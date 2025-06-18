@@ -371,7 +371,7 @@ ContextualMemory o-- EntityMemory
 
 `knowledge` 模块允许你为代理提供外部知识库。它通过 `Source` -> `Storage` -> `Embedder` 的清晰流水线，将外部文档处理成可供检索的向量化知识。
 
-![image](..\assets\crewai_knowledge_classdiagram.png)
+![image](assets\crewai_knowledge_classdiagram.png)
 
 ```plantuml
 @startuml
