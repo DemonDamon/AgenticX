@@ -207,6 +207,7 @@ CrewAgentParser ..> AgentFinish : creates
 ### 2.2. Crews 模块
 
 `crews` 模块相对简单，主要定义了 `Crew` 执行完成后的输出数据结构 `CrewOutput`。
+
 ![image](../assets/crewai_crews_classdiagram.png)
 
 ```plantuml
