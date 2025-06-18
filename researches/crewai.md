@@ -158,7 +158,7 @@ Agent 是执行任务的基本单位。每个 Agent 都有自己的角色 (Role)
 ### 2.1. Agents 模块
 
 `agents` 模块负责代理的执行逻辑，包括与 LLM 的交互、工具的使用和输出的解析。`CrewAgentExecutor` 是该模块的核心。
-![image](..\assets\crewai_agents_classdiagram.png)
+![image](../assets/crewai_agents_classdiagram.png)
 ```plantuml
 @startuml
 !theme plain
@@ -207,7 +207,7 @@ CrewAgentParser ..> AgentFinish : creates
 ### 2.2. Crews 模块
 
 `crews` 模块相对简单，主要定义了 `Crew` 执行完成后的输出数据结构 `CrewOutput`。
-![image](..\assets\crewai_crews_classdiagram.png)
+![image](../assets/crewai_crews_classdiagram.png)
 
 ```plantuml
 @startuml
@@ -238,7 +238,7 @@ CrewOutput o-- "0..*" TaskOutput
 
 `tasks` 模块定义了工作的基本单元。`Task` 是所有任务的基类，而 `ConditionalTask` 等子类则提供了更丰富的流程控制能力。
 
-![image](..\assets\crewai_task_classdiagram.png)
+![image](../assets/crewai_task_classdiagram.png)
 
 ```plantuml
 @startuml
@@ -274,7 +274,7 @@ ConditionalTask --> TaskOutput : uses
 
 `tools` 模块是框架的"手臂"，定义了代理可以执行的具体操作。`BaseTool` 是所有工具的基类，`ToolUsage` 负责整个工具的调用生命周期。
 
-![image](..\assets\crewai_tool_classdiagram.png)
+![image](../assets/crewai_tool_classdiagram.png)
 
 ```plantuml
 @startuml
@@ -323,7 +323,7 @@ ToolUsage o-- "0..*" BaseTool
 
 `memory` 模块为代理提供了记忆能力。它被精心设计为多种类型（短期、长期、实体），并由 `ContextualMemory` 统一管理和调用，为代理提供丰富的上下文。
 
-![image](..\assets\crewai_memory_classdiagram.png)
+![image](../assets/crewai_memory_classdiagram.png)
 
 ```plantuml
 @startuml
@@ -421,7 +421,7 @@ KnowledgeStorage o-- "1" BaseEmbedder
 
 `flow` 模块提供了一种先进的、基于图的工作流定义方式。通过 `@start`、`@listen` 和 `@router` 等装饰器，开发者可以构建出复杂的、事件驱动的任务流程，并能将其可视化。
 
-![image](..\assets\crewai_flow_classdiagram.png)
+![image](../assets/crewai_flow_classdiagram.png)
 
 ```plantuml
 @startuml
