@@ -73,8 +73,6 @@ Agent (抽象基类)
 
 ### 1.4 系统类图
 
-![image](../assets/agenticSeek.png)
-
 ```mermaid
 classDiagram
     direction LR
