@@ -29,7 +29,7 @@
 - **基础设施**：提供通用的工具和服务，如日志系统、配置管理等。
 
 ### 1.2. 核心包的类图设计
-![alt text](image-1.png)
+![alt text](../assets/image-1.png)
 
 ```plantuml
 @startuml
@@ -147,7 +147,7 @@ package agents {
   - **依赖关系**：独立模块，为整个系统提供基础工具支持。
 
 #### 流程图
-![alt text](image.png)
+![alt text](../assets/image.png)
 
 ```plantuml
 @startuml
