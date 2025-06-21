@@ -8,10 +8,24 @@
 
 经过对十余个高质量项目的分析，我们识别出AI Agent技术栈中的不同层次，并将其归纳为以下六大类别。这六个类别从底层的基础设施到顶层的特定应用，构成了一个相对完整生态系统。
 
-![AI Agent 技术版图](https://i.imgur.com/rLz9j4Y.png)
 
-*（图：AI Agent技术栈分层图）*
+<table>
+<tr>
+<td width="56%">
 
+![image](../assets/aiagentmap.png)
+
+</td>
+<td width="50%">
+
+![image](../assets/aiagentmap2.png)
+
+</td>
+</tr>
+</table>
+
+* https://aiagentsdirectory.com/category/ai-agents-frameworks
+* https://aiagentslist.com/ai-agents-map
 ---
 
 ### **类别一：Agent应用开发框架 (Application Frameworks)**
