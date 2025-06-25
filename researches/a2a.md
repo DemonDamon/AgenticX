@@ -194,3 +194,44 @@ pip install --upgrade -q google-genai google-adk a2a-sdk python-dotenv aiohttp u
 - **实现 `AgentExecutor`**: 将你的核心业务逻辑在 `AgentExecutor` 的 `execute` 方法中实现。
 - **优先使用 `A2AToolClient`**: 在构建协调者 Agent 时，优先使用 `A2AToolClient` 将远程 Agent 包装成工具。这极大地简化了与远程 Agent 的交互逻辑，能更好地发挥 LLM 的工具调用能力。
 - **考虑持久化**: 如果你的应用需要跟踪长时间运行的任务，请尽早将 `InMemoryTaskStore` 替换为持久化方案。
+
+## 7. 智能体身份认证机制
+
+### 7.1 A2A协议中的身份认证实现
+
+根据对A2A协议源代码的分析，A2A协议采用了一套标准化但相对简单的身份认证机制，主要基于传统的API密钥和令牌认证方式，而非零知识证明技术。其认证机制包括以下几个关键组件：
+
+- **auth模块**: A2A Python SDK中的`auth/`模块专门负责认证相关功能，提供了基础的身份验证框架。
+- **多种认证方案支持**: A2A支持多种标准的Web认证方案：
+  - HTTP Bearer令牌认证
+  - OAuth2认证
+  - OpenID Connect认证
+  - API密钥认证（可在HTTP头、查询参数等位置）
+- **认证拦截器**: 客户端使用`AuthInterceptor`自动处理认证流程，根据Agent的安全要求添加适当的认证信息。
+- **凭证服务**: 通过`CredentialService`抽象接口管理凭证，默认实现是`InMemoryContextCredentialStore`，提供基于会话的凭证存储。
+
+### 7.2 认证流程
+
+1. **Agent注册与凭证获取**: 
+   - 每个Agent在配置时需要定义其安全需求（`AgentCard.security`和`AgentCard.securitySchemes`）
+   - 客户端需要通过某种方式（如用户输入、配置文件等）获取访问凭证
+
+2. **请求认证流程**: 当Agent A调用Agent B的能力时：
+   - Agent A的`AuthInterceptor`从`CredentialService`获取适当的凭证
+   - 根据目标Agent的安全方案类型，将凭证添加到HTTP请求头或其他位置
+   - Agent B的服务端验证这些凭证后处理请求
+
+3. **用户身份表示**: 服务端使用`User`抽象类表示认证用户，包含`is_authenticated`和`user_name`属性。
+
+### 7.3 安全增强建议
+
+在实际部署中，A2A的身份认证机制可以通过以下方式增强：
+
+- **实现更强大的凭证服务**: 替换默认的`InMemoryContextCredentialStore`，实现基于数据库或安全密钥管理系统的凭证存储。
+- **接入OAuth2/OIDC**: 利用A2A已有的OAuth2和OpenID Connect支持，与企业现有的身份管理系统集成。
+- **加密通信**: 确保所有Agent间通信使用TLS/SSL加密。
+- **审计日志**: 实现详细的认证和授权审计日志，记录所有跨Agent调用的身份验证事件。
+- **零信任架构**: 采用"零信任"原则，对每次Agent间的调用都进行完整的身份验证和授权检查。
+- **考虑添加高级认证机制**: 如有需要，可以扩展A2A协议实现更高级的认证机制，包括零知识证明、多因素认证等。
+
+通过这套身份认证机制，A2A协议确保了在分布式多Agent系统中，只有经过授权的Agent才能调用其他Agent的能力，从而保障了整个Agent网络的安全性和可信度。
