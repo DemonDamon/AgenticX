@@ -276,3 +276,85 @@ if __name__ == "__main__":
 这个客户端脚本会启动 `calculator.py` 服务器，连接到它，列出其工具，然后调用这些工具并打印结果，最后读取资源并退出。这是构建与MCP服务器交互的自动化脚本或更复杂应用程序的基础。
 
 ---
+
+### 4.3. 端到端工作流时序图
+
+为了更直观地理解 MCP 客户端和服务器的交互过程，下面是一个基于上述 `calculator.py` 示例的详细时序图。该图展示了从客户端启动、调用工具到最终关闭的完整生命周期。
+
+```mermaid
+sequenceDiagram
+    participant UserApp as "用户应用 (client.py)"
+    participant ClientSession as "MCP ClientSession"
+    participant Transport as "Transport (stdio)"
+    participant ServerProcess as "服务器进程 (calculator.py)"
+    participant FastMCP as "FastMCP (Server lib)"
+    participant Tool as "工具函数 (e.g., add)"
+
+    UserApp->>Transport: 启动服务器进程 (command: "python calculator.py")
+    activate ServerProcess
+    ServerProcess->>FastMCP: 实例化 FastMCP & 监听 stdio
+    Transport-->>UserApp: 返回 read/write streams
+
+    UserApp->>ClientSession: 创建 ClientSession 实例
+    activate ClientSession
+    UserApp->>ClientSession: aawait session.initialize()
+    ClientSession->>Transport: 发送 InitializeRequest
+    Transport->>FastMCP: 写入请求到 stdin
+    activate FastMCP
+    FastMCP-->>Transport: 发送 InitializeResponse
+    Transport-->>ClientSession: 从 stdout 读取响应
+    deactivate FastMCP
+    ClientSession-->>UserApp: 返回初始化结果
+
+    UserApp->>ClientSession: await session.list_tools()
+    ClientSession->>Transport: 发送 ListToolsRequest
+    Transport->>FastMCP: 写入请求
+    activate FastMCP
+    FastMCP->>FastMCP: 检查所有 @mcp.tool() 装饰器
+    FastMCP-->>Transport: 发送 ListToolsResponse
+    Transport-->>ClientSession: 读取响应
+    deactivate FastMCP
+    ClientSession-->>UserApp: 返回工具列表
+
+    UserApp->>UserApp: 打印工具列表
+
+    UserApp->>ClientSession: await session.call_tool("add", {"a": 5, "b": 7})
+    ClientSession->>Transport: 发送 CallToolRequest
+    Transport->>FastMCP: 写入请求
+    activate FastMCP
+    FastMCP->>Tool: 调用 add(5, 7)
+    activate Tool
+    Tool-->>FastMCP: return 12
+    deactivate Tool
+    FastMCP-->>Transport: 发送 CallToolResponse (content: "12")
+    Transport-->>ClientSession: 读取响应
+    deactivate FastMCP
+    ClientSession-->>UserApp: 返回调用结果
+
+    UserApp->>UserApp: 打印工具调用结果
+
+    UserApp->>ClientSession: await session.read_resource("constants://pi")
+    ClientSession->>Transport: 发送 ReadResourceRequest
+    Transport->>FastMCP: 写入请求
+    activate FastMCP
+    FastMCP->>Tool: 调用 get_pi()
+    activate Tool
+    Tool-->>FastMCP: return 3.14159...
+    deactivate Tool
+    FastMCP-->>Transport: 发送 ReadResourceResponse
+    Transport-->>ClientSession: 读取响应
+    deactivate FastMCP
+    ClientSession-->>UserApp: 返回资源内容
+
+    UserApp->>UserApp: 打印资源内容
+
+    UserApp->>ClientSession: (退出 `async with` 块)
+    ClientSession->>Transport: 发送 ShutdownRequest
+    Transport->>FastMCP: 写入请求
+    activate FastMCP
+    FastMCP-->>ServerProcess: 触发正常关闭
+    deactivate FastMCP
+    ServerProcess-->>Transport: 进程退出
+    deactivate ServerProcess
+    deactivate ClientSession
+```
