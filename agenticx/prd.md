@@ -88,17 +88,19 @@ graph TD
 *   **M8: 通信协议层 (`agenticx.protocols`)**: 负责 Agent 间和跨平台的通信。
 *   **M9: 可观测性 (`agenticx.callbacks`)**: 日志、追踪和可视化。
 *   **M10: 用户接口 (`agenticx.interfaces`)**: CLI、SDK 和未来的 Web UI。
+*   **M11: 平台服务层 (`agenticx.platform`)**: 覆盖多租户和安全。
 
 ## 4. 开发路线图 (Development Roadmap / To-Do List)
 
 针对每个模块，我们拆解出具体的开发任务，可以逐一完成并勾选。
 
 ### M1: 核心抽象层 (`agenticx.core`)
-- [ ] `Agent` Class: 定义 Agent 的基本属性（role, goal, backstory, llm_config, memory, tools）。
+- [ ] `Agent` Class: 定义 Agent 的基本属性（role, goal, backstory, llm_config, memory, tools, organization_id）。
 - [ ] `Task` Class: 定义任务的属性（description, agent, expected_output, context, tools）。
 - [ ] `Tool` Class/Decorator: 定义工具的接口规范，支持 Pydantic 模型作为输入。
-- [ ] `Workflow` Class: 定义工作流的结构（例如，节点和边的图结构）。
+- [ ] `Workflow` Class: 定义工作流的结构（例如，节点和边的图结构，organization_id）。
 - [ ] `Message` Class: 定义 Agent 之间通信的消息格式。
+- [ ] `User` & `Organization` Class: 定义用户和租户的基本结构。
 
 ### M2: LLM 服务提供层 (`agenticx.llms`)
 - [ ] 设计统一的 LLM Provider 接口 (`BaseLLMProvider`)。
@@ -107,6 +109,11 @@ graph TD
 - [ ] (可选) 实现本地模型 Provider (Ollama, LM Studio)。
 - [ ] (可选) 实现 Azure OpenAI Provider。
 - [ ] 实现 Token 使用计数和成本估算。
+- [ ] 使用 `@tool` 装饰器轻松创建工具。
+- [ ] 内置一组基础工具集 (e.g., `search`, `file_read`, `file_write`, `execute_python_code`)。
+- [ ] **`CredentialStore`**: 实现一个安全的、与组织关联的凭据管理器，用于存储和检索工具所需的 API Keys 等敏感信息（需加密）。
+- [ ] 工具执行引擎，带错误处理和安全沙箱（针对代码执行）。
+- [ ] 支持异步工具。
 
 ### M3: 工具系统 (`agenticx.tools`)
 - [ ] 使用 `@tool` 装饰器轻松创建工具。
@@ -116,9 +123,9 @@ graph TD
 - [ ] (可选) 工具认证和权限管理。
 
 ### M4: 记忆系统 (`agenticx.memory`)
-- [ ] `BaseMemory` 接口定义。
-- [ ] `ShortTermMemory`: 实现简单的会话内记忆（如消息历史）。
-- [ ] `LongTermMemory`: 对接向量数据库。
+- [ ] `BaseMemory` 接口定义，强制要求实现租户隔离。
+- [ ] `ShortTermMemory`: 实现简单的会话内记忆（如消息历史），需按 `organization_id` 隔离。
+- [ ] `LongTermMemory`: 对接向量数据库，所有查询和写入必须与 `organization_id` 绑定。
     - [ ] 实现 ChromaDB/LanceDB 的集成。
     - [ ] 实现 RAG (Retrieval-Augmented Generation) 逻辑。
 - [ ] `KnowledgeBase`: 允许为任务或 Agent 挂载特定的知识库。
@@ -144,6 +151,7 @@ graph TD
 - [ ] 支持层次化工作流（`hierarchical`, e.g., Manager-Worker）。
 - [ ] 支持会话式工作流 (`conversational`, e.g., group chat)。
 - [ ] 状态管理，追踪整个工作流的状态。
+- [ ] **`WorkflowRun`**: 将每次工作流的执行作为持久化记录，包含触发者、组织、状态和结果，用于审计和追踪。
 
 ### M8: 通信协议层 (`agenticx.protocols`)
 - [ ] 定义标准的 `ProtocolMessage` 或 `Envelope` 类，包含 header 和 body。
@@ -152,6 +160,7 @@ graph TD
 - [ ] (研究) 调研并实现一个兼容外部标准的 MCP (Multi-Agent Communication Protocol) 处理器。
 - [ ] 将协议层集成到 `Agent` 的 `send/receive` 方法中。
 - [ ] (可选) 支持消息的持久化和重传机制。
+- [ ] (未来) 规划并设计 Web UI，用于可视化监控和交互。
 
 ### M9: 可观测性 (`agenticx.callbacks`)
 - [ ] 设计 Callback/Hook 系统 (`BaseCallbackHandler`)。
@@ -165,3 +174,17 @@ graph TD
     - [ ] `run` 命令来执行一个工作流文件。
     - [ ] `validate` 命令来检查配置。
 - [ ] (未来) 规划并设计 Web UI，用于可视化监控和交互。
+
+### M11: 平台服务层 (`agenticx.platform`)
+> **启发来源**: `airweaves.md` 的整体多租户安全架构。这是将 AgenticX 从一个框架提升为生产级服务的关键。
+- [ ] **用户与组织管理**:
+    - [ ] 实现 `User` 和 `Organization` 的 CRUD 操作。
+    - [ ] 实现用户邀请、加入/离开组织的功能。
+- [ ] **认证与授权**:
+    - [ ] 设计统一的 `AuthContext`，包含当前用户和组织信息。
+    - [ ] 实现基于角色的访问控制 (RBAC)，例如，区分组织管理员和普通成员。
+    - [ ] 支持 API Key 认证，用于程序化调用。
+- [ ] **安全的资源访问**:
+    - [ ] 设计并实现类似于 `CRUDBaseOrganization` 的基类，确保所有核心资源（Agent, Workflow, Memory 等）的数据库操作都自动按 `organization_id` 进行隔离。
+- [ ] **安全与加密**:
+    - [ ] 实现凭据 (`CredentialStore`) 和其他敏感数据的加密存储。
