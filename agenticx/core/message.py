@@ -1,14 +1,14 @@
- 
-from dataclasses import Field
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
-from pydantic import BaseModel
+import uuid
 
 class Message(BaseModel):
     """
     Represents a message exchanged between agents.
     """
-    sender: str = Field(description="The ID or name of the sender agent.")
-    receiver: str = Field(description="The ID or name of the receiver agent.")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for the message.")
+    sender_id: str = Field(description="The ID of the sender agent.")
+    recipient_id: str = Field(description="The ID of the recipient agent.")
     content: Any = Field(description="The content of the message.")
     metadata: Dict[str, Any] = Field(description="Additional metadata for the message.", default_factory=dict)
 
