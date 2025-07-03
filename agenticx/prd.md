@@ -112,10 +112,10 @@ graph TD
 
 **实现状态**: ✅ **已完成** - 已基于 `litellm` 库构建了统一的LLM服务层。通过 `LiteLLMProvider`，框架现在可以无缝支持 OpenAI, Anthropic, Ollama, Gemini 等上百种模型。提供了 `invoke`, `ainvoke`, `stream`, `astream` 等核心方法，并实现了标准化的 `LLMResponse` 对象，内置了 token 使用量和成本计算。通过便利类（如 `OpenAIProvider`, `AnthropicProvider`）简化了特定模型的调用。
 
-### M3: 工具系统 (`agenticx.tools`)
+### M3: 工具系统 (`agenticx.tools`) ✅
 > 启发来源: 融合了 CAMEL `FunctionTool` 的易用性和 CrewAI `BaseTool` 的结构化设计。
 
-- [ ] `BaseTool(ABC)`: 所有工具的抽象基类，定义工具的核心契约。
+- [x] `BaseTool(ABC)`: 所有工具的抽象基类，定义工具的核心契约。
     - `name: str`: 工具的唯一名称。
     - `description: str`: 工具功能的详细描述，供 LLM 理解。
     - `args_schema: Type[BaseModel]`: 使用 Pydantic 模型定义的参数结构。
@@ -123,14 +123,14 @@ graph TD
     - `_arun(**kwargs) -> Any`: 异步执行工具逻辑的抽象方法。
     - `run(**kwargs)`: 公共执行入口，内部调用 `_run` 并处理回调、错误和日志。
 
-- [ ] `FunctionTool(BaseTool)`: 将普通 Python 函数包装成工具的具体实现。
+- [x] `FunctionTool(BaseTool)`: 将普通 Python 函数包装成工具的具体实现。
     - `__init__(func: Callable)`: 构造函数，接收一个 Python 函数。
     - 内部实现会解析函数的签名和 docstring 来自动填充 `name`, `description`, 和 `args_schema`。
 
-- [ ] `@tool` 装饰器: 一个便捷的工厂装饰器，用于将任何 Python 函数快速转换为 `FunctionTool` 实例。
+- [x] `@tool` 装饰器: 一个便捷的工厂装饰器，用于将任何 Python 函数快速转换为 `FunctionTool` 实例。
     - `my_tool = tool(my_func)` or `@tool\ndef my_func(...)`
 
-- [ ] `ToolExecutor`: 工具执行引擎。
+- [x] `ToolExecutor`: 工具执行引擎。
     - 负责安全地调用 `BaseTool` 的 `run` 方法。
     - `SandboxEnvironment`: (可选) 为需要执行代码（如 `PythonInterpreterTool`）的工具提供一个隔离和安全的环境（例如，使用 aiodocker 或 aio-podman）。
     - 内置错误处理、重试和超时逻辑。
@@ -139,14 +139,16 @@ graph TD
     - `__init__(server_url: str, tool_name: str)`: 初始化一个远程工具客户端。
     - `_run` 和 `_arun` 方法将通过网络协议（如 MCP 或 HTTP）调用远程服务。
 
-- [ ] `CredentialStore`: 一个安全的凭据管理器 (与 M11 紧密集成)。
+- [x] `CredentialStore`: 一个安全的凭据管理器 (与 M11 紧密集成)。
     - `get_credential(organization_id: str, tool_name: str)`: 根据组织和工具名获取凭据。
     - `set_credential(...)`: 设置凭据，并使用 M11 的 `EncryptionService` 进行加密存储。
 
-- [ ] `BuiltInTools`: 提供一组开箱即用的基础工具集。
+- [x] `BuiltInTools`: 提供一组开箱即用的基础工具集。
     - `WebSearchTool`: 封装搜索引擎 API。
     - `FileTool`: 提供本地文件的读写能力。
     - `CodeInterpreterTool`: 在沙箱环境中执行 Python 代码。
+
+**实现状态**: ✅ **已完成** - 已完整实现 M3 工具系统。包含统一的 `BaseTool` 抽象基类，支持同步/异步执行、参数验证、错误处理和回调机制。`FunctionTool` 和 `@tool` 装饰器提供便捷的函数到工具转换，自动解析类型注解和文档字符串生成 Pydantic 模式。`ToolExecutor` 提供安全的执行环境，支持重试、超时和批量执行。`CredentialStore` 实现加密的多租户凭据管理。内置工具集包含文件操作、网络搜索、代码执行、HTTP 请求和 JSON 处理等常用功能。全面支持 OpenAI 函数调用格式。
 
 ### M4: 记忆系统 (`agenticx.memory`)
 - [ ] `BaseMemory(ABC)`: 记忆接口，定义 `add`, `search`, `update`, `delete` 等核心方法，并强制要求实现租户隔离。
