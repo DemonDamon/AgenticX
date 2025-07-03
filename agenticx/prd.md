@@ -102,13 +102,15 @@ graph TD
 
 **实现状态**: ✅ **已完成** - 所有核心抽象类已完全实现，包含完整的字段定义、类型注解、多租户支持和版本管理。已通过全面测试验证。
 
-### M2: LLM 服务提供层 (`agenticx.llms`)
-- [ ] `BaseLLMProvider(ABC)`: 定义统一的 LLM Provider 接口，包含 `invoke(prompt)`, `ainvoke(prompt)`, `stream(prompt)` 等方法。
-- [ ] `LLMResponse(BaseModel)`: 定义标准的 LLM 返回对象，包含 `content`, `token_usage`, `cost`, `model_name`。
-- [ ] `OpenAIProvider(BaseLLMProvider)`: 实现 OpenAI 系列模型的服务对接。
-- [ ] `AnthropicProvider(BaseLLMProvider)`: 实现 Anthropic Claude 系列模型的服务对接。
-- [ ] (可选) `OllamaProvider(BaseLLMProvider)`: 实现对本地 Ollama 服务的对接。
-- [ ] `TokenUsageTracker`: 一个工具类或 Callback，用于聚合和计算整个工作流的 Token 使用量和成本。
+### M2: LLM 服务提供层 (`agenticx.llms`) ✅
+- [x] `BaseLLMProvider(ABC)`: 定义统一的 LLM Provider 接口，包含 `invoke(prompt)`, `ainvoke(prompt)`, `stream(prompt)` 等方法。
+- [x] `LLMResponse(BaseModel)`: 定义标准的 LLM 返回对象，包含 `content`, `token_usage`, `cost`, `model_name`。
+- [x] `OpenAIProvider(BaseLLMProvider)`: 实现 OpenAI 系列模型的服务对接。
+- [x] `AnthropicProvider(BaseLLMProvider)`: 实现 Anthropic Claude 系列模型的服务对接。
+- [x] `OllamaProvider(BaseLLMProvider)`: 实现对本地 Ollama 服务的对接。
+- [x] `TokenUsageTracker`: 一个工具类或 Callback，用于聚合和计算整个工作流的 Token 使用量和成本。
+
+**实现状态**: ✅ **已完成** - 已基于 `litellm` 库构建了统一的LLM服务层。通过 `LiteLLMProvider`，框架现在可以无缝支持 OpenAI, Anthropic, Ollama, Gemini 等上百种模型。提供了 `invoke`, `ainvoke`, `stream`, `astream` 等核心方法，并实现了标准化的 `LLMResponse` 对象，内置了 token 使用量和成本计算。通过便利类（如 `OpenAIProvider`, `AnthropicProvider`）简化了特定模型的调用。
 
 ### M3: 工具系统 (`agenticx.tools`)
 - [ ] `@tool` 装饰器: 一个工厂函数，能将任意 Python 函数快速包装成一个 `BaseTool` 的实例，并自动从函数签名和 docstring 推断 `name`, `description`, `args_schema`。
