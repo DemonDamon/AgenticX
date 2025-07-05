@@ -12,6 +12,8 @@ from .base import BaseTool
 from .function_tool import FunctionTool, tool
 from .executor import ToolExecutor
 from .credentials import CredentialStore
+from .remote import RemoteTool, MCPServerConfig
+from .mineru import create_mineru_parse_tool, create_mineru_ocr_languages_tool
 from .builtin import (
     WebSearchTool,
     FileTool,
@@ -27,6 +29,14 @@ __all__ = [
     # 执行器和管理
     "ToolExecutor",
     "CredentialStore",
+    
+    # 远程工具
+    "RemoteTool",
+    "MCPServerConfig",
+    
+    # MinerU 工具
+    "create_mineru_parse_tool",
+    "create_mineru_ocr_languages_tool",
     
     # 内置工具
     "WebSearchTool",
