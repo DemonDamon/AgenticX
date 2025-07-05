@@ -422,6 +422,56 @@ python tests/test_e2e_agent_tools.py --api-key YOUR_API_KEY --model deepseek/dee
 python tests/test_mcp_server_demo.py
 ```
 
+### 10. `test_universal_mcp.py` - 通用 MCP 客户端架构演示 🆕
+这是对重构后的通用 MCP 客户端架构的演示和测试脚本，展示了如何通过零适配代码轻松接入任何标准的 MCP 服务器。
+
+**演示内容：**
+- ✅ **自动发现** - 连接到 `mineru-mcp` 服务并自动发现其提供的 `parse_documents` 和 `get_ocr_languages` 工具。
+- ✅ **动态工具创建** - 从服务器返回的 schema 动态创建类型安全的 `RemoteTool` 实例。
+- ✅ **端到端调用** - 实际调用 `parse_documents` 工具来解析一个 PDF 文件并验证结果。
+- ✅ **易用性展示** - 提供了清晰的步骤说明，展示用户如何轻松接入自己的或其他第三方的 MCP 服务器。
+- ✅ **高级用法示例** - 演示了如何批量集成多个 MCP 服务器的工具，以及如何在 Agent 中使用它们。
+
+**运行方式：**
+```bash
+# 运行通用 MCP 客户端演示
+python tests/test_universal_mcp.py
+```
+
+**预期输出示例：**
+```
+=== AgenticX 通用 MCP 架构演示 ===
+
+1. 自动发现并创建工具（推荐方式）
+--------------------------------------------------
+🔍 正在发现 MCP 服务器提供的工具...
+✅ 发现 2 个工具:
+  1. parse_documents: 统一接口，将文件转换为Markdown格式...
+     参数: ['file_sources', 'enable_ocr', 'language', 'page_ranges']
+  2. get_ocr_languages: 获取 OCR 支持的语言列表。
+
+🛠️ 创建工具实例...
+✅ 创建工具: mineru-mcp_parse_documents
+   描述: 统一接口，将文件转换为Markdown格式...
+✅ 创建了 2 个工具实例
+
+📄 测试文档解析...
+✅ 解析成功! 结果长度: 32413 字符
+📁 结果已保存到: D:\myWorks\AgenticX\tests\mineru_output_universal.md
+
+============================================================
+2. 接入其他 MCP 服务器的示例
+--------------------------------------------------
+💡 接入任何 MCP 服务器只需 3 步:
+...
+
+============================================================
+3. 高级用法示例
+--------------------------------------------------
+🔧 高级用法:
+...
+```
+
 ## 测试验证的 PRD 需求
 
 这些测试脚本验证了以下 PRD 模块：
