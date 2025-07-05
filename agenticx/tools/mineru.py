@@ -1,5 +1,5 @@
 """
-MinerU-specific remote tools and configurations.
+即将弃用：MinerU-specific remote tools and configurations.
 """
 from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
