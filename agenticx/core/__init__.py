@@ -10,6 +10,7 @@ from .tool import BaseTool, FunctionTool, tool
 from .workflow import Workflow, WorkflowNode, WorkflowEdge
 from .message import Message, ProtocolMessage
 from .platform import User, Organization
+from .component import Component
 
 __all__ = [
     # Core abstractions
@@ -23,6 +24,7 @@ __all__ = [
     "WorkflowEdge",
     "Message",
     "ProtocolMessage",
+    "Component",
     # Platform entities
     "User",
     "Organization"
