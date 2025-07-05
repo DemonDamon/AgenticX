@@ -171,14 +171,27 @@ graph TD
 **实现状态**: ✅ **已完成** - 已完整实现 M3 工具系统。包含统一的 `BaseTool` 抽象基类，支持同步/异步执行、参数验证、错误处理和回调机制。`FunctionTool` 和 `@tool` 装饰器提供便捷的函数到工具转换，自动解析类型注解和文档字符串生成 Pydantic 模式。`ToolExecutor` 提供安全的执行环境，支持重试、超时和批量执行。`CredentialStore` 实现加密的多租户凭据管理。内置工具集包含文件操作、网络搜索、代码执行、HTTP 请求和 JSON 处理等常用功能。全面支持 OpenAI 函数调用格式。
 
 ### M4: 记忆系统 (`agenticx.memory`)
+
+`agenticx` 的记忆系统旨在实现短期、长期、可插拔、可共享的记忆能力。其核心设计哲学是**拥抱开放标准**，通过模型上下文协议（MCP）与外部记忆服务解耦，允许用户自由选择或自行实现记忆后端，实现跨工具的知识沉淀与复用。
+
 - [ ] `BaseMemory(ABC)`: 记忆接口，定义 `add`, `search`, `update`, `delete` 等核心方法，并强制要求实现租户隔离。
-- [ ] `ShortTermMemory(BaseMemory)`: 实现基于会话的简单易失性记忆（如消息历史）。
-- [ ] `LongTermMemory(BaseMemory)`: 对接向量数据库的长期语义记忆。
-    - [ ] 内置 `RAGPipeline`: 实现标准的检索增强生成逻辑。
-    - [ ] `MemoryUpdator(Component)`: 实现"提取-检索-推理-更新"的智能循环，在 `add` 方法中被调用，以实现记忆的自我演化。
-- [ ] `GraphMemory(BaseMemory)`: 对接图数据库（如 Neo4j），用于存储和查询结构化的知识图谱。
-- [ ] `MemoryHistory`: 记录对 `LongTermMemory` 和 `GraphMemory` 的所有变更操作，用于审计和调试。
-- [ ] `KnowledgeBase`: 允许为任务或 Agent 挂载特定的、只读的知识集合（可基于向量存储）。
+
+- [ ] `ShortTermMemory(BaseMemory)`: 实现基于会话的简单易失性记忆（如消息历史）。这部分保留，用于处理临时的、无需持久化的上下文。
+
+- [ ] **`MCPMemory(BaseMemory)` (核心变更)**:
+    -   **定位**: 作为框架的默认长期记忆解决方案，对接任何兼容 OpenMemory MCP 规范的记忆服务器。
+    -   **实现**: 内部使用 `agenticx.tools.MCPClient` 连接到用户配置的 MCP Server 地址。
+    -   **方法映射**: 将 `BaseMemory` 的 `add`, `search` 等方法，翻译成对 MCP Server 提供的 `add_memories`, `search_memory` 等工具的调用。
+    -   **优势**: 实现了记忆能力的**即插即用**。用户既可以连接到云端托管的 `OpenMemory` 服务，也可以在本地通过 Docker 启动一个私有记忆服务，甚至可以自己实现一个兼容的 MCP 记忆服务器。
+
+- [ ] `MemoryComponent(Component)`:
+    -   **定位**: 一个高阶组件，用于实现复杂的记忆操作逻辑。
+    -   **功能**:
+        -   **智能更新**: 实现"提取-检索-推理-更新"的智能循环，在 `add` 方法中被调用，以实现记忆的自我演化。该逻辑在客户端实现，调用 `BaseMemory` 的接口，使其不依赖于具体的记忆后端。
+        -   **历史记录**: 可选地在本地记录对 `BaseMemory` 的所有变更操作，用于审计和调试。
+
+- [ ] `KnowledgeBase`:
+    -   **实现**: 通过为 `BaseMemory` 的 `add` 和 `search` 操作附加特定的命名空间或标签来实现。例如，在调用 `MCPMemory.add()` 时，可以给记忆内容加上 `knowledge_base: "my_kb"` 的元数据，在搜索时利用这个元数据进行过滤，从而实现对特定知识库的挂载和读写。
 
 ### M5: 智能体核心 (`agenticx.agent`)
 - [ ] `AgentExecutor`: Agent 的执行器，包含 Agent 的核心 `think-act` 循环。
