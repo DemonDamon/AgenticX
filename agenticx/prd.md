@@ -116,37 +116,57 @@ graph TD
 > 启发来源: 融合了 CAMEL `FunctionTool` 的易用性和 CrewAI `BaseTool` 的结构化设计。
 
 - [x] `BaseTool(ABC)`: 所有工具的抽象基类，定义工具的核心契约。
-    - `name: str`: 工具的唯一名称。
-    - `description: str`: 工具功能的详细描述，供 LLM 理解。
-    - `args_schema: Type[BaseModel]`: 使用 Pydantic 模型定义的参数结构。
-    - `_run(**kwargs) -> Any`: 同步执行工具逻辑的抽象方法。
-    - `_arun(**kwargs) -> Any`: 异步执行工具逻辑的抽象方法。
-    - `run(**kwargs)`: 公共执行入口，内部调用 `_run` 并处理回调、错误和日志。
+    - `name: str`, `description: str`, `args_schema: Type[BaseModel]`: 核心元数据。
+    - `run(**kwargs)` / `arun(**kwargs)`: 统一的同步/异步执行入口，内置超时、回调、错误处理逻辑。
+    - `to_openai_schema() -> Dict`: 原生支持将工具转换为 OpenAI 函数调用格式。
+    - `add_callback(callback)`: 支持强大的回调机制，用于与 M9 可观测性模块集成。
+    - `ToolError`, `ToolTimeoutError`, `ToolValidationError`: 定义了精细的错误类型。
 
-- [x] `FunctionTool(BaseTool)`: 将普通 Python 函数包装成工具的具体实现。
-    - `__init__(func: Callable)`: 构造函数，接收一个 Python 函数。
-    - 内部实现会解析函数的签名和 docstring 来自动填充 `name`, `description`, 和 `args_schema`。
+- [x] `FunctionTool(BaseTool)`: 将普通 Python 函数（同步/异步）包装成工具的具体实现。
+    - `__init__(func: Callable)`: 构造函数，自动从函数签名和 docstring 推断 `name`, `description`, 和 `args_schema`。
 
 - [x] `@tool` 装饰器: 一个便捷的工厂装饰器，用于将任何 Python 函数快速转换为 `FunctionTool` 实例。
-    - `my_tool = tool(my_func)` or `@tool\ndef my_func(...)`
+    - `@tool\ndef my_func(...)`
 
 - [x] `ToolExecutor`: 工具执行引擎。
-    - 负责安全地调用 `BaseTool` 的 `run` 方法。
-    - `SandboxEnvironment`: (可选) 为需要执行代码（如 `PythonInterpreterTool`）的工具提供一个隔离和安全的环境（例如，使用 aiodocker 或 aio-podman）。
-    - 内置错误处理、重试和超时逻辑。
+    - `execute(tool, **kwargs) -> ExecutionResult`: 安全地调用工具，封装执行结果。
+    - `SandboxEnvironment`: 为 `CodeInterpreterTool` 提供安全的沙箱环境。
+    - 内置错误处理、重试 (`max_retries`) 和超时 (`retry_delay`) 逻辑。
 
-- [ ] `RemoteTool(BaseTool)`: (未来) 用于表示远程工具的类。
-    - `__init__(server_url: str, tool_name: str)`: 初始化一个远程工具客户端。
-    - `_run` 和 `_arun` 方法将通过网络协议（如 MCP 或 HTTP）调用远程服务。
+- [x] `RemoteTool(BaseTool)`: 用于连接 MCP (Model Context Protocol) 服务的通用远程工具。
+    - `__init__(server_config, tool_name, ...)`: 初始化一个远程工具客户端，支持完整的 MCP 协议握手。
+    - `_run` 和 `_arun` 方法通过标准 MCP 协议（JSON-RPC 2.0）调用远程服务。
+    - 支持自动参数验证、错误处理、超时控制和资源管理。
+
+- [x] `MCPClient`: 通用 MCP 客户端，提供自动发现和工具创建能力。
+    - `discover_tools() -> List[MCPToolInfo]`: 自动发现 MCP 服务器提供的所有工具及其 schema。
+    - `create_tool(tool_name: str) -> RemoteTool`: 为指定工具创建 RemoteTool 实例，自动解析参数 schema。
+    - `create_all_tools() -> List[RemoteTool]`: 批量创建服务器提供的所有工具实例。
+    - 支持动态 Pydantic 模型生成，无需手动编写参数类。
+
+- [x] `MCPServerConfig`: MCP 服务器配置模型，支持命令、参数、环境变量和超时设置。
+
+- [x] `load_mcp_config(config_path)`: 从配置文件加载 MCP 服务器配置。
+
+- [x] `create_mcp_client(server_name, config_path) -> MCPClient`: 便捷函数，从配置文件创建 MCP 客户端。
+
+**设计优势:**
+- **零适配代码**: 接入任何 MCP 服务器无需编写专门的适配代码。
+- **自动发现**: 运行时自动发现服务器提供的工具和参数 schema。
+- **动态类型**: 自动从 JSON Schema 生成 Pydantic 模型，提供完整的类型安全。
+- **标准协议**: 完整实现 MCP 协议规范，兼容所有标准 MCP 服务器。
+- **易于扩展**: 支持批量创建、多服务器集成和动态工具管理。
 
 - [x] `CredentialStore`: 一个安全的凭据管理器 (与 M11 紧密集成)。
-    - `get_credential(organization_id: str, tool_name: str)`: 根据组织和工具名获取凭据。
-    - `set_credential(...)`: 设置凭据，并使用 M11 的 `EncryptionService` 进行加密存储。
+    - `get_credential(organization_id: str, tool_name: str) -> Dict`: 安全地获取凭据。
+    - `set_credential(...)`: 使用 M11 的 `EncryptionService` 加密存储凭据。
 
 - [x] `BuiltInTools`: 提供一组开箱即用的基础工具集。
     - `WebSearchTool`: 封装搜索引擎 API。
-    - `FileTool`: 提供本地文件的读写能力。
+    - `FileTool`: 提供安全的本地文件读写能力。
     - `CodeInterpreterTool`: 在沙箱环境中执行 Python 代码。
+    - `HttpRequestTool`: 提供发送 HTTP 请求的能力。
+    - `JsonTool`: 提供对 JSON 数据的查询和操作能力。
 
 **实现状态**: ✅ **已完成** - 已完整实现 M3 工具系统。包含统一的 `BaseTool` 抽象基类，支持同步/异步执行、参数验证、错误处理和回调机制。`FunctionTool` 和 `@tool` 装饰器提供便捷的函数到工具转换，自动解析类型注解和文档字符串生成 Pydantic 模式。`ToolExecutor` 提供安全的执行环境，支持重试、超时和批量执行。`CredentialStore` 实现加密的多租户凭据管理。内置工具集包含文件操作、网络搜索、代码执行、HTTP 请求和 JSON 处理等常用功能。全面支持 OpenAI 函数调用格式。
 
