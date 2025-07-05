@@ -8,38 +8,47 @@ AgenticX 工具系统
 - 内置工具集 (BuiltInTools)
 """
 
-from .base import BaseTool
+from .base import BaseTool, ToolError, ToolTimeoutError, ToolValidationError
 from .function_tool import FunctionTool, tool
-from .executor import ToolExecutor
+from .executor import ToolExecutor, ExecutionResult
 from .credentials import CredentialStore
-from .remote import RemoteTool, MCPServerConfig
+from .remote import RemoteTool, MCPClient, MCPServerConfig, load_mcp_config, create_mcp_client
 from .mineru import create_mineru_parse_tool, create_mineru_ocr_languages_tool
 from .builtin import (
     WebSearchTool,
     FileTool,
     CodeInterpreterTool,
+    HttpRequestTool,
+    JsonTool,
 )
 
 __all__ = [
-    # 核心抽象
+    # Base classes
     "BaseTool",
-    "FunctionTool", 
+    "ToolError",
+    "ToolTimeoutError", 
+    "ToolValidationError",
+    # Function tools
+    "FunctionTool",
     "tool",
-    
-    # 执行器和管理
+    # Executor
     "ToolExecutor",
+    "ExecutionResult",
+    # Credential management
     "CredentialStore",
-    
-    # 远程工具
-    "RemoteTool",
-    "MCPServerConfig",
-    
-    # MinerU 工具
-    "create_mineru_parse_tool",
-    "create_mineru_ocr_languages_tool",
-    
-    # 内置工具
+    # Built-in tools
     "WebSearchTool",
     "FileTool", 
     "CodeInterpreterTool",
+    "HttpRequestTool",
+    "JsonTool",
+    # Remote/MCP tools
+    "RemoteTool",
+    "MCPClient",
+    "MCPServerConfig",
+    "load_mcp_config",
+    "create_mcp_client",
+    # MinerU 工具
+    "create_mineru_parse_tool",
+    "create_mineru_ocr_languages_tool",
 ] 

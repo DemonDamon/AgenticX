@@ -8,7 +8,7 @@ import os
 import subprocess
 from typing import Any, Dict, List, Optional, Type, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 from .base import BaseTool, ToolError
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,12 @@ class MCPToolResponse(BaseModel):
         if self.error:
             return self.error.get("message", "Unknown error")
         return None
+
+class MCPToolInfo(BaseModel):
+    """MCP 工具信息"""
+    name: str
+    description: str
+    inputSchema: Dict[str, Any]
 
 class RemoteTool(BaseTool):
     def __init__(
@@ -239,4 +245,249 @@ class RemoteTool(BaseTool):
         return schema
 
 
-# 移除了重复的 MinerU 相关代码，这些代码已经在 mineru.py 中定义 
+class MCPClient:
+    """MCP 客户端，用于自动发现和创建工具"""
+    
+    def __init__(self, server_config: Union[MCPServerConfig, Dict[str, Any]]):
+        if isinstance(server_config, dict):
+            server_config = MCPServerConfig(**server_config)
+        self.server_config = server_config
+        self._tools_cache: Optional[List[MCPToolInfo]] = None
+    
+    async def discover_tools(self) -> List[MCPToolInfo]:
+        """自动发现 MCP 服务器提供的所有工具"""
+        if self._tools_cache is not None:
+            return self._tools_cache
+            
+        try:
+            # 构建环境变量
+            env = dict(os.environ)
+            env.update(self.server_config.env)
+            
+            command_str = f'"{self.server_config.command}" {" ".join(self.server_config.args)}'
+            
+            logger.debug(f"Discovering tools from: {command_str}")
+
+            # 使用交互式进程通信
+            process = await asyncio.create_subprocess_shell(
+                command_str,
+                env=env,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                limit=1024*1024*10
+            )
+
+            try:
+                # 初始化握手
+                initialize_request = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {"tools": {}},
+                        "clientInfo": {"name": "AgenticX", "version": "1.0.0"}
+                    }
+                }
+                
+                init_data = json.dumps(initialize_request) + "\n"
+                process.stdin.write(init_data.encode('utf-8'))
+                await process.stdin.drain()
+                
+                # 等待初始化响应
+                init_response_line = await process.stdout.readline()
+                init_response = json.loads(init_response_line)
+                if init_response.get('error'):
+                    raise ToolError(f"MCP initialization failed: {init_response['error']}")
+                
+                # 发送 initialized 通知
+                initialized_notification = {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/initialized"
+                }
+                
+                initialized_data = json.dumps(initialized_notification) + "\n"
+                process.stdin.write(initialized_data.encode('utf-8'))
+                await process.stdin.drain()
+                
+                await asyncio.sleep(0.1)
+                
+                # 请求工具列表
+                tools_request = {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/list",
+                    "params": {}
+                }
+                
+                tools_data = json.dumps(tools_request) + "\n"
+                process.stdin.write(tools_data.encode('utf-8'))
+                await process.stdin.drain()
+                
+                # 等待工具列表响应
+                tools_response_line = await process.stdout.readline()
+                tools_response = json.loads(tools_response_line)
+                
+                # 关闭输入流
+                process.stdin.close()
+                await process.wait()
+                
+                if tools_response.get('error'):
+                    raise ToolError(f"Failed to get tools list: {tools_response['error']}")
+                
+                # 解析工具信息
+                tools_data = tools_response.get('result', {}).get('tools', [])
+                tools = []
+                for tool_data in tools_data:
+                    tool_info = MCPToolInfo(
+                        name=tool_data['name'],
+                        description=tool_data.get('description', ''),
+                        inputSchema=tool_data.get('inputSchema', {})
+                    )
+                    tools.append(tool_info)
+                
+                self._tools_cache = tools
+                return tools
+                
+            finally:
+                # 确保进程被清理
+                if process.returncode is None:
+                    process.terminate()
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        process.kill()
+        
+        except Exception as e:
+            if isinstance(e, ToolError):
+                raise
+            raise ToolError(f"Failed to discover tools: {e}") from e
+    
+    def _create_pydantic_model_from_schema(self, schema: Dict[str, Any], model_name: str) -> Type[BaseModel]:
+        """从 JSON Schema 创建 Pydantic 模型"""
+        if not schema or schema.get('type') != 'object':
+            # 如果没有 schema 或不是对象类型，返回空模型
+            return create_model(model_name)
+        
+        properties = schema.get('properties', {})
+        required = schema.get('required', [])
+        
+        fields = {}
+        for field_name, field_schema in properties.items():
+            field_type = self._json_schema_to_python_type(field_schema)
+            field_description = field_schema.get('description', '')
+            
+            if field_name in required:
+                fields[field_name] = (field_type, Field(description=field_description))
+            else:
+                fields[field_name] = (Optional[field_type], Field(default=None, description=field_description))
+        
+        return create_model(model_name, **fields)
+    
+    def _json_schema_to_python_type(self, schema: Dict[str, Any]) -> type:
+        """将 JSON Schema 类型转换为 Python 类型"""
+        schema_type = schema.get('type', 'string')
+        
+        if schema_type == 'string':
+            return str
+        elif schema_type == 'integer':
+            return int
+        elif schema_type == 'number':
+            return float
+        elif schema_type == 'boolean':
+            return bool
+        elif schema_type == 'array':
+            item_type = self._json_schema_to_python_type(schema.get('items', {'type': 'string'}))
+            return List[item_type]
+        elif schema_type == 'object':
+            return Dict[str, Any]
+        else:
+            return str  # 默认为字符串
+    
+    async def create_tool(self, tool_name: str, organization_id: Optional[str] = None) -> RemoteTool:
+        """为指定的工具名称创建 RemoteTool 实例"""
+        tools = await self.discover_tools()
+        
+        # 查找指定的工具
+        tool_info = None
+        for tool in tools:
+            if tool.name == tool_name:
+                tool_info = tool
+                break
+        
+        if tool_info is None:
+            available_tools = [tool.name for tool in tools]
+            raise ToolError(f"Tool '{tool_name}' not found. Available tools: {available_tools}")
+        
+        # 从 inputSchema 创建 Pydantic 模型
+        args_schema = self._create_pydantic_model_from_schema(
+            tool_info.inputSchema, 
+            f"{tool_name.title().replace('_', '')}Args"
+        )
+        
+        return RemoteTool(
+            server_config=self.server_config,
+            tool_name=tool_name,
+            name=f"{self.server_config.name}_{tool_name}",
+            description=tool_info.description,
+            args_schema=args_schema,
+            organization_id=organization_id,
+        )
+    
+    async def create_all_tools(self, organization_id: Optional[str] = None) -> List[RemoteTool]:
+        """创建服务器提供的所有工具"""
+        tools = await self.discover_tools()
+        remote_tools = []
+        
+        for tool_info in tools:
+            args_schema = self._create_pydantic_model_from_schema(
+                tool_info.inputSchema, 
+                f"{tool_info.name.title().replace('_', '')}Args"
+            )
+            
+            remote_tool = RemoteTool(
+                server_config=self.server_config,
+                tool_name=tool_info.name,
+                name=f"{self.server_config.name}_{tool_info.name}",
+                description=tool_info.description,
+                args_schema=args_schema,
+                organization_id=organization_id,
+            )
+            remote_tools.append(remote_tool)
+        
+        return remote_tools
+
+
+def load_mcp_config(config_path: str = "~/.cursor/mcp.json") -> Dict[str, MCPServerConfig]:
+    """加载 MCP 配置文件"""
+    config_path = os.path.expanduser(config_path)
+    
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"MCP config file not found: {config_path}")
+    
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config_data = json.load(f)
+    
+    # 处理嵌套的 mcpServers 结构
+    if 'mcpServers' in config_data:
+        servers_data = config_data['mcpServers']
+    else:
+        servers_data = config_data
+    
+    servers = {}
+    for name, server_data in servers_data.items():
+        servers[name] = MCPServerConfig(name=name, **server_data)
+    
+    return servers
+
+
+async def create_mcp_client(server_name: str, config_path: str = "~/.cursor/mcp.json") -> MCPClient:
+    """便捷函数：从配置文件创建 MCP 客户端"""
+    configs = load_mcp_config(config_path)
+    
+    if server_name not in configs:
+        available_servers = list(configs.keys())
+        raise ValueError(f"Server '{server_name}' not found in config. Available servers: {available_servers}")
+    
+    return MCPClient(configs[server_name]) 
