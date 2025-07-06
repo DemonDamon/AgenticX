@@ -418,7 +418,7 @@ class MCPClient:
         
         if tool_info is None:
             available_tools = [tool.name for tool in tools]
-            raise ToolError(f"Tool '{tool_name}' not found. Available tools: {available_tools}")
+            raise ToolError(f"Tool '{tool_name}' not found. Available tools: {available_tools}", tool_name)
         
         # 从 inputSchema 创建 Pydantic 模型
         args_schema = self._create_pydantic_model_from_schema(
