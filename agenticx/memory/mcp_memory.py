@@ -10,8 +10,9 @@ import logging
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from ..tools.remote import MCPClient
+from ..tools import MCPClient, create_mcp_client
 from .base import BaseMemory, MemoryRecord, SearchResult, MemoryError, MemoryConnectionError, MemoryNotFoundError
+from .short_term import ShortTermMemory
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,8 @@ class MCPMemory(BaseMemory):
     def __init__(
         self,
         tenant_id: str,
-        server_config: Dict[str, Any],
+        mcp_client: MCPClient,
+        fallback_to_short_term: bool = True,
         **kwargs
     ):
         """
@@ -35,37 +37,59 @@ class MCPMemory(BaseMemory):
         
         Args:
             tenant_id: Unique identifier for tenant isolation
-            server_config: MCP server configuration (command, args, env, etc.)
+            mcp_client: An initialized MCPClient instance
+            fallback_to_short_term: Whether to use ShortTermMemory if MCP server is unavailable
             **kwargs: Additional configuration options
         """
         super().__init__(tenant_id, **kwargs)
-        self.server_config = server_config
-        self._client: Optional[MCPClient] = None
-        self._available_tools: Dict[str, Any] = {}
+        self._client = mcp_client
+        self._tools_discovered = False
+        self._fallback_memory: Optional[ShortTermMemory] = None
+        self._use_fallback = False
+        self.fallback_to_short_term = fallback_to_short_term
     
-    async def _ensure_connected(self):
-        """Ensure MCP client is connected and tools are available."""
-        if self._client is None:
+    async def _ensure_tools_discovered(self):
+        """Ensure MCP client has discovered tools and memory tools are available."""
+        if not self._tools_discovered:
             try:
-                self._client = MCPClient(self.server_config)
-                await self._client.connect()
-                self._available_tools = await self._client.list_tools()
-                logger.info(f"Connected to MCP memory server with {len(self._available_tools)} tools")
+                tools = await self._client.discover_tools()
+                tool_names = {tool.name for tool in tools}
+                
+                # Check for essential memory tools
+                required_tools = {"add_memories", "search_memory"}
+                if not required_tools.issubset(tool_names):
+                    if self.fallback_to_short_term:
+                        logger.warning(
+                            f"MCP server '{self._client.server_config.name}' does not provide full memory API. "
+                            f"Missing: {required_tools - tool_names}. Using ShortTermMemory as fallback."
+                        )
+                        self._use_fallback = True
+                        self._fallback_memory = ShortTermMemory(tenant_id=self.tenant_id)
+                    else:
+                        raise MemoryConnectionError(
+                            f"MCP server does not provide required memory tools: {required_tools - tool_names}"
+                        )
+                
+                self._tools_discovered = True
+                logger.info(f"Discovered {len(tools)} tools from MCP memory server '{self._client.server_config.name}'")
             except Exception as e:
-                raise MemoryConnectionError(f"Failed to connect to MCP memory server: {str(e)}") from e
+                if self.fallback_to_short_term:
+                    logger.warning(f"Failed to discover tools, using ShortTermMemory fallback: {e}")
+                    self._use_fallback = True
+                    self._fallback_memory = ShortTermMemory(tenant_id=self.tenant_id)
+                else:
+                    raise MemoryConnectionError(f"Failed to discover tools from MCP memory server: {str(e)}") from e
     
     async def _call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         """Call an MCP tool with error handling."""
-        await self._ensure_connected()
-        
-        if tool_name not in self._available_tools:
-            raise MemoryError(f"Tool '{tool_name}' not available in MCP server")
+        await self._ensure_tools_discovered()
         
         try:
-            result = await self._client.call_tool(tool_name, arguments)
+            tool = await self._client.create_tool(tool_name)
+            result = await tool.arun(**arguments)
             return result
         except Exception as e:
-            raise MemoryError(f"MCP tool call failed: {str(e)}") from e
+            raise MemoryError(f"MCP tool '{tool_name}' call failed: {str(e)}") from e
     
     async def add(
         self,
@@ -74,6 +98,10 @@ class MCPMemory(BaseMemory):
         record_id: Optional[str] = None
     ) -> str:
         """Add a new memory record via MCP."""
+        await self._ensure_tools_discovered()
+        if self._use_fallback:
+            return await self._fallback_memory.add(content, metadata, record_id)
+        
         try:
             # Ensure tenant isolation
             metadata = self._ensure_tenant_isolation(metadata)
@@ -116,6 +144,10 @@ class MCPMemory(BaseMemory):
         min_score: float = 0.0
     ) -> List[SearchResult]:
         """Search for relevant memory records via MCP."""
+        await self._ensure_tools_discovered()
+        if self._use_fallback:
+            return await self._fallback_memory.search(query, limit, metadata_filter, min_score)
+        
         try:
             # Prepare search arguments
             search_args = {
@@ -347,7 +379,7 @@ class MCPMemory(BaseMemory):
     
     async def __aenter__(self):
         """Async context manager entry."""
-        await self._ensure_connected()
+        await self._ensure_tools_discovered()
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
