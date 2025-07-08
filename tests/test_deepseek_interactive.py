@@ -54,10 +54,14 @@ def test_deepseek_sync():
         print("正在调用 DeepSeek API...")
         
         # 创建 DeepSeek 提供商
-        provider = LiteLLMProvider(model="deepseek/deepseek-chat")
+        provider = LiteLLMProvider(
+            model="deepseek/deepseek-chat",
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url=os.getenv("DEEPSEEK_API_BASE")
+        )
         
         # 调用模型
-        response = provider.invoke(user_input)
+        response = provider.invoke([{"role": "user", "content": user_input}])
         
         print(f"\n✅ 调用成功!")
         print(f"模型: {response.model_name}")
@@ -93,11 +97,15 @@ def test_deepseek_stream():
         print("-" * 50)
         
         # 创建 DeepSeek 提供商
-        provider = LiteLLMProvider(model="deepseek/deepseek-chat")
+        provider = LiteLLMProvider(
+            model="deepseek/deepseek-chat",
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url=os.getenv("DEEPSEEK_API_BASE")
+        )
         
         # 流式调用模型
         full_response = ""
-        for chunk in provider.stream(user_input):
+        for chunk in provider.stream([{"role": "user", "content": user_input}]):
             if chunk:
                 print(chunk, end='', flush=True)
                 full_response += chunk
@@ -127,10 +135,14 @@ async def test_deepseek_async():
         print("正在异步调用 DeepSeek API...")
         
         # 创建 DeepSeek 提供商
-        provider = LiteLLMProvider(model="deepseek/deepseek-chat")
+        provider = LiteLLMProvider(
+            model="deepseek/deepseek-chat",
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url=os.getenv("DEEPSEEK_API_BASE")
+        )
         
         # 异步调用模型
-        response = await provider.ainvoke(user_input)
+        response = await provider.ainvoke([{"role": "user", "content": user_input}])
         
         print(f"\n✅ 异步调用成功!")
         print(f"模型: {response.model_name}")
@@ -165,11 +177,15 @@ async def test_deepseek_async_stream():
         print("-" * 50)
         
         # 创建 DeepSeek 提供商
-        provider = LiteLLMProvider(model="deepseek/deepseek-chat")
+        provider = LiteLLMProvider(
+            model="deepseek/deepseek-chat",
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url=os.getenv("DEEPSEEK_API_BASE")
+        )
         
         # 异步流式调用模型
         full_response = ""
-        async for chunk in provider.astream(user_input):
+        async for chunk in provider.astream([{"role": "user", "content": user_input}]):
             if chunk:
                 print(chunk, end='', flush=True)
                 full_response += chunk
@@ -199,10 +215,14 @@ def test_deepseek_reasoner():
         print("正在调用 DeepSeek Reasoner...")
         
         # 创建 DeepSeek Reasoner 提供商
-        provider = LiteLLMProvider(model="deepseek/deepseek-reasoner")
+        provider = LiteLLMProvider(
+            model="deepseek/deepseek-reasoner",
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url=os.getenv("DEEPSEEK_API_BASE")
+        )
         
         # 调用模型
-        response = provider.invoke(user_input)
+        response = provider.invoke([{"role": "user", "content": user_input}])
         
         print(f"\n✅ Reasoner 调用成功!")
         print(f"模型: {response.model_name}")
