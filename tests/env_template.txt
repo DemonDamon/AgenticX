@@ -1,19 +1,28 @@
 # AgenticX 测试环境变量模板
-# 复制此文件为 .env 并填入实际的 API 密钥
+# 复制此文件为 .env 并填入实际的 API 密钥和可选的 Base URL
 
-# DeepSeek API 密钥
+# --- DeepSeek ---
 DEEPSEEK_API_KEY=
+DEEPSEEK_API_BASE=
 
-# OpenAI API 密钥 (可选)
+# --- OpenAI ---
 OPENAI_API_KEY=
+OPENAI_API_BASE=
 
-# Anthropic API 密钥 (可选)
+# --- Anthropic ---
 ANTHROPIC_API_KEY=
+ANTHROPIC_API_BASE=
 
-# Google Gemini API 密钥 (可选)
+# --- Google Gemini ---
 GOOGLE_API_KEY=
+GOOGLE_API_BASE=
 
-# 其他 LLM 提供商的 API 密钥
+# --- 其他 LLM 提供商 ---
 # AZURE_API_KEY=
+# AZURE_API_BASE=
+
 # COHERE_API_KEY=
-# HUGGINGFACE_API_KEY= 
+# COHERE_API_BASE=
+
+# HUGGINGFACE_API_KEY=
+# HUGGINGFACE_API_BASE= 
