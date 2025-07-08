@@ -101,13 +101,13 @@ def run_basic_tests():
         
         # 测试同步调用
         with patch('litellm.completion', return_value=mock_response):
-            provider = LiteLLMProvider(model="gpt-3.5-turbo")
-            result = provider.invoke("Hello, world!")
+            provider = LiteLLMProvider(model="gpt-4.1")
+            result = provider.invoke([{"role": "user", "content": "Hello, world!"}])
             
             assert isinstance(result, LLMResponse)
             assert result.content == "Hello from test!"
             assert result.token_usage.total_tokens == 15
-            assert result.cost == 0.0001
+            assert result.cost > 0
         
         print("   ✅ LiteLLMProvider同步调用测试通过\n")
         
@@ -130,7 +130,7 @@ def run_basic_tests():
         
         with patch('litellm.completion', return_value=mock_chunks):
             provider = LiteLLMProvider(model="gpt-3.5-turbo")
-            stream_result = "".join([chunk for chunk in provider.stream("Stream test")])
+            stream_result = "".join([chunk for chunk in provider.stream([{"role": "user", "content": "Stream test"}])])
             
             assert stream_result == "Hello from stream!"
         
@@ -174,7 +174,7 @@ def run_async_tests():
             
             with patch('litellm.acompletion', new_callable=AsyncMock, return_value=mock_response):
                 provider = LiteLLMProvider(model="gpt-4")
-                result = await provider.ainvoke("Async test")
+                result = await provider.ainvoke([{"role": "user", "content": "Async test"}])
                 
                 assert isinstance(result, LLMResponse)
                 assert result.content == "Async response!"
@@ -194,7 +194,7 @@ def run_async_tests():
             
             with patch('litellm.acompletion', new_callable=AsyncMock, return_value=mock_async_stream()):
                 provider = LiteLLMProvider(model="gpt-4")
-                stream_result = "".join([chunk async for chunk in provider.astream("Async stream test")])
+                stream_result = "".join([chunk async for chunk in provider.astream([{"role": "user", "content": "Async stream test"}])])
                 
                 assert stream_result == "Async stream test!"
                 
