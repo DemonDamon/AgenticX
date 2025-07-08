@@ -42,17 +42,15 @@ def mock_litellm_response():
     choice.message.content = "This is a test response."
     response.choices = [choice]
     
-    # 模拟 usage - 使用字典格式，因为代码中使用 .get() 方法
-    usage = {
-        "prompt_tokens": 10,
-        "completion_tokens": 20,
-        "total_tokens": 30
-    }
+    # 模拟 usage - litellm v1.35.0+ returns a Pydantic model
+    usage = MagicMock()
+    usage.prompt_tokens = 10
+    usage.completion_tokens = 20
+    usage.total_tokens = 30
     response.usage = usage
     
     # 模拟 cost
-    cost = {"completion_cost": 0.00015}
-    response.cost = cost
+    response.completion_cost = 0.00015
     
     # 模拟其他元数据
     response._response_ms = 500
@@ -91,8 +89,8 @@ class TestLLMDataClasses:
         assert choice.content == "Hello"
 
     def test_llm_response(self):
-        usage = TokenUsage(total_tokens=50)
-        choice = LLMChoice(index=0, content="Test")
+        usage = TokenUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        choice = LLMChoice(index=0, content="Test", finish_reason="stop")
         response = LLMResponse(
             id="res-123",
             model_name="test-model",
@@ -104,7 +102,7 @@ class TestLLMDataClasses:
         )
         assert response.id == "res-123"
         assert response.content == "Test"
-        assert response.token_usage.total_tokens == 50
+        assert response.token_usage.total_tokens == 30
         assert len(response.choices) == 1
 
 class TestLiteLLMProvider:
@@ -116,7 +114,7 @@ class TestLiteLLMProvider:
         mock_completion.return_value = mock_litellm_response
         
         provider = LiteLLMProvider(model="gpt-3.5-turbo")
-        response = provider.invoke("Hello, world!")
+        response = provider.invoke([{"role": "user", "content": "Hello, world!"}])
         
         mock_completion.assert_called_once()
         assert isinstance(response, LLMResponse)
@@ -132,7 +130,7 @@ class TestLiteLLMProvider:
         mock_acompletion.return_value = mock_litellm_response
         
         provider = LiteLLMProvider(model="gpt-4")
-        response = await provider.ainvoke("Hello, async world!")
+        response = await provider.ainvoke([{"role": "user", "content": "Hello, async world!"}])
         
         mock_acompletion.assert_called_once()
         assert isinstance(response, LLMResponse)
@@ -145,7 +143,7 @@ class TestLiteLLMProvider:
         mock_completion.return_value = mock_litellm_stream_chunks
         
         provider = LiteLLMProvider(model="test-model")
-        stream = provider.stream("Stream test")
+        stream = provider.stream([{"role": "user", "content": "Stream test"}])
         
         result = "".join([chunk for chunk in stream])
         
@@ -163,7 +161,7 @@ class TestLiteLLMProvider:
         mock_acompletion.return_value = mock_stream_gen()
         
         provider = LiteLLMProvider(model="test-model")
-        stream = provider.astream("Async stream test")
+        stream = provider.astream([{"role": "user", "content": "Async stream test"}])
         
         result = "".join([chunk async for chunk in stream])
         
