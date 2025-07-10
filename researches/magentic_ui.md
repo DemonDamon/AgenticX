@@ -47,35 +47,35 @@ Magentic UI 采用了一个分层的架构，主要包括：
 ### 2.1 模块概述
 
 - **模块路径**: `magentic_ui/agents/`
-- **核心职责**: 定义了框架中所有自主代理（Agent）的核心实现。这些代理是执行任务的基本单位，各自拥有特定的技能，如编码、网页浏览或文件操作。该模块大量使用了 `autogen` 框架作为底层支持，实现了组件化、可插拔的代理架构。
+- **核心职责**: 定义了框架中所有自主Agent（Agent）的核心实现。这些Agent是执行任务的基本单位，各自拥有特定的技能，如编码、网页浏览或文件操作。该模块大量使用了 `autogen` 框架作为底层支持，实现了组件化、可插拔的Agent架构。
 
 ### 2.2 关键文件与组件分析
 
 - **`CoderAgent` (`_coder.py`)**:
-  - **功能**: 核心的编码代理。能够根据任务需求编写Python代码，并在安全的环境（本地或Docker容器）中执行。
+  - **功能**: 核心的编码Agent。能够根据任务需求编写Python代码，并在安全的环境（本地或Docker容器）中执行。
   - **实现**: 内置了一个"编码-执行-调试"的循环。如果代码执行出错，它会尝试分析错误并自动修正，最多重试指定次数。在执行代码前，可以通过 `ApprovalGuard` 机制请求用户批准，确保安全性。
 
 - **`FileSurfer` (`file_surfer/`)**:
-  - **功能**: 只读的文件系统浏览代理。它能像人一样"阅读"文件和目录，但不能修改它们。
+  - **功能**: 只读的文件系统浏览Agent。它能像人一样"阅读"文件和目录，但不能修改它们。
   - **实现**: 通过一个巧妙的 `CodeExecutorMarkdownFileBrowser` 组件实现。该组件将文件（甚至是图片、文档等）和目录列表转换为Markdown格式的文本，然后提供分页、搜索等类似浏览器的操作。所有底层文件操作都通过安全的 `CodeExecutor` 完成。
 
 - **`WebSurfer` (`web_surfer/`)**:
-  - **功能**: 强大的网页浏览代理，是与外部世界信息交互的主要入口。
-  - **实现**: 这是一个多模态代理，它会截取当前网页的屏幕截图，在可交互的元素（如按钮、输入框）上标记数字，然后将这张"带标记的截图"连同任务指令一起发送给大语言模型。模型通过"看图"来决定下一步操作，例如回复"点击第7个元素"。这种"看图操作"的模式极大地增强了其在复杂网页上的操作能力。底层使用 Playwright 进行浏览器自动化。
+  - **功能**: 强大的网页浏览Agent，是与外部世界信息交互的主要入口。
+  - **实现**: 这是一个多模态Agent，它会截取当前网页的屏幕截图，在可交互的元素（如按钮、输入框）上标记数字，然后将这张"带标记的截图"连同任务指令一起发送给大语言模型。模型通过"看图"来决定下一步操作，例如回复"点击第7个元素"。这种"看图操作"的模式极大地增强了其在复杂网页上的操作能力。底层使用 Playwright 进行浏览器自动化。
 
 - **User Proxies (`users/`)**:
-  - **功能**: 模拟人类用户在多代理协作中的角色。
+  - **功能**: 模拟人类用户在多Agent协作中的角色。
   - **`DummyUserProxy`**: 一个简单的"哑"用户，主要用于自动化测试，例如自动批准计划或在被提问时给出通用回复。
-  - **`MetadataUserProxy`**: 一个由语言模型驱动的"智能"模拟用户。它可以被赋予关于任务的"内部信息"（如提示或最终答案），并根据这些信息在计划阶段提供有价值的反馈，或在执行阶段提供帮助。这对于可复现地评估（Eval）多代理系统的性能至关重要。
+  - **`MetadataUserProxy`**: 一个由语言模型驱动的"智能"模拟用户。它可以被赋予关于任务的"内部信息"（如提示或最终答案），并根据这些信息在计划阶段提供有价值的反馈，或在执行阶段提供帮助。这对于可复现地评估（Eval）多Agent系统的性能至关重要。
 
 - **`McpAgent` (`mcp/`)**:
-  - **功能**: 一个通用的工具调用代理。
+  - **功能**: 一个通用的工具调用Agent。
   - **实现**: 它可以连接到多个远程的"MCP服务器"，并将这些服务器上提供的工具聚合起来，供自己在解决任务时调用。这为框架提供了一种可扩展的、分布式的工具架构。
 
 ### 2.3 设计模式与亮点
 
-- **组件化设计**: 所有代理都遵循了 `autogen` 的组件化规范，将配置（`Config`）与实现分离，便于管理和复用。
-- **关注点分离 (SoC)**: 不同代理职责清晰，`CoderAgent` 负责写代码，`FileSurfer` 负责读文件，`WebSurfer` 负责上网，体现了良好的架构设计。
+- **组件化设计**: 所有Agent都遵循了 `autogen` 的组件化规范，将配置（`Config`）与实现分离，便于管理和复用。
+- **关注点分离 (SoC)**: 不同Agent职责清晰，`CoderAgent` 负责写代码，`FileSurfer` 负责读文件，`WebSurfer` 负责上网，体现了良好的架构设计。
 - **策略模式**: `CoderAgent` 和 `FileSurfer` 都依赖于 `CodeExecutor` 抽象。用户可以根据安全需求和环境，选择使用 `LocalCommandLineCodeExecutor` 或 `DockerCommandLineCodeExecutor` 作为具体的执行策略。
 - **安全沙箱**: 通过 `CodeExecutor`（特别是Docker实现），将不授信的代码执行限制在隔离的环境中，保证了系统的安全性。
 - **人机交互的抽象**: `WebSurfer` 的"截图+标记"和 `FileSurfer` 的"文件转Markdown"都是将复杂的图形化界面或二进制文件抽象为语言模型可以理解的文本/图像格式的优秀实践。
@@ -170,28 +170,28 @@ McpAgent ..> AggregateMcpWorkbench
 ### 3.1 模块概述
 
 - **模块路径**: `magentic_ui/tools/`
-- **核心职责**: 提供代理（Agents）用以与外部世界交互的具体能力和底层设施。它包含了从浏览器自动化、网页搜索到定义、加载和管理这些工具的完整机制。这里是驱动代理执行实际操作的"引擎室"。
+- **核心职责**: 提供Agent（Agents）用以与外部世界交互的具体能力和底层设施。它包含了从浏览器自动化、网页搜索到定义、加载和管理这些工具的完整机制。这里是驱动Agent执行实际操作的"引擎室"。
 
 ### 3.2 关键文件与组件分析
 
-- **`playwright/`**: 这是该模块最核心的部分，是 `WebSurfer` 代理的能力来源。
-  - **`PlaywrightController`**: 一个外观（Facade）模式的实现，它将代理的指令（如"点击第5个元素"）翻译成具体的 Playwright API 调用。它通过向页面注入一个名为 `page_script.js` 的脚本来查找和标记网页上的所有可交互元素。
-  - **Browser Implementations (`browser/`)**: 提供了一系列可供选择的浏览器环境策略。`LocalPlaywrightBrowser` 直接在主机上运行浏览器；`HeadlessDockerPlaywrightBrowser` 和 `VncDockerPlaywrightBrowser` 则在隔离的 Docker 容器中运行。其中，VNC 版本尤为出色，因为它允许开发者通过 Web 界面实时观察代理的操作。
+- **`playwright/`**: 这是该模块最核心的部分，是 `WebSurfer` Agent的能力来源。
+  - **`PlaywrightController`**: 一个外观（Facade）模式的实现，它将Agent的指令（如"点击第5个元素"）翻译成具体的 Playwright API 调用。它通过向页面注入一个名为 `page_script.js` 的脚本来查找和标记网页上的所有可交互元素。
+  - **Browser Implementations (`browser/`)**: 提供了一系列可供选择的浏览器环境策略。`LocalPlaywrightBrowser` 直接在主机上运行浏览器；`HeadlessDockerPlaywrightBrowser` 和 `VncDockerPlaywrightBrowser` 则在隔离的 Docker 容器中运行。其中，VNC 版本尤为出色，因为它允许开发者通过 Web 界面实时观察Agent的操作。
 
-- **`bing_search.py`**: 提供了一个高级函数 `get_bing_search_results`。它不仅执行搜索，还会访问排名靠前的几个链接并汇总其内容，为调用代理提供了一个信息丰富的摘要。
+- **`bing_search.py`**: 提供了一个高级函数 `get_bing_search_results`。它不仅执行搜索，还会访问排名靠前的几个链接并汇总其内容，为调用Agent提供了一个信息丰富的摘要。
 
 - **`tool_metadata.py`**: 一个关键的基础设施组件。它提供了标准化的方式（`load_tool`）来定义工具及其元数据（例如，某个操作是否需要用户批准）。
 
-- **`url_status_manager.py`**: 一个必要的安全功能，它允许精细地控制 `WebSurfer` 代理可以访问的网站URL，支持白名单、黑名单和阻止列表。
+- **`url_status_manager.py`**: 一个必要的安全功能，它允许精细地控制 `WebSurfer` Agent可以访问的网站URL，支持白名单、黑名单和阻止列表。
 
-- **`mcp/`**: 定义了 `AggregateMcpWorkbench`。这是一个强大的抽象，允许一个代理连接到多个工具服务器，并通过统一的、带命名空间的接口来使用它们提供的所有工具。
+- **`mcp/`**: 定义了 `AggregateMcpWorkbench`。这是一个强大的抽象，允许一个Agent连接到多个工具服务器，并通过统一的、带命名空间的接口来使用它们提供的所有工具。
 
 ### 3.3 设计模式与亮点
 
-- **外观模式 (Facade)**: `PlaywrightController` 是外观模式的典型应用，它将复杂的 `playwright` 库简化为一个对 `WebSurfer` 代理来说易于使用的接口。
-- **策略模式 (Strategy)**: `PlaywrightBrowser` 抽象基类及其具体实现（`Local`, `Docker`, `VNC`）允许系统在不修改代理代码的情况下，切换整个浏览器环境策略。这是一种实现灵活性和可测试性的强大设计。
-- **依赖注入 (DI)**: `WebSurfer` 代理依赖于 `PlaywrightBrowser` 抽象，而不是具体的实现。要使用的具体浏览器是在运行时注入的。
-- **JavaScript 桥接**: 通过注入 `page_script.js` 来分析 DOM 并将可交互元素的信息传回 Python 控制器，是解决浏览器世界和代理世界之间鸿沟的一个巧妙方案。
+- **外观模式 (Facade)**: `PlaywrightController` 是外观模式的典型应用，它将复杂的 `playwright` 库简化为一个对 `WebSurfer` Agent来说易于使用的接口。
+- **策略模式 (Strategy)**: `PlaywrightBrowser` 抽象基类及其具体实现（`Local`, `Docker`, `VNC`）允许系统在不修改Agent代码的情况下，切换整个浏览器环境策略。这是一种实现灵活性和可测试性的强大设计。
+- **依赖注入 (DI)**: `WebSurfer` Agent依赖于 `PlaywrightBrowser` 抽象，而不是具体的实现。要使用的具体浏览器是在运行时注入的。
+- **JavaScript 桥接**: 通过注入 `page_script.js` 来分析 DOM 并将可交互元素的信息传回 Python 控制器，是解决浏览器世界和Agent世界之间鸿沟的一个巧妙方案。
 - **分布式架构支持**: `AggregateMcpWorkbench` 的设计具有前瞻性，它使系统能够通过将工具作为微服务分布在多个服务器上进行扩展。
 
 ### 3.4 模块PlantUML类图
@@ -275,19 +275,19 @@ WebSurfer ..> BingSearchModule
 ### 4.1 模块概述
 
 - **模块路径**: `magentic_ui/teams/`
-- **核心职责**: 定义了如何将单个代理组织和协调起来以共同完成一项任务。它提供了代理框架的"神经系统"，控制对话的流程，并决定"谁在什么时候做什么"。该模块提供了从简单到高度智能的不同编排策略。
+- **核心职责**: 定义了如何将单个Agent组织和协调起来以共同完成一项任务。它提供了Agent框架的"神经系统"，控制对话的流程，并决定"谁在什么时候做什么"。该模块提供了从简单到高度智能的不同编排策略。
 
 ### 4.2 关键文件与组件分析
 
-- **`Orchestrator` (`orchestrator/_orchestrator.py`)**: 这是"智能"的团队管理器。它不仅仅是传递消息，其本身也是一个由大语言模型驱动的代理，主动地指导整个团队。其核心职责包括：
+- **`Orchestrator` (`orchestrator/_orchestrator.py`)**: 这是"智能"的团队管理器。它不仅仅是传递消息，其本身也是一个由大语言模型驱动的Agent，主动地指导整个团队。其核心职责包括：
   - **规划 (Planning)**: 为用户的任务创建一个分步计划。
-  - **代理-任务路由 (Agent-Task Routing)**: 为计划中的每一步动态选择最合适的代理。
+  - **Agent-任务路由 (Agent-Task Routing)**: 为计划中的每一步动态选择最合适的Agent。
   - **重新规划 (Re-planning)**: 如果团队在执行中遇到困难或意外障碍，它可以修改计划。
   - **状态追踪 (State Tracking)**: 维护一个关于任务进度的详细"账本"。
 
-- **`GroupChat` (`orchestrator/_group_chat.py`)**: 这是包装了 `Orchestrator` 的高级组件。用户创建一个 `GroupChat` 实例，向其中添加一系列 `participants`（参与者，即代理），并提供 `OrchestratorConfig` 来定义团队的行为。
+- **`GroupChat` (`orchestrator/_group_chat.py`)**: 这是包装了 `Orchestrator` 的高级组件。用户创建一个 `GroupChat` 实例，向其中添加一系列 `participants`（参与者，即Agent），并提供 `OrchestratorConfig` 来定义团队的行为。
 
-- **`RoundRobinGroupChat` (`roundrobin_orchestrator.py`)**: 这提供了一种更简单的、非大语言模型驱动的编排策略，即每个代理按固定的顺序轮流发言。这对于简单的任务或创建可预测的工作流很有用。
+- **`RoundRobinGroupChat` (`roundrobin_orchestrator.py`)**: 这提供了一种更简单的、非大语言模型驱动的编排策略，即每个Agent按固定的顺序轮流发言。这对于简单的任务或创建可预测的工作流很有用。
 
 - **Prompts (`orchestrator/_prompts.py`)**: 这个文件对 `Orchestrator` 的智能至关重要。它包含了详细的系统提示，其中包含少量示例（few-shot examples）和指令，强制大语言模型为计划输出结构化的JSON，从而使编排过程既健壮又可预测。
 
@@ -298,7 +298,7 @@ WebSurfer ..> BingSearchModule
 - **编排 (Orchestration) vs. 协同 (Choreography)**: 框架同时支持这两种模式。`RoundRobinGroupChat` 是一种协同模式，交互模式是预先确定的。`Orchestrator` 则实现了编排模式，由一个中心指挥（即Orchestrator自身）动态地决定工作流程。
 - **声明式配置**: 整个团队的行为通过 `GroupChatConfig` 和 `OrchestratorConfig` 进行声明式定义。这使得在不更改核心代码的情况下，可以轻松地试验不同的团队构成和策略。
 - **提示工程即代码**: `_prompts.py` 文件展示了一种复杂的提示工程方法，将提示视为应用程序核心逻辑的一部分，包含了示例、结构化格式要求和上下文变体。
-- **有状态和可恢复操作**: 整个团队的状态，包括 `Orchestrator` 的计划和各个代理的历史记录，都可以被保存和加载。`pause` 和 `resume` 功能支持长时间运行的交互式任务。
+- **有状态和可恢复操作**: 整个团队的状态，包括 `Orchestrator` 的计划和各个Agent的历史记录，都可以被保存和加载。`pause` 和 `resume` 功能支持长时间运行的交互式任务。
 
 ### 4.4 模块PlantUML类图
 
@@ -361,19 +361,19 @@ BaseGroupChat o-- "many" ChatAgent
 ### 5.1 模块概述
 
 - **模块路径**: `magentic_ui/backend/`
-- **核心职责**: 提供了完整的Web服务器应用程序，为Magentic UI提供服务，并暴露API用于管理代理团队并与之交互。它处理用户会话、数据库持久化、实时通信以及代理任务执行的编排。
+- **核心职责**: 提供了完整的Web服务器应用程序，为Magentic UI提供服务，并暴露API用于管理Agent团队并与之交互。它处理用户会话、数据库持久化、实时通信以及Agent任务执行的编排。
 
 ### 5.2 关键文件与组件分析
 
 - **`web/app.py`**: `FastAPI`应用程序的主入口。它负责设置服务器、管理应用程序生命周期（启动/关闭）、配置CORS以及包含所有的API路由。
 - **`web/routes/`**: 此目录定义了所有的HTTP API端点。
   - **`sessions.py`**: 为用户会话提供CRUD（创建、读取、更新、删除）操作，以及检索与会话相关的所有数据（运行和消息）的端点。
-  - **`ws.py`**: 定义了关键的WebSocket端点 (`/api/ws/runs/{run_id}`)。这是实时通信的枢纽，前端可以通过它来启动、停止、暂停和恢复代理运行，并在代理团队请求时提供输入。
-- **`teammanager/teammanager.py`**: `TeamManager` 类是Web API和代理运行时之间的关键链接。它负责：
-  - 从配置文件或对象实例化代理团队。
+  - **`ws.py`**: 定义了关键的WebSocket端点 (`/api/ws/runs/{run_id}`)。这是实时通信的枢纽，前端可以通过它来启动、停止、暂停和恢复Agent运行，并在Agent团队请求时提供输入。
+- **`teammanager/teammanager.py`**: `TeamManager` 类是Web API和Agent运行时之间的关键链接。它负责：
+  - 从配置文件或对象实例化Agent团队。
   - 设置必要的运行目录和环境。
   - 通过 `run_stream` 执行团队的任务。
-  - 捕获所有事件（代理消息、LLM调用等）并通过WebSocket流式传输回客户端。
+  - 捕获所有事件（Agent消息、LLM调用等）并通过WebSocket流式传输回客户端。
 - **`database/`**: 此子目录包含一个健壮的数据持久层。
   - **`DatabaseManager`**: 一个通用的存储库，使用 `SQLModel` 为任何数据模型提供 `upsert`/`get`/`delete` 操作。
   - **`SchemaManager`**: `alembic` 的一个包装器，可自动处理数据库模式的创建和迁移。
@@ -466,25 +466,25 @@ TeamManager ..> Team
 - **模块路径**: `magentic_ui/_cli.py`, `magentic_ui/cli/`, `magentic_ui/backend/cli.py`
 - **核心职责**: 该项目提供了两个命令行界面（CLI）：
    1. **后端CLI (`backend/cli.py`)**: 其唯一目的是启动、配置和管理运行后端API的`uvicorn` Web服务器。
-   2. **主/任务CLI (`_cli.py`)**: 这是直接从命令行运行代理任务的主要接口，无需Web UI。它允许进行实验、调试，并集成到自动化工作流中（如基准测试）。
+   2. **主/任务CLI (`_cli.py`)**: 这是直接从命令行运行Agent任务的主要接口，无需Web UI。它允许进行实验、调试，并集成到自动化工作流中（如基准测试）。
 
 ### 6.2 关键文件与组件分析
 
-- **`_cli.py`**: 运行代理任务的主入口点。
-  - 它使用 `argparse` 提供了一套全面的命令行标志，以配置代理运行的各个方面（任务、团队构成、执行模式、安全策略等）。
-  - 其核心函数 `get_team` 作为一个工厂，收集所有配置并使用 `get_task_team` 辅助函数来实例化相应的代理团队。
+- **`_cli.py`**: 运行Agent任务的主入口点。
+  - 它使用 `argparse` 提供了一套全面的命令行标志，以配置Agent运行的各个方面（任务、团队构成、执行模式、安全策略等）。
+  - 其核心函数 `get_team` 作为一个工厂，收集所有配置并使用 `get_task_team` 辅助函数来实例化相应的Agent团队。
   - 它设置了一个asyncio事件循环，并将来自团队执行的事件流式传输到控制台渲染器。
 - **`cli/pretty_console.py`**: 一个复杂的控制台输出渲染器。
-  - 它负责终端中代理对话的所有"美化"格式。
-  - 它使用ANSI颜色代码，为每个代理分配独特的颜色，并为不同类型的消息（如计划、JSON对象和代理转换）提供自定义格式化程序。
+  - 它负责终端中Agent对话的所有"美化"格式。
+  - 它使用ANSI颜色代码，为每个Agent分配独特的颜色，并为不同类型的消息（如计划、JSON对象和Agent转换）提供自定义格式化程序。
 - **`backend/cli.py`**: Web服务器启动器。
   - 它使用 `typer` 来获得一个清晰的命令界面。
   - 其主要职责是执行预检（例如，Docker是否正在运行？），构建必要的Docker镜像，然后使用正确的环境变量启动 `uvicorn` 服务器。
 
 ### 6.3 设计模式与亮点
 
-- **关注点分离**: 项目明智地将用于运行后端服务器的CLI与用于运行代理任务的CLI分开。这也体现在将渲染逻辑 (`pretty_console.py`) 与执行逻辑 (`_cli.py`) 分开。
-- **外观模式**: `_cli.py` 作为复杂代理团队设置和配置的外观，将其暴露为带各种标志的单个命令。
+- **关注点分离**: 项目明智地将用于运行后端服务器的CLI与用于运行Agent任务的CLI分开。这也体现在将渲染逻辑 (`pretty_console.py`) 与执行逻辑 (`_cli.py`) 分开。
+- **外观模式**: `_cli.py` 作为复杂Agent团队设置和配置的外观，将其暴露为带各种标志的单个命令。
 - **工厂模式**: `get_task_team` 函数被后端的 `TeamManager` 和主 `_cli.py` 同时用作工厂，确保在UI驱动和CLI驱动的运行中一致地创建团队。
 - **观察者/事件流**: CLI的主循环订阅团队的 `run_stream` 事件并对其作出反应，这是事件驱动的观察者模式的一个清晰例子。
 

@@ -136,7 +136,7 @@ MaAS 需要一个配置文件来设置 LLM 的 API Key。
     llm:
       api_type: "openai" 
       model: "gpt-4o-mini" # 执行模型的名称
-      base_url: "" # 如果使用代理，填写代理地址
+      base_url: "" # 如果使用Agent，填写Agent地址
       api_key: "sk-..."
     ```
 

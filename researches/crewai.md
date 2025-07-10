@@ -2,7 +2,7 @@
 
 ## 0. 项目概览
 
-crewAI 是一个帮助开发者构建和编排多个 AI 代理（Agent）的框架。它旨在让代理能够协同工作，完成复杂的任务。
+crewAI 是一个帮助开发者构建和编排多个 AI Agent（Agent）的框架。它旨在让Agent能够协同工作，完成复杂的任务。
 
 ### 0.1. 技术栈
 
@@ -64,7 +64,7 @@ Agent 是执行任务的基本单位。每个 Agent 都有自己的角色 (Role)
 - **`_set_knowledge()`**: 从 `knowledge_sources` 初始化 Agent 的知识库。
 - **`_training_handler()` / `_use_trained_data()`**: 这两个方法表明 crewAI 支持一种训练机制，允许 Agent 从人类反馈或已有的训练数据中学习，以改进其未来的表现。
 
-总的来说，`Agent` 类是一个高度可配置的实体，它封装了 AI 代理所需的所有元素：身份、目标、工具和执行逻辑。
+总的来说，`Agent` 类是一个高度可配置的实体，它封装了 AI Agent所需的所有元素：身份、目标、工具和执行逻辑。
 
 ### 1.2. Task (`task.py`)
 
@@ -120,7 +120,7 @@ Agent 是执行任务的基本单位。每个 Agent 都有自己的角色 (Role)
 - **`train()`**: 和 `Agent` 类似，`Crew` 也支持训练模式，可以通过多轮迭代和人类反馈来优化协作流程。
 - **`replay(task_id)`**: 一个非常实用的调试功能，允许从任意一个失败或指定的 `task_id` 开始，重新执行后续流程。
 
-`Crew` 类将 Agent 和 Task 有机地结合在一起，通过不同的 `process` 提供了灵活的协作模式。它不仅是执行器，还提供了训练、调试等高级功能，是构建复杂多代理系统的关键。
+`Crew` 类将 Agent 和 Task 有机地结合在一起，通过不同的 `process` 提供了灵活的协作模式。它不仅是执行器，还提供了训练、调试等高级功能，是构建复杂多Agent系统的关键。
 
 接下来将概览性地分析一下其他辅助模块，包括 `Tools`, `Memory`, `Knowledge`, 和 `Flow`。
 
@@ -157,7 +157,7 @@ Agent 是执行任务的基本单位。每个 Agent 都有自己的角色 (Role)
 
 ### 2.1. Agents 模块
 
-`agents` 模块负责代理的执行逻辑，包括与 LLM 的交互、工具的使用和输出的解析。`CrewAgentExecutor` 是该模块的核心。
+`agents` 模块负责Agent的执行逻辑，包括与 LLM 的交互、工具的使用和输出的解析。`CrewAgentExecutor` 是该模块的核心。
 ![image](../assets/crewai_agents_classdiagram.png)
 ```plantuml
 @startuml
@@ -273,7 +273,7 @@ ConditionalTask --> TaskOutput : uses
 
 ### 2.4. Tools 模块
 
-`tools` 模块是框架的"手臂"，定义了代理可以执行的具体操作。`BaseTool` 是所有工具的基类，`ToolUsage` 负责整个工具的调用生命周期。
+`tools` 模块是框架的"手臂"，定义了Agent可以执行的具体操作。`BaseTool` 是所有工具的基类，`ToolUsage` 负责整个工具的调用生命周期。
 
 ![image](../assets/crewai_tool_classdiagram.png)
 
@@ -322,7 +322,7 @@ ToolUsage o-- "0..*" BaseTool
 
 ### 2.5. Memory 模块
 
-`memory` 模块为代理提供了记忆能力。它被精心设计为多种类型（短期、长期、实体），并由 `ContextualMemory` 统一管理和调用，为代理提供丰富的上下文。
+`memory` 模块为Agent提供了记忆能力。它被精心设计为多种类型（短期、长期、实体），并由 `ContextualMemory` 统一管理和调用，为Agent提供丰富的上下文。
 
 ![image](../assets/crewai_memory_classdiagram.png)
 
@@ -370,7 +370,7 @@ ContextualMemory o-- EntityMemory
 
 ### 2.6. Knowledge 模块
 
-`knowledge` 模块允许你为代理提供外部知识库。它通过 `Source` -> `Storage` -> `Embedder` 的清晰流水线，将外部文档处理成可供检索的向量化知识。
+`knowledge` 模块允许你为Agent提供外部知识库。它通过 `Source` -> `Storage` -> `Embedder` 的清晰流水线，将外部文档处理成可供检索的向量化知识。
 
 ![image](../assets/crewai_knowledge_classdiagram.png)
 
@@ -510,7 +510,7 @@ pip install crewai
 pip install 'crewai[tools]'
 ```
 
-其中 `crewai[tools]` 包含了额外的工具组件，可以增强代理的能力，但需要更多的依赖项。
+其中 `crewai[tools]` 包含了额外的工具组件，可以增强Agent的能力，但需要更多的依赖项。
 
 ### 4.2. 使用 YAML 配置创建 Crew
 
@@ -542,10 +542,10 @@ my_project/
 ```
 
 要自定义项目，你可以：
-- 修改 `src/my_project/config/agents.yaml` 定义你的代理
+- 修改 `src/my_project/config/agents.yaml` 定义你的Agent
 - 修改 `src/my_project/config/tasks.yaml` 定义你的任务
 - 修改 `src/my_project/crew.py` 添加自定义逻辑、工具和特定参数
-- 修改 `src/my_project/main.py` 添加代理和任务的自定义输入
+- 修改 `src/my_project/main.py` 添加Agent和任务的自定义输入
 - 在 `.env` 文件中添加环境变量
 
 ### 4.3. 运行 Crew
@@ -572,23 +572,23 @@ crewAI 官方提供了多个实际案例，展示了不同场景下的应用：
 
 ### 5.1. 职位描述生成器
 
-这个案例展示了如何使用 crewAI 自动生成详细的职位描述。代理会分析职位要求，并生成专业、吸引人的职位描述文本。
+这个案例展示了如何使用 crewAI 自动生成详细的职位描述。Agent会分析职位要求，并生成专业、吸引人的职位描述文本。
 
 ### 5.2. 旅行规划师
 
-这个例子使用多个代理协作，为用户规划旅行。包括：
-- 本地专家代理：了解目的地的文化、景点和隐藏宝藏
-- 旅行规划师代理：根据用户偏好和预算创建行程
-- 住宿专家代理：推荐最佳住宿选择
+这个例子使用多个Agent协作，为用户规划旅行。包括：
+- 本地专家Agent：了解目的地的文化、景点和隐藏宝藏
+- 旅行规划师Agent：根据用户偏好和预算创建行程
+- 住宿专家Agent：推荐最佳住宿选择
 
-这些代理协同工作，生成一个全面的旅行计划，包括每日行程、住宿建议和当地体验。
+这些Agent协同工作，生成一个全面的旅行计划，包括每日行程、住宿建议和当地体验。
 
 ### 5.3. 股票分析
 
 这个案例展示了如何使用 crewAI 进行金融分析：
-- 研究分析师代理：收集公司和行业数据
-- 财务分析师代理：分析财务报表和指标
-- 投资顾问代理：整合信息并提供投资建议
+- 研究分析师Agent：收集公司和行业数据
+- 财务分析师Agent：分析财务报表和指标
+- 投资顾问Agent：整合信息并提供投资建议
 
 最终输出是一份详细的股票分析报告，包括公司概况、财务健康状况和投资建议。
 
@@ -649,4 +649,4 @@ pip install dist/*.tar.gz
 3. **记忆与知识库增强**：改进或扩展记忆和知识库模块，以支持更复杂的场景
 4. **可视化组件**：增强 `Flow` 模块的可视化能力，提供更直观的任务流程展示
 
-开始开发时，建议从单个代理和简单任务开始，逐步扩展到更复杂的多代理协作系统。
+开始开发时，建议从单个Agent和简单任务开始，逐步扩展到更复杂的多Agent协作系统。

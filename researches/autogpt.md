@@ -2,8 +2,8 @@
 
 ## 0. 项目概览
 
-- **项目名称与简介**: AutoGPT Platform，一个用于创建和运行 AI 代理以解决业务问题的强大系统。
-- **核心理念与设计哲学**: "Agent as a Graph" (代理即图)。Agent被定义为由相互连接的节点（称为 "Blocks"）组成的图，允许创建复杂、模块化和可重用的工作流。系统采用高度异步和事件驱动的设计，以支持多个代理的并发执行。
+- **项目名称与简介**: AutoGPT Platform，一个用于创建和运行 AI Agent以解决业务问题的强大系统。
+- **核心理念与设计哲学**: "Agent as a Graph" (Agent即图)。Agent被定义为由相互连接的节点（称为 "Blocks"）组成的图，允许创建复杂、模块化和可重用的工作流。系统采用高度异步和事件驱动的设计，以支持多个Agent的并发执行。
 - **技术栈与主要依赖**:
   - **后端**: Python, FastAPI, Prisma, PostgreSQL, Redis, `apscheduler`
   - **前端**: Next.js, TypeScript, Tailwind CSS, React
