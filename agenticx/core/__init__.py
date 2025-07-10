@@ -12,6 +12,18 @@ from .message import Message, ProtocolMessage
 from .platform import User, Organization
 from .component import Component
 
+# M5: Agent Core Components
+from .event import (
+    Event, EventLog, AnyEvent,
+    TaskStartEvent, TaskEndEvent, ToolCallEvent, ToolResultEvent,
+    ErrorEvent, LLMCallEvent, LLMResponseEvent, HumanRequestEvent,
+    HumanResponseEvent, FinishTaskEvent
+)
+from .prompt import PromptManager, ContextRenderer, XMLContextRenderer, PromptTemplate
+from .error_handler import ErrorHandler, ErrorClassifier, CircuitBreaker, CircuitBreakerOpenError
+from .communication import CommunicationInterface, BroadcastCommunication, AsyncCommunicationInterface
+from .agent_executor import AgentExecutor, ToolRegistry, ActionParser
+
 __all__ = [
     # Core abstractions
     "Agent",
@@ -27,5 +39,38 @@ __all__ = [
     "Component",
     # Platform entities
     "User",
-    "Organization"
+    "Organization",
+    # M5: Agent Core Components
+    # Event System
+    "Event",
+    "EventLog", 
+    "AnyEvent",
+    "TaskStartEvent",
+    "TaskEndEvent",
+    "ToolCallEvent", 
+    "ToolResultEvent",
+    "ErrorEvent",
+    "LLMCallEvent",
+    "LLMResponseEvent", 
+    "HumanRequestEvent",
+    "HumanResponseEvent",
+    "FinishTaskEvent",
+    # Prompt Management
+    "PromptManager",
+    "ContextRenderer",
+    "XMLContextRenderer", 
+    "PromptTemplate",
+    # Error Handling
+    "ErrorHandler",
+    "ErrorClassifier",
+    "CircuitBreaker",
+    "CircuitBreakerOpenError",
+    # Communication
+    "CommunicationInterface",
+    "BroadcastCommunication", 
+    "AsyncCommunicationInterface",
+    # Agent Execution
+    "AgentExecutor",
+    "ToolRegistry",
+    "ActionParser"
 ] 
