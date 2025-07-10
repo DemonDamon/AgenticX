@@ -3,7 +3,7 @@
 ## 0. 项目概览
 
 - **项目名称与简介**: OWL (Optimized Workforce Learning for General Multi-Agent Assistance in Real-World Task Automation) 是一个为真实世界任务自动化设计的、先进的多智能体协作框架。
-- **核心理念与设计哲学**: OWL 基于 `CAMEL-AI` 框架构建，其核心是通过模拟一个"智能体员工团队"来解决复杂任务。它采用"角色扮演"的模式，由一个智能体（用户代理）负责规划和拆解任务，另一个智能体（助理代理）负责执行和使用工具，从而实现高效、鲁棒的任务自动化。
+- **核心理念与设计哲学**: OWL 基于 `CAMEL-AI` 框架构建，其核心是通过模拟一个"智能体员工团队"来解决复杂任务。它采用"角色扮演"的模式，由一个智能体（用户Agent）负责规划和拆解任务，另一个智能体（助理Agent）负责执行和使用工具，从而实现高效、鲁棒的任务自动化。
 - **技术栈与主要依赖**:
     - **核心框架**: `camel-ai` (版本 `0.2.57`)
     - **Web 界面**: `gradio`
@@ -29,7 +29,7 @@ OWL 的架构可以分为三层：
 
 1.  **表示层 (Presentation Layer)**: 由 `Gradio` 构建的 Web UI (`webapp.py`)。它为用户提供了一个交互界面，用于输入任务、选择运行配置（例如使用哪个 LLM 模型）、管理环境变量（API密钥），并实时查看智能体之间的对话日志。
 2.  **应用层 (Application Layer)**: 这是连接前端和后端的核心。`webapp.py` 中的 `run_owl` 函数负责解析用户的输入，动态加载 `examples/` 目录中对应的配置脚本，并启动智能体"社会"。
-3.  **核心逻辑层 (Core Logic Layer)**: 这是基于 `camel-ai` 框架的智能体系统，主要实现在 `owl/utils/enhanced_role_playing.py` 中。它定义了 `OwlRolePlaying` 类，负责初始化和管理两个核心智能体（用户代理和助理代理）并运行它们之间的交互循环。
+3.  **核心逻辑层 (Core Logic Layer)**: 这是基于 `camel-ai` 框架的智能体系统，主要实现在 `owl/utils/enhanced_role_playing.py` 中。它定义了 `OwlRolePlaying` 类，负责初始化和管理两个核心智能体（用户Agent和助理Agent）并运行它们之间的交互循环。
 
 ### 1.2. 核心类图与继承体系
 

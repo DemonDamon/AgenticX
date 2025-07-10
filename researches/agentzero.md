@@ -82,7 +82,7 @@ core -right-> Ollama : "LLM推理"
 | **后端 (Backend)** | `python/` | 项目核心逻辑。处理API请求，管理智能体，与LLM交互，执行工具。 |
 | - API | `python/api/` | 定义了所有与前端交互的HTTP接口，设计上每个文件对应一个功能点，非常模块化。 |
 | - 核心辅助 | `python/helpers/` | 包含智能体核心逻辑（`mcp_handler.py`）、记忆、历史、设置管理等关键实现。 |
-| - 工具集 | `python/tools/` | 定义了智能体可以使用的各种能力，如代码执行、浏览器代理、知识检索等。 |
+| - 工具集 | `python/tools/` | 定义了智能体可以使用的各种能力，如代码执行、浏览器Agent、知识检索等。 |
 | - 扩展机制 | `python/extensions/` | 提供了一套基于事件钩子的扩展系统，允许在智能体运行的不同阶段注入自定义逻辑。 |
 | **前端 (Frontend)** | `webui/` | 提供用户操作界面，基于Alpine.js构建，实现了与后端的实时通信。 |
 | **Docker配置** | `docker/` | 包含 Dockerfile 和相关脚本，用于构建和管理项目的容器化环境。 |

@@ -172,7 +172,7 @@ Team ..> Context : uses for cost management
 #### 2.3.2 核心实现分析
 
 1.  **资源持有**：
-    -   `config: Config`：持有一个 `Config` 对象，该对象从 `config2.yaml` 文件加载，包含了所有静态配置，如 LLM API密钥、模型名称、代理设置等。
+    -   `config: Config`：持有一个 `Config` 对象，该对象从 `config2.yaml` 文件加载，包含了所有静态配置，如 LLM API密钥、模型名称、Agent设置等。
     -   `cost_manager: CostManager`：持有一个成本管理器实例，用于实时累计 LLM token 开销。这是实现 `Team` 投资和预算控制功能的基础。
     -   `kwargs: AttrDict`：一个可动态读写的属性字典，用作运行时共享数据（如 `project_path`）的通用存储，非常灵活。
 

@@ -3,7 +3,7 @@
 ## 0. 项目概览
 
 - **项目名称**: `openai-agents-python`
-- **核心理念**: 提供一个用于构建、管理和运行自主代理的Python库。该库似乎是OpenAI Assistants API的一个Python实现或其早期版本/变体，重点在于状态管理、工具使用、模型交互和可扩展性。
+- **核心理念**: 提供一个用于构建、管理和运行自主Agent的Python库。该库似乎是OpenAI Assistants API的一个Python实现或其早期版本/变体，重点在于状态管理、工具使用、模型交互和可扩展性。
 - **技术栈**: Python
 - **目录结构概览**: 
 

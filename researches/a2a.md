@@ -3,7 +3,7 @@
 ## 0. 项目概览
 
 - **项目名称**: A2A (Agent-to-Agent) Protocol
-- **核心理念**: A2A 是一个由 Google 设计的开放协议，旨在为 AI Agent（人工智能代理）之间提供一个标准化的通信、发现和协作框架。它允许不同开发者、不同平台、不同技术栈构建的 Agent 能够互相理解、调用彼此的能力，从而构建更强大的、分布式的多 Agent 系统。
+- **核心理念**: A2A 是一个由 Google 设计的开放协议，旨在为 AI Agent（人工智能Agent）之间提供一个标准化的通信、发现和协作框架。它允许不同开发者、不同平台、不同技术栈构建的 Agent 能够互相理解、调用彼此的能力，从而构建更强大的、分布式的多 Agent 系统。
 - **技术栈与主要依赖**:
   - **协议定义**: 使用 Protocol Buffers (`.proto`) 定义 gRPC 接口，使用 OpenRPC (`.json`) 定义 JSON-RPC 接口。使用 TypeScript (`.ts`) 提供协议核心类型的定义。
   - **Python SDK (`a2a-python`)**: `uvicorn`, `httpx`, `fastapi`/`starlette`, `grpcio`。
