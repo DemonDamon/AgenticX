@@ -108,6 +108,10 @@ class EventLog(BaseModel):
         """Add an event to the log."""
         self.events.append(event)
     
+    def add_event(self, event: AnyEvent) -> None:
+        """Add an event to the log (alias for append)."""
+        self.append(event)
+    
     def get_last_event(self) -> Optional[AnyEvent]:
         """Get the most recent event."""
         return self.events[-1] if self.events else None

@@ -24,6 +24,20 @@ from .error_handler import ErrorHandler, ErrorClassifier, CircuitBreaker, Circui
 from .communication import CommunicationInterface, BroadcastCommunication, AsyncCommunicationInterface
 from .agent_executor import AgentExecutor, ToolRegistry, ActionParser
 
+# M6: Task Contract & Outcome Validation
+from .task_validator import (
+    TaskOutputParser, TaskResultValidator, OutputRepairLoop,
+    ParseResult, ValidationResult, RepairStrategy,
+    ParseError, ValidationError, RepairError
+)
+
+# M7: Orchestration & Routing Engine
+from .workflow_engine import (
+    WorkflowEngine, WorkflowGraph, TriggerService,
+    ScheduledTrigger, EventDrivenTrigger,
+    ExecutionContext, NodeExecution, WorkflowStatus, NodeStatus
+)
+
 __all__ = [
     # Core abstractions
     "Agent",
@@ -72,5 +86,25 @@ __all__ = [
     # Agent Execution
     "AgentExecutor",
     "ToolRegistry",
-    "ActionParser"
+    "ActionParser",
+    # Task Validation
+    "TaskOutputParser",
+    "TaskResultValidator",
+    "OutputRepairLoop",
+    "ParseResult",
+    "ValidationResult",
+    "RepairStrategy",
+    "ParseError",
+    "ValidationError",
+    "RepairError",
+    # Workflow Orchestration
+    "WorkflowEngine",
+    "WorkflowGraph",
+    "TriggerService",
+    "ScheduledTrigger",
+    "EventDrivenTrigger",
+    "ExecutionContext",
+    "NodeExecution",
+    "WorkflowStatus",
+    "NodeStatus"
 ] 
