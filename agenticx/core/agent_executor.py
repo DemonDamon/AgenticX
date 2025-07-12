@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from ..llms.base import BaseLLMProvider
 from ..llms.response import LLMResponse
 from ..tools.base import BaseTool
+from ..tools.security import ApprovalRequiredError
 from .agent import Agent
 from .task import Task
 from .event import (
@@ -128,6 +129,7 @@ class AgentExecutor:
         """
         # Initialize event log
         event_log = EventLog(agent_id=agent.id, task_id=task.id)
+        result = None # 为 result 提供一个默认值
         
         # Start task
         start_event = TaskStartEvent(
@@ -141,41 +143,53 @@ class AgentExecutor:
             # Main execution loop
             result = self._execute_loop(agent, task, event_log)
             
-            # End task successfully
-            end_event = TaskEndEvent(
-                success=True,
-                result=result,
-                agent_id=agent.id,
-                task_id=task.id
-            )
-            event_log.append(end_event)
-            
+        except ApprovalRequiredError as e:
+            # 人工审批请求，直接返回暂停状态
             return {
                 "success": True,
-                "result": result,
+                "result": "Paused for human approval",
                 "event_log": event_log,
                 "stats": self._get_execution_stats(event_log)
             }
-            
+
         except Exception as e:
             # Handle execution failure
             error_event = self.error_handler.handle(e, {"agent_id": agent.id, "task_id": task.id})
             event_log.append(error_event)
             
-            end_event = TaskEndEvent(
-                success=False,
-                result=None,
-                agent_id=agent.id,
-                task_id=task.id
-            )
-            event_log.append(end_event)
-            
+            # 如果是不可恢复的错误，直接返回失败
+            if not error_event.recoverable:
+                return {
+                    "success": False,
+                    "error": error_event.error_message,
+                    "event_log": event_log,
+                    "stats": self._get_execution_stats(event_log)
+                }
+
+        # 如果工作流暂停，则返回成功（不添加 TaskEndEvent）
+        if event_log.needs_human_input():
             return {
-                "success": False,
-                "error": error_event.error_message,
+                "success": True,
+                "result": "Paused for human approval",
                 "event_log": event_log,
                 "stats": self._get_execution_stats(event_log)
             }
+            
+        # 只有在没有等待人工输入时才记录结束事件
+        end_event = TaskEndEvent(
+            success=True,
+            result=result,
+            agent_id=agent.id,
+            task_id=task.id
+        )
+        event_log.append(end_event)
+        
+        return {
+            "success": True,
+            "result": result,
+            "event_log": event_log,
+            "stats": self._get_execution_stats(event_log)
+        }
     
     def _execute_loop(self, agent: Agent, task: Task, event_log: EventLog) -> Any:
         """
@@ -211,6 +225,10 @@ class AgentExecutor:
                 
                 # Execute the action
                 self._execute_action(action, event_log)
+                
+            except ApprovalRequiredError:
+                # 重新抛出 ApprovalRequiredError，让 run 方法处理
+                raise
                 
             except Exception as e:
                 # Handle errors
@@ -337,22 +355,39 @@ class AgentExecutor:
             event_log.append(tool_result_event)
             raise ValueError(f"Tool '{tool_name}' not found")
         
-        # Execute tool
+        # 使用 ToolExecutor 执行工具
+        from ..tools.executor import ToolExecutor
+
+        executor = ToolExecutor()
         try:
-            result = tool.execute(**tool_args)
+            execution_result = executor.execute(tool, **tool_args)
             
-            # Record success
-            tool_result_event = ToolResultEvent(
-                tool_name=tool_name,
-                success=True,
-                result=result,
+            if execution_result.success:
+                tool_result_event = ToolResultEvent(
+                    tool_name=tool_name,
+                    success=True,
+                    result=execution_result.result,
+                    agent_id=event_log.agent_id,
+                    task_id=event_log.task_id
+                )
+            else:
+                raise execution_result.error
+
+        except ApprovalRequiredError as e:
+            # 创建人工请求事件
+            human_request_event = HumanRequestEvent(
+                question=e.message,
+                context=f"Tool: {e.tool_name}, Args: {e.kwargs}",
+                urgency="high",
                 agent_id=event_log.agent_id,
                 task_id=event_log.task_id
             )
-            event_log.append(tool_result_event)
+            event_log.append(human_request_event)
+            # 重新抛出异常，让上层处理
+            raise e
             
         except Exception as e:
-            # Record failure
+            # 记录失败
             tool_result_event = ToolResultEvent(
                 tool_name=tool_name,
                 success=False,
@@ -362,6 +397,8 @@ class AgentExecutor:
             )
             event_log.append(tool_result_event)
             raise e
+        
+        event_log.append(tool_result_event)
     
     def _execute_human_request(self, action: Dict[str, Any], event_log: EventLog):
         """Execute a human request action."""

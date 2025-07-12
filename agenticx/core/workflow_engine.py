@@ -24,7 +24,7 @@ import logging
 from .task import Task
 from .agent import Agent
 from .workflow import Workflow, WorkflowNode, WorkflowEdge
-from .event import Event, EventLog, TaskStartEvent, TaskEndEvent, ErrorEvent
+from .event import Event, EventLog, TaskStartEvent, TaskEndEvent, ErrorEvent, HumanRequestEvent
 from .agent_executor import AgentExecutor
 from .tool import FunctionTool
 from ..tools.base import BaseTool
@@ -116,6 +116,9 @@ class WorkflowGraph:
         Returns:
             self: 支持链式调用
         """
+        if node_type == "human_approval":
+            component = "human_approval_placeholder"
+        
         node = WorkflowNode(
             id=name,
             name=name,
@@ -548,14 +551,16 @@ class WorkflowEngine:
             if context.status == WorkflowStatus.RUNNING:
                 context.status = WorkflowStatus.COMPLETED
             
-            # 记录结束事件
-            end_event = TaskEndEvent(
-                task_id=context.workflow_id,
-                success=context.status == WorkflowStatus.COMPLETED,
-                result=f"工作流执行完成，状态: {context.status.value}",
-                agent_id="workflow_engine"
-            )
-            context.event_log.add_event(end_event)
+            # 只有在工作流未暂停时才记录结束事件
+            if context.status != WorkflowStatus.PAUSED:
+                # 记录结束事件
+                end_event = TaskEndEvent(
+                    task_id=context.workflow_id,
+                    success=context.status == WorkflowStatus.COMPLETED,
+                    result=f"工作流执行完成，状态: {context.status.value}",
+                    agent_id="workflow_engine"
+                )
+                context.event_log.add_event(end_event)
             
         except Exception as e:
             logger.error(f"工作流执行失败: {e}")
@@ -570,9 +575,10 @@ class WorkflowEngine:
             context.event_log.add_event(error_event)
             
         finally:
-            # 清理活跃执行
-            if execution_id in self.active_executions:
-                del self.active_executions[execution_id]
+            # 如果工作流未暂停，则清理活跃执行
+            if context.status != WorkflowStatus.PAUSED:
+                if execution_id in self.active_executions:
+                    del self.active_executions[execution_id]
         
         return context
     
@@ -657,8 +663,14 @@ class WorkflowEngine:
             if context.status == WorkflowStatus.PAUSED:
                 return
             
-            # 获取节点和组件
+            # 获取节点
             node = graph.nodes[node_id]
+
+            # 处理人工审批节点
+            if node.type == "human_approval":
+                return await self._execute_human_approval(node, context)
+
+            # 获取组件
             component = graph.components[node_id]
             
             # 创建节点执行记录
@@ -737,6 +749,37 @@ class WorkflowEngine:
         
         else:
             raise ValueError(f"不支持的组件类型: {type(component)}")
+
+    async def _execute_human_approval(self, 
+                                    node: WorkflowNode,
+                                    context: ExecutionContext):
+        """执行人工审批节点，触发 HumanRequestEvent 并暂停工作流"""
+        logger.info(f"节点 {node.id} 需要人工审批，正在暂停工作流...")
+
+        # 从节点配置中获取问题和上下文
+        question = node.config.get("question", f"请批准节点 '{node.name}' 的执行。")
+        approval_context = node.config.get("context", "无")
+        
+        # 创建并记录人工请求事件
+        human_request_event = HumanRequestEvent(
+            question=question,
+            context=f"工作流审批: {context.workflow_id}\n节点: {node.name}\n上下文: {approval_context}",
+            urgency="high"
+        )
+        context.event_log.add_event(human_request_event)
+        
+        # 暂停工作流
+        context.status = WorkflowStatus.PAUSED
+        
+        # 保存节点状态
+        node_execution = NodeExecution(
+            node_id=node.id,
+            status=NodeStatus.RUNNING, # 标记为运行中，等待恢复
+            start_time=datetime.now()
+        )
+        if context.execution_id not in self.node_executions:
+            self.node_executions[context.execution_id] = {}
+        self.node_executions[context.execution_id][node.id] = node_execution
     
     async def _execute_agent(self, 
                              agent_executor: AgentExecutor,
