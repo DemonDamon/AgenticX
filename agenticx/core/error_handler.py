@@ -1,3 +1,11 @@
+"""
+M5 的 ErrorHandler 系统实现了 ErrorClassifier, CircuitBreaker, ErrorHandler 三个组件，
+分别用于分类错误、熔断错误和处理错误。
+
+M5 的 ErrorHandler 将异常转化为 Agent “看得懂”的 ErrorEvent，使其有机会进行自我修复，
+这是微观层面的自适应
+"""
+
 from typing import Optional, Dict, Any, List, Callable
 from abc import ABC, abstractmethod
 import traceback
