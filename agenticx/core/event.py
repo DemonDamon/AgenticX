@@ -1,3 +1,8 @@
+"""
+M5 的 Event 系统定义了 TaskStartEvent, ToolCallEvent, ErrorEvent 等12种事件类型，
+这与 Trae-Agent 的 TrajectoryRecorder 记录的内容异曲同工，但在架构上更为原生
+"""
+
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional, Union, Literal
 from datetime import datetime
