@@ -10,6 +10,7 @@ import time
 from typing import Any, Dict, List, Optional, Union
 
 from .base import BaseTool, ToolError, ToolTimeoutError
+from ..tools.security import ApprovalRequiredError
 
 logger = logging.getLogger(__name__)
 
@@ -231,12 +232,12 @@ class ToolExecutor:
         while retry_count <= self.max_retries:
             try:
                 # 设置超时
-                timeout = tool.timeout or self.default_timeout
+                timeout = getattr(tool, 'timeout', None) or self.default_timeout
                 if timeout:
                     tool.timeout = timeout
                 
                 # 执行工具
-                result = tool.run(**kwargs)
+                result = tool.execute(**kwargs)
                 
                 # 记录成功
                 execution_time = time.time() - start_time
@@ -250,6 +251,10 @@ class ToolExecutor:
                     execution_time=execution_time,
                     retry_count=retry_count,
                 )
+            
+            except ApprovalRequiredError as e:
+                # 人工审批请求，不计入错误，直接抛出
+                raise e
                 
             except Exception as e:
                 last_error = e
@@ -301,12 +306,12 @@ class ToolExecutor:
         while retry_count <= self.max_retries:
             try:
                 # 设置超时
-                timeout = tool.timeout or self.default_timeout
+                timeout = getattr(tool, 'timeout', None) or self.default_timeout
                 if timeout:
                     tool.timeout = timeout
                 
                 # 执行工具
-                result = await tool.arun(**kwargs)
+                result = await tool.aexecute(**kwargs)
                 
                 # 记录成功
                 execution_time = time.time() - start_time
@@ -320,6 +325,10 @@ class ToolExecutor:
                     execution_time=execution_time,
                     retry_count=retry_count,
                 )
+            
+            except ApprovalRequiredError as e:
+                # 人工审批请求，不计入错误，直接抛出
+                raise e
                 
             except Exception as e:
                 last_error = e

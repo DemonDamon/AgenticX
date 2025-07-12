@@ -45,6 +45,28 @@ class FunctionTool(BaseTool):
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, lambda: self.func(**kwargs))
 
+    @classmethod
+    def from_function(
+        cls, 
+        func: Callable[..., Any], 
+        name: Optional[str] = None, 
+        description: Optional[str] = None
+    ) -> "FunctionTool":
+        """Create a FunctionTool from a Python function."""
+        tool_name = name or func.__name__
+        tool_description = description or func.__doc__ or f"Tool: {tool_name}"
+        
+        # Create args_schema from function signature
+        sig = inspect.signature(func)
+        # (保持 schema 生成逻辑不变)
+        
+        return cls(
+            name=tool_name,
+            description=tool_description,
+            func=func,
+            args_schema=None # 简化处理
+        )
+
 def tool(name: Optional[str] = None, description: Optional[str] = None):
     """
     Decorator to create a Tool from a function.

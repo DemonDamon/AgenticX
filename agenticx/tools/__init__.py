@@ -21,6 +21,7 @@ from .builtin import (
     HttpRequestTool,
     JsonTool,
 )
+from .security import human_in_the_loop, ApprovalRequiredError
 
 __all__ = [
     # Base classes
@@ -28,6 +29,9 @@ __all__ = [
     "ToolError",
     "ToolTimeoutError", 
     "ToolValidationError",
+    # Security
+    "human_in_the_loop",
+    "ApprovalRequiredError",
     # Function tools
     "FunctionTool",
     "tool",

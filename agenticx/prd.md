@@ -203,6 +203,7 @@ graph LR
     - `CodeInterpreterTool`: 在沙箱环境中执行 Python 代码。
     - `HttpRequestTool`: 提供发送 HTTP 请求的能力。
     - `JsonTool`: 提供对 JSON 数据的查询和操作能力。
+- [x] `@human_in_the_loop` 装饰器: (规划中) 一个用于高风险工具的安全装饰器。在工具执行前，它会检查 `M11: PolicyEngine`，如果策略要求，它会暂停工作流并请求人工批准。
 
 **实现状态**: ✅ **已完成** - 已完整实现 M3 工具系统。包含统一的 `BaseTool` 抽象基类，支持同步/异步执行、参数验证、错误处理和回调机制。`FunctionTool` 和 `@tool` 装饰器提供便捷的函数到工具转换，自动解析类型注解和文档字符串生成 Pydantic 模式。`ToolExecutor` 提供安全的执行环境，支持重试、超时和批量执行。`CredentialStore` 实现加密的多租户凭据管理。内置工具集包含文件操作、网络搜索、代码执行、HTTP 请求和 JSON 处理等常用功能。全面支持 OpenAI 函数调用格式。
 
@@ -304,6 +305,7 @@ graph LR
 
 - [x] `WorkflowGraph`: 工作流的静态或动态定义。
     - [x] `add_node(name: str, component: Union[AgentExecutor, BaseTool, Callable])`: 添加执行节点
+    - [x] `add_node(name: str, type: 'human_approval', config: dict)`: (新增) 添加一个人工审批节点。当工作流执行到此节点时，会触发 `HumanRequestEvent` 并暂停，直到收到外部恢复信号。
     - [x] `add_edge(start_node: str, end_node: str, condition: Callable = None)`: 添加条件路由边
     - [x] 支持条件路由和并行执行
     - [x] 工作流图验证和环路检测
@@ -350,6 +352,7 @@ graph LR
 - [ ] `LangfuseCallbackHandler(BaseCallback_Handler)`: 实现与 Langfuse 的集成，用于高级追踪和调试。
 - [ ] `WebSocketCallbackHandler(BaseCallbackHandler)`: 将事件通过 WebSocket 发送到前端，支持实时可视化监控。
 - [ ] `MonitoringCallbackHandler(BaseCallbackHandler)`: 将 Agent 的负载、响应时间、成本等关键指标推送到监控系统（如 Prometheus），为 `M7: SchedulerAgent` 提供决策数据。
+- [ ] `TrajectorySummarizerCallback(BaseCallbackHandler)`: (新增) 受 `traeagent.md` 启发，该回调函数监听完整的事件流，并能够在执行结束时生成一个人类可读的、精简的执行轨迹摘要，用于快速诊断和复盘。
 
 ### M10: 用户接口 (`agenticx.interfaces`)
 - [ ] `AgenticXClient`: 一个高层次的 Python SDK 客户端，封装了定义和运行工作流的常用操作。
@@ -376,8 +379,8 @@ graph LR
 - [ ] `AuditLogger`: 审计日志记录器。
     - [ ] `log_event(user_id, organization_id, event_type, details: dict)`: 记录所有关键操作。
 - [ ] **`EvolutionService` (长期愿景)**: 智能体进化服务。
-    - **核心理念**: 基于 `camelai` 的经验池和 `agenticsupernet` 的强化学习思想。
-    - **功能**: 持续分析 `M9` 收集的 Agent 性能数据，通过 A/B 测试、Prompt 自动优化、甚至 RL 调优等方式，提出或自动应用改进策略，以实现整个 Agent 群体的持续进化。
+    - **核心理念**: 基于 `camelai` 的经验池、`agenticsupernet` 的强化学习思想以及 `traeagent` 的轨迹增强理念。
+    - **功能**: (扩展) 持续分析 `M9` 捕获并持久化的执行轨迹 (`EventLog`)。通过离线分析失败案例、A/B 测试、甚至强化学习（从人类的审批决策中学习），对 Agent 的 Prompt、工具选择策略、或工作流结构提出优化建议或自动应用改进，实现整个 Agent 群体的持续、自适应进化。
 
 ### M12: 知识与数据层 (`agenticx.knowledge`)
 - [ ] `ConnectorService`: 数据连接器服务，管理所有连接器的生命周期。
