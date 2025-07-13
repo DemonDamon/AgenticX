@@ -336,12 +336,59 @@ graph LR
     - **实现**: 训练一个 `Controller` 模型，该模型接收任务描述，然后从一个包含所有可用 Agent 和 Tool 的"超网"中，动态采样或生成一个为该任务定制的、最高效的子图（即一个临时工作流）。
     - **价值**: 实现真正的任务自适应架构，将系统性能和资源效率提升到新的高度。这是 M7 模块的终极演进方向。
 
-### M8: 通信协议层 (`agenticx.protocols`)
-- [ ] `Envelope(BaseModel)`: 标准的消息信封，包含 `header` (元数据) 和 `body` (M1 的 `Message` 对象)。
-- [ ] `BaseProtocolHandler(ABC)`: 协议处理器的接口，定义 `encode(envelope)` 和 `decode(raw_data)`。
-- [ ] `InternalA2AHandler(BaseProtocolHandler)`: 一个高效的、用于进程内 Agent 间通信的协议处理器。
-- [ ] `MCPHandler(BaseProtocolHandler)`: (研究) 兼容外部标准（如 FIPA）的 MCP 协议处理器，用于跨平台通信。
-- [ ] `ProtocolRouter`: 根据消息的 `recipient_id` 或 `metadata`，选择合适的 `ProtocolHandler` 进行路由。
+- **实施策略与挑战分析**:
+    - **`SchedulerAgent` (工程难题)**:
+        - **定位**: 这是一个**工程挑战**，核心在于构建强大的**数据基础设施** (`M11: PlatformService`) 和设计精密的**决策 Prompt**。虽然挑战巨大，但路径清晰，可以分阶段实现。
+        - **实现路径 (分阶段)**:
+            1.  **V1 (基础调度)**: 实现基于 `M13: AgentHub` 的技能匹配调度。
+            2.  **V2 (资源感知调度)**: 集成 `M11: PlatformService` 的实时监控数据，引入负载均衡和成本控制逻辑。
+            3.  **V3 (综合决策调度)**: 引入历史表现、成功率等更复杂的决策因子，实现真正的智能管理。
+    - **`Agentic Supernet` (科研难题)**:
+        - **定位**: 这是一个**科研挑战**，代表了框架的终极演进方向。它不是简单的"选择"一个 Agent，而是动态"生成"一个最优的临时工作流，是真正意义上的“软件2.0”在 Agent 领域的体现。
+        - **核心挑战**:
+            - **模型能力**: 需要训练或微调一个能理解任务并输出复杂图结构（`WorkflowGraph`）的 `Controller` 模型，这超出了传统 Prompt 工程的范畴。
+            - **数据瓶颈**: 最大的障碍是缺乏大规模的 `(任务描述, 最优工作流图)` 标注数据，这可能需要引入强化学习等前沿方法进行探索，是业界共同面临的难题。
+
+### M8: 智能体通信协议 (`agenticx.protocols`)
+> 启发来源: 深度融合 Google A2A 协议的任务协作模式与 MCP 协议的微服务思想，并遵循【原则三：类级粒度】进行详细设计。
+
+- **战略定位**:
+    - **智能体-资源 (A-R) 通信**: 采用 **MCP (Model Context Protocol)** 作为标准。此部分已在 **M3: 工具系统** 中通过 `RemoteTool` 和 `MCPClient` 深度集成。M8 不再重复定义，仅确认此战略。
+    - **智能体-智能体 (A-A) 通信**: 借鉴 **Google A2A 协议** 的核心理念，构建一个面向任务的、结构化的协作框架。
+
+#### 1. 核心接口与抽象 (Interfaces & Abstractions)
+- [ ] `BaseTaskStore(ABC)`: 定义A2A协作任务持久化的标准接口，确保任务在分布式系统中的可靠追踪。
+    - [ ] `get_task(task_id: str) -> CollaborationTask`: 根据ID获取任务详情。
+    - [ ] `create_task(task: CollaborationTask) -> None`: 创建一个新任务。
+    - [ ] `update_task(task: CollaborationTask) -> None`: 更新任务的状态或其他属性。
+
+#### 2. 核心数据模型 (Data Models)
+- [ ] `AgentCard(BaseModel)`: Agent的"数字名片"，通过 `/.well-known/agent.json` 端点发布。
+    - `agent_id: str`, `name: str`, `description: str`, `endpoint: HttpUrl`, `skills: List[Skill]`
+- [ ] `Skill(BaseModel)`: Agent可执行能力的标准化描述。
+    - `name: str`, `description: str`, `parameters_schema: Type[BaseModel]`
+- [ ] `CollaborationTask(BaseModel)`: 智能体间协作的基本单元，取代 M1 中过于通用的 `Message`。
+    - `task_id: UUID`, `issuer_agent_id: str`, `target_agent_id: str`, `skill_name: str`, `parameters: Dict`, `status: Literal['pending', 'in_progress', 'completed', 'failed']`, `result: Optional[Any]`, `created_at: datetime`
+
+#### 3. 服务端实现 (Server-side Implementation)
+- [ ] `A2AWebServiceWrapper`: 将一个 `agenticx.agent.AgentExecutor` 包装成符合A2A协议的、可独立部署的FastAPI/Starlette应用。
+    - [ ] `__init__(self, agent_executor: AgentExecutor, task_store: BaseTaskStore)`: 构造函数，注入执行器和任务存储。
+    - [ ] `@app.get("/.well-known/agent.json") async def get_agent_card(self) -> AgentCard`: 发布AgentCard，实现服务发现。
+    - [ ] `@app.post("/tasks", status_code=202) async def create_task(self, task_request: TaskCreationRequest) -> CollaborationTask`: 接收任务创建请求，存入`task_store`并异步触发执行。
+    - [ ] `@app.get("/tasks/{task_id}") async def get_task_status(self, task_id: UUID) -> CollaborationTask`: 查询任务状态和结果。
+- [ ] `InMemoryTaskStore(BaseTaskStore)`: 任务存储的默认内存实现，主要用于开发和测试。
+
+#### 4. 客户端实现与集成 (Client-side Implementation & Integration)
+- [ ] `A2AClient`: 与远程 `A2AWebServiceWrapper` 交互的底层客户端。
+    - [ ] `__init__(self, target_agent_card: AgentCard)`: 使用目标Agent的AgentCard进行初始化。
+    - [ ] `async def create_task(self, skill_name: str, parameters: Dict) -> CollaborationTask`: 发起远程任务。
+    - [ ] `async def get_task(self, task_id: UUID) -> CollaborationTask`: 查询远程任务状态。
+- [ ] **`A2ASkillTool(BaseTool)`**: (关键集成点) 将远程Agent的Skill无缝包装为本地可调用的工具。
+    - **`name`**: (动态生成) 格式为 `"{agent_name}/{skill_name}"`，例如 `"TrendAnalyzer/analyze_topic"`。
+    - **`description`**: (动态获取) 直接来自 `Skill.description`。
+    - **`args_schema`**: (动态创建) 直接使用 `Skill.parameters_schema`。
+    - [ ] `__init__(self, client: A2AClient, skill: Skill)`: 构造函数，注入客户端和要包装的技能。
+    - [ ] `async def _arun(self, **kwargs) -> str`: 核心执行逻辑。内部调用 `self.client.create_task()`，然后进入一个轮询循环，通过 `self.client.get_task()` 检查任务状态，直到任务完成或失败，最终返回结构化的结果。
 
 ### M9: 可观测性 (`agenticx.callbacks`)
 - [ ] `BaseCallbackHandler(ABC)`: 定义 Callback 系统的接口，包含一系列生命周期和执行过程的事件钩子。
