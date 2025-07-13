@@ -160,7 +160,7 @@ class A2AClient:
         # Send request with retries
         for attempt in range(self.max_retries + 1):
             try:
-                endpoint = f"{self.target_agent_card.endpoint}/tasks"
+                endpoint = f"{str(self.target_agent_card.endpoint).rstrip('/')}/tasks"
                 
                 response = await self.http_client.post(
                     endpoint,
@@ -213,7 +213,7 @@ class A2AClient:
         """
         for attempt in range(self.max_retries + 1):
             try:
-                endpoint = f"{self.target_agent_card.endpoint}/tasks/{task_id}"
+                endpoint = f"{str(self.target_agent_card.endpoint).rstrip('/')}/tasks/{task_id}"
                 
                 response = await self.http_client.get(endpoint)
                 response.raise_for_status()
@@ -295,7 +295,7 @@ class A2AClient:
             A2AConnectionError: If health check fails
         """
         try:
-            endpoint = f"{self.target_agent_card.endpoint}/health"
+            endpoint = f"{str(self.target_agent_card.endpoint).rstrip('/')}/health"
             response = await self.http_client.get(endpoint)
             response.raise_for_status()
             
