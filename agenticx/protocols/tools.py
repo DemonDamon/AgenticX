@@ -46,69 +46,69 @@ class A2ASkillTool(BaseTool):
             polling_interval: Time between status checks in seconds
             max_wait_time: Maximum time to wait for task completion
         """
+        # Generate dynamic name in format "{agent_name}/{skill_name}"
+        agent_name = client.target_agent_card.name
+        skill_name = skill.name
+        tool_name = f"{agent_name}/{skill_name}"
+        
+        # Create dynamic Pydantic model from skill's parameters schema
+        args_schema = self._create_args_schema_static(skill)
+        
+        # Initialize parent class
+        super().__init__(
+            name=tool_name,
+            description=skill.description,
+            args_schema=args_schema
+        )
+        
         self.client = client
         self.skill = skill
         self.issuer_agent_id = issuer_agent_id
         self.polling_interval = polling_interval
         self.max_wait_time = max_wait_time
-        
-        # Generate dynamic name in format "{agent_name}/{skill_name}"
-        agent_name = client.target_agent_card.name
-        skill_name = skill.name
-        self._name = f"{agent_name}/{skill_name}"
-        
-        # Use skill description directly
-        self._description = skill.description
-        
-        # Create dynamic Pydantic model from skill's parameters schema
-        self._args_schema = self._create_args_schema()
     
-    @property
-    def name(self) -> str:
-        """Get the tool name."""
-        return self._name
+
     
-    @property
-    def description(self) -> str:
-        """Get the tool description."""
-        return self._description
-    
-    @property
-    def args_schema(self) -> Optional[Type[BaseModel]]:
-        """Get the arguments schema."""
-        return self._args_schema
-    
-    def _create_args_schema(self) -> Optional[Type[BaseModel]]:
+    @staticmethod
+    def _create_args_schema_static(skill: Skill) -> Optional[Type[BaseModel]]:
         """
         Create a Pydantic model from the skill's parameters schema.
         
+        Args:
+            skill: Skill definition
+            
         Returns:
             Dynamically created Pydantic model class
         """
-        if not self.skill.parameters_schema:
+        if not skill.parameters_schema:
             return None
         
         try:
             # Extract properties from JSON schema
-            properties = self.skill.parameters_schema.get('properties', {})
-            required = self.skill.parameters_schema.get('required', [])
+            properties = skill.parameters_schema.get('properties', {})
+            required = skill.parameters_schema.get('required', [])
             
             # Convert JSON schema types to Python types
             field_definitions = {}
             for field_name, field_schema in properties.items():
-                field_type = self._json_schema_to_python_type(field_schema)
+                field_type = A2ASkillTool._json_schema_to_python_type_static(field_schema)
                 default_value = ... if field_name in required else None
                 field_definitions[field_name] = (field_type, default_value)
             
             # Create dynamic model
-            model_name = f"{self.skill.name.title()}Args"
+            model_name = f"{skill.name.title()}Args"
             return create_model(model_name, **field_definitions)
             
         except Exception as e:
-            logger.warning(f"Failed to create args schema for skill {self.skill.name}: {e}")
+            logger.warning(f"Failed to create args schema for skill {skill.name}: {e}")
             return None
     
-    def _json_schema_to_python_type(self, schema: Dict[str, Any]) -> Type:
+    def _create_args_schema(self) -> Optional[Type[BaseModel]]:
+        """Backward compatibility method."""
+        return self._create_args_schema_static(self.skill)
+    
+    @staticmethod
+    def _json_schema_to_python_type_static(schema: Dict[str, Any]) -> Type:
         """
         Convert JSON schema type to Python type.
         
@@ -130,6 +130,10 @@ class A2ASkillTool(BaseTool):
         }
         
         return type_mapping.get(schema_type, str)
+    
+    def _json_schema_to_python_type(self, schema: Dict[str, Any]) -> Type:
+        """Backward compatibility method."""
+        return self._json_schema_to_python_type_static(schema)
     
     async def _arun(self, **kwargs) -> str:
         """
