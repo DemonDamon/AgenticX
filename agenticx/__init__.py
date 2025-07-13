@@ -8,6 +8,7 @@ AgenticX: 统一的多智能体框架
 - llms: LLM 服务提供层 (M2)
 - tools: 工具系统 (M3)
 - memory: 记忆系统 (M4)
+- protocols: 智能体通信协议 (M8)
 """
 
 __version__ = "0.1.0"
@@ -19,6 +20,7 @@ from .core import *
 from .llms import *
 from .tools import *
 from .memory import *
+from .protocols import *
 
 __all__ = [
     # 版本信息
