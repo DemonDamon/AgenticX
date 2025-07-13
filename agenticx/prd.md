@@ -370,7 +370,7 @@ graph LR
 - [ ] `CollaborationTask(BaseModel)`: 智能体间协作的基本单元，取代 M1 中过于通用的 `Message`。
     - `task_id: UUID`, `issuer_agent_id: str`, `target_agent_id: str`, `skill_name: str`, `parameters: Dict`, `status: Literal['pending', 'in_progress', 'completed', 'failed']`, `result: Optional[Any]`, `created_at: datetime`
 
-#### 3. 服务端实现 (Server-side Implementation)
+#### 3. 服务端实现 (Server Implementation)
 - [ ] `A2AWebServiceWrapper`: 将一个 `agenticx.agent.AgentExecutor` 包装成符合A2A协议的、可独立部署的FastAPI/Starlette应用。
     - [ ] `__init__(self, agent_executor: AgentExecutor, task_store: BaseTaskStore)`: 构造函数，注入执行器和任务存储。
     - [ ] `@app.get("/.well-known/agent.json") async def get_agent_card(self) -> AgentCard`: 发布AgentCard，实现服务发现。
