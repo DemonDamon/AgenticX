@@ -378,7 +378,7 @@ graph LR
     - [ ] `@app.get("/tasks/{task_id}") async def get_task_status(self, task_id: UUID) -> CollaborationTask`: 查询任务状态和结果。
 - [ ] `InMemoryTaskStore(BaseTaskStore)`: 任务存储的默认内存实现，主要用于开发和测试。
 
-#### 4. 客户端实现与集成 (Client-side Implementation & Integration)
+#### 4. 客户端实现与集成 (Client Implementation & Integration)
 - [ ] `A2AClient`: 与远程 `A2AWebServiceWrapper` 交互的底层客户端。
     - [ ] `__init__(self, target_agent_card: AgentCard)`: 使用目标Agent的AgentCard进行初始化。
     - [ ] `async def create_task(self, skill_name: str, parameters: Dict) -> CollaborationTask`: 发起远程任务。
