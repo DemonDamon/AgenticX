@@ -1,0 +1,235 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agenticx"
+dynamic = ["version"]
+description = "A unified, scalable, production-ready multi-agent application development framework"
+authors = [
+    {name = "AgenticX Team", email = "team@agenticx.ai"},
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+    "Topic :: System :: Distributed Computing",
+]
+keywords = ["ai", "agents", "multi-agent", "framework", "automation", "llm", "workflow", "orchestration"]
+
+dependencies = [
+    # 核心依赖
+    "pydantic>=2.0.0,<3.0.0",
+    "typing-extensions>=4.0.0",
+    "loguru>=0.7.0",
+    "rich>=13.0.0",
+    "aiohttp>=3.8.0",
+    "websockets>=11.0.0",
+    
+    # LLM基础依赖
+    "litellm>=1.40.0",
+    
+    # 工具依赖
+    "httpx>=0.25.0",
+    "requests>=2.31.0",
+    
+    # 实用工具
+    "python-dotenv>=1.0.0",
+    "click>=8.0.0",
+    "PyYAML>=6.0.0",
+    "jinja2>=3.0.0",
+]
+
+[project.optional-dependencies]
+# LLM提供者
+llms = [
+    "openai>=1.0.0",
+    "anthropic>=0.25.0,<0.30.0",  # 避免与chromadb冲突
+    "ollama>=0.2.0",
+]
+
+# 记忆系统
+memory = [
+    "mem0ai>=0.1.0",
+    "chromadb>=0.4.0,<1.1.0",  # 使用稳定版本避免冲突
+    "qdrant-client>=1.7.0",
+]
+
+# 监控和可观测性
+monitoring = [
+    "prometheus-client>=0.18.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+]
+
+# 数据处理
+data = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+]
+
+# 通信协议
+protocols = [
+    "asyncio-mqtt>=0.12.0",
+    "mcp>=1.0.0",
+]
+
+# 开发工具
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+    "twine>=4.0.0",
+    "build>=0.10.0",
+]
+
+# 文档工具
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.0.0",
+    "mkdocstrings>=0.22.0",
+    "mkdocs-autorefs>=0.4.0",
+]
+
+# 所有功能
+all = [
+    "agenticx[llms,memory,monitoring,data,protocols]",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+    "twine>=4.0.0",
+    "build>=0.10.0",
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.0.0",
+    "mkdocstrings>=0.22.0",
+    "mkdocs-autorefs>=0.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/DemonDamon/AgenticX"
+Documentation = "https://agenticx.ai/docs"
+Repository = "https://github.com/DemonDamon/AgenticX"
+Issues = "https://github.com/DemonDamon/AgenticX/issues"
+Discussions = "https://github.com/DemonDamon/AgenticX/discussions"
+
+[project.scripts]
+agenticx = "agenticx.cli.main:main"
+agx = "agenticx.cli.main:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "agenticx.__version__"}
+
+[tool.setuptools.packages.find]
+exclude = ["tests*", "examples*", "docs*", "thirdparty*", "researches*", "markmap*", "exps*"]
+
+[tool.setuptools.package-data]
+agenticx = ["*.yaml", "*.yml", "*.json", "*.toml", "**/*.yaml", "**/*.yml", "**/*.json", "**/*.toml"]
+
+[tool.black]
+line-length = 88
+target-version = ['py310']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--verbose",
+    "--cov=agenticx",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+
+[tool.coverage.run]
+source = ["agenticx"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/examples/*",
+    "*/benchmarks/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
+exclude = [
+    ".git",
+    "__pycache__",
+    "docs/source/conf.py",
+    "old",
+    "build",
+    "dist",
+    ".eggs",
+    "*.egg",
+] 
