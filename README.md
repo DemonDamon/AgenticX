@@ -1,4 +1,4 @@
-# AgenticX: 统一的多智能体框架
+# AgenticX: Unified Multi-Agent Framework
 
 <div align="center">
 <img src="assets/agenticx-logo.png" alt="AgenticX Logo" width="240" style="margin-bottom:20px;" />
@@ -7,266 +7,270 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Documentation](https://img.shields.io/badge/docs-coming_soon-green.svg)](#)
 
-**一个统一、可扩展、生产就绪的多智能体应用开发框架**
+**A unified, scalable, production-ready multi-agent application development framework**
 
-[功能特性](#-核心功能) • [快速开始](#-快速开始) • [示例](#-完整示例) • [架构](#-技术架构) • [进展](#-开发进展)
+[Features](#-core-features) • [Quick Start](#-quick-start) • [Examples](#-complete-examples) • [Architecture](#️-technical-architecture) • [Progress](#-development-progress)
 
 </div>
 
 ---
 
-## 🎯 愿景
+**🌍 Language / 语言**: [English](README.md) | [中文](README_ZN.md)
 
-AgenticX 旨在打造一个统一、可扩展、生产就绪的多智能体应用开发框架，赋予开发者构建从简单自动化助手到复杂协作式智能体系统的全部能力。
+---
 
-## ✨ 核心功能
+## 🎯 Vision
 
-### 🔧 核心框架 (已完成)
-- **🤖 智能体核心**: 基于 12-Factor Agents 方法论的智能体执行引擎
-- **🔗 编排引擎**: 支持复杂工作流、条件路由、并行执行的图式编排引擎
-- **🛠️ 工具系统**: 统一的工具接口，支持函数装饰器、远程工具(MCP)、内置工具集
-- **🧠 记忆系统**: 深度集成 Mem0 的长期记忆，支持任意 LLM 模型
-- **💬 通信协议**: A2A 智能体间通信、MCP 资源访问协议
-- **✅ 任务验证**: 基于 Pydantic 的输出解析和自动修复
+**AgenticX** aims to create a unified, scalable, production-ready multi-agent application development framework, empowering developers to build everything from simple automation assistants to complex collaborative intelligent agent systems.
 
-### 🔍 企业级监控 (已完成)
-- **📊 可观测性**: 完整的回调系统、实时监控、轨迹分析
-- **📈 性能监控**: 实时指标收集、Prometheus 集成、系统监控
-- **🔍 轨迹分析**: 执行路径追踪、失败分析、性能瓶颈识别
-- **📁 数据导出**: 多格式导出(JSON/CSV/Prometheus)、时间序列分析
+## ✨ Core Features
 
-### 🎛️ 开发者体验 (规划中)
-- **🖥️ CLI 工具**: 项目创建、部署、监控命令行工具
-- **📱 Web UI**: 可视化智能体管理和监控界面
-- **🔌 IDE 集成**: VS Code 扩展、Jupyter 内核支持
+### 🔧 Core Framework (Completed)
+- **🤖 Agent Core**: Agent execution engine based on 12-Factor Agents methodology
+- **🔗 Orchestration Engine**: Graph-based orchestration engine supporting complex workflows, conditional routing, and parallel execution
+- **🛠️ Tool System**: Unified tool interface supporting function decorators, remote tools (MCP), and built-in toolsets
+- **🧠 Memory System**: Deep integration with Mem0 for long-term memory, supporting arbitrary LLM models
+- **💬 Communication Protocol**: A2A inter-agent communication, MCP resource access protocol
+- **✅ Task Validation**: Pydantic-based output parsing and auto-repair
 
-### 🔒 企业级安全 (规划中)
-- **🔐 安全沙箱**: 安全的代码执行环境和资源隔离
-- **👥 多租户**: RBAC 权限控制、数据隔离
-- **✋ 人工审批**: 人机协作工作流、风险控制
+### 🔍 Enterprise-Grade Monitoring (Completed)
+- **📊 Observability**: Complete callback system, real-time monitoring, trajectory analysis
+- **📈 Performance Monitoring**: Real-time metrics collection, Prometheus integration, system monitoring
+- **🔍 Trajectory Analysis**: Execution path tracing, failure analysis, performance bottleneck identification
+- **📁 Data Export**: Multi-format export (JSON/CSV/Prometheus), time series analysis
 
-## 🚀 快速开始
+### 🎛️ Developer Experience (Planned)
+- **🖥️ CLI Tools**: Command-line tools for project creation, deployment, and monitoring
+- **📱 Web UI**: Visual agent management and monitoring interface
+- **🔌 IDE Integration**: VS Code extension, Jupyter kernel support
 
-### 基础安装
+### 🔒 Enterprise Security (Planned)
+- **🔐 Security Sandbox**: Secure code execution environment and resource isolation
+- **👥 Multi-tenancy**: RBAC permission control, data isolation
+- **✋ Human Approval**: Human-in-the-loop workflows, risk control
+
+## 🚀 Quick Start
+
+### Basic Installation
 
 ```bash
-# 克隆仓库
+# Clone repository
 git clone https://github.com/DemonDamon/AgenticX.git
 cd AgenticX
 
-# 安装依赖
+# Install dependencies
 pip install -r requirements.txt
 
-# 设置环境变量
+# Set environment variables
 export OPENAI_API_KEY="your-api-key"
 ```
 
-### 创建第一个智能体
+### Create Your First Agent
 
 ```python
 from agenticx import Agent, Task, AgentExecutor
 from agenticx.llms import OpenAIProvider
 
-# 创建智能体
+# Create agent
 agent = Agent(
     id="data-analyst",
-    name="数据分析师",
-    role="数据分析专家", 
-    goal="帮助用户分析和理解数据",
+    name="Data Analyst",
+    role="Data Analysis Expert", 
+    goal="Help users analyze and understand data",
     organization_id="my-org"
 )
 
-# 创建任务
+# Create task
 task = Task(
     id="analysis-task",
-    description="分析销售数据趋势",
-    expected_output="详细的分析报告"
+    description="Analyze sales data trends",
+    expected_output="Detailed analysis report"
 )
 
-# 配置LLM
+# Configure LLM
 llm = OpenAIProvider(model="gpt-4")
 
-# 执行任务
+# Execute task
 executor = AgentExecutor(agent=agent, llm=llm)
 result = executor.run(task)
 print(result)
 ```
 
-### 工具使用示例
+### Tool Usage Example
 
 ```python
 from agenticx.tools import tool
 
 @tool
 def calculate_sum(x: int, y: int) -> int:
-    """计算两个数的和"""
+    """Calculate the sum of two numbers"""
     return x + y
 
 @tool  
 def search_web(query: str) -> str:
-    """搜索网络信息"""
-    return f"搜索结果: {query}"
+    """Search web information"""
+    return f"Search results: {query}"
 
-# 智能体会自动调用这些工具
+# Agents will automatically invoke these tools
 ```
 
-## 📚 完整示例
+## 📚 Complete Examples
 
-我们提供了丰富的示例来展示框架的各种功能：
+We provide rich examples demonstrating various framework capabilities:
 
-### 🤖 智能体核心 (M5)
+### 🤖 Agent Core (M5)
 
-**单智能体示例**
+**Single Agent Example**
 ```bash
-# 基础智能体使用
+# Basic agent usage
 python examples/m5_agent_demo.py
 ```
-- 展示智能体的基本创建和执行
-- 工具调用和错误处理
-- 事件驱动的执行流程
+- Demonstrates basic agent creation and execution
+- Tool invocation and error handling
+- Event-driven execution flow
 
-**多智能体协作**
+**Multi-Agent Collaboration**
 ```bash
-# 多智能体协作示例
+# Multi-agent collaboration example
 python examples/m5_multi_agent_demo.py
 ```
-- 多个智能体的协作模式
-- 任务分发和结果聚合
-- 智能体间的通信
+- Multi-agent collaboration patterns
+- Task distribution and result aggregation
+- Inter-agent communication
 
-### 🔗 编排与验证 (M6 & M7)
+### 🔗 Orchestration & Validation (M6 & M7)
 
-**简单工作流**
+**Simple Workflow**
 ```bash
-# 基础工作流编排
+# Basic workflow orchestration
 python examples/m6_m7_simple_demo.py
 ```
-- 工作流的创建和执行
-- 任务输出的解析和验证
-- 条件路由和错误处理
+- Workflow creation and execution
+- Task output parsing and validation
+- Conditional routing and error handling
 
-**复杂工作流**
+**Complex Workflow**
 ```bash
-# 复杂工作流编排
+# Complex workflow orchestration
 python examples/m6_m7_comprehensive_demo.py
 ```
-- 复杂的工作流图结构
-- 并行执行和条件分支
-- 完整的生命周期管理
+- Complex workflow graph structures
+- Parallel execution and conditional branching
+- Complete lifecycle management
 
-### 💬 智能体通信 (M8)
+### 💬 Agent Communication (M8)
 
-**A2A 协议演示**
+**A2A Protocol Demo**
 ```bash
-# 智能体间通信协议
+# Inter-agent communication protocol
 python examples/m8_a2a_demo.py
 ```
-- Agent-to-Agent 通信协议
-- 分布式智能体系统
-- 服务发现和技能调用
+- Agent-to-Agent communication protocol
+- Distributed agent systems
+- Service discovery and skill invocation
 
-### 📊 可观测性监控 (M9)
+### 📊 Observability Monitoring (M9)
 
-**完整监控演示**
+**Complete Monitoring Demo**
 ```bash
-# 可观测性模块演示
+# Observability module demo
 python examples/m9_observability_demo.py
 ```
-- 实时性能监控
-- 执行轨迹分析
-- 失败分析和恢复建议
-- 数据导出和报告生成
+- Real-time performance monitoring
+- Execution trajectory analysis
+- Failure analysis and recovery recommendations
+- Data export and report generation
 
-### 🧠 记忆系统
+### 🧠 Memory System
 
-**基础记忆使用**
+**Basic Memory Usage**
 ```bash
-# 记忆系统示例
+# Memory system example
 python examples/memory_example.py
 ```
-- 长期记忆的存储和检索
-- 上下文记忆管理
+- Long-term memory storage and retrieval
+- Context memory management
 
-**医疗场景应用**
+**Healthcare Scenario**
 ```bash
-# 医疗记忆场景
+# Healthcare memory scenario
 python examples/mem0_healthcare_example.py  
 ```
-- 医疗知识的记忆和应用
-- 个性化的患者信息管理
+- Medical knowledge memory and application
+- Personalized patient information management
 
-### 👤 人机协作
+### 👤 Human-in-the-Loop
 
-**人工干预流程**
+**Human Intervention Flow**
 ```bash
-# 人机协作示例
+# Human-in-the-loop example
 python examples/human_in_the_loop_example.py
 ```
-- 人工审批工作流
-- 人机协作模式
-- 风险控制机制
+- Human approval workflows
+- Human-machine collaboration patterns
+- Risk control mechanisms
 
-详细说明请参考: [examples/README_HITL.md](examples/README_HITL.md)
+Detailed documentation: [examples/README_HITL.md](examples/README_HITL.md)
 
-### 💬 LLM 集成
+### 💬 LLM Integration
 
-**聊天机器人**
+**Chatbot**
 ```bash
-# LLM聊天示例
+# LLM chat example
 python examples/llm_chat_example.py
 ```
-- 多模型支持演示
-- 流式响应处理
-- 成本控制和监控
+- Multi-model support demonstration
+- Streaming response handling
+- Cost control and monitoring
 
-### 🔒 安全沙箱
+### 🔒 Security Sandbox
 
-**代码执行沙箱**
+**Code Execution Sandbox**
 ```bash
-# 微沙箱示例
+# Micro-sandbox example
 python examples/microsandbox_example.py
 ```
-- 安全的代码执行环境
-- 资源限制和隔离
+- Secure code execution environment
+- Resource limits and isolation
 
-技术博客: [examples/microsandbox_blog.md](examples/microsandbox_blog.md)
+Technical blog: [examples/microsandbox_blog.md](examples/microsandbox_blog.md)
 
-## 🏗️ 技术架构
+## 🏗️ Technical Architecture
 
 ```mermaid
 graph TD
-    subgraph "用户接口层"
+    subgraph "User Interface Layer"
         SDK[Python SDK]
-        CLI[CLI 工具]
+        CLI[CLI Tools]
         UI[Web UI]
     end
 
-    subgraph "核心框架层"
-        subgraph "编排引擎"
-            Orchestrator[工作流编排器]
+    subgraph "Core Framework Layer"
+        subgraph "Orchestration Engine"
+            Orchestrator[Workflow Orchestrator]
         end
-        subgraph "执行引擎"
-            AgentExecutor[智能体执行器]
-            TaskValidator[任务验证器]
+        subgraph "Execution Engine"
+            AgentExecutor[Agent Executor]
+            TaskValidator[Task Validator]
         end
-        subgraph "核心组件"
-            Agent[智能体]
-            Task[任务]
-            Tool[工具]
-            Memory[记忆]
-            LLM[LLM提供者]
+        subgraph "Core Components"
+            Agent[Agent]
+            Task[Task]
+            Tool[Tool]
+            Memory[Memory]
+            LLM[LLM Provider]
         end
     end
 
-    subgraph "平台服务层"
-        subgraph "可观测性"
-            Monitoring[监控系统]
+    subgraph "Platform Services Layer"
+        subgraph "Observability"
+            Monitoring[Monitoring System]
         end
-        subgraph "通信协议"
-            Protocols[协议处理器]
+        subgraph "Communication Protocols"
+            Protocols[Protocol Handler]
         end
-        subgraph "安全治理"
-            Security[安全服务]
+        subgraph "Security Governance"
+            Security[Security Service]
         end
     end
 
@@ -280,59 +284,59 @@ graph TD
     Agent --> Protocols
 ```
 
-## 📈 开发进展
+## 📈 Development Progress
 
-### ✅ 已完成模块 (M1-M9)
+### ✅ Completed Modules (M1-M9)
 
-| 模块 | 状态 | 功能描述 |
-|------|------|----------|
-| **M1** | ✅ | 核心抽象层 - Agent、Task、Tool、Workflow 等基础数据结构 |
-| **M2** | ✅ | LLM 服务层 - 基于 LiteLLM 的统一 LLM 接口，支持 100+ 模型 |
-| **M3** | ✅ | 工具系统 - 函数装饰器、MCP 远程工具、内置工具集 |
-| **M4** | ✅ | 记忆系统 - 深度集成 Mem0，支持自定义 LLM |
-| **M5** | ✅ | 智能体核心 - 完整的 think-act 循环、事件驱动架构 |
-| **M6** | ✅ | 任务验证 - 基于 Pydantic 的输出解析和自动修复 |
-| **M7** | ✅ | 编排引擎 - 图式工作流、条件路由、并行执行 |
-| **M8** | ✅ | 通信协议 - A2A 智能体通信、MCP 资源访问 |
-| **M9** | ✅ | 可观测性 - 完整监控、轨迹分析、性能指标 |
+| Module | Status | Description |
+|---------|--------|-------------|
+| **M1** | ✅ | Core Abstraction Layer - Basic data structures like Agent, Task, Tool, Workflow |
+| **M2** | ✅ | LLM Service Layer - Unified LLM interface based on LiteLLM, supporting 100+ models |
+| **M3** | ✅ | Tool System - Function decorators, MCP remote tools, built-in toolsets |
+| **M4** | ✅ | Memory System - Deep integration with Mem0, supporting custom LLM |
+| **M5** | ✅ | Agent Core - Complete think-act loop, event-driven architecture |
+| **M6** | ✅ | Task Validation - Pydantic-based output parsing and auto-repair |
+| **M7** | ✅ | Orchestration Engine - Graph-based workflows, conditional routing, parallel execution |
+| **M8** | ✅ | Communication Protocols - A2A agent communication, MCP resource access |
+| **M9** | ✅ | Observability - Complete monitoring, trajectory analysis, performance metrics |
 
-### 🔄 规划中模块 (M10-M13)
+### 🔄 Planned Modules (M10-M13)
 
-| 模块 | 状态 | 功能描述 |
-|------|------|----------|
-| **M10** | 🚧 | 开发者体验 - CLI、Web UI、IDE 集成 |
-| **M11** | 🚧 | 企业安全 - 多租户、RBAC、安全沙箱 |
-| **M12** | 🚧 | 智能体进化 - 架构搜索、知识蒸馏 |
-| **M13** | 🚧 | 知识中台 - 企业数据连接、统一搜索 |
+| Module | Status | Description |
+|---------|--------|-------------|
+| **M10** | 🚧 | Developer Experience - CLI, Web UI, IDE integration |
+| **M11** | 🚧 | Enterprise Security - Multi-tenancy, RBAC, security sandbox |
+| **M12** | 🚧 | Agent Evolution - Architecture search, knowledge distillation |
+| **M13** | 🚧 | Knowledge Hub - Enterprise data connection, unified search |
 
-## 🌟 核心优势
+## 🌟 Core Advantages
 
-- **🎯 统一抽象**: 提供清晰一致的核心抽象，避免概念混乱
-- **🔌 可插拔架构**: 所有组件都可替换，避免厂商锁定
-- **📊 企业级监控**: 完整的可观测性，生产环境就绪
-- **🛡️ 安全第一**: 内置安全机制和多租户支持
-- **🚀 高性能**: 优化的执行引擎和并发处理
-- **📚 丰富生态**: 完整的工具集和示例库
+- **🎯 Unified Abstraction**: Clear and consistent core abstractions, avoiding conceptual confusion
+- **🔌 Pluggable Architecture**: All components are replaceable, avoiding vendor lock-in
+- **📊 Enterprise-Grade Monitoring**: Complete observability, production-ready
+- **🛡️ Security First**: Built-in security mechanisms and multi-tenant support
+- **🚀 High Performance**: Optimized execution engine and concurrent processing
+- **📚 Rich Ecosystem**: Complete toolset and example library
 
-## 🛠️ 系统要求
+## 🛠️ System Requirements
 
 - **Python**: 3.10+
-- **内存**: 4GB+ RAM 推荐
-- **系统**: Windows / Linux / macOS
-- **依赖**: 详见 `requirements.txt`
+- **Memory**: 4GB+ RAM recommended
+- **System**: Windows / Linux / macOS
+- **Dependencies**: See `requirements.txt`
 
-## 🤝 贡献指南
+## 🤝 Contributing
 
-我们欢迎社区贡献！请参考：
+We welcome community contributions! Please refer to:
 
-1. 提交 Issue 报告 bug 或提出功能请求
-2. Fork 项目并创建功能分支
-3. 提交 Pull Request，确保通过所有测试
-4. 参与代码审查和讨论
+1. Submit Issues to report bugs or request features
+2. Fork the project and create feature branches
+3. Submit Pull Requests, ensuring all tests pass
+4. Participate in code reviews and discussions
 
-## 📄 许可证
+## 📄 License
 
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+This project is licensed under the MIT License - see [LICENSE](LICENSE) file for details
 
 ## ⭐ Star History
 
@@ -342,8 +346,8 @@ graph TD
 
 <div align="center">
 
-**🌟 如果 AgenticX 对你有帮助，请给我们一个 Star！**
+**🌟 If AgenticX helps you, please give us a Star!**
 
-[GitHub](https://github.com/DemonDamon/AgenticX) • [文档](coming-soon) • [示例](examples/) • [讨论](https://github.com/DemonDamon/AgenticX/discussions)
+[GitHub](https://github.com/DemonDamon/AgenticX) • [Documentation](coming-soon) • [Examples](examples/) • [Discussions](https://github.com/DemonDamon/AgenticX/discussions)
 
 </div>
