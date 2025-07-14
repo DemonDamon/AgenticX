@@ -7,3 +7,5 @@ __pycache__/
 
 *.log
 .env
+*.egg-info/
+dist/
