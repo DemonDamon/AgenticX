@@ -630,7 +630,7 @@ class TrajectoryCollector(BaseCallbackHandler):
         llm_call_step = None
         for step in reversed(trajectory.steps):
             if (step.step_type == StepType.LLM_CALL and 
-                step.input_data.get("model") == event.model and
+                step.input_data.get("model") == event.data.get("model") and
                 step.status == StepStatus.IN_PROGRESS):
                 llm_call_step = step
                 break
@@ -641,8 +641,8 @@ class TrajectoryCollector(BaseCallbackHandler):
             llm_call_step.duration = (event.timestamp - llm_call_step.timestamp).total_seconds()
             llm_call_step.output_data = {
                 "response": event.response,
-                "token_usage": event.data.get("token_usage", {}),
-                "cost": event.data.get("cost", 0.0)
+                "token_usage": event.token_usage or {},
+                "cost": event.cost or 0.0
             }
         
         # 创建LLM响应步骤
@@ -652,11 +652,11 @@ class TrajectoryCollector(BaseCallbackHandler):
             timestamp=event.timestamp,
             agent_id=event.agent_id,
             task_id=event.task_id,
-            input_data={"model": event.model},
+            input_data={"model": event.data.get("model", "unknown")},
             output_data={
                 "response": event.response,
-                "token_usage": event.data.get("token_usage", {}),
-                "cost": event.data.get("cost", 0.0)
+                "token_usage": event.token_usage or {},
+                "cost": event.cost or 0.0
             }
         )
         
