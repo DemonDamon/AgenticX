@@ -22,7 +22,7 @@ AgenticX是一个完整的多智能体应用开发框架，提供从核心抽象
 """
 
 # 版本信息
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 __author__ = "AgenticX Team"
 __email__ = "team@agenticx.ai"
 
