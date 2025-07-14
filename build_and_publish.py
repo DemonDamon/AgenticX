@@ -77,14 +77,27 @@ def run_tests():
     return run_command("python -m pytest tests/ -v", check=False)
 
 
-def build_package():
+def build_package(no_isolation=False):
     """构建包"""
     print("📦 构建包...")
     
-    # 使用现代的build工具
-    if not run_command("python -m build"):
+    # 构建命令
+    build_cmd = "python -m build"
+    if no_isolation:
+        build_cmd += " --no-isolation"
+        print("🔧 使用 --no-isolation 模式")
+    
+    if not run_command(build_cmd):
         print("❌ 构建失败")
         return False
+    
+    # 检查构建产物大小
+    dist_dir = Path("dist")
+    if dist_dir.exists():
+        print("\n📊 构建产物信息:")
+        for file in dist_dir.glob("*"):
+            size_mb = file.stat().st_size / (1024 * 1024)
+            print(f"  {file.name}: {size_mb:.2f} MB")
     
     print("✅ 构建完成")
     return True
@@ -143,6 +156,7 @@ def main():
     parser = argparse.ArgumentParser(description="构建和发布AgenticX包")
     parser.add_argument("--clean", action="store_true", help="清理构建目录")
     parser.add_argument("--build", action="store_true", help="构建包")
+    parser.add_argument("--no-isolation", action="store_true", help="构建时使用 --no-isolation 模式")
     parser.add_argument("--test", action="store_true", help="运行测试")
     parser.add_argument("--check", action="store_true", help="检查包")
     parser.add_argument("--test-pypi", action="store_true", help="发布到测试PyPI")
@@ -179,7 +193,7 @@ def main():
     
     # 构建包
     if args.build or args.all:
-        if not build_package():
+        if not build_package(no_isolation=args.no_isolation):
             success = False
     
     # 检查包
