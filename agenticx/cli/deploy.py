@@ -363,11 +363,12 @@ server:
   port: 8000
   workers: 1
 
-# LLM配置
+# LLM配置 (支持多种provider)
 llm:
-  provider: openai
-  model: gpt-4o-mini
-  api_key: ${OPENAI_API_KEY}
+  provider: ${LLM_PROVIDER:-openai}
+  model: ${LLM_MODEL:-gpt-4o-mini}
+  api_key: ${LLM_API_KEY:-${OPENAI_API_KEY}}
+  base_url: ${LLM_BASE_URL:-${OPENAI_API_BASE}}
   temperature: 0.7
   max_tokens: 1000
 
@@ -405,11 +406,51 @@ spec:
         ports:
         - containerPort: 8000
         env:
+        # LLM Provider 配置
+        - name: LLM_PROVIDER
+          valueFrom:
+            configMapKeyRef:
+              name: agenticx-config
+              key: llm-provider
+        - name: LLM_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: agenticx-config
+              key: llm-model
+        # OpenAI
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
               name: agenticx-secrets
               key: openai-api-key
+        - name: OPENAI_API_BASE
+          valueFrom:
+            configMapKeyRef:
+              name: agenticx-config
+              key: openai-api-base
+        # DeepSeek
+        - name: DEEPSEEK_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: agenticx-secrets
+              key: deepseek-api-key
+        - name: DEEPSEEK_API_BASE
+          valueFrom:
+            configMapKeyRef:
+              name: agenticx-config
+              key: deepseek-api-base
+        # Anthropic
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: agenticx-secrets
+              key: anthropic-api-key
+        - name: ANTHROPIC_API_BASE
+          valueFrom:
+            configMapKeyRef:
+              name: agenticx-config
+              key: anthropic-api-base
+        # 数据库
         - name: DATABASE_URL
           valueFrom:
             configMapKeyRef:
@@ -459,7 +500,19 @@ kind: ConfigMap
 metadata:
   name: agenticx-config
 data:
+  # LLM Provider 配置
+  llm-provider: "openai"
+  llm-model: "gpt-4o-mini"
+  
+  # API Base URLs
+  openai-api-base: ""
+  deepseek-api-base: "https://api.deepseek.com"
+  anthropic-api-base: ""
+  
+  # 数据库配置
   database-url: "postgresql://user:password@postgres:5432/agenticx"
+  
+  # 应用配置
   app-config: |
     app:
       name: agenticx-app
@@ -500,7 +553,27 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # LLM Provider 配置
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      
+      # OpenAI
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_BASE=${OPENAI_API_BASE}
+      
+      # DeepSeek
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_BASE=${DEEPSEEK_API_BASE}
+      
+      # Anthropic
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_API_BASE=${ANTHROPIC_API_BASE}
+      
+      # Google Gemini
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_API_BASE=${GOOGLE_API_BASE}
+      
+      # 数据库
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/agenticx
     depends_on:
       - postgres
@@ -544,8 +617,27 @@ volumes:
         """获取环境变量模板"""
         return """# AgenticX 环境变量
 
-# OpenAI API Key
+# LLM 服务配置
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+LLM_API_KEY=your_api_key_here
+LLM_BASE_URL=
+
+# --- OpenAI ---
 OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_API_BASE=
+
+# --- DeepSeek ---
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+DEEPSEEK_API_BASE=https://api.deepseek.com
+
+# --- Anthropic ---
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+ANTHROPIC_API_BASE=
+
+# --- Google Gemini ---
+GOOGLE_API_KEY=your_google_api_key_here
+GOOGLE_API_BASE=
 
 # 数据库配置
 DATABASE_URL=postgresql://postgres:password@postgres:5432/agenticx
@@ -596,7 +688,27 @@ functions:
           method: ANY
           cors: true
     environment:
+      # LLM Provider 配置
+      LLM_PROVIDER: ${env:LLM_PROVIDER, 'openai'}
+      LLM_MODEL: ${env:LLM_MODEL, 'gpt-4o-mini'}
+      
+      # OpenAI
       OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+      OPENAI_API_BASE: ${env:OPENAI_API_BASE}
+      
+      # DeepSeek
+      DEEPSEEK_API_KEY: ${env:DEEPSEEK_API_KEY}
+      DEEPSEEK_API_BASE: ${env:DEEPSEEK_API_BASE}
+      
+      # Anthropic
+      ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY}
+      ANTHROPIC_API_BASE: ${env:ANTHROPIC_API_BASE}
+      
+      # Google Gemini
+      GOOGLE_API_KEY: ${env:GOOGLE_API_KEY}
+      GOOGLE_API_BASE: ${env:GOOGLE_API_BASE}
+      
+      # 应用配置
       STAGE: ${self:provider.stage}
     timeout: 30
     memory: 512
