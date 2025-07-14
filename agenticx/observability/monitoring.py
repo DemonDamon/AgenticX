@@ -564,7 +564,7 @@ class MonitoringCallbackHandler(BaseCallbackHandler):
             self.metrics_collector.performance_metrics.llm_call_count += 1
             
             # Token使用量
-            total_tokens = response.token_usage.get("total_tokens", 0)
+            total_tokens = response.token_usage.total_tokens
             self.metrics_collector.performance_metrics.llm_token_usage += total_tokens
             self.metrics_collector.add_metric(
                 "llm_tokens_used",
