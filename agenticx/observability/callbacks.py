@@ -266,12 +266,35 @@ class BaseCallbackHandler(ABC):
     def _handle_llm_response_event(self, event: LLMResponseEvent):
         """处理LLM响应事件"""
         # 创建一个临时的LLMResponse对象
-        from ..llms.response import LLMResponse
-        response = LLMResponse(
+        from ..llms.response import LLMResponse, LLMChoice, TokenUsage
+        import time
+        
+        # 创建TokenUsage对象
+        token_usage_data = event.token_usage or {}
+        if isinstance(token_usage_data, dict):
+            token_usage = TokenUsage(
+                prompt_tokens=token_usage_data.get("prompt_tokens", 0),
+                completion_tokens=token_usage_data.get("completion_tokens", 0),
+                total_tokens=token_usage_data.get("total_tokens", 0)
+            )
+        else:
+            token_usage = TokenUsage()
+        
+        # 创建LLMChoice对象
+        choice = LLMChoice(
+            index=0,
             content=event.response,
-            model_name=event.model,
-            token_usage=event.data.get("token_usage", {}),
-            cost=event.data.get("cost", 0.0)
+            finish_reason="stop"
+        )
+        
+        response = LLMResponse(
+            id=event.id,
+            model_name=event.data.get("model", "unknown"),
+            created=int(event.timestamp.timestamp()),
+            content=event.response,
+            choices=[choice],
+            token_usage=token_usage,
+            cost=event.cost or 0.0
         )
         self.on_llm_response(response, event.data)
     
