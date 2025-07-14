@@ -50,7 +50,7 @@ graph TD
             Security["RBAC & Guardrails"]
         end
         subgraph "M9: 可观测性"
-            Callbacks["Callback Manager"]
+            Callbacks["Callback Manager &<br>Monitoring System"]
         end
         subgraph "M8: 通信协议"
             Protocols["Protocol Handlers"]
@@ -127,6 +127,23 @@ graph LR
 - **5. 终止阶段 (Termination & Destruction)**: 当一个 Agent 或其特定版本不再需要时，可以通过 `M13: AgentHub` 将其标记为“已退役”，系统将不再向其调度任务，并最终清理相关资源。
 
 ## 5. 开发路线图 (Development Roadmap / To-Do List)
+
+**总体进度概览**:
+- ✅ **M1: 核心抽象层** - 已完成
+- ✅ **M2: LLM 服务提供层** - 已完成  
+- ✅ **M3: 工具系统** - 已完成
+- ✅ **M4: 记忆系统** - 已完成
+- ✅ **M5: 智能体核心** - 已完成
+- ✅ **M6: 任务契约与成果验证** - 已完成
+- ✅ **M7: 编排与路由引擎** - 已完成
+- ✅ **M8: 智能体通信协议** - 已完成
+- ✅ **M9: 可观测性与分析** - 已完成
+- ⏳ **M10: 开发者体验** - 规划中
+- ⏳ **M11: 企业安全与治理** - 规划中
+- ⏳ **M12: 智能体进化平台** - 长期愿景
+- ⏳ **M13: 企业知识中台** - 规划中
+
+**当前状态**: 框架核心功能及可观测性已完成 (M1-M9)，具备完整的多智能体应用开发和监控能力。后续模块 (M10-M13) 专注于企业级功能和开发者体验优化。
 
 ### M1: 核心抽象层 (`agenticx.core`) ✅
 - [x] `Agent(BaseModel)`: 定义 Agent 的静态属性，如 `id`, `name`, `version`, `role`, `goal`, `backstory`, `llm_config_name` (指向M13), `memory_config`, `tool_names` (指向M13), `organization_id`。
@@ -317,8 +334,9 @@ graph LR
     - [x] 错误处理：优雅的错误恢复和状态管理
     - [x] 资源管理：可配置的并发限制和超时控制
 
-**实现状态**: ✅ **已完成** - 已完整实现 M7 编排与路由引擎。`WorkflowEngine` 基于事件溯源实现可恢复的工作流执行。`WorkflowGraph` 支持复杂的图结构定义和条件路由。`TriggerService` 提供定时和事件驱动的触发机制。支持Agent、Tool、自定义函数等多种组件类型。已通过25+测试用例验证，包含完整的并发执行和错误处理测试。
+**实现状态**: ✅ **已完成** - 已完整实现 M7 编排与路由引擎的核心功能。`WorkflowEngine` 基于事件溯源实现可恢复的工作流执行。`WorkflowGraph` 支持复杂的图结构定义和条件路由。`TriggerService` 提供定时和事件驱动的触发机制。支持Agent、Tool、自定义函数等多种组件类型。已通过25+测试用例验证，包含完整的并发执行和错误处理测试。
 
+#### 扩展功能（规划中）
 - [ ] **`SchedulerAgent` (原 `MasterRouterAgent`)**: 系统的"AI CEO"，负责任务的智能分派与调度。
     - **核心理念**: 基于 `MAS智能调度思考`，将调度从简单的技能匹配升级为综合的管理决策。
     - **决策依据**:
@@ -349,7 +367,7 @@ graph LR
             - **模型能力**: 需要训练或微调一个能理解任务并输出复杂图结构（`WorkflowGraph`）的 `Controller` 模型，这超出了传统 Prompt 工程的范畴。
             - **数据瓶颈**: 最大的障碍是缺乏大规模的 `(任务描述, 最优工作流图)` 标注数据，这可能需要引入强化学习等前沿方法进行探索，是业界共同面临的难题。
 
-### M8: 智能体通信协议 (`agenticx.protocols`)
+### M8: 智能体通信协议 (`agenticx.protocols`) ✅
 > 启发来源: 深度融合 Google A2A 协议的任务协作模式与 MCP 协议的微服务思想，并遵循【原则三：类级粒度】进行详细设计。
 
 - **战略定位**:
@@ -357,105 +375,272 @@ graph LR
     - **智能体-智能体 (A-A) 通信**: 借鉴 **Google A2A 协议** 的核心理念，构建一个面向任务的、结构化的协作框架。
 
 #### 1. 核心接口与抽象 (Interfaces & Abstractions)
-- [ ] `BaseTaskStore(ABC)`: 定义A2A协作任务持久化的标准接口，确保任务在分布式系统中的可靠追踪。
-    - [ ] `get_task(task_id: str) -> CollaborationTask`: 根据ID获取任务详情。
-    - [ ] `create_task(task: CollaborationTask) -> None`: 创建一个新任务。
-    - [ ] `update_task(task: CollaborationTask) -> None`: 更新任务的状态或其他属性。
+- [x] `BaseTaskStore(ABC)`: 定义A2A协作任务持久化的标准接口，确保任务在分布式系统中的可靠追踪。
+    - [x] `get_task(task_id: UUID) -> CollaborationTask`: 根据ID获取任务详情。
+    - [x] `create_task(task: CollaborationTask) -> None`: 创建一个新任务。
+    - [x] `update_task(task: CollaborationTask) -> None`: 更新任务的状态或其他属性。
+    - [x] `list_tasks(filters: Dict[str, Any] = None) -> List[CollaborationTask]`: 列出任务，支持过滤。
+    - [x] `delete_task(task_id: UUID) -> None`: 删除任务。
+- [x] `TaskError`, `TaskNotFoundError`, `TaskAlreadyExistsError`: 完整的异常类型系统。
 
 #### 2. 核心数据模型 (Data Models)
-- [ ] `AgentCard(BaseModel)`: Agent的"数字名片"，通过 `/.well-known/agent.json` 端点发布。
-    - `agent_id: str`, `name: str`, `description: str`, `endpoint: HttpUrl`, `skills: List[Skill]`
-- [ ] `Skill(BaseModel)`: Agent可执行能力的标准化描述。
-    - `name: str`, `description: str`, `parameters_schema: Type[BaseModel]`
-- [ ] `CollaborationTask(BaseModel)`: 智能体间协作的基本单元，取代 M1 中过于通用的 `Message`。
-    - `task_id: UUID`, `issuer_agent_id: str`, `target_agent_id: str`, `skill_name: str`, `parameters: Dict`, `status: Literal['pending', 'in_progress', 'completed', 'failed']`, `result: Optional[Any]`, `created_at: datetime`
+- [x] `AgentCard(BaseModel)`: Agent的"数字名片"，通过 `/.well-known/agent.json` 端点发布。
+    - `agent_id: str`, `name: str`, `description: str`, `endpoint: HttpUrl`, `skills: List[Skill]`, `version: str`
+- [x] `Skill(BaseModel)`: Agent可执行能力的标准化描述。
+    - `name: str`, `description: str`, `parameters_schema: Dict[str, Any]`
+- [x] `CollaborationTask(BaseModel)`: 智能体间协作的基本单元，取代 M1 中过于通用的 `Message`。
+    - `task_id: UUID`, `issuer_agent_id: str`, `target_agent_id: str`, `skill_name: str`, `parameters: Dict[str, Any]`, `status: Literal['pending', 'in_progress', 'completed', 'failed']`, `result: Optional[Any]`, `error: Optional[str]`, `created_at: datetime`, `updated_at: datetime`
+- [x] `TaskCreationRequest(BaseModel)`: 任务创建请求模型。
+- [x] `TaskStatusResponse(BaseModel)`: 任务状态响应模型。
 
 #### 3. 服务端实现 (Server Implementation)
-- [ ] `A2AWebServiceWrapper`: 将一个 `agenticx.agent.AgentExecutor` 包装成符合A2A协议的、可独立部署的FastAPI/Starlette应用。
-    - [ ] `__init__(self, agent_executor: AgentExecutor, task_store: BaseTaskStore)`: 构造函数，注入执行器和任务存储。
-    - [ ] `@app.get("/.well-known/agent.json") async def get_agent_card(self) -> AgentCard`: 发布AgentCard，实现服务发现。
-    - [ ] `@app.post("/tasks", status_code=202) async def create_task(self, task_request: TaskCreationRequest) -> CollaborationTask`: 接收任务创建请求，存入`task_store`并异步触发执行。
-    - [ ] `@app.get("/tasks/{task_id}") async def get_task_status(self, task_id: UUID) -> CollaborationTask`: 查询任务状态和结果。
-- [ ] `InMemoryTaskStore(BaseTaskStore)`: 任务存储的默认内存实现，主要用于开发和测试。
+- [x] `A2AWebServiceWrapper`: 将一个 `agenticx.agent.AgentExecutor` 包装成符合A2A协议的、可独立部署的FastAPI应用。
+    - [x] `__init__(self, agent_executor: AgentExecutor, task_store: BaseTaskStore, agent_id: str, agent_name: str, agent_description: str, base_url: str)`: 构造函数，注入执行器和任务存储。
+    - [x] `@app.get("/.well-known/agent.json") async def get_agent_card(self) -> AgentCard`: 发布AgentCard，实现服务发现。
+    - [x] `@app.post("/tasks", status_code=202) async def create_task(self, task_request: TaskCreationRequest) -> TaskStatusResponse`: 接收任务创建请求，存入`task_store`并异步触发执行。
+    - [x] `@app.get("/tasks/{task_id}") async def get_task_status(self, task_id: UUID) -> TaskStatusResponse`: 查询任务状态和结果。
+    - [x] `@app.get("/health") async def health_check(self) -> Dict[str, str]`: 健康检查端点。
+    - [x] `async def start_server(self, host: str = "0.0.0.0", port: int = 8000)`: 启动服务器。
+- [x] `InMemoryTaskStore(BaseTaskStore)`: 任务存储的默认内存实现，支持完整的CRUD操作和异步锁。
 
 #### 4. 客户端实现与集成 (Client Implementation & Integration)
-- [ ] `A2AClient`: 与远程 `A2AWebServiceWrapper` 交互的底层客户端。
-    - [ ] `__init__(self, target_agent_card: AgentCard)`: 使用目标Agent的AgentCard进行初始化。
-    - [ ] `async def create_task(self, skill_name: str, parameters: Dict) -> CollaborationTask`: 发起远程任务。
-    - [ ] `async def get_task(self, task_id: UUID) -> CollaborationTask`: 查询远程任务状态。
-- [ ] **`A2ASkillTool(BaseTool)`**: (关键集成点) 将远程Agent的Skill无缝包装为本地可调用的工具。
-    - **`name`**: (动态生成) 格式为 `"{agent_name}/{skill_name}"`，例如 `"TrendAnalyzer/analyze_topic"`。
+- [x] `A2AClient`: 与远程 `A2AWebServiceWrapper` 交互的底层客户端。
+    - [x] `__init__(self, target_agent_card: AgentCard, timeout: float = 30.0, max_retries: int = 3, retry_delay: float = 1.0)`: 使用目标Agent的AgentCard进行初始化。
+    - [x] `@classmethod async def from_endpoint(cls, endpoint: str) -> 'A2AClient'`: 从端点自动发现并创建客户端。
+    - [x] `async def create_task(self, issuer_agent_id: str, skill_name: str, parameters: Dict[str, Any]) -> CollaborationTask`: 发起远程任务。
+    - [x] `async def get_task(self, task_id: UUID) -> CollaborationTask`: 查询远程任务状态。
+    - [x] `async def wait_for_completion(self, task_id: UUID, polling_interval: float = 1.0, max_wait_time: float = 300.0) -> CollaborationTask`: 等待任务完成。
+    - [x] `async def health_check(self) -> Dict[str, Any]`: 健康检查。
+    - [x] 内置重试机制和指数退避策略。
+- [x] **`A2ASkillTool(BaseTool)`**: (关键集成点) 将远程Agent的Skill无缝包装为本地可调用的工具。
+    - **`name`**: (动态生成) 格式为 `"{agent_name}/{skill_name}"`，例如 `"Calculator Agent/calculate_add"`。
     - **`description`**: (动态获取) 直接来自 `Skill.description`。
-    - **`args_schema`**: (动态创建) 直接使用 `Skill.parameters_schema`。
-    - [ ] `__init__(self, client: A2AClient, skill: Skill)`: 构造函数，注入客户端和要包装的技能。
-    - [ ] `async def _arun(self, **kwargs) -> str`: 核心执行逻辑。内部调用 `self.client.create_task()`，然后进入一个轮询循环，通过 `self.client.get_task()` 检查任务状态，直到任务完成或失败，最终返回结构化的结果。
+    - **`args_schema`**: (动态创建) 从 `Skill.parameters_schema` 自动生成 Pydantic 模型。
+    - [x] `__init__(self, client: A2AClient, skill: Skill, issuer_agent_id: str)`: 构造函数，注入客户端和要包装的技能。
+    - [x] `async def _arun(self, **kwargs) -> str`: 核心执行逻辑。内部调用 `self.client.create_task()`，然后进入轮询循环，通过 `self.client.get_task()` 检查任务状态，直到任务完成或失败。
+    - [x] `def _run(self, **kwargs) -> str`: 同步执行入口。
+- [x] `A2ASkillToolFactory`: 工厂类，提供便捷的工具创建方法。
+    - [x] `@staticmethod async def create_tools_from_agent(agent_endpoint: str, issuer_agent_id: str) -> Dict[str, A2ASkillTool]`: 从Agent端点自动创建所有技能工具。
+    - [x] `@staticmethod def create_tool_from_skill(client: A2AClient, skill: Skill, issuer_agent_id: str) -> A2ASkillTool`: 从技能创建单个工具。
 
-### M9: 可观测性 (`agenticx.callbacks`)
-- [ ] `BaseCallbackHandler(ABC)`: 定义 Callback 系统的接口，包含一系列生命周期和执行过程的事件钩子。
-    - **执行事件**: `on_workflow_start`, `on_workflow_end`, `on_agent_action`, `on_tool_start`, `on_tool_end`, `on_llm_stream` 等。
-    - **生命周期事件**: `on_agent_register`, `on_agent_update`, `on_agent_retire`, `on_agent_load_change`。
-- [ ] `CallbackManager`: 管理所有注册的 `BaseCallbackHandler`，并在代码执行的关键节点触发相应的事件。
-- [ ] `LoggingCallbackHandler(BaseCallbackHandler)`: 实现将所有事件以结构化日志格式输出。
-- [ ] `LangfuseCallbackHandler(BaseCallback_Handler)`: 实现与 Langfuse 的集成，用于高级追踪和调试。
-- [ ] `WebSocketCallbackHandler(BaseCallbackHandler)`: 将事件通过 WebSocket 发送到前端，支持实时可视化监控。
-- [ ] `MonitoringCallbackHandler(BaseCallbackHandler)`: 将 Agent 的负载、响应时间、成本等关键指标推送到监控系统（如 Prometheus），为 `M7: SchedulerAgent` 提供决策数据。
-- [ ] `TrajectorySummarizerCallback(BaseCallbackHandler)`: (新增) 受 `traeagent.md` 启发，该回调函数监听完整的事件流，并能够在执行结束时生成一个人类可读的、精简的执行轨迹摘要，用于快速诊断和复盘。
+**实现状态**: ✅ **已完成** - 已完整实现 M8 智能体通信协议模块的核心功能。实现了完整的 A2A 协议，包括服务发现、任务创建、状态查询和结果获取。`A2AWebServiceWrapper` 提供标准的 FastAPI 服务端，`A2AClient` 提供健壮的客户端，`A2ASkillTool` 实现了"A2A Skill as a Tool"设计模式。支持异步操作、重试机制、错误处理和完整的测试覆盖。已通过端到端演示验证，可支持分布式多代理系统中的代理间协作。MCP 协议集成已在 M3 工具系统中实现。
 
-### M10: 用户接口 (`agenticx.interfaces`)
-- [ ] `AgenticXClient`: 一个高层次的 Python SDK 客户端，封装了定义和运行工作流的常用操作。
-- [ ] `agenticx.cli`: 基于 `Typer` 或 `Click` 的命令行工具。
-    - [ ] `run <workflow_file.py>`: 执行一个定义了工作流的 Python 文件。
-    - [ ] `validate <config.yaml>`: 检查 Agent 或 Workflow 的配置文件是否合法。
-    - [ ] `agent register <agent_dir>`: 注册一个 Agent 到 `AgentHub`。
-    - [ ] `agent update <agent_dir>`: 更新一个 Agent 的版本。
-    - [ ] `agent retire <agent_name>:<version>`: 退休一个 Agent 版本。
+### M9: 可观测性与分析 (`agenticx.observability`) ✅
+> 启发来源: 融合 `AgentScope` 的透明化设计、`Magentic UI` 的评估框架、以及 `traeagent` 的轨迹分析理念。
 
-### M11: 平台服务层 (`agenticx.platform`)
-- [ ] `UserService` & `OrganizationService`: 实现用户和组织的 CRUD 及业务逻辑（如邀请）。
-- [ ] `AuthContext`: 一个上下文变量 (`contextvars`)，在请求生命周期内持有当前的用户和组织信息。
-- [ ] `RBACService`: 实现基于角色的访问控制，提供如 `@require_role('admin')` 的装饰器。
-- [ ] `APIKeyAuthenticator`: 实现基于 API Key 的认证策略。
-- [ ] `BaseRepository`: 一个泛型基类，所有对数据库的 CRUD 操作都继承自它，并自动使用 `AuthContext` 中的 `organization_id` 进行数据隔离。
-- [ ] `EncryptionService`: 一个封装了加密库（如 Fernet）的服务，提供 `encrypt` 和 `decrypt` 方法。
-- [ ] **`SandboxService`**: 提供安全的、隔离的代码执行环境（如 Docker 容器或 WebAssembly），供 `M3: CodeInterpreterTool` 等高风险工具使用，是框架的核心安全基石。
-- [ ] `PolicyEngine`: 智能体护栏的策略引擎。
-    - [ ] `load_policies(organization_id: str)`: 加载 YAML 或 JSON 格式的策略规则。
-    - [ ] `check_permission(action: str, agent_name: str, agent_version: str, params: dict) -> bool`: 检查 Agent 的行为是否合规，检查应与 Agent 版本挂钩。
-- [ ] `InputOutputScanner`: 内容扫描器。
-    - [ ] `scan(text: str) -> ScanResult`: 扫描文本，`ScanResult` 包含是否发现敏感信息（PII）或违规内容。
+**战略定位**: M9 不仅是日志记录，更是智能体系统的"神经中枢"，负责捕获、分析和可视化所有执行轨迹，为系统优化和决策提供数据支撑。
+
+#### 1. 核心回调系统 (Core Callback System) ✅
+- [x] `BaseCallbackHandler(ABC)`: 定义 Callback 系统的接口，包含完整的生命周期和执行事件钩子。
+    - **执行事件**: `on_workflow_start`, `on_workflow_end`, `on_agent_action`, `on_tool_start`, `on_tool_end`, `on_llm_response`
+    - **生命周期事件**: `on_task_start`, `on_task_end`, `on_error`, `on_human_request`, `on_human_response`
+- [x] `CallbackManager`: 管理所有注册的回调处理器，支持异步事件分发和过滤。
+- [x] `LoggingCallbackHandler(BaseCallbackHandler)`: 结构化日志输出，支持多种格式（JSON、XML、Plain Text）。
+- [x] `CallbackRegistry`: 回调注册表，管理处理器的注册、注销和查找。
+
+#### 2. 实时监控与可视化 (Real-time Monitoring & Visualization) ✅
+- [x] `WebSocketCallbackHandler(BaseCallbackHandler)`: 实时事件流推送，支持前端可视化监控。
+- [x] `MonitoringCallbackHandler(BaseCallbackHandler)`: 系统指标收集器。
+    - [x] `collect_metrics(event: Event) -> Dict[str, float]`: 提取性能指标（响应时间、Token消耗、成本等）。
+    - [x] `get_prometheus_metrics() -> str`: 导出 Prometheus 格式指标。
+- [x] `MetricsCollector`: 指标收集器，支持计数器、仪表盘、系统指标收集。
+    - [x] `collect_system_metrics() -> SystemMetrics`: 收集CPU、内存、磁盘等系统指标。
+    - [x] `increment_counter()`, `set_gauge()`, `add_metric()`: 多种指标收集方法。
+- [x] `PrometheusExporter`: Prometheus 指标导出器。
+
+#### 3. 轨迹分析与优化 (Trajectory Analysis & Optimization) ✅
+- [x] `TrajectoryCollector(BaseCallbackHandler)`: 执行轨迹收集器。
+    - [x] `collect_trajectory(workflow_id: str) -> ExecutionTrajectory`: 收集完整的执行轨迹。
+    - [x] `store_trajectory(trajectory: ExecutionTrajectory)`: 持久化轨迹数据。
+- [x] `ExecutionTrajectory`: 完整的轨迹数据结构，包含步骤、元数据和资源使用。
+- [x] `TrajectorySummarizer`: 智能轨迹摘要生成器。
+    - [x] `summarize(trajectory: ExecutionTrajectory) -> TrajectorySummary`: 生成人类可读的执行摘要。
+    - [x] `identify_bottlenecks(trajectory: ExecutionTrajectory) -> List[Bottleneck]`: 识别性能瓶颈。
+- [x] `FailureAnalyzer`: 失败案例分析器。
+    - [x] `analyze_failure(failed_trajectory: ExecutionTrajectory) -> FailureReport`: 分析失败原因。
+    - [x] `suggest_improvements(failure_report: FailureReport) -> List[Improvement]`: 提出改进建议。
+
+#### 4. 数据分析与导出 (Data Analysis & Export) ✅
+- [x] `MetricsCalculator`: 指标计算器。
+    - [x] `calculate_success_rate(results: List[TaskResult]) -> float`: 计算成功率。
+    - [x] `calculate_efficiency(trajectory: ExecutionTrajectory) -> EfficiencyMetrics`: 计算效率指标。
+    - [x] `calculate_all_metrics(trajectories: List[ExecutionTrajectory]) -> MetricsResult`: 计算所有指标。
+- [x] `TimeSeriesData`: 时间序列数据管理器。
+    - [x] `add_metric_point()`, `calculate_metric_statistics()`, `resample()`: 时间序列分析功能。
+- [x] `StatisticsCalculator`: 统计分析器。
+    - [x] `calculate_descriptive_stats()`, `calculate_percentiles()`, `detect_outliers()`: 统计分析功能。
+- [x] `DataExporter`: 数据导出器，支持多种格式（JSON、CSV、Prometheus）。
+    - [x] `export_trajectory_to_json()`, `export_trajectories_to_csv()`, `export_time_series_to_csv()`: 多种导出方法。
+
+**实现状态**: ✅ **已完成** - 已完整实现 M9 可观测性与分析模块的所有核心功能。包含完整的回调系统、实时监控、轨迹收集分析、失败分析、性能指标计算、时间序列分析、统计分析和数据导出功能。提供了完整的演示应用（`m9_observability_demo.py`）展示所有功能。支持 Prometheus 集成、WebSocket 实时推送、多种数据格式导出。已通过全面测试验证，具备企业级监控能力。
+
+### M10: 开发者体验 (`agenticx.devex`)
+> 启发来源: `smolagents` 的 Hub 集成、`AgentScope` 的透明化设计、以及 `Magentic UI` 的全栈开发体验。
+
+**战略定位**: 将 AgenticX 从代码库提升为开发平台，提供从本地开发到生产部署的完整工具链。
+
+#### 1. 统一 SDK 与客户端 (Unified SDK & Client) **[必要功能]**
+- [ ] `AgenticXClient`: 高级 Python SDK，封装所有核心功能。
+    - [ ] `create_agent(definition: AgentDefinition) -> Agent`: 创建 Agent 实例。
+    - [ ] `run_workflow(workflow: Workflow, inputs: Dict) -> WorkflowResult`: 执行工作流。
+    - [ ] `monitor_execution(execution_id: str) -> ExecutionStatus`: 监控执行状态。
+- [ ] `AsyncAgenticXClient`: 异步版本的 SDK，支持并发操作。
+- [ ] `AgenticXJS`: JavaScript/TypeScript SDK，支持前端集成。
+
+#### 2. 命令行工具 (CLI Tools) **[必要功能]**
+- [ ] `agenticx.cli`: 基于 `Typer` 的命令行工具套件。
+    - [ ] `agx run <workflow_file.py>`: 执行工作流文件。
+    - [ ] `agx validate <config.yaml>`: 验证配置文件。
+    - [ ] `agx deploy <agent_dir>`: 部署 Agent 到生产环境。
+    - [ ] `agx monitor`: 启动监控面板。
+    - [ ] `agx test <test_suite>`: 运行测试套件。
+- [ ] `ProjectScaffolder`: 项目脚手架生成器。
+    - [ ] `create_project(template: str, name: str)`: 创建项目模板。
+    - [ ] `add_agent(agent_type: str)`: 添加 Agent 模板。
+
+#### 3. 开发工具与集成 (Development Tools & Integrations) **[加分功能]**
+- [ ] `DebugServer`: 调试服务器。
+    - [ ] `start_debug_session(agent: Agent) -> DebugSession`: 启动调试会话。
+    - [ ] `set_breakpoint(location: str)`: 设置断点。
+    - [ ] `step_execution()`: 单步执行。
+- [ ] `VSCodeExtension`: VS Code 扩展支持。
+- [ ] `JupyterKernel`: Jupyter Notebook 内核，支持交互式开发。
+- [ ] `DocGenerator`: 自动文档生成器。
+    - [ ] `generate_agent_docs(agent: Agent) -> Documentation`: 生成 Agent 文档。
+    - [ ] `generate_api_docs(module: Module) -> APIDocumentation`: 生成 API 文档。
+
+#### 4. 云原生部署 (Cloud-Native Deployment) **[加分功能]**
+- [ ] `KubernetesOperator`: Kubernetes 操作器，支持声明式部署。
+- [ ] `DockerComposer`: Docker Compose 配置生成器。
+- [ ] `CloudFormationTemplate`: AWS CloudFormation 模板生成器。
+- [ ] `HelmChartGenerator`: Helm Chart 生成器。
+
+### M11: 企业安全与治理 (`agenticx.governance`) 
+> 启发来源: `Glean` 的安全架构、`humanintheloop` 的审批机制、以及企业级 AI 的合规需求。
+
+**战略定位**: 将安全、合规和治理作为框架的核心能力，而非后加的补丁，确保企业级应用的安全可控。
+
+#### 1. 身份认证与访问控制 (Authentication & Access Control) **[必要功能]**
+- [ ] `AuthenticationService`: 统一身份认证服务。
+    - [ ] `authenticate(credentials: Credentials) -> AuthResult`: 用户认证。
+    - [ ] `refresh_token(refresh_token: str) -> TokenPair`: 刷新访问令牌。
+- [ ] `AuthorizationService`: 授权服务。
+    - [ ] `check_permission(user: User, resource: Resource, action: str) -> bool`: 权限检查。
+    - [ ] `get_user_permissions(user: User) -> List[Permission]`: 获取用户权限列表。
+- [ ] `RBACManager`: 基于角色的访问控制管理器。
+    - [ ] `assign_role(user: User, role: Role)`: 分配角色。
+    - [ ] `@require_role(role: str)`: 角色检查装饰器。
+- [ ] `MultiTenantContext`: 多租户上下文管理器。
+    - [ ] `get_current_organization() -> Organization`: 获取当前组织。
+    - [ ] `isolate_data(organization_id: str)`: 数据隔离。
+
+#### 2. 安全沙箱与隔离 (Security Sandbox & Isolation) **[必要功能]**
+- [ ] `SandboxService`: 安全沙箱服务。
+    - [ ] `create_sandbox(config: SandboxConfig) -> Sandbox`: 创建沙箱环境。
+    - [ ] `execute_in_sandbox(sandbox: Sandbox, code: str) -> ExecutionResult`: 在沙箱中执行代码。
+    - [ ] `destroy_sandbox(sandbox: Sandbox)`: 销毁沙箱。
+- [ ] `NetworkIsolationService`: 网络隔离服务。
+    - [ ] `create_network_policy(rules: List[NetworkRule]) -> NetworkPolicy`: 创建网络策略。
+    - [ ] `apply_policy(policy: NetworkPolicy, target: str)`: 应用网络策略。
+- [ ] `ResourceLimitService`: 资源限制服务。
+    - [ ] `set_limits(resource_type: str, limits: ResourceLimits)`: 设置资源限制。
+    - [ ] `monitor_usage(resource_type: str) -> ResourceUsage`: 监控资源使用。
+
+#### 3. 内容安全与合规 (Content Security & Compliance) **[必要功能]**
+- [ ] `ContentScanner`: 内容安全扫描器。
+    - [ ] `scan_text(text: str) -> ScanResult`: 扫描文本内容。
+    - [ ] `scan_file(file_path: str) -> ScanResult`: 扫描文件内容。
+    - [ ] `detect_pii(content: str) -> PIIDetectionResult`: 检测个人信息。
+- [ ] `PolicyEngine`: 策略引擎。
+    - [ ] `load_policies(organization_id: str) -> List[Policy]`: 加载策略规则。
+    - [ ] `evaluate_policy(action: Action, context: Context) -> PolicyResult`: 评估策略。
+- [ ] `ComplianceManager`: 合规管理器。
+    - [ ] `check_compliance(action: Action) -> ComplianceResult`: 合规检查。
+    - [ ] `generate_compliance_report(period: TimePeriod) -> ComplianceReport`: 生成合规报告。
+
+#### 4. 人工审批与干预 (Human Approval & Intervention) **[加分功能]**
+- [ ] `ApprovalWorkflow`: 审批工作流。
+    - [ ] `create_approval_request(request: ApprovalRequest) -> str`: 创建审批请求。
+    - [ ] `process_approval(request_id: str, decision: ApprovalDecision)`: 处理审批决策。
+- [ ] `HumanInTheLoopService`: 人机协作服务。
+    - [ ] `request_human_intervention(context: InterventionContext) -> InterventionResult`: 请求人工干预。
+    - [ ] `escalate_to_human(escalation: Escalation)`: 升级到人工处理。
 - [ ] `AuditLogger`: 审计日志记录器。
-    - [ ] `log_event(user_id, organization_id, event_type, details: dict)`: 记录所有关键操作。
-- [ ] **`EvolutionService` (长期愿景)**: 智能体进化服务。
-    - **核心理念**: 基于 `camelai` 的经验池、`agenticsupernet` 的强化学习思想以及 `traeagent` 的轨迹增强理念。
-    - **功能**: (扩展) 持续分析 `M9` 捕获并持久化的执行轨迹 (`EventLog`)。通过离线分析失败案例、A/B 测试、甚至强化学习（从人类的审批决策中学习），对 Agent 的 Prompt、工具选择策略、或工作流结构提出优化建议或自动应用改进，实现整个 Agent 群体的持续、自适应进化。
+    - [ ] `log_action(action: Action, user: User, result: ActionResult)`: 记录操作日志。
+    - [ ] `generate_audit_trail(entity: str, period: TimePeriod) -> AuditTrail`: 生成审计轨迹。
 
-### M12: 知识与数据层 (`agenticx.knowledge`)
-- [ ] `ConnectorService`: 数据连接器服务，管理所有连接器的生命周期。
-- [ ] `BaseConnector(ABC)`: 定义连接器标准接口，包含 `connect()`, `sync()`, `get_permissions()`, `fetch_batch(cursor)`。
-- [ ] `ConnectorRegistry`: 用于注册和获取连接器实现类，如 `JiraConnector`, `SlackConnector`。
-- [ ] `PermissionManager`: 权限管理服务。
-    - [ ] `sync_permissions(connector_name: str)`: 同步源系统的权限信息。
-    - [ ] `check_permission(user_id: str, resource_id: str) -> bool`: 提供快速的权限检查。
-- [ ] `HybridSearchEngine`: 统一混合搜索服务。
-    - [ ] `search(query: str, user_id: str) -> List[SearchResult]`: 对内调用 `VectorSearcher`, `KeywordSearcher`, `GraphSearcher` 并对结果进行权限过滤和重排序。
-- [ ] `EnterpriseKnowledgeGraph`: 企业知识图谱构建与查询服务。
-    - [ ] `build_from_source(connector: BaseConnector)`: 从一个数据源提取实体关系并更新图谱。
-    - `query(cypher_query: str) -> List[dict]`: 提供图查询接口。
+### M12: 智能体进化平台 (`agenticx.evolution`) **[加分功能 - 长期愿景]**
+> 启发来源: `agenticsupernet` 的架构搜索、`camelai` 的经验池、以及 `AutoAgent` 的自适应能力。
 
-### M13: 资产中心 (`agenticx.hub`)
-> Agent 生命周期管理的“户籍处”和“配置中心”。
+**战略定位**: 这是 AgenticX 的"大脑升级"模块，通过机器学习和强化学习技术，实现智能体的自我进化和系统级优化。
 
-- [ ] `AgentHub`: Agent 注册与发现中心。
-    - **核心职责**: 提供对 Agent 从注册、多版本管理、发现到最终退役的全生命周期支持。
-    - [ ] `register(agent_definition: dict) -> AgentInfo`: 注册一个新的 Agent，系统为其生成唯一的 `agent_id` 和初始版本号 `v1`。
-    - [ ] `update(agent_id: str, new_definition: dict) -> AgentInfo`: 为现有 Agent 创建一个新版本（如 `v2`），旧版本依然保留，可用于回滚。
-    - [ ] `get(agent_id: str, version: str = 'latest') -> Agent`: 按版本获取 Agent 的完整定义。支持 `latest`, `stable` 等标签。
-    - [ ] `list(organization_id: str) -> List[AgentInfo]`: 列出某个组织所有可用的 Agent 及其版本。
-    - [ ] `retire(agent_id: str, version: str)`: 弃用一个特定版本的 Agent。调度器将不再向其分配新任务。
-    - [ ] `delete(agent_id: str, version: str)`: (软删除) 标记某个版本为已删除，通常在确保没有正在运行的任务后执行。
-- [ ] `WorkflowHub`: Workflow 注册与发现中心。
-    - [ ] `register(workflow: Workflow)`: 注册一个新 Workflow 或新版本。
-    - [ ] `get(name: str, version: str = 'latest') -> Workflow`: 获取一个 Workflow 的定义。
-- [ ] `ModelHub`: LLM 配置管理中心。
-    - [ ] `register_provider_config(name: str, config: dict)`: 注册一个LLM Provider的配置。
-    - [ ] `get_provider(name: str) -> BaseLLMProvider`: 使用存储的配置，通过 M2 的工厂创建并返回一个 LLM Provider 实例。
+#### 1. 智能体架构搜索 (Agent Architecture Search)
+- [ ] `AgenticSupernet`: 智能体超网络。
+    - [ ] `sample_architecture(task_context: TaskContext) -> AgentArchitecture`: 根据任务采样最优架构。
+    - [ ] `update_distribution(performance_feedback: PerformanceFeedback)`: 基于反馈更新架构分布。
+- [ ] `ArchitectureOptimizer`: 架构优化器。
+    - [ ] `search_optimal_architecture(task_suite: TaskSuite) -> AgentArchitecture`: 搜索最优架构。
+    - [ ] `evaluate_architecture(architecture: AgentArchitecture, benchmark: Benchmark) -> ArchitectureScore`: 评估架构性能。
+
+#### 2. 经验学习与知识蒸馏 (Experience Learning & Knowledge Distillation)
+- [ ] `ExperiencePool`: 经验池。
+    - [ ] `store_experience(experience: Experience)`: 存储执行经验。
+    - [ ] `retrieve_similar_experiences(context: TaskContext) -> List[Experience]`: 检索相似经验。
+- [ ] `KnowledgeDistiller`: 知识蒸馏器。
+    - [ ] `distill_from_expert(expert_agent: Agent, student_agent: Agent) -> DistillationResult`: 从专家智能体蒸馏知识。
+    - [ ] `compress_model(model: Model, compression_ratio: float) -> CompressedModel`: 模型压缩。
+
+#### 3. 自适应优化 (Adaptive Optimization)
+- [ ] `ReinforcementLearner`: 强化学习器。
+    - [ ] `train_policy(environment: Environment, reward_function: RewardFunction) -> Policy`: 训练策略。
+    - [ ] `update_policy(policy: Policy, feedback: Feedback) -> Policy`: 更新策略。
+- [ ] `MetaLearner`: 元学习器。
+    - [ ] `learn_to_learn(task_distribution: TaskDistribution) -> MetaPolicy`: 学习如何学习。
+    - [ ] `adapt_to_new_task(meta_policy: MetaPolicy, new_task: Task) -> AdaptedAgent`: 快速适应新任务。
+
+### M13: 企业知识中台 (`agenticx.knowledge`) 
+> 启发来源: `Glean` 的统一搜索架构、企业级 RAG 需求、以及多模态知识管理。
+
+**战略定位**: 构建企业级的统一知识访问层，让智能体能够安全、高效地访问企业的全域知识。
+
+#### 1. 统一数据连接 (Unified Data Connection) **[必要功能]**
+- [ ] `ConnectorFramework`: 连接器框架。
+    - [ ] `BaseConnector(ABC)`: 连接器抽象基类，定义标准接口。
+    - [ ] `register_connector(connector_type: str, connector_class: Type[BaseConnector])`: 注册连接器。
+- [ ] `EnterpriseConnectors`: 企业级连接器集合。
+    - [ ] `JiraConnector(BaseConnector)`: Jira 项目管理系统连接器。
+    - [ ] `SlackConnector(BaseConnector)`: Slack 通信平台连接器。
+    - [ ] `SharePointConnector(BaseConnector)`: SharePoint 文档系统连接器。
+    - [ ] `SalesforceConnector(BaseConnector)`: Salesforce CRM 系统连接器。
+- [ ] `DataSyncService`: 数据同步服务。
+    - [ ] `sync_data_source(connector: BaseConnector) -> SyncResult`: 同步数据源。
+    - [ ] `schedule_sync(connector: BaseConnector, schedule: Schedule)`: 调度同步任务。
+
+#### 2. 智能搜索引擎 (Intelligent Search Engine) **[必要功能]**
+- [ ] `HybridSearchEngine`: 混合搜索引擎。
+    - [ ] `search(query: str, context: SearchContext) -> SearchResults`: 统一搜索接口。
+    - [ ] `vector_search(embedding: Embedding, filters: Dict) -> VectorResults`: 向量搜索。
+    - [ ] `keyword_search(keywords: List[str], filters: Dict) -> KeywordResults`: 关键词搜索。
+- [ ] `SemanticIndexer`: 语义索引器。
+    - [ ] `index_document(document: Document) -> IndexResult`: 索引文档。
+    - [ ] `update_embeddings(documents: List[Document])`: 更新嵌入向量。
+- [ ] `QueryUnderstanding`: 查询理解器。
+    - [ ] `parse_query(query: str) -> ParsedQuery`: 解析查询意图。
+    - [ ] `expand_query(query: str) -> ExpandedQuery`: 查询扩展。
+
+#### 3. 权限与安全 (Permissions & Security) **[必要功能]**
+- [ ] `PermissionManager`: 权限管理器。
+    - [ ] `sync_permissions(data_source: str) -> PermissionSyncResult`: 同步权限信息。
+    - [ ] `check_access(user: User, resource: Resource) -> AccessResult`: 检查访问权限。
+- [ ] `DataGovernanceService`: 数据治理服务。
+    - [ ] `classify_data(data: Data) -> DataClassification`: 数据分类。
+    - [ ] `apply_retention_policy(data: Data, policy: RetentionPolicy)`: 应用保留策略。
+
+#### 4. 知识图谱 (Knowledge Graph) **[加分功能]**
+- [ ] `KnowledgeGraphBuilder`: 知识图谱构建器。
+    - [ ] `extract_entities(text: str) -> List[Entity]`: 实体抽取。
+    - [ ] `extract_relations(text: str, entities: List[Entity]) -> List[Relation]`: 关系抽取。
+    - [ ] `build_graph(documents: List[Document]) -> KnowledgeGraph`: 构建知识图谱。
+- [ ] `GraphQueryEngine`: 图查询引擎。
+    - [ ] `query_graph(cypher_query: str) -> GraphResult`: 图查询。
+    - [ ] `find_path(start_entity: Entity, end_entity: Entity) -> Path`: 路径查找。
