@@ -1,0 +1,68 @@
+# Include the README files
+include README.md
+include README_ZN.md
+
+# Include the license file
+include LICENSE
+
+# Include requirements files
+include requirements.txt
+include pyproject.toml
+
+# Include assets
+recursive-include assets *
+
+# Include examples
+recursive-include examples *.py
+recursive-include examples *.md
+recursive-include examples *.txt
+recursive-include examples *.yaml
+recursive-include examples *.yml
+recursive-include examples *.json
+
+# Include documentation
+recursive-include docs *
+
+# Include configuration files
+include *.yaml
+include *.yml
+include *.json
+include *.toml
+include *.cfg
+include *.ini
+
+# Include package data
+recursive-include agenticx *.yaml
+recursive-include agenticx *.yml
+recursive-include agenticx *.json
+recursive-include agenticx *.toml
+recursive-include agenticx *.txt
+recursive-include agenticx *.md
+
+# Exclude unnecessary files
+exclude .gitignore
+exclude .pre-commit-config.yaml
+exclude .github
+recursive-exclude thirdparty *
+recursive-exclude researches *
+recursive-exclude markmap *
+recursive-exclude tests *
+exclude M8开发细节.md
+exclude AgenticX-vs-Others.md
+exclude PACKAGING.md
+exclude build_and_publish.py
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * *.pyc
+recursive-exclude * *.pyo
+recursive-exclude * *.orig
+recursive-exclude * *.rej
+recursive-exclude * .DS_Store
+recursive-exclude * Thumbs.db
+recursive-exclude .git *
+recursive-exclude .pytest_cache *
+recursive-exclude .coverage *
+recursive-exclude htmlcov *
+recursive-exclude build *
+recursive-exclude dist *
+recursive-exclude *.egg-info * 
