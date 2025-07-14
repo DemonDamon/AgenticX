@@ -1,6 +1,7 @@
 # AgenticX: 统一的多智能体框架
 
 <div align="center">
+<img src="assets/agenticx-logo.png" alt="AgenticX Logo" width="120" style="margin-bottom:16px;" />
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
