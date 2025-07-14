@@ -139,7 +139,9 @@ agx = "agenticx.cli.main:main"
 version = {attr = "agenticx.__version__"}
 
 [tool.setuptools.packages.find]
-exclude = ["tests*", "examples*", "docs*", "thirdparty*", "researches*", "markmap*", "exps*"]
+# 只包含 agenticx 包，排除所有其他目录
+include = ["agenticx*"]
+exclude = ["tests*", "examples*", "docs*", "thirdparty*", "researches*", "markmap*", "exps*", "assets*"]
 
 [tool.setuptools.package-data]
 agenticx = ["*.yaml", "*.yml", "*.json", "*.toml", "**/*.yaml", "**/*.yml", "**/*.json", "**/*.toml"]
