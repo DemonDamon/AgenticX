@@ -8,15 +8,15 @@ data structures used in agent-to-agent communication.
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Type, Literal
 from uuid import UUID, uuid4
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, ConfigDict
 
 
 class Skill(BaseModel):
     """
-    Agent executable capability description.
+    Represents a skill that an agent can provide.
     
-    Represents a standardized description of what an agent can do,
-    including the parameters it expects and how to invoke it.
+    Skills define the capabilities that an agent advertises to the network.
+    Other agents can discover and invoke these skills through the A2A protocol.
     """
     name: str = Field(..., description="Unique name for the skill")
     description: str = Field(..., description="Human-readable description of what the skill does")
@@ -25,10 +25,11 @@ class Skill(BaseModel):
         description="JSON schema defining the expected parameters"
     )
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             Type: lambda v: str(v)
         }
+    )
 
 
 class AgentCard(BaseModel):
@@ -45,10 +46,11 @@ class AgentCard(BaseModel):
     skills: List[Skill] = Field(default_factory=list, description="List of skills this agent provides")
     version: str = Field(default="1.0.0", description="Agent version for compatibility tracking")
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             HttpUrl: str
         }
+    )
 
 
 class CollaborationTask(BaseModel):

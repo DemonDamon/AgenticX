@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Any, Dict
 import uuid
 
@@ -15,6 +15,4 @@ class Task(BaseModel):
     dependencies: Optional[List[str]] = Field(description="List of task IDs that this task depends on.", default_factory=list)
     output_schema: Optional[Dict[str, Any]] = Field(description="Schema definition for the expected output format.", default=None)
     
-    class Config:
-        """Pydantic configuration."""
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
