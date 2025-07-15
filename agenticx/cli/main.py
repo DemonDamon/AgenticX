@@ -15,11 +15,27 @@ from rich.console import Console
 from rich.table import Table
 
 from agenticx import __version__
-from .client import AgenticXClient
-from .scaffold import ProjectScaffolder
-from .debug import DebugServer
-from .docs import DocGenerator
-from .deploy import DeployManager
+
+# 延迟导入以提高启动速度
+def _get_client():
+    from .client import AgenticXClient
+    return AgenticXClient
+
+def _get_scaffolder():
+    from .scaffold import ProjectScaffolder
+    return ProjectScaffolder
+
+def _get_debug_server():
+    from .debug import DebugServer
+    return DebugServer
+
+def _get_doc_generator():
+    from .docs import DocGenerator
+    return DocGenerator
+
+def _get_deploy_manager():
+    from .deploy import DeployManager
+    return DeployManager
 
 # 创建主应用
 app = typer.Typer(
@@ -27,6 +43,25 @@ app = typer.Typer(
     help="AgenticX: 统一的多智能体框架 - 开发者工具套件",
     add_completion=False
 )
+
+# 添加版本回调函数
+def version_callback(value: bool):
+    if value:
+        typer.echo(f"AgenticX {__version__}")
+        raise typer.Exit()
+
+# 添加全局 --version 选项
+@app.callback()
+def main_callback(
+    version: Optional[bool] = typer.Option(
+        None, "--version", "-v", 
+        callback=version_callback,
+        is_eager=True,
+        help="显示版本信息并退出"
+    )
+):
+    """AgenticX: 统一的多智能体框架 - 开发者工具套件"""
+    pass
 
 # 创建子命令组
 project_app = typer.Typer(name="project", help="项目管理命令")
@@ -54,36 +89,6 @@ def version():
 
 
 @app.command()
-def examples():
-    """显示示例列表"""
-    console.print("[bold green]可用示例:[/bold green]")
-    
-    table = Table(show_header=True, header_style="bold magenta")
-    table.add_column("示例名称", style="cyan")
-    table.add_column("描述", style="white")
-    table.add_column("模块", style="yellow")
-    
-    examples_list = [
-        ("m5_agent_demo.py", "基础智能体示例", "M5 - 智能体核心"),
-        ("m5_multi_agent_demo.py", "多智能体协作示例", "M5 - 智能体核心"),
-        ("m6_m7_simple_demo.py", "简单工作流示例", "M6/M7 - 工作流编排"),
-        ("m6_m7_comprehensive_demo.py", "复杂工作流示例", "M6/M7 - 工作流编排"),
-        ("m8_a2a_demo.py", "智能体通信示例", "M8 - 通信协议"),
-        ("m9_observability_demo.py", "可观测性示例", "M9 - 监控分析"),
-        ("memory_example.py", "记忆系统示例", "M4 - 记忆系统"),
-        ("mem0_healthcare_example.py", "医疗场景记忆示例", "M4 - 记忆系统"),
-        ("human_in_the_loop_example.py", "人机协作示例", "M11 - 安全治理"),
-        ("llm_chat_example.py", "LLM聊天示例", "M2 - LLM服务"),
-        ("microsandbox_example.py", "安全沙箱示例", "M3 - 工具系统"),
-    ]
-    
-    for name, desc, module in examples_list:
-        table.add_row(name, desc, module)
-    
-    console.print(table)
-
-
-@app.command()
 def run(
     file: str = typer.Argument(..., help="要执行的工作流文件"),
     config: Optional[str] = typer.Option(None, "--config", "-c", help="配置文件路径"),
@@ -97,7 +102,8 @@ def run(
         console.print(f"[bold red]错误:[/bold red] 文件不存在: {file}")
         raise typer.Exit(1)
     
-    # 创建客户端
+    # 延迟导入和创建客户端
+    AgenticXClient = _get_client()
     client = AgenticXClient(config_path=config, verbose=verbose, debug=debug)
     
     try:
@@ -123,6 +129,7 @@ def validate(
         console.print(f"[bold red]错误:[/bold red] 配置文件不存在: {config}")
         raise typer.Exit(1)
     
+    AgenticXClient = _get_client()
     client = AgenticXClient()
     try:
         result = client.validate_config(config, schema)
@@ -147,6 +154,7 @@ def test(
     """运行测试套件"""
     console.print(f"[bold blue]运行测试套件:[/bold blue] {suite or '所有测试'}")
     
+    AgenticXClient = _get_client()
     client = AgenticXClient()
     try:
         result = client.run_tests(suite, pattern, verbose)
@@ -173,6 +181,7 @@ def create_project(
     """创建新项目"""
     console.print(f"[bold blue]创建项目:[/bold blue] {name}")
     
+    ProjectScaffolder = _get_scaffolder()
     scaffolder = ProjectScaffolder()
     try:
         project_path = scaffolder.create_project(name, template, directory)
@@ -183,23 +192,18 @@ def create_project(
         raise typer.Exit(1)
 
 
-@project_app.command("templates")
-def list_templates():
-    """列出可用的项目模板"""
-    console.print("[bold green]可用项目模板:[/bold green]")
+@project_app.command("info")
+def project_info():
+    """显示项目信息"""
+    console.print("[bold blue]项目信息:[/bold blue]")
     
-    scaffolder = ProjectScaffolder()
-    templates = scaffolder.list_templates()
+    # 检查是否在项目目录中
+    if not os.path.exists("config.yaml"):
+        console.print("[yellow]当前目录不是 AgenticX 项目[/yellow]")
+        return
     
-    table = Table(show_header=True, header_style="bold magenta")
-    table.add_column("模板名称", style="cyan")
-    table.add_column("描述", style="white")
-    table.add_column("类型", style="yellow")
-    
-    for template in templates:
-        table.add_row(template.name, template.description, template.type)
-    
-    console.print(table)
+    # 显示项目信息
+    console.print("✓ 这是一个 AgenticX 项目")
 
 
 # === 智能体管理命令 ===
@@ -213,6 +217,7 @@ def create_agent(
     """创建新的智能体"""
     console.print(f"[bold blue]创建智能体:[/bold blue] {name}")
     
+    ProjectScaffolder = _get_scaffolder()
     scaffolder = ProjectScaffolder()
     try:
         agent_path = scaffolder.create_agent(name, role, template, interactive)
@@ -228,6 +233,7 @@ def list_agents():
     """列出当前项目的智能体"""
     console.print("[bold blue]当前项目的智能体:[/bold blue]")
     
+    AgenticXClient = _get_client()
     client = AgenticXClient()
     try:
         agents = client.list_agents()
@@ -256,14 +262,15 @@ def list_agents():
 def create_workflow(
     name: str = typer.Argument(..., help="工作流名称"),
     template: str = typer.Option("sequential", "--template", "-t", help="工作流模板"),
-    interactive: bool = typer.Option(False, "--interactive", "-i", help="交互式创建")
+    agents: Optional[str] = typer.Option(None, "--agents", "-a", help="智能体列表(逗号分隔)")
 ):
     """创建新的工作流"""
     console.print(f"[bold blue]创建工作流:[/bold blue] {name}")
     
+    ProjectScaffolder = _get_scaffolder()
     scaffolder = ProjectScaffolder()
     try:
-        workflow_path = scaffolder.create_workflow(name, template, interactive)
+        workflow_path = scaffolder.create_workflow(name, template, agents)
         console.print(f"[bold green]✓ 工作流创建成功![/bold green]")
         console.print(f"工作流文件: {workflow_path}")
     except Exception as e:
@@ -276,6 +283,7 @@ def list_workflows():
     """列出当前项目的工作流"""
     console.print("[bold blue]当前项目的工作流:[/bold blue]")
     
+    AgenticXClient = _get_client()
     client = AgenticXClient()
     try:
         workflows = client.list_workflows()
@@ -287,11 +295,11 @@ def list_workflows():
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("工作流ID", style="cyan")
         table.add_column("名称", style="white")
-        table.add_column("节点数", style="yellow")
+        table.add_column("类型", style="yellow")
         table.add_column("状态", style="green")
         
         for workflow in workflows:
-            table.add_row(workflow.id, workflow.name, str(workflow.node_count), workflow.status)
+            table.add_row(workflow.id, workflow.name, workflow.type, workflow.status)
         
         console.print(table)
     except Exception as e:
@@ -309,6 +317,7 @@ def prepare_deploy(
     """准备部署包"""
     console.print(f"[bold blue]准备部署:[/bold blue] {target}")
     
+    DeployManager = _get_deploy_manager()
     deploy_manager = DeployManager()
     try:
         deploy_path = deploy_manager.prepare_deployment(target, platform, config)
@@ -321,58 +330,80 @@ def prepare_deploy(
 
 @deploy_app.command("docker")
 def deploy_docker(
-    image_name: str = typer.Option("agenticx-app", "--image", "-i", help="Docker镜像名称"),
-    tag: str = typer.Option("latest", "--tag", "-t", help="Docker标签"),
-    push: bool = typer.Option(False, "--push", "-p", help="推送到仓库")
+    target: str = typer.Argument(..., help="部署目标目录"),
+    tag: str = typer.Option("latest", "--tag", "-t", help="Docker 镜像标签"),
+    push: bool = typer.Option(False, "--push", "-p", help="是否推送到远程仓库")
 ):
-    """部署到Docker"""
-    console.print(f"[bold blue]Docker部署:[/bold blue] {image_name}:{tag}")
+    """Docker 部署"""
+    console.print(f"[bold blue]Docker 部署:[/bold blue] {target}")
     
+    DeployManager = _get_deploy_manager()
     deploy_manager = DeployManager()
     try:
-        image_id = deploy_manager.deploy_docker(image_name, tag, push)
-        console.print(f"[bold green]✓ Docker部署完成![/bold green]")
-        console.print(f"镜像ID: {image_id}")
+        result = deploy_manager.deploy_docker(target, tag, push)
+        console.print(f"[bold green]✓ Docker 部署完成![/bold green]")
+        if push:
+            console.print(f"镜像已推送: {result.image_url}")
     except Exception as e:
-        console.print(f"[bold red]Docker部署失败:[/bold red] {e}")
+        console.print(f"[bold red]Docker 部署失败:[/bold red] {e}")
+        raise typer.Exit(1)
+
+
+@deploy_app.command("k8s")
+def deploy_kubernetes(
+    target: str = typer.Argument(..., help="部署目标目录"),
+    namespace: str = typer.Option("default", "--namespace", "-n", help="Kubernetes 命名空间"),
+    apply: bool = typer.Option(False, "--apply", "-a", help="是否直接应用到集群")
+):
+    """Kubernetes 部署"""
+    console.print(f"[bold blue]Kubernetes 部署:[/bold blue] {target}")
+    
+    DeployManager = _get_deploy_manager()
+    deploy_manager = DeployManager()
+    try:
+        result = deploy_manager.deploy_kubernetes(target, namespace, apply)
+        console.print(f"[bold green]✓ Kubernetes 部署完成![/bold green]")
+        if apply:
+            console.print(f"应用已部署到命名空间: {namespace}")
+    except Exception as e:
+        console.print(f"[bold red]Kubernetes 部署失败:[/bold red] {e}")
         raise typer.Exit(1)
 
 
 # === 监控相关命令 ===
 @monitor_app.command("start")
 def start_monitor(
-    host: str = typer.Option("localhost", "--host", "-h", help="监控服务器主机"),
-    port: int = typer.Option(8080, "--port", "-p", help="监控服务器端口"),
-    debug: bool = typer.Option(False, "--debug", "-d", help="调试模式")
+    port: int = typer.Option(8080, "--port", "-p", help="监控端口"),
+    host: str = typer.Option("0.0.0.0", "--host", "-h", help="监控地址")
 ):
-    """启动监控面板"""
-    console.print(f"[bold blue]启动监控面板:[/bold blue] {host}:{port}")
+    """启动监控服务"""
+    console.print(f"[bold blue]启动监控服务:[/bold blue] {host}:{port}")
     
+    DebugServer = _get_debug_server()
     debug_server = DebugServer()
     try:
-        debug_server.start_monitoring(host, port, debug)
-        console.print(f"[bold green]✓ 监控面板启动成功![/bold green]")
+        debug_server.start_monitor(host, port)
+        console.print(f"[bold green]✓ 监控服务启动成功![/bold green]")
         console.print(f"访问地址: http://{host}:{port}")
     except Exception as e:
-        console.print(f"[bold red]监控面板启动失败:[/bold red] {e}")
+        console.print(f"[bold red]监控服务启动失败:[/bold red] {e}")
         raise typer.Exit(1)
 
 
-@monitor_app.command("debug")
-def start_debug(
-    host: str = typer.Option("localhost", "--host", "-h", help="调试服务器主机"),
-    port: int = typer.Option(8888, "--port", "-p", help="调试服务器端口")
-):
-    """启动调试服务器"""
-    console.print(f"[bold blue]启动调试服务器:[/bold blue] {host}:{port}")
+@monitor_app.command("status")
+def monitor_status():
+    """查看监控状态"""
+    console.print("[bold blue]监控状态:[/bold blue]")
     
+    DebugServer = _get_debug_server()
     debug_server = DebugServer()
     try:
-        debug_server.start_debug_server(host, port)
-        console.print(f"[bold green]✓ 调试服务器启动成功![/bold green]")
-        console.print(f"调试地址: http://{host}:{port}")
+        status = debug_server.get_status()
+        console.print(f"服务状态: {status.status}")
+        console.print(f"运行时间: {status.uptime}")
+        console.print(f"请求数: {status.requests}")
     except Exception as e:
-        console.print(f"[bold red]调试服务器启动失败:[/bold red] {e}")
+        console.print(f"[bold red]获取状态失败:[/bold red] {e}")
         raise typer.Exit(1)
 
 
@@ -386,6 +417,7 @@ def generate_docs(
     """生成文档"""
     console.print(f"[bold blue]生成文档:[/bold blue] {source} -> {output}")
     
+    DocGenerator = _get_doc_generator()
     doc_generator = DocGenerator()
     try:
         doc_path = doc_generator.generate_docs(source, output, format)
@@ -398,15 +430,17 @@ def generate_docs(
 
 @docs_app.command("serve")
 def serve_docs(
-    docs_path: str = typer.Option("docs", "--path", "-p", help="文档目录"),
-    port: int = typer.Option(8000, "--port", help="服务端口")
+    directory: str = typer.Option("docs", "--dir", "-d", help="文档目录"),
+    port: int = typer.Option(8000, "--port", "-p", help="服务端口"),
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="服务地址")
 ):
     """启动文档服务器"""
-    console.print(f"[bold blue]启动文档服务器:[/bold blue] {docs_path}:{port}")
+    console.print(f"[bold blue]启动文档服务器:[/bold blue] {directory}")
     
+    DocGenerator = _get_doc_generator()
     doc_generator = DocGenerator()
     try:
-        doc_generator.serve_docs(docs_path, port)
+        doc_generator.serve_docs(directory, host, port)
         console.print(f"[bold green]✓ 文档服务器启动成功![/bold green]")
         console.print(f"访问地址: http://localhost:{port}")
     except Exception as e:
