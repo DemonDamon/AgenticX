@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Callable, Any, Optional, Dict
 import inspect
 import asyncio
@@ -12,9 +12,7 @@ class BaseTool(ABC, BaseModel):
     description: str = Field(description="A description of what the tool does.")
     args_schema: Optional[Any] = Field(description="The schema for the tool's arguments (e.g., Pydantic model).", default=None)
 
-    class Config:
-        """Pydantic configuration."""
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @abstractmethod
     def execute(self, **kwargs) -> Any:

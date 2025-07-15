@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator, Generator, Union, Dict, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from .response import LLMResponse
 
@@ -10,8 +10,7 @@ class BaseLLMProvider(ABC, BaseModel):
     """
     model: str = Field(description="The model name to use for the provider.")
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     
     @abstractmethod
     def invoke(self, prompt: str, **kwargs: Any) -> LLMResponse:
