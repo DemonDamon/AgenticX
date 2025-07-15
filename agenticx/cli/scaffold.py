@@ -445,6 +445,7 @@ llm:
   provider: openai
   model: gpt-4o-mini
   api_key: ${OPENAI_API_KEY}
+  base_url: ${OPENAI_API_BASE}  # 支持代理设置
   temperature: 0.7
   max_tokens: 1000
 
@@ -851,7 +852,69 @@ edges:
         return "# 多智能体项目主程序模板"
     
     def _get_multi_agent_config_template(self) -> str:
-        return "# 多智能体项目配置模板"
+        return '''# {{ project_name }} 多智能体配置文件
+
+# LLM配置
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY}
+  base_url: ${OPENAI_API_BASE}  # 支持代理设置
+  temperature: 0.7
+  max_tokens: 2000
+
+# 智能体配置
+agents:
+  - id: coordinator_agent
+    name: 协调器智能体
+    role: 协调器
+    goal: 协调多个智能体完成复杂任务
+    backstory: 我是一个专业的任务协调器
+    tools: []
+  
+  - id: worker_agent_1
+    name: 工作者智能体1
+    role: 专业工作者
+    goal: 执行具体任务
+    backstory: 我是一个专业的任务执行者
+    tools: []
+  
+  - id: worker_agent_2
+    name: 工作者智能体2
+    role: 专业工作者
+    goal: 执行具体任务
+    backstory: 我是一个专业的任务执行者
+    tools: []
+
+# 工作流配置
+workflows:
+  - id: multi_agent_workflow
+    name: 多智能体协作工作流
+    nodes:
+      - id: coordinator
+        type: agent
+        agent_id: coordinator_agent
+      - id: worker1
+        type: agent
+        agent_id: worker_agent_1
+      - id: worker2
+        type: agent
+        agent_id: worker_agent_2
+    edges:
+      - from: coordinator
+        to: worker1
+      - from: coordinator
+        to: worker2
+
+# 监控配置
+monitoring:
+  enabled: true
+  metrics:
+    - execution_time
+    - token_usage
+    - success_rate
+    - agent_performance
+'''
     
     def _get_multi_agent_requirements_template(self) -> str:
         return "# 多智能体项目依赖模板"
@@ -878,7 +941,94 @@ edges:
         return "# 企业级项目主程序模板"
     
     def _get_enterprise_config_template(self) -> str:
-        return "# 企业级项目配置模板"
+        return '''# {{ project_name }} 企业级配置文件
+
+# LLM配置
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY}
+  base_url: ${OPENAI_API_BASE}  # 支持代理设置
+  temperature: 0.7
+  max_tokens: 2000
+
+# 企业级功能配置
+enterprise:
+  authentication:
+    enabled: true
+    type: jwt
+    secret: ${JWT_SECRET}
+  
+  authorization:
+    enabled: true
+    roles:
+      - admin
+      - user
+      - guest
+  
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 100
+  
+  caching:
+    enabled: true
+    type: redis
+    url: ${REDIS_URL}
+
+# 智能体配置
+agents:
+  - id: enterprise_agent
+    name: 企业级智能体
+    role: 企业助手
+    goal: 为企业用户提供专业服务
+    backstory: 我是一个专业的企业级AI助手
+    tools: []
+
+# 工作流配置
+workflows:
+  - id: enterprise_workflow
+    name: 企业级工作流
+    nodes:
+      - id: auth_check
+        type: auth
+      - id: main_agent
+        type: agent
+        agent_id: enterprise_agent
+    edges:
+      - from: auth_check
+        to: main_agent
+
+# 监控配置
+monitoring:
+  enabled: true
+  metrics:
+    - execution_time
+    - token_usage
+    - success_rate
+    - user_satisfaction
+    - error_rate
+  
+  logging:
+    level: INFO
+    format: json
+    destination: file
+    file_path: logs/enterprise.log
+  
+  alerting:
+    enabled: true
+    thresholds:
+      error_rate: 0.05
+      response_time: 5000
+
+# 数据库配置
+database:
+  type: postgresql
+  host: ${DB_HOST}
+  port: ${DB_PORT}
+  name: ${DB_NAME}
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
+'''
     
     def _get_enterprise_requirements_template(self) -> str:
         return "# 企业级项目依赖模板"
