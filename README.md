@@ -4,7 +4,7 @@
 <img src="assets/agenticx-logo.png" alt="AgenticX Logo" width="240" style="margin-bottom:20px;" />
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Documentation](https://img.shields.io/badge/docs-coming_soon-green.svg)](#)
 
 **A unified, scalable, production-ready multi-agent application development framework**
@@ -336,7 +336,7 @@ We welcome community contributions! Please refer to:
 
 ## 📄 License
 
-This project is licensed under the MIT License - see [LICENSE](LICENSE) file for details
+This project is licensed under the Apache License 2.0 - see [LICENSE](LICENSE) file for details
 
 ## ⭐ Star History
 
