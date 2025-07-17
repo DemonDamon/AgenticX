@@ -1,7 +1,7 @@
 """
-AgenticX M6 & M7 综合演示：智能数据处理工作流
+AgenticX M7 & M8 综合演示：智能数据处理工作流
 
-这个演示展示了 M6 任务契约验证和 M7 工作流编排的完整功能：
+这个演示展示了 M7 任务契约验证和 M8 工作流编排的完整功能：
 - 任务输出解析和验证
 - 输出自修复机制
 - 复杂工作流编排
@@ -634,7 +634,7 @@ class DataProcessingWorkflow:
 
 async def main():
     """主函数"""
-    print("🎯 AgenticX M6 & M7 综合演示")
+    print("🎯 AgenticX M7 & M8 综合演示")
     print("数据处理工作流 - 展示任务验证和工作流编排")
     print("=" * 80)
     
@@ -711,8 +711,8 @@ async def main():
         
         print("\n🎉 演示完成！")
         print("\n📋 演示总结:")
-        print("  ✅ M6 任务验证：支持JSON解析、格式修复、Schema验证")
-        print("  ✅ M7 工作流编排：支持顺序执行、并行处理、条件路由")
+        print("  ✅ M7 任务验证：支持JSON解析、格式修复、Schema验证")
+        print("  ✅ M8 工作流编排：支持顺序执行、并行处理、条件路由")
         print("  ✅ 触发器服务：支持定时触发和事件驱动")
         print("  ✅ 错误处理：自动修复和优雅降级")
         print("  ✅ 可观测性：完整的事件日志和执行统计")

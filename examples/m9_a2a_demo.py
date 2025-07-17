@@ -1,8 +1,8 @@
 """
-M8 A2A Protocol Demo
+M9 A2A Protocol Demo
 
 This example demonstrates the Agent-to-Agent (A2A) protocol implementation
-from the M8 module, showing how agents can discover and collaborate with
+from the M9 module, showing how agents can discover and collaborate with
 each other through standardized communication.
 
 The demo creates two agents:
@@ -216,7 +216,7 @@ class CoordinatorAgent:
 
 async def run_demo():
     """Run the complete A2A protocol demo."""
-    logger.info("=== M8 A2A Protocol Demo ===")
+    logger.info("=== M9 A2A Protocol Demo ===")
     
     # Create calculator agent
     calculator_agent = CalculatorAgent()
