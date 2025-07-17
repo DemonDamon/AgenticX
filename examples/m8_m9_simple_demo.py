@@ -1,9 +1,9 @@
 """
-AgenticX M6 & M7 简化演示：任务验证 + 工作流编排
+AgenticX M8 & M9 简化演示：任务验证 + 工作流编排
 
-这个演示展示了 M6 和 M7 的核心功能：
-1. M6 任务输出解析和验证
-2. M7 工作流编排和条件路由
+这个演示展示了 M8 和 M9 的核心功能：
+1. M8 任务输出解析和验证
+2. M9 工作流编排和条件路由
 3. 事件驱动的触发器
 
 使用简单的计算任务来展示工作流的执行过程。
@@ -236,7 +236,7 @@ class SimpleWorkflowDemo:
     
     def demonstrate_task_validation(self):
         """演示任务验证功能"""
-        print("🔍 M6 任务验证演示")
+        print("🔍 M8 任务验证演示")
         print("=" * 50)
         
         # 测试正确的输出
@@ -265,7 +265,7 @@ class SimpleWorkflowDemo:
     
     async def run_sequential_workflow(self):
         """运行顺序工作流"""
-        print("🚀 M7 顺序工作流演示")
+        print("🚀 M9 顺序工作流演示")
         print("=" * 50)
         
         graph = self.create_sequential_workflow()
@@ -295,7 +295,7 @@ class SimpleWorkflowDemo:
     
     async def run_conditional_workflow(self):
         """运行条件工作流"""
-        print("🔀 M7 条件路由工作流演示")
+        print("🔀 M9 条件路由工作流演示")
         print("=" * 50)
         
         graph = self.create_conditional_workflow()
@@ -323,7 +323,7 @@ class SimpleWorkflowDemo:
 
 async def main():
     """主函数"""
-    print("🎯 AgenticX M6 & M7 简化演示")
+    print("🎯 AgenticX M8 & M9 简化演示")
     print("任务验证 + 工作流编排核心功能展示")
     print("=" * 60)
     
@@ -350,8 +350,8 @@ async def main():
         
         print("\n🎉 演示完成！")
         print("\n📋 功能总结:")
-        print("  ✅ M6 任务验证：JSON解析、格式修复、Schema验证")
-        print("  ✅ M7 工作流编排：顺序执行、并行处理、条件路由")
+        print("  ✅ M8 任务验证：JSON解析、格式修复、Schema验证")
+        print("  ✅ M9 工作流编排：顺序执行、并行处理、条件路由")
         print("  ✅ 变量解析：节点间数据传递")
         print("  ✅ 错误处理：优雅降级和恢复")
         

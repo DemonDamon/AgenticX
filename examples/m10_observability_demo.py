@@ -1,7 +1,7 @@
 """
-AgenticX M9 可观测性模块演示
+AgenticX M10 可观测性模块演示
 
-这个示例展示了M9可观测性模块的各种功能，包括：
+这个示例展示了M10可观测性模块的各种功能，包括：
 1. 回调系统使用
 2. 日志记录
 3. 轨迹收集和分析
@@ -22,7 +22,7 @@ import math
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 
-# 导入M9模块
+# 导入M10模块
 from agenticx.observability import (
     CallbackManager, LoggingCallbackHandler, TrajectoryCollector,
     MonitoringCallbackHandler, TrajectorySummarizer, FailureAnalyzer,
@@ -536,7 +536,7 @@ class ObservabilityDemo:
         
     def run_demo(self):
         """运行完整演示"""
-        print("🎉 开始AgenticX M9可观测性模块演示")
+        print("🎉 开始AgenticX M10可观测性模块演示")
         print("=" * 60)
         
         # 1. 运行任务批次
