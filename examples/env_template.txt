@@ -1,0 +1,35 @@
+# --- DeepSeek ---
+DEEPSEEK_API_KEY=sk-1118a1d3fc9f40dd9a01282baec3714b
+DEEPSEEK_API_BASE=https://api.deepseek.com
+
+# --- OpenAI ---
+OPENAI_API_KEY=sk-jQ0b8347cc1b8d06395eeefe1461da93c99050f9ac8PZmEd
+OPENAI_API_BASE=https://api.gptsapi.net/v1
+
+# --- Anthropic ---
+ANTHROPIC_API_KEY=
+ANTHROPIC_API_BASE=
+
+# --- Google Gemini ---
+GOOGLE_API_KEY=
+GOOGLE_API_BASE=
+
+# --- SiliconFlow Embedding ---
+SILICONFLOW_API_KEY=your_siliconflow_api_key_here
+SILICONFLOW_API_BASE=https://api.siliconflow.cn/v1/embeddings
+SILICONFLOW_DEFAULT_MODEL=BAAI/bge-large-zh-v1.5
+
+# --- Bailian Embedding ---
+BAILIAN_API_KEY=your_bailian_api_key_here
+BAILIAN_API_BASE=https://api.bailian.aliyun.com/v1/embeddings
+BAILIAN_DEFAULT_MODEL=bge-large-zh-v1.5
+
+# --- 其他 LLM 提供商 ---
+# AZURE_API_KEY=
+# AZURE_API_BASE=
+
+# COHERE_API_KEY=
+# COHERE_API_BASE=
+
+# HUGGINGFACE_API_KEY=
+# HUGGINGFACE_API_BASE= 
