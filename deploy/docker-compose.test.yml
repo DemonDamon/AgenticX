@@ -1,0 +1,147 @@
+version: '3.8'
+
+services:
+  # ========== 核心数据库服务 (测试用) ==========
+  
+  # PostgreSQL - 关系型数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: agenticx-postgres-test
+    environment:
+      POSTGRES_DB: agenticx
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis - 缓存数据库
+  redis:
+    image: redis:7.2-alpine
+    container_name: agenticx-redis-test
+    command: redis-server --requirepass password
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MongoDB - 文档数据库
+  mongodb:
+    image: mongo:7.0
+    container_name: agenticx-mongodb-test
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: agenticx
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./data/mongodb:/data/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Milvus - 向量数据库 (简化版)
+  milvus:
+    image: milvusdb/milvus:v2.3.3
+    container_name: agenticx-milvus-test
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - ./data/milvus:/var/lib/milvus
+    depends_on:
+      - etcd
+      - minio
+    restart: unless-stopped
+
+  # Qdrant - 向量搜索引擎
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: agenticx-qdrant-test
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    restart: unless-stopped
+
+  # Neo4j - 图数据库
+  neo4j:
+    image: neo4j:5.15.0
+    container_name: agenticx-neo4j-test
+    environment:
+      NEO4J_AUTH: neo4j/password
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - ./data/neo4j:/data
+    restart: unless-stopped
+
+  # MinIO - S3兼容对象存储
+  minio:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    container_name: agenticx-minio-test
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./data/minio:/data
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+
+  # etcd - 分布式键值存储 (Milvus依赖)
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: agenticx-etcd-test
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    volumes:
+      - ./data/etcd:/etcd
+    command: etcd -advertise-client-urls http://0.0.0.0:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  mongodb_data:
+  milvus_data:
+  qdrant_data:
+  neo4j_data:
+  minio_data:
+  etcd_data:
+
+networks:
+  default:
+    name: agenticx-test-network
+    driver: bridge 
