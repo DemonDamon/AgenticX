@@ -13,4 +13,8 @@ class BaseEmbeddingProvider(ABC):
     @abstractmethod
     def embed(self, texts: List[str], **kwargs) -> List[List[float]]:
         """将文本列表转为向量列表"""
-        pass 
+        pass
+    
+    async def aembed(self, texts: List[str], **kwargs) -> List[List[float]]:
+        """异步将文本列表转为向量列表"""
+        return self.embed(texts, **kwargs) 
