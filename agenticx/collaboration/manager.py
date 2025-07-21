@@ -14,7 +14,7 @@ from .base import BaseCollaborationPattern, CollaborationResult, CollaborationSt
 from .config import CollaborationConfig, CollaborationManagerConfig
 from .enums import CollaborationMode, CollaborationStatus
 from .patterns import (
-    MasterSlavePattern, ReflectionPattern
+    MasterSlavePattern, ReflectionPattern, DebatePattern, GroupChatPattern, ParallelPattern, NestedPattern, DynamicPattern, AsyncPattern
     # 其他模式将在后续版本中实现
     # DebatePattern, GroupChatPattern, ParallelPattern,
     # NestedPattern, DynamicPattern, AsyncPattern
@@ -80,16 +80,16 @@ class CollaborationManager:
         **kwargs
     ) -> BaseCollaborationPattern:
         """创建模式实例"""
+        # 模式类映射
         pattern_classes = {
             CollaborationMode.MASTER_SLAVE: MasterSlavePattern,
             CollaborationMode.REFLECTION: ReflectionPattern,
-            # 其他模式将在后续版本中实现
-            # CollaborationMode.DEBATE: DebatePattern,
-            # CollaborationMode.GROUP_CHAT: GroupChatPattern,
-            # CollaborationMode.PARALLEL: ParallelPattern,
-            # CollaborationMode.NESTED: NestedPattern,
-            # CollaborationMode.DYNAMIC: DynamicPattern,
-            # CollaborationMode.ASYNC: AsyncPattern,
+            CollaborationMode.DEBATE: DebatePattern,
+            CollaborationMode.GROUP_CHAT: GroupChatPattern,
+            CollaborationMode.PARALLEL: ParallelPattern,
+            CollaborationMode.NESTED: NestedPattern,
+            CollaborationMode.DYNAMIC: DynamicPattern,
+            CollaborationMode.ASYNC: AsyncPattern,
         }
         
         pattern_class = pattern_classes.get(pattern)

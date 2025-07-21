@@ -17,16 +17,17 @@ AgenticX M8.5: 多智能体协作框架模块 (Multi-Agent Collaboration Framewo
 from .enums import CollaborationMode, ConflictResolutionStrategy, RepairStrategy
 from .config import CollaborationConfig, CollaborationManagerConfig, CollaborationMemoryConfig
 from .base import BaseCollaborationPattern, CollaborationResult, CollaborationState
+# 协作模式
 from .patterns import (
+    BaseCollaborationPattern,
     MasterSlavePattern,
-    ReflectionPattern
-    # 其他模式将在后续版本中实现
-    # DebatePattern,
-    # GroupChatPattern,
-    # ParallelPattern,
-    # NestedPattern,
-    # DynamicPattern,
-    # AsyncPattern
+    ReflectionPattern,
+    DebatePattern,
+    GroupChatPattern,
+    ParallelPattern,
+    NestedPattern,
+    DynamicPattern,
+    AsyncPattern,
 )
 from .manager import CollaborationManager
 from .memory import CollaborationMemory, CollaborationEvent
