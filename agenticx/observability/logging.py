@@ -21,6 +21,70 @@ from ..core.workflow import Workflow
 from ..llms.response import LLMResponse
 
 
+def get_logger(name=None):
+    """
+    获取日志记录器
+    
+    Args:
+        name: 日志记录器名称
+        
+    Returns:
+        logging.Logger: 配置好的日志记录器
+    """
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        formatter = ColoredFormatter()
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    return logger
+
+
+class ColoredFormatter(logging.Formatter):
+    """彩色日志格式化器"""
+
+    COLORS = {
+        'DEBUG': '\033[36m',      # 青色
+        'INFO': '\033[32m',       # 绿色
+        'WARNING': '\033[33m',    # 黄色
+        'ERROR': '\033[31m',      # 红色
+        'CRITICAL': '\033[35m',   # 紫色
+        'RESET': '\033[0m',       # 重置
+        'TIMESTAMP': '\033[36m',  # 青色
+        'MODULE': '\033[35m',     # 粉色
+        'MESSAGE': '\033[37m',    # 白色
+    }
+
+    def __init__(self):
+        super().__init__(
+            fmt='[%(asctime)s][%(levelname)s][%(name)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+
+    def format(self, record):
+        original = super().format(record)
+        # 添加颜色
+        colored = original.replace(
+            '[', f'{self.COLORS["TIMESTAMP"]}['
+        ).replace(
+            ']', f']{self.COLORS["RESET"]}'
+        )
+        # 为不同级别添加颜色
+        level_color = self.COLORS.get(record.levelname, self.COLORS['INFO'])
+        colored = colored.replace(
+            f'[{record.levelname}]', 
+            f'{level_color}[{record.levelname}]{self.COLORS["RESET"]}'
+        )
+        # 为模块名添加颜色
+        if record.name:
+            colored = colored.replace(
+                f'[{record.name}]', 
+                f'{self.COLORS["MODULE"]}[{record.name}]{self.COLORS["RESET"]}'
+            )
+        return colored
+
+
 class LogLevel(Enum):
     """日志级别"""
     DEBUG = "DEBUG"
