@@ -275,14 +275,15 @@ class AgentExecutor:
         # Call LLM
         llm_call_event = LLMCallEvent(
             prompt=prompt,
-            model=self.llm_provider.model,
+            model=getattr(self.llm_provider, 'model', 'unknown'),
             agent_id=agent.id,
             task_id=task.id
         )
         event_log.append(llm_call_event)
-        
-        response = self.llm_provider.invoke(prompt)
-        
+
+        # 始终用self.llm_provider调用LLM，不用agent.model
+        response = self.llm_provider.invoke([{"role": "user", "content": prompt}])
+
         # Handle token usage safely
         token_usage = None
         if response.token_usage:
@@ -299,7 +300,7 @@ class AgentExecutor:
             task_id=task.id
         )
         event_log.append(llm_response_event)
-        
+
         # Parse action
         action = self.action_parser.parse_action(response.content)
         
