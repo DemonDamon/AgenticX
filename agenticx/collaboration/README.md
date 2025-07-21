@@ -574,30 +574,5 @@ pattern_classes = {
 
 ## 📚 参考资料
 
-- [AgenticX 项目主页](https://github.com/agenticx/agenticx)
-- [MAS 理论介绍](https://en.wikipedia.org/wiki/Multi-agent_system)
-- [协作模式设计模式](https://en.wikipedia.org/wiki/Design_pattern)
-
-## 🤝 贡献指南
-
-欢迎贡献代码和想法！请遵循以下步骤：
-
-1. Fork 项目
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 打开 Pull Request
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
-## 📞 联系方式
-
-- 项目主页: [https://github.com/agenticx/agenticx](https://github.com/agenticx/agenticx)
-- 问题反馈: [Issues](https://github.com/agenticx/agenticx/issues)
-- 讨论区: [Discussions](https://github.com/agenticx/agenticx/discussions)
-
----
-
-**AgenticX M8.5 多智能体协作框架** - 让AI协作更简单、更高效！🚀
+- [AgenticX项目主页](https://github.com/DemonDamon/AgenticX)
+- [多Agent协作模式](https://arxiv.org/abs/2501.06322)
