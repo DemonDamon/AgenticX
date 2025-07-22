@@ -7,6 +7,7 @@ This module provides a unified interface for interacting with various Large Lang
 from .base import BaseLLMProvider
 from .response import LLMResponse, LLMChoice, TokenUsage
 from .litellm_provider import LiteLLMProvider
+from .kimi_provider import KimiProvider
 
 # Convenience re-exports for specific models, all using LiteLLMProvider
 # This makes it easy to instantiate a specific provider type.
@@ -27,6 +28,11 @@ class GeminiProvider(LiteLLMProvider):
     """Provider for Google Gemini models, e.g., 'gemini/gemini-pro'."""
     pass
 
+# Dedicated provider for Kimi (Moonshot AI)
+class MoonshotProvider(KimiProvider):
+    """Provider for Moonshot AI Kimi models, e.g., 'kimi-k2-0711-preview'."""
+    pass
+
 
 __all__ = [
     # Base classes and data structures
@@ -35,12 +41,14 @@ __all__ = [
     "LLMChoice",
     "TokenUsage",
     
-    # Concrete provider implementation
+    # Concrete provider implementations
     "LiteLLMProvider",
+    "KimiProvider",
     
     # Convenience classes
     "OpenAIProvider",
     "AnthropicProvider",
     "OllamaProvider",
     "GeminiProvider",
-] 
+    "MoonshotProvider",
+]
