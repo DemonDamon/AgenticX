@@ -14,6 +14,11 @@ ANTHROPIC_API_BASE=
 GOOGLE_API_KEY=
 GOOGLE_API_BASE=
 
+# --- Kimi (Moonshot AI) ---
+KIMI_API_KEY=your_kimi_api_key_here
+KIMI_API_BASE=https://api.moonshot.cn/v1
+KIMI_MODEL_NAME=kimi-k2-0711-preview
+
 # --- SiliconFlow Embedding ---
 SILICONFLOW_API_KEY=your_siliconflow_api_key_here
 SILICONFLOW_API_BASE=https://api.siliconflow.cn/v1/embeddings
@@ -32,4 +37,4 @@ BAILIAN_DEFAULT_MODEL=bge-large-zh-v1.5
 # COHERE_API_BASE=
 
 # HUGGINGFACE_API_KEY=
-# HUGGINGFACE_API_BASE= 
+# HUGGINGFACE_API_BASE=
