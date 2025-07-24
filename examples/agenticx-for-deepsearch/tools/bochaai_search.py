@@ -199,13 +199,14 @@ class BochaaIWebSearchTool(BaseTool):
             # If no 'data' field found, handle silently
             
             # Print title of each web page in search results
-            print(f"    ✦ search query: \033[34m{query}\033[0m")
+            # print(f"    ✦ search query: \033[36m{query}\033[0m")
             if results:
+                print(f"  |")
                 for i, result in enumerate(results, 1):
                     if result.get('type') != 'image':  # Only print web page results, not image results
                         title = result.get('title', 'No Title')
-                        print(f"    | \033[2m{title}\033[0m")
-                # print(f"    ⎿ search completed ✅")
+                        print(f"  | \033[2m{title}\033[0m")
+                print(f"  |")
 
             return results
             
@@ -217,19 +218,19 @@ class BochaaIWebSearchTool(BaseTool):
                 error_msg += "\nRequests too frequent, please try again later"
             elif e.code == 403:
                 error_msg += "\nAccess denied, please check API key permissions"
-            print(f"❌ {error_msg}")
+            print(f"  | \033[2m{error_msg}\033[0m")
             return []
             
         except urllib.error.URLError as e:
-            print(f"      ❌ Network connection error: {e.reason}")
+            print(f"  | \033[2mNetwork connection error: {e.reason}\033[0m")
             return []
             
         except json.JSONDecodeError as e:
-            print(f"❌ JSON parsing error: {e}")
+            print(f"  | \033[2mJSON parsing error: {e}\033[0m")
             return []
             
         except Exception as e:
-            print(f"❌ BochaAI search failed: {e}")
+            print(f"  | \033[2mBochaAI search failed: {e}\033[0m")
             return []
     
     async def _arun(self, query: str, freshness: str = "noLimit", summary: bool = False,
