@@ -77,6 +77,22 @@ class NodeExecution:
     retry_count: int = 0
 
 
+@dataclass
+class WorkflowResult:
+    """工作流执行结果"""
+    execution_id: str
+    workflow_id: str
+    status: WorkflowStatus
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    result: Any = None
+    error: Optional[str] = None
+    node_results: Dict[str, Any] = field(default_factory=dict)
+    variables: Dict[str, Any] = field(default_factory=dict)
+    event_log: Optional[EventLog] = None
+    execution_time: Optional[float] = None
+
+
 class WorkflowGraph:
     """
     工作流图定义
@@ -908,4 +924,4 @@ __all__ = [
     'NodeExecution',
     'WorkflowStatus',
     'NodeStatus'
-] 
+]

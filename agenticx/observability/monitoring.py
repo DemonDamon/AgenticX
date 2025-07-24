@@ -573,12 +573,13 @@ class MonitoringCallbackHandler(BaseCallbackHandler):
             )
             
             # 成本
-            self.metrics_collector.performance_metrics.llm_cost_total += response.cost
-            self.metrics_collector.add_metric(
-                "llm_cost",
-                response.cost,
-                labels={"model": response.model_name}
-            )
+            if response.cost is not None:
+                self.metrics_collector.performance_metrics.llm_cost_total += response.cost
+                self.metrics_collector.add_metric(
+                    "llm_cost",
+                    response.cost,
+                    labels={"model": response.model_name}
+                )
             
             # 更新平均执行时间
             total_calls = self.metrics_collector.performance_metrics.llm_call_count
@@ -642,4 +643,4 @@ class MonitoringCallbackHandler(BaseCallbackHandler):
     
     def __del__(self):
         """析构函数，停止系统指标收集"""
-        self._stop_system_metrics_collection() 
+        self._stop_system_metrics_collection()

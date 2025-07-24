@@ -22,7 +22,7 @@ AgenticX是一个完整的多智能体应用开发框架，提供从核心抽象
 """
 
 # 版本信息
-__version__ = "0.1.5"
+__version__ = "0.1.7"
 __author__ = "AgenticX Team"
 __email__ = "team@agenticx.ai"
 
@@ -57,7 +57,8 @@ from .core import (
 # LLM模块导出
 from .llms import (
     BaseLLMProvider, LLMResponse, LiteLLMProvider,
-    OpenAIProvider, AnthropicProvider, OllamaProvider
+    OpenAIProvider, AnthropicProvider, OllamaProvider,
+    KimiProvider, MoonshotProvider
 )
 
 # 工具模块导出
@@ -156,6 +157,7 @@ __all__ = [
     # LLM相关
     "BaseLLMProvider", "LLMResponse", "LiteLLMProvider", "LLM",
     "OpenAIProvider", "AnthropicProvider", "OllamaProvider",
+    "KimiProvider", "MoonshotProvider",
     
     # 工具相关
     "BaseTool", "FunctionTool", "tool", "ToolExecutor", 
@@ -181,4 +183,4 @@ __all__ = [
     "MetricsCalculator", "BenchmarkRunner", "AutoEvaluator",
     "WebSocketCallbackHandler", "EventStream", "RealtimeMonitor",
     "EventProcessor", "TimeSeriesData", "StatisticsCalculator", "DataExporter"
-] 
+]

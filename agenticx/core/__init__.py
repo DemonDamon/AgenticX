@@ -4,7 +4,7 @@ AgenticX Core Module
 This module contains the core abstractions and data structures for the AgenticX framework.
 """
 
-from .agent import Agent
+from .agent import Agent, AgentContext, AgentResult
 from .task import Task
 from .tool import BaseTool, FunctionTool, tool
 from .workflow import Workflow, WorkflowNode, WorkflowEdge
@@ -35,12 +35,18 @@ from .task_validator import (
 from .workflow_engine import (
     WorkflowEngine, WorkflowGraph, TriggerService,
     ScheduledTrigger, EventDrivenTrigger,
-    ExecutionContext, NodeExecution, WorkflowStatus, NodeStatus
+    ExecutionContext, NodeExecution, WorkflowStatus, NodeStatus,
+    WorkflowResult
 )
+
+# 为了向后兼容，添加 WorkflowContext 别名
+WorkflowContext = ExecutionContext
 
 __all__ = [
     # Core abstractions
     "Agent",
+    "AgentContext",
+    "AgentResult",
     "Task", 
     "BaseTool",
     "FunctionTool",
@@ -104,7 +110,9 @@ __all__ = [
     "ScheduledTrigger",
     "EventDrivenTrigger",
     "ExecutionContext",
+    "WorkflowContext",  # 别名
+    "WorkflowResult",
     "NodeExecution",
     "WorkflowStatus",
     "NodeStatus"
-] 
+]

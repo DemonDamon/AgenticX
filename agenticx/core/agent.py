@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import uuid
+from datetime import datetime
 
 class Agent(BaseModel):
     """
@@ -41,3 +42,29 @@ class Agent(BaseModel):
                 "confidence": 0.8
             }
         }
+
+
+class AgentContext(BaseModel):
+    """Agent execution context"""
+    agent_id: str = Field(description="Agent identifier")
+    task_id: Optional[str] = Field(default=None, description="Current task identifier")
+    session_id: Optional[str] = Field(default=None, description="Session identifier")
+    variables: Dict[str, Any] = Field(default_factory=dict, description="Context variables")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Context creation time")
+    
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class AgentResult(BaseModel):
+    """Agent execution result"""
+    agent_id: str = Field(description="Agent identifier")
+    task_id: Optional[str] = Field(default=None, description="Task identifier")
+    success: bool = Field(description="Whether the execution was successful")
+    output: Any = Field(default=None, description="Execution output")
+    error: Optional[str] = Field(default=None, description="Error message if failed")
+    execution_time: Optional[float] = Field(default=None, description="Execution time in seconds")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Result creation time")
+    
+    model_config = ConfigDict(arbitrary_types_allowed=True)
