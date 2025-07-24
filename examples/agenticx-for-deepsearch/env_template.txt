@@ -1,1 +1,42 @@
- 
+# --- DeepSeek ---
+DEEPSEEK_API_KEY=
+DEEPSEEK_API_BASE=https://api.deepseek.com
+
+# --- OpenAI ---
+OPENAI_API_KEY=
+OPENAI_API_BASE=
+
+# --- Anthropic ---
+ANTHROPIC_API_KEY=
+ANTHROPIC_API_BASE=
+
+# --- Google Gemini ---
+GOOGLE_API_KEY=
+GOOGLE_API_BASE=
+
+# --- Kimi (Moonshot AI) ---
+KIMI_API_KEY=
+KIMI_API_BASE=https://api.moonshot.cn/v1
+KIMI_MODEL_NAME=kimi-k2-0711-preview
+
+# --- SiliconFlow Embedding ---
+SILICONFLOW_API_KEY=
+SILICONFLOW_API_BASE=https://api.siliconflow.cn/v1/embeddings
+SILICONFLOW_DEFAULT_MODEL=BAAI/bge-large-zh-v1.5
+
+# --- Bailian Embedding ---
+BAILIAN_API_KEY=
+BAILIAN_API_BASE=https://api.bailian.aliyun.com/v1/embeddings
+BAILIAN_DEFAULT_MODEL=bge-large-zh-v1.5
+
+# --- 其他 LLM 提供商 ---
+# AZURE_API_KEY=
+# AZURE_API_BASE=
+
+# COHERE_API_KEY=
+# COHERE_API_BASE=
+
+# HUGGINGFACE_API_KEY=
+# HUGGINGFACE_API_BASE=
+
+BOCHAAI_API_KEY=
