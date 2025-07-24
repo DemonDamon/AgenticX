@@ -87,7 +87,7 @@ class TestAgentFunctionality:
         agent = ResearchSummarizerAgent()
         
         # 测试搜索和总结提示词
-        search_prompt = agent.create_search_and_summarize_prompt("AI技术", "人工智能研究")
+        search_prompt = agent.create_search_and_summarize_prompt("人工智能研究", "AI技术")
         assert "AI技术" in search_prompt
         assert "人工智能研究" in search_prompt
         assert "google_search_tool" in search_prompt
