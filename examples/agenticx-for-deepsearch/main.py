@@ -678,7 +678,8 @@ def interactive_mode(config: Dict[str, Any]):
                 from InquirerPy import inquirer
                 user_input = inquirer.text(
                     message="\n● Type your research topic:",
-                    qmark=""  # 去掉默认的问号
+                    qmark="",
+                    amark=""
                 ).execute()
 
                 # 清除可能的残留输出和多余的问号

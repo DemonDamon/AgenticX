@@ -39,6 +39,7 @@ search:
 deep_search:
   max_research_loops: 1  # 最大研究迭代次数
   max_search_results: 2  # 每次搜索的最大结果数
+  max_generated_search_query_per_research_loop: 1  # 每次研究循环生成的最大查询数
   quality_threshold: 0.8  # 质量阈值
   convergence_threshold: 0.95  # 收敛阈值
   content_analysis_depth: "detailed"  # 内容分析深度: basic, detailed, comprehensive
