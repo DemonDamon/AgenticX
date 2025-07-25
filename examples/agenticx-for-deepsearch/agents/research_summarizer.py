@@ -156,6 +156,7 @@ Please return the analysis results in JSON format:
             str: Formatted prompt
         """
         combined_summaries = "\n\n---\n\n".join(all_summaries)
+        citations_text = "\n".join([f"- {citation}" for citation in citations])
         
         # Detect language and generate appropriate prompt
         detected_language = self._detect_language(research_topic)
