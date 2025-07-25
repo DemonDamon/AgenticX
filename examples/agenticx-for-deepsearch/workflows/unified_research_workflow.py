@@ -1744,7 +1744,8 @@ Return only JSON, no other explanations.
         try:
             # Build search results summary for analysis
             results_summary = ""
-            for i, result in enumerate(search_results[:3], 1):  # Analyze top 3 results
+            for i, result in enumerate(search_results, 1):
+                # for i, result in enumerate(search_results[:3], 1):  # Analyze top 3 results
                 title = result.get('title', 'No title')
                 content = result.get('content', '') or result.get('summary', '')
                 url = result.get('url', '')
