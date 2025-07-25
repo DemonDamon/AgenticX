@@ -32,14 +32,14 @@ except ImportError:
     Panel = None
     boxen = None
 
-# 添加项目根目录到 Python 路径
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-sys.path.append(str(Path(__file__).parent))
+# # 添加项目根目录到 Python 路径
+# project_root = Path(__file__).parent.parent.parent
+# sys.path.insert(0, str(project_root))
+# sys.path.append(str(Path(__file__).parent))
 
-# 确保能找到agenticx模块
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
+# # 确保能找到agenticx模块
+# if str(project_root) not in sys.path:
+#     sys.path.insert(0, str(project_root))
 
 # 加载环境变量
 try:
@@ -303,6 +303,13 @@ def select_workflow_mode() -> str:
             amark="",
             pointer="  >"
         ).execute()
+        
+        # 清除可能的残留输出和多余的问号
+        sys.stdout.write('\r')
+        sys.stdout.flush()
+        # 清除当前行的内容
+        sys.stdout.write('\033[K')
+        sys.stdout.flush()
 
         return mode
         
@@ -477,7 +484,7 @@ def run_deep_search(topic: str, config: Dict[str, Any], workflow_mode: str = 'ba
         #     print("\n┌─────────────────────────────────────────────────────────────┐")
         #     print("│ Deep Search Completed                                       │")
         #     print("└─────────────────────────────────────────────────────────────┘")
-        print(f"\n● Deep Search Completed Successfully! 🎉")
+        print(f"● Deep Search Completed Successfully! 🎉")
 
         # 显示最终研究报告
         if isinstance(result, dict) and 'final_report' in result:
@@ -673,6 +680,14 @@ def interactive_mode(config: Dict[str, Any]):
                     message="\n● Type your research topic:",
                     qmark=""  # 去掉默认的问号
                 ).execute()
+
+                # 清除可能的残留输出和多余的问号
+                sys.stdout.write('\r')
+                sys.stdout.flush()
+                # 清除当前行的内容
+                sys.stdout.write('\033[K')
+                sys.stdout.flush()
+            
             except ImportError:
                 # 回退到传统输入
                 if console and Panel:
