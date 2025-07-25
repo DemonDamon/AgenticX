@@ -172,9 +172,9 @@ def print_welcome():
         api_key = os.getenv('KIMI_API_KEY', 'sk-***')
         api_key_display = f"{api_key[:8]}..." if len(api_key) > 8 else api_key
         
-        console.print("● Quick Commands:", style="bold #FF6B35")
-        console.print("  ⎿  /help for help, /clear to clear", style="dim")
-        console.print("  ⎿  /exit to quit, /mode to select mode\n", style="dim")
+        # console.print("● Quick Commands:", style="bold #FF6B35")
+        # console.print("  ⎿  /help for help, /clear to clear", style="dim")
+        # console.print("  ⎿  /exit to quit, /mode to select mode\n", style="dim")
         
         console.print("● Environment Configuration:", style="bold #FF6B35")
         console.print(f"  ⎿  API Key: {api_key_display}", style="dim")

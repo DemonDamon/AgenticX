@@ -15,6 +15,8 @@ import yaml
 import os
 import time
 import logging
+import itertools
+import sys
 import threading
 import asyncio
 from typing import List, Dict, Any, Optional, Union
@@ -80,6 +82,7 @@ class UnifiedResearchWorkflow:
         self.organization_id = organization_id
         self.config_path = config_path
         self.clarification_mode = clarification_mode  # "one_shot" or "progressive"
+        self.language = "en"  # Default language
         self.kwargs = kwargs
         
         # Initialize monitoring metrics
@@ -254,6 +257,9 @@ class UnifiedResearchWorkflow:
         start_time = time.time()
         
         try:
+            # Detect language and set it for the current execution
+            self.language = self._detect_language(research_topic)
+
             # Initialize research context
             self.research_context["topic"] = research_topic
             self.research_context["objective"] = research_objective
@@ -299,8 +305,21 @@ class UnifiedResearchWorkflow:
             # Show thinking process: analyze current research status
             print(f"\n● Round {iteration + 1}/{self.max_research_loops}")
             
-            # Generate search queries
-            queries = self._generate_search_queries(research_topic, self.research_context)
+            # Generate search queries with loading animation
+            max_queries = self.config.get('deep_search', {}).get('max_generated_search_query_per_research_loop', 5)
+            done_generating = threading.Event()
+            spinner_generating = threading.Thread(target=self._spinner, args=(done_generating, f"  ✦ Generating {max_queries} search query ..."))
+            spinner_generating.start()
+            try:
+                queries = self._generate_search_queries(research_topic, self.research_context)
+            finally:
+                done_generating.set()
+                spinner_generating.join()
+            print(f"  ✦ Finished generating {max_queries} search query")
+
+            if isinstance(queries, list):
+                for query in queries:
+                    print(f"  | \033[2m{query}\033[0m")
             
             # Execute search and summarization
             search_results = self._search_and_summarize(queries, self.research_context)
@@ -318,11 +337,19 @@ class UnifiedResearchWorkflow:
             
             # Check if research should continue
             if not self._should_continue_research(self.research_context):
-                print(f"● Research completed in {iteration + 1} rounds, now preparing final report, please wait...")
+                print(f"● Searching Loop completed in {iteration + 1} rounds\n")
                 break
         
-        # Generate final report
-        final_report = self._generate_final_report(self.research_context)
+        # Generate final report with loading animation
+        done = threading.Event()
+        spinner = threading.Thread(target=self._spinner, args=(done, "● Preparing final report, it will takes a few minutes ..."))
+        spinner.start()
+        
+        try:
+            final_report = self._generate_final_report(self.research_context)
+        finally:
+            done.set()
+            spinner.join()
         
         return {
             "success": True,
@@ -331,11 +358,22 @@ class UnifiedResearchWorkflow:
             "research_context": self.research_context
         }
     
+    def _spinner(self, done: threading.Event, message: str = "Loading..."):
+        """Display a spinner animation."""
+        for char in itertools.cycle(['|', '/', '-', '\\']):
+            if done.is_set():
+                break
+            sys.stdout.write(f'\r{message} {char}')
+            sys.stdout.flush()
+            time.sleep(0.1)
+        sys.stdout.write('\r' + ' ' * (len(message) + 2) + '\r')  # Clear the line
+        sys.stdout.flush()
+
     def _execute_interactive_mode(self, research_topic: str, research_objective: str) -> Dict[str, Any]:
         """Execute interactive research mode"""
         try:
             # Phase 1: Initial search and understanding
-            print(f"\n● Phase 1: Initial search and understanding")
+            print(f"\n● Initial search and understanding")
             initial_queries = self._generate_search_queries(research_topic, self.research_context)
             initial_search_results = self._search_and_summarize(initial_queries, self.research_context)
             
@@ -350,11 +388,33 @@ class UnifiedResearchWorkflow:
                 results_list = []
             
             # Phase 2: Reflection based on initial search results
-            print(f"\n● Phase 2: Reflection and analysis")
-            reflection_result = self._perform_reflection_analysis(research_topic, results_list)
+            print(f"● Reflection and analysis")
+            done_analyzing = threading.Event()
+            spinner_analyzing = threading.Thread(target=self._spinner, args=(done_analyzing, "  ✦ Analyzing initial search results ..."))
+            spinner_analyzing.start()
+            try:
+                reflection_result = self._perform_reflection_analysis(research_topic, results_list)
+            finally:
+                done_analyzing.set()
+                spinner_analyzing.join()
+
+            print("\r  ✦ Finished analyzing initial search results")
+            if isinstance(reflection_result, dict):
+                for key, value in reflection_result.items():
+                    print(f"     ✦ {key.replace('_', ' ').title()}")
+                    if isinstance(value, list):
+                        for _ in value:
+                            print(f"     | \033[2m{_}\033[0m")
+                    else:
+                        print(f"     | \033[2m{value}\033[0m")
+            elif isinstance(reflection_result, list):
+                for item in reflection_result:
+                    print(f"     | {item}")
+            else:
+                print(f"     | {reflection_result}")
             
             # Phase 3: Question clarification
-            print(f"\n● Phase 3: Topic clarification")
+            print(f"\n● Topic clarification")
             clarification_result = self._clarify_research_topic(research_topic, reflection_result)
             
             # Update clarification count
@@ -367,8 +427,7 @@ class UnifiedResearchWorkflow:
             
             # Phase 4: Continue research with clarified topic
             if clarification_success and clarified_topic != research_topic:
-                print(f"\n● Phase 4: Targeted research with clarified topic")
-                print(f"\n● Updated research focus: {clarified_topic}")
+                print(f"\n● Updated research focus: \033[36m{clarified_topic}\033[0m")
                 final_research_result = self._continue_research_with_clarified_topic(clarified_topic, user_answers)
                 
                 return {
@@ -386,7 +445,7 @@ class UnifiedResearchWorkflow:
                 }
             else:
                 # If clarification failed or user chose original topic, continue with basic research
-                print(f"\n● Phase 4: Continuing with original topic")
+                print(f"\n● Continuing with original topic")
                 
                 # Update research context with initial findings
                 self.research_context.update({
@@ -543,12 +602,14 @@ class UnifiedResearchWorkflow:
             if all_insights:
                 thinking_insights_text = "\n".join(f"- {insight}" for insight in all_insights[-5:])  # Last 5 insights
         
-        # Detect language and generate appropriate prompt
-        language = self._detect_language(topic)
+        # Generate prompt based on the language of the current execution
         
-        if language == "zh":
+        # Get max_generated_search_query_per_research_loop from config
+        max_queries = self.config.get('deep_search', {}).get('max_generated_search_query_per_research_loop', 3)
+
+        if self.language == "zh":
             prompt = f"""
-作为专业的搜索策略专家，请根据以下信息生成3-5个高质量的搜索查询。
+作为专业的搜索策略专家，请根据以下信息严格生成{max_queries}个高质量的搜索查询。
 
 研究主题：{topic}
 
@@ -569,14 +630,14 @@ class UnifiedResearchWorkflow:
 5. 查询应简洁且有针对性
 6. 使用与研究主题相同的语言
 
-请以JSON格式返回查询列表：
-{{"queries": ["查询1", "查询2", "查询3"]}}
+请以JSON格式返回查询列表, 数组长度必须为 {max_queries}：
+{{"queries": ["查询1", ...]}}
 
 只返回JSON，不要其他解释。
 """
         else:
             prompt = f"""
-As a professional search strategy expert, please generate 3-5 high-quality search queries based on the following information.
+As a professional search strategy expert, please strictly generate {max_queries} high-quality search queries based on the following information.
 
 Research Topic: {topic}
 
@@ -597,8 +658,8 @@ Requirements:
 5. Queries should be concise and targeted
 6. Use the same language as the research topic
 
-Please return query list in JSON format:
-{{"queries": ["query1", "query2", "query3"]}}
+Please return query list in JSON format, the length of array must be {max_queries}:
+{{"queries": ["query1", ...]}}
 
 Return only JSON, no other explanations.
 """
@@ -609,7 +670,8 @@ Return only JSON, no other explanations.
             result = self._safe_json_parse(response.content)
             
             if result and isinstance(result, dict) and "queries" in result and isinstance(result["queries"], list):
-                return result["queries"]
+                queries = result["queries"][:max_queries]
+                return queries
         except Exception as e:
             self.logger.error(f"Query generation failed: {e}")
         
@@ -625,31 +687,30 @@ Return only JSON, no other explanations.
             print(f"  ✦ Searching: \033[36m{query}\033[0m")
             
             try:
-                # Execute search - use configuration instead of hardcoded value
+                # Execute search
                 max_search_results = self.config.get('deep_search', {}).get('max_search_results', 10)
                 search_results = self.search_tool._run(query, summary=True, count=max_search_results)
                 if isinstance(search_results, list):
                     all_results.extend(search_results)
-                    # print(f"    ✦ Obtained {len(search_results)} results")
+            except Exception as e:
+                print(f"\n\033[31mAn error occurred during search: {e}\033[0m")
 
+            try:
                 # Use ResearchSummarizerAgent for thinking summary
                 if search_results:
-                    # Create search and summarization task
-                    summary_task = self.research_summarizer.create_search_and_summarize_prompt(
-                        query=query,
-                        research_topic=context.get("topic", "")
-                    )
+                    # Start thinking animation
+                    done = threading.Event()
+                    thinking_spinner = threading.Thread(target=self._spinner, args=(done, "  ✦ Thinking ..."))
+                    thinking_spinner.start()
                     
-                    # Build search results content
-                    results_content = ""
-                    for result in search_results[:3]:  # Take first 3 results
-                        content = result.get('content', '') or result.get('summary', '')
-                        if content:
-                            results_content += content[:300] + "\n"
-                    
-                    # Real agent thinking process using LLM
-                    thinking_result = self._perform_search_analysis_thinking(query, search_results, context)
-                    thinking_process.append(thinking_result["thinking"])
+                    try:
+                        # Real agent thinking process using LLM
+                        thinking_result = self._perform_search_analysis_thinking(query, search_results, context)
+                        thinking_process.append(thinking_result["thinking"])
+                    finally:
+                        done.set()
+                        thinking_spinner.join()
+
                     print(f"  ✦ Thinking: {thinking_result['thinking']}\n")
                     
                     # Update context with thinking insights for next query generation
@@ -866,7 +927,7 @@ This report is based on available search results and may have limitations in cov
             if file_path.exists():
                 file_size = file_path.stat().st_size
                 print(f"\n● Report successfully saved to: {file_path}")
-                print(f"\n● File size: {file_size:,} bytes")
+                print(f"\n● File size: {file_size:,} bytes\n")
                 # self.logger.info(f"Report saved successfully: {file_path}, size: {file_size} bytes")
                 return str(file_path)
             else:
@@ -947,7 +1008,30 @@ This report is based on available search results and may have limitations in cov
                     key_findings.extend([s.strip() for s in sentences if len(s.strip()) > 10])
             
             # Generate reflection using LLM
-            reflection_prompt = f"""
+            if self.language == "zh":
+                reflection_prompt = f"""
+作为一名研究分析师，请对以下主题的初步搜索结果进行分析：{research_topic}
+
+初步搜索的关键发现：
+{chr(10).join(key_findings[:10])}
+
+请提供：
+1. 值得进一步探索的关键方面
+2. 基于该主题的潜在用户兴趣点
+3. 建议的澄清方向
+
+以JSON格式返回：
+{{
+  "key_aspects": ["方面1", "方面2", "方面3"],
+  "potential_interests": ["兴趣点1", "兴趣点2", "兴趣点3"],
+  "suggested_clarifications": ["澄清方向1", "澄清方向2"],
+  "reflection": "简要反思总结"
+}}
+
+重要提示：仅返回有效的JSON格式，不要添加任何其他文本解释。
+"""
+            else:
+                reflection_prompt = f"""
 As a research analyst, please analyze the initial search results for the topic: {research_topic}
 
 Key findings from initial search:
@@ -996,7 +1080,7 @@ IMPORTANT: Return only valid JSON format, do not add any other text explanations
     
     def _clarify_research_topic(self, research_topic: str, reflection_result: Dict[str, Any]) -> Dict[str, Any]:
         """Clarify research topic based on reflection results"""
-        print("\n● Preparing topic clarification questions")
+        print("  ✦ Preparing topic clarification questions")
         
         # Get clarification mode from config or default to one_shot
         clarification_mode = getattr(self, 'clarification_mode', 'one_shot')
@@ -1024,7 +1108,36 @@ IMPORTANT: Return only valid JSON format, do not add any other text explanations
         suggested_clarifications = reflection_result.get("suggested_clarifications", [])
         
         # Generate clarification questions
-        clarification_prompt = f"""
+        if self.language == "zh":
+            clarification_prompt = f"""
+作为一名专业的研究顾问，根据初步的搜索分析，我需要帮助用户澄清他们的研究需求。
+
+用户的原始问题：{research_topic}
+
+初步分析中发现的关键方面：{', '.join(key_aspects) if key_aspects else '无'}
+用户可能关心的问题：{', '.join(potential_interests) if potential_interests else '无'}
+建议的澄清方向：{', '.join(suggested_clarifications) if suggested_clarifications else '无'}
+
+根据这些信息，请提出1-3个核心澄清问题，这些问题应：
+1. 直接影响研究的方向和重点
+2. 帮助确定研究的具体范围和深度
+3. 澄清用户的真实需求和应用场景
+4. 结合初步分析中发现的关键方面
+
+以JSON格式返回：
+{{
+  "analysis": "基于初步搜索的分析结果（50字以内）",
+  "core_questions": [
+    "核心澄清问题1",
+    "核心澄清问题2",
+    "核心澄清问题3"
+  ]
+}}
+
+重要提示：仅返回有效的JSON格式，不要添加任何其他文本解释。
+"""
+        else:
+            clarification_prompt = f"""
 As a professional research consultant, based on preliminary search analysis, I need to help users clarify their research needs.
 
 User's original question: {research_topic}
@@ -1138,41 +1251,77 @@ IMPORTANT: Return only valid JSON format, do not add any other text explanations
         if not questions:
             return user_answers
         
-        print(f"\n● Please answer the following {len(questions)} questions to help us provide more targeted research:")
+        print(f"  ✦ Please answer the following {len(questions)} questions to help us provide more targeted research:")
         
         for i, question in enumerate(questions, 1):
-            print(f"\n  ❓ Question {i}: {question}")
+            print(f"  | ❓ Question {i}: {question}")
             try:
-                answer = input("   Your answer: ").strip()
+                answer = input("  | 💭 Your answer: ").strip()
                 if answer:
                     user_answers[f"question_{i}"] = answer
                 else:
                     user_answers[f"question_{i}"] = "No specific preference"
             except (EOFError, KeyboardInterrupt):
-                print("\n[Auto mode] Using default answers")
+                # print("\n[Auto mode] Using default answers")
                 user_answers[f"question_{i}"] = "No specific preference"
         
         return user_answers
     
     def _generate_clarified_topic(self, original_topic: str, user_answers: Dict[str, str]) -> str:
-        """Generate clarified topic based on user answers"""
+        """Generate clarified topic based on user answers using LLM."""
         if not user_answers:
             return original_topic
-        
-        # Simple implementation: combine original topic with key user inputs
-        clarifications = []
-        for key, value in user_answers.items():
-            if value and value != "No specific preference":
-                clarifications.append(value)
-        
-        if clarifications:
-            return f"{original_topic} - {', '.join(clarifications[:2])}"
+
+        answers_text = "\n".join(f"- {q}: {a}" for q, a in user_answers.items())
+
+        if self.language == "zh":
+            prompt = f"""
+作为一名专业的研究助理，请根据用户的原始研究主题和他们对澄清问题的回答，生成一个新的、更精确、更聚焦的研究主题。
+
+原始主题：{original_topic}
+
+用户的回答：
+{answers_text}
+
+请综合以上信息，提炼出一个不超过20个字的精炼研究主题，确保新主题能准确反映用户的具体兴趣点。
+
+例如，如果原始主题是“人工智能”，用户的回答指向“在医疗领域的应用”和“图像识别技术”，那么一个好的新主题可以是“医疗影像中人工智能图像识别技术的应用研究”。
+
+请直接返回新的研究主题，不要包含任何解释或多余的文字。
+"""
         else:
-            return original_topic
+            prompt = f"""
+As a professional research assistant, please generate a new, more precise, and focused research topic based on the user's original topic and their answers to the clarification questions.
+
+Original Topic: {original_topic}
+
+User's Answers:
+{answers_text}
+
+Please synthesize the above information to refine a concise research topic of no more than 30 words, ensuring the new topic accurately reflects the user's specific interests.
+
+For example, if the original topic is "Artificial Intelligence" and the user's answers point to "applications in the medical field" and "image recognition technology," a good new topic could be "Research on the Application of AI Image Recognition Technology in Medical Imaging."
+
+Please return only the new research topic, without any explanation or extraneous text.
+"""
+
+        try:
+            messages = [{"role": "user", "content": prompt}]
+            response = self.llm_provider.invoke(messages)
+            clarified_topic = response.content.strip()
+            # self.logger.info(f"Generated clarified topic: {clarified_topic}")
+            return clarified_topic
+        except Exception as e:
+            # self.logger.error(f"Failed to generate clarified topic with LLM: {e}")
+            # Fallback to simple concatenation if LLM fails
+            clarifications = [v for v in user_answers.values() if v and v != "No specific preference"]
+            if clarifications:
+                return f"{original_topic} - {', '.join(clarifications[:2])}"
+            else:
+                return original_topic
     
     def _continue_research_with_clarified_topic(self, clarified_topic: str, user_answers: Dict[str, str]) -> Dict[str, Any]:
         """Continue research with clarified topic"""
-        print(f"\n🔬 Starting targeted research based on clarified topic: {clarified_topic}\n")
         
         try:
             # Initialize research context for clarified topic
@@ -1188,8 +1337,19 @@ IMPORTANT: Return only valid JSON format, do not add any other text explanations
                 "thinking_process": []
             }
             
-            # Generate targeted search queries based on clarified topic and user answers
-            targeted_queries = self._generate_targeted_queries(clarified_topic, user_answers)
+            # Generate targeted search queries with loading animation
+            done_generating_targeted = threading.Event()
+            spinner_generating_targeted = threading.Thread(target=self._spinner, args=(done_generating_targeted, "  ✦ Start generated queries based on clarified topic"))
+            spinner_generating_targeted.start()
+            try:
+                targeted_queries = self._generate_targeted_queries(clarified_topic, user_answers)
+            finally:
+                done_generating_targeted.set()
+                spinner_generating_targeted.join()
+
+            print(f"  ✦ Generated {len(targeted_queries)} targeted queries based on your preferences")
+            for _ in targeted_queries:
+                print(f"  | \033[2m{_}\033[0m")
             
             # Execute multi-round research similar to basic mode but with targeted focus
             all_results = []
@@ -1226,9 +1386,15 @@ IMPORTANT: Return only valid JSON format, do not add any other text explanations
                 # Brief pause between iterations
                 time.sleep(1)
             
-            # Generate final report
-            print(f"\n● Generating final research report")
-            final_report = self._generate_final_report(research_context)
+            # Generate final report with loading animation
+            done_generating_report = threading.Event()
+            spinner_generating_report = threading.Thread(target=self._spinner, args=(done_generating_report, " ● Generating final research report"))
+            spinner_generating_report.start()
+            try:
+                final_report = self._generate_final_report(research_context)
+            finally:
+                done_generating_report.set()
+                spinner_generating_report.join()
             
             # Save report
             report_path = self._save_report_to_file(
@@ -1259,37 +1425,63 @@ IMPORTANT: Return only valid JSON format, do not add any other text explanations
             }
     
     def _generate_targeted_queries(self, clarified_topic: str, user_answers: Dict[str, str]) -> List[str]:
-        """Generate targeted search queries based on clarified topic and user preferences"""
-        base_queries = [clarified_topic]
-        
-        # Add queries based on user answers
-        for key, value in user_answers.items():
-            if value and value != "No specific preference":
-                if "focus" in key.lower():
-                    base_queries.append(f"{clarified_topic} {value}")
-                elif "depth" in key.lower() or "level" in key.lower():
-                    if "professional" in value.lower():
-                        base_queries.append(f"{clarified_topic} technical details")
-                        base_queries.append(f"{clarified_topic} advanced concepts")
-                    elif "introductory" in value.lower():
-                        base_queries.append(f"{clarified_topic} basics")
-                        base_queries.append(f"{clarified_topic} introduction")
-                elif "purpose" in key.lower():
-                    if "research" in value.lower():
-                        base_queries.append(f"{clarified_topic} research papers")
-                        base_queries.append(f"{clarified_topic} academic studies")
-                    elif "application" in value.lower():
-                        base_queries.append(f"{clarified_topic} practical applications")
-                        base_queries.append(f"{clarified_topic} use cases")
-                else:
-                    # Generic question-based queries
-                    base_queries.append(f"{clarified_topic} {value}")
-        
-        # Remove duplicates and limit to reasonable number
-        unique_queries = list(dict.fromkeys(base_queries))[:5]
-        
-        print(f"● Generated {len(unique_queries)} targeted queries based on your preferences")
-        return unique_queries
+        """Generate targeted search queries based on clarified topic and user preferences using LLM."""
+        language = self._detect_language(clarified_topic)
+        preferences = "\n".join([f"- {key}: {value}" for key, value in user_answers.items() if value and value != "No specific preference"])
+
+        if language == "zh":
+            prompt = f"""
+作为专业的搜索策略专家，请根据以下研究主题和用户偏好，生成5个高质量且有针对性的搜索查询。
+
+研究主题：{clarified_topic}
+
+用户偏好：
+{preferences}
+
+要求：
+1. 查询必须紧密围绕研究主题和用户偏好。
+2. 生成的查询应具有多样性，能从不同角度探索主题。
+3. 查询应简洁、清晰，适合搜索引擎。
+
+请以JSON格式返回查询列表：
+{{"queries": ["查询1", "查询2", ...]}}
+
+只返回JSON，不要其他解释。
+"""
+        else:
+            prompt = f"""
+As a professional search strategy expert, please generate 5 high-quality, targeted search queries based on the following research topic and user preferences.
+
+Research Topic: {clarified_topic}
+
+User Preferences:
+{preferences}
+
+Requirements:
+1. Queries must be closely related to the research topic and user preferences.
+2. The generated queries should be diverse to explore the topic from different angles.
+3. Queries should be concise, clear, and suitable for search engines.
+
+Please return the list of queries in JSON format:
+{{"queries": ["query1", "query2", ...]}}
+
+Return only JSON, no other explanations.
+"""
+
+        try:
+            messages = [{"role": "user", "content": prompt}]
+            response = self.llm_provider.invoke(messages)
+            result = self._safe_json_parse(response.content)
+            
+            if result and isinstance(result, dict) and "queries" in result and isinstance(result["queries"], list):
+                unique_queries = list(dict.fromkeys(result["queries"]))[:5]
+
+                return unique_queries
+        except Exception as e:
+            self.logger.error(f"Targeted query generation failed: {e}")
+
+        # Fallback to a simple query if LLM fails
+        return [clarified_topic]
     
     def _should_continue_research(self, context: Dict[str, Any]) -> bool:
         """Determine if research should continue"""
