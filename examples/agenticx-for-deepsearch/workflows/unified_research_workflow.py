@@ -324,6 +324,8 @@ class UnifiedResearchWorkflow:
             # Execute search and summarization
             search_results = self._search_and_summarize(queries, self.research_context)
             
+            self.research_context["research_summaries"] = search_results.get("findings_summary", [])
+
             # Update research context with thinking process
             if "thinking_process" not in self.research_context:
                 self.research_context["thinking_process"] = []
@@ -748,11 +750,13 @@ Return only JSON, no other explanations.
         
         # Integrate research findings
         findings_summary = ""
-        for result in all_results[:5]:  # Take first 5 results for summary
+        for result in all_results:  # Take all results for summary
+            # for result in all_results[:5]:  # Take first 5 results for summary
             content = result.get('content', '') or result.get('summary', '')
             if content:
-                findings_summary += content[:200] + "\n"
-        
+                # findings_summary += content[:200] + "\n"
+                findings_summary += content + "\n"
+
         return {
             "search_results": all_results,
             "findings_summary": findings_summary,
@@ -766,7 +770,8 @@ Return only JSON, no other explanations.
             # Use ResearchSummarizerAgent to create final report prompt
             final_report_prompt = self.research_summarizer.create_final_report_prompt(
                 research_topic=context.get("topic", ""),
-                all_summaries=context.get("research_summaries", [])
+                all_summaries=context.get("research_summaries", []),
+                citations=context.get("citations", [])
             )
             
             # Add thinking process information
@@ -806,13 +811,6 @@ Please generate a comprehensive research report based on the above information.
             #     report_content += f"\n\n## Research Thinking Process\n\n"
             #     for i, thinking in enumerate(thinking_process, 1):
             #         report_content += f"{i}. {thinking}\n"
-            
-            # Add citation list
-            citations = context.get("citations", [])
-            if citations:
-                report_content += f"\n\n## References\n\n"
-                for citation in citations:
-                    report_content += f"• {citation}\n"
             
             return report_content
             
@@ -1332,9 +1330,10 @@ Please return only the new research topic, without any explanation or extraneous
                 "current_iteration": 0,
                 "max_iterations": self.max_research_loops,
                 "search_history": [],
-                "findings": [],
+                "research_summaries": [],
                 "knowledge_gaps": [],
-                "thinking_process": []
+                "thinking_process": [],
+                "citations": []
             }
             
             # Generate targeted search queries with loading animation
@@ -1375,9 +1374,10 @@ Please return only the new research topic, without any explanation or extraneous
                 
                 # Update research context
                 research_context["search_history"].extend(current_queries)
-                research_context["findings"].extend(search_results.get("findings", []))
                 research_context["knowledge_gaps"] = search_results.get("knowledge_gaps", [])
                 research_context["thinking_process"].extend(search_results.get("thinking_process", []))
+                research_context["research_summaries"].extend(search_results.get("findings_summary", []))
+                research_context["citations"].extend(search_results.get("citations", []))
                 
                 # Check if we should continue
                 if not self._should_continue_research(research_context):
