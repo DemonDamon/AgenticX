@@ -89,7 +89,9 @@ class UnifiedResearchWorkflow:
             "loop_count": 0,
             "success_rate": 0.0,
             "token_usage": 0,
-            "error_count": 0
+            "error_count": 0,
+            "clarification_count": 0,
+            "thinking_steps": 0
         }
         
         # Initialize monitoring handlers
@@ -292,6 +294,7 @@ class UnifiedResearchWorkflow:
         # Execute multi-round research loop
         for iteration in range(self.max_research_loops):
             self.research_context["current_iteration"] = iteration + 1
+            self.metrics["loop_count"] = iteration + 1
             
             # Show thinking process: analyze current research status
             print(f"\n● Round {iteration + 1}/{self.max_research_loops}")
@@ -307,12 +310,15 @@ class UnifiedResearchWorkflow:
                 self.research_context["thinking_process"] = []
             self.research_context["thinking_process"].extend(search_results.get("thinking_process", []))
             
+            # Update thinking steps count
+            self.metrics["thinking_steps"] += len(search_results.get("thinking_process", []))
+            
             # Show thinking process: analyze search results
             # print(f"\n● Analyzing search results...")
             
             # Check if research should continue
             if not self._should_continue_research(self.research_context):
-                print(f"\n● Research completed in {iteration + 1} rounds")
+                print(f"● Research completed in {iteration + 1} rounds, now preparing final report, please wait...")
                 break
         
         # Generate final report
@@ -350,6 +356,10 @@ class UnifiedResearchWorkflow:
             # Phase 3: Question clarification
             print(f"\n● Phase 3: Topic clarification")
             clarification_result = self._clarify_research_topic(research_topic, reflection_result)
+            
+            # Update clarification count
+            if clarification_result.get("clarification_success", False):
+                self.metrics["clarification_count"] += 1
             
             clarified_topic = clarification_result.get("clarified_topic", research_topic)
             user_answers = clarification_result.get("user_answers", {})
@@ -390,6 +400,7 @@ class UnifiedResearchWorkflow:
                 for iteration in range(1, self.max_research_loops):
                     print(f"\n● Research iteration {iteration + 1}/{self.max_research_loops}")
                     self.research_context["current_iteration"] = iteration
+                    self.metrics["loop_count"] = iteration + 1
                     
                     queries = self._generate_search_queries(research_topic, self.research_context)
                     search_results = self._search_and_summarize(queries, self.research_context)
@@ -398,6 +409,9 @@ class UnifiedResearchWorkflow:
                     if "thinking_process" not in self.research_context:
                         self.research_context["thinking_process"] = []
                     self.research_context["thinking_process"].extend(search_results.get("thinking_process", []))
+                    
+                    # Update thinking steps count
+                    self.metrics["thinking_steps"] += len(search_results.get("thinking_process", []))
                     
                     if not self._should_continue_research(self.research_context):
                         break
@@ -444,6 +458,7 @@ class UnifiedResearchWorkflow:
             # Execute multi-round iterations
             for iteration in range(1, max_iterations + 1):
                 print(f"\n● Iteration {iteration}/{max_iterations}")
+                self.metrics["loop_count"] = iteration
                 
                 # Execute single iteration
                 iteration_result = self._execute_single_iteration(
@@ -452,6 +467,10 @@ class UnifiedResearchWorkflow:
                 
                 all_iterations.append(iteration_result)
                 total_search_results.extend(iteration_result.get('search_results', []))
+                
+                # Update thinking steps count
+                if "thinking_process" in self.research_context:
+                    self.metrics["thinking_steps"] += len(self.research_context["thinking_process"])
                 
                 # Update accumulated knowledge
                 self._update_accumulated_knowledge(accumulated_knowledge, iteration_result)
