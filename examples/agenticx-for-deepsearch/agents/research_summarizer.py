@@ -144,7 +144,7 @@ Please return the analysis results in JSON format:
 """
         return prompt
     
-    def create_final_report_prompt(self, research_topic: str, all_summaries: list) -> str:
+    def create_final_report_prompt(self, research_topic: str, all_summaries: list, citations: list) -> str:
         """
         Create final report prompt
         
@@ -167,6 +167,9 @@ Please return the analysis results in JSON format:
 研究摘要内容:
 {combined_summaries}
 
+参考文献:
+{citations_text}
+
 报告要求：
 1. 结构清晰，包括引言、主要发现、分析和结论
 2. 整合所有相关信息，避免重复
@@ -183,6 +186,9 @@ You are a professional research report writing expert. Please write a comprehens
 
 Research summary content:
 {combined_summaries}
+
+References:
+{citations_text}
 
 Report requirements:
 1. Clear structure, including introduction, main findings, analysis and conclusions
