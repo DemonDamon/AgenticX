@@ -201,12 +201,10 @@ class BochaaIWebSearchTool(BaseTool):
             # Print title of each web page in search results
             # print(f"    ✦ search query: \033[36m{query}\033[0m")
             if results:
-                print(f"  |")
                 for i, result in enumerate(results, 1):
                     if result.get('type') != 'image':  # Only print web page results, not image results
                         title = result.get('title', 'No Title')
                         print(f"  | \033[2m{title}\033[0m")
-                print(f"  |")
 
             return results
             
