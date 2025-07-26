@@ -123,16 +123,7 @@ class UnifiedResearchWorkflow:
         )
         
         # Research context
-        self.research_context = {
-            "topic": "",
-            "objective": "",
-            "current_iteration": 0,
-            "max_iterations": max_research_loops,
-            "search_history": [],
-            "findings": [],
-            "knowledge_gaps": [],
-            "thinking_process": []
-        }
+        self.research_context = self._get_initial_research_context()
         
         # Advanced mode specific initialization
         if mode == WorkflowMode.ADVANCED:
@@ -323,8 +314,9 @@ class UnifiedResearchWorkflow:
             
             # Execute search and summarization
             search_results = self._search_and_summarize(queries, self.research_context)
-            
-            self.research_context["research_summaries"] = search_results.get("findings_summary", [])
+
+            self.research_context["research_summaries"].extend(search_results.get("findings_summary", []))
+            self.research_context["citations"].extend(search_results.get("citations", []))
 
             # Update research context with thinking process
             if "thinking_process" not in self.research_context:
@@ -346,7 +338,7 @@ class UnifiedResearchWorkflow:
         done = threading.Event()
         spinner = threading.Thread(target=self._spinner, args=(done, "● Preparing final report, it will takes a few minutes ..."))
         spinner.start()
-        
+
         try:
             final_report = self._generate_final_report(self.research_context)
         finally:
@@ -725,15 +717,7 @@ Return only JSON, no other explanations.
             except Exception as e:
                 self.logger.error(f"Search failed: {e}")
                 self.metrics["error_count"] += 1
-        
-        # # Show agent thinking process
-        # if thinking_process:
-        #     print(f"\n● Agent thinking process:")
-        #     # Record thinking process
-        #     for thinking in thinking_process[-3:]:  # Show last 3 thinking steps
-        #         print(f"  ✦ {thinking}")
-        #         context["thinking_process"].append(thinking)
-        
+
         # Fallback results
         if not all_results:
             print("   ● No search results obtained, using fallback")
@@ -749,13 +733,13 @@ Return only JSON, no other explanations.
                     citations.append(f"[{title}]({url})")
         
         # Integrate research findings
-        findings_summary = ""
+        findings_summary = []
         for result in all_results:  # Take all results for summary
             # for result in all_results[:5]:  # Take first 5 results for summary
             content = result.get('content', '') or result.get('summary', '')
             if content:
-                # findings_summary += content[:200] + "\n"
-                findings_summary += content + "\n"
+                # findings_summary.append(content[:200])
+                findings_summary.append(content)
 
         return {
             "search_results": all_results,
@@ -1490,9 +1474,9 @@ Return only JSON, no other explanations.
         
         return current_iteration < max_iterations
     
-    def reset_research_context(self):
-        """Reset research context"""
-        self.research_context = {
+    def _get_initial_research_context(self):
+        """Returns the initial structure for the research context."""
+        return {
             "topic": "",
             "objective": "",
             "current_iteration": 0,
@@ -1500,8 +1484,20 @@ Return only JSON, no other explanations.
             "search_history": [],
             "findings": [],
             "knowledge_gaps": [],
-            "thinking_process": []
+            "thinking_process": [],
+            "citations": [],
+            "research_summaries": [],
+            "original_topic": "",
+            "clarified_topic": "",
+            "research_focus": [],
+            "search_results": [],
+            "generated_queries": [],
+            "errors": []
         }
+
+    def reset_research_context(self):
+        """Reset research context"""
+        self.research_context = self._get_initial_research_context()
         self.metrics = {
             "execution_time": 0.0,
             "search_count": 0,
@@ -1511,19 +1507,6 @@ Return only JSON, no other explanations.
             "error_count": 0,
             "clarification_count": 0,
             "thinking_steps": 0
-        }
-        
-        # Reset research context
-        self.research_context = {
-            "original_topic": "",
-            "clarified_topic": "",
-            "research_focus": [],
-            "thinking_process": [],
-            "search_results": [],
-            "research_summaries": [],
-            "generated_queries": [],
-            "knowledge_gaps": [],
-            "errors": []
         }
     
     # ===== Advanced Mode Helper Methods =====
