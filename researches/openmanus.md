@@ -493,6 +493,41 @@ package "智能体系统" {
         + is_stuck(): bool
     }
     
+    abstract class ReActAgent {
+        + name: str
+        + description: Optional[str]
+        + system_prompt: Optional[str]
+        + next_step_prompt: Optional[str]
+        + llm: LLM
+        + memory: Memory
+        + state: AgentState
+        + max_steps: int
+        + current_step: int
+        + {abstract} think(): bool
+        + {abstract} act(): str
+        + step(): str
+    }
+    
+    class ToolCallAgent {
+        + name: str = "toolcall"
+        + description: str
+        + system_prompt: str
+        + next_step_prompt: str
+        + available_tools: ToolCollection
+        + tool_choices: TOOL_CHOICE_TYPE
+        + special_tool_names: List[str]
+        + tool_calls: List[ToolCall]
+        + max_steps: int
+        + max_observe: Optional[Union[int, bool]]
+        + think(): bool
+        + act(): str
+        + execute_tool(command: ToolCall): str
+        + _handle_special_tool(name, result, **kwargs): None
+        + _should_finish_execution(**kwargs): bool
+        + _is_special_tool(name: str): bool
+        + cleanup(): None
+    }
+    
     class Manus {
         + name: str = "Manus"
         + description: str
@@ -512,25 +547,66 @@ package "智能体系统" {
         + think(): bool
     }
     
-    class ToolCallAgent {
-        + available_tools: ToolCollection
-        + special_tool_names: list[str]
-        + max_observe: int
-        + step(): str
-        + execute_tool(tool_name, tool_input): ToolResult
-        + observe_tool_result(result): None
-    }
-    
     class BrowserAgent {
+        + name: str = "browser"
+        + description: str
+        + system_prompt: str
+        + next_step_prompt: str
+        + max_observe: int
+        + max_steps: int
+        + available_tools: ToolCollection
+        + tool_choices: ToolChoice
+        + special_tool_names: list[str]
         + browser_context_helper: BrowserContextHelper
-        + step(): str
-        + execute_browser_action(action): ToolResult
+        + think(): bool
+        + cleanup(): None
     }
     
-    class DataAnalysisAgent {
-        + step(): str
-        + analyze_data(data): str
-        + create_visualization(data): str
+    class MCPAgent {
+        + name: str = "mcp_agent"
+        + description: str
+        + system_prompt: str
+        + next_step_prompt: str
+        + mcp_clients: MCPClients
+        + available_tools: MCPClients
+        + max_steps: int
+        + connection_type: str
+        + tool_schemas: Dict[str, Dict[str, Any]]
+        + special_tool_names: List[str]
+        + initialize(connection_type, server_url, command, args): None
+        + _refresh_tools(): Tuple[List[str], List[str]]
+        + think(): bool
+        + _handle_special_tool(name, result, **kwargs): None
+        + _should_finish_execution(name, **kwargs): bool
+        + cleanup(): None
+    }
+    
+    class SWEAgent {
+        + name: str = "swe"
+        + description: str
+        + system_prompt: str
+        + next_step_prompt: str
+        + available_tools: ToolCollection
+        + special_tool_names: List[str]
+        + max_steps: int
+    }
+    
+    class DataAnalysis {
+        + name: str = "Data_Analysis"
+        + description: str
+        + system_prompt: str
+        + next_step_prompt: str
+        + max_observe: int
+        + max_steps: int
+        + available_tools: ToolCollection
+    }
+    
+    class BrowserContextHelper {
+        - agent: BaseAgent
+        - _current_base64_image: Optional[str]
+        + get_browser_state(): Optional[dict]
+        + format_next_step_prompt(): str
+        + cleanup_browser(): None
     }
 }
 
@@ -589,6 +665,8 @@ package "工具系统" {
         + description: str
         + parameters: dict
         + execute(action: str, **kwargs): ToolResult
+        + get_current_state(): ToolResult
+        + cleanup(): None
     }
     
     class StrReplaceEditor {
@@ -598,11 +676,55 @@ package "工具系统" {
         + execute(content: str, replacements: List[Dict]): ToolResult
     }
     
-    class MCPClientTool {
-        + name: str
+    class MCPClients {
+        + sessions: Dict[str, Any]
+        + tool_map: Dict[str, Any]
+        + connect_sse(server_url: str): None
+        + connect_stdio(command: str, args: List[str]): None
+        + list_tools(): Any
+        + execute_tool(name: str, arguments: dict): ToolResult
+    }
+    
+    class CreateChatCompletion {
+        + name: str = "create_chat_completion"
         + description: str
         + parameters: dict
-        + execute(**kwargs): ToolResult
+        + execute(messages: List[dict], model: str, **kwargs): ToolResult
+    }
+    
+    class Terminate {
+        + name: str = "terminate"
+        + description: str
+        + parameters: dict
+        + execute(reason: str): ToolResult
+    }
+    
+    class Bash {
+        + name: str = "bash"
+        + description: str
+        + parameters: dict
+        + execute(command: str): ToolResult
+    }
+    
+    class VisualizationPrepare {
+        + name: str = "visualization_prepare"
+        + description: str
+        + parameters: dict
+        + execute(data: str): ToolResult
+    }
+    
+    class DataVisualization {
+        + name: str = "data_visualization"
+        + description: str
+        + parameters: dict
+        + execute(chart_type: str, data: dict): ToolResult
+    }
+    
+    class NormalPythonExecute {
+        + name: str = "normal_python_execute"
+        + description: str
+        + parameters: dict
+        + execute(code: str): ToolResult
     }
 }
 
@@ -791,10 +913,14 @@ AppConfig --> MCPSettings : 包含
 BaseAgent --> LLM : 使用
 BaseAgent --> Memory : 包含
 BaseAgent --> AgentState : 状态
+ReActAgent --> BaseAgent : 继承
+ToolCallAgent --> ReActAgent : 继承
 Manus --> ToolCallAgent : 继承
-ToolCallAgent --> BaseAgent : 继承
-BrowserAgent --> BaseAgent : 继承
-DataAnalysisAgent --> BaseAgent : 继承
+BrowserAgent --> ToolCallAgent : 继承
+MCPAgent --> ToolCallAgent : 继承
+SWEAgent --> ToolCallAgent : 继承
+DataAnalysis --> ToolCallAgent : 继承
+BrowserContextHelper --> BaseAgent : 使用
 
 BaseTool --> ToolResult : 返回
 ToolCollection --> BaseTool : 管理
@@ -804,7 +930,13 @@ CLIResult --> ToolResult : 继承
 PythonExecute --> BaseTool : 继承
 BrowserUseTool --> BaseTool : 继承
 StrReplaceEditor --> BaseTool : 继承
-MCPClientTool --> BaseTool : 继承
+CreateChatCompletion --> BaseTool : 继承
+Terminate --> BaseTool : 继承
+Bash --> BaseTool : 继承
+VisualizationPrepare --> BaseTool : 继承
+DataVisualization --> BaseTool : 继承
+NormalPythonExecute --> BaseTool : 继承
+MCPClients --> BaseTool : 实现
 
 LLM --> TokenCounter : 使用
 LLM --> LLMSettings : 配置
