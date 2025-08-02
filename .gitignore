@@ -24,3 +24,5 @@ blog/
 .coverage
 
 coverage.xml
+
+thirdparty/
