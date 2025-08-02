@@ -16,3 +16,11 @@ risks/
 
 /deploy/data/
 /deploy/logs/
+
+htmlcov/
+
+blog/
+
+.coverage
+
+coverage.xml
