@@ -1,0 +1,9 @@
+# agenticx-for-intent-recognition 依赖包
+
+agenticx
+
+pydantic
+
+typer
+
+rich
