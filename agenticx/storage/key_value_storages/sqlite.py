@@ -4,7 +4,9 @@ AgenticX SQLite Key-Value Storage
 SQLite键值存储实现，支持轻量级本地存储。
 """
 
-from typing import Any, Dict, List, Optional
+import sqlite3
+import json
+from typing import Any, Dict, List, Optional, Tuple
 from .base import BaseKeyValueStorage
 
 
@@ -21,33 +23,36 @@ class SQLiteStorage(BaseKeyValueStorage):
             db_path: SQLite数据库文件路径
         """
         self.db_path = db_path
-        self._connection = None
-        # TODO: 实现SQLite连接
-        print("⚠️  SQLite存储暂未实现，使用内存存储模拟")
+        self._connection = sqlite3.connect(db_path, check_same_thread=False)
+        self._cursor = self._connection.cursor()
+        self._cursor.execute(
+            'CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)'
+        )
+        self._connection.commit()
 
     def save(self, records: List[Dict[str, Any]]) -> None:
-        """保存记录到SQLite
+        """保存一批记录到键值存储系统
         
         Args:
-            records: 要保存的记录列表
+            records: 要存储的记录列表，每个记录是一个字典
         """
-        # TODO: 实现SQLite保存逻辑
-        print(f"✅ 模拟保存 {len(records)} 条记录到SQLite")
+        for record in records:
+            for key, value in record.items():
+                self.set(key, value)
 
     def load(self) -> List[Dict[str, Any]]:
-        """从SQLite加载所有记录
+        """从键值存储系统加载所有记录
         
         Returns:
             存储的记录列表
         """
-        # TODO: 实现SQLite加载逻辑
-        print("✅ 模拟从SQLite加载记录")
-        return []
+        self._cursor.execute('SELECT key, value FROM kv')
+        return [{row[0]: json.loads(row[1])} for row in self._cursor.fetchall()]
 
     def clear(self) -> None:
         """清空所有记录"""
-        # TODO: 实现SQLite清空逻辑
-        print("✅ 模拟清空SQLite记录")
+        self._cursor.execute('DELETE FROM kv')
+        self._connection.commit()
 
     def get(self, key: str) -> Optional[Any]:
         """根据键获取值
@@ -58,8 +63,10 @@ class SQLiteStorage(BaseKeyValueStorage):
         Returns:
             对应的值，如果不存在返回None
         """
-        # TODO: 实现SQLite获取逻辑
-        print(f"✅ 模拟从SQLite获取键: {key}")
+        self._cursor.execute('SELECT value FROM kv WHERE key = ?', (key,))
+        row = self._cursor.fetchone()
+        if row:
+            return json.loads(row[0])
         return None
 
     def set(self, key: str, value: Any) -> None:
@@ -69,8 +76,11 @@ class SQLiteStorage(BaseKeyValueStorage):
             key: 键名
             value: 值
         """
-        # TODO: 实现SQLite设置逻辑
-        print(f"✅ 模拟设置SQLite键值对: {key} = {value}")
+        value_json = json.dumps(value)
+        self._cursor.execute(
+            'INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)', (key, value_json)
+        )
+        self._connection.commit()
 
     def delete(self, key: str) -> bool:
         """删除指定键
@@ -81,9 +91,9 @@ class SQLiteStorage(BaseKeyValueStorage):
         Returns:
             是否删除成功
         """
-        # TODO: 实现SQLite删除逻辑
-        print(f"✅ 模拟删除SQLite键: {key}")
-        return True
+        self._cursor.execute('DELETE FROM kv WHERE key = ?', (key,))
+        self._connection.commit()
+        return self._cursor.rowcount > 0
 
     def exists(self, key: str) -> bool:
         """检查键是否存在
@@ -94,9 +104,8 @@ class SQLiteStorage(BaseKeyValueStorage):
         Returns:
             键是否存在
         """
-        # TODO: 实现SQLite存在检查逻辑
-        print(f"✅ 模拟检查SQLite键是否存在: {key}")
-        return False
+        self._cursor.execute('SELECT 1 FROM kv WHERE key = ?', (key,))
+        return self._cursor.fetchone() is not None
 
     def keys(self) -> List[str]:
         """获取所有键名
@@ -104,9 +113,8 @@ class SQLiteStorage(BaseKeyValueStorage):
         Returns:
             键名列表
         """
-        # TODO: 实现SQLite键列表获取逻辑
-        print("✅ 模拟获取SQLite所有键")
-        return []
+        self._cursor.execute('SELECT key FROM kv')
+        return [row[0] for row in self._cursor.fetchall()]
 
     def values(self) -> List[Any]:
         """获取所有值
@@ -114,19 +122,17 @@ class SQLiteStorage(BaseKeyValueStorage):
         Returns:
             值列表
         """
-        # TODO: 实现SQLite值列表获取逻辑
-        print("✅ 模拟获取SQLite所有值")
-        return []
+        self._cursor.execute('SELECT value FROM kv')
+        return [json.loads(row[0]) for row in self._cursor.fetchall()]
 
-    def items(self) -> List[tuple]:
+    def items(self) -> List[Tuple[str, Any]]:
         """获取所有键值对
         
         Returns:
             键值对列表
         """
-        # TODO: 实现SQLite键值对获取逻辑
-        print("✅ 模拟获取SQLite所有键值对")
-        return []
+        self._cursor.execute('SELECT key, value FROM kv')
+        return [(row[0], json.loads(row[1])) for row in self._cursor.fetchall()]
 
     def count(self) -> int:
         """获取记录总数
@@ -134,13 +140,11 @@ class SQLiteStorage(BaseKeyValueStorage):
         Returns:
             记录数量
         """
-        # TODO: 实现SQLite计数逻辑
-        print("✅ 模拟获取SQLite记录总数")
-        return 0
+        self._cursor.execute('SELECT COUNT(*) FROM kv')
+        return self._cursor.fetchone()[0]
 
     def close(self) -> None:
         """关闭SQLite连接"""
         if self._connection:
-            # TODO: 实现SQLite连接关闭逻辑
-            print("✅ 模拟关闭SQLite连接")
-            self._connection = None 
+            self._connection.close()
+            self._connection = None
