@@ -1,0 +1,116 @@
+# 意图识别项目数据目录完整分析报告
+
+## 目录路径: d:\myWorks\AgenticX\examples\agenticx-for-intent-recognition\intent-recognition\src\business\mcloud\data
+
+## 完整目录结构和文件摘要
+
+```
+data/
+├── badcase/
+│   ├── 20240927/
+│   │   └── 008.txt # 文本文件，共13行，非空行13行，内容预览: 老照片修复入口在哪里 | 老照片修复应用工具 | 搜老照片修复在哪 (381 bytes)
+│   ├── 20241015-功能意图/
+│   │   └── intents.txt # 文本文件，共22行，非空行21行，内容预览: 换手机 000+021 | 查看文档 021 | 我的音频 021 (5197 bytes)
+│   ├── 20241017-AI写真/
+│   │   └── intents.txt # 文本文件，共7行，非空行7行，内容预览: 我试了下用智能抠图去生成的图片不太适合当证件照，还有什么工具是适合生成带有正装效果的艺术照？ 011 | 我的形象 011 | 妙云相机和秒鸭相机有关系吗？我要用下看看 011 (375 bytes)
+│   └── 20241030/
+│       ├── entity.txt # 文本文件，共22行，非空行21行，内容预览: 搜索docx格式的文档 | 搜索doc格式的文档 | 找doc格式的四大名著相关的文档 (1958 bytes)
+│       └── intents.txt # 文本文件，共22行，非空行21行，内容预览: 如何购买湖北短剧包 | 如何购买湖北影视包 | 购买广东综艺影视包 (1955 bytes)
+├── bak/
+│   ├── 000.json # JSON数组，包含3238个元素，每个元素包含字段: input, output (396354 bytes)
+│   ├── 001.json # JSON数组，包含168个元素，每个元素包含字段: input, output (17162 bytes)
+│   └── 035.json # JSON数组，包含169个元素，每个元素包含字段: input, output (18864 bytes)
+├── function/
+│   ├── multi_intents/
+│   │   └── multi_intents.json # JSON数组，包含1288个元素，每个元素包含字段: input, output (264117 bytes)
+│   ├── single_intent/
+│   │   ├── 002.json # JSON数组，包含424个元素，每个元素包含字段: input, output (54269 bytes)
+│   │   ├── 003.json # JSON数组，包含209个元素，每个元素包含字段: input, output (23133 bytes)
+│   │   ├── 004.json # JSON数组，包含355个元素，每个元素包含字段: input, output (40323 bytes)
+│   │   ├── 005.json # JSON数组，包含205个元素，每个元素包含字段: input, output (20969 bytes)
+│   │   ├── 006.json # JSON数组，包含222个元素，每个元素包含字段: input, output (22022 bytes)
+│   │   ├── 007.json # JSON数组，包含188个元素，每个元素包含字段: input, output (18730 bytes)
+│   │   ├── 008.json # JSON数组，包含250个元素，每个元素包含字段: input, output (28652 bytes)
+│   │   ├── 009.json # JSON数组，包含87个元素，每个元素包含字段: input, output (9725 bytes)
+│   │   ├── 011.json # JSON数组，包含190个元素，每个元素包含字段: input, output (18400 bytes)
+│   │   ├── 021.json # JSON数组，包含489个元素，每个元素包含字段: input, output (44921 bytes)
+│   │   ├── 024.json # JSON数组，包含96个元素，每个元素包含字段: input, output (9332 bytes)
+│   │   ├── 025.json # JSON数组，包含188个元素，每个元素包含字段: input, output (18003 bytes)
+│   │   ├── 026.json # JSON数组，包含364个元素，每个元素包含字段: input, output (42239 bytes)
+│   │   ├── 027.json # JSON数组，包含145个元素，每个元素包含字段: input, output (15400 bytes)
+│   │   ├── 029.json # JSON数组，包含60个元素，每个元素包含字段: input, output (6437 bytes)
+│   │   ├── 030.json # JSON数组，包含77个元素，每个元素包含字段: input, output (9753 bytes)
+│   │   ├── 031.json # JSON数组，包含143个元素，每个元素包含字段: input, output (15104 bytes)
+│   │   ├── 032.json # JSON数组，包含158个元素，每个元素包含字段: input, output (35506 bytes)
+│   │   ├── 033.json # JSON数组，包含124个元素，每个元素包含字段: input, output (14857 bytes)
+│   │   ├── 036.json # JSON数组，包含510个元素，每个元素包含字段: input, output (55356 bytes)
+│   │   └── 036_args.json # JSON数组，包含1599个元素，每个元素包含字段: input, output (311053 bytes)
+│   ├── databuilder.py # Python脚本，导入6个模块 (11175 bytes)
+│   ├── mcloud_function_v1_20250630.json # JSON数组，包含7371个元素，每个元素包含字段: input, output (1078264 bytes)
+│   └── mcloud_function_v1_20250701.json # JSON数组，包含7375个元素，每个元素包含字段: input, output (1078039 bytes)
+├── intent/
+│   ├── single_intent/
+│   │   ├── 000.json # JSON数组，包含3139个元素，每个元素包含字段: input, output (386069 bytes)
+│   │   ├── 001.json # JSON数组，包含4244个元素，每个元素包含字段: input, output (578302 bytes)
+│   │   └── 002.json # JSON数组，包含6086个元素，每个元素包含字段: input, output (712505 bytes)
+│   ├── databuilder.py # Python脚本，导入6个模块 (11150 bytes)
+│   └── mcloud_intents_v1_20250627.json # JSON数组，包含15266个元素，每个元素包含字段: input, output (2080877 bytes)
+├── old_version_data/
+│   ├── __init__.py # Python脚本 (16 bytes)
+│   ├── build_020_data.py # Python脚本，定义函数: parse_cell, generate_intent_data，导入3个模块 (2480 bytes)
+│   ├── build_021_data.py # Python脚本，定义函数: parse_cell, generate_intent_data，导入3个模块 (2480 bytes)
+│   ├── build_032_data.py # Python脚本，定义函数: generate_intent_data，导入3个模块 (2047 bytes)
+│   ├── intents_v10_20240920.json # JSON数组，包含11271个元素，每个元素包含字段: input, output (2336131 bytes)
+│   ├── intents_v11_20241018.json # JSON数组，包含11823个元素，每个元素包含字段: input, output (2270335 bytes)
+│   ├── intents_v12_20241101.json # JSON数组，包含12369个元素，每个元素包含字段: input, output (2341102 bytes)
+│   ├── intents_v13_20241104.json # JSON数组，包含12369个元素，每个元素包含字段: input, output (2341388 bytes)
+│   ├── intents_v14_20241105.json # JSON数组，包含12379个元素，每个元素包含字段: input, output (2343394 bytes)
+│   ├── intents_v15_20241113.json # JSON数组，包含12525个元素，每个元素包含字段: input, output (2381371 bytes)
+│   ├── intents_v16_20241124.json # JSON数组，包含12686个元素，每个元素包含字段: input, output (2424650 bytes)
+│   ├── intents_v18_20241223.json # JSON数组，包含13248个元素，每个元素包含字段: input, output (2504418 bytes)
+│   ├── intents_v19_20250317.json # JSON数组，包含13251个元素，每个元素包含字段: input, output (2504853 bytes)
+│   ├── intents_v20_20250323.json # JSON数组，包含13613个元素，每个元素包含字段: input, output (2569265 bytes)
+│   ├── intents_v21_20250326.json # JSON数组，包含13613个元素，每个元素包含字段: input, output (2573313 bytes)
+│   ├── intents_v22_20250330.json # JSON数组，包含13868个元素，每个元素包含字段: input, output (2628738 bytes)
+│   ├── intents_v23_20250415.json # JSON数组，包含14072个元素，每个元素包含字段: input, output (2631647 bytes)
+│   ├── intents_v24_20250418.json # JSON数组，包含14473个元素，每个元素包含字段: input, output (2741383 bytes)
+│   ├── intents_v25_20250422.json # JSON数组，包含14512个元素，每个元素包含字段: input, output (2755073 bytes)
+│   ├── intents_v26_20250505.json # JSON数组，包含14935个元素，每个元素包含字段: input, output (2825342 bytes)
+│   ├── intents_v27_20250516.json # JSON数组，包含14963个元素，每个元素包含字段: input, output (2828388 bytes)
+│   ├── intents_v28_20250521.json # JSON数组，包含15171个元素，每个元素包含字段: input, output (2879165 bytes)
+│   ├── 功能列表.xlsx # Excel文件，44行3列，列名: 功能名称, 功能名称/简化词/相关词, 表达语句 (14020 bytes)
+│   ├── 发邮件数据.xlsx # Excel文件，158行8列，列名: Unnamed: 0, 语句, Unnamed: 2, 动作, 收件人名称等 (31780 bytes)
+│   └── 活动列表.xlsx # Excel文件，20行3列，列名: 活动名称, 活动名称/简化词/相关词, 表达语句 (11433 bytes)
+├── search/
+│   ├── multi_intents/
+│   │   └── multi_intents.json # JSON数组，包含1155个元素，每个元素包含字段: input, output (408187 bytes)
+│   ├── multi_turns/
+│   │   └── search_multi_turns.json # JSON数组，包含133个元素，每个元素包含字段: input, output (39926 bytes)
+│   ├── single_intent/
+│   │   ├── 012.json # JSON数组，包含2146个元素，每个元素包含字段: input, output (598379 bytes)
+│   │   ├── 013.json # JSON数组，包含317个元素，每个元素包含字段: input, output (76452 bytes)
+│   │   ├── 014.json # JSON数组，包含239个元素，每个元素包含字段: input, output (67538 bytes)
+│   │   ├── 015.json # JSON数组，包含202个元素，每个元素包含字段: input, output (42867 bytes)
+│   │   ├── 016.json # JSON数组，包含57个元素，每个元素包含字段: input, output (11260 bytes)
+│   │   ├── 017.json # JSON数组，包含115个元素，每个元素包含字段: input, output (24384 bytes)
+│   │   ├── 018.json # JSON数组，包含106个元素，每个元素包含字段: input, output (21785 bytes)
+│   │   ├── 020.json # JSON数组，包含112个元素，每个元素包含字段: input, output (18744 bytes)
+│   │   ├── 022书籍.json # JSON数组，包含82个元素，每个元素包含字段: input, output (15687 bytes)
+│   │   ├── 022影视.json # JSON数组，包含155个元素，每个元素包含字段: input, output (26897 bytes)
+│   │   ├── 022视频.json # JSON数组，包含76个元素，每个元素包含字段: input, output (14258 bytes)
+│   │   ├── 022试卷.json # JSON数组，包含107个元素，每个元素包含字段: input, output (19191 bytes)
+│   │   ├── 022音频.json # JSON数组，包含6个元素，每个元素包含字段: input, output (1113 bytes)
+│   │   ├── 023.json # JSON数组，包含244个元素，每个元素包含字段: input, output (35047 bytes)
+│   │   ├── 028.json # JSON数组，包含321个元素，每个元素包含字段: input, output (80188 bytes)
+│   │   └── 038.json # JSON数组，包含36个元素，每个元素包含字段: input, output (7648 bytes)
+│   ├── databuilder.py # Python脚本，导入6个模块 (11061 bytes)
+│   ├── mcloud_search_v1_20250630.json # JSON数组，包含5542个元素，每个元素包含字段: input, output (1495709 bytes)
+│   └── mcloud_search_v1_20250701.json # JSON数组，包含5542个元素，每个元素包含字段: input, output (1495115 bytes)
+├── test/
+│   └── 20241115.xlsx # Excel文件，5122行2列，列名: query, intent (154706 bytes)
+├── conclusion.md # 文本文件，共22行，非空行17行，内容预览: # 意图识别数据目录结构总结 | ## 目录整体结构概述 | 本目录是一个意图识别项目的核心数据管理目录，采用模块化设计，包含训练数据、测试数据、历史版本数据以及问题案例等多个组成部分。整体结构清晰，便于数据管理和模型训练。 (5574 bytes)
+└── dataset_info.json # JSON对象，包含字段: identity, alpaca_en_demo, alpaca_zh_demo, glaive_toolcall_en_demo, glaive_toolcall_zh_demo, mllm_demo, alpaca_en, alpaca_zh, alpaca_gpt4_en, alpaca_gpt4_zh等 (21533 bytes)
+```
+
+## 分析完成
+总计扫描文件和目录数量: 104
