@@ -159,6 +159,20 @@ class KimiProvider(BaseLLMProvider):
             }
         )
     
+    def generate(self, prompt: str, **kwargs) -> str:
+        """Generate text response from a simple prompt string.
+        
+        Args:
+            prompt: The input prompt string
+            **kwargs: Additional generation parameters
+            
+        Returns:
+            Generated text content as string
+        """
+        messages = [{"role": "user", "content": prompt}]
+        response = self.invoke(messages, **kwargs)
+        return response.content
+
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "KimiProvider":
         """Create KimiProvider from configuration dictionary."""
