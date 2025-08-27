@@ -615,37 +615,8 @@ volumes:
     
     def _get_env_template(self) -> str:
         """获取环境变量模板"""
-        return """# AgenticX 环境变量
-
-# LLM 服务配置
-LLM_PROVIDER=openai
-LLM_MODEL=gpt-4o-mini
-LLM_API_KEY=your_api_key_here
-LLM_BASE_URL=
-
-# --- OpenAI ---
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_API_BASE=
-
-# --- DeepSeek ---
-DEEPSEEK_API_KEY=your_deepseek_api_key_here
-DEEPSEEK_API_BASE=https://api.deepseek.com
-
-# --- Anthropic ---
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
-ANTHROPIC_API_BASE=
-
-# --- Google Gemini ---
-GOOGLE_API_KEY=your_google_api_key_here
-GOOGLE_API_BASE=
-
-# 数据库配置
-DATABASE_URL=postgresql://postgres:password@postgres:5432/agenticx
-
-# 应用配置
-DEBUG=false
-LOG_LEVEL=INFO
-"""
+        template_path = Path(__file__).parent / "env_template.txt"
+        return template_path.read_text(encoding='utf-8')
     
     def _get_compose_start_script_template(self) -> str:
         """获取Compose启动脚本模板"""
@@ -765,4 +736,4 @@ async def run_agent(request: dict):
 
 # Lambda handler
 handler = Mangum(app)
-""" 
+"""
