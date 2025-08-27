@@ -24,10 +24,23 @@ SILICONFLOW_API_KEY=your_siliconflow_api_key_here
 SILICONFLOW_API_BASE=https://api.siliconflow.cn/v1/embeddings
 SILICONFLOW_DEFAULT_MODEL=BAAI/bge-large-zh-v1.5
 
-# --- Bailian Embedding ---
+# --- Bailian/Dashscope (阿里云百炼) ---
+# 百炼API密钥 - 用于LLM和多模态模型（推荐使用此变量名）
 BAILIAN_API_KEY=your_bailian_api_key_here
-BAILIAN_API_BASE=https://api.bailian.aliyun.com/v1/embeddings
+
+# Dashscope API密钥 - 向后兼容（如果没有设置BAILIAN_API_KEY会使用此变量）
+DASHSCOPE_API_KEY=your_dashscope_api_key_here
+
+# 百炼LLM API基础URL
+BAILIAN_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+
+# 百炼嵌入模型配置
+BAILIAN_EMBEDDING_API_BASE=https://api.bailian.aliyun.com/v1/embeddings
 BAILIAN_DEFAULT_MODEL=bge-large-zh-v1.5
+
+# 百炼多模态模型推荐配置
+# BAILIAN_VLM_MODEL=qwen-vl-plus  # 多模态模型
+# BAILIAN_TEXT_MODEL=qwen-turbo   # 纯文本模型
 
 # --- 其他 LLM 提供商 ---
 # AZURE_API_KEY=
@@ -38,3 +51,6 @@ BAILIAN_DEFAULT_MODEL=bge-large-zh-v1.5
 
 # HUGGINGFACE_API_KEY=
 # HUGGINGFACE_API_BASE=
+
+# --- 网络搜索引擎提供商 ---
+BOCHA_API_KEY=
