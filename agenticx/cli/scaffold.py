@@ -72,6 +72,7 @@ class ProjectScaffolder:
                 "requirements.txt": self._get_basic_requirements_template(),
                 "README.md": self._get_basic_readme_template(),
                 ".gitignore": self._get_gitignore_template(),
+                ".env.example": self._get_env_example_template(),
                 "agents/__init__.py": "",
                 "workflows/__init__.py": "",
                 "tools/__init__.py": "",
@@ -92,6 +93,7 @@ class ProjectScaffolder:
                 "requirements.txt": self._get_multi_agent_requirements_template(),
                 "README.md": self._get_multi_agent_readme_template(),
                 ".gitignore": self._get_gitignore_template(),
+                ".env.example": self._get_env_example_template(),
                 "agents/__init__.py": "",
                 "agents/coordinator.py": self._get_coordinator_agent_template(),
                 "agents/worker.py": self._get_worker_agent_template(),
@@ -116,6 +118,7 @@ class ProjectScaffolder:
                 "requirements.txt": self._get_enterprise_requirements_template(),
                 "README.md": self._get_enterprise_readme_template(),
                 ".gitignore": self._get_gitignore_template(),
+                ".env.example": self._get_env_example_template(),
                 "Dockerfile": self._get_dockerfile_template(),
                 "docker-compose.yml": self._get_docker_compose_template(),
                 "agents/__init__.py": "",
@@ -1079,4 +1082,9 @@ database:
         return "# 条件工作流代码模板"
     
     def _get_conditional_workflow_config_template(self) -> str:
-        return "# 条件工作流配置模板" 
+        return "# 条件工作流配置模板"
+    
+    def _get_env_example_template(self) -> str:
+        """获取环境变量示例模板"""
+        template_path = Path(__file__).parent / "env_template.txt"
+        return template_path.read_text(encoding='utf-8')
