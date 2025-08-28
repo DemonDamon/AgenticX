@@ -1,34 +1,30 @@
-/.idea/
-/thirdparty/
-/.cursor/
+.idea/
+.cursor/
+.qoder/
+.pytest_cache/
 
 __pycache__/ 
 **/__pycache__/
 
-*.log
-.env
 *.egg-info/
 dist/
 
+conclusions/
+deploy/data/
+deploy/logs/
+discussions/
+exps/
+htmlcov/
+markmap/
+progress/
+thirdparty/
+
 prd.md
 
-risks/
-
-/deploy/data/
-/deploy/logs/
-
-htmlcov/
-
-blog/
+*.log
+.env
 
 .coverage
-
 coverage.xml
-
-thirdparty/
-progress/
-
-conclusions/
-discussions/
 
 scan_structure.py
