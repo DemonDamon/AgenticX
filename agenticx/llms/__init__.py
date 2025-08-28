@@ -8,6 +8,7 @@ from .base import BaseLLMProvider
 from .response import LLMResponse, LLMChoice, TokenUsage
 from .litellm_provider import LiteLLMProvider
 from .kimi_provider import KimiProvider
+from .bailian_provider import BailianProvider
 
 # Convenience re-exports for specific models, all using LiteLLMProvider
 # This makes it easy to instantiate a specific provider type.
@@ -33,6 +34,11 @@ class MoonshotProvider(KimiProvider):
     """Provider for Moonshot AI Kimi models, e.g., 'kimi-k2-0711-preview'."""
     pass
 
+# Dedicated provider for Bailian (Alibaba Cloud Dashscope)
+class DashscopeProvider(BailianProvider):
+    """Provider for Alibaba Cloud Bailian/Dashscope models, e.g., 'qwen-vl-plus'."""
+    pass
+
 
 __all__ = [
     # Base classes and data structures
@@ -44,6 +50,7 @@ __all__ = [
     # Concrete provider implementations
     "LiteLLMProvider",
     "KimiProvider",
+    "BailianProvider",
     
     # Convenience classes
     "OpenAIProvider",
@@ -51,4 +58,5 @@ __all__ = [
     "OllamaProvider",
     "GeminiProvider",
     "MoonshotProvider",
+    "DashscopeProvider",
 ]
