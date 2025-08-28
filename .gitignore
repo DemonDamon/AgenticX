@@ -19,7 +19,7 @@ markmap/
 progress/
 thirdparty/
 
-prd.md
+# prd.md
 
 *.log
 .env
