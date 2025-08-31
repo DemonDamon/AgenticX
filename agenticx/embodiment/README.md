@@ -24,120 +24,102 @@ graph TB
     subgraph "M16: Embodiment Layer"
         subgraph "M16.1: Core Abstractions"
             GUIAgent[GUIAgent]
-            GUIEnvironment[GUIEnvironment]
-            ActionSpace[ActionSpace]
-            ScreenState[ScreenState]
         end
-        
-        subgraph "M16.2: Human-Aligned Learning Engine"
-            KnowledgeRetriever[AppKnowledgeRetriever]
+
+        subgraph "M16.2: Learning Components"
+            AppKnowledgeRetriever[AppKnowledgeRetriever]
             GUIExplorer[GUIExplorer]
             TaskSynthesizer[TaskSynthesizer]
             DeepUsageOptimizer[DeepUsageOptimizer]
             EdgeCaseHandler[EdgeCaseHandler]
+            KnowledgeEvolution[KnowledgeEvolution]
         end
-        
-        subgraph "M16.3: Data Engineering Pipeline"
-            ExplorerAgent[ExplorerAgent]
-            AutoAnnotator[AutoAnnotator]
-            HumanValidator[HumanValidator]
-            QualityAssessor[QualityAssessor]
-            ValidationInterface[ValidationInterface]
+
+        subgraph "M16.3: GUI Tools"
+            ClickTool[ClickTool]
+            TypeTool[TypeTool]
+            ScrollTool[ScrollTool]
+            ScreenshotTool[ScreenshotTool]
+            GetElementTreeTool[GetElementTreeTool]
         end
-        
-        subgraph "M16.4: GRPO Training System"
-            GRPOTrainer[GRPOTrainer]
-            PolicyNetwork[PolicyNetwork]
-            ValueNetwork[ValueNetwork]
-            RewardModel[RewardModel]
-            GUIRLEnvironment[GUIRLEnvironment]
+
+        subgraph "M16.4: Workflow"
+            GUIAutomationWorkflow[GUIAutomationWorkflow]
         end
-        
-        subgraph "M16.5: Execution Engine"
-            TaskPlanner[TaskPlanner]
-            ActionExecutor[ActionExecutor]
-            VisionProcessor[VisionProcessor]
-            ErrorRecovery[ErrorRecovery]
-            ReflectionEngine[ReflectionEngine]
-        end
-        
-        subgraph "M16.6: Data Flywheel System"
-            DataGeneratorAgent[DataGeneratorAgent]
-            QualityEvaluator[QualityEvaluator]
-            ContinuousLearner[ContinuousLearner]
-            ModelUpdater[ModelUpdater]
-            FeedbackLoop[FeedbackLoop]
-        end
-        
-        subgraph "M16.7: Platform Adapters"
-            AndroidAdapter[AndroidAdapter]
-            IOSAdapter[IOSAdapter]
-            WebAdapter[WebAdapter]
-            DesktopAdapter[DesktopAdapter]
+
+        subgraph "M16.5: Human-in-the-Loop"
+            HumanInTheLoopComponent[HumanInTheLoopComponent]
+            FeedbackCollector[FeedbackCollector]
         end
     end
-    
+
     subgraph "AgenticX Core Infrastructure"
-        M5["M5: Agent Core"]
-        M6["M6: Task Validation"]
-        M7["M7: Workflow Engine"]
-        M9["M9: Observability"]
-        M11["M11: Memory"]
-        M12["M12: LLM"]
-        M13["M13: Storage"]
+        Agent["agenticx.core.agent.Agent"]
+        Component["agenticx.core.component.Component"]
+        BaseTool["agenticx.core.tool.BaseTool"]
+        Workflow["agenticx.core.workflow.Workflow"]
+        Event["agenticx.core.event.Event"]
+        Memory["agenticx.memory.component.Memory"]
     end
-    
-    GUIAgent --> M5
-    ExplorerAgent --> M5
-    TaskSynthesizer --> M7
-    AutoAnnotator --> M12
-    GRPOTrainer --> M9
-    TaskPlanner --> M6
-    DataGeneratorAgent --> M11
-    KnowledgeRetriever --> M11
-    QualityAssessor --> M9
-    ContinuousLearner --> M7
-    ValidationInterface --> M13
+
+    GUIAgent -- inherits from --> Agent
+    AppKnowledgeRetriever -- inherits from --> Component
+    GUIExplorer -- inherits from --> Component
+    TaskSynthesizer -- inherits from --> Component
+    DeepUsageOptimizer -- inherits from --> Component
+    EdgeCaseHandler -- inherits from --> Component
+    KnowledgeEvolution -- inherits from --> Component
+    ClickTool -- inherits from --> BaseTool
+    TypeTool -- inherits from --> BaseTool
+    ScrollTool -- inherits from --> BaseTool
+    ScreenshotTool -- inherits from --> BaseTool
+    GetElementTreeTool -- inherits from --> BaseTool
+    GUIAutomationWorkflow -- inherits from --> Workflow
+    HumanInTheLoopComponent -- inherits from --> Component
+
+    GUIAgent -- uses --> GUIAutomationWorkflow
+    GUIAutomationWorkflow -- uses --> ClickTool
+    GUIAutomationWorkflow -- uses --> TypeTool
+    GUIAutomationWorkflow -- uses --> ScrollTool
+    GUIAgent -- uses --> AppKnowledgeRetriever
+    GUIAgent -- uses --> GUIExplorer
+    GUIAgent -- uses --> HumanInTheLoopComponent
+    GUIAgent -- uses --> Memory
+    GUIAgent -- dispatches --> Event
 ```
 
 ## 3. 功能模块拆解 (Functional Modules Breakdown)
 
-*   **M16.1: 核心抽象层 (`agenticx.embodiment.core`)**: [GUI Agent基础抽象、环境定义、动作空间规范和状态表示](./prds/m16_1_core_abstractions.md)
-*   **M16.2: 人类对齐学习引擎 (`agenticx.embodiment.learning`)**: [五阶段学习方法论实现，从知识检索到边缘情况处理](./prds/m16_2_human_aligned_learning_engine.md)
-*   **M16.3: 数据工程管道 (`agenticx.embodiment.data_engineering`)**: [半自动化数据收集、VLM标注和人工校验系统](./prds/m16_3_grpo_engine.md)
-*   **M16.4: GRPO训练系统 (`agenticx.embodiment.training`)**: [基于群体相对策略优化的强化学习训练框架](./prds/m16_4_training_system.md)
-*   **M16.5: 执行引擎 (`agenticx.embodiment.execution`)**: [任务规划、动作执行、视觉处理和多层次错误恢复](./prds/m16_5_data_flywheel.md)
-*   **M16.6: 数据飞轮系统 (`agenticx.embodiment.flywheel`)**: [模型生成数据、质量评估和持续学习的闭环系统](./prds/m16_6_platform_adapters.md)
-*   **M16.7: 平台适配层 (`agenticx.embodiment.platforms`)**: [多平台GUI操作适配器和统一接口](./prds/m16_7_cross_platform_gui_abstraction_layer.md)
+*   **M16.1: 核心抽象层 (`agenticx.embodiment.core`)**: [GUI Agent核心抽象，基于`agenticx.core.agent`进行扩展](./prds/m16_1_core_abstractions.md)
+*   **M16.2: 人类对齐学习引擎 (`agenticx.embodiment.learning`)**: [基于`agenticx.core.component`实现五阶段学习方法论](./prds/m16_2_human_aligned_learning_engine.md)
+*   **M16.3: GUI工具集 (`agenticx.embodiment.tools`)**: [将GUI操作封装为`agenticx.core.tool.BaseTool`，实现原子化和可组合性](./prds/m16_3_tools.md)
+*   **M16.4: 工作流编排 (`agenticx.embodiment.workflow`)**: [使用`agenticx.core.workflow.Workflow`定义和执行GUI自动化任务](./prds/m16_4_workflow.md)
+*   **M16.5: 人机协同 (`agenticx.embodiment.hitl`)**: [定义人机协同接口和反馈机制，实现持续学习](./prds/m16_5_human_in_the_loop.md)
 
 ## 4. 开发路线图 (Development Roadmap / To-Do List)
 
-### Phase 1: 基础设施
-**目标**: 建立M16模块的核心基础设施和人类对齐学习引擎
+### Phase 1: 核心框架重构
+**目标**: 完成`embodiment`模块与`agenticx.core`的深度集成，重构核心抽象、学习组件和工具。
 
-### Phase 2: 数据工程管道
-**目标**: 构建半自动化的数据收集和标注系统
+### Phase 2: 工作流与人机协同
+**目标**: 实现基于`Workflow`的复杂任务编排和`Human-in-the-Loop`的协同与反馈机制。
 
-### Phase 3: 先进RL训练系统
-**目标**: 建立完整的强化学习训练和数学建模能力，集成最新算法演进路径
+### Phase 3: 平台适配与测试
+**目标**: 扩展GUI工具集以支持跨平台（Web, Android, iOS），并建立完善的测试体系。
 
-### Phase 4: 执行引擎和数据飞轮
-**目标**: 实现智能执行和持续学习能力
+### Phase 4: 持续学习与优化
+**目标**: 完善数据飞轮，通过持续学习和优化，提升`GUIAgent`的自主性和任务成功率。
 
-### Phase 5: 平台适配和优化
-**目标**: 实现跨平台支持和性能优化
+## 5. 与AgenticX框架的深度融合 (Deep Integration with AgenticX Framework)
 
-## 5. 与AgenticX框架集成策略 (Integration with AgenticX Framework)
+M16 `embodiment` 模块不再是与AgenticX框架的简单集成，而是完全基于其核心概念构建，实现了深度融合：
 
-### 核心模块依赖关系
-
-*   **与M5 Agent Core集成**: `GUIAgent`继承`Agent`基类。
-*   **与M6 Task Validation集成**: `TaskPlanner`使用`TaskOutputParser`验证规划结果。
-*   **与M7 Workflow Engine集成**: `ContinuousLearningWorkflow`和`DataFlywheel`基于`WorkflowEngine`实现复杂编排。
-*   **与M9 Observability集成**: `GRPOTrainer`和`QualityAssessor`使用`MetricsCollector`进行性能监控。
-*   **与M11 Memory集成**: `AppKnowledgeRetriever`和`KnowledgeEvolution`利用`MemoryComponent`实现知识持久化。
-*   **与M12 LLM集成**: `AutoAnnotator`和`TaskInstructionGenerator`使用`BailianProvider`进行视觉理解和文本生成。
-*   **与M13 Storage集成**: 轨迹数据、训练模型和知识图谱通过`StorageManager`进行统一存储管理。
+*   **统一的Agent模型**: `GUIAgent` 作为 `agenticx.core.agent.Agent` 的子类，复用其生命周期管理、事件处理和组件模型。
+*   **组件化学习能力**: `embodiment` 的所有学习组件（如 `AppKnowledgeRetriever`, `GUIExplorer`）均继承自 `agenticx.core.component.Component`，实现了模块化、可插拔和可复用。
+*   **标准化的工具体系**: 所有的GUI操作（点击、输入等）被建模为 `agenticx.core.tool.BaseTool` 的子类，由 `ToolExecutor` 统一调度和执行。
+*   **工作流驱动的任务执行**: 复杂的GUI任务通过 `agenticx.core.workflow.Workflow` 进行编排，实现了任务的分解、状态管理和可靠执行。
+*   **事件驱动的通信**: 组件之间、Agent与环境之间的交互通过 `agenticx.core.event.EventSystem` 进行解耦，提高了系统的灵活性和可扩展性。
+*   **集成的记忆系统**: `GUIAgent` 直接利用 `agenticx.memory` 组件来存储和检索知识，实现了长期记忆和持续学习。
 
 ## 6. 成功指标 (Success Metrics)
 
