@@ -1,0 +1,175 @@
+"""GUI Workflow Implementation.
+
+This module provides the GUIWorkflow class that extends the core Workflow
+with GUI-specific capabilities and state management.
+"""
+
+from typing import Type, Dict, Any, Optional, List
+from pydantic import Field
+import networkx as nx
+
+from agenticx.core.workflow import Workflow, WorkflowNode, WorkflowEdge
+from agenticx.embodiment.core.context import GUIAgentContext
+from agenticx.embodiment.core.models import GUIAgentResult
+
+
+class GUIWorkflow(Workflow):
+    """GUI task workflow representation.
+    
+    Extends the core Workflow with GUI-specific capabilities including:
+    - Graph-based workflow structure using NetworkX
+    - GUI state schema definition
+    - Entry point management
+    - GUI-specific metadata
+    """
+    
+    model_config = {"arbitrary_types_allowed": True}
+    
+    # GUI-specific fields
+    entry_point: Optional[str] = Field(default=None, description="Graph entry node name")
+    state_schema: Type[GUIAgentContext] = Field(
+        default=GUIAgentContext,
+        description="State schema for this workflow"
+    )
+    
+    # Internal graph representation
+    graph: Optional[nx.DiGraph] = Field(default=None, exclude=True)
+    
+    def __init__(self, **data):
+        """Initialize GUI workflow."""
+        super().__init__(**data)
+        self.graph = nx.DiGraph()
+        self._build_graph()
+    
+    def _build_graph(self) -> None:
+        """Build NetworkX graph from nodes and edges."""
+        self.graph = nx.DiGraph()
+        
+        # Add nodes
+        for node in self.nodes:
+            self.graph.add_node(
+                node.id,
+                type=node.type,
+                name=node.name,
+                config=node.config
+            )
+        
+        # Add edges
+        for edge in self.edges:
+            self.graph.add_edge(
+                edge.source,
+                edge.target,
+                condition=edge.condition,
+                metadata=edge.metadata
+            )
+    
+    def rebuild_graph(self) -> None:
+        """Rebuild the NetworkX graph representation."""
+        self._build_graph()
+    
+    def add_node(self, node: WorkflowNode) -> None:
+        """Add a node to the workflow graph."""
+        self.nodes.append(node)
+        self.graph.add_node(node.id, node=node)
+    
+    def add_edge(self, edge: WorkflowEdge) -> None:
+        """Add an edge to the workflow graph."""
+        self.edges.append(edge)
+        self.graph.add_edge(edge.source, edge.target, edge=edge)
+    
+    def get_node(self, node_id: str) -> Optional[WorkflowNode]:
+        """Get a node by ID."""
+        for node in self.nodes:
+            if node.id == node_id:
+                return node
+        return None
+    
+    def get_successors(self, node_id: str) -> List[str]:
+        """Get successor node IDs for a given node."""
+        return list(self.graph.successors(node_id))
+    
+    def get_predecessors(self, node_id: str) -> List[str]:
+        """Get predecessor node IDs for a given node."""
+        return list(self.graph.predecessors(node_id))
+    
+    def validate(self) -> bool:
+        """Validate the workflow structure."""
+        # Check if workflow has an entry point
+        if self.entry_point is None:
+            raise ValueError("Workflow must have an entry point")
+        
+        # Check if entry point exists
+        if self.entry_point not in [node.id for node in self.nodes]:
+            raise ValueError(f"Entry point '{self.entry_point}' references non-existent node")
+        
+        # Check for cycles (optional - some workflows may allow cycles)
+        if not nx.is_directed_acyclic_graph(self.graph):
+            raise ValueError("Workflow contains cycles")
+        
+        # Check if all edges reference valid nodes
+        node_ids = {node.id for node in self.nodes}
+        for edge in self.edges:
+            if edge.source not in node_ids or edge.target not in node_ids:
+                raise ValueError(f"Edge references non-existent nodes: {edge.source} -> {edge.target}")
+        
+        return True
+    
+    def set_entry_point(self, node_id: str) -> None:
+        """Set the workflow entry point.
+        
+        Args:
+            node_id: ID of the node to set as entry point
+            
+        Raises:
+            ValueError: If the node doesn't exist in the workflow
+        """
+        node_ids = {node.id for node in self.nodes}
+        if node_id not in node_ids:
+            raise ValueError(f"Node {node_id} does not exist in workflow")
+        
+        self.entry_point = node_id
+    
+    def get_entry_nodes(self) -> List[str]:
+        """Get all nodes that have no incoming edges (entry points)."""
+        return [node for node in self.graph.nodes() if self.graph.in_degree(node) == 0]
+    
+    def get_terminal_nodes(self) -> List[str]:
+        """Get all terminal nodes (nodes with no successors)."""
+        return [node for node in self.graph.nodes() if self.graph.out_degree(node) == 0]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert workflow to dictionary representation."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "version": self.version,
+            "organization_id": self.organization_id,
+            "entry_point": self.entry_point,
+            "state_schema": self.state_schema.__name__ if self.state_schema else None,
+            "nodes": [node.dict() for node in self.nodes],
+            "edges": [edge.dict() for edge in self.edges],
+            "metadata": self.metadata
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "GUIWorkflow":
+        """Create workflow from dictionary representation."""
+        nodes = [WorkflowNode(**node_data) for node_data in data.get("nodes", [])]
+        edges = [WorkflowEdge(**edge_data) for edge_data in data.get("edges", [])]
+        
+        # Handle state_schema - if it's a string, use default GUIAgentContext
+        state_schema = GUIAgentContext
+        if "state_schema" in data and data["state_schema"] == "GUIAgentContext":
+            state_schema = GUIAgentContext
+        
+        return cls(
+            id=data.get("id"),
+            name=data["name"],
+            version=data.get("version", "1.0.0"),
+            organization_id=data["organization_id"],
+            entry_point=data["entry_point"],
+            state_schema=state_schema,
+            nodes=nodes,
+            edges=edges,
+            metadata=data.get("metadata", {})
+        )

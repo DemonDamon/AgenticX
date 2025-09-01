@@ -90,8 +90,12 @@ graph TB
 
 ## 3. 功能模块拆解 (Functional Modules Breakdown)
 
-*   **M16.1: 核心抽象层 (`agenticx.embodiment.core`)**: [GUI Agent核心抽象，基于`agenticx.core.agent`进行扩展](./prds/m16_1_core_abstractions.md)
-*   **M16.2: 人类对齐学习引擎 (`agenticx.embodiment.learning`)**: [基于`agenticx.core.component`实现五阶段学习方法论](./prds/m16_2_human_aligned_learning_engine.md)
+*   **M16.1: 核心抽象层 (`agenticx.embodiment.core`)**: ✅ **已完成** - [GUI Agent核心抽象，基于`agenticx.core.agent`进行扩展](./prds/m16_1_core_abstractions.md)
+    - 实现了 `GUIAgent`、`GUITask`、`GUIAgentContext`、`ScreenState`、`InteractionElement`、`GUIAgentResult` 等核心类
+    - 所有测试用例通过，功能验证完成
+*   **M16.2: 人类对齐学习引擎 (`agenticx.embodiment.learning`)**: ✅ **已完成** - [基于`agenticx.core.component`实现五阶段学习方法论](./prds/m16_2_human_aligned_learning_engine.md)
+    - 实现了 `AppKnowledgeRetriever`、`GUIExplorer`、`TaskSynthesizer`、`DeepUsageOptimizer`、`EdgeCaseHandler`、`KnowledgeEvolution` 等学习组件
+    - 所有14个测试用例通过，功能验证完成
 *   **M16.3: GUI工具集 (`agenticx.embodiment.tools`)**: [将GUI操作封装为`agenticx.core.tool.BaseTool`，实现原子化和可组合性](./prds/m16_3_tools.md)
 *   **M16.4: 工作流编排 (`agenticx.embodiment.workflow`)**: [使用`agenticx.core.workflow.Workflow`定义和执行GUI自动化任务](./prds/m16_4_workflow.md)
 *   **M16.5: 人机协同 (`agenticx.embodiment.hitl`)**: [定义人机协同接口和反馈机制，实现持续学习](./prds/m16_5_human_in_the_loop.md)
