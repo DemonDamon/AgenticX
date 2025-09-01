@@ -145,7 +145,7 @@ class GUIWorkflow(Workflow):
             "version": self.version,
             "organization_id": self.organization_id,
             "entry_point": self.entry_point,
-            "state_schema": self.state_schema.__name__ if self.state_schema else None,
+            "state_schema": self.state_schema.__name__ if hasattr(self.state_schema, '__name__') else str(self.state_schema),
             "nodes": [node.dict() for node in self.nodes],
             "edges": [edge.dict() for edge in self.edges],
             "metadata": self.metadata
@@ -154,22 +154,34 @@ class GUIWorkflow(Workflow):
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "GUIWorkflow":
         """Create workflow from dictionary representation."""
-        nodes = [WorkflowNode(**node_data) for node_data in data.get("nodes", [])]
-        edges = [WorkflowEdge(**edge_data) for edge_data in data.get("edges", [])]
+        # Handle state_schema field
+        state_schema = data.get("state_schema")
+        if state_schema == "GUIAgentContext" or state_schema is None:
+            from agenticx.embodiment.core.context import GUIAgentContext
+            state_schema_class = GUIAgentContext
+        else:
+            # For other state schema types, use GUIAgentContext as default
+            from agenticx.embodiment.core.context import GUIAgentContext
+            state_schema_class = GUIAgentContext
         
-        # Handle state_schema - if it's a string, use default GUIAgentContext
-        state_schema = GUIAgentContext
-        if "state_schema" in data and data["state_schema"] == "GUIAgentContext":
-            state_schema = GUIAgentContext
-        
-        return cls(
-            id=data.get("id"),
+        workflow = cls(
+            id=data["id"],
             name=data["name"],
-            version=data.get("version", "1.0.0"),
+            version=data["version"],
             organization_id=data["organization_id"],
-            entry_point=data["entry_point"],
-            state_schema=state_schema,
-            nodes=nodes,
-            edges=edges,
+            entry_point=data.get("entry_point"),
+            state_schema=state_schema_class,
             metadata=data.get("metadata", {})
         )
+        
+        # Add nodes
+        for node_data in data.get("nodes", []):
+            node = WorkflowNode(**node_data)
+            workflow.add_node(node)
+        
+        # Add edges
+        for edge_data in data.get("edges", []):
+            edge = WorkflowEdge(**edge_data)
+            workflow.add_edge(edge)
+        
+        return workflow

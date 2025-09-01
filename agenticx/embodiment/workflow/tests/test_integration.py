@@ -404,15 +404,19 @@ class TestWorkflowIntegration:
         assert result.status == "completed"
         assert len(result.node_executions) == 2
         
-        # Verify context was updated
-        assert context.metadata["current_page"] == "login_page"
-        assert context.metadata["form_data"] == {"username": "testuser"}
+        # Verify context was updated in the final result
+        final_context = result.output
+        assert "metadata" in final_context
+        assert final_context["metadata"]["current_page"] == "login_page"
+        assert final_context["metadata"]["form_data"] == {"username": "testuser"}
         
         # Verify function node result
         function_execution = result.node_executions[0]
         assert function_execution.node_id == "update_state"
         assert function_execution.status == "completed"
-        assert function_execution.result["page_updated"] is True
+        # Check the function result in the output context
+        assert "update_state_result" in final_context["metadata"]
+        assert final_context["metadata"]["update_state_result"]["page_updated"] is True
     
     @pytest.mark.asyncio
     async def test_complex_branching_workflow(self, engine, context, mock_tools):

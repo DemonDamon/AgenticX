@@ -43,7 +43,7 @@ class WorkflowBuilder:
         self.workflow_id = workflow_id or f"workflow_{uuid.uuid4().hex[:8]}"
         self.name = name or f"workflow_{uuid.uuid4().hex[:8]}"
         self.version = version
-        self.state_schema = state_schema
+        self.state_schema = state_schema if state_schema != GUIAgentContext else {}
         self.organization_id = organization_id
         
         self._nodes: Dict[str, WorkflowNode] = {}
@@ -51,22 +51,44 @@ class WorkflowBuilder:
         self._entry_point: Optional[str] = None
         self._metadata: Dict[str, Any] = {}
     
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        """Get workflow metadata."""
+        return self._metadata
+    
+    @property
+    def edges(self) -> List[WorkflowEdge]:
+        """Get workflow edges."""
+        return self._edges
+    
+    @property
+    def entry_point(self) -> Optional[str]:
+        """Get workflow entry point."""
+        return self._entry_point
+    
+    @property
+    def nodes(self) -> List[WorkflowNode]:
+        """Get workflow nodes as a list."""
+        return list(self._nodes.values())
+    
     def add_node(
         self, 
         node_id: str, 
-        handler: Union[Callable, str], 
         node_type: str = "function",
         name: Optional[str] = None,
-        **config
+        handler: Optional[Callable] = None,
+        config: Optional[Dict[str, Any]] = None,
+        **kwargs
     ) -> "WorkflowBuilder":
         """Add a node to the workflow.
         
         Args:
             node_id: Unique node identifier
-            handler: Function or tool name to execute
             node_type: Type of node (function, tool, condition)
             name: Human-readable node name
-            **config: Additional node configuration
+            handler: Function or handler for the node
+            config: Additional configuration for the node
+            **kwargs: Additional configuration for the node
             
         Returns:
             Self for method chaining
@@ -75,7 +97,9 @@ class WorkflowBuilder:
             raise ValueError(f"Node {node_id} already exists")
         
         # Prepare config based on handler type
-        node_config = config.copy()
+        node_config = config.copy() if config else {}
+        node_config.update(kwargs)
+        
         if callable(handler):
             node_config["function"] = handler
             if node_type == "function":
@@ -83,7 +107,7 @@ class WorkflowBuilder:
         elif isinstance(handler, str):
             node_config["tool_name"] = handler
             node_type = "tool"
-        else:
+        elif handler is not None:
             raise ValueError(f"Invalid handler type: {type(handler)}")
         
         node = WorkflowNode(
@@ -101,7 +125,7 @@ class WorkflowBuilder:
         node_id: str, 
         name: str,
         tool_name: str, 
-        tool_args: Optional[Dict[str, Any]] = None
+        args: Optional[Dict[str, Any]] = None
     ) -> "WorkflowBuilder":
         """Add a tool execution node.
         
@@ -109,7 +133,7 @@ class WorkflowBuilder:
             node_id: Unique node identifier
             name: Human-readable node name
             tool_name: Name of the tool to execute
-            tool_args: Arguments to pass to the tool
+            args: Arguments to pass to the tool
             
         Returns:
             Self for method chaining
@@ -119,7 +143,7 @@ class WorkflowBuilder:
             handler=tool_name,
             node_type="tool",
             name=name,
-            args=tool_args or {}
+            args=args or {}
         )
     
     def add_function_node(
@@ -127,7 +151,7 @@ class WorkflowBuilder:
         node_id: str, 
         name: str,
         function: Callable, 
-        config: Optional[Dict[str, Any]] = None
+        args: Optional[Dict[str, Any]] = None
     ) -> "WorkflowBuilder":
         """Add a function execution node.
         
@@ -135,48 +159,53 @@ class WorkflowBuilder:
             node_id: Unique node identifier
             name: Human-readable node name
             function: Function to execute
-            config: Additional configuration
+            args: Additional configuration
             
         Returns:
             Self for method chaining
         """
-        return self.add_node(
-            node_id=node_id,
-            handler=function,
-            node_type="function",
-            name=name,
-            **(config or {})
+        node_config = {}
+        node_config["function"] = function
+        if args:
+            node_config["args"] = args
+            
+        node = WorkflowNode(
+            id=node_id,
+            type="function",
+            name=name or node_id,
+            config=node_config
         )
+        self._nodes[node_id] = node
+        return self
     
     def add_condition_node(
         self, 
         node_id: str, 
-        condition: Union[str, Callable], 
-        name: Optional[str] = None
+        name: Optional[str] = None,
+        expression: str = "True",
+        **config
     ) -> "WorkflowBuilder":
         """Add a condition evaluation node.
         
         Args:
             node_id: Unique node identifier
-            condition: Condition string or function
+            expression: Condition expression
             name: Human-readable node name
             
         Returns:
             Self for method chaining
         """
-        config = {}
-        if isinstance(condition, str):
-            config["condition"] = condition
-        else:
-            config["function"] = condition
-        
-        return self.add_node(
-            node_id=node_id,
-            handler=condition,
-            node_type="condition",
-            name=name,
-            **config
+        node_config = config.copy() if config else {}
+        node_config["expression"] = expression
+            
+        node = WorkflowNode(
+            id=node_id,
+            type="condition",
+            name=name or node_id,
+            config=node_config
         )
+        self._nodes[node_id] = node
+        return self
     
     def add_edge(
         self, 
@@ -278,14 +307,7 @@ class WorkflowBuilder:
         Returns:
             Self for method chaining
         """
-        from agenticx.embodiment.core.context import GUIAgentContext
-        
-        if isinstance(schema, dict):
-            # For now, we'll use GUIAgentContext as the default schema class
-            # In a real implementation, you might want to create a dynamic class
-            self.state_schema = GUIAgentContext
-        else:
-            self.state_schema = schema
+        self.state_schema = schema
         return self
     
     def set_metadata(self, metadata: Union[Dict[str, Any], str], value: Any = None) -> "WorkflowBuilder":
@@ -319,10 +341,13 @@ class WorkflowBuilder:
             Constructed GUIWorkflow
         """
         if not self._entry_point:
-            raise ValueError("Entry point must be set before building")
+            raise ValueError("Workflow must have an entry point")
         
         if not self._nodes:
             raise ValueError("At least one node must be added before building")
+        
+        # Ensure state_schema is a proper class, not a dict
+        state_schema = self.state_schema if isinstance(self.state_schema, type) else GUIAgentContext
         
         workflow = GUIWorkflow(
             id=self.workflow_id,
@@ -333,7 +358,7 @@ class WorkflowBuilder:
             nodes=list(self._nodes.values()),
             edges=self._edges,
             metadata=self._metadata,
-            state_schema=self.state_schema
+            state_schema=state_schema
         )
         
         # Validate the workflow
@@ -392,6 +417,8 @@ class WorkflowBuilder:
 def create_sequential_workflow(
     name: str,
     steps: List[Dict[str, Any]],
+    workflow_id: Optional[str] = None,
+    version: str = "1.0.0",
     state_schema: Type[GUIAgentContext] = GUIAgentContext,
     organization_id: str = "default"
 ) -> GUIWorkflow:
@@ -407,27 +434,43 @@ def create_sequential_workflow(
         Constructed GUIWorkflow
     """
     builder = WorkflowBuilder(
+        workflow_id=workflow_id or name.lower().replace(" ", "_"),
         name=name,
+        version=version,
         state_schema=state_schema,
         organization_id=organization_id
     )
     
     previous_step = None
     
+    if not steps:
+        raise ValueError("Steps cannot be empty")
+    
     for i, step in enumerate(steps):
         step_id = step.get("id", f"step_{i}")
-        step_type = step.get("type", "function")
-        handler = step.get("handler")
         step_name = step.get("name", step_id)
-        config = step.get("config", {})
         
-        builder.add_node(
-            node_id=step_id,
-            handler=handler,
-            node_type=step_type,
-            name=step_name,
-            **config
-        )
+        if "tool_name" in step:
+            # This is a tool node
+            builder.add_tool_node(
+                node_id=step_id,
+                name=step_name,
+                tool_name=step["tool_name"],
+                args=step.get("args", {})
+            )
+        else:
+            # This is a function node
+            step_type = step.get("type", "function")
+            handler = step.get("handler")
+            config = step.get("config", {})
+            
+            builder.add_node(
+                node_id=step_id,
+                handler=handler,
+                node_type=step_type,
+                name=step_name,
+                **config
+            )
         
         if i == 0:
             builder.set_entry_point(step_id)
@@ -441,7 +484,7 @@ def create_sequential_workflow(
 
 
 # Standalone decorator functions for convenience
-def node(node_id: str, node_type: str = "function", name: Optional[str] = None, **config):
+def node(node_id: str, name: Optional[str] = None, node_type: str = "function", **config):
     """Standalone decorator for adding function nodes.
     
     This creates a global workflow builder instance if none exists.
@@ -460,7 +503,7 @@ def node(node_id: str, node_type: str = "function", name: Optional[str] = None, 
         # In practice, you'd want to use a proper builder instance
         func._workflow_node_id = node_id
         func._workflow_node_type = node_type
-        func._workflow_node_name = name or func.__name__
+        func._workflow_node_name = name if name is not None else func.__name__
         func._workflow_node_config = config
         return func
     return decorator
@@ -490,10 +533,9 @@ def tool(node_id: str, tool_name: str, name: Optional[str] = None, **tool_args):
 
 def create_conditional_workflow(
     name: str,
-    entry_step: Dict[str, Any],
-    condition: str,
-    true_branch: List[Dict[str, Any]],
-    false_branch: List[Dict[str, Any]],
+    condition_config: Dict[str, Any],
+    workflow_id: Optional[str] = None,
+    version: str = "1.0.0",
     state_schema: Type[GUIAgentContext] = GUIAgentContext,
     organization_id: str = "default"
 ) -> GUIWorkflow:
@@ -512,38 +554,42 @@ def create_conditional_workflow(
         Constructed GUIWorkflow
     """
     builder = WorkflowBuilder(
+        workflow_id=workflow_id or name.lower().replace(" ", "_"),
         name=name,
+        version=version,
         state_schema=state_schema,
         organization_id=organization_id
     )
     
-    # Add entry step
-    entry_id = entry_step.get("id", "entry")
-    builder.add_node(
-        node_id=entry_id,
-        handler=entry_step.get("handler"),
-        node_type=entry_step.get("type", "function"),
-        name=entry_step.get("name", entry_id),
-        **entry_step.get("config", {})
-    )
-    builder.set_entry_point(entry_id)
+    # Validate condition_config
+    if "condition_node" not in condition_config:
+        raise ValueError("Condition config must include 'condition_node'")
+    if "true_branch" not in condition_config:
+        raise ValueError("Condition config must include 'true_branch'")
+    if "false_branch" not in condition_config:
+        raise ValueError("Condition config must include 'false_branch'")
     
     # Add condition node
-    condition_id = "condition"
-    builder.add_condition_node(condition_id, condition)
-    builder.add_edge(entry_id, condition_id)
+    condition_node = condition_config["condition_node"]
+    condition_id = condition_node.get("id", "condition")
+    builder.add_condition_node(
+        node_id=condition_id,
+        expression=condition_node.get("expression", "True"),
+        name=condition_node.get("name", "Condition")
+    )
+    builder.set_entry_point(condition_id)
     
     # Add true branch
+    true_branch = condition_config["true_branch"]
     true_start = None
     previous_step = None
     for i, step in enumerate(true_branch):
         step_id = step.get("id", f"true_{i}")
-        builder.add_node(
+        builder.add_tool_node(
             node_id=step_id,
-            handler=step.get("handler"),
-            node_type=step.get("type", "function"),
             name=step.get("name", step_id),
-            **step.get("config", {})
+            tool_name=step.get("tool_name", "default_tool"),
+            args=step.get("args", {})
         )
         
         if i == 0:
@@ -555,16 +601,16 @@ def create_conditional_workflow(
         previous_step = step_id
     
     # Add false branch
+    false_branch = condition_config["false_branch"]
     false_start = None
     previous_step = None
     for i, step in enumerate(false_branch):
         step_id = step.get("id", f"false_{i}")
-        builder.add_node(
+        builder.add_tool_node(
             node_id=step_id,
-            handler=step.get("handler"),
-            node_type=step.get("type", "function"),
             name=step.get("name", step_id),
-            **step.get("config", {})
+            tool_name=step.get("tool_name", "default_tool"),
+            args=step.get("args", {})
         )
         
         if i == 0:
@@ -577,8 +623,17 @@ def create_conditional_workflow(
     
     # Add conditional edges
     if true_start and false_start:
-        builder.add_conditional_edge(
-            condition_id, condition, true_start, false_start
+        # Add true edge
+        builder.add_edge(
+            source=condition_id,
+            target=true_start,
+            condition="result == True"
+        )
+        # Add false edge
+        builder.add_edge(
+            source=condition_id,
+            target=false_start,
+            condition="result == False"
         )
     
     return builder.build()
