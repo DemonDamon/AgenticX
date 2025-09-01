@@ -87,14 +87,16 @@ class HumanInTheLoopComponent(Component):
         self.request_futures[request.request_id] = future
         
         # 发布干预请求事件
-        event = HumanInterventionRequestedEvent(
+        event = HumanInterventionRequestedEvent.create(
             request=request,
             context=context.to_dict(),
             screenshot_data=screenshot_data,
-            urgency_level=self._calculate_urgency(confidence_score, priority)
+            urgency_level=self._calculate_urgency(confidence_score, priority),
+            agent_id=context.agent_id,
+            task_id=getattr(context, 'task_id', None)
         )
         
-        await self.event_bus.publish(event)
+        await self.event_bus.publish_async(event)
         
         # 更新指标
         self.metrics.total_requests += 1
@@ -154,14 +156,16 @@ class HumanInTheLoopComponent(Component):
         request.updated_at = datetime.now()
         
         # 发布状态变更事件
-        status_event = InterventionStatusChangedEvent(
+        status_event = InterventionStatusChangedEvent.create(
             request_id=request_id,
             old_status=old_status,
             new_status="completed",
             changed_by="human_expert",
-            reason="feedback_received"
+            reason="feedback_received",
+            agent_id=request.agent_id,
+            task_id=request.task_id
         )
-        await self.event_bus.publish(status_event)
+        await self.event_bus.publish_async(status_event)
         
         # 完成Future
         if request_id in self.request_futures:
@@ -195,14 +199,16 @@ class HumanInTheLoopComponent(Component):
         request.updated_at = datetime.now()
         
         # 发布状态变更事件
-        status_event = InterventionStatusChangedEvent(
+        status_event = InterventionStatusChangedEvent.create(
             request_id=request_id,
             old_status=old_status,
             new_status="cancelled",
             changed_by="system",
-            reason=reason
+            reason=reason,
+            agent_id=request.agent_id,
+            task_id=request.task_id
         )
-        await self.event_bus.publish(status_event)
+        await self.event_bus.publish_async(status_event)
         
         # 取消Future
         if request_id in self.request_futures:
@@ -287,13 +293,15 @@ class HumanInTheLoopComponent(Component):
             logger.info(f"Retrying request {request_id} (attempt {retry_count + 1})")
             
             # 重新发布事件
-            event = HumanInterventionRequestedEvent(
+            event = HumanInterventionRequestedEvent.create(
                 request=request,
                 context=request.context,
                 screenshot_data=request.screenshot,
-                urgency_level="high"  # 重试时提高紧急程度
+                urgency_level="high",  # 重试时提高紧急程度
+                agent_id=request.agent_id,
+                task_id=request.task_id
             )
-            await self.event_bus.publish(event)
+            await self.event_bus.publish_async(event)
         else:
             # 超时取消
             await self.cancel_request(request_id, "timeout")
