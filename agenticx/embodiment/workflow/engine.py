@@ -76,8 +76,13 @@ class WorkflowEngine(Component):
         self._tool_registry: Dict[str, GUIActionTool] = {}
         self._node_handlers: Dict[str, Callable] = {}
         self._execution_history: List[WorkflowExecution] = []
+        self._initialized = False
+        
+        # Aliases for test compatibility
+        self.tools = self._tool_registry
+        self.node_processors = self._node_handlers
     
-    def register_tool(self, name: str, tool: GUIActionTool) -> None:
+    def register_tool(self, name: str, tool) -> None:
         """Register a GUI tool for use in workflows."""
         self._tool_registry[name] = tool
         self.logger.debug(f"Registered tool: {name}")
@@ -86,6 +91,20 @@ class WorkflowEngine(Component):
         """Register a handler function for a specific node type."""
         self._node_handlers[node_type] = handler
         self.logger.debug(f"Registered node handler: {node_type}")
+    
+    def register_node_processor(self, node_type: str, processor: Callable) -> None:
+        """Register a node processor (alias for register_node_handler)."""
+        self.register_node_handler(node_type, processor)
+    
+    async def initialize(self) -> None:
+        """Initialize the workflow engine."""
+        if not self._initialized:
+            await self._setup()
+            self._initialized = True
+    
+    def is_initialized(self) -> bool:
+        """Check if the engine is initialized."""
+        return self._initialized
     
     async def arun(
         self, 
@@ -143,7 +162,7 @@ class WorkflowEngine(Component):
                     current_context = GUIAgentContext(**node_execution.output_context)
                 
                 # Determine next node
-                current_node_id = await self._get_next_node(
+                current_node_id = self._get_next_node(
                     current_node_id, current_context, workflow
                 )
             
@@ -171,7 +190,7 @@ class WorkflowEngine(Component):
         
         # Create a result object with node_executions attribute for compatibility
         result = GUIAgentResult(
-            task_id=getattr(initial_context, 'task_id', ''),
+            task_id=getattr(initial_context, 'task_id', None) or execution_id or 'default_task_id',
             status=TaskStatus.COMPLETED if execution.status == "completed" else TaskStatus.FAILED,
             summary=f"Workflow execution {execution.status} with {len(execution.node_executions)} nodes executed",
             output=execution.final_context or {},
@@ -335,11 +354,20 @@ class WorkflowEngine(Component):
         
         # Execute function
         if asyncio.iscoroutinefunction(function):
-            result_context = await function(context)
+            result = await function(context)
         else:
-            result_context = function(context)
+            result = function(context)
         
-        return result_context
+        # If function returns a context object, use it directly
+        if isinstance(result, GUIAgentContext):
+            return result
+        
+        # Function can modify context directly and return any result
+        # Store the function result in metadata for later access
+        if hasattr(context, 'metadata') and result is not None:
+            context.metadata[f"{node.id}_result"] = result
+        
+        return context
     
     async def _handle_condition_node(self, node, context: GUIAgentContext, engine) -> GUIAgentContext:
         """Handle condition evaluation nodes."""
