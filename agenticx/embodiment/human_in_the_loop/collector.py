@@ -51,8 +51,8 @@ class FeedbackCollector(Component):
         # 注册事件监听器
         self.event_bus.subscribe(HumanFeedbackReceivedEvent, self.on_feedback_received)
         
-        # 启动处理任务
-        self._processing_task = asyncio.create_task(self._process_feedback_queue())
+        # 处理任务（延迟启动）
+        self._processing_task = None
         
         logger.info("FeedbackCollector initialized")
     
@@ -383,6 +383,12 @@ class FeedbackCollector(Component):
             logger.info(f"Flushing {len(self.feedback_buffer)} feedback items")
             # 这里可以实现批量处理逻辑
             self.feedback_buffer.clear()
+    
+    def start(self):
+        """启动收集器"""
+        if self._processing_task is None:
+            self._processing_task = asyncio.create_task(self._process_feedback_queue())
+            logger.info("FeedbackCollector started")
     
     async def shutdown(self):
         """关闭收集器"""
