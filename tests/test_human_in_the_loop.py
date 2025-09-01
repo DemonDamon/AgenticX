@@ -193,23 +193,22 @@ class TestHumanInTheLoopComponent:
     async def test_request_intervention(self, component, event_bus):
         """测试请求干预"""
         # 模拟事件发布
-        event_bus.publish = AsyncMock()
+        event_bus.publish_async = AsyncMock()
         
         context = MockGUIAgentContext("test_agent", "test_task", task="test")
         request = await component.request_intervention(
             context=context,
             intervention_type="validation",
             description="Test request",
-            confidence_score=0.5,
-            priority="high"
+            confidence_score=0.5
         )
         
         assert request is not None
         assert request.request_id in component.pending_requests
         
         # 验证事件发布
-        event_bus.publish.assert_called_once()
-        published_event = event_bus.publish.call_args[0][0]
+        event_bus.publish_async.assert_called_once()
+        published_event = event_bus.publish_async.call_args[0][0]
         assert isinstance(published_event, HumanInterventionRequestedEvent)
         assert published_event.request.request_id == request.request_id
     
@@ -217,7 +216,7 @@ class TestHumanInTheLoopComponent:
     async def test_process_feedback(self, component, event_bus):
         """测试处理反馈"""
         # 先创建一个请求
-        event_bus.publish = AsyncMock()
+        event_bus.publish_async = AsyncMock()
         context = MockGUIAgentContext("test_agent", "test_task", task="test")
         request = await component.request_intervention(
             context=context,
@@ -244,13 +243,13 @@ class TestHumanInTheLoopComponent:
         assert request.request_id not in component.pending_requests
         
         # 验证状态变更事件发布
-        assert event_bus.publish.call_count >= 2  # 至少有请求事件和状态变更事件
+        assert event_bus.publish_async.call_count >= 2  # 至少有请求事件和状态变更事件
     
     @pytest.mark.asyncio
     async def test_cancel_request(self, component, event_bus):
         """测试取消请求"""
         # 创建请求
-        event_bus.publish = AsyncMock()
+        event_bus.publish_async = AsyncMock()
         context = MockGUIAgentContext("test_agent", "test_task", task="test")
         request = await component.request_intervention(
             context=context,
@@ -266,7 +265,7 @@ class TestHumanInTheLoopComponent:
         
         # 验证状态变更事件
         status_change_calls = [
-            call for call in event_bus.publish.call_args_list
+            call for call in event_bus.publish_async.call_args_list
             if isinstance(call[0][0], InterventionStatusChangedEvent)
         ]
         assert len(status_change_calls) > 0
@@ -285,7 +284,7 @@ class TestHumanInTheLoopComponent:
         """测试超时处理"""
         # 使用短超时时间进行测试
         component.default_timeout = 0.1
-        event_bus.publish = AsyncMock()
+        event_bus.publish_async = AsyncMock()
         
         context = MockGUIAgentContext("test_agent", "test_task", task="test")
         request = await component.request_intervention(
@@ -332,14 +331,23 @@ class TestFeedbackCollector:
         # 清理：关闭收集器（如果已启动）
         if collector._processing_task is not None:
             import asyncio
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(collector.shutdown())
+            try:
+                loop = asyncio.get_event_loop()
+                if not loop.is_closed():
+                    loop.run_until_complete(collector.shutdown())
+            except RuntimeError:
+                # 如果事件循环已关闭，直接取消任务
+                if collector._processing_task:
+                    collector._processing_task.cancel()
     
     @pytest.mark.asyncio
     async def test_feedback_processing(self, collector, event_bus, memory):
         """测试反馈处理"""
         # 模拟事件发布
-        event_bus.publish = AsyncMock()
+        event_bus.publish_async = AsyncMock()
+        
+        # 启动收集器
+        collector.start()
         
         # 创建反馈
         feedback = HumanFeedback(
@@ -422,17 +430,18 @@ class TestFeedbackCollector:
     @pytest.mark.asyncio
     async def test_demonstration_feedback_processing(self, collector):
         """测试演示反馈处理"""
-        demonstration_steps = [
-            "Step 1: Click on menu",
-            "Step 2: Select option",
-            "Step 3: Confirm action"
-        ]
+        # 启动收集器
+        collector.start()
         
         feedback = HumanFeedback(
             request_id="test_request",
             expert_id="expert_1",
             feedback_type="demonstration",
-            demonstration_steps=demonstration_steps,
+            demonstration_steps=[
+                {"step": 1, "action": "click", "target": "menu", "description": "Click on menu"},
+                {"step": 2, "action": "select", "target": "option", "description": "Select option"},
+                {"step": 3, "action": "confirm", "target": "action", "description": "Confirm action"}
+            ],
             confidence=0.95
         )
         
@@ -502,7 +511,13 @@ class TestFeedbackCollector:
     @pytest.mark.asyncio
     async def test_shutdown(self, collector):
         """测试关闭收集器"""
-        # 启动后立即关闭
+        # 启动收集器
+        collector.start()
+        
+        # 等待一下确保任务启动
+        await asyncio.sleep(0.1)
+        
+        # 关闭收集器
         await collector.shutdown()
         
         # 验证处理任务已取消
@@ -616,6 +631,9 @@ class TestIntegration:
         """测试端到端工作流"""
         component, collector = system
         
+        # 启动收集器
+        collector.start()
+        
         # 1. 请求干预
         context = MockGUIAgentContext("test_agent", "test_task", task="complex_task")
         request = await component.request_intervention(
@@ -644,6 +662,16 @@ class TestIntegration:
             "feedback": feedback
         })
         
+        # 手动触发反馈事件给收集器
+        feedback_event = HumanFeedbackReceivedEvent.create(
+            feedback=feedback,
+            processing_time=60.0,
+            expert_confidence=0.9,
+            agent_id="test_agent",
+            task_id="test_task"
+        )
+        await collector.on_feedback_received(feedback_event)
+        
         # 4. 等待收集器处理
         await asyncio.sleep(0.1)
         
@@ -660,6 +688,9 @@ class TestIntegration:
         component_metrics = component.get_metrics()
         assert component_metrics.total_requests > 0
         assert component_metrics.completed_requests > 0
+        
+        # 清理收集器
+        await collector.shutdown()
     
     @pytest.mark.asyncio
     async def test_multiple_requests_handling(self, system):

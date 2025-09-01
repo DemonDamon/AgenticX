@@ -127,7 +127,7 @@ class FeedbackCollector(Component):
                     agent_id=trajectory.agent_id,
                     data_quality_score=quality_score
                 )
-                await self.event_bus.publish(learning_event)
+                await self.event_bus.publish_async(learning_event)
                 
                 # 更新统计
                 self.stats["trajectories_generated"] += 1
