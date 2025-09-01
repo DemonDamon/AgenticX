@@ -107,6 +107,22 @@ class GUIAgentResult(BaseModel):
         return self.status == TaskStatus.FAILED and self.error_message is not None
 
 
+class GUIAction(BaseModel):
+    """GUI操作动作模型
+    
+    表示GUI自动化中的一个具体操作动作。
+    """
+    action_type: str = Field(description="操作类型，如click、type、scroll等")
+    target: str = Field(description="操作目标，如元素ID或坐标")
+    parameters: Dict[str, Any] = Field(default_factory=dict, description="操作参数")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="操作时间")
+    success: bool = Field(default=True, description="操作是否成功")
+    error_message: Optional[str] = Field(default=None, description="错误信息")
+    
+    class Config:
+        use_enum_values = True
+
+
 class GUITask(Task):
     """GUI-specific task that extends the base Task class.
     
