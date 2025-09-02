@@ -170,4 +170,20 @@ class EventLog(BaseModel):
     
     def is_complete(self) -> bool:
         """Check if the task is complete."""
-        return self.get_current_state()["status"] in ["completed", "failed"] 
+        return self.get_current_state()["status"] in ["completed", "failed"]
+
+
+def listens_to(event_type):
+    """装饰器，用于标记事件监听器方法
+    
+    Args:
+        event_type: 要监听的事件类型
+    
+    Returns:
+        装饰器函数
+    """
+    def decorator(func):
+        # 为函数添加事件类型标记
+        func._listens_to = event_type
+        return func
+    return decorator
