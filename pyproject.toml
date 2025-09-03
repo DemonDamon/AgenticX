@@ -144,7 +144,10 @@ include = ["agenticx*"]
 exclude = ["tests*", "examples*", "docs*", "thirdparty*", "researches*", "markmap*", "exps*", "assets*"]
 
 [tool.setuptools.package-data]
-agenticx = ["*.yaml", "*.yml", "*.json", "*.toml", "**/*.yaml", "**/*.yml", "**/*.json", "**/*.toml"]
+agenticx = [
+    "*.yaml", "*.yml", "*.json", "*.toml", "*.txt", "*.md",
+    "**/*.yaml", "**/*.yml", "**/*.json", "**/*.toml", "**/*.txt", "**/*.md"
+]
 
 [tool.black]
 line-length = 88
