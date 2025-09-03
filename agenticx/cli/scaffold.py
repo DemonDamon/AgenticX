@@ -430,8 +430,8 @@ def main():
     )
     
     # 执行任务
-    executor = AgentExecutor(agent=agent, llm=llm)
-    result = executor.run(task)
+    executor = AgentExecutor(llm_provider=llm)
+    result = executor.run(agent, task)
     
     print(f"执行结果: {result}")
 
@@ -709,7 +709,7 @@ from agenticx.llms import OpenAIProvider
 from agenticx.tools import tool
 
 
-@tool
+@tool()
 def {{ agent_id }}_tool(input_text: str) -> str:
     """{{ agent_name }}专用工具"""
     return f"处理结果: {input_text}"
@@ -727,7 +727,7 @@ class {{ agent_name.replace(" ", "") }}Agent:
             backstory="{{ agent_backstory }}",
             organization_id="default"
         )
-        self.executor = AgentExecutor(agent=self.agent, llm=llm_provider)
+        self.executor = AgentExecutor(llm_provider=llm_provider)
     
     def run(self, task_description: str) -> str:
         """运行任务"""
@@ -737,7 +737,8 @@ class {{ agent_name.replace(" ", "") }}Agent:
             expected_output="完成的任务结果"
         )
         
-        return self.executor.run(task)
+        result = self.executor.run(self.agent, task)
+        return result.get('result', str(result))
 
 
 def main():
