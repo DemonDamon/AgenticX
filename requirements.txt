@@ -54,3 +54,5 @@ flake8>=6.0.0
 
 # Optional: Sandbox environment
 # microsandbox>=0.1.0
+docstring_parser
+typer
