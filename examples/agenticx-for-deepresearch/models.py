@@ -168,6 +168,7 @@ class Citation:
     publication_date: Optional[datetime] = None
     access_date: datetime = field(default_factory=datetime.now)
     citation_format: str = "APA"  # APA, MLA, Chicago等
+    metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
@@ -177,7 +178,8 @@ class Citation:
             "author": self.author,
             "publication_date": self.publication_date.isoformat() if self.publication_date else None,
             "access_date": self.access_date.isoformat(),
-            "citation_format": self.citation_format
+            "citation_format": self.citation_format,
+            "metadata": self.metadata
         }
     
     def format_citation(self) -> str:

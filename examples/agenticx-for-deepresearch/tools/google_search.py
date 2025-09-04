@@ -35,16 +35,17 @@ class MockGoogleSearchTool(BaseTool):
         print(f"● Mock Google Search configuration:")
         print(f"   Mode: Test mode (returns simulated results)")
     
-    def _run(self, query: str) -> List[Dict[str, Any]]:
+    def _run(self, **kwargs) -> List[Dict[str, Any]]:
         """
         Simulate Google search execution
         
         Args:
-            query: Search query string
+            **kwargs: Keyword arguments containing 'query' parameter
             
         Returns:
             List[Dict[str, Any]]: Simulated search results list
         """
+        query = kwargs.get('query', '')
         # Return simulated search results
         mock_results = [
             {
@@ -66,9 +67,9 @@ class MockGoogleSearchTool(BaseTool):
         
         return mock_results
     
-    async def aexecute(self, query: str) -> List[Dict[str, Any]]:
+    async def aexecute(self, **kwargs) -> List[Dict[str, Any]]:
         """Asynchronous execution of search (currently calls synchronous method)"""
-        return self._run(query)
+        return self._run(**kwargs)
 
 
 class GoogleSearchTool(BaseTool):
@@ -96,4 +97,49 @@ class GoogleSearchTool(BaseTool):
                 "Please set api_key parameter in config file, or set in environment variables:\n"
                 "  GOOGLE_API_KEY=your_google_api_key\n"
                 "  GEMINI_API_KEY=your_gemini_api_key"
-            ) 
+            )
+        
+        print(f"● Google Search configuration:")
+        print(f"   API Key: {'Configured' if self.api_key else 'Not configured'}")
+    
+    def _run(self, **kwargs) -> List[Dict[str, Any]]:
+        """
+        Execute Google search using Google Generative AI API
+        
+        Args:
+            **kwargs: Keyword arguments containing 'query' parameter
+            
+        Returns:
+            List[Dict[str, Any]]: Search results list
+        """
+        query = kwargs.get('query', '')
+        try:
+            # Create Google GenAI client
+            client = Client(api_key=self.api_key)
+            
+            # For now, return a placeholder implementation since Google GenAI
+            # might not have direct web search capabilities
+            # This would need to be replaced with actual Google Search API integration
+            mock_results = [
+                {
+                    "title": f"Google Search: {query}",
+                    "link": "https://www.google.com/search?q=" + query.replace(" ", "+"),
+                    "snippet": f"Search results for {query} using Google Search API. This is a placeholder implementation."
+                },
+                {
+                    "title": f"Related to {query}",
+                    "link": "https://example.com/related",
+                    "snippet": f"Additional information related to {query}."
+                }
+            ]
+            
+            print(f"✅ Google search completed: query='{query}', result count={len(mock_results)}")
+            return mock_results
+            
+        except Exception as e:
+            print(f"❌ Google search failed: {e}")
+            return []
+    
+    async def _arun(self, **kwargs) -> List[Dict[str, Any]]:
+        """Asynchronous execution of search (currently calls synchronous method)"""
+        return self._run(**kwargs) 

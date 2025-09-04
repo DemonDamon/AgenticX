@@ -24,7 +24,8 @@ class KnowledgeExtractionTask(Task):
     llm_provider: Optional[Any] = Field(default=None, description="LLM provider")
     
     def __init__(self, description: str, expected_output: str, llm_provider=None, **kwargs):
-        super().__init__(description=description, expected_output=expected_output, llm_provider=llm_provider, **kwargs)
+        super().__init__(description=description, expected_output=expected_output, **kwargs)
+        self.llm_provider = llm_provider
     
     def _detect_language(self, text: str) -> str:
         """Detect input text language"""
@@ -133,7 +134,7 @@ Please return in JSON format, each knowledge item includes:
 - source: Source information
 """
         
-        message = Message(content=prompt, sender=self.name)
+        message = Message(content=prompt, sender_id=self.id, recipient_id="llm_provider")
         response = await self.llm_provider.generate(message.content)
         
         try:

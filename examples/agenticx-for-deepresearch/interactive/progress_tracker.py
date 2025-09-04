@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 import json
 from agenticx.observability import BaseCallbackHandler, CallbackManager
+from agenticx.core.agent import Agent
+from agenticx.core.task import Task
 from models import ResearchContext, ResearchIteration
 
 
@@ -443,7 +445,7 @@ class ProgressTracker(BaseCallbackHandler):
         elif "analysis" in agent_name.lower():
             await self.complete_task(self.progress.current_iteration, ProgressPhase.ANALYZING, agent_name)
     
-    async def on_task_start(self, task_name: str, **kwargs) -> None:
+    def on_task_start(self, agent: Agent, task: Task):
         """Handle task start event"""
         if not self.progress:
             return
@@ -453,16 +455,22 @@ class ProgressTracker(BaseCallbackHandler):
         if self.progress.current_iteration in self.progress.iterations:
             iteration = self.progress.iterations[self.progress.current_iteration]
             if current_phase in iteration.phases:
-                iteration.phases[current_phase].current_task = task_name
+                iteration.phases[current_phase].current_task = task.description
     
-    async def on_task_end(self, task_name: str, result: Any = None, **kwargs) -> None:
+    def on_task_end(self, agent: Agent, task: Task, result: Dict[str, Any]):
         """Handle task completion event"""
         if not self.progress:
             return
         
-        await self.complete_task(self.progress.current_iteration, self.progress.current_phase, task_name)
+        # Use asyncio to call the async method in a sync context
+        asyncio.create_task(self.complete_task(
+            self.progress.current_iteration, 
+            self.progress.current_phase, 
+            task.description,
+            result
+        ))
     
-    async def on_error(self, error: Exception, **kwargs) -> None:
+    def on_error(self, error: Exception, context: Dict[str, Any]):
         """Handle error event"""
         if not self.progress:
             return
@@ -471,7 +479,13 @@ class ProgressTracker(BaseCallbackHandler):
         if self.progress.current_iteration in self.progress.iterations:
             iteration = self.progress.iterations[self.progress.current_iteration]
             if self.progress.current_phase in iteration.phases:
-                await self.complete_phase(self.progress.current_iteration, self.progress.current_phase, False, str(error))
+                # Use asyncio to call the async method in a sync context
+                asyncio.create_task(self.complete_phase(
+                    self.progress.current_iteration, 
+                    self.progress.current_phase, 
+                    False, 
+                    str(error)
+                ))
     
     # Private methods
     async def _update_overall_progress(self) -> None:

@@ -6,6 +6,7 @@ managing citations and formatting, strictly following the AgenticX framework's A
 
 from typing import List, Dict, Any, Optional
 import json
+import logging
 from datetime import datetime
 from agenticx.core.agent import Agent
 from agenticx.core.message import Message
@@ -162,17 +163,19 @@ Please output the outline in JSON format:
                 results_count=len(all_results),
                 findings_summary=findings_summary
             ),
-            sender=self.name,
-            message_type="outline_generation"
+            sender_id=self.id,
+            recipient_id="llm_provider"
         )
         
+        if self.llm is None:
+            raise ValueError("LLM provider not initialized. Please set self.llm before using generate methods.")
         response = self.llm.generate(message.content)
         
         try:
             outline = self._extract_json_from_response(response)
             return outline
         except Exception as e:
-            self.logger.error(f"Failed to parse report outline: {e}")
+            logging.error(f"Failed to parse report outline: {e}")
             return self._create_default_outline(context)
     
     def write_abstract(self, context: ResearchContext, outline: Dict[str, Any]) -> str:
@@ -236,10 +239,12 @@ The abstract should be accurate, concise, and self-contained, allowing readers t
                 abstract_elements="\n".join(outline.get("abstract_elements", [])),
                 key_findings=key_findings
             ),
-            sender=self.name,
-            message_type="abstract_writing"
+            sender_id=self.id,
+            recipient_id="llm_provider"
         )
         
+        if self.llm is None:
+            raise ValueError("LLM provider not initialized. Please set self.llm before using generate methods.")
         response = self.llm.generate(message.content)
         return response.strip()
     
@@ -308,10 +313,12 @@ The section content should be complete and independent, able to fully elaborate 
                 estimated_length=section_spec.get("estimated_length", "适中"),
                 relevant_sources=self._format_sources_for_writing(relevant_results)
             ),
-            sender=self.name,
-            message_type="section_writing"
+            sender_id=self.id,
+            recipient_id="llm_provider"
         )
         
+        if self.llm is None:
+            raise ValueError("LLM provider not initialized. Please set self.llm before using generate methods.")
         response = self.llm.generate(message.content)
         
         # Create section object

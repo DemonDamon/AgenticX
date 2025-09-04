@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 from pydantic import Field
 from agenticx.core.task import Task
 from agenticx.core.message import Message
-from models import SearchResult
+from models import SearchResult, SearchEngine
 import re
 from urllib.parse import urlparse
 
@@ -45,11 +45,13 @@ class SourceValidationTask(Task):
         super().__init__(
             description=description, 
             expected_output=expected_output, 
-            llm_provider=llm_provider,
-            trusted_domains=trusted_domains,
-            suspicious_patterns=suspicious_patterns,
             **kwargs
         )
+        
+        # 设置实例属性
+        self.llm_provider = llm_provider
+        self.trusted_domains = trusted_domains
+        self.suspicious_patterns = suspicious_patterns
     
     def _detect_language(self, text: str) -> str:
         """Detect the language of input text"""
@@ -360,11 +362,12 @@ class SourceValidationTask(Task):
         content = kwargs.get("content", "")
         title = kwargs.get("title", "")
         
-        # Create a temporary SearchResult object
+        # 创建一个临时的SearchResult对象
         temp_result = SearchResult(
             title=title,
             url="",
             snippet="",
+            source=SearchEngine.MOCK,
             content=content
         )
         

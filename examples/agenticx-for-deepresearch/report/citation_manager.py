@@ -7,6 +7,7 @@ strictly following the AgenticX framework's Task abstraction.
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import re
+import logging
 from urllib.parse import urlparse
 from pydantic import Field
 from agenticx.core.task import Task
@@ -36,10 +37,15 @@ class CitationManagerTask(Task):
         super().__init__(
             description=description, 
             expected_output=expected_output, 
-            citation_format=citation_format,
-            supported_formats=supported_formats,
             **kwargs
         )
+        
+        # Set instance attributes after calling super()
+        self.citation_format = citation_format
+        self.supported_formats = supported_formats
+        
+        # Initialize logger
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
     
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """Execute citation management task"""
@@ -83,22 +89,23 @@ class CitationManagerTask(Task):
             # Try to extract publication date from content
             publication_date = self._extract_publication_date(result.snippet, result.content)
             
+            # Prepare metadata
+            metadata = {
+                "domain": domain_info.get("domain"),
+                "domain_type": domain_info.get("type"),
+                "search_engine": result.source.value,
+                "relevance_score": result.relevance_score
+            }
+            
             citation = Citation(
                 source_url=result.url,
                 title=self._clean_title(result.title),
                 author=author,
                 publication_date=publication_date,
                 access_date=result.timestamp,
-                citation_format=self.citation_format
+                citation_format=self.citation_format,
+                metadata=metadata
             )
-            
-            # Add additional metadata
-            citation.metadata = {
-                "domain": domain_info.get("domain"),
-                "domain_type": domain_info.get("type"),
-                "search_engine": result.source.value,
-                "relevance_score": result.relevance_score
-            }
             
             return citation
             

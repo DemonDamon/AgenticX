@@ -5,8 +5,10 @@ identifying knowledge gaps, determining iteration directions, strictly following
 the AgenticX framework's Agent abstraction.
 """
 
-from typing import List, Dict, Any, Optional
 import json
+import logging
+from typing import List, Dict, Any, Optional
+
 from agenticx.core.agent import Agent
 from agenticx.core.message import Message
 from agenticx.core.prompt import PromptTemplate
@@ -32,7 +34,7 @@ class PlannerAgent(Agent):
     
     def __init__(self, name: str = "Research Planning Expert", role: str = "Research Planning Expert", 
                  goal: str = "Formulate efficient research strategies, identify knowledge gaps, guide multi-round reflective research processes",
-                 organization_id: str = "deepsearch", **kwargs):
+                 organization_id: str = "deepsearch", llm_provider=None, **kwargs):
         super().__init__(
             name=name,
             role=role,
@@ -45,6 +47,27 @@ class PlannerAgent(Agent):
             ),
             **kwargs
         )
+        
+        # 设置 LLM 提供者
+        self.llm = llm_provider
+        if self.llm is None:
+            # 如果没有提供 LLM，尝试从 kwargs 或环境变量创建
+            from agenticx.llms.kimi_provider import KimiProvider
+            import os
+            
+            api_key = os.getenv('KIMI_API_KEY') or os.getenv('OPENAI_API_KEY')
+            if api_key:
+                self.llm = KimiProvider(
+                    model="kimi-k2-0711-preview",
+                    api_key=api_key,
+                    base_url=os.getenv('KIMI_API_BASE', 'https://api.moonshot.cn/v1'),
+                    temperature=0.7
+                )
+            else:
+                raise ValueError("需要提供 llm_provider 参数或设置 KIMI_API_KEY/OPENAI_API_KEY 环境变量")
+        
+        # 设置 logger
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
     
     def create_initial_research_plan(self, research_topic: str, research_objective: str) -> str:
         """Create initial research plan"""
@@ -123,9 +146,12 @@ Please output the research plan in a structured manner, ensuring clear logic and
                 research_topic=research_topic,
                 research_objective=research_objective
             ),
-            sender=self.name,
-            message_type="research_planning"
+            sender_id=self.id,
+            recipient_id="system"
         )
+        
+        if self.llm is None:
+            raise ValueError("LLM provider is not initialized")
         
         response = self.llm.generate(message.content)
         return response
@@ -231,9 +257,12 @@ Please output in JSON format as follows:
                 max_iterations=context.max_iterations,
                 results_summary=results_summary
             ),
-            sender=self.name,
-            message_type="gap_identification"
+            sender_id=self.id,
+            recipient_id="system"
         )
+        
+        if self.llm is None:
+            raise ValueError("LLM provider is not initialized")
         
         response = self.llm.generate(message.content)
         
@@ -340,9 +369,12 @@ Please output the decision result in JSON format:
                 recent_gaps_count=len(recent_gaps),
                 recent_gaps_summary=self._format_gaps_summary(recent_gaps)
             ),
-            sender=self.name,
-            message_type="continuation_decision"
+            sender_id=self.id,
+            recipient_id="system"
         )
+        
+        if self.llm is None:
+            raise ValueError("LLM provider is not initialized")
         
         response = self.llm.generate(message.content)
         
@@ -468,9 +500,12 @@ Please output strategy recommendations in JSON format:
                 current_iteration=context.current_iteration,
                 gaps_summary=self._format_gaps_summary(gaps)
             ),
-            sender=self.name,
-            message_type="strategy_adjustment"
+            sender_id=self.id,
+            recipient_id="system"
         )
+        
+        if self.llm is None:
+            raise ValueError("LLM provider is not initialized")
         
         response = self.llm.generate(message.content)
         

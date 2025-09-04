@@ -103,23 +103,30 @@ class BochaaIWebSearchTool(BaseTool):
         
         # BochaaI Web Search configuration completed
     
-    def _run(self, query: str, freshness: str = "noLimit", summary: bool = False, 
-             include: Optional[str] = None, exclude: Optional[str] = None, 
-             count: int = 10) -> List[Dict[str, Any]]:
+    def _run(self, **kwargs) -> List[Dict[str, Any]]:
         """
         Execute BochaaI Web Search
         
         Args:
-            query: Search query string
-            freshness: Search time range
-            summary: Whether to display text summary
-            include: Specify website scope for search
-            exclude: Exclude website scope for search
-            count: Number of returned results
+            **kwargs: Keyword arguments containing:
+                query: Search query string
+                freshness: Search time range (default: "noLimit")
+                summary: Whether to display text summary (default: False)
+                include: Specify website scope for search (optional)
+                exclude: Exclude website scope for search (optional)
+                count: Number of returned results (default: 10)
             
         Returns:
             List[Dict[str, Any]]: Search results list, each result includes title, link, summary, etc.
         """
+        # Extract parameters from kwargs
+        query = kwargs.get('query', '')
+        freshness = kwargs.get('freshness', 'noLimit')
+        summary = kwargs.get('summary', False)
+        include = kwargs.get('include', None)
+        exclude = kwargs.get('exclude', None)
+        count = kwargs.get('count', 10)
+        
         try:
             # Build request data
             request_data = {
@@ -231,11 +238,9 @@ class BochaaIWebSearchTool(BaseTool):
             print(f"  | \033[2mBochaAI search failed: {e}\033[0m")
             return []
     
-    async def _arun(self, query: str, freshness: str = "noLimit", summary: bool = False,
-                    include: Optional[str] = None, exclude: Optional[str] = None,
-                    count: int = 10) -> List[Dict[str, Any]]:
+    async def _arun(self, **kwargs) -> List[Dict[str, Any]]:
         """Asynchronously execute search (currently calls synchronous method)"""
-        return self._run(query, freshness, summary, include, exclude, count)
+        return self._run(**kwargs)
 
 
 class MockBochaaISearchTool(BaseTool):
@@ -250,23 +255,30 @@ class MockBochaaISearchTool(BaseTool):
         
         # Mock BochaaI Search configuration completed
     
-    def _run(self, query: str, freshness: str = "noLimit", summary: bool = False,
-             include: Optional[str] = None, exclude: Optional[str] = None,
-             count: int = 10) -> List[Dict[str, Any]]:
+    def _run(self, **kwargs) -> List[Dict[str, Any]]:
         """
         Mock BochaaI search execution
         
         Args:
-            query: Search query string
-            freshness: Search time range
-            summary: Whether to display text summary
-            include: Specify website scope for search
-            exclude: Exclude website scope for search
-            count: Number of returned results
+            **kwargs: Keyword arguments containing:
+                query: Search query string
+                freshness: Search time range (default: "noLimit")
+                summary: Whether to display text summary (default: False)
+                include: Specify website scope for search (optional)
+                exclude: Exclude website scope for search (optional)
+                count: Number of returned results (default: 10)
             
         Returns:
             List[Dict[str, Any]]: Mock search results list
         """
+        # Extract parameters from kwargs
+        query = kwargs.get('query', '')
+        freshness = kwargs.get('freshness', 'noLimit')
+        summary = kwargs.get('summary', False)
+        include = kwargs.get('include', None)
+        exclude = kwargs.get('exclude', None)
+        count = kwargs.get('count', 10)
+        
         # Return mock search results
         mock_results = []
         
@@ -292,11 +304,9 @@ class MockBochaaISearchTool(BaseTool):
         print(f"    ⎿ ✅ Mock BochaAI search completed: query='{query}', result count={len(mock_results)}")
         return mock_results
     
-    async def _arun(self, query: str, freshness: str = "noLimit", summary: bool = False,
-                    include: Optional[str] = None, exclude: Optional[str] = None,
-                    count: int = 10) -> List[Dict[str, Any]]:
+    async def _arun(self, **kwargs) -> List[Dict[str, Any]]:
         """Asynchronously execute mock search"""
-        return self._run(query, freshness, summary, include, exclude, count)
+        return self._run(**kwargs)
 
 
 # For compatibility, provide simplified search result model
