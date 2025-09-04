@@ -81,17 +81,16 @@ class QualityAssessmentTask(Task):
     assessment_weights: Dict[str, float] = Field(default_factory=dict, description="Assessment weights configuration")
     
     def __init__(self, description: str, expected_output: str, quality_standards: Optional[Dict[str, Any]] = None, **kwargs):
-        # Initialize quality standards and assessment weights
-        quality_standards_value = quality_standards or self._get_default_standards()
-        assessment_weights_value = self._get_assessment_weights()
-        
+        # 调用基类初始化方法
         super().__init__(
             description=description, 
             expected_output=expected_output, 
-            quality_standards=quality_standards_value,
-            assessment_weights=assessment_weights_value,
             **kwargs
         )
+        
+        # 初始化质量标准和评估权重
+        self.quality_standards = quality_standards or self._get_default_standards()
+        self.assessment_weights = self._get_assessment_weights()
         
     def _detect_language(self, text: str) -> str:
         """Detect input text language"""
@@ -324,6 +323,7 @@ class QualityAssessmentTask(Task):
             evidence.append(f"Title relevance: {title_relevance:.1%}")
             
             # Check abstract relevance
+            abstract_relevance = 0.0
             if report.abstract:
                 abstract_relevance = self._calculate_text_relevance(
                     report.abstract, context.research_topic
@@ -1224,3 +1224,162 @@ class QualityAssessmentTask(Task):
             "citation": 1.0,
             "structure": 0.8
         }
+    
+    async def _assess_research_process(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """评估研究过程质量"""
+        context = kwargs.get("context")
+        
+        if not context:
+            raise ValueError("研究过程评估需要上下文信息")
+        
+        process_metrics = {
+            "iteration_count": len(context.iterations) if hasattr(context, 'iterations') else 0,
+            "depth_score": self._assess_research_depth(context),
+            "methodology_score": self._assess_research_methodology(context),
+            "coverage_score": self._assess_topic_coverage(context)
+        }
+        
+        overall_process_score = sum(process_metrics.values()) / len(process_metrics)
+        
+        return {
+            "process_score": overall_process_score,
+            "metrics": process_metrics,
+            "recommendations": self._generate_process_recommendations(process_metrics)
+        }
+    
+    async def _validate_citations(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """验证引用质量"""
+        report = kwargs.get("report")
+        
+        if not report or not report.citations:
+            return {
+                "validation_result": "no_citations",
+                "valid_citations": [],
+                "invalid_citations": [],
+                "validation_summary": "报告缺少引用"
+            }
+        
+        valid_citations = []
+        invalid_citations = []
+        
+        for citation in report.citations:
+            if self._is_valid_citation(citation):
+                valid_citations.append(citation)
+            else:
+                invalid_citations.append(citation)
+        
+        validity_rate = len(valid_citations) / len(report.citations)
+        
+        return {
+            "validation_result": "completed",
+            "valid_citations": valid_citations,
+            "invalid_citations": invalid_citations,
+            "validity_rate": validity_rate,
+            "validation_summary": f"引用验证完成，有效率: {validity_rate:.1%}"
+        }
+    
+    async def _check_completeness(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """检查报告完整性"""
+        report = kwargs.get("report")
+        
+        if not report:
+            raise ValueError("缺少报告对象")
+        
+        completeness_checks = {
+            "has_title": bool(report.title),
+            "has_abstract": bool(report.abstract),
+            "has_sections": bool(report.sections),
+            "has_citations": bool(report.citations),
+            "section_content_complete": self._check_section_content_completeness(report),
+            "minimum_content_length": self._check_minimum_content_length(report)
+        }
+        
+        completeness_score = sum(completeness_checks.values()) / len(completeness_checks)
+        
+        missing_items = [item for item, status in completeness_checks.items() if not status]
+        
+        return {
+            "completeness_score": completeness_score,
+            "checks": completeness_checks,
+            "missing_items": missing_items,
+            "recommendations": self._generate_completeness_recommendations(missing_items)
+        }
+    
+    def _assess_research_depth(self, context) -> float:
+        """评估研究深度"""
+        if not hasattr(context, 'iterations'):
+            return 0.5
+        
+        iteration_count = len(context.iterations)
+        # 假设5轮迭代为满分
+        return min(iteration_count / 5.0, 1.0)
+    
+    def _assess_research_methodology(self, context) -> float:
+        """评估研究方法"""
+        # 简化的方法评估
+        return 0.8  # 假设80%的方法质量
+    
+    def _assess_topic_coverage(self, context) -> float:
+        """评估主题覆盖度"""
+        # 简化的覆盖度评估
+        return 0.85  # 假设85%的覆盖度
+    
+    def _generate_process_recommendations(self, metrics: Dict[str, float]) -> List[str]:
+        """生成过程改进建议"""
+        recommendations = []
+        
+        if metrics.get("iteration_count", 0) < 3:
+            recommendations.append("增加研究迭代轮数以提高深度")
+        
+        if metrics.get("methodology_score", 0) < 0.7:
+            recommendations.append("改进研究方法和策略")
+        
+        if metrics.get("coverage_score", 0) < 0.8:
+            recommendations.append("扩大主题覆盖范围")
+        
+        return recommendations
+    
+    def _is_valid_citation(self, citation) -> bool:
+        """检查引用是否有效"""
+        if not citation.source_url:
+            return False
+        
+        if not citation.source_url.startswith(('http://', 'https://')):
+            return False
+        
+        if not citation.title:
+            return False
+        
+        return True
+    
+    def _check_section_content_completeness(self, report) -> bool:
+        """检查章节内容完整性"""
+        if not report.sections:
+            return False
+        
+        content_sections = [s for s in report.sections if s.content.strip()]
+        return len(content_sections) >= len(report.sections) * 0.8  # 80%的章节有内容
+    
+    def _check_minimum_content_length(self, report) -> bool:
+        """检查最小内容长度"""
+        total_length = self._calculate_total_content_length(report)
+        return total_length >= self.quality_standards.get("minimum_content_length", 2000)
+    
+    def _generate_completeness_recommendations(self, missing_items: List[str]) -> List[str]:
+        """生成完整性改进建议"""
+        recommendations = []
+        
+        item_mapping = {
+            "has_title": "添加报告标题",
+            "has_abstract": "添加报告摘要",
+            "has_sections": "添加报告章节",
+            "has_citations": "添加参考文献",
+            "section_content_complete": "完善章节内容",
+            "minimum_content_length": "增加报告内容长度"
+        }
+        
+        for item in missing_items:
+            if item in item_mapping:
+                recommendations.append(item_mapping[item])
+        
+        return recommendations

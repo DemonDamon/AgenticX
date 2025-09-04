@@ -222,10 +222,10 @@ class RealTimeMonitor(BaseCallbackHandler):
             # Network IO
             network = psutil.net_io_counters()
             network_io = {
-                "bytes_sent": network.bytes_sent,
-                "bytes_recv": network.bytes_recv,
-                "packets_sent": network.packets_sent,
-                "packets_recv": network.packets_recv
+                "bytes_sent": float(network.bytes_sent),
+                "bytes_recv": float(network.bytes_recv),
+                "packets_sent": float(network.packets_sent),
+                "packets_recv": float(network.packets_recv)
             }
             
             # Process information
@@ -755,30 +755,36 @@ class RealTimeMonitor(BaseCallbackHandler):
                 print(f"Alert callback execution failed: {e}")
     
     # BaseCallbackHandler interface implementation
-    async def on_agent_start(self, agent_name: str, **kwargs) -> None:
-        """Callback when agent starts"""
-        await self._notify_alert("agent_started", MonitorLevel.INFO,
-                               f"Agent {agent_name} started", {"agent_name": agent_name})
-    
-    async def on_agent_end(self, agent_name: str, **kwargs) -> None:
-        """Callback when agent ends"""
-        await self._notify_alert("agent_ended", MonitorLevel.INFO,
-                               f"Agent {agent_name} ended", {"agent_name": agent_name})
-    
-    async def on_task_start(self, task_name: str, **kwargs) -> None:
+    def on_task_start(self, agent, task):
         """Callback when task starts"""
-        await self._notify_alert("task_started", MonitorLevel.INFO,
-                               f"Task {task_name} started", {"task_name": task_name})
+        task_name = task.description if hasattr(task, 'description') else str(task)
+        agent_name = agent.name if hasattr(agent, 'name') else str(agent)
+        
+        # Use asyncio to call the async method
+        asyncio.create_task(self._notify_alert("task_started", MonitorLevel.INFO,
+                                             f"Task {task_name} started by agent {agent_name}", 
+                                             {"task_name": task_name, "agent_name": agent_name}))
     
-    async def on_task_end(self, task_name: str, **kwargs) -> None:
+    def on_task_end(self, agent, task, result):
         """Callback when task ends"""
-        await self._notify_alert("task_ended", MonitorLevel.INFO,
-                               f"Task {task_name} ended", {"task_name": task_name})
+        task_name = task.description if hasattr(task, 'description') else str(task)
+        agent_name = agent.name if hasattr(agent, 'name') else str(agent)
+        success = result.get('success', True) if isinstance(result, dict) else True
+        
+        # Use asyncio to call the async method
+        asyncio.create_task(self._notify_alert("task_ended", MonitorLevel.INFO,
+                                             f"Task {task_name} ended by agent {agent_name}", 
+                                             {"task_name": task_name, "agent_name": agent_name, 
+                                              "success": success, "result": result}))
     
-    async def on_error(self, error: Exception, **kwargs) -> None:
+    def on_error(self, error: Exception, context):
         """Callback when error occurs"""
-        await self._notify_alert("system_error", MonitorLevel.ERROR,
-                               f"System error: {str(error)}", {"error": str(error)})
+        error_message = str(error)
+        
+        # Use asyncio to call the async method
+        asyncio.create_task(self._notify_alert("system_error", MonitorLevel.ERROR,
+                                             f"System error: {error_message}", 
+                                             {"error": error_message, "context": context}))
     
     def _serialize_metrics(self, metrics: Any) -> Dict[str, Any]:
         """Serialize metrics"""

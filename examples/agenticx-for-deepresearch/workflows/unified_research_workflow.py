@@ -33,9 +33,9 @@ from agenticx.tools.base import BaseTool
 from agenticx.observability.monitoring import MonitoringCallbackHandler
 from agenticx.observability.logging import LoggingCallbackHandler
 
-from agents import QueryGeneratorAgent, ResearchSummarizerAgent
-from tools import GoogleSearchTool, BingWebSearchTool, MockBingSearchTool, BochaaIWebSearchTool
-from utils import clean_input_text
+from ..agents import QueryGeneratorAgent, ResearchSummarizerAgent
+from ..tools import GoogleSearchTool, BingWebSearchTool, MockBingSearchTool, BochaaIWebSearchTool
+from ..utils import clean_input_text
 
 
 class WorkflowMode(Enum):
@@ -397,13 +397,10 @@ class UnifiedResearchWorkflow:
                 for key, value in reflection_result.items():
                     print(f"     ✦ {key.replace('_', ' ').title()}")
                     if isinstance(value, list):
-                        for _ in value:
-                            print(f"     | \033[2m{_}\033[0m")
+                        for item in value:
+                            print(f"     | \033[2m{item}\033[0m")
                     else:
                         print(f"     | \033[2m{value}\033[0m")
-            elif isinstance(reflection_result, list):
-                for item in reflection_result:
-                    print(f"     | {item}")
             else:
                 print(f"     | {reflection_result}")
             
@@ -659,7 +656,7 @@ Return only JSON, no other explanations.
         
         try:
             messages = [{"role": "user", "content": prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(prompt)
             result = self._safe_json_parse(response.content)
             
             if result and isinstance(result, dict) and "queries" in result and isinstance(result["queries"], list):
@@ -680,13 +677,25 @@ Return only JSON, no other explanations.
             print(f"  ✦ Searching: \033[36m{query}\033[0m")
             
             try:
-                # Execute search
+                # Execute search - Different tools have different interfaces
                 max_search_results = self.config.get('deep_search', {}).get('max_search_results', 10)
-                search_results = self.search_tool._run(query, summary=True, count=max_search_results)
+                
+                # Initialize search_results
+                search_results = []
+                
+                # Check tool type and call accordingly
+                if hasattr(self.search_tool, 'name') and 'bochaai' in self.search_tool.name.lower():
+                    # BochaaI tool supports additional parameters
+                    search_results = self.search_tool.run(query=query, summary=True, count=max_search_results)
+                else:
+                    # For Bing and Google tools - they only accept query parameter
+                    search_results = self.search_tool.run(query=query)
+                    
                 if isinstance(search_results, list):
                     all_results.extend(search_results)
             except Exception as e:
                 print(f"\n\033[31mAn error occurred during search: {e}\033[0m")
+                search_results = []  # Initialize on error
 
             try:
                 # Use ResearchSummarizerAgent for thinking summary
@@ -784,7 +793,7 @@ Please generate a comprehensive research report based on the above information.
 """
             
             messages = [{"role": "user", "content": complete_prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(complete_prompt)
             
             # Add citation list and thinking process at the end of the report
             report_content = response.content
@@ -1035,7 +1044,7 @@ IMPORTANT: Return only valid JSON format, do not add any other text explanations
 """
             
             messages = [{"role": "user", "content": reflection_prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(reflection_prompt)
             result = self._safe_json_parse(response.content)
             
             if result and isinstance(result, dict):
@@ -1148,7 +1157,7 @@ IMPORTANT: Return only valid JSON format, do not add any other text explanations
         
         try:
             messages = [{"role": "user", "content": clarification_prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(clarification_prompt)
             clarification_result = self._safe_json_parse(response.content)
             
             if clarification_result and isinstance(clarification_result, dict):
@@ -1288,7 +1297,7 @@ Please return only the new research topic, without any explanation or extraneous
 
         try:
             messages = [{"role": "user", "content": prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(prompt)
             clarified_topic = response.content.strip()
             # self.logger.info(f"Generated clarified topic: {clarified_topic}")
             return clarified_topic
@@ -1347,8 +1356,7 @@ Please return only the new research topic, without any explanation or extraneous
                     # Generate new queries based on previous findings
                     current_queries = self._generate_search_queries(
                         clarified_topic,
-                        research_context.get("findings", []),
-                        research_context.get("knowledge_gaps", [])
+                        research_context
                     )
                 
                 # Execute search and summarization
@@ -1453,7 +1461,7 @@ Return only JSON, no other explanations.
 
         try:
             messages = [{"role": "user", "content": prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(prompt)
             result = self._safe_json_parse(response.content)
             
             if result and isinstance(result, dict) and "queries" in result and isinstance(result["queries"], list):
@@ -1472,6 +1480,15 @@ Return only JSON, no other explanations.
         max_iterations = context.get("max_iterations", self.max_research_loops)
         
         return current_iteration < max_iterations
+    
+    def _get_summary_content(self, summary: Any) -> str:
+        """Safely get summary content"""
+        if isinstance(summary, dict):
+            return summary.get('summary', str(summary))
+        elif isinstance(summary, str):
+            return summary
+        else:
+            return str(summary)
     
     def _get_initial_research_context(self):
         """Returns the initial structure for the research context."""
@@ -1810,7 +1827,7 @@ IMPORTANT: Return only valid JSON format, do not add any other text explanations
             
             # Call LLM for analysis
             messages = [{"role": "user", "content": analysis_prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(analysis_prompt)
             
             # Parse LLM response
             result = self._safe_json_parse(response.content)
@@ -1860,32 +1877,35 @@ if __name__ == "__main__":
     }
     
     # Initialize LLM provider
-    llm_provider = BaseLLMProvider.from_config(config)
+    # llm_provider = BaseLLMProvider.from_config(config)  # This would need proper LLM provider initialization
+    llm_provider = None  # Placeholder - needs actual LLM provider
     
     # Create workflows in different modes
+    # NOTE: This example code is commented out because it requires proper LLM provider initialization
+    
     # Basic mode
-    basic_workflow = UnifiedResearchWorkflow(
-        llm_provider=llm_provider,
-        mode=WorkflowMode.BASIC,
-        max_research_loops=3,
-        search_engine="mock"
-    )
+    # basic_workflow = UnifiedResearchWorkflow(
+    #     llm_provider=llm_provider,
+    #     mode=WorkflowMode.BASIC,
+    #     max_research_loops=3,
+    #     search_engine="mock"
+    # )
     
     # Interactive mode
-    interactive_workflow = UnifiedResearchWorkflow(
-        llm_provider=llm_provider,
-        mode=WorkflowMode.INTERACTIVE,
-        max_research_loops=3,
-        search_engine="mock"
-    )
+    # interactive_workflow = UnifiedResearchWorkflow(
+    #     llm_provider=llm_provider,
+    #     mode=WorkflowMode.INTERACTIVE,
+    #     max_research_loops=3,
+    #     search_engine="mock"
+    # )
     
     # Advanced mode
-    advanced_workflow = UnifiedResearchWorkflow(
-        llm_provider=llm_provider,
-        mode=WorkflowMode.ADVANCED,
-        max_research_loops=5,
-        search_engine="mock"
-    )
+    # advanced_workflow = UnifiedResearchWorkflow(
+    #     llm_provider=llm_provider,
+    #     mode=WorkflowMode.ADVANCED,
+    #     max_research_loops=5,
+    #     search_engine="mock"
+    # )
     
     # Execute research
     # result = basic_workflow.execute("The development trends of artificial intelligence")

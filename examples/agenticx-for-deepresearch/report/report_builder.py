@@ -36,26 +36,24 @@ class StructuredReportBuilderTask(Task):
     default_templates: Dict[str, Any] = Field(default_factory=dict, description="Default report templates")
     
     def __init__(self, description: str, expected_output: str, template_dir: Optional[str] = None, **kwargs):
+        # Initialize parent class first
+        super().__init__(
+            description=description, 
+            expected_output=expected_output, 
+            **kwargs
+        )
+        
         # Handle template_dir parameter
-        template_dir_path = Path(template_dir) if template_dir else None
-        supported_formats = ["markdown", "html", "json", "txt"]
+        self.template_dir = Path(template_dir) if template_dir else None
+        self.supported_formats = ["markdown", "html", "json", "txt"]
         
         # Initialize default report templates
-        default_templates = {
+        self.default_templates = {
             "academic": self._get_academic_template(),
             "business": self._get_business_template(),
             "technical": self._get_technical_template(),
             "summary": self._get_summary_template()
         }
-        
-        super().__init__(
-            description=description, 
-            expected_output=expected_output, 
-            template_dir=template_dir_path,
-            supported_formats=supported_formats,
-            default_templates=default_templates,
-            **kwargs
-        )
     
     def _detect_language(self, text: str) -> str:
         """Detect input text language"""
@@ -175,6 +173,78 @@ class StructuredReportBuilderTask(Task):
         )
         
         return structure
+    
+    async def _apply_template(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply template to content"""
+        template_type = kwargs.get("template_type", "academic")
+        content = kwargs.get("content", {})
+        
+        template = self._get_template(template_type)
+        
+        # Apply template logic here
+        applied_content = {
+            "template_applied": True,
+            "template_type": template_type,
+            "template": template,
+            "content": content
+        }
+        
+        return applied_content
+    
+    async def _export_to_format(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Export report to specific format"""
+        report = kwargs.get("report")
+        output_format = kwargs.get("output_format", "markdown")
+        
+        if not report:
+            raise ValueError("Missing report data")
+        
+        if isinstance(report, ResearchReport):
+            formatted_output = await self._format_output(report, output_format)
+        else:
+            # Handle dict format
+            temp_report = ResearchReport(
+                title=report.get("title", "Untitled Report"),
+                abstract=report.get("abstract", ""),
+                sections=[],
+                citations=[],
+                metadata=report.get("metadata", {})
+            )
+            formatted_output = await self._format_output(temp_report, output_format)
+        
+        return {
+            "export_successful": True,
+            "output_format": output_format,
+            "formatted_output": formatted_output
+        }
+    
+    async def _optimize_report_structure(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Optimize report structure"""
+        structure = kwargs.get("structure", {})
+        context = kwargs.get("context")
+        
+        if not structure:
+            raise ValueError("Missing structure data")
+        
+        # Optimize structure based on content analysis
+        optimized_structure = structure.copy()
+        
+        # Add optimization logic here
+        if context:
+            content_analysis = await self._analyze_research_content(context)
+            recommended_template = self._recommend_structure(
+                content_analysis["content_stats"], 
+                content_analysis["topic_analysis"]
+            )
+            
+            optimized_structure["recommended_template"] = recommended_template
+            optimized_structure["optimization_applied"] = True
+        
+        return {
+            "optimization_successful": True,
+            "original_structure": structure,
+            "optimized_structure": optimized_structure
+        }
     
     async def _generate_report_content(self, context: ResearchContext, 
                                      structure: Dict[str, Any]) -> ResearchReport:

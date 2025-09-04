@@ -30,9 +30,12 @@ class ContentAnalysisTask(Task):
         super().__init__(
             description=description,
             expected_output=expected_output,
-            llm_provider=llm_provider,
             **kwargs
         )
+        # 设置 LLM provider 作为实例属性
+        self.llm_provider = llm_provider
+        # 设置任务名称
+        self.name = name
     
     def _detect_language(self, text: str) -> str:
         """Detect input text language"""
@@ -137,7 +140,11 @@ Please analyze from the following dimensions:
 Please return analysis results in JSON format.
 """
         
-        message = Message(content=prompt, sender=self.name)
+        message = Message(
+            content=prompt, 
+            sender_id=self.name,
+            recipient_id="llm_provider"
+        )
         response = await self.llm_provider.generate(message.content)
         
         try:

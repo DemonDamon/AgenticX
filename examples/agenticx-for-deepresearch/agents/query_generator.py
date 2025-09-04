@@ -7,7 +7,7 @@ strictly following the AgenticX framework's agent design patterns.
 from typing import Dict, List, Any, Optional, Set
 import asyncio
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pydantic import Field
 
@@ -15,7 +15,7 @@ from agenticx.core.agent import Agent, AgentContext, AgentResult
 from agenticx.llms.base import BaseLLMProvider
 from agenticx.core.prompt import PromptTemplate
 
-from models import SearchQuery, QueryType, KnowledgeGap, ResearchContext
+from models import SearchQuery, QueryType, KnowledgeGap, ResearchContext, SearchEngine
 
 
 class QueryStrategy(Enum):
@@ -50,8 +50,8 @@ class QueryGenerationContext:
     target_complexity: QueryComplexity
     max_queries: int = 10
     language_preference: str = "zh-CN"
-    domain_constraints: List[str] = None
-    temporal_constraints: Dict[str, Any] = None
+    domain_constraints: List[str] = field(default_factory=list)
+    temporal_constraints: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -80,7 +80,7 @@ class QueryGeneratorAgent(Agent):
     """
     
     # Additional field definitions
-    query_templates: Dict[str, List[str]] = Field(default_factory=dict, description="Query templates")
+    query_templates: Dict[QueryStrategy, List[str]] = Field(default_factory=dict, description="Query templates")
     enhancement_terms: Dict[str, List[str]] = Field(default_factory=dict, description="Query enhancement terms")
     generated_queries: Set[str] = Field(default_factory=set, description="Generated queries cache")
     query_stats: Dict[str, Any] = Field(default_factory=dict, description="Query performance statistics")
@@ -154,8 +154,7 @@ class QueryGeneratorAgent(Agent):
             "type": ["research", "report", "analysis", "review", "case"]
         }
         
-        # Generated queries cache
-        self.generated_queries: Set[str] = set()
+        # Generated queries cache is already defined as class attribute with Field
         
         # Query performance statistics
         self.query_stats = {
@@ -295,7 +294,7 @@ Please return the query list in JSON format:
         detected_language = self._detect_language(context.research_topic)
         
         for gap in context.knowledge_gaps:
-            gap_area = gap.gap_description
+            gap_area = gap.description
             
             # Direct query for gap area
             queries.append(f"{context.research_topic} {gap_area}")
@@ -371,8 +370,8 @@ Please return the query list directly, one query per line:
 """
         
         try:
-            if hasattr(self, 'llm_provider') and self.llm_provider:
-                response = await self.llm_provider.generate(
+            if hasattr(self, 'llm') and self.llm:
+                response = await self.llm.generate(
                     prompt=prompt,
                     max_tokens=200,
                     temperature=0.7
@@ -597,7 +596,7 @@ Please return the query list directly, one query per line:
                                   context: QueryGenerationContext) -> float:
         """Calculate uniqueness score"""
         # Similarity with previous queries
-        previous_queries = [q.query_text for q in context.previous_queries]
+        previous_queries = [q.query for q in context.previous_queries]
         
         if not previous_queries:
             return 1.0
@@ -761,19 +760,18 @@ Please return the query list directly, one query per line:
         
         # Select appropriate search engines based on language
         if detected_language == "zh":
-            search_engines = ["google", "bing", "baidu", "bochaai"]
+            search_engines = [SearchEngine.GOOGLE, SearchEngine.BING, SearchEngine.BOCHAAI]
         else:
-            search_engines = ["google", "bing", "bochaai"]
+            search_engines = [SearchEngine.GOOGLE, SearchEngine.BING, SearchEngine.BOCHAAI]
         
         selected_queries = []
         for i, (score, analysis) in enumerate(scored_analyses[:context.max_queries]):
             search_query = SearchQuery(
-                query_text=analysis.query_text,
+                query=analysis.query_text,
                 query_type=self._determine_query_type(analysis),
                 max_results=self._determine_max_results(analysis, context),
                 language=language_code,
                 search_engines=search_engines,
-                priority=len(scored_analyses) - i,  # Priority based on ranking
                 metadata={
                     "relevance_score": analysis.estimated_relevance,
                     "coverage_score": analysis.estimated_coverage,
@@ -781,7 +779,8 @@ Please return the query list directly, one query per line:
                     "uniqueness_score": analysis.uniqueness_score,
                     "overall_score": score,
                     "keywords": analysis.keywords,
-                    "concepts": analysis.semantic_concepts
+                    "concepts": analysis.semantic_concepts,
+                    "priority": len(scored_analyses) - i  # Priority based on ranking
                 }
             )
             selected_queries.append(search_query)
@@ -816,13 +815,13 @@ Please return the query list directly, one query per line:
     def _determine_query_type(self, analysis: QueryAnalysis) -> QueryType:
         """Determine query type"""
         if analysis.complexity_score > 0.7:
-            return QueryType.EXPERT
+            return QueryType.DEEP_DIVE
         elif "AND" in analysis.query_text or "OR" in analysis.query_text:
-            return QueryType.BOOLEAN
+            return QueryType.FOLLOWUP
         elif '"' in analysis.query_text:
-            return QueryType.PHRASE
+            return QueryType.CLARIFICATION
         else:
-            return QueryType.KEYWORD
+            return QueryType.INITIAL
     
     def _determine_max_results(self, analysis: QueryAnalysis, 
                              context: QueryGenerationContext) -> int:

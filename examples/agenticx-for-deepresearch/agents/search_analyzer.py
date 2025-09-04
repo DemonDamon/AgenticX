@@ -3,6 +3,7 @@ Specialized agent for analyzing search result quality, relevance, and completene
 """
 
 from typing import List, Dict, Any
+import logging
 from agenticx.core.agent import Agent
 from agenticx.core.prompt import PromptTemplate
 from agenticx.core.message import Message
@@ -18,7 +19,7 @@ class SearchAnalyzerAgent(Agent):
     
     def __init__(self, name: str = "Search Analysis Expert", role: str = "Search Quality Analyst", 
                  goal: str = "To analyze search results quality, relevance, and completeness, identifying information gaps and areas requiring further investigation.",
-                 organization_id: str = "deepsearch", **kwargs):
+                 organization_id: str = "deepsearch", llm_provider=None, **kwargs):
         super().__init__(
             id="search_analyzer_agent",
             name=name,
@@ -29,6 +30,27 @@ class SearchAnalyzerAgent(Agent):
             tool_names=[],  # This agent mainly performs analysis and doesn't need external tools
             **kwargs
         )
+        
+        # 设置 LLM 提供者
+        self.llm = llm_provider
+        if self.llm is None:
+            # 如果没有提供 LLM，尝试从 kwargs 或环境变量创建
+            from agenticx.llms.kimi_provider import KimiProvider
+            import os
+            
+            api_key = os.getenv('KIMI_API_KEY') or os.getenv('OPENAI_API_KEY')
+            if api_key:
+                self.llm = KimiProvider(
+                    model="kimi-k2-0711-preview",
+                    api_key=api_key,
+                    base_url=os.getenv('KIMI_API_BASE', 'https://api.moonshot.cn/v1'),
+                    temperature=0.7
+                )
+            else:
+                raise ValueError("需要提供 llm_provider 参数或设置 KIMI_API_KEY/OPENAI_API_KEY 环境变量")
+        
+        # 设置 logger
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
     
     def analyze_search_results(self, search_results: List[SearchResult], 
                              research_topic: str, research_objective: str) -> Dict[str, Any]:
@@ -152,10 +174,13 @@ Please output analysis results in JSON format:
                 research_objective=research_objective,
                 results_summary=results_summary
             ),
-            sender=self.name,
-            message_type="search_analysis"
+            sender_id=self.id,
+            recipient_id="llm",
+            metadata={"message_type": "search_analysis"}
         )
         
+        if self.llm is None:
+            raise ValueError("LLM provider not initialized. Please set self.llm before using analysis methods.")
         response = self.llm.generate(message.content)
         return self._parse_analysis_response(response)
     
@@ -169,7 +194,11 @@ Please output analysis results in JSON format:
             List[KnowledgeGap]: List of identified knowledge gaps
         """
         all_results = context.get_all_search_results()
-        current_findings = context.get_current_findings()
+        # 简化实现，从现有的研究迭代中获取所有发现
+        current_findings = []
+        for iteration in context.iterations:
+            if iteration.analysis_summary:
+                current_findings.append(iteration.analysis_summary)
         
         # Detect language and generate appropriate prompt
         detected_language = self._detect_language(context.research_topic)
@@ -258,10 +287,13 @@ Please output identified information gaps in JSON format:
                 current_findings=self._format_findings(current_findings),
                 results_count=len(all_results)
             ),
-            sender=self.name,
-            message_type="gap_analysis"
+            sender_id=self.id,
+            recipient_id="llm",
+            metadata={"message_type": "gap_analysis"}
         )
         
+        if self.llm is None:
+            raise ValueError("LLM provider not initialized. Please set self.llm before using analysis methods.")
         response = self.llm.generate(message.content)
         return self._parse_knowledge_gaps(response)
     
@@ -274,8 +306,22 @@ Please output identified information gaps in JSON format:
         Returns:
             Dict: Strategy evaluation results and improvement suggestions
         """
-        search_history = context.get_search_history()
-        results_quality = context.get_results_quality_metrics()
+        # 简化实现，从现有的迭代中获取搜索历史
+        search_history = []
+        for iteration in context.iterations:
+            for query in iteration.queries:
+                search_history.append({
+                    'query': query.query,
+                    'result_count': len([r for r in iteration.search_results if r])
+                })
+        
+        # 简化的结果质量指标
+        total_results = len(context.get_all_search_results())
+        results_quality = {
+            'total_results': total_results,
+            'average_relevance': 0.7,  # 默认值
+            'coverage_score': min(total_results / 50.0, 1.0)  # 基于结果数量的覆盖度评估
+        }
         
         # Detect language and generate appropriate prompt
         detected_language = self._detect_language(context.research_topic)
@@ -357,10 +403,13 @@ Output evaluation results in JSON format:
                 search_history=self._format_search_history(search_history),
                 results_quality=str(results_quality)
             ),
-            sender=self.name,
-            message_type="strategy_evaluation"
+            sender_id=self.id,
+            recipient_id="llm",
+            metadata={"message_type": "strategy_evaluation"}
         )
         
+        if self.llm is None:
+            raise ValueError("LLM provider not initialized. Please set self.llm before using analysis methods.")
         response = self.llm.generate(message.content)
         return self._parse_strategy_evaluation(response)
     
@@ -423,11 +472,11 @@ Output evaluation results in JSON format:
                 data = json.loads(json_str)
                 for gap_data in data.get('knowledge_gaps', []):
                     gap = KnowledgeGap(
-                        gap_type=gap_data.get('gap_type', ''),
+                        topic=gap_data.get('gap_type', 'Unknown'),
                         description=gap_data.get('description', ''),
-                        importance=gap_data.get('importance', 'medium'),
+                        priority=int(gap_data.get('importance', 5)) if str(gap_data.get('importance', 5)).isdigit() else 5,
                         suggested_queries=gap_data.get('suggested_queries', []),
-                        expected_sources=gap_data.get('expected_sources', [])
+                        identified_by=self.id
                     )
                     gaps.append(gap)
         except:

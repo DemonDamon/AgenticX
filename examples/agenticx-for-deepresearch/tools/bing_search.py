@@ -7,6 +7,7 @@ import os
 import json
 import urllib.parse
 import urllib.request
+import urllib.error
 import ssl
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
@@ -72,16 +73,17 @@ class BingWebSearchTool(BaseTool):
         print(f"   Count: {self.count}")
         print(f"   API Key: {'Configured' if self.subscription_key else 'Not configured'}")
     
-    def _run(self, query: str) -> List[Dict[str, Any]]:
+    def _run(self, **kwargs) -> List[Dict[str, Any]]:
         """
         Execute Bing Web Search
         
         Args:
-            query: Search query string
+            **kwargs: Keyword arguments containing 'query' parameter
             
         Returns:
             List[Dict[str, Any]]: Search results list, each result includes title, link, snippet
         """
+        query = kwargs.get('query', '')
         try:
             # Build request URL
             params = {
@@ -96,7 +98,8 @@ class BingWebSearchTool(BaseTool):
             
             # Create request
             req = urllib.request.Request(url)
-            req.add_header('Ocp-Apim-Subscription-Key', self.subscription_key)
+            if self.subscription_key:  # Type guard to ensure subscription_key is not None
+                req.add_header('Ocp-Apim-Subscription-Key', self.subscription_key)
             req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
             
             # Send request
@@ -159,9 +162,9 @@ class BingWebSearchTool(BaseTool):
             print(f"❌ Bing search failed: {e}")
             return []
     
-    async def _arun(self, query: str) -> List[Dict[str, Any]]:
+    async def _arun(self, **kwargs) -> List[Dict[str, Any]]:
         """Asynchronous execution of search (currently calls synchronous method)"""
-        return self._run(query)
+        return self._run(**kwargs)
 
 
 class MockBingSearchTool(BaseTool):
@@ -177,16 +180,17 @@ class MockBingSearchTool(BaseTool):
         print(f"● Mock Bing Search configuration:")
         print(f"   Mode: Test mode (returns simulated results)")
     
-    def _run(self, query: str) -> List[Dict[str, Any]]:
+    def _run(self, **kwargs) -> List[Dict[str, Any]]:
         """
         Simulate Bing search
         
         Args:
-            query: Search query string
+            **kwargs: Keyword arguments containing 'query' parameter
             
         Returns:
             List[Dict[str, Any]]: Simulated search results list
         """
+        query = kwargs.get('query', '')
         # Return simulated search results
         mock_results = [
             {
@@ -219,6 +223,6 @@ class MockBingSearchTool(BaseTool):
         print(f"✅ Mock Bing search completed: query='{query}', result count={len(mock_results)}")
         return mock_results
     
-    async def _arun(self, query: str) -> List[Dict[str, Any]]:
+    async def _arun(self, **kwargs) -> List[Dict[str, Any]]:
         """Asynchronous execution of search (currently calls synchronous method)"""
-        return self._run(query)
+        return self._run(**kwargs)

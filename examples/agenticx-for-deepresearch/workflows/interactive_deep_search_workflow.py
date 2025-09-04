@@ -20,8 +20,19 @@ from agenticx.core.task import Task
 from agenticx.llms.base import BaseLLMProvider
 from agenticx.tools.base import BaseTool
 
-from agents import QueryGeneratorAgent, ResearchSummarizerAgent
-from tools import GoogleSearchTool, BingWebSearchTool, MockBingSearchTool, BochaaIWebSearchTool
+import sys
+import os
+
+# Add parent directory to sys.path to enable importing from sibling directories
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+
+# Direct imports from specific modules
+from agents.query_generator import QueryGeneratorAgent
+from agents.research_summarizer import ResearchSummarizerAgent
+from tools.google_search import GoogleSearchTool
+from tools.bing_search import BingWebSearchTool, MockBingSearchTool
+from tools.bochaai_search import BochaaIWebSearchTool
 from utils import clean_input_text
 
 
@@ -272,8 +283,7 @@ Return only JSON, no other explanations.
 """
         
         try:
-            messages = [{"role": "user", "content": clarification_prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(clarification_prompt)
             result = self._safe_json_parse(response.content)
             
             if result and isinstance(result, dict):
@@ -346,8 +356,7 @@ Return JSON only, no other explanations.
 """
         
         try:
-            messages = [{"role": "user", "content": clarification_prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(clarification_prompt)
             result = self._safe_json_parse(response.content)
             
             if result and isinstance(result, dict):
@@ -750,8 +759,7 @@ Please return the description of the thinking process directly, not in JSON form
 """
         
         try:
-            messages = [{"role": "user", "content": thinking_prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(thinking_prompt)
             self.metrics["thinking_steps"] += 1
             return response.content.strip()
         except Exception as e:
@@ -775,7 +783,7 @@ Please return the description of the thinking process directly, not in JSON form
             
             try:
                 # Enable summary parameter to get more detailed content
-                search_results = self.search_tool._run(query, summary=True, count=10)
+                search_results = self.search_tool._run(query=query, summary=True, count=10)
                 if isinstance(search_results, list):
                     all_results.extend(search_results)
                     print(f"   ✅ Obtained {len(search_results)} results")
@@ -1068,8 +1076,7 @@ Only return JSON, no other explanations.
 """
         
         try:
-            messages = [{"role": "user", "content": prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(prompt)
             result = self._safe_json_parse(response.content)
             
             if result and isinstance(result, dict) and "queries" in result:
@@ -1159,8 +1166,7 @@ Only return JSON, no other explanations.
 """
         
         try:
-            messages = [{"role": "user", "content": prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(prompt)
             result = self._safe_json_parse(response.content)
             
             if result and isinstance(result, dict):
@@ -1312,8 +1318,7 @@ Please return the complete report content directly, without JSON format.
 """
         
         try:
-            messages = [{"role": "user", "content": prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(prompt)
             return response.content
         except Exception as e:
             self.logger.error(f"Report generation failed: {e}")
@@ -1455,8 +1460,7 @@ Only return JSON, no other explanations.
 """
         
         try:
-            messages = [{"role": "user", "content": prompt}]
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(prompt)
             result = self._safe_json_parse(response.content)
             
             if result and isinstance(result, dict):
@@ -1503,7 +1507,7 @@ Only return JSON, no other explanations.
         chinese_ratio = chinese_chars / total_chars
         return "zh" if chinese_ratio > 0.3 else "en"
     
-    def _save_report_to_file(self, report_content: str, research_topic: str, suffix: str = "") -> str:
+    def _save_report_to_file(self, report_content: str, research_topic: str, suffix: str = "") -> Optional[str]:
         """
         Save report to file
         

@@ -705,25 +705,25 @@ class UserFeedbackHandler(BaseCallbackHandler):
         pass
     
     # BaseCallbackHandler interface implementation
-    async def on_agent_start(self, agent_name: str, **kwargs) -> None:
+    def on_agent_start(self, agent, **kwargs):
         """Callback when agent starts"""
         pass
     
-    async def on_agent_end(self, agent_name: str, **kwargs) -> None:
+    def on_agent_end(self, agent, **kwargs):
         """Callback when agent ends"""
         # Can request user feedback after agent ends
         pass
     
-    async def on_task_start(self, task_name: str, **kwargs) -> None:
+    def on_task_start(self, agent, task):
         """Callback when task starts"""
         pass
     
-    async def on_task_end(self, task_name: str, **kwargs) -> None:
+    def on_task_end(self, agent, task, result):
         """Callback when task ends"""
         # Can request user feedback after task ends
         pass
     
-    async def on_error(self, error: Exception, **kwargs) -> None:
+    def on_error(self, error: Exception, context: Dict[str, Any]):
         """Callback when error occurs"""
         # Can collect user feedback after error occurs
         pass

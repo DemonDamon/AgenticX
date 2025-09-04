@@ -53,7 +53,7 @@ class ResearchProgress:
     current_phase: str
     progress_percentage: float
     estimated_completion: Optional[datetime] = None
-    last_update: datetime = None
+    last_update: Optional[datetime] = None
 
 
 class InteractiveResearchInterface(BaseCallbackHandler):
@@ -236,16 +236,17 @@ class InteractiveResearchInterface(BaseCallbackHandler):
                 "analysis": result or {}
             })
     
-    async def on_task_start(self, task_name: str, **kwargs) -> None:
+    def on_task_start(self, agent: Agent, task: Task):
         """Handle task start event"""
         if not self.is_active:
             return
         
         if self.progress:
+            task_name = task.description if hasattr(task, 'description') else str(task)
             self.progress.current_phase = f"Executing {task_name}"
             self.progress.last_update = datetime.now()
     
-    async def on_task_end(self, task_name: str, result: Any = None, **kwargs) -> None:
+    def on_task_end(self, agent: Agent, task: Task, result: Dict[str, Any]):
         """Handle task completion event"""
         if not self.is_active:
             return
@@ -255,15 +256,30 @@ class InteractiveResearchInterface(BaseCallbackHandler):
             self.progress.completed_searches += 1
             self._update_progress_percentage()
     
-    async def on_error(self, error: Exception, **kwargs) -> None:
+    def on_error(self, error: Exception, context: Dict[str, Any]):
         """Handle error event"""
-        await self._emit_event(InterfaceEvent.ERROR_OCCURRED, {
-            "error_message": str(error),
-            "timestamp": datetime.now().isoformat()
-        })
+        # Use asyncio to call the async method in a sync context
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Create task if loop is already running
+                asyncio.create_task(self._emit_event(InterfaceEvent.ERROR_OCCURRED, {
+                    "error_message": str(error),
+                    "timestamp": datetime.now().isoformat()
+                }))
+            else:
+                # Run directly if no loop is running
+                loop.run_until_complete(self._emit_event(InterfaceEvent.ERROR_OCCURRED, {
+                    "error_message": str(error),
+                    "timestamp": datetime.now().isoformat()
+                }))
+        except Exception:
+            # Fallback: just log the error without emitting event
+            print(f"Error occurred: {error}")
     
     # Workflow control methods
-    async def start_research(self, workflow_id: str = None) -> None:
+    async def start_research(self, workflow_id: Optional[str] = None) -> None:
         """Start research"""
         if self.progress:
             self.progress.current_phase = "Workflow Execution"
@@ -274,7 +290,7 @@ class InteractiveResearchInterface(BaseCallbackHandler):
             "start_time": datetime.now().isoformat()
         })
     
-    async def complete_research(self, workflow_id: str = None, results: Any = None) -> None:
+    async def complete_research(self, workflow_id: Optional[str] = None, results: Any = None) -> None:
         """Complete research"""
         if self.progress:
             self.progress.current_phase = "Completed"
@@ -433,7 +449,7 @@ class InteractiveResearchInterface(BaseCallbackHandler):
         # Here you can register some default event handling logic
         pass
     
-    async def update_progress(self, phase: str = None) -> None:
+    async def update_progress(self, phase: Optional[str] = None) -> None:
         """Update progress"""
         if not self.progress:
             return

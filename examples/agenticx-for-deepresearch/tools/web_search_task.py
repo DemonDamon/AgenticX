@@ -6,9 +6,11 @@ strictly following the AgenticX framework's Task abstraction.
 
 from typing import List, Dict, Any, Optional
 from pydantic import Field
+from datetime import datetime
+import logging
 from agenticx.core.task import Task
 from agenticx.core.message import Message
-from models import SearchQuery, SearchResult
+from models import SearchQuery, SearchResult, SearchEngine
 from .google_search import GoogleSearchTool
 from .bing_search import BingWebSearchTool
 from .bochaai_search import BochaaIWebSearchTool
@@ -54,10 +56,15 @@ class WebSearchTask(Task):
         super().__init__(
             description=description,
             expected_output=expected_output,
-            search_provider=search_provider,
-            search_tools=search_tools,
             **kwargs
         )
+        
+        # 设置实例属性
+        self.search_provider = search_provider
+        self.search_tools = search_tools
+        
+        # 设置日志记录器
+        self.logger = logging.getLogger(self.__class__.__name__)
     
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """Execute search task"""
@@ -110,14 +117,31 @@ class WebSearchTask(Task):
         """Convert raw search results to standard format"""
         search_results = []
         
+        # 将字符串引擎名称转换为 SearchEngine 枚举
+        try:
+            engine_enum = SearchEngine(engine)
+        except ValueError:
+            # 如果引擎名称无效，使用默认值
+            engine_enum = SearchEngine.BOCHAAI
+        
         for result in raw_results:
+            # 确保时间戳是 datetime 类型
+            timestamp = result.get("timestamp")
+            if timestamp is None:
+                timestamp = datetime.now()
+            elif isinstance(timestamp, str):
+                try:
+                    timestamp = datetime.fromisoformat(timestamp)
+                except ValueError:
+                    timestamp = datetime.now()
+            
             search_result = SearchResult(
                 title=result.get("title", ""),
                 url=result.get("url", ""),
                 snippet=result.get("snippet", ""),
-                content=result.get("content", ""),
-                source=engine,
-                timestamp=result.get("timestamp")
+                source=engine_enum,
+                timestamp=timestamp,
+                content=result.get("content", "")
             )
             search_results.append(search_result)
         

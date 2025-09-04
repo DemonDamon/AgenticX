@@ -22,8 +22,8 @@ from agenticx.tools.base import BaseTool
 from agenticx.observability.monitoring import MonitoringCallbackHandler
 from agenticx.observability.logging import LoggingCallbackHandler
 
-from agents import QueryGeneratorAgent, ResearchSummarizerAgent
-from tools import GoogleSearchTool, BingWebSearchTool, MockBingSearchTool, BochaaIWebSearchTool
+from ..agents import QueryGeneratorAgent, ResearchSummarizerAgent
+from ..tools import GoogleSearchTool, BingWebSearchTool, MockBingSearchTool, BochaaIWebSearchTool
 
 
 class DeepSearchWorkflow:
@@ -303,6 +303,7 @@ class DeepSearchWorkflow:
         Returns:
             Parsed dictionary, or None if parsing fails
         """
+        clean_content = None
         try:
             # Clean the content first
             clean_content = self._clean_json_response(content)
@@ -313,10 +314,13 @@ class DeepSearchWorkflow:
         except json.JSONDecodeError as e:
             print(f"⚠️  JSON parsing failed: {e}")
             print(f"⚠️  Original content: {content[:200]}...")
-            print(f"⚠️  Cleaned content: {clean_content[:200]}...")
+            if clean_content is not None:
+                print(f"⚠️  Cleaned content: {clean_content[:200]}...")
             return None
         except Exception as e:
             print(f"⚠️  JSON parsing exception: {e}")
+            if clean_content is not None:
+                print(f"⚠️  Cleaned content: {clean_content[:200]}...")
             return None
     
     def _get_summary_content(self, summary: Any) -> str:
@@ -574,7 +578,6 @@ Return JSON only, no other explanations.
         
         try:
             # Correct LLM call method
-            messages = [{"role": "user", "content": prompt}]
             
             # Record LLM call start
             call_start_time = time.time()
@@ -582,7 +585,7 @@ Return JSON only, no other explanations.
             # Record LLM call start monitoring
             self.monitoring_handler.on_llm_call(prompt, self.llm_provider.model, {"operation": "query_generation"})
             
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(prompt)
             call_duration = time.time() - call_start_time
             
             # Record token usage
@@ -634,7 +637,7 @@ Return JSON only, no other explanations.
             print(f"  Searching: {query}")
             try:
                 # Enable summary parameter to get more detailed content
-                search_results = self.search_tool._run(query, summary=True, count=10)
+                search_results = self.search_tool._run(query=query, summary=True, count=10)
                 if isinstance(search_results, list):
                     all_search_results.extend(search_results)
                 else:
@@ -722,7 +725,6 @@ Return JSON only, no other explanations.
         
         try:
             # Correct LLM call method
-            messages = [{"role": "user", "content": prompt}]
             
             # Record LLM call start
             call_start_time = time.time()
@@ -730,7 +732,7 @@ Return JSON only, no other explanations.
             # Record LLM call start monitoring
             self.monitoring_handler.on_llm_call(prompt, self.llm_provider.model, {"operation": "search_summarization"})
             
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(prompt)
             call_duration = time.time() - call_start_time
             
             # Record token usage
@@ -888,7 +890,6 @@ Please return the complete Markdown format report directly.
 """
         
         try:
-            messages = [{"role": "user", "content": prompt}]
             print("📝 Generating final report")
             
             # Record LLM call start
@@ -897,7 +898,7 @@ Please return the complete Markdown format report directly.
             # Record LLM call start monitoring
             self.monitoring_handler.on_llm_call(prompt, self.llm_provider.model, {"operation": "final_report_generation"})
             
-            response = self.llm_provider.invoke(messages)
+            response = self.llm_provider.invoke(prompt)
             call_duration = time.time() - call_start_time
             
             # Record token usage
@@ -1071,7 +1072,7 @@ This report is automatically generated based on search results. Due to LLM servi
         else:
             return "english"
     
-    def _save_report_to_file(self, report_content: str, research_topic: str, suffix: str = "") -> str:
+    def _save_report_to_file(self, report_content: str, research_topic: str, suffix: str = "") -> Optional[str]:
         """
         Save report to file
         
@@ -1081,7 +1082,7 @@ This report is automatically generated based on search results. Due to LLM servi
             suffix: File name suffix
             
         Returns:
-            Saved file path
+            Saved file path, or None if save failed
         """
         try:
             # Create output directory
