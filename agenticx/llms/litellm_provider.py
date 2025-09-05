@@ -1,4 +1,5 @@
-from typing import Any, Optional, Dict, List, AsyncGenerator, Generator
+import asyncio
+from typing import Any, Optional, Dict, List, AsyncGenerator, Generator, Union, cast
 import litellm
 from pydantic import Field
 from .base import BaseLLMProvider
@@ -18,8 +19,16 @@ class LiteLLMProvider(BaseLLMProvider):
     max_retries: Optional[int] = Field(default=None, description="Maximum number of retries")
 
     def invoke(
-        self, messages: List[Dict], tools: Optional[List[Dict]] = None, **kwargs
+        self, prompt: Union[str, List[Dict]], tools: Optional[List[Dict]] = None, **kwargs
     ) -> LLMResponse:
+        # 处理不同的输入类型
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": prompt}]
+        elif isinstance(prompt, list):
+            messages = prompt
+        else:
+            raise ValueError(f"Unsupported prompt type: {type(prompt)}")
+            
         try:
             response = litellm.completion(
                 model=self.model,
@@ -37,8 +46,16 @@ class LiteLLMProvider(BaseLLMProvider):
             raise
 
     async def ainvoke(
-        self, messages: List[Dict], tools: Optional[List[Dict]] = None, **kwargs
+        self, prompt: Union[str, List[Dict]], tools: Optional[List[Dict]] = None, **kwargs
     ) -> LLMResponse:
+        # 处理不同的输入类型
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": prompt}]
+        elif isinstance(prompt, list):
+            messages = prompt
+        else:
+            raise ValueError(f"Unsupported prompt type: {type(prompt)}")
+            
         try:
             response = await litellm.acompletion(
                 model=self.model,
@@ -55,8 +72,16 @@ class LiteLLMProvider(BaseLLMProvider):
         except Exception as e:
             raise
 
-    def stream(self, messages: List[Dict], **kwargs) -> Generator[str, None, None]:
+    def stream(self, prompt: Union[str, List[Dict]], **kwargs) -> Generator[Union[str, Dict], None, None]:
         """Stream the language model's response synchronously."""
+        # 处理不同的输入类型
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": prompt}]
+        elif isinstance(prompt, list):
+            messages = prompt
+        else:
+            raise ValueError(f"Unsupported prompt type: {type(prompt)}")
+            
         response_stream = litellm.completion(
             model=self.model,
             messages=messages,
@@ -68,13 +93,30 @@ class LiteLLMProvider(BaseLLMProvider):
             max_retries=self.max_retries,
             **kwargs
         )
-        for chunk in response_stream:
-            content = chunk.choices[0].delta.content
-            if content:
-                yield content
+        try:
+            for chunk in response_stream:
+                # 使用 cast 来告诉类型检查器 chunk 的类型
+                chunk = cast(Any, chunk)
+                # 检查 chunk 是否有 choices 属性，并且不是 None
+                if hasattr(chunk, 'choices') and chunk.choices:
+                    delta = chunk.choices[0].delta
+                    if hasattr(delta, 'content') and delta.content:
+                        yield delta.content
+        except Exception as e:
+            # 处理可能的异常
+            raise e
 
-    async def astream(self, messages: List[Dict], **kwargs) -> AsyncGenerator[str, None]:
-        """Stream the language model's response asynchronously."""
+    async def _astream_generator(self, prompt: Union[str, List[Dict]], **kwargs) -> AsyncGenerator[Union[str, Dict], None]:
+        """Internal method to create the async generator for streaming."""
+        # 处理不同的输入类型
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": prompt}]
+        elif isinstance(prompt, list):
+            messages = prompt
+        else:
+            raise ValueError(f"Unsupported prompt type: {type(prompt)}")
+            
+        # 获取流式响应
         response_stream = await litellm.acompletion(
             model=self.model,
             messages=messages,
@@ -86,10 +128,35 @@ class LiteLLMProvider(BaseLLMProvider):
             max_retries=self.max_retries,
             **kwargs
         )
-        async for chunk in response_stream:
-            content = chunk.choices[0].delta.content
-            if content:
-                yield content
+        
+        # 异步迭代处理流式响应
+        try:
+            # 告诉类型检查器 response_stream 是可异步迭代的
+            async_stream = cast(AsyncGenerator[Any, None], response_stream)
+            async for chunk in async_stream:
+                # 使用 cast 来告诉类型检查器 chunk 的类型
+                chunk = cast(Any, chunk)
+                # 检查 chunk 是否有 choices 属性，并且不是 None
+                if hasattr(chunk, 'choices') and chunk.choices:
+                    delta = chunk.choices[0].delta
+                    if hasattr(delta, 'content') and delta.content:
+                        yield delta.content
+                    elif hasattr(delta, 'tool_calls') and delta.tool_calls:
+                        # 如果是工具调用，返回整个 delta
+                        yield {"role": "assistant", "tool_calls": delta.tool_calls}
+                elif hasattr(chunk, 'choices') and not chunk.choices:
+                    # 处理空 choices 的情况
+                    continue
+        except Exception as e:
+            # 处理可能的异常
+            raise e
+
+    async def astream(self, prompt: Union[str, List[Dict]], **kwargs) -> AsyncGenerator[Union[str, Dict], None]:
+        """Stream the language model's response asynchronously."""
+        async_gen = self._astream_generator(prompt, **kwargs)
+        # 为了满足类型检查器的要求，我们需要返回一个协程
+        # 但实际上我们直接返回异步生成器
+        return async_gen
 
     def _parse_response(self, response) -> LLMResponse:
         """Parses a LiteLLM ModelResponse into an AgenticX LLMResponse."""
@@ -145,7 +212,7 @@ class LiteLLMProvider(BaseLLMProvider):
             }
         )
 
-    def generate(self, prompt: str, **kwargs) -> str:
+    def generate(self, prompt: Union[str, List[Dict]], **kwargs) -> str:
         """Generate text response from a simple prompt string.
         
         Args:
@@ -155,14 +222,16 @@ class LiteLLMProvider(BaseLLMProvider):
         Returns:
             Generated text content as string
         """
-        messages = [{"role": "user", "content": prompt}]
-        response = self.invoke(messages, **kwargs)
+        response = self.invoke(prompt, **kwargs)
         return response.content
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "LiteLLMProvider":
+        model = config.get("model")
+        if not model:
+            raise ValueError("Model must be specified in config")
         return cls(
-            model=config.get("model"),
+            model=model,
             api_key=config.get("api_key"),
             base_url=config.get("base_url"),
             api_version=config.get("api_version"),
