@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from ..llms.base import BaseLLMProvider
 from ..llms.response import LLMResponse
 from ..tools.base import BaseTool
-from ..tools.security import ApprovalRequiredError
+from agenticx.tools.security import ApprovalRequiredError
 from .agent import Agent
 from .task import Task
 from .event import (
@@ -238,7 +238,9 @@ class AgentExecutor:
                 # Check if we should request human help
                 if self.error_handler.should_request_human_help():
                     recent_errors = event_log.get_events_by_type("error")[-3:]
-                    human_request = self.error_handler.create_human_help_request(recent_errors)
+                    # Type cast from List[AnyEvent] to List[ErrorEvent]
+                    error_events = [event for event in recent_errors if isinstance(event, ErrorEvent)]
+                    human_request = self.error_handler.create_human_help_request(error_events)
                     event_log.append(human_request)
                     break
                 
@@ -372,7 +374,10 @@ class AgentExecutor:
                     task_id=event_log.task_id
                 )
             else:
-                raise execution_result.error
+                if execution_result.error:
+                    raise execution_result.error
+                else:
+                    raise Exception("Tool execution failed without specific error")
 
         except ApprovalRequiredError as e:
             # 创建人工请求事件
@@ -476,10 +481,12 @@ class AgentExecutor:
         total_cost = 0.0
         
         for event in llm_responses:
-            if hasattr(event, 'token_usage') and event.token_usage:
-                total_tokens += event.token_usage.get('total_tokens', 0)
-            if hasattr(event, 'cost') and event.cost:
-                total_cost += event.cost
+            # Type check to ensure we only access token_usage on LLMResponseEvent
+            if isinstance(event, LLMResponseEvent):
+                if event.token_usage:
+                    total_tokens += event.token_usage.get('total_tokens', 0)
+                if event.cost:
+                    total_cost += event.cost
         
         stats["token_usage"] = total_tokens
         stats["estimated_cost"] = total_cost
