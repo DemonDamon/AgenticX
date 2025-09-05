@@ -262,7 +262,8 @@ def list_agents():
 def create_workflow(
     name: str = typer.Argument(..., help="工作流名称"),
     template: str = typer.Option("sequential", "--template", "-t", help="工作流模板"),
-    agents: Optional[str] = typer.Option(None, "--agents", "-a", help="智能体列表(逗号分隔)")
+    agents: Optional[str] = typer.Option(None, "--agents", "-a", help="智能体列表(逗号分隔)"),
+    interactive: bool = typer.Option(False, "--interactive", "-i", help="交互式创建")
 ):
     """创建新的工作流"""
     console.print(f"[bold blue]创建工作流:[/bold blue] {name}")
@@ -270,7 +271,7 @@ def create_workflow(
     ProjectScaffolder = _get_scaffolder()
     scaffolder = ProjectScaffolder()
     try:
-        workflow_path = scaffolder.create_workflow(name, template, agents)
+        workflow_path = scaffolder.create_workflow(name, template, interactive)
         console.print(f"[bold green]✓ 工作流创建成功![/bold green]")
         console.print(f"工作流文件: {workflow_path}")
     except Exception as e:
@@ -299,7 +300,7 @@ def list_workflows():
         table.add_column("状态", style="green")
         
         for workflow in workflows:
-            table.add_row(workflow.id, workflow.name, workflow.type, workflow.status)
+            table.add_row(workflow.id, workflow.name, str(workflow.node_count), workflow.status)
         
         console.print(table)
     except Exception as e:
@@ -343,7 +344,7 @@ def deploy_docker(
         result = deploy_manager.deploy_docker(target, tag, push)
         console.print(f"[bold green]✓ Docker 部署完成![/bold green]")
         if push:
-            console.print(f"镜像已推送: {result.image_url}")
+            console.print(f"镜像已推送: {result}")
     except Exception as e:
         console.print(f"[bold red]Docker 部署失败:[/bold red] {e}")
         raise typer.Exit(1)
@@ -361,10 +362,10 @@ def deploy_kubernetes(
     DeployManager = _get_deploy_manager()
     deploy_manager = DeployManager()
     try:
-        result = deploy_manager.deploy_kubernetes(target, namespace, apply)
+        result = deploy_manager.deploy_kubernetes(namespace)  # 修复参数
         console.print(f"[bold green]✓ Kubernetes 部署完成![/bold green]")
         if apply:
-            console.print(f"应用已部署到命名空间: {namespace}")
+            console.print(f"应用已部署到命名空间: {result}")
     except Exception as e:
         console.print(f"[bold red]Kubernetes 部署失败:[/bold red] {e}")
         raise typer.Exit(1)
@@ -382,7 +383,7 @@ def start_monitor(
     DebugServer = _get_debug_server()
     debug_server = DebugServer()
     try:
-        debug_server.start_monitor(host, port)
+        debug_server.start_monitoring(host, port)  # 修复方法名
         console.print(f"[bold green]✓ 监控服务启动成功![/bold green]")
         console.print(f"访问地址: http://{host}:{port}")
     except Exception as e:
@@ -398,10 +399,13 @@ def monitor_status():
     DebugServer = _get_debug_server()
     debug_server = DebugServer()
     try:
-        status = debug_server.get_status()
-        console.print(f"服务状态: {status.status}")
-        console.print(f"运行时间: {status.uptime}")
-        console.print(f"请求数: {status.requests}")
+        # 修复方法调用
+        if debug_server.is_running:
+            console.print("服务状态: 运行中")
+        else:
+            console.print("服务状态: 已停止")
+        console.print(f"运行时间: 未知")  # 简化实现
+        console.print(f"请求数: 未知")    # 简化实现
     except Exception as e:
         console.print(f"[bold red]获取状态失败:[/bold red] {e}")
         raise typer.Exit(1)
@@ -440,7 +444,7 @@ def serve_docs(
     DocGenerator = _get_doc_generator()
     doc_generator = DocGenerator()
     try:
-        doc_generator.serve_docs(directory, host, port)
+        doc_generator.serve_docs(directory, port)  # 修复参数
         console.print(f"[bold green]✓ 文档服务器启动成功![/bold green]")
         console.print(f"访问地址: http://localhost:{port}")
     except Exception as e:
