@@ -11,7 +11,7 @@ import json
 import threading
 import time
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from rich.console import Console
@@ -26,11 +26,10 @@ class DebugSession:
     agent_id: str
     created_at: datetime
     status: str = "active"
-    breakpoints: List[str] = None
+    breakpoints: List[str] = field(default_factory=list)
     
     def __post_init__(self):
-        if self.breakpoints is None:
-            self.breakpoints = []
+        pass
 
 
 class DebugServer:
