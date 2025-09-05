@@ -1,4 +1,4 @@
-from typing import Any, Optional, Dict, List, AsyncGenerator, Generator
+from typing import Any, Optional, Dict, List, AsyncGenerator, Generator, Union
 import openai
 from pydantic import Field
 from .base import BaseLLMProvider
@@ -23,14 +23,22 @@ class BailianProvider(BaseLLMProvider):
             api_key=self.api_key,
             base_url=self.base_url,
             timeout=self.timeout,
-            max_retries=self.max_retries
+            max_retries=self.max_retries or 3
         )
     
     def invoke(
-        self, messages: List[Dict], tools: Optional[List[Dict]] = None, **kwargs
+        self, prompt: Union[str, List[Dict]], tools: Optional[List[Dict]] = None, **kwargs
     ) -> LLMResponse:
         """Invoke the Bailian model synchronously."""
         try:
+            # Convert prompt to messages format
+            if isinstance(prompt, str):
+                messages = [{"role": "user", "content": prompt}]
+            elif isinstance(prompt, list):
+                messages = prompt
+            else:
+                raise ValueError("Prompt must be either a string or a list of message dictionaries")
+            
             request_params = {
                 "model": self.model,
                 "messages": messages,
@@ -41,21 +49,32 @@ class BailianProvider(BaseLLMProvider):
             if tools:
                 request_params["tools"] = tools
             
+            if self.client is None:
+                raise ValueError("Client not initialized")
+                
             response = self.client.chat.completions.create(**request_params)
             return self._parse_response(response)
         except Exception as e:
             raise Exception(f"Bailian API call failed: {str(e)}")
     
     async def ainvoke(
-        self, messages: List[Dict], tools: Optional[List[Dict]] = None, **kwargs
+        self, prompt: Union[str, List[Dict]], tools: Optional[List[Dict]] = None, **kwargs
     ) -> LLMResponse:
         """Invoke the Bailian model asynchronously."""
         try:
+            # Convert prompt to messages format
+            if isinstance(prompt, str):
+                messages = [{"role": "user", "content": prompt}]
+            elif isinstance(prompt, list):
+                messages = prompt
+            else:
+                raise ValueError("Prompt must be either a string or a list of message dictionaries")
+            
             async_client = openai.AsyncOpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
                 timeout=self.timeout,
-                max_retries=self.max_retries
+                max_retries=self.max_retries or 3
             )
             
             request_params = {
@@ -73,9 +92,17 @@ class BailianProvider(BaseLLMProvider):
         except Exception as e:
             raise Exception(f"Bailian API async call failed: {str(e)}")
     
-    def stream(self, messages: List[Dict], **kwargs) -> Generator[str, None, None]:
+    def stream(self, prompt: Union[str, List[Dict]], **kwargs) -> Generator[str, None, None]:
         """Stream the Bailian model's response synchronously."""
         try:
+            # Convert prompt to messages format
+            if isinstance(prompt, str):
+                messages = [{"role": "user", "content": prompt}]
+            elif isinstance(prompt, list):
+                messages = prompt
+            else:
+                raise ValueError("Prompt must be either a string or a list of message dictionaries")
+            
             request_params = {
                 "model": self.model,
                 "messages": messages,
@@ -84,6 +111,9 @@ class BailianProvider(BaseLLMProvider):
                 **kwargs
             }
             
+            if self.client is None:
+                raise ValueError("Client not initialized")
+                
             response_stream = self.client.chat.completions.create(**request_params)
             
             for chunk in response_stream:
@@ -92,14 +122,22 @@ class BailianProvider(BaseLLMProvider):
         except Exception as e:
             raise Exception(f"Bailian API stream call failed: {str(e)}")
     
-    async def astream(self, messages: List[Dict], **kwargs) -> AsyncGenerator[str, None]:
+    async def astream(self, prompt: Union[str, List[Dict]], **kwargs):  # type: ignore
         """Stream the Bailian model's response asynchronously."""
         try:
+            # Convert prompt to messages format
+            if isinstance(prompt, str):
+                messages = [{"role": "user", "content": prompt}]
+            elif isinstance(prompt, list):
+                messages = prompt
+            else:
+                raise ValueError("Prompt must be either a string or a list of message dictionaries")
+            
             async_client = openai.AsyncOpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
                 timeout=self.timeout,
-                max_retries=self.max_retries
+                max_retries=self.max_retries or 3
             )
             
             request_params = {
@@ -161,8 +199,7 @@ class BailianProvider(BaseLLMProvider):
         Returns:
             Generated text content as string
         """
-        messages = [{"role": "user", "content": prompt}]
-        response = self.invoke(messages, **kwargs)
+        response = self.invoke(prompt, **kwargs)
         return response.content
 
     @classmethod
@@ -189,7 +226,7 @@ class BailianProvider(BaseLLMProvider):
         Returns:
             格式化的多模态消息
         """
-        content = [{"type": "text", "text": text}]
+        content: List[Dict[str, Any]] = [{"type": "text", "text": text}]
         
         if image_url:
             content.append({

@@ -13,7 +13,7 @@ class BaseLLMProvider(ABC, BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
     @abstractmethod
-    def invoke(self, prompt: str, **kwargs: Any) -> LLMResponse:
+    def invoke(self, prompt: Union[str, List[Dict]], **kwargs: Any) -> LLMResponse:
         """
         Invoke the language model synchronously.
         
@@ -27,7 +27,7 @@ class BaseLLMProvider(ABC, BaseModel):
         pass
 
     @abstractmethod
-    async def ainvoke(self, prompt: str, **kwargs: Any) -> LLMResponse:
+    async def ainvoke(self, prompt: Union[str, List[Dict]], **kwargs: Any) -> LLMResponse:
         """
         Invoke the language model asynchronously.
 
@@ -41,7 +41,7 @@ class BaseLLMProvider(ABC, BaseModel):
         pass
 
     @abstractmethod
-    def stream(self, prompt: str, **kwargs: Any) -> Generator[Union[str, Dict], None, None]:
+    def stream(self, prompt: Union[str, List[Dict]], **kwargs: Any) -> Generator[Union[str, Dict], None, None]:
         """
         Stream the language model's response synchronously.
         
@@ -51,7 +51,7 @@ class BaseLLMProvider(ABC, BaseModel):
         pass
 
     @abstractmethod
-    async def astream(self, prompt: str, **kwargs: Any) -> AsyncGenerator[Union[str, Dict], None]:
+    async def astream(self, prompt: Union[str, List[Dict]], **kwargs: Any) -> AsyncGenerator[Union[str, Dict], None]:
         """
         Stream the language model's response asynchronously.
 
