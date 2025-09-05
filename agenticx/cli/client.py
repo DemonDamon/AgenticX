@@ -131,7 +131,11 @@ class AgenticXClient:
         # 动态加载工作流文件
         import importlib.util
         spec = importlib.util.spec_from_file_location("workflow_module", file_path)
+        if spec is None:
+            raise ValueError(f"无法加载工作流文件: {file_path}")
         module = importlib.util.module_from_spec(spec)
+        if spec.loader is None:
+            raise ValueError(f"无法获取工作流文件加载器: {file_path}")
         spec.loader.exec_module(module)
         
         # 查找并执行主函数
