@@ -39,7 +39,14 @@ class HumanInTheLoopComponent(Component):
         # 内部状态
         self.pending_requests: Dict[str, HumanInterventionRequest] = {}
         self.request_futures: Dict[str, asyncio.Future] = {}
-        self.metrics = InterventionMetrics()
+        self.request_retry_counts: Dict[str, int] = {}  # 用于存储请求的重试次数
+        self.metrics = InterventionMetrics(
+            total_requests=0,
+            pending_requests=0,
+            completed_requests=0,
+            average_response_time=0.0,
+            success_rate=0.0
+        )
         
         logger.info("HumanInTheLoopComponent initialized")
     
@@ -72,11 +79,12 @@ class HumanInTheLoopComponent(Component):
             agent_id=context.agent_id,
             task_id=getattr(context, 'task_id', None),
             intervention_type=intervention_type,
-            context=context.to_dict(),
+            context=context.dict(),
             screenshot=screenshot_data,
             description=description,
             confidence_score=confidence_score,
-            priority=priority
+            priority=priority,
+            status="pending"
         )
         
         # 存储请求
@@ -89,7 +97,7 @@ class HumanInTheLoopComponent(Component):
         # 发布干预请求事件
         event = HumanInterventionRequestedEvent.create(
             request=request,
-            context=context.to_dict(),
+            context=context.dict(),
             screenshot_data=screenshot_data,
             urgency_level=self._calculate_urgency(confidence_score, priority),
             agent_id=context.agent_id,
@@ -286,10 +294,10 @@ class HumanInTheLoopComponent(Component):
         request = self.pending_requests[request_id]
         
         # 检查是否可以重试
-        retry_count = getattr(request, '_retry_count', 0)
+        retry_count = self.request_retry_counts.get(request_id, 0)
         if retry_count < self.max_retries:
             # 重试
-            request._retry_count = retry_count + 1
+            self.request_retry_counts[request_id] = retry_count + 1
             logger.info(f"Retrying request {request_id} (attempt {retry_count + 1})")
             
             # 重新发布事件
@@ -314,6 +322,7 @@ class HumanInTheLoopComponent(Component):
         """
         self.pending_requests.pop(request_id, None)
         self.request_futures.pop(request_id, None)
+        self.request_retry_counts.pop(request_id, None)  # 清理重试计数
     
     async def shutdown(self):
         """关闭组件"""
