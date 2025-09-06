@@ -1,44 +1,58 @@
-"""
+""" 
 M5 的 Event 系统定义了 TaskStartEvent, ToolCallEvent, ErrorEvent 等12种事件类型，
 这与 Trae-Agent 的 TrajectoryRecorder 记录的内容异曲同工，但在架构上更为原生
 """
 
 from pydantic import BaseModel, Field
-from typing import Any, Dict, List, Optional, Union, Literal
+from typing import Any, Dict, List, Optional, Union, Literal, Callable, Generic, TypeVar
 from datetime import datetime
 import uuid
 
-class Event(BaseModel):
+# 定义类型变量用于泛型
+EventType = TypeVar('EventType', bound=str)
+
+class Event(BaseModel, Generic[EventType]):
     """
     Base class for all events in the AgenticX framework.
     Events form the core of the state management system following the 12-Factor Agents principle.
     """
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for the event.")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="When the event occurred.")
-    type: str = Field(description="The type of event (e.g., 'task_start', 'tool_call', 'error').")
+    type: EventType = Field(description="The type of event (e.g., 'task_start', 'tool_call', 'error').")
     data: Dict[str, Any] = Field(description="Event-specific data payload.", default_factory=dict)
     agent_id: Optional[str] = Field(description="ID of the agent that generated this event.", default=None)
     task_id: Optional[str] = Field(description="ID of the task this event relates to.", default=None)
+    
+    # 为了向后兼容，允许不指定泛型参数
+    def __init__(self, **data: Any) -> None:
+        # 如果没有显式指定type，从data中获取
+        if 'type' not in data and hasattr(self, 'type'):
+            # 这是子类的情况，type已经在类定义中指定
+            pass
+        super().__init__(**data)
 
-class TaskStartEvent(Event):
+# 为了向后兼容，创建一个非泛型的别名
+EventStr = Event[str]
+
+class TaskStartEvent(Event[Literal["task_start"]]):
     """Event fired when a task starts execution."""
     type: Literal["task_start"] = "task_start"
     task_description: str = Field(description="Description of the task being started.")
 
-class TaskEndEvent(Event):
+class TaskEndEvent(Event[Literal["task_end"]]):
     """Event fired when a task completes."""
     type: Literal["task_end"] = "task_end"
     success: bool = Field(description="Whether the task completed successfully.")
     result: Optional[Any] = Field(description="The result of the task execution.", default=None)
 
-class ToolCallEvent(Event):
+class ToolCallEvent(Event[Literal["tool_call"]]):
     """Event fired when an agent decides to call a tool."""
     type: Literal["tool_call"] = "tool_call"
     tool_name: str = Field(description="Name of the tool being called.")
     tool_args: Dict[str, Any] = Field(description="Arguments passed to the tool.", default_factory=dict)
     intent: str = Field(description="The agent's intent behind this tool call.")
 
-class ToolResultEvent(Event):
+class ToolResultEvent(Event[Literal["tool_result"]]):
     """Event fired when a tool call completes."""
     type: Literal["tool_result"] = "tool_result"
     tool_name: str = Field(description="Name of the tool that was called.")
@@ -46,40 +60,40 @@ class ToolResultEvent(Event):
     result: Optional[Any] = Field(description="The result of the tool execution.", default=None)
     error: Optional[str] = Field(description="Error message if the tool call failed.", default=None)
 
-class ErrorEvent(Event):
+class ErrorEvent(Event[Literal["error"]]):
     """Event fired when an error occurs."""
     type: Literal["error"] = "error"
     error_type: str = Field(description="Type of error (e.g., 'tool_error', 'parsing_error').")
     error_message: str = Field(description="Human-readable error message.")
     recoverable: bool = Field(description="Whether this error can be recovered from.", default=True)
 
-class LLMCallEvent(Event):
+class LLMCallEvent(Event[Literal["llm_call"]]):
     """Event fired when an LLM is called."""
     type: Literal["llm_call"] = "llm_call"
     prompt: str = Field(description="The prompt sent to the LLM.")
     model: str = Field(description="The model used for the call.")
 
-class LLMResponseEvent(Event):
+class LLMResponseEvent(Event[Literal["llm_response"]]):
     """Event fired when an LLM responds."""
     type: Literal["llm_response"] = "llm_response"
     response: str = Field(description="The response from the LLM.")
     token_usage: Optional[Dict[str, int]] = Field(description="Token usage information.", default=None)
     cost: Optional[float] = Field(description="Cost of the LLM call.", default=None)
 
-class HumanRequestEvent(Event):
+class HumanRequestEvent(Event[Literal["human_request"]]):
     """Event fired when human input is requested."""
     type: Literal["human_request"] = "human_request"
     question: str = Field(description="The question or request for human input.")
     context: Optional[str] = Field(description="Additional context for the human.", default=None)
     urgency: str = Field(description="Urgency level (low, medium, high).", default="medium")
 
-class HumanResponseEvent(Event):
+class HumanResponseEvent(Event[Literal["human_response"]]):
     """Event fired when human provides input."""
     type: Literal["human_response"] = "human_response"
     response: str = Field(description="The human's response.")
     request_id: str = Field(description="ID of the original human request event.")
 
-class FinishTaskEvent(Event):
+class FinishTaskEvent(Event[Literal["finish_task"]]):
     """Event fired when an agent decides the task is complete."""
     type: Literal["finish_task"] = "finish_task"
     final_result: Any = Field(description="The final result of the task.")
@@ -97,7 +111,7 @@ AnyEvent = Union[
     HumanRequestEvent,
     HumanResponseEvent,
     FinishTaskEvent,
-    Event  # Fallback for custom events
+    Event[str]  # Fallback for custom events
 ]
 
 class EventLog(BaseModel):
@@ -155,14 +169,17 @@ class EventLog(BaseModel):
         return {
             "status": status,
             "step_count": step_count,
-            "last_event_type": last_event.type,
-            "last_event_id": last_event.id
+            "last_event_type": last_event.type if last_event else None,
+            "last_event_id": last_event.id if last_event else None
         }
     
     def can_continue(self) -> bool:
         """Check if execution can continue based on current state."""
         state = self.get_current_state()
-        return state["status"] in ["running", "executing_tool"]
+        status = state.get("status", "")
+        if isinstance(status, str) and status in ["running", "executing_tool"]:
+            return True
+        return False
     
     def needs_human_input(self) -> bool:
         """Check if execution is waiting for human input."""
@@ -173,7 +190,7 @@ class EventLog(BaseModel):
         return self.get_current_state()["status"] in ["completed", "failed"]
 
 
-def listens_to(event_type):
+def listens_to(event_type: str) -> Callable:
     """装饰器，用于标记事件监听器方法
     
     Args:
@@ -182,8 +199,8 @@ def listens_to(event_type):
     Returns:
         装饰器函数
     """
-    def decorator(func):
+    def decorator(func: Callable) -> Callable:
         # 为函数添加事件类型标记
-        func._listens_to = event_type
+        setattr(func, "_listens_to", event_type)
         return func
     return decorator
