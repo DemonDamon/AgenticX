@@ -269,14 +269,14 @@ class GUIExplorer(Component):
             element_type = getattr(element, 'element_type', 'unknown')
             analysis['element_types'][element_type] = analysis['element_types'].get(element_type, 0) + 1
             
-            element_text = getattr(element, 'text_content', getattr(element, 'text', ''))
+            element_text = getattr(element, 'text_content', '')
             if element_text:
                 analysis['text_content'].append(element_text)
             
             # Check if element is interactive
             is_interactive = element.attributes.get('is_interactive', True) if element.attributes else True
             if is_interactive:
-                element_text = getattr(element, 'text_content', getattr(element, 'text', ''))
+                element_text = getattr(element, 'text_content', '')
                 analysis['interactive_areas'].append({
                     'type': element_type,
                     'bounds': element.bounds,
@@ -309,7 +309,7 @@ class GUIExplorer(Component):
         """Determine if we should interact with an element."""
         if self._strategy.avoid_destructive_actions:
             destructive_keywords = ['delete', 'remove', 'clear', 'reset', 'logout', 'exit']
-            element_text = (getattr(element, 'text_content', getattr(element, 'text', '')) or '').lower()
+            element_text = (getattr(element, 'text_content', '') or '').lower()
             if any(keyword in element_text for keyword in destructive_keywords):
                 return False
         
@@ -421,14 +421,14 @@ class GUIExplorer(Component):
         # Filter elements
         relevant_elements = []
         for element in result.discovered_elements:
-            element_text = (element.text or '').lower()
+            element_text = (element.text_content or '').lower()
             if any(keyword in element_text for keyword in goal_keywords):
                 relevant_elements.append(element)
         
         # Filter interaction patterns
         relevant_patterns = []
         for pattern in result.interaction_patterns:
-            element_text = pattern['element'].get('text_content', pattern['element'].get('text', '')).lower()
+            element_text = pattern['element'].get('text_content', '').lower()
             if any(keyword in element_text for keyword in goal_keywords):
                 relevant_patterns.append(pattern)
         
