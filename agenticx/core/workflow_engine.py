@@ -110,7 +110,7 @@ class WorkflowGraph:
         self.workflow = workflow
         self.nodes: Dict[str, WorkflowNode] = {}
         self.edges: List[WorkflowEdge] = []
-        self.components: Dict[str, Union[AgentExecutor, BaseTool, FunctionTool, Callable]] = {}
+        self.components: Dict[str, Union[AgentExecutor, BaseTool, FunctionTool, Callable, str]] = {}
         
         if workflow:
             self._load_from_workflow(workflow)
@@ -344,7 +344,7 @@ class TriggerService:
         for trigger in self.triggers.values():
             trigger.stop()
     
-    async def trigger_workflow(self, workflow_name: str, initial_data: Dict[str, Any] = None):
+    async def trigger_workflow(self, workflow_name: str, initial_data: Optional[Dict[str, Any]] = None):
         """触发工作流执行"""
         # 这里应该调用 WorkflowEngine 来执行工作流
         logger.info(f"触发工作流: {workflow_name}, 数据: {initial_data}")
@@ -811,8 +811,16 @@ class WorkflowEngine:
             context=context.variables
         )
         
+        # 创建一个临时的Agent实例
+        temp_agent = Agent(
+            name=f"workflow_agent_{node.name}",
+            role="Workflow Executor",
+            goal="Execute workflow tasks",
+            organization_id="workflow_engine"
+        )
+        
         # 执行任务
-        result = agent_executor.run(None, task)  # Agent 从配置中获取
+        result = agent_executor.run(temp_agent, task)
         
         return result
     
