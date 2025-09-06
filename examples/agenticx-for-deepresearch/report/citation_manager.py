@@ -43,9 +43,11 @@ class CitationManagerTask(Task):
         # Set instance attributes after calling super()
         self.citation_format = citation_format
         self.supported_formats = supported_formats
-        
-        # Initialize logger
-        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+    
+    @property
+    def logger(self):
+        """Get logger instance"""
+        return logging.getLogger(f"{__name__}.{self.__class__.__name__}")
     
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """Execute citation management task"""

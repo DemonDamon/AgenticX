@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Dict, Any, Optional, Union, TextIO
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 
@@ -165,7 +165,7 @@ class StructuredLogger:
         """记录日志"""
         log_data = {
             "message": message,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": level.value,
             "logger": self.name
         }
@@ -211,7 +211,7 @@ class JsonFormatter(logging.Formatter):
     
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -230,7 +230,7 @@ class StructuredFormatter(logging.Formatter):
     """结构化格式化器"""
     
     def format(self, record: logging.LogRecord) -> str:
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         
         # 基础信息
         message = f"[{timestamp}] {record.levelname} - {record.getMessage()}"
@@ -256,7 +256,7 @@ class XmlFormatter(logging.Formatter):
     """XML格式化器"""
     
     def format(self, record: logging.LogRecord) -> str:
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
         
         xml_parts = [
             f'<log>',

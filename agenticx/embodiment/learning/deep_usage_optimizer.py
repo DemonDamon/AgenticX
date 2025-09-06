@@ -641,8 +641,10 @@ class DeepUsageOptimizer(Component):
         if pattern.application == task.target_application:
             relevance += 0.4
         
-        # Task category match
-        if pattern.task_category == task.task_type:
+        # Task category match - Fixed: use a proper way to determine task category
+        # Since GUITask doesn't have task_type attribute, we'll derive category from task description or steps
+        task_category = self._derive_task_category(task)
+        if pattern.task_category == task_category:
             relevance += 0.3
         
         # Context similarity
@@ -650,6 +652,52 @@ class DeepUsageOptimizer(Component):
         relevance += context_similarity * 0.3
         
         return min(relevance, 1.0)
+    
+    def _derive_task_category(self, task: GUITask) -> str:
+        """Derive task category from task properties.
+        
+        Since GUITask doesn't have a task_type attribute, we derive it from:
+        1. The first step's action if available
+        2. Keywords in the task description
+        3. Default to 'general' if nothing specific found
+        """
+        # Try to derive from steps if available
+        if task.steps:
+            first_step = task.steps[0] if task.steps else {}
+            action = first_step.get('action', '').lower()
+            if action:
+                # Map common actions to categories
+                action_to_category = {
+                    'click': 'click',
+                    'type': 'input',
+                    'fill': 'input',
+                    'submit': 'form',
+                    'navigate': 'navigation',
+                    'search': 'search',
+                    'select': 'selection',
+                    'drag': 'drag_drop',
+                    'drop': 'drag_drop',
+                    'scroll': 'navigation',
+                    'login': 'authentication',
+                    'logout': 'authentication'
+                }
+                # Ensure we always return a string, even if action is not in the mapping
+                category = action_to_category.get(action, action)
+                return category if category is not None else 'general'
+        
+        # Try to derive from description keywords
+        description = task.description.lower()
+        if 'login' in description or 'sign in' in description:
+            return 'authentication'
+        elif 'search' in description:
+            return 'search'
+        elif 'form' in description or 'submit' in description:
+            return 'form'
+        elif 'navigate' in description or 'go to' in description:
+            return 'navigation'
+        
+        # Default category
+        return 'general'
     
     async def _calculate_context_similarity(self, pattern_context: Dict[str, Any], current_context: Dict[str, Any]) -> float:
         """Calculate similarity between contexts."""

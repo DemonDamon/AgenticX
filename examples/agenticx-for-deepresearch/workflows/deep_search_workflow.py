@@ -63,7 +63,7 @@ class DeepSearchWorkflow:
         
         # Initialize monitoring handlers
         self.monitoring_handler = MonitoringCallbackHandler()
-        self.logging_handler = LoggingCallbackHandler()
+        self.logging_handler = LoggingCallbackHandler(console_output=False)
         
         # Set up logging
         self._setup_logging()

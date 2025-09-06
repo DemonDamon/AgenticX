@@ -170,7 +170,7 @@ class BaseTool(ABC):
         Returns:
             工具执行结果
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self._run(**kwargs))
     
     def run(self, **kwargs) -> Any:
@@ -199,21 +199,22 @@ class BaseTool(ABC):
             
             # 触发开始回调（同步环境）
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
+                # 检查是否在异步环境中
+                try:
+                    loop = asyncio.get_running_loop()
                     # 如果事件循环正在运行，创建任务
                     asyncio.create_task(self._trigger_callback("tool_start", {
                         "tool_name": self.name,
                         "args": kwargs
                     }))
-                else:
-                    # 如果没有运行的事件循环，同步触发回调
+                except RuntimeError:
+                    # 没有运行的事件循环，同步触发回调
                     self._trigger_callback_sync("tool_start", {
                         "tool_name": self.name,
                         "args": kwargs
                     })
-            except RuntimeError:
-                # 没有事件循环，同步触发回调
+            except Exception:
+                # 任何异常都同步触发回调
                 self._trigger_callback_sync("tool_start", {
                     "tool_name": self.name,
                     "args": kwargs
@@ -262,20 +263,21 @@ class BaseTool(ABC):
             
             # 触发成功回调（同步环境）
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
+                # 检查是否在异步环境中
+                try:
+                    loop = asyncio.get_running_loop()
                     asyncio.create_task(self._trigger_callback("tool_end", {
                         "tool_name": self.name,
                         "args": validated_args,
                         "result": result
                     }))
-                else:
+                except RuntimeError:
                     self._trigger_callback_sync("tool_end", {
                         "tool_name": self.name,
                         "args": validated_args,
                         "result": result
                     })
-            except RuntimeError:
+            except Exception:
                 self._trigger_callback_sync("tool_end", {
                     "tool_name": self.name,
                     "args": validated_args,
@@ -297,20 +299,21 @@ class BaseTool(ABC):
             
             # 触发错误回调（同步环境）
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
+                # 检查是否在异步环境中
+                try:
+                    loop = asyncio.get_running_loop()
                     asyncio.create_task(self._trigger_callback("tool_error", {
                         "tool_name": self.name,
                         "args": kwargs,
                         "error": error
                     }))
-                else:
+                except RuntimeError:
                     self._trigger_callback_sync("tool_error", {
                         "tool_name": self.name,
                         "args": kwargs,
                         "error": error
                     })
-            except RuntimeError:
+            except Exception:
                 self._trigger_callback_sync("tool_error", {
                     "tool_name": self.name,
                     "args": kwargs,
