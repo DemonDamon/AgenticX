@@ -850,7 +850,9 @@ class KnowledgeEvolution(Component):
                                     affected_knowledge: List[str],
                                     changes_made: Dict[str, Any],
                                     duration: float = 0.0,
-                                    old_knowledge: Optional[KnowledgeItem] = None) -> str:
+                                    old_knowledge: Optional[KnowledgeItem] = None,
+                                    performance_before: Optional[Dict[str, float]] = None,
+                                    performance_after: Optional[Dict[str, float]] = None) -> str:
         """Record an evolution event."""
         event_id = hashlib.md5(f"{trigger}_{datetime.now().isoformat()}".encode()).hexdigest()[:12]
         
@@ -860,6 +862,8 @@ class KnowledgeEvolution(Component):
             strategy=strategy,
             affected_knowledge=affected_knowledge,
             changes_made=changes_made,
+            performance_before=performance_before or {},
+            performance_after=performance_after or {},
             duration=duration,
             success=True  # Simplified for now
         )
