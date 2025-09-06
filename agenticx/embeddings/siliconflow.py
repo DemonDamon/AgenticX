@@ -9,7 +9,10 @@ class SiliconFlowEmbeddingProvider(BaseEmbeddingProvider):
         self.model = model
         self.api_url = api_url
 
-    def embed(self, texts: List[str], encoding_format: str = "float", dimensions: Optional[int] = None) -> List[List[float]]:
+    def embed(self, texts: List[str], **kwargs) -> List[List[float]]:
+        encoding_format = kwargs.get("encoding_format", "float")
+        dimensions = kwargs.get("dimensions", None)
+        
         payload = {
             "model": self.model,
             "input": texts if len(texts) > 1 else texts[0],
@@ -29,4 +32,4 @@ class SiliconFlowEmbeddingProvider(BaseEmbeddingProvider):
                 raise EmbeddingError(f"No 'data' in response: {data}")
             return [item["embedding"] for item in data["data"]]
         except Exception as e:
-            raise EmbeddingError(f"SiliconFlow embedding error: {e}") 
+            raise EmbeddingError(f"SiliconFlow embedding error: {e}")
