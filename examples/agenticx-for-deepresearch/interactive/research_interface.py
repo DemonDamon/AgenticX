@@ -261,16 +261,17 @@ class InteractiveResearchInterface(BaseCallbackHandler):
         # Use asyncio to call the async method in a sync context
         import asyncio
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Create task if loop is already running
+            # 检查是否已有运行的事件循环
+            try:
+                loop = asyncio.get_running_loop()
+                # 如果事件循环正在运行，创建任务
                 asyncio.create_task(self._emit_event(InterfaceEvent.ERROR_OCCURRED, {
                     "error_message": str(error),
                     "timestamp": datetime.now().isoformat()
                 }))
-            else:
-                # Run directly if no loop is running
-                loop.run_until_complete(self._emit_event(InterfaceEvent.ERROR_OCCURRED, {
+            except RuntimeError:
+                # 没有运行的事件循环，创建新的
+                asyncio.run(self._emit_event(InterfaceEvent.ERROR_OCCURRED, {
                     "error_message": str(error),
                     "timestamp": datetime.now().isoformat()
                 }))

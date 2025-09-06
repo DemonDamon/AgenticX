@@ -8,7 +8,7 @@ llm:
   api_key: "${KIMI_API_KEY}"  # 从环境变量读取
   base_url: "${KIMI_API_BASE}"  # 支持代理设置
   temperature: 0.7
-  max_tokens: 4000
+  max_tokens: 32000
   timeout: 300.0  # 增加到300秒（5分钟）
   max_retries: 3
 

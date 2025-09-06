@@ -3,10 +3,10 @@
 AgenticX Unified Storage Demo
 
 演示新的四层存储架构：
-- Key-Value Storage: 键值存储
-- Vector Storage: 向量存储
-- Graph Storage: 图存储  
-- Object Storage: 对象存储
+- Key-Value Storage: 键值存储 (仅使用已实现的InMemory)
+- Vector Storage: 向量存储 (仅使用已实现的FAISS)
+- Graph Storage: 图存储 (模拟实现)
+- Object Storage: 对象存储 (模拟实现)
 
 参考camel设计，展示完整的存储生态。
 """
@@ -19,10 +19,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agenticx.storage import (
-    # Key-Value Storage
+    # Key-Value Storage (仅使用已实现的)
     InMemoryStorage,
     
-    # Vector Storage
+    # Vector Storage (仅使用已实现的)
     FaissStorage,
     VectorRecord,
     VectorDBQuery,
@@ -34,10 +34,56 @@ from agenticx.storage import (
 )
 
 
-def demo_key_value_storage():
-    """演示键值存储"""
+def check_storage_connectivity():
+    """检查存储连通性"""
     print("=" * 50)
-    print("Key-Value Storage Demo")
+    print("Storage Connectivity Check")
+    print("=" * 50)
+    
+    # 检查可用的存储类型
+    available_storages = {
+        "Key-Value Storage": {
+            "InMemory": "✅ 可用 (已实现)",
+            "Redis": "⚠️  模拟实现 (需要安装redis)",
+            "PostgreSQL": "⚠️  模拟实现 (需要安装psycopg2)",
+            "SQLite": "⚠️  模拟实现 (需要安装sqlite3)",
+            "MongoDB": "⚠️  模拟实现 (需要安装pymongo)",
+        },
+        "Vector Storage": {
+            "FAISS": "✅ 可用 (已实现)",
+            "Milvus": "⚠️  模拟实现 (需要安装pymilvus)",
+            "Qdrant": "⚠️  模拟实现 (需要安装qdrant-client)",
+            "Chroma": "⚠️  模拟实现 (需要安装chromadb)",
+            "Weaviate": "⚠️  模拟实现 (需要安装weaviate-client)",
+            "Pinecone": "⚠️  模拟实现 (需要安装pinecone-client)",
+            "pgvector": "⚠️  模拟实现 (需要安装pgvector)",
+        },
+        "Graph Storage": {
+            "Neo4j": "⚠️  模拟实现 (需要安装neo4j)",
+            "Nebula": "⚠️  模拟实现 (需要安装nebula3-python)",
+        },
+        "Object Storage": {
+            "S3": "⚠️  模拟实现 (需要安装boto3)",
+            "GCS": "⚠️  模拟实现 (需要安装google-cloud-storage)",
+            "Azure": "⚠️  模拟实现 (需要安装azure-storage-blob)",
+        }
+    }
+    
+    for category, storages in available_storages.items():
+        print(f"\n{category}:")
+        for storage, status in storages.items():
+            print(f"  {storage}: {status}")
+    
+    print("\n💡 提示:")
+    print("  - 绿色✅表示已实现且可直接使用")
+    print("  - 黄色⚠️表示模拟实现，需要安装对应数据库中间件")
+    print("  - 当前演示仅使用已实现的存储类型")
+
+
+def demo_key_value_storage():
+    """演示键值存储 (仅使用InMemory)"""
+    print("\n" + "=" * 50)
+    print("Key-Value Storage Demo (InMemory Only)")
     print("=" * 50)
     
     # 创建内存键值存储
@@ -69,9 +115,9 @@ def demo_key_value_storage():
 
 
 def demo_vector_storage():
-    """演示向量存储"""
+    """演示向量存储 (仅使用FAISS)"""
     print("\n" + "=" * 50)
-    print("Vector Storage Demo")
+    print("Vector Storage Demo (FAISS Only)")
     print("=" * 50)
     
     # 创建FAISS向量存储
@@ -119,12 +165,12 @@ def demo_vector_storage():
 
 
 def demo_storage_manager():
-    """演示存储管理器"""
+    """演示存储管理器 (仅使用已实现的存储)"""
     print("\n" + "=" * 50)
-    print("Storage Manager Demo")
+    print("Storage Manager Demo (Available Storages Only)")
     print("=" * 50)
     
-    # 创建存储配置
+    # 创建存储配置 (仅使用已实现的)
     configs = [
         StorageConfig(
             storage_type=StorageType.IN_MEMORY,
@@ -156,6 +202,51 @@ def demo_storage_manager():
     asyncio.run(storage_manager.close())
     
     return storage_manager
+
+
+def demo_mock_storages():
+    """演示模拟存储 (展示其他存储的模拟实现)"""
+    print("\n" + "=" * 50)
+    print("Mock Storages Demo")
+    print("=" * 50)
+    
+    print("🔧 模拟存储实现示例:")
+    print()
+    
+    # 模拟Redis存储
+    print("📦 Redis Storage (模拟):")
+    print("  - 连接: redis://localhost:6379")
+    print("  - 状态: ⚠️ 模拟实现")
+    print("  - 需要安装: pip install redis")
+    print()
+    
+    # 模拟PostgreSQL存储
+    print("📦 PostgreSQL Storage (模拟):")
+    print("  - 连接: postgresql://user:pass@localhost:5432/db")
+    print("  - 状态: ⚠️ 模拟实现")
+    print("  - 需要安装: pip install psycopg2-binary")
+    print()
+    
+    # 模拟Milvus存储
+    print("📦 Milvus Storage (模拟):")
+    print("  - 连接: milvus://localhost:19530")
+    print("  - 状态: ⚠️ 模拟实现")
+    print("  - 需要安装: pip install pymilvus")
+    print()
+    
+    # 模拟Neo4j存储
+    print("📦 Neo4j Storage (模拟):")
+    print("  - 连接: neo4j://localhost:7687")
+    print("  - 状态: ⚠️ 模拟实现")
+    print("  - 需要安装: pip install neo4j")
+    print()
+    
+    # 模拟S3存储
+    print("📦 S3 Storage (模拟):")
+    print("  - 连接: s3://bucket-name")
+    print("  - 状态: ⚠️ 模拟实现")
+    print("  - 需要安装: pip install boto3")
+    print()
 
 
 def demo_storage_comparison():
@@ -199,9 +290,13 @@ def main():
     """主函数"""
     print("🚀 AgenticX Unified Storage Demo")
     print("参考camel设计，展示四层存储架构")
+    print("⚠️  注意: 当前仅使用已实现的存储类型，避免数据库依赖")
     print()
     
     try:
+        # 检查存储连通性
+        check_storage_connectivity()
+        
         # 演示键值存储
         kv_storage = demo_key_value_storage()
         
@@ -210,6 +305,9 @@ def main():
         
         # 演示存储管理器
         storage_manager = demo_storage_manager()
+        
+        # 演示模拟存储
+        demo_mock_storages()
         
         # 演示架构对比
         demo_storage_comparison()
@@ -220,6 +318,7 @@ def main():
         
         print("\n" + "=" * 50)
         print("✅ 所有演示完成！")
+        print("💡 要使用其他存储类型，请安装对应的数据库中间件")
         print("=" * 50)
         
     except Exception as e:

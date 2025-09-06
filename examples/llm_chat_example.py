@@ -25,7 +25,7 @@ from agenticx.llms import LiteLLMProvider
 class AgenticXChatClient:
     """AgenticX 聊天客户端"""
     
-    def __init__(self, model: str = "gpt-4o-mini"):
+    def __init__(self, model: str = "gpt-4.1"):
         """
         初始化聊天客户端
         
@@ -240,8 +240,8 @@ def main():
     
     parser.add_argument(
         "-m", "--model",
-        default="gpt-4o-mini",
-        help="要使用的模型名称 (默认: gpt-4o-mini)"
+        default="gpt-4.1",
+        help="要使用的模型名称 (默认: gpt-4.1)"
     )
     
     parser.add_argument(

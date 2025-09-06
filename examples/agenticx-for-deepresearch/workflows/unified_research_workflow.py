@@ -19,11 +19,18 @@ import itertools
 import sys
 import threading
 import asyncio
+import warnings
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
 from enum import Enum
 from pydantic import Field
+from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+# 过滤弃用警告
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*There is no current event loop.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*datetime.datetime.utcnow.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="litellm.*")
 
 from agenticx.core.workflow import Workflow
 from agenticx.core.agent_executor import AgentExecutor
@@ -33,9 +40,30 @@ from agenticx.tools.base import BaseTool
 from agenticx.observability.monitoring import MonitoringCallbackHandler
 from agenticx.observability.logging import LoggingCallbackHandler
 
-from ..agents import QueryGeneratorAgent, ResearchSummarizerAgent
-from ..tools import GoogleSearchTool, BingWebSearchTool, MockBingSearchTool, BochaaIWebSearchTool
-from ..utils import clean_input_text
+# Import local modules - fix relative imports
+import sys
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+# Add parent directory to path for imports
+current_dir = Path(__file__).parent.parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
+# Import agents
+from agents import QueryGeneratorAgent, ResearchSummarizerAgent  # type: ignore
+
+# Import search tools
+from tools import GoogleSearchTool, BingWebSearchTool, MockBingSearchTool, BochaaIWebSearchTool  # type: ignore
+
+# Import utilities
+from utils import clean_input_text  # type: ignore
+
+# Import report components
+from report import StructuredReportBuilderTask, CitationManagerTask, QualityAssessmentTask  # type: ignore
+
+# Import models
+from models import ResearchContext, ResearchIteration, SearchResult, Citation, SearchEngine, ResearchPhase, SearchQuery, KnowledgeGap  # type: ignore
 
 
 class WorkflowMode(Enum):
@@ -99,7 +127,7 @@ class UnifiedResearchWorkflow:
         
         # Initialize monitoring handlers
         self.monitoring_handler = MonitoringCallbackHandler()
-        self.logging_handler = LoggingCallbackHandler()
+        self.logging_handler = LoggingCallbackHandler(console_output=False)
         
         # Set up logging
         self._setup_logging()
@@ -122,6 +150,20 @@ class UnifiedResearchWorkflow:
             organization_id=organization_id
         )
         
+        # Initialize report building components
+        self.report_builder = StructuredReportBuilderTask(
+            description="Build comprehensive structured research reports",
+            expected_output="Detailed multi-section research report with citations"
+        )
+        self.citation_manager = CitationManagerTask(
+            description="Manage and format citations",
+            expected_output="Properly formatted citation list"
+        )
+        self.quality_assessor = QualityAssessmentTask(
+            description="Assess research and report quality",
+            expected_output="Quality assessment report"
+        )
+        
         # Research context
         self.research_context = self._get_initial_research_context()
         
@@ -137,7 +179,7 @@ class UnifiedResearchWorkflow:
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             handlers=[
                 logging.FileHandler(log_filename),
-                logging.StreamHandler()
+                # 移除StreamHandler()以避免日志输出到终端
             ]
         )
         self.logger = logging.getLogger(__name__)
@@ -336,7 +378,7 @@ class UnifiedResearchWorkflow:
         
         # Generate final report with loading animation
         done = threading.Event()
-        spinner = threading.Thread(target=self._spinner, args=(done, "● Preparing final report, it will takes a few minutes ..."))
+        spinner = threading.Thread(target=self._spinner, args=(done, "● Preparing comprehensive research report, it will takes a few minutes ..."))
         spinner.start()
 
         try:
@@ -344,6 +386,7 @@ class UnifiedResearchWorkflow:
         finally:
             done.set()
             spinner.join()
+        print("")  # 添加换行以改善输出格式
         
         return {
             "success": True,
@@ -354,13 +397,21 @@ class UnifiedResearchWorkflow:
     
     def _spinner(self, done: threading.Event, message: str = "Loading..."):
         """Display a spinner animation."""
-        for char in itertools.cycle(['|', '/', '-', '\\']):
-            if done.is_set():
-                break
-            sys.stdout.write(f'\r{message} {char}')
+        # 打印初始消息并换行
+        sys.stdout.write(f"{message}\n")
+        sys.stdout.flush()
+        
+        # 只在当前行显示旋转字符
+        spinner_chars = ['|\r', '/\r', '-\r', '\\\r']
+        i = 0
+        while not done.is_set():
+            sys.stdout.write(spinner_chars[i % len(spinner_chars)])
             sys.stdout.flush()
             time.sleep(0.1)
-        sys.stdout.write('\r' + ' ' * (len(message) + 2) + '\r')  # Clear the line
+            i += 1
+        
+        # 清理并换行
+        sys.stdout.write('\r' + ' ' * len(spinner_chars[i % len(spinner_chars)]) + '\r')
         sys.stdout.flush()
 
     def _execute_interactive_mode(self, research_topic: str, research_objective: str) -> Dict[str, Any]:
@@ -543,10 +594,35 @@ class UnifiedResearchWorkflow:
                 if iteration < max_iterations:
                     self._adjust_next_iteration_strategy(reflection, accumulated_knowledge)
             
-            # Generate final report
-            final_report = self._generate_advanced_final_report(
-                research_topic, all_iterations, accumulated_knowledge, total_search_results
-            )
+            # Generate comprehensive final report using new method
+            print("● Preparing comprehensive advanced research report...")
+            
+            # Convert accumulated knowledge to research context
+            advanced_context = {
+                "topic": research_topic,
+                "objective": research_objective,
+                "current_iteration": len(all_iterations),
+                "research_summaries": [],
+                "thinking_process": [],
+                "citations": []
+            }
+            
+            # Aggregate all search results and insights
+            for iteration_result in all_iterations:
+                search_results = iteration_result.get('search_results', [])
+                for result in search_results:
+                    if isinstance(result, dict):
+                        advanced_context["research_summaries"].append({
+                            "title": result.get("title", "Advanced Search Result"),
+                            "content": result.get("content", "") or result.get("snippet", ""),
+                            "url": result.get("url", "")
+                        })
+            
+            # Add accumulated insights to thinking process
+            insights = accumulated_knowledge.get('insights', [])
+            advanced_context["thinking_process"].extend(insights)
+            
+            final_report = self._generate_final_report(advanced_context)
             
             return {
                 'success': True,
@@ -656,7 +732,7 @@ Return only JSON, no other explanations.
         
         try:
             messages = [{"role": "user", "content": prompt}]
-            response = self.llm_provider.invoke(prompt)
+            response = self.llm_provider.invoke(messages)  # type: ignore
             result = self._safe_json_parse(response.content)
             
             if result and isinstance(result, dict) and "queries" in result and isinstance(result["queries"], list):
@@ -757,58 +833,735 @@ Return only JSON, no other explanations.
         }
     
     def _generate_final_report(self, context: Dict[str, Any]) -> str:
-        """Generate final research report"""
+        """Generate comprehensive final research report with multiple components"""
         try:
-            # Use ResearchSummarizerAgent to create final report prompt
-            final_report_prompt = self.research_summarizer.create_final_report_prompt(
-                research_topic=context.get("topic", ""),
-                all_summaries=context.get("research_summaries", []),
-                citations=context.get("citations", [])
-            )
+            print("● Preparing comprehensive research report...")
             
-            # Add thinking process information
-            thinking_process = context.get("thinking_process", [])
-            thinking_text = "\n".join([f"• {thinking}" for thinking in thinking_process[-5:]])  # Last 5 thinking processes
+            # Step 1: Convert context to ResearchContext model
+            research_context = self._convert_to_research_context(context)
             
-            # Detect language and build complete report generation prompt
-            language = self._detect_language(context.get("topic", ""))
+            # Step 2: Generate sub-reports for different aspects
+            sub_reports = self._generate_sub_reports(research_context)
             
-            if language == "zh":
-                complete_prompt = f"""
-{final_report_prompt}
-
-研究思考过程：
-{thinking_text}
-
-请基于以上信息生成一份全面的研究报告。
-"""
-            else:
-                complete_prompt = f"""
-{final_report_prompt}
-
-Research Thinking Process:
-{thinking_text}
-
-Please generate a comprehensive research report based on the above information.
-"""
+            # Step 3: Build structured comprehensive report
+            final_report = self._build_comprehensive_report(research_context, sub_reports)
             
-            messages = [{"role": "user", "content": complete_prompt}]
-            response = self.llm_provider.invoke(complete_prompt)
+            # Step 4: Save sub-reports as separate files
+            self._save_sub_reports(sub_reports, context.get("topic", "research"))
             
-            # Add citation list and thinking process at the end of the report
-            report_content = response.content
-            
-            # # Add thinking process section
-            # if thinking_process:
-            #     report_content += f"\n\n## Research Thinking Process\n\n"
-            #     for i, thinking in enumerate(thinking_process, 1):
-            #         report_content += f"{i}. {thinking}\n"
-            
-            return report_content
+            return final_report
             
         except Exception as e:
-            self.logger.error(f"Final report generation failed: {e}")
+            self.logger.error(f"Comprehensive report generation failed: {e}")
             return self._create_fallback_report(context)
+    
+    def _convert_to_research_context(self, context: Dict[str, Any]) -> ResearchContext:
+        """Convert workflow context to ResearchContext model"""
+        # Create search results
+        search_results = []
+        for summary in context.get("research_summaries", []):
+            if isinstance(summary, dict):
+                result = SearchResult(
+                    title=summary.get("title", "Search Result"),
+                    url=summary.get("url", ""),
+                    snippet=summary.get("content", str(summary)),
+                    source=SearchEngine.MOCK,  # Default to MOCK source
+                    content=summary.get("content", str(summary))
+                )
+                search_results.append(result)
+        
+        # Create research iteration
+        iteration = ResearchIteration(
+            iteration_id=context.get("current_iteration", 1),
+            queries=[],  # Empty queries list
+            search_results=search_results,
+            analysis_summary="\n".join(context.get("thinking_process", [])),
+            identified_gaps=[],  # Empty gaps list
+            phase=ResearchPhase.SEARCH_EXECUTION  # Default phase
+        )
+        
+        # Create research context
+        research_context = ResearchContext(
+            research_topic=context.get("topic", ""),
+            research_objective=context.get("objective", ""),
+            iterations=[iteration]
+        )
+        
+        return research_context
+    
+    def _generate_sub_reports(self, research_context: ResearchContext) -> Dict[str, str]:
+        """Generate multiple sub-reports for different aspects"""
+        sub_reports = {}
+        language = self._detect_language(research_context.research_topic)
+        
+        print("  ✦ Generating executive summary...")
+        sub_reports["executive_summary"] = self._generate_executive_summary(research_context, language)
+        
+        print("  ✦ Generating detailed analysis...")
+        sub_reports["detailed_analysis"] = self._generate_detailed_analysis(research_context, language)
+        
+        print("  ✦ Generating methodology report...")
+        sub_reports["methodology"] = self._generate_methodology_report(research_context, language)
+        
+        print("  ✦ Generating findings summary...")
+        sub_reports["findings"] = self._generate_findings_report(research_context, language)
+        
+        print("  ✦ Generating implications analysis...")
+        sub_reports["implications"] = self._generate_implications_report(research_context, language)
+        
+        return sub_reports
+    
+    def _generate_executive_summary(self, context: ResearchContext, language: str) -> str:
+        """Generate executive summary"""
+        all_results = context.get_all_search_results()
+        key_findings = "\n".join([result.snippet[:200] for result in all_results[:5]])
+        
+        if language == "zh":
+            prompt = f"""
+作为专业的研究报告撰写专家，请为以下研究主题撰写一份高质量的执行摘要。
+
+研究主题：{context.research_topic}
+研究目标：{context.research_objective}
+
+关键发现摘要：
+{key_findings}
+
+请撰写一份包含以下要素的执行摘要（800-1200字）：
+1. 研究背景与重要性
+2. 核心发现（3-5个要点）
+3. 主要结论
+4. 实践意义
+5. 建议行动
+
+要求：
+- 语言简洁明了，逻辑清晰
+- 突出核心价值和关键洞察
+- 适合高管阅读的风格
+- 包含具体的数据和事实
+"""
+        else:
+            prompt = f"""
+As a professional research report writing expert, please write a high-quality executive summary for the following research topic.
+
+Research Topic: {context.research_topic}
+Research Objective: {context.research_objective}
+
+Key Findings Summary:
+{key_findings}
+
+Please write an executive summary (800-1200 words) that includes:
+1. Research background and importance
+2. Core findings (3-5 key points)
+3. Main conclusions
+4. Practical implications
+5. Recommended actions
+
+Requirements:
+- Clear and concise language with logical flow
+- Highlight core value and key insights
+- Executive-friendly writing style
+- Include specific data and facts
+"""
+        
+        try:
+            response = self.llm_provider.invoke([{"role": "user", "content": prompt}])  # type: ignore
+            return response.content
+        except Exception as e:
+            return f"Executive summary generation failed: {e}"
+    
+    def _generate_detailed_analysis(self, context: ResearchContext, language: str) -> str:
+        """Generate detailed analysis report"""
+        all_results = context.get_all_search_results()
+        detailed_content = "\n\n".join([f"**{result.title}**\n{result.content}" for result in all_results[:10]])
+        
+        if language == "zh":
+            prompt = f"""
+作为深度研究分析专家，请对以下研究主题进行全面深入的分析。
+
+研究主题：{context.research_topic}
+
+详细研究内容：
+{detailed_content}
+
+请撰写一份深度分析报告（2000-3000字），包含：
+
+## 一、现状分析
+- 行业/领域当前状态
+- 主要参与者和利益相关方
+- 市场规模和趋势
+
+## 二、深度洞察
+- 关键驱动因素
+- 技术发展水平
+- 用户需求分析
+
+## 三、挑战与机遇
+- 主要挑战和瓶颈
+- 潜在机遇和增长点
+- 风险因素分析
+
+## 四、趋势预测
+- 短期发展趋势（1-2年）
+- 中长期演进方向（3-5年）
+- 颠覆性变化可能性
+
+要求：
+- 基于具体数据和事实
+- 提供多维度分析视角
+- 结论要有充分论证支撑
+- 语言专业严谨
+"""
+        else:
+            prompt = f"""
+As a deep research analysis expert, please conduct a comprehensive in-depth analysis of the following research topic.
+
+Research Topic: {context.research_topic}
+
+Detailed Research Content:
+{detailed_content}
+
+Please write an in-depth analysis report (2000-3000 words) including:
+
+## I. Current State Analysis
+- Current industry/field status
+- Key players and stakeholders
+- Market size and trends
+
+## II. Deep Insights
+- Key driving factors
+- Technology development level
+- User demand analysis
+
+## III. Challenges and Opportunities
+- Major challenges and bottlenecks
+- Potential opportunities and growth points
+- Risk factor analysis
+
+## IV. Trend Predictions
+- Short-term development trends (1-2 years)
+- Medium to long-term evolution direction (3-5 years)
+- Possibility of disruptive changes
+
+Requirements:
+- Based on specific data and facts
+- Provide multi-dimensional analytical perspectives
+- Conclusions must be well-supported
+- Professional and rigorous language
+"""
+        
+        try:
+            response = self.llm_provider.invoke([{"role": "user", "content": prompt}])  # type: ignore
+            return response.content
+        except Exception as e:
+            return f"Detailed analysis generation failed: {e}"
+    
+    def _generate_methodology_report(self, context: ResearchContext, language: str) -> str:
+        """Generate methodology report"""
+        search_count = len(context.get_all_search_results())
+        iteration_count = len(context.iterations)
+        
+        if language == "zh":
+            prompt = f"""
+作为研究方法学专家，请详细描述本次研究的方法论和过程。
+
+研究主题：{context.research_topic}
+研究轮次：{iteration_count}轮
+搜索结果：{search_count}条
+
+请撰写一份方法论报告（1000-1500字），包含：
+
+## 研究设计
+- 研究问题的界定
+- 研究方法的选择依据
+- 研究框架的构建
+
+## 数据收集方法
+- 信息来源的选择标准
+- 搜索策略的设计
+- 数据收集的具体流程
+
+## 质量保证措施
+- 信息可靠性验证
+- 多源交叉验证方法
+- 偏见控制机制
+
+## 分析方法
+- 数据整理和分类方法
+- 内容分析技术
+- 趋势识别方法
+
+## 局限性分析
+- 方法论的限制
+- 数据来源的局限
+- 时间范围的影响
+
+要求：
+- 详细说明每个步骤的理论依据
+- 分析方法选择的合理性
+- 承认并分析研究局限性
+"""
+        else:
+            prompt = f"""
+As a research methodology expert, please provide a detailed description of the methodology and process of this research.
+
+Research Topic: {context.research_topic}
+Research Rounds: {iteration_count} rounds
+Search Results: {search_count} items
+
+Please write a methodology report (1000-1500 words) including:
+
+## Research Design
+- Definition of research questions
+- Rationale for methodology selection
+- Construction of research framework
+
+## Data Collection Methods
+- Selection criteria for information sources
+- Design of search strategies
+- Specific data collection processes
+
+## Quality Assurance Measures
+- Information reliability verification
+- Multi-source cross-validation methods
+- Bias control mechanisms
+
+## Analysis Methods
+- Data organization and classification methods
+- Content analysis techniques
+- Trend identification methods
+
+## Limitations Analysis
+- Methodological constraints
+- Data source limitations
+- Impact of time scope
+
+Requirements:
+- Detailed explanation of theoretical basis for each step
+- Rationality of analytical method selection
+- Acknowledge and analyze research limitations
+"""
+        
+        try:
+            response = self.llm_provider.invoke([{"role": "user", "content": prompt}])  # type: ignore
+            return response.content
+        except Exception as e:
+            return f"Methodology report generation failed: {e}"
+    
+    def _generate_findings_report(self, context: ResearchContext, language: str) -> str:
+        """Generate comprehensive findings report"""
+        all_results = context.get_all_search_results()
+        
+        # Group findings by themes
+        findings_by_theme = self._group_findings_by_theme(all_results, language)
+        
+        if language == "zh":
+            prompt = f"""
+作为研究发现分析专家，请基于以下分主题的研究发现，撰写一份全面的发现报告。
+
+研究主题：{context.research_topic}
+
+分主题发现：
+{findings_by_theme}
+
+请撰写一份发现报告（1500-2000字），包含：
+
+## 核心发现概述
+- 最重要的3-5个关键发现
+- 每个发现的重要性说明
+
+## 分类详细发现
+### 技术/产品层面
+### 市场/商业层面
+### 用户/社会层面
+### 政策/监管层面
+
+## 数据支撑
+- 具体的数字、比例、趋势
+- 权威来源的引用
+
+## 发现之间的关联性
+- 不同发现的相互关系
+- 综合效应分析
+
+## 意外发现
+- 超出预期的发现
+- 颠覆性的洞察
+
+要求：
+- 每个发现都要有具体支撑材料
+- 区分确定性发现和推测性判断
+- 突出独特和有价值的洞察
+"""
+        else:
+            prompt = f"""
+As a research findings analysis expert, please write a comprehensive findings report based on the following thematic research findings.
+
+Research Topic: {context.research_topic}
+
+Thematic Findings:
+{findings_by_theme}
+
+Please write a findings report (1500-2000 words) including:
+
+## Core Findings Overview
+- 3-5 most important key findings
+- Importance explanation for each finding
+
+## Detailed Categorized Findings
+### Technical/Product Level
+### Market/Business Level
+### User/Social Level
+### Policy/Regulatory Level
+
+## Data Support
+- Specific numbers, ratios, trends
+- Citations from authoritative sources
+
+## Interconnections Between Findings
+- Relationships between different findings
+- Comprehensive effect analysis
+
+## Unexpected Discoveries
+- Findings beyond expectations
+- Disruptive insights
+
+Requirements:
+- Each finding must have specific supporting materials
+- Distinguish between definitive findings and speculative judgments
+- Highlight unique and valuable insights
+"""
+        
+        try:
+            response = self.llm_provider.invoke([{"role": "user", "content": prompt}])  # type: ignore
+            return response.content
+        except Exception as e:
+            return f"Findings report generation failed: {e}"
+    
+    def _generate_implications_report(self, context: ResearchContext, language: str) -> str:
+        """Generate implications and recommendations report"""
+        if language == "zh":
+            prompt = f"""
+作为战略分析专家，请基于对"{context.research_topic}"的研究，撰写一份影响分析和建议报告。
+
+请撰写一份影响分析报告（1200-1800字），包含：
+
+## 对不同利益相关方的影响
+### 对企业的影响
+- 机遇和挑战
+- 战略调整建议
+
+### 对用户/消费者的影响
+- 直接影响
+- 行为变化预期
+
+### 对行业生态的影响
+- 产业链影响
+- 竞争格局变化
+
+### 对社会的影响
+- 社会效益
+- 潜在风险
+
+## 行动建议
+### 短期行动（0-6个月）
+### 中期规划（6个月-2年）
+### 长期战略（2-5年）
+
+## 风险提示
+- 主要风险因素
+- 风险缓解策略
+
+## 监测指标
+- 关键跟踪指标
+- 预警信号
+
+要求：
+- 建议要具体可执行
+- 考虑不同规模和类型的组织
+- 提供优先级排序
+"""
+        else:
+            prompt = f"""
+As a strategic analysis expert, please write an implications analysis and recommendations report based on research on "{context.research_topic}".
+
+Please write an implications analysis report (1200-1800 words) including:
+
+## Impact on Different Stakeholders
+### Impact on Enterprises
+- Opportunities and challenges
+- Strategic adjustment recommendations
+
+### Impact on Users/Consumers
+- Direct impacts
+- Expected behavioral changes
+
+### Impact on Industry Ecosystem
+- Supply chain impacts
+- Competitive landscape changes
+
+### Impact on Society
+- Social benefits
+- Potential risks
+
+## Action Recommendations
+### Short-term Actions (0-6 months)
+### Medium-term Planning (6 months-2 years)
+### Long-term Strategy (2-5 years)
+
+## Risk Alerts
+- Major risk factors
+- Risk mitigation strategies
+
+## Monitoring Indicators
+- Key tracking indicators
+- Warning signals
+
+Requirements:
+- Recommendations should be specific and actionable
+- Consider different sizes and types of organizations
+- Provide priority rankings
+"""
+        
+        try:
+            response = self.llm_provider.invoke([{"role": "user", "content": prompt}])  # type: ignore
+            return response.content
+        except Exception as e:
+            return f"Implications report generation failed: {e}"
+    
+    def _group_findings_by_theme(self, results: List, language: str) -> str:
+        """Group research findings by themes"""
+        # Simple thematic grouping - can be enhanced with NLP
+        themes = {
+            "technical": [],
+            "market": [],
+            "social": [],
+            "regulatory": []
+        }
+        
+        for result in results[:15]:  # Process top 15 results
+            content = getattr(result, 'content', '') or getattr(result, 'snippet', '')
+            if isinstance(result, dict):
+                content = result.get('content', '') or result.get('snippet', '')
+            
+            # Simple keyword-based categorization
+            content_lower = content.lower()
+            if any(word in content_lower for word in ['technology', 'technical', '技术', '科技']):
+                themes["technical"].append(content[:300])
+            elif any(word in content_lower for word in ['market', 'business', '市场', '商业']):
+                themes["market"].append(content[:300])
+            elif any(word in content_lower for word in ['social', 'user', '社会', '用户']):
+                themes["social"].append(content[:300])
+            elif any(word in content_lower for word in ['policy', 'regulation', '政策', '法规']):
+                themes["regulatory"].append(content[:300])
+            else:
+                themes["technical"].append(content[:300])  # Default category
+        
+        # Format themes
+        theme_text = ""
+        for theme, findings in themes.items():
+            if findings:
+                theme_name = {
+                    "technical": "技术层面" if language == "zh" else "Technical Aspects",
+                    "market": "市场层面" if language == "zh" else "Market Aspects", 
+                    "social": "社会层面" if language == "zh" else "Social Aspects",
+                    "regulatory": "监管层面" if language == "zh" else "Regulatory Aspects"
+                }[theme]
+                
+                theme_text += f"\n## {theme_name}\n"
+                for i, finding in enumerate(findings[:3], 1):  # Top 3 per theme
+                    theme_text += f"{i}. {finding}\n\n"
+        
+        return theme_text
+    
+    def _build_comprehensive_report(self, context: ResearchContext, sub_reports: Dict[str, str]) -> str:
+        """Build the final comprehensive report"""
+        language = self._detect_language(context.research_topic)
+        
+        if language == "zh":
+            report = f"""
+# {context.research_topic} - 综合研究报告
+
+## 报告概述
+
+本报告通过多轮深度研究，对"{context.research_topic}"进行了全面系统的分析。报告采用结构化研究方法，从多个维度深入探讨了相关议题，为决策提供了科学依据。
+
+### 研究规模
+- 研究轮次：{len(context.iterations)}轮
+- 信息来源：{len(context.get_all_search_results())}个
+- 报告生成时间：{datetime.now().strftime('%Y年%m月%d日')}
+
+---
+
+## 一、执行摘要
+
+{sub_reports.get('executive_summary', '执行摘要生成中...')}
+
+---
+
+## 二、研究方法论
+
+{sub_reports.get('methodology', '方法论报告生成中...')}
+
+---
+
+## 三、核心发现
+
+{sub_reports.get('findings', '发现报告生成中...')}
+
+---
+
+## 四、深度分析
+
+{sub_reports.get('detailed_analysis', '详细分析生成中...')}
+
+---
+
+## 五、影响分析与建议
+
+{sub_reports.get('implications', '影响分析生成中...')}
+
+---
+
+## 六、研究总结
+
+### 关键洞察
+本研究通过系统性的信息收集和分析，对{context.research_topic}形成了全面深入的认知。研究发现显示该领域具有重要的发展潜力和应用价值。
+
+### 研究价值
+本报告为相关决策者、研究人员和实践者提供了有价值的参考信息，有助于推动该领域的进一步发展。
+
+### 后续研究方向
+建议后续研究可以在以下方向深入：
+1. 针对特定细分领域的专门研究
+2. 实证数据的收集和验证
+3. 跨领域对比分析
+4. 长期追踪研究
+
+---
+
+## 附录
+
+### 信息来源统计
+- 总计收集信息：{len(context.get_all_search_results())}条
+- 研究深度评分：{self._calculate_research_depth_simple(context):.2f}/1.0
+- 信息覆盖度：多维度覆盖
+
+### 报告版本信息
+- 版本：v1.0
+- 生成时间：{datetime.now().isoformat()}
+- 报告类型：综合研究报告
+
+*本报告由AgenticX深度研究系统生成*
+"""
+        else:
+            report = f"""
+# {context.research_topic} - Comprehensive Research Report
+
+## Report Overview
+
+This report conducts a comprehensive and systematic analysis of "{context.research_topic}" through multi-round in-depth research. The report adopts a structured research methodology, exploring related issues from multiple dimensions, providing scientific basis for decision-making.
+
+### Research Scale
+- Research Rounds: {len(context.iterations)} rounds
+- Information Sources: {len(context.get_all_search_results())} sources
+- Report Generation Date: {datetime.now().strftime('%B %d, %Y')}
+
+---
+
+## I. Executive Summary
+
+{sub_reports.get('executive_summary', 'Executive summary generating...')}
+
+---
+
+## II. Research Methodology
+
+{sub_reports.get('methodology', 'Methodology report generating...')}
+
+---
+
+## III. Core Findings
+
+{sub_reports.get('findings', 'Findings report generating...')}
+
+---
+
+## IV. In-Depth Analysis
+
+{sub_reports.get('detailed_analysis', 'Detailed analysis generating...')}
+
+---
+
+## V. Implications Analysis and Recommendations
+
+{sub_reports.get('implications', 'Implications analysis generating...')}
+
+---
+
+## VI. Research Summary
+
+### Key Insights
+Through systematic information collection and analysis, this research has formed a comprehensive and in-depth understanding of {context.research_topic}. The findings indicate significant development potential and application value in this field.
+
+### Research Value
+This report provides valuable reference information for relevant decision-makers, researchers, and practitioners, contributing to further development in this field.
+
+### Future Research Directions
+Recommended future research directions include:
+1. Specialized research on specific sub-fields
+2. Collection and verification of empirical data
+3. Cross-domain comparative analysis
+4. Long-term tracking studies
+
+---
+
+## Appendix
+
+### Information Source Statistics
+- Total Information Collected: {len(context.get_all_search_results())} items
+- Research Depth Score: {self._calculate_research_depth_simple(context):.2f}/1.0
+- Information Coverage: Multi-dimensional coverage
+
+### Report Version Information
+- Version: v1.0
+- Generation Time: {datetime.now().isoformat()}
+- Report Type: Comprehensive Research Report
+
+*This report is generated by AgenticX Deep Research System*
+"""
+        
+        return report
+    
+    def _save_sub_reports(self, sub_reports: Dict[str, str], topic: str):
+        """Save sub-reports as separate files"""
+        try:
+            output_dir = Path("./output/sub_reports")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            safe_topic = re.sub(r'[^\w\s-]', '', topic)[:30]
+            
+            for report_type, content in sub_reports.items():
+                filename = f"{safe_topic}_{report_type}_{timestamp}.md"
+                file_path = output_dir / filename
+                
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                
+                print(f"  ✦ Saved {report_type} report: {file_path}")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to save sub-reports: {e}")
+    
+    def _calculate_research_depth_simple(self, context: ResearchContext) -> float:
+        """Calculate simple research depth score"""
+        iterations = len(context.iterations)
+        results = len(context.get_all_search_results())
+        
+        iteration_score = min(iterations * 0.25, 1.0)
+        result_score = min(results * 0.02, 0.5)
+        
+        return min(iteration_score + result_score, 1.0)
     
     def _create_fallback_report(self, context: Dict[str, Any]) -> str:
         """Create fallback report when final report generation fails"""
@@ -1044,7 +1797,7 @@ IMPORTANT: Return only valid JSON format, do not add any other text explanations
 """
             
             messages = [{"role": "user", "content": reflection_prompt}]
-            response = self.llm_provider.invoke(reflection_prompt)
+            response = self.llm_provider.invoke(messages)  # type: ignore
             result = self._safe_json_parse(response.content)
             
             if result and isinstance(result, dict):
@@ -1157,7 +1910,7 @@ IMPORTANT: Return only valid JSON format, do not add any other text explanations
         
         try:
             messages = [{"role": "user", "content": clarification_prompt}]
-            response = self.llm_provider.invoke(clarification_prompt)
+            response = self.llm_provider.invoke(messages)  # type: ignore
             clarification_result = self._safe_json_parse(response.content)
             
             if clarification_result and isinstance(clarification_result, dict):
@@ -1297,7 +2050,7 @@ Please return only the new research topic, without any explanation or extraneous
 
         try:
             messages = [{"role": "user", "content": prompt}]
-            response = self.llm_provider.invoke(prompt)
+            response = self.llm_provider.invoke(messages)  # type: ignore
             clarified_topic = response.content.strip()
             # self.logger.info(f"Generated clarified topic: {clarified_topic}")
             return clarified_topic
@@ -1379,13 +2132,14 @@ Please return only the new research topic, without any explanation or extraneous
             
             # Generate final report with loading animation
             done_generating_report = threading.Event()
-            spinner_generating_report = threading.Thread(target=self._spinner, args=(done_generating_report, " ● Generating final research report"))
+            spinner_generating_report = threading.Thread(target=self._spinner, args=(done_generating_report, " ● Generating comprehensive research report with multiple components"))
             spinner_generating_report.start()
             try:
                 final_report = self._generate_final_report(research_context)
             finally:
                 done_generating_report.set()
                 spinner_generating_report.join()
+            print("")  # 添加换行以改善输出格式
             
             # Save report
             report_path = self._save_report_to_file(
@@ -1461,7 +2215,7 @@ Return only JSON, no other explanations.
 
         try:
             messages = [{"role": "user", "content": prompt}]
-            response = self.llm_provider.invoke(prompt)
+            response = self.llm_provider.invoke(messages)  # type: ignore
             result = self._safe_json_parse(response.content)
             
             if result and isinstance(result, dict) and "queries" in result and isinstance(result["queries"], list):
@@ -1827,7 +2581,7 @@ IMPORTANT: Return only valid JSON format, do not add any other text explanations
             
             # Call LLM for analysis
             messages = [{"role": "user", "content": analysis_prompt}]
-            response = self.llm_provider.invoke(analysis_prompt)
+            response = self.llm_provider.invoke(messages)  # type: ignore
             
             # Parse LLM response
             result = self._safe_json_parse(response.content)
