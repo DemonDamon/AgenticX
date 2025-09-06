@@ -14,7 +14,7 @@ import json
 import re
 from abc import ABC, abstractmethod
 from typing import Type, Dict, Any, List, Optional, Union, Callable
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError as PydanticValidationError
 from dataclasses import dataclass
 from enum import Enum
 
@@ -147,7 +147,10 @@ class TaskOutputParser:
             data = json.loads(cleaned)
             
             # 验证 Schema
-            instance = schema(**data) if isinstance(data, dict) else schema(data)
+            if isinstance(data, dict):
+                instance = schema.model_validate(data)
+            else:
+                instance = schema.model_validate({'__root__': data})
             
             return ParseResult(
                 success=True,
@@ -158,7 +161,7 @@ class TaskOutputParser:
             
         except json.JSONDecodeError as e:
             return ParseResult(success=False, error=f"JSON 解析错误: {str(e)}")
-        except ValidationError as e:
+        except PydanticValidationError as e:
             return ParseResult(success=False, error=f"Schema 验证错误: {str(e)}")
         except Exception as e:
             return ParseResult(success=False, error=f"直接解析异常: {str(e)}")
@@ -178,7 +181,10 @@ class TaskOutputParser:
                         data = json.loads(cleaned)
                         
                         # 验证 Schema
-                        instance = schema(**data) if isinstance(data, dict) else schema(data)
+                        if isinstance(data, dict):
+                            instance = schema.model_validate(data)
+                        else:
+                            instance = schema.model_validate({'__root__': data})
                         
                         return ParseResult(
                             success=True,
@@ -187,7 +193,7 @@ class TaskOutputParser:
                             confidence=0.8
                         )
                         
-                    except (json.JSONDecodeError, ValidationError):
+                    except (json.JSONDecodeError, PydanticValidationError):
                         continue
                         
             except Exception:
@@ -219,7 +225,7 @@ class TaskOutputParser:
                         
                         # 根据字段类型转换值
                         try:
-                            converted_value = self._convert_field_value(value, field_info.type_)
+                            converted_value = self._convert_field_value(value, field_info.annotation)
                             extracted_data[field_name] = converted_value
                             break
                         except Exception:
@@ -228,14 +234,14 @@ class TaskOutputParser:
             # 如果提取到了一些字段，尝试创建实例
             if extracted_data:
                 try:
-                    instance = schema(**extracted_data)
+                    instance = schema.model_validate(extracted_data)
                     return ParseResult(
                         success=True,
                         data=instance,
                         raw_output=response,
                         confidence=0.6
                     )
-                except ValidationError as e:
+                except PydanticValidationError as e:
                     return ParseResult(
                         success=False,
                         error=f"结构化文本解析失败: {str(e)}"
@@ -248,6 +254,15 @@ class TaskOutputParser:
     
     def _convert_field_value(self, value: str, field_type: Type) -> Any:
         """根据字段类型转换值"""
+        # 处理 Pydantic V2 的类型注解
+        if hasattr(field_type, '__origin__'):
+            # 处理 Optional 类型 (Union[T, None])
+            if field_type.__origin__ is Union:
+                # 获取非 None 的类型
+                non_none_types = [t for t in field_type.__args__ if t is not type(None)]
+                if non_none_types:
+                    field_type = non_none_types[0]
+        
         if field_type == str:
             return value
         elif field_type == int:
@@ -573,9 +588,9 @@ class OutputRepairLoop:
             from .task import Task
             
             # 构建修复提示
-            error_message = parse_result.error
+            error_message = parse_result.error or ""
             if validation_result and not validation_result.valid:
-                error_message += f"\n验证错误: {'; '.join(validation_result.errors)}"
+                error_message = error_message + f"\n验证错误: {'; '.join(validation_result.errors)}"
             
             schema_description = self._get_schema_description(expected_schema)
             
