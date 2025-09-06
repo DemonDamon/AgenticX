@@ -503,7 +503,7 @@ class EdgeCaseHandler(Component):
         
         # Extract relevant context
         relevant_context = {
-            'task_type': task.task_type,
+            'task_type': type(task).__name__,
             'target_application': task.target_application,
             'execution_time': context.get('execution_time', 0),
             'user_id': context.get('user_id'),
@@ -514,8 +514,8 @@ class EdgeCaseHandler(Component):
             case_id=case_id,
             case_type=case_type,
             severity=severity,
-            task_id=task.task_id,
-            application=task.target_application,
+            task_id=task.id,
+            application=task.target_application or "Unknown",
             context=relevant_context,
             error_details=error_info or {},
             screen_state=screen_state.model_dump() if screen_state else None,
@@ -570,7 +570,7 @@ class EdgeCaseHandler(Component):
         }.get(case_type, 0.1)
         
         # Adjust based on task importance
-        task_importance = task.metadata.get('importance', 0.5)
+        task_importance = getattr(task, 'metadata', {}).get('importance', 0.5) if hasattr(task, 'metadata') else 0.5
         
         # Adjust based on user impact
         user_impact = context.get('user_impact', 0.5)
