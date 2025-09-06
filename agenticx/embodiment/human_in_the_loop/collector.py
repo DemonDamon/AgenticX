@@ -49,14 +49,14 @@ class FeedbackCollector(Component):
         }
         
         # 注册事件监听器
-        self.event_bus.subscribe(HumanFeedbackReceivedEvent, self.on_feedback_received)
+        self.event_bus.subscribe("human_feedback_received", self.on_feedback_received, async_handler=True)
         
         # 处理任务（延迟启动）
         self._processing_task = None
         
         logger.info("FeedbackCollector initialized")
     
-    @listens_to(HumanFeedbackReceivedEvent)
+    @listens_to("human_feedback_received")
     async def on_feedback_received(self, event: HumanFeedbackReceivedEvent) -> None:
         """处理接收到的人工反馈事件
         
@@ -121,7 +121,7 @@ class FeedbackCollector(Component):
                 await self._store_trajectory(trajectory)
                 
                 # 发布学习数据生成事件
-                learning_event = LearningDataGeneratedEvent(
+                learning_event = LearningDataGeneratedEvent.create(
                     trajectory_id=trajectory.trajectory_id,
                     feedback_id=feedback.feedback_id,
                     agent_id=trajectory.agent_id,
@@ -284,16 +284,16 @@ class FeedbackCollector(Component):
             key = f"{self.storage_namespace}:trajectory:{trajectory.trajectory_id}"
             
             # 存储数据
-            await self.memory.store(
-                key=key,
-                data=trajectory.dict(),
+            await self.memory.add(
+                content=str(trajectory.dict()),
                 metadata={
                     "type": "trajectory",
                     "feedback_id": trajectory.feedback_id,
                     "agent_id": trajectory.agent_id,
                     "reward": trajectory.reward,
                     "created_at": trajectory.created_at.isoformat()
-                }
+                },
+                record_id=key
             )
             
             logger.debug(f"Trajectory stored: {key}")
