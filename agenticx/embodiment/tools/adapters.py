@@ -6,7 +6,7 @@ import asyncio
 import base64
 from io import BytesIO
 
-from agenticx.embodiment.core.models import ScreenState, InteractionElement
+from agenticx.embodiment.core.models import ScreenState, InteractionElement, ElementType
 
 
 class BasePlatformAdapter(ABC):
@@ -73,7 +73,7 @@ class BasePlatformAdapter(ABC):
         pass
     
     @abstractmethod
-    async def find_element(self, element_query: str) -> Optional[str]:
+    async def find_element(self, element_query: Optional[str]) -> Optional[str]:
         """Find an element by natural language description.
         
         Args:
@@ -85,7 +85,7 @@ class BasePlatformAdapter(ABC):
         pass
     
     @abstractmethod
-    async def wait_for_element(self, element_query: str, timeout: float = 10.0,
+    async def wait_for_element(self, element_query: Optional[str], timeout: float = 10.0,
                               condition: str = "visible") -> bool:
         """Wait for an element to meet a condition.
         
@@ -195,7 +195,9 @@ class WebPlatformAdapter(BasePlatformAdapter):
         
         # Scroll specific element or entire page
         if element_id or element_query:
-            target_element = element_id or await self.find_element(element_query)
+            target_element = element_id
+            if not target_element and element_query:
+                target_element = await self.find_element(element_query)
             if target_element:
                 await self.page.hover(target_element)
         
@@ -260,13 +262,13 @@ class WebPlatformAdapter(BasePlatformAdapter):
         
         return elements
     
-    async def find_element(self, element_query: str) -> Optional[str]:
+    async def find_element(self, element_query: Optional[str]) -> Optional[str]:
         """Find element by natural language description.
         
         This is a simplified implementation. In practice, you'd use
         more sophisticated element matching algorithms.
         """
-        if not self.page:
+        if not self.page or not element_query:
             return None
         
         # Simple text-based matching
@@ -296,10 +298,10 @@ class WebPlatformAdapter(BasePlatformAdapter):
         
         return None
     
-    async def wait_for_element(self, element_query: str, timeout: float = 10.0,
+    async def wait_for_element(self, element_query: Optional[str], timeout: float = 10.0,
                               condition: str = "visible") -> bool:
         """Wait for element to meet condition."""
-        if not self.page:
+        if not self.page or not element_query:
             return False
         
         try:
@@ -353,7 +355,7 @@ class MockPlatformAdapter(BasePlatformAdapter):
         self.mock_elements = [
             InteractionElement(
                 element_id="button_1",
-                element_type="button",
+                element_type=ElementType.BUTTON,
                 text_content="Click me",
                 bounds=(100, 100, 80, 30),
                 attributes={'is_interactive': True}
@@ -397,15 +399,17 @@ class MockPlatformAdapter(BasePlatformAdapter):
     async def get_element_tree(self) -> List[InteractionElement]:
         return self.mock_elements
     
-    async def find_element(self, element_query: str) -> Optional[str]:
+    async def find_element(self, element_query: Optional[str]) -> Optional[str]:
         # Simple mock implementation
-        if "button" in element_query.lower():
+        if element_query and "button" in element_query.lower():
             return "button_1"
         return None
     
-    async def wait_for_element(self, element_query: str, timeout: float = 10.0,
+    async def wait_for_element(self, element_query: Optional[str], timeout: float = 10.0,
                               condition: str = "visible") -> bool:
         # Mock always succeeds
+        if element_query is None:
+            return False
         await asyncio.sleep(0.1)  # Simulate wait time
         return True
     
