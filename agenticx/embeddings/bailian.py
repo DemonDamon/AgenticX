@@ -28,7 +28,7 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
         self, 
         api_key: str, 
         model: str = "text-embedding-v4", 
-        api_url: str = None,
+        api_url: Optional[str] = None,  # 修复：使用Optional[str]而不是str = None
         dimension: int = 1536,
         max_tokens: int = 8192,
         batch_size: int = 100,
@@ -39,7 +39,7 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
         multimodal_model: str = "multimodal-embedding-v1",
         **kwargs
     ):
-        super().__init__(kwargs)
+        super().__init__(kwargs or {})  # 修复：确保传入的是一个字典而不是None
         self.api_key = api_key
         self.model = model
         # 根据官方文档，使用base_url格式，OpenAI客户端会自动添加/embeddings
@@ -65,7 +65,7 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
         
         # OpenAI客户端（用于兼容接口）
         self._openai_client = None
-        if OPENAI_AVAILABLE:
+        if OPENAI_AVAILABLE and AsyncOpenAI:
             self._openai_client = AsyncOpenAI(
                 api_key=self.api_key,
                 base_url=self.api_url
@@ -133,27 +133,25 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
     
     async def _embed_multimodal_with_sdk(self, inputs: List[Dict[str, Any]], **kwargs) -> List[List[float]]:
         """使用dashscope SDK进行多模态embedding"""
+        # 修复：添加对dashscope是否可用的检查
+        if not DASHSCOPE_AVAILABLE or not dashscope or not HTTPStatus:
+            raise EmbeddingError("dashscope SDK不可用，无法进行多模态embedding")
+            
         try:
-            # 分批处理多模态输入
-            all_embeddings = []
+            # 直接使用完整的输入列表
+            resp = dashscope.MultiModalEmbedding.call(
+                model=self.multimodal_model,
+                input=inputs,  # type: ignore
+                **kwargs
+            )
             
-            for input_item in inputs:
-                # 调用dashscope MultiModalEmbedding API
-                resp = dashscope.MultiModalEmbedding.call(
-                    model=self.multimodal_model,
-                    input=[input_item],  # 单个输入项
-                    **kwargs
+            # 修复：添加对HTTPStatus是否可用的检查
+            if HTTPStatus and resp.status_code == HTTPStatus.OK:
+                return self._extract_multimodal_embeddings_sdk(resp.output)
+            else:
+                raise EmbeddingError(
+                    f"多模态embedding SDK错误: {resp.status_code}, {resp.message}"
                 )
-                
-                if resp.status_code == HTTPStatus.OK:
-                    embeddings = self._extract_multimodal_embeddings_sdk(resp.output)
-                    all_embeddings.extend(embeddings)
-                else:
-                    raise EmbeddingError(
-                        f"多模态embedding SDK错误: {resp.status_code}, {resp.message}"
-                    )
-            
-            return all_embeddings
             
         except Exception as e:
             raise EmbeddingError(f"SDK多模态embedding失败: {e}")
@@ -174,7 +172,7 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
             
             session = await self._get_session()
             async with session.post(
-                "https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
+                f"{self.api_url}/embeddings",
                 headers=headers,
                 json=payload
             ) as response:
@@ -191,7 +189,12 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
     def _extract_multimodal_embeddings_sdk(self, output: Dict[str, Any]) -> List[List[float]]:
         """从dashscope SDK响应中提取embedding向量"""
         try:
-            if "embeddings" in output:
+            # 优先支持OpenAI兼容格式
+            if "data" in output:
+                embeddings = output["data"]
+                return [item["embedding"] for item in embeddings]
+            # 兼容原生百炼格式
+            elif "embeddings" in output:
                 embeddings = output["embeddings"]
                 return [item["embedding"] for item in embeddings]
             else:
@@ -202,7 +205,12 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
     def _extract_multimodal_embeddings_http(self, result: Dict[str, Any]) -> List[List[float]]:
         """从HTTP API响应中提取embedding向量"""
         try:
-            if "output" in result and "embeddings" in result["output"]:
+            # 优先支持OpenAI兼容格式
+            if "data" in result:
+                embeddings = result["data"]
+                return [item["embedding"] for item in embeddings]
+            # 兼容原生百炼格式
+            elif "output" in result and "embeddings" in result["output"]:
                 embeddings = result["output"]["embeddings"]
                 return [item["embedding"] for item in embeddings]
             else:
@@ -251,6 +259,9 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
             "Content-Type": "application/json"
         }
         
+        # 修复：确保api_url不为None
+        api_url = self.api_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        
         payload = {
             "model": self.model,
             "input": texts,  # 直接传递文本列表，兼容OpenAI格式
@@ -264,7 +275,7 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
         
         # 添加详细的请求日志
         print(f"\n🔍 百炼API请求详情 (HTTP):")
-        print(f"URL: {self.api_url}/embeddings")
+        print(f"URL: {api_url}/embeddings")
         print(f"Headers: {headers}")
         print(f"Payload: {payload}")
         print(f"Texts count: {len(texts)}")
@@ -274,7 +285,7 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
             try:
                 session = await self._get_session()
                 async with session.post(
-                    self.api_url,
+                    api_url,  # 修复：使用确保不为None的api_url
                     headers=headers,
                     json=payload
                 ) as response:
