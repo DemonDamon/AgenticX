@@ -63,23 +63,24 @@ class VectorRetriever(BaseRetriever):
             
             # Search vector storage
             from ..storage.vectordb_storages.base import VectorDBQuery
-            query = VectorDBQuery(
+            vector_db_query = VectorDBQuery(
                 query_vector=query_embedding.tolist(),
                 top_k=retrieval_query.limit
             )
-            search_results = await self.vector_storage.query(query)
+            search_results = self.vector_storage.query(vector_db_query)
             
             # Convert to RetrievalResult objects
             results = []
             for result in search_results:
-                if result.score >= retrieval_query.min_score:
+                if result.similarity >= retrieval_query.min_score:
+                    payload = result.record.payload or {}
                     retrieval_result = RetrievalResult(
-                        content=result.record.payload.get("content", ""),
-                        score=result.score,
-                        metadata=result.record.payload.get("metadata", {}),
-                        source=result.record.payload.get("source"),
+                        content=payload.get("content", ""),
+                        score=result.similarity,
+                        metadata=payload.get("metadata", {}),
+                        source=payload.get("source"),
                         chunk_id=result.record.id,
-                        vector_score=result.score
+                        vector_score=result.similarity
                     )
                     results.append(retrieval_result)
             
@@ -117,7 +118,8 @@ class VectorRetriever(BaseRetriever):
                             "tenant_id": self.tenant_id
                         }
                     )
-                    record_id = await self.vector_storage.add([record])
+                    self.vector_storage.add([record])
+                    record_id = record.id
                     
                     document_ids.append(record_id)
                     
@@ -137,11 +139,11 @@ class VectorRetriever(BaseRetriever):
         """Remove documents from the vector index."""
         
         try:
+            # Remove from vector storage
+            self.vector_storage.delete(document_ids)
+            
+            # Remove from local cache
             for doc_id in document_ids:
-                # Remove from vector storage
-                await self.vector_storage.delete(doc_id)
-                
-                # Remove from local cache
                 if doc_id in self._documents:
                     del self._documents[doc_id]
             
@@ -154,7 +156,7 @@ class VectorRetriever(BaseRetriever):
         """Get vector retriever statistics."""
         
         try:
-            storage_stats = await self.vector_storage.status()
+            storage_stats = self.vector_storage.status()
             
             return {
                 "retriever_type": "vector",
@@ -193,4 +195,4 @@ class VectorRetriever(BaseRetriever):
             pass
             
         except Exception as e:
-            print(f"Failed to load existing documents: {e}") 
+            print(f"Failed to load existing documents: {e}")
