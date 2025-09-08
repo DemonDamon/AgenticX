@@ -132,9 +132,13 @@ class WorkflowEngine(Component):
         self.logger.info(f"Starting workflow execution: {execution_id}")
         
         try:
-            # Validate workflow
-            if not workflow.validate():
-                raise ValueError(f"Invalid workflow: {workflow.name}")
+            # Validate workflow before execution
+            try:
+                if not workflow.validate_workflow():
+                    raise ValueError("Workflow validation failed")
+            except Exception as e:
+                self.logger.error(f"Workflow validation error: {e}")
+                raise
             
             # Initialize context
             current_context = initial_context.copy(deep=True)
