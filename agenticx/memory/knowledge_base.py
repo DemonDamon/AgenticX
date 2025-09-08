@@ -336,9 +336,9 @@ class KnowledgeBase:
         """
         records = await self.list_all(limit=10000)
         
-        exported_data = []
+        exported_data: List[Dict[str, Any]] = []
         for record in records:
-            record_data = {
+            record_data: Dict[str, Any] = {
                 "id": record.id,
                 "content": record.content,
                 "created_at": record.created_at.isoformat(),
@@ -346,7 +346,7 @@ class KnowledgeBase:
             }
             
             if include_metadata:
-                record_data["metadata"] = record.metadata
+                record_data["metadata"] = record.metadata.copy()  # Create a copy to avoid reference issues
             
             exported_data.append(record_data)
         

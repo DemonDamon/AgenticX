@@ -266,15 +266,15 @@ class MemoryDecayService:
         Returns:
             List of decaying records
         """
-        if threshold is None:
-            threshold = self.cleanup_threshold
+        # Ensure threshold is not None
+        effective_threshold: float = threshold if threshold is not None else self.cleanup_threshold
         
         decaying_records = []
         current_time = datetime.utcnow()
         
         for record in records:
             decay_factor = await self.calculate_decay_factor(record, current_time)
-            if decay_factor < threshold:
+            if decay_factor < effective_threshold:
                 decaying_records.append(record)
         
         return decaying_records

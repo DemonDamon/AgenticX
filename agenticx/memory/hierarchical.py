@@ -199,13 +199,15 @@ class BaseHierarchicalMemory(BaseMemory):
     async def get_associations(self, record_id: str) -> List[HierarchicalMemoryRecord]:
         """Get associated memory records."""
         record = await self.get(record_id)
-        if not record or not hasattr(record, 'associations'):
+        # Check if record is of the correct type and has associations attribute
+        if not record or not isinstance(record, HierarchicalMemoryRecord) or not hasattr(record, 'associations'):
             return []
         
         associations = []
         for assoc_id in record.associations:
             assoc_record = await self.get(assoc_id)
-            if assoc_record:
+            # Ensure the associated record is of the correct type
+            if assoc_record and isinstance(assoc_record, HierarchicalMemoryRecord):
                 associations.append(assoc_record)
         
         return associations
@@ -213,7 +215,8 @@ class BaseHierarchicalMemory(BaseMemory):
     async def add_association(self, record_id: str, associated_id: str) -> bool:
         """Add association between memory records."""
         record = await self.get(record_id)
-        if not record:
+        # Check if record is of the correct type and has associations attribute
+        if not record or not isinstance(record, HierarchicalMemoryRecord):
             return False
         
         if hasattr(record, 'associations') and associated_id not in record.associations:

@@ -5,7 +5,7 @@ Implements the core memory layer for storing agent identity,
 personality, and persistent information.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from datetime import datetime, timedelta
 import json
 import asyncio
@@ -21,7 +21,7 @@ from .hierarchical import (
     SearchContext,
     SearchResult
 )
-from .base import MemoryError
+from .base import MemoryError, MemoryRecord
 
 
 class CoreMemory(BaseHierarchicalMemory):
@@ -307,14 +307,18 @@ class CoreMemory(BaseHierarchicalMemory):
         self,
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
+        record_id: Optional[str] = None,
         importance: MemoryImportance = MemoryImportance.MEDIUM,
         sensitivity: MemorySensitivity = MemorySensitivity.INTERNAL,
-        source: str = "user"
+        source: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None
     ) -> str:
         """Add a new memory record."""
         await self._ensure_initialized()
         
-        record_id = str(uuid.uuid4())
+        if record_id is None:
+            record_id = str(uuid.uuid4())
+        
         now = datetime.now()
         record = HierarchicalMemoryRecord(
             id=record_id,
@@ -326,25 +330,31 @@ class CoreMemory(BaseHierarchicalMemory):
             memory_type=MemoryType.CORE,
             importance=importance,
             sensitivity=sensitivity,
-            source=source
+            source=source,
+            context=context or {}
         )
         
         await self._store_record(record)
         return record.id
     
-    async def add_association(self, record_id: str, associated_record_id: str) -> bool:
+    async def add_association(self, record_id: str, associated_id: str) -> bool:
         """Add association between records."""
         if record_id in self._core_records:
             record = self._core_records[record_id]
-            if associated_record_id not in record.associations:
-                record.associations.append(associated_record_id)
+            if associated_id not in record.associations:
+                record.associations.append(associated_id)
             return True
         return False
     
-    async def get_associations(self, record_id: str) -> List[str]:
+    async def get_associations(self, record_id: str) -> List[HierarchicalMemoryRecord]:
         """Get associations for a record."""
         if record_id in self._core_records:
-            return self._core_records[record_id].associations
+            associated_records = []
+            record = self._core_records[record_id]
+            for assoc_id in record.associations:
+                if assoc_id in self._core_records:
+                    associated_records.append(self._core_records[assoc_id])
+            return associated_records
         return []
     
     async def _store_record(self, record: HierarchicalMemoryRecord):
@@ -510,19 +520,19 @@ class CoreMemory(BaseHierarchicalMemory):
         
         return results
     
-    def _matches_metadata_filter(self, record: HierarchicalMemoryRecord, filter_dict: Dict[str, Any]) -> bool:
+    def _matches_metadata_filter(self, record: Union[HierarchicalMemoryRecord, MemoryRecord], filter_dict: Dict[str, Any]) -> bool:
         """Check if record matches the filter."""
         for key, value in filter_dict.items():
             # Check record attributes first
             if hasattr(record, key):
                 record_value = getattr(record, key)
-                # Handle enum values
+                # Handle enum values for HierarchicalMemoryRecord
                 if hasattr(record_value, 'value'):
                     record_value = record_value.value
                 if record_value != value:
                     return False
-            # Check metadata
-            elif key in record.metadata:
+            # Check metadata for both types of records
+            elif hasattr(record, 'metadata') and record.metadata and key in record.metadata:
                 if record.metadata[key] != value:
                     return False
             else:
@@ -579,25 +589,25 @@ class CoreMemory(BaseHierarchicalMemory):
         limit: int = 100,
         offset: int = 0,
         metadata_filter: Optional[Dict[str, Any]] = None
-    ) -> List[HierarchicalMemoryRecord]:
+    ) -> List[MemoryRecord]:
         """List all memory records for the current tenant."""
-        all_records = list(self._core_records.values())
+        all_records: List[MemoryRecord] = list(self._core_records.values())
         
         # Apply metadata filter
         if metadata_filter:
             filtered_records = []
             for record in all_records:
-                if self._matches_metadata_filter(record.metadata, metadata_filter):
+                if self._matches_metadata_filter(record, metadata_filter):
                     filtered_records.append(record)
             all_records = filtered_records
         
         # Sort by creation time (newest first)
-        all_records.sort(key=lambda r: r.created_at, reverse=True)
+        all_records.sort(key=lambda r: r.created_at, reverse=True)  # type: ignore
         
         # Apply pagination
         start = offset
         end = offset + limit
-        return all_records[start:end]
+        return all_records[start:end]  # type: ignore
     
     async def clear(self) -> int:
         """Clear all memory records for the current tenant."""

@@ -20,9 +20,10 @@ from .hierarchical import (
     MemoryImportance,
     MemorySensitivity,
     SearchContext,
-    SearchResult
+    SearchResult,
+    MemoryEvent
 )
-from .base import MemoryError
+from .base import MemoryError, MemoryRecord
 
 
 @dataclass
@@ -150,7 +151,7 @@ class SemanticMemory(BaseHierarchicalMemory):
             metadata=record_metadata,
             importance=importance,
             sensitivity=sensitivity,
-            source=source
+            source=source or "user"  # Provide default value if source is None
         )
         
         # Create or update concepts
@@ -238,42 +239,44 @@ class SemanticMemory(BaseHierarchicalMemory):
         self,
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
+        record_id: Optional[str] = None,
         importance: MemoryImportance = MemoryImportance.MEDIUM,
         sensitivity: MemorySensitivity = MemorySensitivity.INTERNAL,
-        source: str = "user"
+        source: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None
     ) -> str:
         """Add a new memory record."""
-        record_id = str(uuid.uuid4())
-        now = datetime.now()
+        if record_id is None:
+            record_id = self._generate_record_id()
+        
+        now = datetime.utcnow()
         
         record = HierarchicalMemoryRecord(
             id=record_id,
             content=content,
-            metadata=metadata or {},
+            metadata=self._ensure_tenant_isolation(metadata or {}),
             tenant_id=self.tenant_id,
             created_at=now,
             updated_at=now,
             memory_type=MemoryType.SEMANTIC,
             importance=importance,
             sensitivity=sensitivity,
-            source=source
+            source=source,
+            context=context or {}
         )
         
-        # Store record
-        self._semantic_records[record_id] = record
+        # Store the record
+        await self._store_record(record)
         
-        # Update indices
-        keywords = self._extract_keywords(content)
-        for keyword in keywords:
-            self._keyword_index[keyword].add(record_id)
-        
-        # Also index metadata
-        if metadata:
-            for key, value in metadata.items():
-                if isinstance(value, str):
-                    meta_keywords = self._extract_keywords(value)
-                    for keyword in meta_keywords:
-                        self._keyword_index[keyword].add(record_id)
+        # Log event
+        self._log_event(MemoryEvent(
+            event_id=str(uuid.uuid4()),
+            event_type="write",
+            memory_type=MemoryType.SEMANTIC,
+            record_id=record_id,
+            timestamp=now,
+            metadata={"importance": importance.value, "sensitivity": sensitivity.value}
+        ))
         
         return record_id
     
@@ -776,7 +779,7 @@ class SemanticMemory(BaseHierarchicalMemory):
         
         return results
     
-    def _matches_metadata_filter(self, record: HierarchicalMemoryRecord, filter_dict: Dict[str, Any]) -> bool:
+    def _matches_metadata_filter(self, record: MemoryRecord, filter_dict: Dict[str, Any]) -> bool:
         """Check if record matches the filter."""
         for key, value in filter_dict.items():
             # Check record attributes first
@@ -850,15 +853,15 @@ class SemanticMemory(BaseHierarchicalMemory):
         limit: int = 100,
         offset: int = 0,
         metadata_filter: Optional[Dict[str, Any]] = None
-    ) -> List[HierarchicalMemoryRecord]:
+    ) -> List[MemoryRecord]:
         """List all memory records for the current tenant."""
-        all_records = list(self._semantic_records.values())
+        all_records: List[HierarchicalMemoryRecord] = list(self._semantic_records.values())
         
         # Apply metadata filter
         if metadata_filter:
             filtered_records = []
             for record in all_records:
-                if self._matches_metadata_filter(record.metadata, metadata_filter):
+                if self._matches_metadata_filter(record, metadata_filter):
                     filtered_records.append(record)
             all_records = filtered_records
         
@@ -868,7 +871,7 @@ class SemanticMemory(BaseHierarchicalMemory):
         # Apply pagination
         start = offset
         end = offset + limit
-        return all_records[start:end]
+        return all_records[start:end]  # type: ignore
     
     async def clear(self) -> int:
         """Clear all memory records for the current tenant."""

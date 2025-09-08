@@ -6,7 +6,7 @@
 import asyncio
 import logging
 import time
-from typing import Dict, List, Optional, Any, Tuple, Set
+from typing import Dict, List, Optional, Any, Tuple, Set, Callable
 from datetime import datetime, timedelta
 from collections import defaultdict, deque
 import threading
@@ -62,7 +62,7 @@ class AdaptiveRetrievalOptimizer:
         self.query_patterns: Dict[str, List[RetrievalPerformance]] = defaultdict(list)
         
         # 优化策略
-        self.query_optimizers: Dict[str, callable] = {
+        self.query_optimizers: Dict[str, Callable] = {
             'semantic_expansion': self._optimize_semantic_expansion,
             'keyword_refinement': self._optimize_keyword_refinement,
             'temporal_filtering': self._optimize_temporal_filtering,
@@ -97,7 +97,7 @@ class AdaptiveRetrievalOptimizer:
         # 初始化默认索引配置
         self._initialize_default_indexes()
     
-    def _initialize_default_indexes(self):
+    def _initialize_default_indexes(self) -> None:
         """初始化默认索引配置"""
         for memory_type in MemoryType:
             self.index_configurations[memory_type] = IndexOptimization(
@@ -272,10 +272,10 @@ class AdaptiveRetrievalOptimizer:
         optimizations = []
         
         # 根据历史性能调整结果数量
-        if context.expected_result_count:
+        if context.max_results:
             historical_avg = self._get_average_result_count(context.query_type)
-            if historical_avg and abs(context.expected_result_count - historical_avg) > 5:
-                context.expected_result_count = int((context.expected_result_count + historical_avg) / 2)
+            if historical_avg and abs(context.max_results - historical_avg) > 5:
+                context.max_results = int((context.max_results + historical_avg) / 2)
                 optimizations.append("调整期望结果数量")
         
         # 优化元数据过滤器
@@ -332,7 +332,7 @@ class AdaptiveRetrievalOptimizer:
         
         return recommendations
     
-    async def _activate_index(self, index_name: str):
+    async def _activate_index(self, index_name: str) -> None:
         """激活索引"""
         # 模拟索引激活
         await asyncio.sleep(0.1)
@@ -340,7 +340,7 @@ class AdaptiveRetrievalOptimizer:
         self.optimization_stats['index_rebuilds'] += 1
         self.logger.debug(f"激活索引: {index_name}")
     
-    def record_retrieval_performance(self, performance: RetrievalPerformance):
+    def record_retrieval_performance(self, performance: RetrievalPerformance) -> None:
         """记录检索性能
         
         Args:
@@ -356,7 +356,7 @@ class AdaptiveRetrievalOptimizer:
         # 触发自适应学习
         self._adaptive_learning(performance)
     
-    def _adaptive_learning(self, performance: RetrievalPerformance):
+    def _adaptive_learning(self, performance: RetrievalPerformance) -> None:
         """自适应学习"""
         # 根据性能反馈调整优化策略
         performance_score = performance.get_performance_score()
@@ -370,7 +370,7 @@ class AdaptiveRetrievalOptimizer:
             recent_scores = [p.get_performance_score() for p in list(self.performance_history)[-10:]]
             self.optimization_stats['average_improvement'] = sum(recent_scores) / len(recent_scores)
     
-    def _adjust_optimization_parameters(self, performance: RetrievalPerformance):
+    def _adjust_optimization_parameters(self, performance: RetrievalPerformance) -> None:
         """调整优化参数"""
         query_type = performance.query_type
         
@@ -405,7 +405,7 @@ class AdaptiveRetrievalOptimizer:
         # 如果查询比较宽泛且没有过滤器，建议添加
         return (len(context.query.split()) <= 2 and 
                 not context.metadata_filters and 
-                context.expected_result_count and context.expected_result_count > 50)
+                context.max_results is not None and context.max_results > 50)
     
     def _is_frequent_query(self, query: str) -> bool:
         """判断是否为频繁查询"""
@@ -482,14 +482,14 @@ class AdaptiveRetrievalOptimizer:
         """获取优化统计信息"""
         recent_performances = list(self.performance_history)[-100:]
         
-        stats = self.optimization_stats.copy()
+        stats: Dict[str, Any] = self.optimization_stats.copy()
         stats.update({
             'total_queries_processed': len(self.performance_history),
             'active_indexes': len(self.active_indexes),
             'query_types_distribution': self._get_query_type_distribution(),
             'average_execution_time': self._get_average_execution_time(recent_performances),
             'cache_hit_rate': self._get_cache_hit_rate(recent_performances),
-            'optimization_success_rate': (
+            'optimization_success_rate': float(
                 stats['successful_optimizations'] / max(1, stats['total_optimizations'])
             )
         })
@@ -498,7 +498,7 @@ class AdaptiveRetrievalOptimizer:
     
     def _get_query_type_distribution(self) -> Dict[str, int]:
         """获取查询类型分布"""
-        distribution = defaultdict(int)
+        distribution: Dict[str, int] = defaultdict(int)
         for performance in self.performance_history:
             distribution[performance.query_type] += 1
         return dict(distribution)
@@ -529,13 +529,17 @@ class AdaptiveRetrievalOptimizer:
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         # 过滤异常结果
-        valid_results = []
+        valid_results: List[Tuple[RetrievalContext, List[str]]] = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 self.logger.error(f"批量优化第{i}个查询失败: {result}")
                 valid_results.append((contexts[i], []))
             else:
-                valid_results.append(result)
+                # 确保result是正确的类型
+                if isinstance(result, tuple) and len(result) == 2:
+                    valid_results.append(result)
+                else:
+                    valid_results.append((contexts[i], []))
         
         return valid_results
     
@@ -569,7 +573,7 @@ class AdaptiveRetrievalOptimizer:
         
         return optimized_context
     
-    def clear_performance_history(self, keep_recent: int = 1000):
+    def clear_performance_history(self, keep_recent: int = 1000) -> None:
         """清理性能历史
         
         Args:
@@ -585,27 +589,8 @@ class AdaptiveRetrievalOptimizer:
         for query_type in self.query_patterns:
             if len(self.query_patterns[query_type]) > keep_recent // 10:
                 self.query_patterns[query_type] = self.query_patterns[query_type][-keep_recent // 10:]
-    
-    def adaptive_learning(self) -> bool:
-        """自适应学习
         
-        Returns:
-            是否成功进行了学习调整
-        """
-        if len(self.performance_history) < 5:
-            return False
-        
-        # 分析性能趋势并调整策略
-        recent_performance = list(self.performance_history)[-10:] if len(self.performance_history) >= 10 else list(self.performance_history)
-        avg_execution_time = sum(p.execution_time for p in recent_performance) / len(recent_performance)
-        
-        # 如果平均执行时间过高，调整优化策略
-        if avg_execution_time > 100:  # 100ms阈值
-            self.learning_rate = min(0.2, self.learning_rate * 1.1)
-            return True
-        else:
-            self.learning_rate = max(0.05, self.learning_rate * 0.95)
-            return True
+        self.logger.info(f"清理性能历史，保留最近 {keep_recent} 条记录")
     
     def get_optimization_suggestions(self) -> List[str]:
         """获取优化建议
@@ -639,5 +624,24 @@ class AdaptiveRetrievalOptimizer:
                 suggestions.append("建议添加更多索引以提高查询性能")
         
         return suggestions if suggestions else ["当前性能良好，无需特别优化"]
+    
+    def adaptive_learning(self) -> bool:
+        """自适应学习
         
-        self.logger.info(f"清理性能历史，保留最近 {keep_recent} 条记录")
+        Returns:
+            是否成功进行了学习调整
+        """
+        if len(self.performance_history) < 5:
+            return False
+        
+        # 分析性能趋势并调整策略
+        recent_performance = list(self.performance_history)[-10:] if len(self.performance_history) >= 10 else list(self.performance_history)
+        avg_execution_time = sum(p.execution_time for p in recent_performance) / len(recent_performance)
+        
+        # 如果平均执行时间过高，调整优化策略
+        if avg_execution_time > 100:  # 100ms阈值
+            self.learning_rate = min(0.2, self.learning_rate * 1.1)
+            return True
+        else:
+            self.learning_rate = max(0.05, self.learning_rate * 0.95)
+            return True

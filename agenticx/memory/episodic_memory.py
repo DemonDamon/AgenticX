@@ -20,7 +20,7 @@ from .hierarchical import (
     SearchContext,
     SearchResult
 )
-from .base import MemoryError
+from .base import MemoryError, MemoryRecord
 
 
 @dataclass
@@ -613,18 +613,19 @@ class EpisodicMemory(BaseHierarchicalMemory):
         
         return True
     
-    async def get(self, record_id: str) -> Optional[HierarchicalMemoryRecord]:
+    async def get(self, record_id: str) -> Optional[MemoryRecord]:
         """Get a specific memory record by ID."""
-        return self._episodic_records.get(record_id)
+        record = self._episodic_records.get(record_id)
+        return record  # type: ignore
     
     async def list_all(
         self,
         limit: int = 100,
         offset: int = 0,
         metadata_filter: Optional[Dict[str, Any]] = None
-    ) -> List[HierarchicalMemoryRecord]:
+    ) -> List[MemoryRecord]:
         """List all memory records for the current tenant."""
-        all_records = list(self._episodic_records.values())
+        all_records: List[MemoryRecord] = list(self._episodic_records.values())
         
         # Apply metadata filter
         if metadata_filter:
@@ -635,12 +636,12 @@ class EpisodicMemory(BaseHierarchicalMemory):
             all_records = filtered_records
         
         # Sort by creation time (newest first)
-        all_records.sort(key=lambda r: r.created_at, reverse=True)
+        all_records.sort(key=lambda r: r.created_at, reverse=True)  # type: ignore
         
         # Apply pagination
         start = offset
         end = offset + limit
-        return all_records[start:end]
+        return all_records[start:end]  # type: ignore
     
     async def clear(self) -> int:
         """Clear all memory records for the current tenant."""

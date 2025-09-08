@@ -51,6 +51,16 @@ class MCPMemory(BaseMemory):
     async def _ensure_tools_discovered(self):
         """Ensure MCP client has discovered tools and memory tools are available."""
         if not self._tools_discovered:
+            # Check if client is available
+            if self._client is None:
+                if self.fallback_to_short_term:
+                    logger.warning("MCP client is not available, using ShortTermMemory as fallback.")
+                    self._use_fallback = True
+                    self._fallback_memory = ShortTermMemory(tenant_id=self.tenant_id)
+                    return
+                else:
+                    raise MemoryConnectionError("MCP client is not available and fallback is disabled")
+            
             try:
                 tools = await self._client.discover_tools()
                 tool_names = {tool.name for tool in tools}
@@ -84,6 +94,14 @@ class MCPMemory(BaseMemory):
         """Call an MCP tool with error handling."""
         await self._ensure_tools_discovered()
         
+        # Check if we're using fallback
+        if self._use_fallback:
+            raise MemoryError("Cannot call MCP tools when using fallback memory")
+        
+        # Check if client is available
+        if self._client is None:
+            raise MemoryError("MCP client is not available")
+        
         try:
             tool = await self._client.create_tool(tool_name)
             result = await tool.arun(**arguments)
@@ -100,6 +118,8 @@ class MCPMemory(BaseMemory):
         """Add a new memory record via MCP."""
         await self._ensure_tools_discovered()
         if self._use_fallback:
+            if self._fallback_memory is None:
+                raise MemoryError("Fallback memory is not available")
             return await self._fallback_memory.add(content, metadata, record_id)
         
         try:
@@ -146,6 +166,8 @@ class MCPMemory(BaseMemory):
         """Search for relevant memory records via MCP."""
         await self._ensure_tools_discovered()
         if self._use_fallback:
+            if self._fallback_memory is None:
+                raise MemoryError("Fallback memory is not available")
             return await self._fallback_memory.search(query, limit, metadata_filter, min_score)
         
         try:
@@ -374,7 +396,7 @@ class MCPMemory(BaseMemory):
     async def close(self):
         """Close the MCP connection."""
         if self._client:
-            await self._client.close()
+            # MCPClient doesn't have a close method, so we just set it to None
             self._client = None
     
     async def __aenter__(self):
