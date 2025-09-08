@@ -76,7 +76,7 @@ class WorkflowBuilder:
         node_id: str, 
         node_type: str = "function",
         name: Optional[str] = None,
-        handler: Optional[Callable] = None,
+        handler: Optional[Union[Callable, str]] = None,
         config: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> "WorkflowBuilder":
