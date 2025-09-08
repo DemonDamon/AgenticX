@@ -361,9 +361,9 @@ class WorkflowBuilder:
             state_schema=state_schema
         )
         
-        # Validate the workflow
-        if not workflow.validate():
-            raise ValueError("Built workflow failed validation")
+        # Validate workflow
+        if not workflow.validate_workflow():
+            raise ValueError("Invalid workflow")
         
         return workflow
     

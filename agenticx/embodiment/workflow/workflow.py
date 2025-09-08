@@ -126,7 +126,7 @@ class GUIWorkflow(Workflow):
                 return []
         return []
     
-    def validate(self) -> bool:
+    def validate_workflow(self) -> bool:
         """Validate the workflow structure."""
         # Check if workflow has an entry point
         if self.entry_point is None:

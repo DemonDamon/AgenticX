@@ -135,7 +135,7 @@ class TestGUIWorkflow:
         workflow.set_entry_point("start")
         
         # Should not raise any exception
-        workflow.validate()
+        workflow.validate_workflow()
     
     def test_validate_no_entry_point(self):
         """Test validation fails when no entry point is set."""
@@ -150,7 +150,7 @@ class TestGUIWorkflow:
         workflow.add_node(node)
         
         with pytest.raises(ValueError, match="Workflow must have an entry point"):
-            workflow.validate()
+            workflow.validate_workflow()
     
     def test_validate_invalid_entry_point(self):
         """Test validation fails when entry point references non-existent node."""
@@ -166,7 +166,7 @@ class TestGUIWorkflow:
         workflow.add_node(node)
         
         with pytest.raises(ValueError, match="Entry point 'nonexistent' references non-existent node"):
-            workflow.validate()
+            workflow.validate_workflow()
     
     @patch('agenticx.embodiment.workflow.workflow.nx')
     def test_validate_cycle_detection(self, mock_nx):
@@ -196,7 +196,7 @@ class TestGUIWorkflow:
         workflow.set_entry_point("node1")
         
         with pytest.raises(ValueError, match="Workflow contains cycles"):
-            workflow.validate()
+            workflow.validate_workflow()
     
     def test_to_dict(self):
         """Test converting workflow to dictionary."""
