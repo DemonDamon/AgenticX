@@ -12,7 +12,7 @@ from collections import defaultdict, Counter
 
 from agenticx.core.component import Component
 from agenticx.memory.component import MemoryComponent
-from agenticx.embodiment.core.models import GUITask
+from agenticx.embodiment.core.task import GUITask
 
 
 class TaskPattern(BaseModel):
@@ -189,18 +189,15 @@ class TaskSynthesizer(Component):
         Returns:
             GUITask instance based on the pattern
         """
-        # Determine task type based on pattern characteristics
-        task_type = await self._determine_task_type(pattern)
-        
         # Extract target application
         target_app = pattern.applications[0] if pattern.applications else "unknown"
         
         # Build task parameters
         task_config = {
-            'goal': pattern.description,
-            'steps': [self._convert_action_to_step(action) for action in pattern.action_sequence],
-            'success_criteria': pattern.postconditions,
-            'preconditions': pattern.preconditions,
+            'description': pattern.description,
+            'expected_output': f"Successfully executed pattern: {pattern.name}",
+            'app_name': target_app,
+            'automation_type': 'desktop',  # Default to desktop automation
             'metadata': {
                 'pattern_id': pattern.pattern_id,
                 'confidence_score': pattern.confidence_score,
@@ -212,11 +209,9 @@ class TaskSynthesizer(Component):
         # Override with provided parameters
         task_config.update(task_params)
         
+        # Create GUITask with correct parameters
         return GUITask(
-            task_id=f"synthesized_{pattern.pattern_id}_{datetime.now().isoformat()}",
-            name=pattern.name,
-            task_type=task_type,
-            target_application=target_app,
+            id=f"synthesized_{pattern.pattern_id}_{datetime.now().isoformat()}",
             **task_config
         )
     
