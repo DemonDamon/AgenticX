@@ -302,7 +302,7 @@ class WebSocketCallbackHandler(BaseCallbackHandler):
                 "agent_role": agent.role,
                 "task_id": task.id,
                 "task_description": task.description,
-                "task_details": task.to_dict() if self.include_detailed_data else None
+                "task_details": task.model_dump() if self.include_detailed_data else None  # 修复：使用Pydantic的model_dump方法
             }
         )
         

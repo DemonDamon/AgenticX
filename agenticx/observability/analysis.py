@@ -273,15 +273,25 @@ class TrajectorySummarizer:
         if not errors:
             return {"message": "No errors occurred"}
         
-        error_types = [error.error_data.get("error_type", "unknown") for error in errors]
+        # 修复：添加对error_data为None的检查
+        error_types = [
+            error.error_data.get("error_type", "unknown") if error.error_data else "unknown" 
+            for error in errors
+        ]
         error_type_counts = Counter(error_types)
         
         return {
             "total_errors": len(errors),
             "error_types": dict(error_type_counts),
             "error_rate": len(errors) / trajectory.metadata.total_steps,
-            "recoverable_errors": len([e for e in errors if e.error_data.get("recoverable", True)]),
-            "critical_errors": len([e for e in errors if not e.error_data.get("recoverable", True)])
+            "recoverable_errors": len([
+                e for e in errors 
+                if e.error_data and e.error_data.get("recoverable", True)
+            ]),
+            "critical_errors": len([
+                e for e in errors 
+                if e.error_data and not e.error_data.get("recoverable", True)
+            ])
         }
     
     def _get_key_insights(self, trajectory: ExecutionTrajectory) -> List[str]:
@@ -478,7 +488,8 @@ class FailureAnalyzer:
     
     def _classify_failure_type(self, failure_step: TrajectoryStep) -> str:
         """分类失败类型"""
-        if failure_step.step_type == StepType.ERROR:
+        # 修复：添加对error_data为None的检查
+        if failure_step.step_type == StepType.ERROR and failure_step.error_data:
             return failure_step.error_data.get("error_type", "unknown_error")
         elif failure_step.step_type == StepType.TOOL_CALL:
             return "tool_error"
@@ -489,7 +500,8 @@ class FailureAnalyzer:
     
     def _extract_failure_message(self, failure_step: TrajectoryStep) -> str:
         """提取失败消息"""
-        if failure_step.step_type == StepType.ERROR:
+        # 修复：添加对error_data为None的检查
+        if failure_step.step_type == StepType.ERROR and failure_step.error_data:
             return failure_step.error_data.get("error_message", "Unknown error")
         elif failure_step.error_data:
             return failure_step.error_data.get("error", "Execution failed")
@@ -639,9 +651,17 @@ class BottleneckDetector:
     
     def _create_slow_steps_insight(self, slow_steps: List[TrajectoryStep]) -> AnalysisInsight:
         """创建慢步骤洞察"""
-        very_slow_count = len([s for s in slow_steps if s.duration > self.very_slow_threshold])
+        # 修复：添加对duration为None的检查
+        very_slow_count = len([
+            s for s in slow_steps 
+            if s.duration is not None and s.duration > self.very_slow_threshold
+        ])
         
         severity = SeverityLevel.CRITICAL if very_slow_count > 0 else SeverityLevel.HIGH
+        
+        # 修复：添加对duration为None的检查并过滤掉None值
+        slow_durations = [s.duration for s in slow_steps if s.duration is not None]
+        average_slow_duration = sum(slow_durations) / len(slow_durations) if slow_durations else 0
         
         return AnalysisInsight(
             insight_id=f"slow_steps_{len(slow_steps)}",
@@ -659,7 +679,7 @@ class BottleneckDetector:
             metrics={
                 "slow_steps_count": len(slow_steps),
                 "very_slow_steps_count": very_slow_count,
-                "average_slow_duration": sum(s.duration for s in slow_steps) / len(slow_steps)
+                "average_slow_duration": average_slow_duration
             },
             affected_steps=[step.step_id for step in slow_steps]
         )
@@ -740,11 +760,13 @@ class PerformanceAnalyzer:
         report.fastest_steps = self._get_fastest_steps(trajectory, 5)
         
         # 资源使用
+        # 修复：添加对total_duration为None的检查
+        total_duration = trajectory.metadata.total_duration or 0
         report.resource_usage = {
             "total_tokens": trajectory.metadata.total_tokens,
             "total_cost": trajectory.metadata.total_cost,
             "average_tokens_per_call": trajectory.metadata.total_tokens / max(len(trajectory.get_llm_calls()), 1),
-            "cost_per_second": trajectory.metadata.total_cost / max(trajectory.metadata.total_duration, 1)
+            "cost_per_second": trajectory.metadata.total_cost / max(total_duration, 1)
         }
         
         # 瓶颈检测
@@ -758,6 +780,7 @@ class PerformanceAnalyzer:
     
     def _get_slowest_steps(self, trajectory: ExecutionTrajectory, count: int) -> List[Tuple[str, float]]:
         """获取最慢步骤"""
+        # 修复：添加对duration为None的检查
         steps_with_duration = [
             (f"{step.step_type.value}:{step.input_data.get('tool_name', step.step_id[:8])}", step.duration)
             for step in trajectory.steps
@@ -769,6 +792,7 @@ class PerformanceAnalyzer:
     
     def _get_fastest_steps(self, trajectory: ExecutionTrajectory, count: int) -> List[Tuple[str, float]]:
         """获取最快步骤"""
+        # 修复：添加对duration为None的检查
         steps_with_duration = [
             (f"{step.step_type.value}:{step.input_data.get('tool_name', step.step_id[:8])}", step.duration)
             for step in trajectory.steps

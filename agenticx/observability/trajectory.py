@@ -311,7 +311,11 @@ class ExecutionTrajectory:
         elif step.step_type == StepType.LLM_CALL:
             return f"LLM调用: {step.input_data.get('model', 'Unknown')}"
         elif step.step_type == StepType.ERROR:
-            return f"错误: {step.error_data.get('error_message', 'Unknown error')}"
+            # 修复：添加对error_data为None的检查
+            if step.error_data:
+                return f"错误: {step.error_data.get('error_message', 'Unknown error')}"
+            else:
+                return "错误: Unknown error"
         else:
             return f"{step.step_type.value}"
     
@@ -336,8 +340,8 @@ class ExecutionTrajectory:
             "errors": [
                 {
                     "step_id": step.step_id,
-                    "error_type": step.error_data.get("error_type"),
-                    "error_message": step.error_data.get("error_message")
+                    "error_type": step.error_data.get("error_type") if step.error_data else None,
+                    "error_message": step.error_data.get("error_message") if step.error_data else None
                 }
                 for step in self.get_errors()
             ]
