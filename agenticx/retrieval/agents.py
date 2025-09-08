@@ -51,7 +51,7 @@ class QueryAnalysisAgent(Agent):
             **kwargs
         )
     
-    async def analyze_query(self, query: str, context: Dict[str, Any] = None) -> QueryAnalysis:
+    async def analyze_query(self, query: str, context: Optional[Dict[str, Any]] = None) -> QueryAnalysis:
         """Analyze a query to determine the best retrieval strategy."""
         
         # Create analysis task
@@ -127,6 +127,8 @@ class RetrievalAgent(Agent):
     ):
         # Extract organization_id to avoid duplicate parameter
         organization_id = kwargs.pop("organization_id", "default")
+        # Convert retrievers to a dictionary with string keys for compatibility
+        retrievers_dict = {str(k): v for k, v in retrievers.items()}
         super().__init__(
             id="retrieval_agent",
             name="Intelligent Retrieval Agent", 
@@ -134,7 +136,7 @@ class RetrievalAgent(Agent):
             goal="Retrieve the most relevant information using optimal strategies",
             backstory="Expert at finding information using multiple retrieval approaches",
             organization_id=organization_id,
-            retrievers=retrievers,
+            retrievers=retrievers_dict,
             retrieval_history=[],
             query_analyzer=query_analyzer,
             **kwargs
@@ -143,13 +145,24 @@ class RetrievalAgent(Agent):
     async def retrieve(
         self,
         query: str,
-        context: Dict[str, Any] = None,
+        context: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> List[RetrievalResult]:
         """Intelligent retrieval with strategy selection."""
         
         # 1. Analyze query
-        analysis = await self.query_analyzer.analyze_query(query, context)
+        if self.query_analyzer is not None:
+            analysis = await self.query_analyzer.analyze_query(query, context)
+        else:
+            # Fallback analysis if query_analyzer is not available
+            analysis = QueryAnalysis(
+                intent="general",
+                keywords=[],
+                entities=[],
+                query_type=RetrievalType.AUTO,
+                suggested_filters={},
+                confidence=0.5
+            )
         
         # 2. Select retrieval strategy
         strategy = await self._select_retrieval_strategy(analysis, context)
@@ -168,7 +181,7 @@ class RetrievalAgent(Agent):
     async def _select_retrieval_strategy(
         self,
         analysis: QueryAnalysis,
-        context: Dict[str, Any]
+        context: Optional[Dict[str, Any]]
     ) -> RetrievalType:
         """Select the best retrieval strategy based on analysis."""
         
@@ -177,7 +190,19 @@ class RetrievalAgent(Agent):
             return analysis.query_type
         
         # Fallback to first available strategy for uncertain queries
-        return next(iter(self.retrievers.keys())) if self.retrievers else RetrievalType.VECTOR
+        if self.retrievers:
+            first_key = next(iter(self.retrievers.keys()))
+            # Ensure we return a RetrievalType enum value
+            if isinstance(first_key, RetrievalType):
+                return first_key
+            else:
+                # If key is not RetrievalType, try to convert it
+                try:
+                    return RetrievalType(str(first_key))
+                except ValueError:
+                    pass
+        
+        return RetrievalType.VECTOR
     
     async def _execute_retrieval(
         self,
@@ -189,10 +214,26 @@ class RetrievalAgent(Agent):
         """Execute retrieval using selected strategy."""
         
         # Get appropriate retriever
-        retriever = self.retrievers.get(strategy)
+        retriever = None
+        if self.retrievers:
+            # Try to get retriever with string representation of strategy
+            strategy_key = str(strategy)
+            if strategy_key in self.retrievers:
+                retriever = self.retrievers[strategy_key]
+            else:
+                # Fallback: try to find a matching retriever
+                for key, value in self.retrievers.items():
+                    if key == strategy_key:
+                        retriever = value
+                        break
+        
         if not retriever:
             # Fallback to first available retriever
-            retriever = next(iter(self.retrievers.values())) if self.retrievers else None
+            if self.retrievers:
+                retriever = next(iter(self.retrievers.values()))
+            else:
+                # Return empty list if no retrievers available
+                return []
         
         # Build retrieval query
         retrieval_query = RetrievalQuery(
@@ -246,13 +287,14 @@ class RetrievalAgent(Agent):
         result_count: int
     ):
         """Update retrieval history for learning."""
-        self.retrieval_history.append({
-            "query": query,
-            "analysis": analysis,
-            "strategy": strategy,
-            "result_count": result_count,
-            "timestamp": datetime.utcnow()
-        })
+        if self.retrieval_history is not None:
+            self.retrieval_history.append({
+                "query": query,
+                "analysis": analysis,
+                "strategy": strategy,
+                "result_count": result_count,
+                "timestamp": datetime.utcnow()
+            })
 
 
 class RerankingAgent(Agent):
@@ -281,7 +323,7 @@ class RerankingAgent(Agent):
         self,
         results: List[RetrievalResult],
         query: str,
-        context: Dict[str, Any] = None
+        context: Optional[Dict[str, Any]] = None
     ) -> List[RetrievalResult]:
         """Intelligent reranking of search results."""
         

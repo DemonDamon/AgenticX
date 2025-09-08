@@ -125,20 +125,27 @@ class GraphRetriever(BaseRetriever):
                         "label": entity.get("label", "Entity"),
                         "content": entity.get("content", "")
                     }
-                    await self.graph_storage.add_node(
-                        node_id=node_id,
-                        properties=properties
-                    )
+                    # Check if source_id and target_id exist before calling add_edge
+                    source_id = entity.get("content", f"entity_{len(node_ids)}")
+                    if source_id is not None:
+                        self.graph_storage.add_node(
+                            node_id=source_id,
+                            properties=properties
+                        )
                     node_ids.append(node_id)
                 
                 # Add relationships
                 for rel in relationships:
-                    await self.graph_storage.add_edge(
-                        from_node=rel.get("source_id"),
-                        to_node=rel.get("target_id"),
-                        edge_type=rel.get("type", "RELATES_TO"),
-                        properties=rel.get("properties", {})
-                    )
+                    source_id = rel.get("source_id")
+                    target_id = rel.get("target_id")
+                    # Check if source_id and target_id exist before calling add_edge
+                    if source_id is not None and target_id is not None:
+                        self.graph_storage.add_edge(
+                            from_node=source_id,
+                            to_node=target_id,
+                            edge_type=rel.get("type", "RELATES_TO"),
+                            properties=rel.get("properties", {})
+                        )
                 
                 # Store document metadata
                 doc_id = doc.get("id") or f"doc_{len(self._nodes)}"
@@ -167,7 +174,7 @@ class GraphRetriever(BaseRetriever):
             for doc_id in document_ids:
                 if doc_id in self._nodes:
                     # Remove from graph storage
-                    await self.graph_storage.delete_node(doc_id)
+                    self.graph_storage.delete_node(doc_id)
                     
                     # Remove from local cache
                     del self._nodes[doc_id]
@@ -200,7 +207,7 @@ class GraphRetriever(BaseRetriever):
         
         try:
             # Search nodes by content similarity using query
-            nodes = await self.graph_storage.query(
+            nodes = self.graph_storage.query(
                 query=f"MATCH (n) WHERE n.content CONTAINS '{query}' RETURN n LIMIT 10"
             )
             
@@ -228,7 +235,7 @@ class GraphRetriever(BaseRetriever):
         
         try:
             # Search relationships by type and properties using query
-            relationships = await self.graph_storage.query(
+            relationships = self.graph_storage.query(
                 query=f"MATCH (a)-[r]->(b) WHERE r.type CONTAINS '{query}' OR a.content CONTAINS '{query}' OR b.content CONTAINS '{query}' RETURN a, r, b LIMIT 10"
             )
             
@@ -352,7 +359,7 @@ class GraphRetriever(BaseRetriever):
         
         try:
             # Load nodes using query
-            nodes = await self.graph_storage.query("MATCH (n) RETURN n")
+            nodes = self.graph_storage.query("MATCH (n) RETURN n")
             for node_data in nodes:
                 node = node_data.get("n", {})
                 node_id = node.get("id", f"node_{len(self._nodes)}")
@@ -364,7 +371,7 @@ class GraphRetriever(BaseRetriever):
                 )
             
             # Load relationships using query
-            relationships = await self.graph_storage.query("MATCH (a)-[r]->(b) RETURN a, r, b")
+            relationships = self.graph_storage.query("MATCH (a)-[r]->(b) RETURN a, r, b")
             for rel_data in relationships:
                 source_node = rel_data.get("a", {})
                 target_node = rel_data.get("b", {})
@@ -380,4 +387,4 @@ class GraphRetriever(BaseRetriever):
                 )
                 
         except Exception as e:
-            print(f"Error loading graph data: {e}") 
+            print(f"Error loading graph data: {e}")

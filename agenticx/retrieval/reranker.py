@@ -113,10 +113,10 @@ class Reranker:
                 prompt = self._build_relevance_prompt(query, result.content)
                 
                 # Get LLM response
-                response = await self.llm.agenerate([prompt])
+                response = await self.llm.ainvoke(prompt)
                 
                 # Parse score from response
-                score = self._parse_relevance_score(response.generations[0][0].text)
+                score = self._parse_relevance_score(response.content)
                 scores.append(score)
                 
             except Exception as e:

@@ -28,10 +28,10 @@ class DocumentIndexingTool(BaseTool):
         super().__init__(
             name="document_indexing",
             description="Index documents into the retrieval system for later search",
-            args_schema=DocumentIndexingArgs,
-            indexing_agent=indexing_agent,
-            retriever=retriever
+            args_schema=DocumentIndexingArgs
         )
+        self.indexing_agent = indexing_agent
+        self.retriever = retriever
     
     def execute(self, **kwargs) -> str:
         """Execute document indexing synchronously."""
@@ -74,9 +74,9 @@ class RetrievalTool(BaseTool):
         super().__init__(
             name="retrieval",
             description="Retrieve relevant information from the knowledge base",
-            args_schema=RetrievalArgs,
-            retrieval_agent=retrieval_agent
+            args_schema=RetrievalArgs
         )
+        self.retrieval_agent = retrieval_agent
     
     def execute(self, **kwargs) -> str:
         """Execute retrieval synchronously."""
@@ -131,9 +131,9 @@ class RerankingTool(BaseTool):
         super().__init__(
             name="reranking",
             description="Rerank search results for better relevance",
-            args_schema=RerankingArgs,
-            reranking_agent=reranking_agent
+            args_schema=RerankingArgs
         )
+        self.reranking_agent = reranking_agent
     
     def execute(self, **kwargs) -> str:
         """Execute reranking synchronously."""
@@ -183,9 +183,9 @@ class QueryModificationTool(BaseTool):
         super().__init__(
             name="query_modification",
             description="Modify queries to improve search effectiveness",
-            args_schema=QueryModificationArgs,
-            query_analyzer=query_analyzer
+            args_schema=QueryModificationArgs
         )
+        self.query_analyzer = query_analyzer
     
     def execute(self, **kwargs) -> str:
         """Execute query modification synchronously."""
@@ -255,9 +255,9 @@ class AnswerGenerationTool(BaseTool):
         super().__init__(
             name="answer_generation",
             description="Generate answers based on retrieved information",
-            args_schema=AnswerGenerationArgs,
-            llm=llm
+            args_schema=AnswerGenerationArgs
         )
+        self.llm = llm
     
     def execute(self, **kwargs) -> str:
         """Execute answer generation synchronously."""
@@ -312,9 +312,9 @@ class CanAnswerTool(BaseTool):
         super().__init__(
             name="can_answer",
             description="Check if enough information is available to answer a query",
-            args_schema=CanAnswerArgs,
-            llm=llm
+            args_schema=CanAnswerArgs
         )
+        self.llm = llm
     
     def execute(self, **kwargs) -> str:
         """Execute can answer check synchronously."""
