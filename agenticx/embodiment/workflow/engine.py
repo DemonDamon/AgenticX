@@ -102,6 +102,7 @@ class WorkflowEngine(Component):
             await self._setup()
             self._initialized = True
     
+    @property
     def is_initialized(self) -> bool:
         """Check if the engine is initialized."""
         return self._initialized
@@ -261,7 +262,10 @@ class WorkflowEngine(Component):
         
         # Multiple successors - evaluate conditions
         for successor_id in successors:
-            edge_data = workflow.graph.get_edge_data(current_node_id, successor_id)
+            # Check if workflow graph exists before accessing it
+            edge_data = None
+            if workflow.graph is not None:
+                edge_data = workflow.graph.get_edge_data(current_node_id, successor_id)
             condition = edge_data.get('condition') if edge_data else None
             
             if not condition:
@@ -341,7 +345,8 @@ class WorkflowEngine(Component):
         result = await tool.aexecute(**tool_args)
         
         # Update context with tool result
-        context.action_history.append(result)
+        # Convert ToolResult to dict before adding to action_history
+        context.action_history.append(result.dict() if hasattr(result, 'dict') else dict(result))
         
         return context
     
