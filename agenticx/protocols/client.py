@@ -158,6 +158,7 @@ class A2AClient:
         )
         
         # Send request with retries
+        last_exception: Optional[Exception] = None
         for attempt in range(self.max_retries + 1):
             try:
                 endpoint = f"{str(self.target_agent_card.endpoint).rstrip('/')}/tasks"
@@ -189,6 +190,7 @@ class A2AClient:
                 )
                 
             except httpx.HTTPError as e:
+                last_exception = e
                 if attempt < self.max_retries:
                     logger.warning(f"Task creation attempt {attempt + 1} failed: {e}, retrying...")
                     await asyncio.sleep(self.retry_delay * (2 ** attempt))  # Exponential backoff
@@ -197,6 +199,13 @@ class A2AClient:
                     raise A2ATaskError(f"Failed to create task after {self.max_retries + 1} attempts: {e}")
             except ValidationError as e:
                 raise A2ATaskError(f"Invalid task response format: {e}")
+        
+        # This line should never be reached due to the raise statements above,
+        # but added for type checker safety
+        if last_exception is not None:
+            raise A2ATaskError(f"Failed to create task: {last_exception}")
+        # Fallback to satisfy type checker - this should never be reached
+        raise A2ATaskError("Failed to create task: Unknown error")
     
     async def get_task(self, task_id: UUID) -> CollaborationTask:
         """
@@ -211,6 +220,7 @@ class A2AClient:
         Raises:
             A2ATaskError: If task retrieval fails
         """
+        last_exception: Optional[Exception] = None
         for attempt in range(self.max_retries + 1):
             try:
                 endpoint = f"{str(self.target_agent_card.endpoint).rstrip('/')}/tasks/{task_id}"
@@ -237,6 +247,7 @@ class A2AClient:
                 )
                 
             except httpx.HTTPError as e:
+                last_exception = e
                 if attempt < self.max_retries:
                     logger.warning(f"Task retrieval attempt {attempt + 1} failed: {e}, retrying...")
                     await asyncio.sleep(self.retry_delay * (2 ** attempt))
@@ -245,6 +256,13 @@ class A2AClient:
                     raise A2ATaskError(f"Failed to get task after {self.max_retries + 1} attempts: {e}")
             except ValidationError as e:
                 raise A2ATaskError(f"Invalid task response format: {e}")
+        
+        # This line should never be reached due to the raise statements above,
+        # but added for type checker safety
+        if last_exception is not None:
+            raise A2ATaskError(f"Failed to get task: {last_exception}")
+        # Fallback to satisfy type checker - this should never be reached
+        raise A2ATaskError("Failed to get task: Unknown error")
     
     async def wait_for_completion(
         self,
