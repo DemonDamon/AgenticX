@@ -6,6 +6,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from agenticx.core.tool import BaseTool
+from agenticx.embodiment.tools.adapters import BasePlatformAdapter
 
 
 class ToolResult(BaseModel):
@@ -53,9 +54,10 @@ class GUIActionTool(BaseTool):
         
         super().__init__(
             name=tool_name,
-            description=tool_description,
-            platform_adapter=platform_adapter
+            description=tool_description
         )
+        # Store platform adapter as instance attribute
+        self.platform_adapter = platform_adapter
     
     def execute(self, args=None, **kwargs) -> ToolResult:
         """Execute the GUI action synchronously.
