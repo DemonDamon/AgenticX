@@ -38,12 +38,16 @@ class GUIWorkflow(Workflow):
     def __init__(self, **data):
         """Initialize GUI workflow."""
         super().__init__(**data)
-        self.graph = nx.DiGraph()
+        if self.graph is None:
+            self.graph = nx.DiGraph()
         self._build_graph()
     
     def _build_graph(self) -> None:
         """Build NetworkX graph from nodes and edges."""
-        self.graph = nx.DiGraph()
+        if self.graph is None:
+            self.graph = nx.DiGraph()
+        else:
+            self.graph.clear()  # Clear existing graph instead of reassigning
         
         # Add nodes
         for node in self.nodes:
@@ -70,12 +74,26 @@ class GUIWorkflow(Workflow):
     def add_node(self, node: WorkflowNode) -> None:
         """Add a node to the workflow graph."""
         self.nodes.append(node)
-        self.graph.add_node(node.id, node=node)
+        if self.graph is not None:
+            self.graph.add_node(node.id, node=node)
+        else:
+            # Recreate graph if it was None
+            self.graph = nx.DiGraph()
+            self.graph.add_node(node.id, node=node)
+            # Rebuild the rest of the graph
+            self._build_graph()
     
     def add_edge(self, edge: WorkflowEdge) -> None:
         """Add an edge to the workflow graph."""
         self.edges.append(edge)
-        self.graph.add_edge(edge.source, edge.target, edge=edge)
+        if self.graph is not None:
+            self.graph.add_edge(edge.source, edge.target, edge=edge)
+        else:
+            # Recreate graph if it was None
+            self.graph = nx.DiGraph()
+            self.graph.add_edge(edge.source, edge.target, edge=edge)
+            # Rebuild the rest of the graph
+            self._build_graph()
     
     def get_node(self, node_id: str) -> Optional[WorkflowNode]:
         """Get a node by ID."""
@@ -86,11 +104,27 @@ class GUIWorkflow(Workflow):
     
     def get_successors(self, node_id: str) -> List[str]:
         """Get successor node IDs for a given node."""
-        return list(self.graph.successors(node_id))
+        if self.graph is None:
+            self._build_graph()
+        if self.graph is not None:
+            try:
+                return list(self.graph.successors(node_id))
+            except Exception:
+                # Node doesn't exist in graph
+                return []
+        return []
     
     def get_predecessors(self, node_id: str) -> List[str]:
         """Get predecessor node IDs for a given node."""
-        return list(self.graph.predecessors(node_id))
+        if self.graph is None:
+            self._build_graph()
+        if self.graph is not None:
+            try:
+                return list(self.graph.predecessors(node_id))
+            except Exception:
+                # Node doesn't exist in graph
+                return []
+        return []
     
     def validate(self) -> bool:
         """Validate the workflow structure."""
@@ -102,8 +136,12 @@ class GUIWorkflow(Workflow):
         if self.entry_point not in [node.id for node in self.nodes]:
             raise ValueError(f"Entry point '{self.entry_point}' references non-existent node")
         
+        # Ensure graph exists
+        if self.graph is None:
+            self._build_graph()
+        
         # Check for cycles (optional - some workflows may allow cycles)
-        if not nx.is_directed_acyclic_graph(self.graph):
+        if self.graph is not None and not nx.is_directed_acyclic_graph(self.graph):
             raise ValueError("Workflow contains cycles")
         
         # Check if all edges reference valid nodes
@@ -131,11 +169,27 @@ class GUIWorkflow(Workflow):
     
     def get_entry_nodes(self) -> List[str]:
         """Get all nodes that have no incoming edges (entry points)."""
-        return [node for node in self.graph.nodes() if self.graph.in_degree(node) == 0]
+        if self.graph is None:
+            self._build_graph()
+        if self.graph is not None:
+            try:
+                return [node for node in self.graph.nodes() if self.graph.in_degree(node) == 0]
+            except Exception:
+                # Error accessing graph
+                return []
+        return []
     
     def get_terminal_nodes(self) -> List[str]:
         """Get all terminal nodes (nodes with no successors)."""
-        return [node for node in self.graph.nodes() if self.graph.out_degree(node) == 0]
+        if self.graph is None:
+            self._build_graph()
+        if self.graph is not None:
+            try:
+                return [node for node in self.graph.nodes() if self.graph.out_degree(node) == 0]
+            except Exception:
+                # Error accessing graph
+                return []
+        return []
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert workflow to dictionary representation."""
