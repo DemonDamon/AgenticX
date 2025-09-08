@@ -413,6 +413,10 @@ class WorkflowBuilder:
         return decorator
 
 
+# 添加一个全局注册表来存储函数与工作流节点的映射关系
+_workflow_node_registry = {}
+
+
 # Convenience functions for common workflow patterns
 def create_sequential_workflow(
     name: str,
@@ -499,12 +503,13 @@ def node(node_id: str, name: Optional[str] = None, node_type: str = "function", 
         Decorator function
     """
     def decorator(func: Callable) -> Callable:
-        # This is a simplified version for testing purposes
-        # In practice, you'd want to use a proper builder instance
-        func._workflow_node_id = node_id
-        func._workflow_node_type = node_type
-        func._workflow_node_name = name if name is not None else func.__name__
-        func._workflow_node_config = config
+        # 使用注册表存储函数与工作流节点的映射关系，而不是直接给函数添加属性
+        _workflow_node_registry[func] = {
+            'node_id': node_id,
+            'node_type': node_type,
+            'name': name if name is not None else func.__name__,
+            'config': config
+        }
         return func
     return decorator
 
@@ -522,13 +527,27 @@ def tool(node_id: str, tool_name: str, name: Optional[str] = None, **tool_args):
         Decorator function
     """
     def decorator(func: Callable) -> Callable:
-        # This is a simplified version for testing purposes
-        func._workflow_tool_id = node_id
-        func._workflow_tool_name = tool_name
-        func._workflow_tool_display_name = name or func.__name__
-        func._workflow_tool_args = tool_args
+        # 使用注册表存储函数与工具节点的映射关系
+        _workflow_node_registry[func] = {
+            'tool_id': node_id,
+            'tool_name': tool_name,
+            'display_name': name or func.__name__,
+            'tool_args': tool_args
+        }
         return func
     return decorator
+
+
+def get_workflow_node_info(func: Callable) -> Optional[Dict[str, Any]]:
+    """获取函数关联的工作流节点信息。
+    
+    Args:
+        func: 装饰的函数
+        
+    Returns:
+        工作流节点信息字典，如果函数未被装饰则返回None
+    """
+    return _workflow_node_registry.get(func)
 
 
 def create_conditional_workflow(
