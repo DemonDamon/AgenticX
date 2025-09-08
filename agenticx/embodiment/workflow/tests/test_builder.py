@@ -273,11 +273,13 @@ class TestDecorators:
         def test_function(x, y):
             return x + y
         
-        # Check that function is wrapped correctly
-        assert hasattr(test_function, '_workflow_node_id')
-        assert hasattr(test_function, '_workflow_node_name')
-        assert test_function._workflow_node_id == "test_node"
-        assert test_function._workflow_node_name == "Test Node"
+        # Check that function is registered correctly in the registry
+        from agenticx.embodiment.workflow.builder import get_workflow_node_info
+        node_info = get_workflow_node_info(test_function)
+        
+        assert node_info is not None
+        assert node_info['node_id'] == "test_node"
+        assert node_info['name'] == "Test Node"
         
         # Check that function still works
         result = test_function(2, 3)
@@ -289,11 +291,13 @@ class TestDecorators:
         def test_tool_function(element):
             return f"Clicked {element}"
         
-        # Check that function is wrapped correctly
-        assert hasattr(test_tool_function, '_workflow_tool_id')
-        assert hasattr(test_tool_function, '_workflow_tool_name')
-        assert test_tool_function._workflow_tool_id == "test_tool"
-        assert test_tool_function._workflow_tool_name == "Test Tool"
+        # Check that function is registered correctly in the registry
+        from agenticx.embodiment.workflow.builder import get_workflow_node_info
+        tool_info = get_workflow_node_info(test_tool_function)
+        
+        assert tool_info is not None
+        assert tool_info['tool_id'] == "test_tool"
+        assert tool_info['tool_name'] == "Test Tool"
         
         # Check that function still works
         result = test_tool_function("button")
