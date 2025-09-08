@@ -5,7 +5,7 @@ import uuid
 from agenticx.llms.base import BaseLLMProvider
 from agenticx.memory.base import BaseMemory, MemoryRecord, SearchResult
 from agenticx.integrations.mem0.memory.main import Memory
-from agenticx.integrations.mem0.configs.base import MemoryConfig
+from mem0.configs.base import MemoryConfig  # Use mem0's MemoryConfig instead
 from mem0.llms.configs import LlmConfig
 from agenticx.integrations.mem0.llms.agenticx_llm import register_agenticx_llm, AgenticXLLM
 

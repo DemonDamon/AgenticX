@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Union, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 
 
@@ -97,7 +97,7 @@ class RetrievalContext:
             self.query,
             self.query_type,
             str(self.similarity_threshold),
-            str(self.expected_result_count or "")
+            str(self.max_results or "")
         ]
         return "|".join(key_parts)
 
@@ -147,11 +147,11 @@ class OptimizationResult:
         """获取改进摘要"""
         return {
             'cache_hit_rate_improvement': 
-                self.after_metrics.cache_hit_rate - self.before_metrics.cache_hit_rate,
+                self.after_metrics.hit_rate - self.before_metrics.hit_rate,
             'retrieval_time_improvement': 
-                self.before_metrics.average_retrieval_time - self.after_metrics.average_retrieval_time,
+                self.before_metrics.average_latency - self.after_metrics.average_latency,
             'memory_usage_reduction': 
-                self.before_metrics.total_memory_usage - self.after_metrics.total_memory_usage,
+                0.0,  # MemoryMetrics中没有直接的内存使用量字段
             'overall_performance_improvement': 
                 self.after_metrics.get_overall_performance_score() - 
                 self.before_metrics.get_overall_performance_score()

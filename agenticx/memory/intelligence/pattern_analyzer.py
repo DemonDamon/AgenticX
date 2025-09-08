@@ -150,25 +150,41 @@ class MemoryPatternAnalyzer:
             'data_size': pattern.data_size
         })
     
-    def _detect_pattern_anomaly(self, pattern: MemoryAccessPattern) -> Optional[Dict[str, Any]]:
+    def _detect_pattern_anomaly(self, pattern: MemoryAccessPattern) -> Optional[AnomalyDetection]:
         """检测模式异常"""
         # 检测延迟异常
         if pattern.retrieval_latency > 200.0:  # 阈值200ms
-            return {
-                'type': 'latency_anomaly',
-                'pattern_id': pattern.pattern_id,
-                'description': f'高延迟异常: {pattern.retrieval_latency}ms',
-                'severity': 'high' if pattern.retrieval_latency > 500.0 else 'medium'
-            }
+            return AnomalyDetection(
+                anomaly_id=f"latency_anomaly_{pattern.pattern_id}_{int(time.time())}",
+                anomaly_type='latency_anomaly',
+                severity='high' if pattern.retrieval_latency > 500.0 else 'medium',
+                description=f'高延迟异常: {pattern.retrieval_latency}ms',
+                affected_patterns=[pattern.pattern_id],
+                detection_time=datetime.now(),
+                suggested_actions=[
+                    "检查系统负载",
+                    "分析慢查询",
+                    "考虑增加缓存"
+                ],
+                confidence_score=min(0.9, pattern.retrieval_latency / 1000.0)
+            )
         
         # 检测成功率异常
         if pattern.success_rate < 0.8:  # 阈值80%
-            return {
-                'type': 'success_rate_anomaly',
-                'pattern_id': pattern.pattern_id,
-                'description': f'低成功率异常: {pattern.success_rate:.2%}',
-                'severity': 'high' if pattern.success_rate < 0.5 else 'medium'
-            }
+            return AnomalyDetection(
+                anomaly_id=f"success_rate_anomaly_{pattern.pattern_id}_{int(time.time())}",
+                anomaly_type='success_rate_anomaly',
+                severity='high' if pattern.success_rate < 0.5 else 'medium',
+                description=f'低成功率异常: {pattern.success_rate:.2%}',
+                affected_patterns=[pattern.pattern_id],
+                detection_time=datetime.now(),
+                suggested_actions=[
+                    "检查内存系统健康状态",
+                    "分析失败原因",
+                    "考虑增加冗余机制"
+                ],
+                confidence_score=1.0 - pattern.success_rate
+            )
         
         return None
     
@@ -188,7 +204,7 @@ class MemoryPatternAnalyzer:
         anomaly = self._detect_pattern_anomaly(pattern)
         if anomaly:
             self.anomaly_detections.append(anomaly)
-            self.logger.warning(f"检测到异常模式: {anomaly['description']}")
+            self.logger.warning(f"检测到异常模式: {anomaly.description}")
         
         # 检测趋势变化
         trend_change = self._detect_trend_change(pattern)
@@ -602,6 +618,9 @@ class MemoryPatternAnalyzer:
             random_pattern = random.choice(patterns_with_features)
             centroids.append(random_pattern[1].copy())
         
+        # 初始化clusters
+        clusters = [[] for _ in range(num_clusters)]
+        
         # 迭代聚类
         for iteration in range(10):  # 最多10次迭代
             clusters = [[] for _ in range(num_clusters)]
@@ -730,7 +749,7 @@ class MemoryPatternAnalyzer:
         
         # 基于异常检测生成建议
         recent_anomalies = [a for a in self.anomaly_detections 
-                           if (datetime.now() - a.detection_time).hours < 24]
+                           if (datetime.now() - a.detection_time).total_seconds() / 3600 < 24]
         
         for anomaly in recent_anomalies:
             recommendations.extend([
@@ -816,9 +835,9 @@ class MemoryPatternAnalyzer:
         return {
             'total_patterns': len(self.access_patterns),
             'recent_insights': len([i for i in self.pattern_insights 
-                                  if (datetime.now() - i.timestamp).hours < 24]),
+                                  if (datetime.now() - i.timestamp).total_seconds() / 3600 < 24]),
             'active_anomalies': len([a for a in self.anomaly_detections 
-                                   if (datetime.now() - a.detection_time).hours < 24]),
+                                   if (datetime.now() - a.detection_time).total_seconds() / 3600 < 24]),
             'usage_clusters': len(self.usage_clusters),
             'memory_types_analyzed': len(self.frequency_stats),
             'performance_trends_tracked': len(self.performance_trends),
@@ -856,5 +875,76 @@ class MemoryPatternAnalyzer:
             recommendations.extend([
                 "平衡缓存策略",
                 "监控访问模式变化"
+            ])
+        return recommendations
+    
+    def _calculate_trend(self, values: List[float]) -> Dict[str, Any]:
+        """计算趋势
+        
+        Args:
+            values: 数值列表
+            
+        Returns:
+            趋势信息字典
+        """
+        if len(values) < 2:
+            return {
+                "direction": TrendDirection.STABLE,
+                "slope": 0.0,
+                "confidence": 0.0
+            }
+        
+        # 简单的线性回归计算趋势
+        n = len(values)
+        x = list(range(n))
+        y = values
+        
+        # 计算斜率
+        sum_x = sum(x)
+        sum_y = sum(y)
+        sum_xy = sum(x[i] * y[i] for i in range(n))
+        sum_x2 = sum(xi * xi for xi in x)
+        
+        denominator = n * sum_x2 - sum_x * sum_x
+        if denominator == 0:
+            slope = 0.0
+        else:
+            slope = (n * sum_xy - sum_x * sum_y) / denominator
+        
+        # 确定趋势方向
+        if abs(slope) < 0.01:  # 几乎没有变化
+            direction = TrendDirection.STABLE
+        elif slope > 0:
+            direction = TrendDirection.INCREASING
+        else:
+            direction = TrendDirection.DECREASING
+        
+        # 计算置信度（基于数据点数量和斜率大小）
+        confidence = min(0.9, abs(slope) * n / 10)
+        
+        return {
+            "direction": direction,
+            "slope": slope,
+            "confidence": confidence
+        }
+    
+    def _get_latency_trend_recommendations(self, trend_direction: TrendDirection) -> List[str]:
+        """获取延迟趋势相关的推荐"""
+        recommendations = []
+        if trend_direction == TrendDirection.INCREASING:
+            recommendations.extend([
+                "分析慢查询原因",
+                "优化索引结构",
+                "考虑增加缓存层"
+            ])
+        elif trend_direction == TrendDirection.DECREASING:
+            recommendations.extend([
+                "继续保持优化",
+                "监控性能稳定性"
+            ])
+        else:
+            recommendations.extend([
+                "维持当前性能水平",
+                "定期性能审查"
             ])
         return recommendations

@@ -25,9 +25,15 @@ class MemoryRecord:
     def __post_init__(self):
         """Ensure timestamps are datetime objects."""
         if isinstance(self.created_at, str):
-            self.created_at = datetime.fromisoformat(self.created_at.replace('Z', '+00:00'))
+            # Use a more explicit approach to help type checkers
+            created_at_str = str(self.created_at)
+            formatted_created_at = created_at_str.replace('Z', '+00:00')
+            self.created_at = datetime.fromisoformat(formatted_created_at)
         if isinstance(self.updated_at, str):
-            self.updated_at = datetime.fromisoformat(self.updated_at.replace('Z', '+00:00'))
+            # Use a more explicit approach to help type checkers
+            updated_at_str = str(self.updated_at)
+            formatted_updated_at = updated_at_str.replace('Z', '+00:00')
+            self.updated_at = datetime.fromisoformat(formatted_updated_at)
 
 
 @dataclass
