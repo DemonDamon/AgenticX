@@ -11,6 +11,7 @@ import logging
 from typing import Dict, Any, Optional
 from uuid import UUID
 
+import httpx
 from fastapi import FastAPI, HTTPException, BackgroundTasks, status
 from fastapi.responses import JSONResponse
 
@@ -155,13 +156,16 @@ class A2AWebServiceWrapper:
                 )
                 skills.append(skill)
         
-        return AgentCard(
-            agent_id=self.agent_id,
-            name=self.agent_name,
-            description=self.agent_description,
-            endpoint=self.base_url,
-            skills=skills
-        )
+        # Create AgentCard with explicit HttpUrl conversion
+        agent_card_dict = {
+            "agent_id": self.agent_id,
+            "name": self.agent_name,
+            "description": self.agent_description,
+            "endpoint": self.base_url,  # Pydantic will convert this to HttpUrl
+            "skills": skills
+        }
+        
+        return AgentCard(**agent_card_dict)
     
     async def _execute_task(self, task_id: UUID) -> None:
         """
