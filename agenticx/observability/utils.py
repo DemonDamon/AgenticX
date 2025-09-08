@@ -216,16 +216,23 @@ class StatisticsCalculator:
         if not values:
             return {}
         
+        mode_value = None
+        if len(set(values)) != len(values):  # 有重复值才计算mode
+            try:
+                mode_value = float(statistics.mode(values))
+            except statistics.StatisticsError:
+                mode_value = None
+        
         return {
-            "count": len(values),
-            "min": min(values),
-            "max": max(values),
-            "mean": statistics.mean(values),
-            "median": statistics.median(values),
-            "mode": statistics.mode(values) if len(set(values)) != len(values) else None,
-            "std": statistics.stdev(values) if len(values) > 1 else 0,
-            "variance": statistics.variance(values) if len(values) > 1 else 0,
-            "range": max(values) - min(values)
+            "count": float(len(values)),
+            "min": float(min(values)),
+            "max": float(max(values)),
+            "mean": float(statistics.mean(values)),
+            "median": float(statistics.median(values)),
+            "mode": mode_value if mode_value is not None else float('nan'),  # 修复：确保返回float类型
+            "std": float(statistics.stdev(values) if len(values) > 1 else 0),
+            "variance": float(statistics.variance(values) if len(values) > 1 else 0),
+            "range": float(max(values) - min(values))
         }
     
     def calculate_percentiles(self, values: List[float], percentiles: List[float] = [25, 50, 75, 90, 95, 99]) -> Dict[str, float]:
@@ -242,10 +249,10 @@ class StatisticsCalculator:
             upper = min(lower + 1, len(sorted_values) - 1)
             
             if lower == upper:
-                result[f"p{p}"] = sorted_values[lower]
+                result[f"p{p}"] = float(sorted_values[lower])  # 确保返回float类型
             else:
                 weight = index - lower
-                result[f"p{p}"] = sorted_values[lower] * (1 - weight) + sorted_values[upper] * weight
+                result[f"p{p}"] = float(sorted_values[lower] * (1 - weight) + sorted_values[upper] * weight)  # 确保返回float类型
         
         return result
     
@@ -284,8 +291,7 @@ class StatisticsCalculator:
             
             for i, value in enumerate(values):
                 if value < lower_bound or value > upper_bound:
-                    outliers.append((i, value))
-        
+                    outliers.append((i, float(value)))  # 确保返回float类型
         elif method == "zscore":
             # 使用Z分数方法
             mean = statistics.mean(values)
@@ -295,7 +301,7 @@ class StatisticsCalculator:
                 for i, value in enumerate(values):
                     z_score = abs(value - mean) / std
                     if z_score > 3:  # 3σ原则
-                        outliers.append((i, value))
+                        outliers.append((i, float(value)))  # 确保返回float类型
         
         return outliers
     
@@ -331,10 +337,10 @@ class StatisticsCalculator:
         
         return {
             "trend": trend,
-            "slope": slope,
-            "intercept": intercept,
-            "r_squared": r_squared,
-            "confidence": r_squared  # 使用R²作为置信度
+            "slope": float(slope),         # 确保返回float类型
+            "intercept": float(intercept), # 确保返回float类型
+            "r_squared": float(r_squared), # 确保返回float类型
+            "confidence": float(r_squared) # 使用R²作为置信度，确保返回float类型
         }
 
 
@@ -430,7 +436,7 @@ class EventProcessor:
         return {
             "total_events": len(events),
             "unique_event_types": len(set(event.type for event in events)),
-            "common_sequences": common_sequences,
+            "common_sequences": [(str(seq), float(count)) for seq, count in common_sequences],  # 确保返回正确的类型
             "event_type_distribution": dict(defaultdict(int, {
                 event_type: len(type_events) 
                 for event_type, type_events in self.group_events_by_type(events).items()
@@ -633,15 +639,15 @@ def create_time_series_from_trajectories(trajectories: List[ExecutionTrajectory]
     for trajectory in trajectories:
         if trajectory.metadata.end_time:
             if metric == "duration":
-                value = trajectory.metadata.total_duration or 0
+                value = float(trajectory.metadata.total_duration or 0)  # 确保返回float类型
             elif metric == "cost":
-                value = trajectory.metadata.total_cost
+                value = float(trajectory.metadata.total_cost)  # 确保返回float类型
             elif metric == "tokens":
-                value = trajectory.metadata.total_tokens
+                value = float(trajectory.metadata.total_tokens)  # 确保返回float类型
             elif metric == "steps":
-                value = trajectory.metadata.total_steps
+                value = float(trajectory.metadata.total_steps)  # 确保返回float类型
             else:
-                value = 0
+                value = 0.0
             
             ts_data.add_point(
                 timestamp=trajectory.metadata.end_time,
@@ -662,8 +668,8 @@ def analyze_trajectory_performance(trajectories: List[ExecutionTrajectory]) -> D
     # 收集各种指标
     durations = [t.metadata.total_duration for t in trajectories if t.metadata.total_duration]
     costs = [t.metadata.total_cost for t in trajectories]
-    tokens = [t.metadata.total_tokens for t in trajectories]
-    steps = [t.metadata.total_steps for t in trajectories]
+    tokens = [float(t.metadata.total_tokens) for t in trajectories]  # 修复：转换为float类型
+    steps = [float(t.metadata.total_steps) for t in trajectories]    # 修复：转换为float类型
     
     analysis = {
         "total_trajectories": len(trajectories),

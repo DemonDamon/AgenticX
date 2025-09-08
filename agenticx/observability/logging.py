@@ -173,17 +173,17 @@ class StructuredLogger:
         if data:
             log_data.update(data)
         
-        # 根据级别调用对应的方法
+        # 根据级别调用对应的方法 (修复：使用extra参数传递额外数据)
         if level == LogLevel.DEBUG:
-            self.logger.debug(message, extra={"data": log_data})
+            self.logger.debug(message, extra=log_data)
         elif level == LogLevel.INFO:
-            self.logger.info(message, extra={"data": log_data})
+            self.logger.info(message, extra=log_data)
         elif level == LogLevel.WARNING:
-            self.logger.warning(message, extra={"data": log_data})
+            self.logger.warning(message, extra=log_data)
         elif level == LogLevel.ERROR:
-            self.logger.error(message, extra={"data": log_data})
+            self.logger.error(message, extra=log_data)
         elif level == LogLevel.CRITICAL:
-            self.logger.critical(message, extra={"data": log_data})
+            self.logger.critical(message, extra=log_data)
     
     def debug(self, message: str, data: Optional[Dict[str, Any]] = None):
         """记录调试日志"""
@@ -219,9 +219,14 @@ class JsonFormatter(logging.Formatter):
             "line": record.lineno
         }
         
-        # 添加额外数据
-        if hasattr(record, 'data'):
-            log_data.update(record.data)
+        # 添加额外数据 (修复：正确访问extra参数传递的数据)
+        for key, value in record.__dict__.items():
+            if key not in ['name', 'msg', 'args', 'levelname', 'levelno', 'pathname', 
+                          'filename', 'module', 'lineno', 'funcName', 'created', 
+                          'msecs', 'relativeCreated', 'thread', 'threadName', 
+                          'processName', 'process', 'getMessage', 'exc_info', 
+                          'exc_text', 'stack_info', 'formatter']:
+                log_data[key] = value
         
         return json.dumps(log_data, ensure_ascii=False, indent=2)
 
@@ -235,19 +240,23 @@ class StructuredFormatter(logging.Formatter):
         # 基础信息
         message = f"[{timestamp}] {record.levelname} - {record.getMessage()}"
         
-        # 添加额外数据
-        if hasattr(record, 'data'):
-            data = record.data
-            if 'event_type' in data:
-                message += f" | Event: {data['event_type']}"
-            if 'agent_id' in data:
-                message += f" | Agent: {data['agent_id']}"
-            if 'task_id' in data:
-                message += f" | Task: {data['task_id']}"
-            if 'tool_name' in data:
-                message += f" | Tool: {data['tool_name']}"
-            if 'execution_time' in data:
-                message += f" | Time: {data['execution_time']:.3f}s"
+        # 添加额外数据 (修复：正确访问extra参数传递的数据)
+        for key, value in record.__dict__.items():
+            if key not in ['name', 'msg', 'args', 'levelname', 'levelno', 'pathname', 
+                          'filename', 'module', 'lineno', 'funcName', 'created', 
+                          'msecs', 'relativeCreated', 'thread', 'threadName', 
+                          'processName', 'process', 'getMessage', 'exc_info', 
+                          'exc_text', 'stack_info', 'formatter']:
+                if key == 'event_type':
+                    message += f" | Event: {value}"
+                elif key == 'agent_id':
+                    message += f" | Agent: {value}"
+                elif key == 'task_id':
+                    message += f" | Task: {value}"
+                elif key == 'tool_name':
+                    message += f" | Tool: {value}"
+                elif key == 'execution_time':
+                    message += f" | Time: {value:.3f}s"
         
         return message
 
@@ -268,10 +277,19 @@ class XmlFormatter(logging.Formatter):
             f'  <line>{record.lineno}</line>'
         ]
         
-        # 添加额外数据
-        if hasattr(record, 'data'):
+        # 添加额外数据 (修复：正确访问extra参数传递的数据)
+        extra_data = {}
+        for key, value in record.__dict__.items():
+            if key not in ['name', 'msg', 'args', 'levelname', 'levelno', 'pathname', 
+                          'filename', 'module', 'lineno', 'funcName', 'created', 
+                          'msecs', 'relativeCreated', 'thread', 'threadName', 
+                          'processName', 'process', 'getMessage', 'exc_info', 
+                          'exc_text', 'stack_info', 'formatter']:
+                extra_data[key] = value
+        
+        if extra_data:
             xml_parts.append('  <data>')
-            for key, value in record.data.items():
+            for key, value in extra_data.items():
                 xml_parts.append(f'    <{key}>{value}</{key}>')
             xml_parts.append('  </data>')
         

@@ -279,6 +279,9 @@ class AutoEvaluator:
     
     def _evaluate_with_llm(self, expected: Any, actual: Any, task_type: str) -> EvaluationResult:
         """使用LLM评估"""
+        if not self.llm_provider:
+            return self._evaluate_simple(expected, actual, task_type)
+            
         try:
             prompt = self._build_evaluation_prompt(expected, actual, task_type)
             response = self.llm_provider.invoke(prompt)
@@ -378,7 +381,10 @@ class BenchmarkRunner:
         result = BenchmarkResult(
             benchmark_name=benchmark_name,
             agent_id=agent.id,
-            total_tasks=len(tasks)
+            total_tasks=len(tasks),
+            completed_tasks=0,
+            failed_tasks=0,
+            total_duration=0.0
         )
         
         # 执行任务
