@@ -29,7 +29,7 @@ class Neo4jStorage(BaseGraphStorage):
         # TODO: 实现Neo4j连接
         print("⚠️  Neo4j存储暂未实现，使用内存存储模拟")
 
-    def add_node(self, node_id: str, properties: Dict[str, Any], **kwargs: Any) -> None:
+    def add_node(self, node_id: str, properties: Optional[Dict[str, Any]] = None, **kwargs: Any) -> None:
         """添加节点
         
         Args:
@@ -40,18 +40,18 @@ class Neo4jStorage(BaseGraphStorage):
         # TODO: 实现Neo4j节点添加逻辑
         print(f"✅ 模拟添加节点 {node_id} 到Neo4j")
 
-    def add_edge(self, source_id: str, target_id: str, edge_type: str, properties: Dict[str, Any], **kwargs: Any) -> None:
+    def add_edge(self, from_node: str, to_node: str, edge_type: str, properties: Optional[Dict[str, Any]] = None, **kwargs: Any) -> None:
         """添加边
         
         Args:
-            source_id: 源节点ID
-            target_id: 目标节点ID
+            from_node: 源节点ID
+            to_node: 目标节点ID
             edge_type: 边类型
             properties: 边属性
             **kwargs: 额外参数
         """
         # TODO: 实现Neo4j边添加逻辑
-        print(f"✅ 模拟添加边 {source_id} -> {target_id} 到Neo4j")
+        print(f"✅ 模拟添加边 {from_node} -> {to_node} 到Neo4j")
 
     def get_node(self, node_id: str, **kwargs: Any) -> Optional[Dict[str, Any]]:
         """获取节点
@@ -67,19 +67,19 @@ class Neo4jStorage(BaseGraphStorage):
         print(f"✅ 模拟从Neo4j获取节点 {node_id}")
         return None
 
-    def query(self, cypher_query: str, parameters: Dict[str, Any] = None, **kwargs: Any) -> List[Dict[str, Any]]:
+    def query(self, query: str, params: Optional[Dict[str, Any]] = None, **kwargs: Any) -> List[Dict[str, Any]]:
         """执行Cypher查询
         
         Args:
-            cypher_query: Cypher查询语句
-            parameters: 查询参数
+            query: Cypher查询语句
+            params: 查询参数
             **kwargs: 额外参数
             
         Returns:
             查询结果
         """
         # TODO: 实现Neo4j查询逻辑
-        print(f"✅ 模拟执行Neo4j查询: {cypher_query}")
+        print(f"✅ 模拟执行Neo4j查询: {query}")
         return []
 
     def delete_node(self, node_id: str, **kwargs: Any) -> None:
@@ -92,17 +92,17 @@ class Neo4jStorage(BaseGraphStorage):
         # TODO: 实现Neo4j节点删除逻辑
         print(f"✅ 模拟从Neo4j删除节点 {node_id}")
 
-    def delete_edge(self, source_id: str, target_id: str, edge_type: str, **kwargs: Any) -> None:
+    def delete_edge(self, from_node: str, to_node: str, edge_type: str, **kwargs: Any) -> None:
         """删除边
         
         Args:
-            source_id: 源节点ID
-            target_id: 目标节点ID
+            from_node: 源节点ID
+            to_node: 目标节点ID
             edge_type: 边类型
             **kwargs: 额外参数
         """
         # TODO: 实现Neo4j边删除逻辑
-        print(f"✅ 模拟从Neo4j删除边 {source_id} -> {target_id}")
+        print(f"✅ 模拟从Neo4j删除边 {from_node} -> {to_node}")
 
     def clear(self) -> None:
         """清空图数据库"""
