@@ -28,8 +28,52 @@ class NebulaStorage(BaseGraphStorage):
         self.username = username
         self.password = password
         self._client = None
+        self._schema = ""
+        self._structured_schema: Dict[str, Any] = {}
         # TODO: 实现Nebula连接
         print("⚠️  Nebula存储暂未实现，使用内存存储模拟")
+
+    @property
+    def get_client(self) -> Any:
+        """获取底层图存储客户端"""
+        return self._client
+
+    @property
+    def get_schema(self) -> str:
+        """获取图存储的schema"""
+        return self._schema
+
+    @property
+    def get_structured_schema(self) -> Dict[str, Any]:
+        """获取图存储的结构化schema"""
+        return self._structured_schema
+
+    def refresh_schema(self) -> None:
+        """刷新图schema信息"""
+        # TODO: 实现Nebula schema刷新逻辑
+        print("✅ 模拟刷新Nebula schema信息")
+
+    def add_triplet(self, subj: str, obj: str, rel: str) -> None:
+        """在数据库中添加两个实体之间的关系（三元组）
+        
+        Args:
+            subj: 主体实体的标识符
+            obj: 客体实体的标识符
+            rel: 主体和客体之间的关系
+        """
+        # TODO: 实现Nebula三元组添加逻辑
+        print(f"✅ 模拟添加三元组 {subj} -[{rel}]-> {obj} 到Nebula")
+
+    def delete_triplet(self, subj: str, obj: str, rel: str) -> None:
+        """从图中删除特定的三元组，包括主体、客体和关系
+        
+        Args:
+            subj: 主体实体的标识符
+            obj: 客体实体的标识符
+            rel: 主体和客体之间的关系
+        """
+        # TODO: 实现Nebula三元组删除逻辑
+        print(f"✅ 模拟删除三元组 {subj} -[{rel}]-> {obj} 从Nebula")
 
     def add_node(self, node_id: str, properties: Optional[Dict[str, Any]] = None, **kwargs: Any) -> None:
         """添加节点
@@ -68,6 +112,34 @@ class NebulaStorage(BaseGraphStorage):
         # TODO: 实现Nebula节点获取逻辑
         print(f"✅ 模拟从Nebula获取节点 {node_id}")
         return None
+
+    def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+        """获取节点的邻居
+        
+        Args:
+            node_id: 节点ID
+            
+        Returns:
+            邻居节点列表
+        """
+        # TODO: 实现Nebula邻居获取逻辑
+        print(f"✅ 模拟从Nebula获取节点 {node_id} 的邻居")
+        return []
+
+    def get_path(self, from_node: str, to_node: str, max_depth: int = 3) -> List[Dict[str, Any]]:
+        """获取两个节点之间的路径
+        
+        Args:
+            from_node: 起始节点ID
+            to_node: 目标节点ID
+            max_depth: 最大路径深度
+            
+        Returns:
+            路径信息列表
+        """
+        # TODO: 实现Nebula路径获取逻辑
+        print(f"✅ 模拟从Nebula获取节点 {from_node} 到 {to_node} 的路径")
+        return []
 
     def query(self, query: str, params: Optional[Dict[str, Any]] = None, **kwargs: Any) -> List[Dict[str, Any]]:
         """执行NQL查询
@@ -121,4 +193,4 @@ class NebulaStorage(BaseGraphStorage):
         if self._client:
             # TODO: 实现Nebula连接关闭逻辑
             print("✅ 模拟关闭Nebula连接")
-            self._client = None 
+            self._client = None

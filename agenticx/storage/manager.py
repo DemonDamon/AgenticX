@@ -224,14 +224,14 @@ class StorageManager:
         elif config.storage_type == StorageType.PGVECTOR:
             from .vectordb_storages.pgvector import PgVectorStorage
             return PgVectorStorage(
-                connection_string=config.connection_string,
+                connection_string=config.connection_string or "",
                 dimension=config.extra_params.get("dimension", 768)
             )
         
         elif config.storage_type == StorageType.CHROMA:
             from .vectordb_storages.chroma import ChromaStorage
             return ChromaStorage(
-                persist_directory=config.extra_params.get("persist_directory", "./chroma_db"),
+                persist_directory=config.extra_params.get("persist_directory", "./chroma_db") or "./chroma_db",
                 dimension=config.extra_params.get("dimension", 768)
             )
         
@@ -245,9 +245,9 @@ class StorageManager:
         elif config.storage_type == StorageType.PINECONE:
             from .vectordb_storages.pinecone import PineconeStorage
             return PineconeStorage(
-                api_key=config.extra_params.get("api_key"),
-                environment=config.extra_params.get("environment"),
-                index_name=config.extra_params.get("index_name"),
+                api_key=config.extra_params.get("api_key") or "",
+                environment=config.extra_params.get("environment") or "",
+                index_name=config.extra_params.get("index_name") or "",
                 dimension=config.extra_params.get("dimension", 768)
             )
         
@@ -256,8 +256,8 @@ class StorageManager:
             from .graph_storages.neo4j import Neo4jStorage
             return Neo4jStorage(
                 uri=config.connection_string or "bolt://localhost:7687",
-                username=config.username,
-                password=config.password
+                username=config.username or "neo4j",
+                password=config.password or "password"
             )
         
         elif config.storage_type == StorageType.NEBULA:
@@ -265,32 +265,32 @@ class StorageManager:
             return NebulaStorage(
                 host=config.host or "localhost",
                 port=config.port or 9669,
-                username=config.username,
-                password=config.password
+                username=config.username or "root",
+                password=config.password or "nebula"
             )
         
         # Object Storage
         elif config.storage_type == StorageType.S3:
             from .object_storages.s3 import S3Storage
             return S3Storage(
-                bucket_name=config.extra_params.get("bucket_name"),
-                aws_access_key_id=config.username,
-                aws_secret_access_key=config.password,
+                bucket_name=config.extra_params.get("bucket_name") or "",
+                aws_access_key_id=config.username or "",
+                aws_secret_access_key=config.password or "",
                 region_name=config.extra_params.get("region_name", "us-east-1")
             )
         
         elif config.storage_type == StorageType.GCS:
             from .object_storages.gcs import GCSStorage
             return GCSStorage(
-                bucket_name=config.extra_params.get("bucket_name"),
-                credentials_path=config.extra_params.get("credentials_path")
+                bucket_name=config.extra_params.get("bucket_name") or "",
+                credentials_path=config.extra_params.get("credentials_path") or ""
             )
         
         elif config.storage_type == StorageType.AZURE:
             from .object_storages.azure import AzureStorage
             return AzureStorage(
-                container_name=config.extra_params.get("container_name"),
-                connection_string=config.connection_string
+                container_name=config.extra_params.get("container_name") or "",
+                connection_string=config.connection_string or ""
             )
         
         else:
