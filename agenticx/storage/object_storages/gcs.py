@@ -14,7 +14,7 @@ class GCSStorage(BaseObjectStorage):
     使用Google Cloud Storage进行云对象存储。
     """
 
-    def __init__(self, bucket_name: str = "agenticx", credentials_path: str = None):
+    def __init__(self, bucket_name: str = "agenticx", credentials_path: Optional[str] = None):
         """初始化GCS存储
         
         Args:
@@ -27,7 +27,7 @@ class GCSStorage(BaseObjectStorage):
         # TODO: 实现GCS连接
         print("⚠️  GCS存储暂未实现，使用内存存储模拟")
 
-    def upload(self, key: str, data: BinaryIO, metadata: Dict[str, str] = None, **kwargs: Any) -> None:
+    def upload(self, key: str, data: BinaryIO, metadata: Optional[Dict[str, str]] = None, **kwargs: Any) -> None:
         """上传对象
         
         Args:
@@ -63,7 +63,7 @@ class GCSStorage(BaseObjectStorage):
         # TODO: 实现GCS删除逻辑
         print(f"✅ 模拟从GCS删除对象 {key}")
 
-    def list_objects(self, prefix: str = "", **kwargs: Any) -> List[Dict[str, Any]]:
+    def list_objects(self, prefix: str = "", **kwargs: Any) -> List[str]:
         """列出对象
         
         Args:

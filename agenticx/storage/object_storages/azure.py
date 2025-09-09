@@ -27,7 +27,7 @@ class AzureStorage(BaseObjectStorage):
         # TODO: 实现Azure连接
         print("⚠️  Azure存储暂未实现，使用内存存储模拟")
 
-    def upload(self, key: str, data: BinaryIO, metadata: Dict[str, str] = None, **kwargs: Any) -> None:
+    def upload(self, key: str, data: BinaryIO, metadata: Optional[Dict[str, str]] = None, **kwargs: Any) -> None:
         """上传对象
         
         Args:
@@ -63,7 +63,7 @@ class AzureStorage(BaseObjectStorage):
         # TODO: 实现Azure删除逻辑
         print(f"✅ 模拟从Azure删除对象 {key}")
 
-    def list_objects(self, prefix: str = "", **kwargs: Any) -> List[Dict[str, Any]]:
+    def list_objects(self, prefix: str = "", **kwargs: Any) -> List[str]:
         """列出对象
         
         Args:

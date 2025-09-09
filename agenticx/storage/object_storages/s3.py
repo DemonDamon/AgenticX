@@ -31,7 +31,7 @@ class S3Storage(BaseObjectStorage):
         # TODO: 实现S3连接
         print("⚠️  S3存储暂未实现，使用内存存储模拟")
 
-    def upload(self, key: str, data: BinaryIO, metadata: Dict[str, str] = None, **kwargs: Any) -> None:
+    def upload(self, key: str, data: BinaryIO, metadata: Optional[Dict[str, str]] = None, **kwargs: Any) -> None:
         """上传对象
         
         Args:
@@ -67,7 +67,7 @@ class S3Storage(BaseObjectStorage):
         # TODO: 实现S3删除逻辑
         print(f"✅ 模拟从S3删除对象 {key}")
 
-    def list_objects(self, prefix: str = "", **kwargs: Any) -> List[Dict[str, Any]]:
+    def list_objects(self, prefix: str = "", **kwargs: Any) -> List[str]:
         """列出对象
         
         Args:
