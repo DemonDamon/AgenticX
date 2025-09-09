@@ -52,7 +52,8 @@ class SQLiteStorage(BaseKeyValueStorage):
     def clear(self) -> None:
         """清空所有记录"""
         self._cursor.execute('DELETE FROM kv')
-        self._connection.commit()
+        if self._connection:
+            self._connection.commit()
 
     def get(self, key: str) -> Optional[Any]:
         """根据键获取值
@@ -80,7 +81,8 @@ class SQLiteStorage(BaseKeyValueStorage):
         self._cursor.execute(
             'INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)', (key, value_json)
         )
-        self._connection.commit()
+        if self._connection:
+            self._connection.commit()
 
     def delete(self, key: str) -> bool:
         """删除指定键
@@ -92,7 +94,8 @@ class SQLiteStorage(BaseKeyValueStorage):
             是否删除成功
         """
         self._cursor.execute('DELETE FROM kv WHERE key = ?', (key,))
-        self._connection.commit()
+        if self._connection:
+            self._connection.commit()
         return self._cursor.rowcount > 0
 
     def exists(self, key: str) -> bool:
