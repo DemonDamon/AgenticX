@@ -2,10 +2,10 @@
 Storage migration utilities
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 from datetime import datetime
 
-from .base import BaseStorage
+from .base import BaseStorage, BaseVectorStorage
 from .models import StorageSession, StorageDocument, StorageVector
 from .errors import MigrationError
 
@@ -152,6 +152,13 @@ class StorageMigration:
     ) -> Dict[str, Any]:
         """Migrate vectors from source to target storage"""
         try:
+            # Check if source storage supports vectors
+            if not hasattr(self.source_storage, 'list_vectors'):
+                raise MigrationError(
+                    "Source storage does not support vector operations",
+                    storage_type=str(type(self.source_storage).__name__)
+                )
+            
             # Check if target storage supports vectors
             if not hasattr(self.target_storage, 'list_vectors'):
                 raise MigrationError(
@@ -159,8 +166,12 @@ class StorageMigration:
                     storage_type=str(type(self.target_storage).__name__)
                 )
             
+            # Cast to BaseVectorStorage for type checking
+            source_vector_storage = cast(BaseVectorStorage, self.source_storage)
+            target_vector_storage = cast(BaseVectorStorage, self.target_storage)
+            
             # Get vectors from source
-            vectors = await self.source_storage.list_vectors(collection)
+            vectors = await source_vector_storage.list_vectors(collection)
             
             if dry_run:
                 return {
@@ -177,7 +188,7 @@ class StorageMigration:
             
             for vector in vectors:
                 try:
-                    await self.target_storage.create_vector(vector)
+                    await target_vector_storage.create_vector(vector)
                     migrated_count += 1
                     self.migration_log.append({
                         "timestamp": datetime.now().isoformat(),
@@ -254,4 +265,4 @@ class StorageMigration:
     
     def clear_migration_log(self) -> None:
         """Clear migration log"""
-        self.migration_log.clear() 
+        self.migration_log.clear()
