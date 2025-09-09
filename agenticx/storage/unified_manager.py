@@ -278,7 +278,7 @@ class UnifiedStorageManager:
         Returns:
             存储信息字典
         """
-        info = {
+        info: Dict[str, Any] = {
             "kv_storage": self.kv_storage is not None,
             "vector_storage": self.vector_storage is not None,
             "graph_storage": self.graph_storage is not None,
