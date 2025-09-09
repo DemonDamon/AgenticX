@@ -38,7 +38,7 @@ class ToolIntelligenceEngine:
         self.domain_expertise: Dict[str, List[str]] = {}  # 领域 -> 工具列表
         self.capability_mapping: Dict[str, List[str]] = {}  # 能力 -> 工具列表
         
-    def register_tool(self, tool: BaseTool, domains: List[str] = None, capabilities: List[str] = None):
+    def register_tool(self, tool: BaseTool, domains: Optional[List[str]] = None, capabilities: Optional[List[str]] = None):
         """注册工具到智能引擎
         
         Args:
@@ -46,6 +46,8 @@ class ToolIntelligenceEngine:
             domains: 工具适用的领域列表
             capabilities: 工具提供的能力列表
         """
+        domains = domains or []
+        capabilities = capabilities or []
         self.available_tools[tool.name] = tool
         
         # 更新领域专长映射
@@ -96,7 +98,7 @@ class ToolIntelligenceEngine:
             resource_requirements=getattr(task, 'resource_requirements', {})
         )
     
-    def select_optimal_tool(self, task_features: TaskFeatures, context: Dict[str, Any] = None) -> Tuple[BaseTool, float, str]:
+    def select_optimal_tool(self, task_features: TaskFeatures, context: Optional[Dict[str, Any]] = None) -> Tuple[BaseTool, float, str]:
         """选择最优工具
         
         Args:

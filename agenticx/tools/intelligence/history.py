@@ -5,10 +5,10 @@
 
 import json
 import logging
-from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict
+from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ class ToolUsageRecord:
     """工具使用记录"""
     
     def __init__(self, tool_name: str, task_domain: str, success: bool, 
-                 execution_time: float, timestamp: datetime = None, context: Dict[str, Any] = None):
+                 execution_time: float, timestamp: Optional[datetime] = None, context: Optional[Dict[str, Any]] = None):
         self.tool_name = tool_name
         self.task_domain = task_domain
         self.success = success
@@ -66,7 +66,7 @@ class ToolUsageHistory:
         self._load_history()
     
     def record_usage(self, tool_name: str, task_domain: str, success: bool, 
-                    execution_time: float, context: Dict[str, Any] = None):
+                    execution_time: float, context: Optional[Dict[str, Any]] = None):
         """记录工具使用
         
         Args:
@@ -76,6 +76,7 @@ class ToolUsageHistory:
             execution_time: 执行时间
             context: 上下文信息
         """
+        context = context or {}
         record = ToolUsageRecord(
             tool_name=tool_name,
             task_domain=task_domain,
@@ -95,8 +96,8 @@ class ToolUsageHistory:
         
         logger.debug(f"记录工具使用: {tool_name} in {task_domain}, 成功: {success}")
     
-    def get_tool_history(self, tool_name: str, domain: str = None, 
-                        days: int = None) -> List[Dict[str, Any]]:
+    def get_tool_history(self, tool_name: str, domain: Optional[str] = None, 
+                        days: Optional[int] = None) -> List[Dict[str, Any]]:
         """获取特定工具的使用历史
         
         Args:

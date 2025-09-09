@@ -237,7 +237,7 @@ class ToolExecutor:
                     tool.timeout = timeout
                 
                 # 执行工具
-                result = tool.execute(**kwargs)
+                result = tool.run(**kwargs)
                 
                 # 记录成功
                 execution_time = time.time() - start_time
@@ -311,7 +311,7 @@ class ToolExecutor:
                     tool.timeout = timeout
                 
                 # 执行工具
-                result = await tool.aexecute(**kwargs)
+                result = await tool.arun(**kwargs)
                 
                 # 记录成功
                 execution_time = time.time() - start_time
