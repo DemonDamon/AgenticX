@@ -139,15 +139,15 @@ class FileTool(BaseTool):
         if len(content.encode(encoding)) > self.max_file_size:
             raise ValueError(f"Content size exceeds maximum {self.max_file_size}")
         
-        file_path = Path(file_path)
+        path_obj = Path(file_path)
         
         if create_dirs:
-            file_path.parent.mkdir(parents=True, exist_ok=True)
+            path_obj.parent.mkdir(parents=True, exist_ok=True)
         
-        with open(file_path, "w", encoding=encoding) as f:
+        with open(path_obj, "w", encoding=encoding) as f:
             f.write(content)
         
-        return f"Successfully wrote {len(content)} characters to {file_path}"
+        return f"Successfully wrote {len(content)} characters to {path_obj}"
     
     def _run(self, **kwargs) -> Any:
         """执行文件操作"""
@@ -373,6 +373,10 @@ class JsonTool(BaseTool):
         """处理 JSON 数据"""
         action = kwargs.get("action")
         data = kwargs.get("data")
+        
+        # 检查 data 是否为 None
+        if data is None:
+            return "Error: No data provided for JSON processing"
         
         if action == "parse":
             try:

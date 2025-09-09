@@ -111,6 +111,10 @@ class RemoteTool(BaseTool):
                 limit=1024*1024*10  # 增加到 10MB 缓冲区限制
             )
 
+            # 确保流不为 None
+            if process.stdin is None or process.stdout is None or process.stderr is None:
+                raise ToolError("Failed to create process streams", self.name)
+
             try:
                 # 第一步：发送初始化请求
                 initialize_request = {
@@ -218,7 +222,7 @@ class RemoteTool(BaseTool):
                     try:
                         await asyncio.wait_for(process.wait(), timeout=5.0)
                     except asyncio.TimeoutError:
-                        process.kill()
+                        process.kill
         
         except Exception as e:
             if isinstance(e, ToolError):
@@ -278,6 +282,10 @@ class MCPClient:
                 limit=1024*1024*10
             )
 
+            # 确保流不为 None
+            if process.stdin is None or process.stdout is None or process.stderr is None:
+                raise ToolError("Failed to create process streams", "MCPClient")
+
             try:
                 # 初始化握手
                 initialize_request = {
@@ -299,7 +307,7 @@ class MCPClient:
                 init_response_line = await process.stdout.readline()
                 init_response = json.loads(init_response_line)
                 if init_response.get('error'):
-                    raise ToolError(f"MCP initialization failed: {init_response['error']}")
+                    raise ToolError(f"MCP initialization failed: {init_response['error']}", "MCPClient")
                 
                 # 发送 initialized 通知
                 initialized_notification = {
@@ -334,7 +342,7 @@ class MCPClient:
                 await process.wait()
                 
                 if tools_response.get('error'):
-                    raise ToolError(f"Failed to get tools list: {tools_response['error']}")
+                    raise ToolError(f"Failed to get tools list: {tools_response['error']}", "MCPClient")
                 
                 # 解析工具信息
                 tools_data = tools_response.get('result', {}).get('tools', [])
@@ -362,7 +370,7 @@ class MCPClient:
         except Exception as e:
             if isinstance(e, ToolError):
                 raise
-            raise ToolError(f"Failed to discover tools: {e}") from e
+            raise ToolError(f"Failed to discover tools: {e}", "MCPClient") from e
     
     def _create_pydantic_model_from_schema(self, schema: Dict[str, Any], model_name: str) -> Type[BaseModel]:
         """从 JSON Schema 创建 Pydantic 模型"""

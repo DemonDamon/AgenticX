@@ -34,14 +34,14 @@ class ToolChainAssembler:
     
     def __init__(self, intelligence_engine: ToolIntelligenceEngine):
         self.intelligence_engine = intelligence_engine
-        self.chain_templates: Dict[str, List[Dict[str, Any]]] = {}
+        self.chain_templates: Dict[str, Dict[str, Any]] = {}
         self.optimization_strategies = [
             self._optimize_parallel_execution,
             self._optimize_data_flow,
             self._optimize_error_handling
         ]
     
-    def assemble_tool_chain(self, task: Task, context: Dict[str, Any] = None) -> ToolChain:
+    def assemble_tool_chain(self, task: Task, context: Optional[Dict[str, Any]] = None) -> ToolChain:
         """组装工具链
         
         Args:
@@ -140,7 +140,7 @@ class ToolChainAssembler:
         )
     
     def register_chain_template(self, name: str, template: List[Dict[str, Any]], 
-                              applicable_domains: List[str] = None):
+                              applicable_domains: Optional[List[str]] = None):
         """注册工具链模板
         
         Args:
@@ -156,7 +156,7 @@ class ToolChainAssembler:
         }
         logger.info(f"注册工具链模板: {name}")
     
-    def optimize_existing_chain(self, chain: ToolChain, performance_data: Dict[str, Any] = None) -> ToolChain:
+    def optimize_existing_chain(self, chain: ToolChain, performance_data: Optional[Dict[str, Any]] = None) -> ToolChain:
         """优化现有工具链
         
         Args:
@@ -166,6 +166,8 @@ class ToolChainAssembler:
         Returns:
             ToolChain: 优化后的工具链
         """
+        performance_data = performance_data or {}
+        
         optimized_chain = chain.copy(deep=True)
         
         # 应用优化策略
@@ -213,7 +215,9 @@ class ToolChainAssembler:
                     'features': TaskFeatures(
                         complexity=TaskComplexity.SIMPLE,
                         domain='data_processing',
-                        required_capabilities=['data_loading']
+                        required_capabilities=['data_loading'],
+                        estimated_duration=5.0,
+                        priority=1
                     ),
                     'dependencies': [],
                     'output_mapping': {'data': 'loaded_data'}
@@ -222,7 +226,9 @@ class ToolChainAssembler:
                     'features': TaskFeatures(
                         complexity=TaskComplexity.SIMPLE,
                         domain='data_analysis',
-                        required_capabilities=['data_analysis']
+                        required_capabilities=['data_analysis'],
+                        estimated_duration=10.0,
+                        priority=1
                     ),
                     'dependencies': [0],
                     'input_mapping': {'data': 'loaded_data'},
@@ -236,7 +242,9 @@ class ToolChainAssembler:
                     'features': TaskFeatures(
                         complexity=TaskComplexity.SIMPLE,
                         domain='web_scraping',
-                        required_capabilities=['web_request']
+                        required_capabilities=['web_request'],
+                        estimated_duration=15.0,
+                        priority=1
                     ),
                     'dependencies': [],
                     'output_mapping': {'html': 'raw_html'}
@@ -245,7 +253,9 @@ class ToolChainAssembler:
                     'features': TaskFeatures(
                         complexity=TaskComplexity.SIMPLE,
                         domain='data_processing',
-                        required_capabilities=['html_parsing']
+                        required_capabilities=['html_parsing'],
+                        estimated_duration=8.0,
+                        priority=1
                     ),
                     'dependencies': [0],
                     'input_mapping': {'html': 'raw_html'}
@@ -276,7 +286,9 @@ class ToolChainAssembler:
             subtask_features = TaskFeatures(
                 complexity=TaskComplexity.SIMPLE,
                 domain=task_features.domain,
-                required_capabilities=[capability]
+                required_capabilities=[capability],
+                estimated_duration=5.0,
+                priority=1
             )
             
             # 确定依赖关系（简单的线性依赖）
@@ -294,9 +306,9 @@ class ToolChainAssembler:
     def _find_template_chain(self, task_features: TaskFeatures) -> Optional[ToolChain]:
         """查找适用的工具链模板"""
         for name, template_info in self.chain_templates.items():
-            if task_features.domain in template_info['domains']:
+            if task_features.domain in template_info.get('domains', []):
                 # 找到适用的模板
-                template = template_info['template']
+                template = template_info.get('template', [])
                 steps = []
                 
                 for step_def in template:
@@ -307,7 +319,8 @@ class ToolChainAssembler:
                             order=step_def['order'],
                             dependencies=step_def.get('dependencies', []),
                             input_mapping=step_def.get('input_mapping', {}),
-                            output_mapping=step_def.get('output_mapping', {})
+                            output_mapping=step_def.get('output_mapping', {}),
+                            condition=None
                         )
                         steps.append(step)
                 
@@ -341,20 +354,23 @@ class ToolChainAssembler:
         
         return optimized_chain
     
-    def _optimize_parallel_execution(self, chain: ToolChain, performance_data: Dict[str, Any] = None) -> ToolChain:
+    def _optimize_parallel_execution(self, chain: ToolChain, performance_data: Optional[Dict[str, Any]] = None) -> ToolChain:
         """优化并行执行"""
+        performance_data = performance_data or {}
         # 识别可以并行执行的步骤
         # 这里实现一个简单版本
         return chain
     
-    def _optimize_data_flow(self, chain: ToolChain, performance_data: Dict[str, Any] = None) -> ToolChain:
+    def _optimize_data_flow(self, chain: ToolChain, performance_data: Optional[Dict[str, Any]] = None) -> ToolChain:
         """优化数据流"""
+        performance_data = performance_data or {}
         # 优化步骤间的数据传递
         # 减少不必要的数据转换
         return chain
     
-    def _optimize_error_handling(self, chain: ToolChain, performance_data: Dict[str, Any] = None) -> ToolChain:
+    def _optimize_error_handling(self, chain: ToolChain, performance_data: Optional[Dict[str, Any]] = None) -> ToolChain:
         """优化错误处理"""
+        performance_data = performance_data or {}
         # 添加错误处理和重试机制
         return chain
     

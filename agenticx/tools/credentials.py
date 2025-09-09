@@ -47,9 +47,11 @@ class CredentialStore:
         """
         # 设置存储路径
         if storage_path is None:
-            storage_path = Path.home() / ".agenticx" / "credentials"
+            storage_path_str = str(Path.home() / ".agenticx" / "credentials")
+        else:
+            storage_path_str = storage_path
         
-        self.storage_path = Path(storage_path)
+        self.storage_path = Path(storage_path_str)
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         
         # 设置加密
@@ -67,24 +69,28 @@ class CredentialStore:
     
     def _setup_encryption(self, encryption_key: Optional[str] = None):
         """设置加密"""
+        # 检查加密是否可用
+        if not CRYPTO_AVAILABLE:
+            raise CredentialError("Encryption is not available. Please install the cryptography library.")
+        
         key_file = self.storage_path.parent / "encryption.key"
         
         if encryption_key:
             # 使用提供的密钥
-            self._fernet = Fernet(encryption_key.encode())
+            self._fernet = Fernet(encryption_key.encode())  # type: ignore
         elif key_file.exists():
             # 加载现有密钥
             with open(key_file, "rb") as f:
                 key = f.read()
-            self._fernet = Fernet(key)
+            self._fernet = Fernet(key)  # type: ignore
         else:
             # 生成新密钥
-            key = Fernet.generate_key()
+            key = Fernet.generate_key()  # type: ignore
             with open(key_file, "wb") as f:
                 f.write(key)
             # 设置文件权限（仅所有者可读写）
             os.chmod(key_file, 0o600)
-            self._fernet = Fernet(key)
+            self._fernet = Fernet(key)  # type: ignore
             
             logger.info(f"Generated new encryption key: {key_file}")
     
@@ -372,4 +378,4 @@ def set_credential(organization_id: str, tool_name: str, credential_data: Dict[s
 def get_credential(organization_id: str, tool_name: str) -> Optional[Dict[str, Any]]:
     """便捷函数：获取凭据"""
     store = get_default_credential_store()
-    return store.get_credential(organization_id, tool_name) 
+    return store.get_credential(organization_id, tool_name)
