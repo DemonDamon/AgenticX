@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 """
 AgenticX: 一个统一的多智能体框架
 

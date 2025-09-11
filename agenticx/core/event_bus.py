@@ -95,6 +95,31 @@ class EventBus:
         if async_tasks:
             await asyncio.gather(*async_tasks, return_exceptions=True)
     
+    async def add_error(self, message: str, source: Optional[str] = None, details: Optional[Dict[str, Any]] = None):
+        """Helper to publish a standardized error event."""
+        error_event = Event(
+            type='error',
+            data={
+                'message': message,
+                'source': source,
+                'details': details
+            }
+        )
+        await self.publish_async(error_event)
+
+    async def update_task(self, task_description: str, source_agent: str, status: Optional[str] = None, details: Optional[Dict[str, Any]] = None):
+        """Helper to publish a standardized task update event."""
+        task_event = Event(
+            type='task_update',
+            data={
+                'task_description': task_description,
+                'source_agent': source_agent,
+                'status': status,
+                'details': details
+            }
+        )
+        await self.publish_async(task_event)
+
     def _add_to_history(self, event: AnyEvent) -> None:
         """添加事件到历史记录"""
         self._event_history.append(event)

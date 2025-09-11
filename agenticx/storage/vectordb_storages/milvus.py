@@ -6,6 +6,7 @@ Milvus向量存储实现，支持高性能向量搜索引擎。
 
 from typing import Any, Dict, List, Optional
 from .base import BaseVectorStorage, VectorRecord, VectorDBQuery, VectorDBQueryResult, VectorDBStatus
+from pymilvus import connections, utility
 
 
 class MilvusStorage(BaseVectorStorage):
@@ -26,8 +27,13 @@ class MilvusStorage(BaseVectorStorage):
         self.port = port
         self.dimension = dimension
         self._client = None
-        # TODO: 实现Milvus连接
-        print("⚠️  Milvus存储暂未实现，使用内存存储模拟")
+        try:
+            connections.connect("default", host=self.host, port=self.port)
+            print("✅ Successfully connected to Milvus.")
+            self._client = "default"  # Use the default connection alias
+        except Exception as e:
+            print(f"⚠️  Milvus connection failed: {e}")
+            print("⚠️  Falling back to in-memory storage simulation.")
 
     def add(self, records: List[VectorRecord], **kwargs: Any) -> None:
         """添加向量记录
@@ -37,7 +43,7 @@ class MilvusStorage(BaseVectorStorage):
             **kwargs: 额外参数
         """
         # TODO: 实现Milvus添加逻辑
-        print(f"✅ 模拟添加 {len(records)} 个向量到Milvus")
+        print(f"⏳ TODO: 添加 {len(records)} 个向量到Milvus")
 
     def delete(self, ids: List[str], **kwargs: Any) -> None:
         """删除向量记录
@@ -47,7 +53,7 @@ class MilvusStorage(BaseVectorStorage):
             **kwargs: 额外参数
         """
         # TODO: 实现Milvus删除逻辑
-        print(f"✅ 模拟从Milvus删除 {len(ids)} 个向量")
+        print(f"⏳ TODO: 从Milvus删除 {len(ids)} 个向量")
 
     def status(self) -> VectorDBStatus:
         """获取存储状态
@@ -56,7 +62,7 @@ class MilvusStorage(BaseVectorStorage):
             向量数据库状态
         """
         # TODO: 实现Milvus状态获取逻辑
-        print("✅ 模拟获取Milvus状态")
+        print("⏳ TODO: 获取Milvus状态")
         return VectorDBStatus(vector_dim=self.dimension, vector_count=0)
 
     def query(self, query: VectorDBQuery, **kwargs: Any) -> List[VectorDBQueryResult]:
@@ -70,18 +76,18 @@ class MilvusStorage(BaseVectorStorage):
             查询结果列表
         """
         # TODO: 实现Milvus查询逻辑
-        print(f"✅ 模拟Milvus查询，top_k={query.top_k}")
+        print(f"⏳ TODO: Milvus查询，top_k={query.top_k}")
         return []
 
     def clear(self) -> None:
         """清空所有向量"""
         # TODO: 实现Milvus清空逻辑
-        print("✅ 模拟清空Milvus所有向量")
+        print("⏳ TODO: 清空Milvus所有向量")
 
     def load(self) -> None:
         """加载云服务上托管的集合"""
         # TODO: 实现Milvus加载逻辑
-        print("✅ 模拟加载Milvus集合")
+        print("⏳ TODO: 加载Milvus集合")
 
     @property
     def client(self) -> Any:
@@ -91,6 +97,9 @@ class MilvusStorage(BaseVectorStorage):
     def close(self) -> None:
         """关闭Milvus连接"""
         if self._client:
-            # TODO: 实现Milvus连接关闭逻辑
-            print("✅ 模拟关闭Milvus连接")
-            self._client = None 
+            try:
+                connections.disconnect(self._client)
+                print("✅ Closed Milvus connection.")
+            except Exception as e:
+                print(f"⚠️  Error closing Milvus connection: {e}")
+            self._client = None

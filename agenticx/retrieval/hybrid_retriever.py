@@ -35,9 +35,10 @@ class HybridRetriever(BaseRetriever):
         config: Optional[HybridConfig] = None,
         **kwargs
     ):
-        # Filter out organization_id from kwargs to avoid conflicts
-        filtered_kwargs = {k: v for k, v in kwargs.items() if k != 'organization_id'}
-        super().__init__(vector_retriever.tenant_id, **filtered_kwargs)
+        # Filter out organization_id and tenant_id from kwargs to avoid conflicts
+        tenant_id = vector_retriever.tenant_id
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k not in ['organization_id', 'tenant_id']}
+        super().__init__(tenant_id=tenant_id, **filtered_kwargs)
         self.vector_retriever = vector_retriever
         self.bm25_retriever = bm25_retriever
         self.config = config or HybridConfig()
@@ -253,4 +254,4 @@ class HybridRetriever(BaseRetriever):
         intersection = len(words1 & words2)
         union = len(words1 | words2)
         
-        return intersection / union if union > 0 else 0.0 
+        return intersection / union if union > 0 else 0.0
