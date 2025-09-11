@@ -176,13 +176,23 @@ class StorageManager:
         self.router = StorageRouter(self.storages)
         self._initialized = True
     
+    def get_storage(self, storage_type: StorageType) -> Optional[Union[BaseKeyValueStorage, BaseVectorStorage, BaseGraphStorage, BaseObjectStorage]]:
+        """Get a storage instance by its StorageType enum."""
+        if not self.initialized:
+            return None
+        for i, config in enumerate(self.configs):
+            if config.storage_type == storage_type:
+                if i < len(self.storages):
+                    return self.storages[i]
+        return None
+    
     def _create_storage(self, config: StorageConfig) -> Union[BaseKeyValueStorage, BaseVectorStorage, BaseGraphStorage, BaseObjectStorage]:
         """Create storage instance from config"""
         
         # Key-Value Storage
         if config.storage_type == StorageType.REDIS:
             from .key_value_storages.redis import RedisStorage
-            return RedisStorage(redis_url=config.connection_string or "redis://localhost:6379")
+            return RedisStorage(config)
         
         elif config.storage_type == StorageType.SQLITE:
             from .key_value_storages.sqlite import SQLiteStorage
@@ -190,7 +200,16 @@ class StorageManager:
         
         elif config.storage_type == StorageType.POSTGRES:
             from .key_value_storages.postgres import PostgresStorage
-            return PostgresStorage(connection_string=config.connection_string or "postgresql://localhost:5432/agenticx")
+            if config.connection_string:
+                conn_str = config.connection_string
+            else:
+                user = config.username or 'postgres'
+                password = config.password or 'password'
+                host = config.host or 'localhost'
+                port = config.port or 5432
+                db = config.database or 'agenticx'
+                conn_str = f"postgresql://{user}:{password}@{host}:{port}/{db}"
+            return PostgresStorage(connection_string=conn_str)
         
         elif config.storage_type == StorageType.MONGODB:
             from .key_value_storages.mongodb import MongoDBStorage
@@ -327,4 +346,4 @@ class StorageManager:
             except Exception as e:
                 stats[f"storage_{i}"] = {"error": str(e)}
         
-        return stats 
+        return stats

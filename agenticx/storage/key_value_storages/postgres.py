@@ -6,6 +6,7 @@ PostgreSQL键值存储实现，支持JSONB和复杂查询。
 
 from typing import Any, Dict, List, Optional
 from .base import BaseKeyValueStorage
+import psycopg2
 
 
 class PostgresStorage(BaseKeyValueStorage):
@@ -22,8 +23,12 @@ class PostgresStorage(BaseKeyValueStorage):
         """
         self.connection_string = connection_string
         self._connection = None
-        # TODO: 实现PostgreSQL连接
-        print("⚠️  PostgreSQL存储暂未实现，使用内存存储模拟")
+        try:
+            self._connection = psycopg2.connect(self.connection_string)
+            print("✅ Successfully connected to PostgreSQL.")
+        except psycopg2.OperationalError as e:
+            print(f"⚠️  PostgreSQL connection failed: {e}")
+            print("⚠️  Falling back to in-memory storage simulation.")
 
     def save(self, records: List[Dict[str, Any]]) -> None:
         """保存记录到PostgreSQL
@@ -47,7 +52,7 @@ class PostgresStorage(BaseKeyValueStorage):
     def clear(self) -> None:
         """清空所有记录"""
         # TODO: 实现PostgreSQL清空逻辑
-        print("✅ 模拟清空PostgreSQL记录")
+        print("⏳ TODO: 清空PostgreSQL记录")
 
     def get(self, key: str) -> Optional[Any]:
         """根据键获取值
@@ -59,7 +64,7 @@ class PostgresStorage(BaseKeyValueStorage):
             对应的值，如果不存在返回None
         """
         # TODO: 实现PostgreSQL获取逻辑
-        print(f"✅ 模拟从PostgreSQL获取键: {key}")
+        print(f"⏳ TODO: 从PostgreSQL获取键: {key}")
         return None
 
     def set(self, key: str, value: Any) -> None:
@@ -70,7 +75,7 @@ class PostgresStorage(BaseKeyValueStorage):
             value: 值
         """
         # TODO: 实现PostgreSQL设置逻辑
-        print(f"✅ 模拟设置PostgreSQL键值对: {key} = {value}")
+        print(f"⏳ TODO: 设置PostgreSQL键值对: {key} = {value}")
 
     def delete(self, key: str) -> bool:
         """删除指定键
@@ -82,7 +87,7 @@ class PostgresStorage(BaseKeyValueStorage):
             是否删除成功
         """
         # TODO: 实现PostgreSQL删除逻辑
-        print(f"✅ 模拟删除PostgreSQL键: {key}")
+        print(f"⏳ TODO: 删除PostgreSQL键: {key}")
         return True
 
     def exists(self, key: str) -> bool:
@@ -95,7 +100,7 @@ class PostgresStorage(BaseKeyValueStorage):
             键是否存在
         """
         # TODO: 实现PostgreSQL存在检查逻辑
-        print(f"✅ 模拟检查PostgreSQL键是否存在: {key}")
+        print(f"⏳ TODO: 检查PostgreSQL键是否存在: {key}")
         return False
 
     def keys(self) -> List[str]:
@@ -105,7 +110,7 @@ class PostgresStorage(BaseKeyValueStorage):
             键名列表
         """
         # TODO: 实现PostgreSQL键列表获取逻辑
-        print("✅ 模拟获取PostgreSQL所有键")
+        print("⏳ TODO: 获取PostgreSQL所有键")
         return []
 
     def values(self) -> List[Any]:
@@ -115,7 +120,7 @@ class PostgresStorage(BaseKeyValueStorage):
             值列表
         """
         # TODO: 实现PostgreSQL值列表获取逻辑
-        print("✅ 模拟获取PostgreSQL所有值")
+        print("⏳ TODO: 获取PostgreSQL所有值")
         return []
 
     def items(self) -> List[tuple]:
@@ -125,7 +130,7 @@ class PostgresStorage(BaseKeyValueStorage):
             键值对列表
         """
         # TODO: 实现PostgreSQL键值对获取逻辑
-        print("✅ 模拟获取PostgreSQL所有键值对")
+        print("⏳ TODO: 获取PostgreSQL所有键值对")
         return []
 
     def count(self) -> int:
@@ -135,12 +140,12 @@ class PostgresStorage(BaseKeyValueStorage):
             记录数量
         """
         # TODO: 实现PostgreSQL计数逻辑
-        print("✅ 模拟获取PostgreSQL记录总数")
+        print("⏳ TODO: 获取PostgreSQL记录总数")
         return 0
 
     def close(self) -> None:
         """关闭PostgreSQL连接"""
         if self._connection:
-            # TODO: 实现PostgreSQL连接关闭逻辑
-            print("✅ 模拟关闭PostgreSQL连接")
-            self._connection = None 
+            self._connection.close()
+            print("✅ Closed PostgreSQL connection.")
+            self._connection = None

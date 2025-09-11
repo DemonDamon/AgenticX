@@ -27,9 +27,9 @@ class VectorRetriever(BaseRetriever):
         vector_storage: BaseVectorStorage,
         **kwargs
     ):
-        # Filter out organization_id from kwargs to avoid conflicts
-        filtered_kwargs = {k: v for k, v in kwargs.items() if k != 'organization_id'}
-        super().__init__(tenant_id, **filtered_kwargs)
+        # Filter out organization_id and tenant_id from kwargs to avoid conflicts
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k not in ['organization_id', 'tenant_id']}
+        super().__init__(tenant_id=tenant_id, **filtered_kwargs)
         self.embedding_provider = embedding_provider
         self.vector_storage = vector_storage
         self._documents: Dict[str, Dict[str, Any]] = {}
