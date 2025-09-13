@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class StorageMode(str, Enum):
@@ -61,10 +61,11 @@ class StorageSession(BaseModel):
     team_data: Optional[Dict[str, Any]] = Field(None, description="Team-specific data")
     workflow_data: Optional[Dict[str, Any]] = Field(None, description="Workflow-specific data")
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             datetime: lambda v: int(v.timestamp())
         }
+    )
 
 
 class StorageDocument(BaseModel):
@@ -88,10 +89,11 @@ class StorageDocument(BaseModel):
     indexed: bool = Field(False, description="Whether document is indexed")
     index_type: Optional[IndexType] = Field(None, description="Index type used")
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             datetime: lambda v: int(v.timestamp())
         }
+    )
 
 
 class StorageVector(BaseModel):
@@ -116,10 +118,11 @@ class StorageVector(BaseModel):
     index_type: Optional[IndexType] = Field(None, description="Index type used")
     distance_metric: Optional[DistanceMetric] = Field(None, description="Distance metric used")
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             datetime: lambda v: int(v.timestamp())
         }
+    )
 
 
 class StorageIndex(BaseModel):
@@ -146,10 +149,11 @@ class StorageIndex(BaseModel):
     total_vectors: Optional[int] = Field(None, description="Total vectors in index")
     index_size: Optional[int] = Field(None, description="Index size in bytes")
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             datetime: lambda v: int(v.timestamp())
         }
+    )
 
 
 class StorageQuery(BaseModel):
@@ -175,10 +179,11 @@ class StorageQuery(BaseModel):
     # Timestamps
     created_at: Optional[int] = Field(None, description="Creation timestamp (epoch)")
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             datetime: lambda v: int(v.timestamp())
         }
+    )
 
 
 class StorageResult(BaseModel):
@@ -198,7 +203,8 @@ class StorageResult(BaseModel):
     # Timestamps
     created_at: Optional[int] = Field(None, description="Creation timestamp (epoch)")
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             datetime: lambda v: int(v.timestamp())
-        } 
+        }
+    )

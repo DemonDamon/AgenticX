@@ -6,7 +6,7 @@ including screen state representation and interaction elements.
 
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Tuple
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from enum import Enum
 from agenticx.core.task import Task
 
@@ -48,8 +48,7 @@ class InteractionElement(BaseModel):
     text_content: Optional[str] = Field(default=None, description="Text content of the element")
     attributes: Dict[str, Any] = Field(default_factory=dict, description="Additional element attributes")
     
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class ScreenState(BaseModel):
@@ -95,8 +94,7 @@ class GUIAgentResult(BaseModel):
     actions_performed: List[Dict[str, Any]] = Field(default_factory=list, description="List of actions performed")
     node_executions: List[Any] = Field(default_factory=list, description="List of workflow node executions for compatibility")
     
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
     
     def is_successful(self) -> bool:
         """Check if the task execution was successful."""
@@ -119,8 +117,7 @@ class GUIAction(BaseModel):
     success: bool = Field(default=True, description="操作是否成功")
     error_message: Optional[str] = Field(default=None, description="错误信息")
     
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class GUITask(Task):
