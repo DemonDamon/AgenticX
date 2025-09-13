@@ -5,7 +5,7 @@ This module defines the Pydantic models that represent the fundamental
 data structures used in agent-to-agent communication.
 """
 
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any, Dict, List, Optional, Type, Literal
 from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, HttpUrl, ConfigDict
@@ -77,7 +77,7 @@ class CollaborationTask(BaseModel):
     def update_status(self, status: Literal['pending', 'in_progress', 'completed', 'failed']) -> None:
         """Update task status and timestamp."""
         self.status = status
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
     
     def complete(self, result: Any) -> None:
         """Mark task as completed with result."""

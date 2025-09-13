@@ -6,7 +6,7 @@ and refinement of GUI automation knowledge over time.
 
 from typing import List, Dict, Any, Optional, Tuple, Set, Union
 from pydantic import BaseModel, Field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from collections import defaultdict, Counter
 from dataclasses import dataclass
 import json

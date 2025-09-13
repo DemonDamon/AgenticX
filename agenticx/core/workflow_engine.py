@@ -17,7 +17,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional, Union, Callable, Type, Set
 from dataclasses import dataclass, field
 from enum import Enum
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import uuid
 import logging
 

@@ -6,7 +6,7 @@ personality, and persistent information.
 """
 
 from typing import Any, Dict, List, Optional, Tuple, Union
-from datetime import datetime, timedelta
+from datetime import datetime, UTC
 import json
 import asyncio
 import uuid
@@ -66,7 +66,7 @@ class CoreMemory(BaseHierarchicalMemory):
                     metadata={
                         "type": "agent_profile",
                         "agent_id": self.agent_id,
-                        "created_at": datetime.utcnow().isoformat()
+                        "created_at": datetime.now(UTC).isoformat()
                     },
                     tenant_id=self.tenant_id,
                     created_at=now,
@@ -123,7 +123,7 @@ class CoreMemory(BaseHierarchicalMemory):
                 metadata={
                     "type": "agent_identity",
                     "identity_data": identity_data,
-                    "updated_at": datetime.utcnow().isoformat()
+                    "updated_at": datetime.now(UTC).isoformat()
                 }
             )
             return record_id
@@ -254,7 +254,7 @@ class CoreMemory(BaseHierarchicalMemory):
         content = f"Agent State Update: {description or 'Current state'}"
         
         # Use high precision timestamp for accurate ordering
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(UTC)
         metadata = {
             "type": "agent_state",
             "state_data": state_data,
@@ -415,7 +415,7 @@ class CoreMemory(BaseHierarchicalMemory):
                     continue
             
             if context.max_age:
-                if datetime.utcnow() - record.created_at > context.max_age:
+                if datetime.now(UTC) - record.created_at > context.max_age:
                     continue
             
             if not context.include_decayed and record.decay_factor < 0.5:
@@ -436,7 +436,7 @@ class CoreMemory(BaseHierarchicalMemory):
         if record_id in self._core_records:
             record = self._core_records[record_id]
             record.access_count += 1
-            record.last_accessed = datetime.utcnow()
+            record.last_accessed = datetime.now(UTC)
             
             # Update decay factor based on access
             record.decay_factor = min(1.0, record.decay_factor + 0.1)
@@ -486,7 +486,7 @@ class CoreMemory(BaseHierarchicalMemory):
         decay_factor = record.decay_factor
         
         # Apply recency bonus (newer records get slight boost)
-        age_hours = (datetime.utcnow() - record.created_at).total_seconds() / 3600
+        age_hours = (datetime.now(UTC) - record.created_at).total_seconds() / 3600
         recency_bonus = max(0, 1 - (age_hours / (24 * 7)))  # Bonus fades over a week
         
         # Calculate final score
@@ -558,7 +558,7 @@ class CoreMemory(BaseHierarchicalMemory):
             # Merge metadata
             record.metadata.update(metadata)
         
-        record.updated_at = datetime.utcnow()
+        record.updated_at = datetime.now(UTC)
         
         # Re-index the record
         await self._store_record(record)

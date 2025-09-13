@@ -6,7 +6,7 @@ with vector-based semantic search for optimal retrieval performance.
 """
 
 from typing import Any, Dict, List, Optional, Tuple, Union
-from datetime import datetime
+from datetime import datetime, UTC
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from collections import defaultdict, Counter
@@ -632,7 +632,7 @@ class HybridRanker:
     
     def _calculate_time_decay(self, record: HierarchicalMemoryRecord) -> float:
         """Calculate time decay factor."""
-        age_hours = (datetime.utcnow() - record.created_at).total_seconds() / 3600
+        age_hours = (datetime.now(UTC) - record.created_at).total_seconds() / 3600
         
         # Decay over 30 days
         decay_factor = max(0.1, 1.0 - (age_hours / (24 * 30)))

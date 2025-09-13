@@ -8,7 +8,7 @@ import statistics
 import time
 from typing import Dict, Any, List, Optional, Callable, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, UTC
 from enum import Enum
 import json
 import asyncio
@@ -626,7 +626,7 @@ class BenchmarkRunner:
     def export_results(self, filename: str):
         """导出结果到文件"""
         export_data = {
-            "export_time": datetime.utcnow().isoformat(),
+            "export_time": datetime.now(UTC).isoformat(),
             "total_benchmarks": len(self.benchmark_history),
             "benchmarks": [result.to_dict() for result in self.benchmark_history]
         }

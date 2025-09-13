@@ -10,7 +10,7 @@ import pickle
 import statistics
 from typing import Dict, Any, List, Optional, Union, Tuple, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from collections import defaultdict, deque
 import logging
 from pathlib import Path

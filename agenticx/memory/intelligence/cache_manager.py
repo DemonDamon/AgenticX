@@ -7,7 +7,7 @@ import logging
 import time
 import threading
 from typing import Dict, List, Optional, Any, Tuple, Set, Callable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from collections import defaultdict, OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum

@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Union, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from enum import Enum
 
 

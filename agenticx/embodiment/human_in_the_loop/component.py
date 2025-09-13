@@ -2,7 +2,7 @@
 
 import asyncio
 from typing import Dict, Any, Optional, Literal
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import logging
 
 from agenticx.core.component import Component

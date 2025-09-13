@@ -5,7 +5,7 @@
 
 import logging
 from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 from ..base import BaseTool
 from ...core.task import Task

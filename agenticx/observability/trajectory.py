@@ -8,7 +8,7 @@ AgenticX M9: 执行轨迹收集 (Trajectory Collection)
 import uuid
 from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from enum import Enum
 import json
 from collections import defaultdict
@@ -175,7 +175,7 @@ class ExecutionTrajectory:
         self.trajectory_id = trajectory_id or str(uuid.uuid4())
         self.metadata = TrajectoryMetadata(
             trajectory_id=self.trajectory_id,
-            start_time=datetime.utcnow(),
+            start_time=datetime.now(UTC),
             agent_id=agent_id,
             task_id=task_id,
             workflow_id=workflow_id
@@ -259,7 +259,7 @@ class ExecutionTrajectory:
     
     def finalize(self, final_status: StepStatus, final_result: Optional[Any] = None):
         """完成轨迹记录"""
-        self.metadata.end_time = datetime.utcnow()
+        self.metadata.end_time = datetime.now(UTC)
         self.metadata.total_duration = (
             self.metadata.end_time - self.metadata.start_time
         ).total_seconds()
