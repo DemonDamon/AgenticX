@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any, List
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 class Agent(BaseModel):
     """
