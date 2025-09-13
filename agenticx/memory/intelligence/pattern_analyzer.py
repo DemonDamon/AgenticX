@@ -7,7 +7,7 @@ import logging
 import math
 import time
 from typing import Dict, List, Optional, Any, Tuple, Set
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from enum import Enum

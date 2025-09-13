@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Callable, Union, TypeVar, Generic
 from dataclasses import dataclass
 from enum import Enum
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 import traceback
 import uuid
 
@@ -69,7 +69,7 @@ class BaseCallbackHandler(ABC):
         self.call_count = 0
         self.error_count = 0
         self.last_error: Optional[Exception] = None
-        self.created_at = datetime.now(timezone.utc)
+        self.created_at = datetime.now(UTC)
         
     def set_enabled(self, enabled: bool):
         """启用或禁用回调处理器"""
@@ -460,7 +460,7 @@ class CallbackManager:
         if not self.is_enabled:
             return
             
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         
         try:
             # 获取处理这个事件的所有处理器
@@ -479,7 +479,7 @@ class CallbackManager:
             self.stats["events_processed"] += 1
             self.stats["last_event_time"] = start_time.isoformat()
             
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
+            execution_time = (datetime.now(UTC) - start_time).total_seconds()
             self.stats["total_execution_time"] += execution_time
             
         except Exception as e:
@@ -491,7 +491,7 @@ class CallbackManager:
         if not self.is_enabled:
             return
             
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         
         try:
             # 获取处理这个事件的所有处理器
@@ -516,7 +516,7 @@ class CallbackManager:
             self.stats["events_processed"] += 1
             self.stats["last_event_time"] = start_time.isoformat()
             
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
+            execution_time = (datetime.now(UTC) - start_time).total_seconds()
             self.stats["total_execution_time"] += execution_time
             
         except Exception as e:

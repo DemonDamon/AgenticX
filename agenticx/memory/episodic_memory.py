@@ -6,7 +6,7 @@ experiences, and contextual information.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import json
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -134,7 +134,7 @@ class EpisodicMemory(BaseHierarchicalMemory):
             Record ID
         """
         if timestamp is None:
-            timestamp = datetime.utcnow()
+            timestamp = datetime.now(UTC)
         
         # Create event
         event = EpisodeEvent(
@@ -204,7 +204,7 @@ class EpisodicMemory(BaseHierarchicalMemory):
             Episode ID
         """
         if start_time is None:
-            start_time = datetime.utcnow()
+            start_time = datetime.now(UTC)
         
         episode_id = self._generate_record_id()
         episode = Episode(
@@ -446,7 +446,7 @@ class EpisodicMemory(BaseHierarchicalMemory):
                     continue
             
             if context.max_age:
-                if datetime.utcnow() - record.created_at > context.max_age:
+                if datetime.now(UTC) - record.created_at > context.max_age:
                     continue
             
             if not context.include_decayed and record.decay_factor < 0.5:
@@ -492,7 +492,7 @@ class EpisodicMemory(BaseHierarchicalMemory):
                 temporal_score = 1.0
         else:
             # Recency bonus
-            age_hours = (datetime.utcnow() - record.created_at).total_seconds() / 3600
+            age_hours = (datetime.now(UTC) - record.created_at).total_seconds() / 3600
             temporal_score = max(0, 1 - (age_hours / (24 * 7)))  # Fades over a week
         
         # Importance multiplier
@@ -526,7 +526,7 @@ class EpisodicMemory(BaseHierarchicalMemory):
         if record_id in self._episodic_records:
             record = self._episodic_records[record_id]
             record.access_count += 1
-            record.last_accessed = datetime.utcnow()
+            record.last_accessed = datetime.now(UTC)
             record.decay_factor = min(1.0, record.decay_factor + 0.05)
     
     # Implement required abstract methods from BaseMemory
@@ -580,7 +580,7 @@ class EpisodicMemory(BaseHierarchicalMemory):
         if metadata is not None:
             record.metadata.update(metadata)
         
-        record.updated_at = datetime.utcnow()
+        record.updated_at = datetime.now(UTC)
         
         # Re-index the record
         await self._store_record(record)

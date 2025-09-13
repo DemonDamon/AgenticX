@@ -8,7 +8,7 @@ designed to mimic human memory systems for enhanced AI agent capabilities.
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from enum import Enum
 import uuid
 import json
@@ -133,7 +133,7 @@ class BaseHierarchicalMemory(BaseMemory):
         if record_id is None:
             record_id = self._generate_record_id()
         
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         
         # Create enhanced record
         record = HierarchicalMemoryRecord(

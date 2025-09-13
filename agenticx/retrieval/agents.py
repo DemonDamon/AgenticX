@@ -7,7 +7,7 @@ about retrieval strategies and optimize search results.
 
 from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, UTC
 
 from ..core.agent import Agent
 from ..core.task import Task
@@ -293,7 +293,7 @@ class RetrievalAgent(Agent):
                 "analysis": analysis,
                 "strategy": strategy,
                 "result_count": result_count,
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.now(UTC)
             })
 
 

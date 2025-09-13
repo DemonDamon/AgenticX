@@ -6,7 +6,7 @@ for intelligent memory lifecycle management.
 """
 
 from typing import Any, Dict, List, Optional, Tuple, Callable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from dataclasses import dataclass, field
 from enum import Enum
 import math
@@ -123,7 +123,7 @@ class MemoryDecayService:
             Decay factor between 0 and 1
         """
         if current_time is None:
-            current_time = datetime.utcnow()
+            current_time = datetime.now(UTC)
         
         # Calculate age
         age = current_time - record.created_at
@@ -170,7 +170,7 @@ class MemoryDecayService:
         Returns:
             Decay analysis results
         """
-        current_time = datetime.utcnow()
+        current_time = datetime.now(UTC)
         current_decay = await self.calculate_decay_factor(record, current_time)
         
         # Predict future decay
@@ -222,7 +222,7 @@ class MemoryDecayService:
             Dictionary of record_id -> new_decay_factor
         """
         if current_time is None:
-            current_time = datetime.utcnow()
+            current_time = datetime.now(UTC)
         
         updated_factors = {}
         
@@ -270,7 +270,7 @@ class MemoryDecayService:
         effective_threshold: float = threshold if threshold is not None else self.cleanup_threshold
         
         decaying_records = []
-        current_time = datetime.utcnow()
+        current_time = datetime.now(UTC)
         
         for record in records:
             decay_factor = await self.calculate_decay_factor(record, current_time)
@@ -295,7 +295,7 @@ class MemoryDecayService:
             List of (record, decay_factor, reason) tuples
         """
         candidates = []
-        current_time = datetime.utcnow()
+        current_time = datetime.now(UTC)
         
         for record in records:
             decay_factor = await self.calculate_decay_factor(record, current_time)
@@ -336,13 +336,13 @@ class MemoryDecayService:
         )
         
         record.decay_factor = new_decay_factor
-        record.updated_at = datetime.utcnow()
+        record.updated_at = datetime.now(UTC)
         
         # Track boost in history
         if record.id not in self._decay_history:
             self._decay_history[record.id] = []
         
-        self._decay_history[record.id].append((datetime.utcnow(), new_decay_factor))
+        self._decay_history[record.id].append((datetime.now(UTC), new_decay_factor))
         
         return new_decay_factor
     
@@ -455,7 +455,7 @@ class MemoryDecayService:
         """Determine reason for cleanup suggestion."""
         reasons = []
         
-        age_days = (datetime.utcnow() - record.created_at).total_seconds() / (24 * 3600)
+        age_days = (datetime.now(UTC) - record.created_at).total_seconds() / (24 * 3600)
         
         if age_days > 90:
             reasons.append("old age")
@@ -524,7 +524,7 @@ class MemoryDecayService:
         if not records:
             return {}
         
-        current_time = datetime.utcnow()
+        current_time = datetime.now(UTC)
         decay_factors = []
         
         for record in records:

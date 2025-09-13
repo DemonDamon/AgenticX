@@ -6,7 +6,7 @@ patterns and optimizes GUI automation strategies for better efficiency and user 
 
 from typing import List, Dict, Any, Optional, Tuple, Set
 from pydantic import BaseModel, Field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from collections import defaultdict, Counter
 from dataclasses import dataclass
 import json

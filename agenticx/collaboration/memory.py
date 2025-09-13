@@ -5,7 +5,7 @@ AgenticX M8.5: 协作记忆系统
 """
 
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import json
 import uuid
 

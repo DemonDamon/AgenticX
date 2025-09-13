@@ -99,6 +99,17 @@ class FinishTaskEvent(Event[Literal["finish_task"]]):
     final_result: Any = Field(description="The final result of the task.")
     reasoning: Optional[str] = Field(description="Agent's reasoning for why the task is complete.", default=None)
 
+class ReplanningRequiredEvent(Event[Literal["replanning_required"]]):
+    """Event indicating that the current plan has failed and requires replanning."""
+    type: Literal["replanning_required"] = "replanning_required"
+    reason: str = Field(description="Reason for the replanning request.")
+    current_state: Optional[Any] = Field(description="The current state snapshot.", default=None)
+
+class ActionCorrectionEvent(Event[Literal["action_correction"]]):
+    """Event carrying a corrected action for the executor to retry."""
+    type: Literal["action_correction"] = "action_correction"
+    action: Dict[str, Any] = Field(description="The corrected action to be executed.")
+
 # Union type for all event types
 AnyEvent = Union[
     TaskStartEvent,
@@ -111,6 +122,8 @@ AnyEvent = Union[
     HumanRequestEvent,
     HumanResponseEvent,
     FinishTaskEvent,
+    ReplanningRequiredEvent,
+    ActionCorrectionEvent,
     Event[str]  # Fallback for custom events
 ]
 

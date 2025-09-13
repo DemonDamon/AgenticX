@@ -5,7 +5,7 @@ AgenticX M8.5: 协作指标收集器
 """
 
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from pydantic import BaseModel, Field
 
 from .base import CollaborationResult, TaskResult

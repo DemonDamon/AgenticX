@@ -6,7 +6,7 @@ from observed user behaviors and interactions.
 
 from typing import List, Dict, Any, Optional, Tuple
 from pydantic import BaseModel, Field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import json
 from collections import defaultdict, Counter
 

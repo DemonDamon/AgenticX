@@ -6,7 +6,7 @@ concepts, and factual information that is independent of specific time contexts.
 """
 
 from typing import Any, Dict, List, Optional, Set, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, UTC
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -140,7 +140,7 @@ class SemanticMemory(BaseHierarchicalMemory):
             "knowledge_type": knowledge_type,
             "category": category or "general",
             "concepts": concepts,
-            "extracted_at": datetime.utcnow().isoformat()
+            "extracted_at": datetime.now(UTC).isoformat()
         }
         
         if metadata:
@@ -249,7 +249,7 @@ class SemanticMemory(BaseHierarchicalMemory):
         if record_id is None:
             record_id = self._generate_record_id()
         
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         
         record = HierarchicalMemoryRecord(
             id=record_id,
@@ -513,7 +513,7 @@ class SemanticMemory(BaseHierarchicalMemory):
         
         if existing_concept:
             # Update existing concept
-            existing_concept.attributes["last_seen"] = datetime.utcnow().isoformat()
+            existing_concept.attributes["last_seen"] = datetime.now(UTC).isoformat()
             existing_concept.attributes["source_records"] = existing_concept.attributes.get("source_records", [])
             if source_record_id not in existing_concept.attributes["source_records"]:
                 existing_concept.attributes["source_records"].append(source_record_id)
@@ -677,7 +677,7 @@ class SemanticMemory(BaseHierarchicalMemory):
                     continue
             
             if context.max_age:
-                if datetime.utcnow() - record.created_at > context.max_age:
+                if datetime.now(UTC) - record.created_at > context.max_age:
                     continue
             
             if not context.include_decayed and record.decay_factor < 0.5:
@@ -750,7 +750,7 @@ class SemanticMemory(BaseHierarchicalMemory):
         if record_id in self._semantic_records:
             record = self._semantic_records[record_id]
             record.access_count += 1
-            record.last_accessed = datetime.utcnow()
+            record.last_accessed = datetime.now(UTC)
             record.decay_factor = min(1.0, record.decay_factor + 0.05)
     
     # Implement required abstract methods from BaseMemory
@@ -816,7 +816,7 @@ class SemanticMemory(BaseHierarchicalMemory):
         if metadata is not None:
             record.metadata.update(metadata)
         
-        record.updated_at = datetime.utcnow()
+        record.updated_at = datetime.now(UTC)
         
         # Re-index the record
         await self._store_record(record)

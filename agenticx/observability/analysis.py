@@ -8,7 +8,7 @@ AgenticX M9: 轨迹分析系统 (Trajectory Analysis System)
 import statistics
 from typing import Dict, Any, List, Optional, Tuple, Set
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from enum import Enum
 from collections import defaultdict, Counter
 import json
