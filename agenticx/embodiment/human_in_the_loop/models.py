@@ -3,7 +3,7 @@
 from typing import Dict, List, Optional, Literal, Any
 from uuid import uuid4
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from agenticx.embodiment.core.models import GUIAction
 
@@ -28,10 +28,11 @@ class HumanInterventionRequest(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             datetime: lambda v: v.isoformat()
         }
+    )
 
 
 class HumanFeedback(BaseModel):
@@ -54,10 +55,11 @@ class HumanFeedback(BaseModel):
     notes: Optional[str] = Field(None, description="备注说明")
     submitted_at: datetime = Field(default_factory=datetime.now)
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             datetime: lambda v: v.isoformat()
         }
+    )
 
 
 class TrajectoryData(BaseModel):
@@ -72,10 +74,11 @@ class TrajectoryData(BaseModel):
     reward: float = Field(..., description="奖励信号")
     created_at: datetime = Field(default_factory=datetime.now)
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             datetime: lambda v: v.isoformat()
         }
+    )
 
 
 class InterventionMetrics(BaseModel):
@@ -91,7 +94,8 @@ class InterventionMetrics(BaseModel):
     )
     updated_at: datetime = Field(default_factory=datetime.now)
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             datetime: lambda v: v.isoformat()
         }
+    )
