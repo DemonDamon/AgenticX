@@ -7,6 +7,9 @@ PostgreSQL键值存储实现，支持JSONB和复杂查询。
 from typing import Any, Dict, List, Optional
 from .base import BaseKeyValueStorage
 import psycopg2
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class PostgresStorage(BaseKeyValueStorage):
@@ -25,10 +28,10 @@ class PostgresStorage(BaseKeyValueStorage):
         self._connection = None
         try:
             self._connection = psycopg2.connect(self.connection_string)
-            print("✅ Successfully connected to PostgreSQL.")
+            logger.info("✅ Successfully connected to PostgreSQL.")
         except psycopg2.OperationalError as e:
-            print(f"⚠️  PostgreSQL connection failed: {e}")
-            print("⚠️  Falling back to in-memory storage simulation.")
+            logger.warning(f"⚠️  PostgreSQL connection failed: {e}")
+            logger.warning("⚠️  Falling back to in-memory storage simulation.")
 
     def save(self, records: List[Dict[str, Any]]) -> None:
         """保存记录到PostgreSQL
