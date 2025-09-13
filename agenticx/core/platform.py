@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 class User(BaseModel):
@@ -16,7 +16,7 @@ class User(BaseModel):
     is_active: bool = Field(default=True, description="Whether the user account is active.")
     roles: List[str] = Field(description="List of roles assigned to the user.", default_factory=list)
     
-    created_at: datetime = Field(default_factory=datetime.utcnow, description="Timestamp when the user was created.")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Timestamp when the user was created.")
     updated_at: Optional[datetime] = Field(description="Timestamp when the user was last updated.", default=None)
     
     metadata: Dict[str, Any] = Field(description="Additional metadata for the user.", default_factory=dict)
@@ -34,7 +34,7 @@ class Organization(BaseModel):
     
     settings: Dict[str, Any] = Field(description="Organization-specific settings.", default_factory=dict)
     
-    created_at: datetime = Field(default_factory=datetime.utcnow, description="Timestamp when the organization was created.")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Timestamp when the organization was created.")
     updated_at: Optional[datetime] = Field(description="Timestamp when the organization was last updated.", default=None)
     
     metadata: Dict[str, Any] = Field(description="Additional metadata for the organization.", default_factory=dict) 

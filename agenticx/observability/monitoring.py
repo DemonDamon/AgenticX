@@ -10,7 +10,7 @@ import psutil
 import threading
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timezone
 from enum import Enum
 from collections import defaultdict, deque
 import json
@@ -39,7 +39,7 @@ class MetricType(Enum):
 class MetricValue:
     """指标值"""
     value: float
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     labels: Dict[str, str] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -123,7 +123,7 @@ class SystemMetrics:
     thread_count: int = 0
     
     # 时间戳
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     def to_dict(self) -> Dict[str, Any]:
         return {

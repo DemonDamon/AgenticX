@@ -51,7 +51,7 @@ class AgentContext(BaseModel):
     session_id: Optional[str] = Field(default=None, description="Session identifier")
     variables: Dict[str, Any] = Field(default_factory=dict, description="Context variables")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Context creation time")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Context creation time")
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -65,6 +65,6 @@ class AgentResult(BaseModel):
     error: Optional[str] = Field(default=None, description="Error message if failed")
     execution_time: Optional[float] = Field(default=None, description="Execution time in seconds")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Result creation time")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Result creation time")
     
     model_config = ConfigDict(arbitrary_types_allowed=True)

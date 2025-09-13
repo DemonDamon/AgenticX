@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Dict, Any, List, Optional, Set, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from enum import Enum
 import uuid
 import websockets
@@ -44,8 +44,8 @@ class WebSocketClient:
     websocket: Any
     subscriptions: Set[EventStreamType] = field(default_factory=set)
     filters: Dict[str, Any] = field(default_factory=dict)
-    connected_at: datetime = field(default_factory=datetime.utcnow)
-    last_ping: datetime = field(default_factory=datetime.utcnow)
+    connected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_ping: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -63,7 +63,7 @@ class EventMessage:
     message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     event_type: str = ""
     event_data: Dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     source: str = "agenticx"
     
     def to_dict(self) -> Dict[str, Any]:
