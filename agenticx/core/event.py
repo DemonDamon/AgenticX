@@ -5,7 +5,7 @@ M5 的 Event 系统定义了 TaskStartEvent, ToolCallEvent, ErrorEvent 等12种�
 
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional, Union, Literal, Callable, Generic, TypeVar
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 # 定义类型变量用于泛型
@@ -17,7 +17,7 @@ class Event(BaseModel, Generic[EventType]):
     Events form the core of the state management system following the 12-Factor Agents principle.
     """
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for the event.")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="When the event occurred.")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="When the event occurred.")
     type: EventType = Field(description="The type of event (e.g., 'task_start', 'tool_call', 'error').")
     data: Dict[str, Any] = Field(description="Event-specific data payload.", default_factory=dict)
     agent_id: Optional[str] = Field(description="ID of the agent that generated this event.", default=None)

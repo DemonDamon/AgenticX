@@ -5,7 +5,7 @@ This module defines the Pydantic models that represent the fundamental
 data structures used in agent-to-agent communication.
 """
 
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Type, Literal
 from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, HttpUrl, ConfigDict
@@ -71,8 +71,8 @@ class CollaborationTask(BaseModel):
     )
     result: Optional[Any] = Field(default=None, description="Result of task execution (if completed)")
     error: Optional[str] = Field(default=None, description="Error message (if failed)")
-    created_at: datetime = Field(default_factory=datetime.utcnow, description="Task creation timestamp")
-    updated_at: datetime = Field(default_factory=datetime.utcnow, description="Last update timestamp")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Task creation timestamp")
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Last update timestamp")
     
     def update_status(self, status: Literal['pending', 'in_progress', 'completed', 'failed']) -> None:
         """Update task status and timestamp."""

@@ -8,7 +8,7 @@ import statistics
 import time
 from typing import Dict, Any, List, Optional, Callable, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from enum import Enum
 import json
 import asyncio
@@ -45,7 +45,7 @@ class EvaluationResult:
     value: float
     unit: str = ""
     description: str = ""
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -68,7 +68,7 @@ class BenchmarkResult:
     total_duration: float
     results: List[EvaluationResult] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     def add_result(self, result: EvaluationResult):
         """添加评估结果"""

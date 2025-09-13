@@ -4,7 +4,7 @@ This module contains the core data models used in GUI automation,
 including screen state representation and interaction elements.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Tuple
 from pydantic import BaseModel, Field
 from enum import Enum
@@ -58,7 +58,7 @@ class ScreenState(BaseModel):
     This model captures a snapshot of the screen including visual information,
     interactive elements, and metadata for GUI automation.
     """
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="When this state was captured")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="When this state was captured")
     agent_id: str = Field(description="ID of the agent that captured this state")
     screenshot: Optional[str] = Field(default=None, description="Base64 encoded screenshot or file path")
     element_tree: Dict[str, Any] = Field(default_factory=dict, description="Hierarchical representation of UI elements")
@@ -115,7 +115,7 @@ class GUIAction(BaseModel):
     action_type: str = Field(description="操作类型，如click、type、scroll等")
     target: str = Field(description="操作目标，如元素ID或坐标")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="操作参数")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="操作时间")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="操作时间")
     success: bool = Field(default=True, description="操作是否成功")
     error_message: Optional[str] = Field(default=None, description="错误信息")
     
