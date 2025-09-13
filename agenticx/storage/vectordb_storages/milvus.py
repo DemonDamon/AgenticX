@@ -7,6 +7,9 @@ Milvus向量存储实现，支持高性能向量搜索引擎。
 from typing import Any, Dict, List, Optional
 from .base import BaseVectorStorage, VectorRecord, VectorDBQuery, VectorDBQueryResult, VectorDBStatus
 from pymilvus import connections, utility
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class MilvusStorage(BaseVectorStorage):
@@ -29,11 +32,11 @@ class MilvusStorage(BaseVectorStorage):
         self._client = None
         try:
             connections.connect("default", host=self.host, port=self.port)
-            print("✅ Successfully connected to Milvus.")
+            logger.info("✅ Successfully connected to Milvus.")
             self._client = "default"  # Use the default connection alias
         except Exception as e:
-            print(f"⚠️  Milvus connection failed: {e}")
-            print("⚠️  Falling back to in-memory storage simulation.")
+            logger.warning(f"⚠️  Milvus connection failed: {e}")
+            logger.warning("⚠️  Falling back to in-memory storage simulation.")
 
     def add(self, records: List[VectorRecord], **kwargs: Any) -> None:
         """添加向量记录
