@@ -9,11 +9,8 @@ __pycache__/
 *.egg-info/
 dist/
 
-conclusions/
 deploy/data/
 deploy/logs/
-discussions/
-exps/
 htmlcov/
 markmap/
 progress/
