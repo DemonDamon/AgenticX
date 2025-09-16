@@ -1,37 +1,133 @@
-# agenticx-for-intent-recognition 配置文件
+# =================================================================
+# AgenticX 意图识别服务 - 综合配置文件
+# =================================================================
 
-# LLM配置
+# -----------------------------------------------------------------
+# LLM 提供者配置
+# -----------------------------------------------------------------
 llm:
-  provider: openai
-  model: gpt-4o-mini
-  api_key: ${OPENAI_API_KEY}
-  base_url: ${OPENAI_API_BASE}  # 支持代理设置
-  temperature: 0.7
-  max_tokens: 1000
+  provider: "kimi"  # 默认提供者: kimi, openai, anthropic, azure
+  timeout: 120.0
+  max_retries: 2
+  
+  # 不同提供者的具体配置
+  providers:
+    kimi:
+      model: "moonshot-v1-8k" # Kimi 默认模型
+      api_key: "${KIMI_API_KEY}"
+      base_url: "${KIMI_API_BASE}"
+      temperature: 0.3
+      max_tokens: 2048
+    openai:
+      model: "gpt-4o-mini"
+      api_key: "${OPENAI_API_KEY}"
+      base_url: "${OPENAI_API_BASE}"
+      temperature: 0.5
+      max_tokens: 2048
 
-# 智能体配置
+# -----------------------------------------------------------------
+# 智能体 (Agents) 配置
+# -----------------------------------------------------------------
 agents:
-  - id: main_agent
-    name: 主智能体
-    role: 助手
-    goal: 帮助用户完成任务
-    backstory: 我是一个专业的AI助手
+  - id: intent_classifier_agent
+    name: "意图分类智能体"
+    role: "精准的意图分析师"
+    goal: "准确识别用户输入文本的核心意图，并从预定义的意图列表中选择最匹配的一项。"
+    backstory: "我是一个专注于理解和分类文本意图的AI。我能快速分析文本，并给出最可能的意图及其置信度。"
+    tools: ["rule_matcher"] # 可以使用规则匹配工具进行初步筛选
+
+  - id: entity_extractor_agent
+    name: "实体提取智能体"
+    role: "细致的信息提取员"
+    goal: "从用户输入文本中精确地抽取出所有预定义的实体类型，如地点、时间、人名等。"
+    backstory: "我擅长在文本中寻找和标记关键信息。任何重要的实体都逃不过我的眼睛。"
     tools: []
 
-# 工作流配置
-workflows:
-  - id: main_workflow
-    name: 主工作流
-    nodes:
-      - id: start
-        type: agent
-        agent_id: main_agent
-    edges: []
+  - id: response_formatter_agent
+    name: "响应格式化智能体"
+    role: "清晰的沟通者"
+    goal: "将意图识别和实体提取的结果整合成一个结构清晰、符合API规范的JSON响应。"
+    backstory: "我负责将复杂的分析结果转化为简洁明了的标准化输出，确保下游系统能够轻松解析。"
+    tools: []
 
-# 监控配置
+# -----------------------------------------------------------------
+# 工具 (Tools) 配置
+# -----------------------------------------------------------------
+tools:
+  - id: rule_matcher
+    name: "规则匹配工具"
+    description: "根据预定义的正则表达式或关键词规则库，对输入文本进行快速匹配，用于处理高频、固定的意图。"
+    # 实际实现中，这里会指向一个类或函数
+    implementation: "tools.rule_based_matcher.RuleBasedMatcher" 
+
+# -----------------------------------------------------------------
+# 工作流 (Workflows) 配置
+# -----------------------------------------------------------------
+workflows:
+  - id: "intent_recognition_workflow"
+    name: "标准意图识别工作流"
+    description: "一个标准的、从接收请求到返回结果的完整意图识别流程。"
+    
+    # 工作流节点定义
+    nodes:
+      - id: "start_node"
+        type: "start"
+        description: "工作流起始点"
+
+      - id: "intent_classification_node"
+        type: "agent"
+        agent_id: "intent_classifier_agent"
+        description: "调用意图分类智能体进行意图识别"
+
+      - id: "entity_extraction_node"
+        type: "agent"
+        agent_id: "entity_extractor_agent"
+        description: "调用实体提取智能体进行实体提取"
+
+      - id: "response_formatting_node"
+        type: "agent"
+        agent_id: "response_formatter_agent"
+        description: "格式化最终响应"
+
+      - id: "end_node"
+        type: "end"
+        description: "工作流结束点"
+
+    # 工作流执行路径 (有向无环图)
+    edges:
+      - from: "start_node"
+        to: "intent_classification_node"
+      - from: "intent_classification_node"
+        to: "entity_extraction_node"
+      - from: "entity_extraction_node"
+        to: "response_formatting_node"
+      - from: "response_formatting_node"
+        to: "end_node"
+
+# -----------------------------------------------------------------
+# 错误处理与重试机制
+# -----------------------------------------------------------------
+error_handling:
+  max_retries: 3
+  retry_delay_seconds: 1.5
+  fallback_strategy: "return_error_response" # or "use_default_intent"
+
+# -----------------------------------------------------------------
+# 缓存配置
+# -----------------------------------------------------------------
+caching:
+  enabled: true
+  ttl_seconds: 3600  # 缓存1小时
+  max_size: 1000     # 最多缓存1000条请求
+
+# -----------------------------------------------------------------
+# 监控与日志
+# -----------------------------------------------------------------
 monitoring:
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
   enabled: true
   metrics:
-    - execution_time
-    - token_usage
-    - success_rate
+    - "execution_time"
+    - "token_usage"
+    - "success_rate"
+    - "cache_hit_rate"
