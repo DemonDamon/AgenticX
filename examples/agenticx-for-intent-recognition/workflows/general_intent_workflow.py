@@ -5,7 +5,7 @@
 import time
 import logging
 from typing import Dict, Any, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from agenticx.core.workflow import Workflow, WorkflowNode, WorkflowEdge
 from agenticx.core.task import Task
@@ -28,8 +28,7 @@ class SentimentAnalysisNode(WorkflowNode):
     """情感分析节点"""
     general_agent: GeneralIntentAgent = None
     
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     
     def __init__(self, general_agent: GeneralIntentAgent, name: str = "sentiment_analysis"):
         super().__init__(id=name, name=name, type="sentiment_analysis")

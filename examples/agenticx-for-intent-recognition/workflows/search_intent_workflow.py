@@ -201,8 +201,7 @@ class SearchEntityExtractionNode(WorkflowNode):
     """搜索实体抽取节点"""
     entity_extractor: HybridExtractor = None
     
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     
     def __init__(self, entity_extractor: HybridExtractor, name: str = "search_entity_extraction"):
         super().__init__(id=name, name=name, type="search_entity_extraction")
@@ -275,8 +274,7 @@ class SearchIntentSubclassificationNode(WorkflowNode):
     """搜索意图细分节点"""
     search_agent: SearchIntentAgent = None
     
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     
     def __init__(self, search_agent: SearchIntentAgent, name: str = "search_intent_subclassification"):
         super().__init__(id=name, name=name, type="search_intent_subclassification")

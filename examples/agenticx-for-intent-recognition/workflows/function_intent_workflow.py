@@ -34,8 +34,7 @@ class ParameterExtractionNode(WorkflowNode):
     """参数抽取节点"""
     entity_extractor: HybridExtractor = None
     
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     
     def __init__(self, entity_extractor: HybridExtractor, name: str = "parameter_extraction"):
         super().__init__(id=name, name=name, type="parameter_extraction")
