@@ -12,6 +12,7 @@ dist/
 deploy/data/
 deploy/logs/
 htmlcov/
+rules/
 markmap/
 progress/
 thirdparty/
