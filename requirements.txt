@@ -26,6 +26,7 @@ requests>=2.31.0
 mem0ai>=0.1.0
 chromadb>=0.4.0
 qdrant-client>=1.7.0
+redis>=5.0.0
 
 # Monitoring dependencies
 prometheus-client>=0.18.0
