@@ -1,0 +1,10 @@
+目录结构: d:\myWorks\AgenticX\examples\agenticx-for-intent-recognition\workflows
+==================================================
+├── __init__.py (1,789 bytes)
+├── data_processing/
+│   ├── __init__.py (0 bytes)
+│   └── data_import.py (1,621 bytes)
+├── function_intent_workflow.py (22,334 bytes)
+├── general_intent_workflow.py (13,230 bytes)
+├── intent_recognition_workflow.py (11,629 bytes)
+└── search_intent_workflow.py (18,835 bytes)
