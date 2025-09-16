@@ -28,3 +28,4 @@ thirdparty/
 coverage.xml
 
 scan_structure.py
+.DS_Store
