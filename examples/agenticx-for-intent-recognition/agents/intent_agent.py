@@ -7,6 +7,7 @@ import time
 import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+from pydantic import ConfigDict
 
 from agenticx.core import Agent, Task, AgentResult, AgentContext
 from agenticx.llms import KimiProvider
@@ -22,9 +23,10 @@ class IntentRecognitionAgent(Agent):
     支持三大类意图识别：通用对话(000)、搜索(001)、工具调用(002)。
     """
     
-    class Config:
-        arbitrary_types_allowed = True
-        extra = "allow"
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        extra="allow"
+    )
     
     def __init__(self, config: AgentConfig = None):
         """初始化意图识别Agent
