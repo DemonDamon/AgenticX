@@ -49,6 +49,12 @@ dependencies = [
     "click>=8.0.0",
     "PyYAML>=6.0.0",
     "jinja2>=3.0.0",
+    "typer>=0.9.0",
+    
+    # 文档工具
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.0.0",
+    "pydoc-markdown>=4.8.0",
 ]
 
 [project.optional-dependencies]
@@ -100,10 +106,6 @@ dev = [
 
 # 文档工具
 docs = [
-    "mkdocs>=1.5.0",
-    "mkdocs-material>=9.0.0",
-    "mkdocstrings>=0.22.0",
-    "mkdocs-autorefs>=0.4.0",
 ]
 
 # 所有功能
@@ -118,10 +120,6 @@ all = [
     "pre-commit>=3.0.0",
     "twine>=4.0.0",
     "build>=0.10.0",
-    "mkdocs>=1.5.0",
-    "mkdocs-material>=9.0.0",
-    "mkdocstrings>=0.22.0",
-    "mkdocs-autorefs>=0.4.0",
 ]
 
 [project.urls]
@@ -237,4 +235,4 @@ exclude = [
     "dist",
     ".eggs",
     "*.egg",
-] 
+]
