@@ -53,11 +53,71 @@ def version_callback(value: bool):
 # 添加全局 --version 选项
 # 添加帮助回调函数
 def help_callback(value: bool):
+    """帮助回调函数"""
     if value:
-        # 直接调用typer的帮助显示
         import click
         ctx = click.get_current_context()
         click.echo(ctx.get_help())
+        raise typer.Exit()
+
+
+def run_help_callback(value: bool):
+    """run 命令帮助回调函数"""
+    if value:
+        from rich.panel import Panel
+        from rich.table import Table
+        
+        # 创建选项表格
+        options_table = Table(show_header=False, box=None, padding=(0, 1))
+        options_table.add_column("Option", style="cyan")
+        options_table.add_column("Description")
+        options_table.add_row("--config    -c  TEXT", "配置文件路径")
+        options_table.add_row("--verbose   -v", "详细输出")
+        options_table.add_row("--debug     -d", "调试模式")
+        options_table.add_row("--help      -h", "显示帮助信息")
+        
+        console.print("\n[bold yellow]Usage:[/bold yellow] agx run [OPTIONS] FILE\n")
+        console.print("执行工作流文件\n")
+        console.print(Panel(options_table, title="Options", title_align="left"))
+        raise typer.Exit()
+
+
+def validate_help_callback(value: bool):
+    """validate 命令帮助回调函数"""
+    if value:
+        from rich.panel import Panel
+        from rich.table import Table
+        
+        # 创建选项表格
+        options_table = Table(show_header=False, box=None, padding=(0, 1))
+        options_table.add_column("Option", style="cyan")
+        options_table.add_column("Description")
+        options_table.add_row("--schema    -s  TEXT", "验证模式")
+        options_table.add_row("--help      -h", "显示帮助信息")
+        
+        console.print("\n[bold yellow]Usage:[/bold yellow] agx validate [OPTIONS] CONFIG\n")
+        console.print("验证配置文件\n")
+        console.print(Panel(options_table, title="Options", title_align="left"))
+        raise typer.Exit()
+
+
+def test_help_callback(value: bool):
+    """test 命令帮助回调函数"""
+    if value:
+        from rich.panel import Panel
+        from rich.table import Table
+        
+        # 创建选项表格
+        options_table = Table(show_header=False, box=None, padding=(0, 1))
+        options_table.add_column("Option", style="cyan")
+        options_table.add_column("Description")
+        options_table.add_row("--pattern   -p  TEXT", "测试文件匹配模式")
+        options_table.add_row("--verbose   -v", "详细输出")
+        options_table.add_row("--help      -h", "显示帮助信息")
+        
+        console.print("\n[bold yellow]Usage:[/bold yellow] agx test [OPTIONS] [SUITE]\n")
+        console.print("运行测试套件\n")
+        console.print(Panel(options_table, title="Options", title_align="left"))
         raise typer.Exit()
 
 @app.callback()
@@ -98,6 +158,76 @@ docs_app = typer.Typer(
     add_completion=False
 )
 
+@project_app.callback(invoke_without_command=True)
+def project_callback(
+    ctx: typer.Context,
+    help_flag: bool = typer.Option(
+        False, "-h", "--help", 
+        help="显示帮助信息"
+    )
+):
+    """项目管理命令回调函数，支持 -h 选项"""
+    if help_flag or ctx.invoked_subcommand is None:
+        console.print(ctx.get_help())
+        raise typer.Exit()
+
+
+@agent_app.callback(invoke_without_command=True)
+def agent_callback(
+    ctx: typer.Context,
+    help_flag: bool = typer.Option(
+        False, "-h", "--help", 
+        help="显示帮助信息"
+    )
+):
+    """智能体管理命令回调函数，支持 -h 选项"""
+    if help_flag or ctx.invoked_subcommand is None:
+        console.print(ctx.get_help())
+        raise typer.Exit()
+
+
+@workflow_app.callback(invoke_without_command=True)
+def workflow_callback(
+    ctx: typer.Context,
+    help_flag: bool = typer.Option(
+        False, "-h", "--help", 
+        help="显示帮助信息"
+    )
+):
+    """工作流管理命令回调函数，支持 -h 选项"""
+    if help_flag or ctx.invoked_subcommand is None:
+        console.print(ctx.get_help())
+        raise typer.Exit()
+
+
+@deploy_app.callback(invoke_without_command=True)
+def deploy_callback(
+    ctx: typer.Context,
+    help_flag: bool = typer.Option(
+        False, "-h", "--help", 
+        help="显示帮助信息"
+    )
+):
+    """部署相关命令回调函数，支持 -h 选项"""
+    if help_flag or ctx.invoked_subcommand is None:
+        console.print(ctx.get_help())
+        raise typer.Exit()
+
+
+@monitor_app.callback(invoke_without_command=True)
+def monitor_callback(
+    ctx: typer.Context,
+    help_flag: bool = typer.Option(
+        False, "-h", "--help", 
+        help="显示帮助信息"
+    )
+):
+    """监控相关命令回调函数，支持 -h 选项"""
+    if help_flag or ctx.invoked_subcommand is None:
+        console.print(ctx.get_help())
+        raise typer.Exit()
+
+
 @docs_app.callback(invoke_without_command=True)
 def docs_callback(
     ctx: typer.Context,
@@ -133,7 +263,8 @@ def run(
     file: str = typer.Argument(..., help="要执行的工作流文件"),
     config: Optional[str] = typer.Option(None, "--config", "-c", help="配置文件路径"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="详细输出"),
-    debug: bool = typer.Option(False, "--debug", "-d", help="调试模式")
+    debug: bool = typer.Option(False, "--debug", "-d", help="调试模式"),
+    help_flag: bool = typer.Option(False, "--help", "-h", help="显示帮助信息", callback=lambda value: run_help_callback(value) if value else None, is_eager=True)
 ):
     """执行工作流文件"""
     console.print(f"[bold blue]执行工作流:[/bold blue] {file}")
@@ -160,7 +291,8 @@ def run(
 @app.command()
 def validate(
     config: str = typer.Argument(..., help="要验证的配置文件"),
-    schema: Optional[str] = typer.Option(None, "--schema", "-s", help="验证模式")
+    schema: Optional[str] = typer.Option(None, "--schema", "-s", help="验证模式"),
+    help_flag: bool = typer.Option(False, "--help", "-h", help="显示帮助信息", callback=lambda value: validate_help_callback(value) if value else None, is_eager=True)
 ):
     """验证配置文件"""
     console.print(f"[bold blue]验证配置文件:[/bold blue] {config}")
@@ -189,7 +321,8 @@ def validate(
 def test(
     suite: Optional[str] = typer.Argument(None, help="测试套件名称"),
     pattern: Optional[str] = typer.Option(None, "--pattern", "-p", help="测试文件匹配模式"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="详细输出")
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="详细输出"),
+    help_flag: bool = typer.Option(False, "--help", "-h", help="显示帮助信息", callback=lambda value: test_help_callback(value) if value else None, is_eager=True)
 ):
     """运行测试套件"""
     console.print(f"[bold blue]运行测试套件:[/bold blue] {suite or '所有测试'}")
