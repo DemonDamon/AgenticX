@@ -51,6 +51,15 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 # 添加全局 --version 选项
+# 添加帮助回调函数
+def help_callback(value: bool):
+    if value:
+        # 直接调用typer的帮助显示
+        import click
+        ctx = click.get_current_context()
+        click.echo(ctx.get_help())
+        raise typer.Exit()
+
 @app.callback()
 def main_callback(
     version: Optional[bool] = typer.Option(
@@ -58,6 +67,12 @@ def main_callback(
         callback=version_callback,
         is_eager=True,
         help="显示版本信息并退出"
+    ),
+    help_flag: Optional[bool] = typer.Option(
+        None, "--help", "-h",
+        callback=help_callback,
+        is_eager=True,
+        help="显示帮助信息并退出"
     )
 ):
     """AgenticX: 统一的多智能体框架 - 开发者工具套件"""
