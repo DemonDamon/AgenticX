@@ -79,8 +79,22 @@ docs_app = typer.Typer(
     1. **生成文档**: `agenticx docs generate`
     2. **启动服务**: `agenticx docs serve`
     """,
-    rich_help_panel="Commands"
+    rich_help_panel="Commands",
+    add_completion=False
 )
+
+@docs_app.callback(invoke_without_command=True)
+def docs_callback(
+    ctx: typer.Context,
+    help_flag: bool = typer.Option(
+        False, "-h", "--help", 
+        help="显示帮助信息"
+    )
+):
+    """文档命令回调函数，支持 -h 选项"""
+    if help_flag or ctx.invoked_subcommand is None:
+        console.print(ctx.get_help())
+        raise typer.Exit()
 
 # 注册子命令
 app.add_typer(project_app)
@@ -428,9 +442,29 @@ def generate_docs(
     output_dir: Optional[str] = typer.Option(
         None, "--output-dir", "-o", 
         help="指定文档生成的输出目录，如果不指定则使用项目根目录下的 site 目录"
+    ),
+    help_flag: bool = typer.Option(
+        False, "-h", "--help",
+        help="显示帮助信息"
     )
 ):
     """生成文档"""
+    if help_flag:
+        from rich.panel import Panel
+        from rich.table import Table
+        
+        # 创建选项表格
+        options_table = Table(show_header=False, box=None, padding=(0, 1))
+        options_table.add_column("Option", style="cyan")
+        options_table.add_column("Description")
+        options_table.add_row("--output-dir  -o  TEXT", "指定文档生成的输出目录，如果不指定则使用项目根目录下的 site 目录")
+        options_table.add_row("--help        -h", "显示帮助信息")
+        
+        console.print("\n[bold yellow]Usage:[/bold yellow] agx docs generate [OPTIONS]\n")
+        console.print("生成文档\n")
+        console.print(Panel(options_table, title="Options", title_align="left"))
+        raise typer.Exit()
+    
     DocGenerator = _get_doc_generator()
     doc_generator = DocGenerator(output_dir=output_dir)
     try:
@@ -442,9 +476,29 @@ def generate_docs(
 
 @docs_app.command("serve")
 def serve_docs(
-    port: int = typer.Option(8000, "--port", "-p", help="服务端口")
+    port: int = typer.Option(8000, "--port", "-p", help="服务端口"),
+    help_flag: bool = typer.Option(
+        False, "-h", "--help",
+        help="显示帮助信息"
+    )
 ):
     """启动文档服务器"""
+    if help_flag:
+        from rich.panel import Panel
+        from rich.table import Table
+        
+        # 创建选项表格
+        options_table = Table(show_header=False, box=None, padding=(0, 1))
+        options_table.add_column("Option", style="cyan")
+        options_table.add_column("Description")
+        options_table.add_row("--port  -p  INTEGER", "服务端口 [default: 8000]")
+        options_table.add_row("--help  -h", "显示帮助信息")
+        
+        console.print("\n[bold yellow]Usage:[/bold yellow] agx docs serve [OPTIONS]\n")
+        console.print("启动文档服务器\n")
+        console.print(Panel(options_table, title="Options", title_align="left"))
+        raise typer.Exit()
+    
     console.print(f"[bold blue]启动文档服务器:[/bold blue]")
     
     DocGenerator = _get_doc_generator()
