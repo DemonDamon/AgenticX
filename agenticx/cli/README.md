@@ -1,6 +1,6 @@
 ## AgenticX CLI 模块概览
 
-AgenticX CLI 模块位于 `d:\myWorks\AgenticX\agenticx\cli` 目录，是一个功能完整的命令行工具套件，基于 Typer 框架构建。
+AgenticX CLI 模块位于 `agenticx/cli` 目录，是一个功能完整的命令行工具套件，基于 Typer 框架构建。
 
 ### 🏗️ 核心架构
 
@@ -44,10 +44,11 @@ AgenticX CLI 模块位于 `d:\myWorks\AgenticX\agenticx\cli` 目录，是一个�
 - 部署脚本生成
 
 #### 6. **文档生成** (`docs.py`)
-- **多格式支持**：HTML、Markdown、PDF、JSON
-- 自动生成API文档
+- **专注API文档**：从源代码自动生成纯净的API接口文档
+- **静态网站生成**：基于MkDocs构建美观的文档网站
 - 文档服务器：`http://localhost:8000`
-- 模板化文档生成
+- **智能路径选择**：支持在项目根目录、子目录或指定输出目录生成文档
+- **简洁输出**：优化的日志显示，专业的用户体验
 
 ### 🛠️ 技术特性
 
@@ -85,8 +86,14 @@ agenticx validate config.yaml
 # 启动监控面板
 agenticx monitor start --port 8080
 
-# 生成文档
-agenticx docs generate --format html
+# 生成文档（在当前目录）
+agenticx docs generate
+
+# 生成文档到指定目录
+agenticx docs generate --output-dir ./my-docs
+
+# 启动文档服务器
+agenticx docs serve
 
 # 部署到Docker
 agenticx deploy prepare ./deploy --platform docker
@@ -99,6 +106,26 @@ agenticx deploy prepare ./deploy --platform docker
 3. **多平台部署**：支持现代化部署方式
 4. **开发者友好**：完整的调试、监控、文档工具链
 5. **企业级支持**：包含安全、监控、部署等企业特性
+6. **智能文档生成**：自动检测项目结构，支持灵活的输出路径配置
+
+### 📚 文档生成详细说明
+
+文档生成功能 (`agenticx docs`) 提供了强大的文档自动化能力：
+
+#### **目录结构**
+- **`docs/`** - 源文档目录，包含Markdown文件和自动生成的API文档
+- **`site/`** - 最终的静态网站目录，可直接部署
+
+#### **智能路径选择**
+- 在项目根目录执行：生成到 `<项目根>/site` 和 `<项目根>/docs`
+- 在子目录执行：生成到 `<当前目录>/site` 和 `<当前目录>/docs`
+- 指定输出目录：`--output-dir` 参数自定义输出位置
+
+#### **文档内容**
+- 专注于API接口文档生成，不包含项目开发记录文档
+- 使用 pydoc-markdown 从源代码自动生成API文档
+- 创建 mkdocs.yml 配置文件
+- 构建纯净的API文档静态网站
 
 AgenticX CLI 提供了完整的开发者工具链，从项目创建到部署上线的全生命周期支持，是 AgenticX 框架的重要组成部分。
         
