@@ -123,8 +123,8 @@ setup(
     description="A unified, scalable, production-ready multi-agent application development framework",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    author="AgenticX Team",
-    author_email="team@agenticx.ai",
+    author="Ziran Li",
+    author_email="bingzhenli@hotmail.com",
     url="https://github.com/DemonDamon/AgenticX",
     project_urls={
         "Documentation": "https://agenticx.ai/docs",
