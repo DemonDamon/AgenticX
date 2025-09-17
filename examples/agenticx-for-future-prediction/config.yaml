@@ -1,0 +1,62 @@
+# . 多智能体配置文件
+
+# LLM配置
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY}
+  base_url: ${OPENAI_API_BASE}  # 支持代理设置
+  temperature: 0.7
+  max_tokens: 2000
+
+# 智能体配置
+agents:
+  - id: coordinator_agent
+    name: 协调器智能体
+    role: 协调器
+    goal: 协调多个智能体完成复杂任务
+    backstory: 我是一个专业的任务协调器
+    tools: []
+  
+  - id: worker_agent_1
+    name: 工作者智能体1
+    role: 专业工作者
+    goal: 执行具体任务
+    backstory: 我是一个专业的任务执行者
+    tools: []
+  
+  - id: worker_agent_2
+    name: 工作者智能体2
+    role: 专业工作者
+    goal: 执行具体任务
+    backstory: 我是一个专业的任务执行者
+    tools: []
+
+# 工作流配置
+workflows:
+  - id: multi_agent_workflow
+    name: 多智能体协作工作流
+    nodes:
+      - id: coordinator
+        type: agent
+        agent_id: coordinator_agent
+      - id: worker1
+        type: agent
+        agent_id: worker_agent_1
+      - id: worker2
+        type: agent
+        agent_id: worker_agent_2
+    edges:
+      - from: coordinator
+        to: worker1
+      - from: coordinator
+        to: worker2
+
+# 监控配置
+monitoring:
+  enabled: true
+  metrics:
+    - execution_time
+    - token_usage
+    - success_rate
+    - agent_performance
