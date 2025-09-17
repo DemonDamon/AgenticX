@@ -40,10 +40,10 @@ class DocGenerator:
         current_dir = Path.cwd().resolve()
         
         if output_dir:
-            # 如果指定了输出目录，使用指定的目录
+            # 如果指定了输出目录，使用指定的目录作为site输出
             self.output_dir = Path(output_dir).resolve()
-            # 在指定目录下创建 docs 子目录用于存放源文档
-            self.docs_dir = self.output_dir / "docs"
+            # 在指定目录的同级创建临时 docs 目录用于存放源文档
+            self.docs_dir = self.output_dir.parent / f"{self.output_dir.name}_docs_temp"
             self._custom_output_dir = True
         elif current_dir != self.root_dir:
             # 如果当前目录不是项目根目录，在当前目录生成文档
@@ -103,11 +103,11 @@ class DocGenerator:
         # 1. 使用 pydoc-markdown 从源代码生成 markdown
         self._generate_markdown(api_docs_dir)
 
-        # 2. 在项目根目录创建 mkdocs.yml
-        self._create_mkdocs_config()
-
-        # 3. 如果需要，在 `docs` 中创建默认的 index.md
+        # 2. 如果需要，在 `docs` 中创建默认的 index.md
         self._create_index_md_if_needed()
+
+        # 3. 在项目根目录创建 mkdocs.yml（在所有文档生成完毕后）
+        self._create_mkdocs_config()
 
         # 4. 使用 mkdocs 构建文档
         self._build_docs()
@@ -174,35 +174,39 @@ class DocGenerator:
 
         # 扫描用户文档并添加到导航栏
         nav = []
-        # 确保主页在最前面
-        nav.append({'主页': 'index.md'})
         
-        # 添加存在的用户文档
-        user_docs = []
-        for path in sorted(self.docs_dir.glob("*.md")):
-            if path.name not in ["index.md", "README.md"]:
-                # 只添加实际存在的文件
-                if path.exists():
-                    user_docs.append({path.stem.replace('_', ' ').title(): path.name})
-        
-        if user_docs:
-            nav.extend(user_docs)
+        # 只有在docs目录存在时才扫描用户文档
+        if self.docs_dir.exists():
+            # 只有在index.md存在时才添加主页
+            index_file = self.docs_dir / "index.md"
+            if index_file.exists():
+                nav.append({'主页': 'index.md'})
+            # 添加存在的用户文档
+            user_docs = []
+            for path in sorted(self.docs_dir.glob("*.md")):
+                if path.name not in ["index.md", "README.md"]:
+                    # 只添加实际存在的文件
+                    if path.exists():
+                        user_docs.append({path.stem.replace('_', ' ').title(): path.name})
+            
+            if user_docs:
+                nav.extend(user_docs)
 
-        # 添加生成的 API 文档到导航栏
-        api_dir = self.docs_dir / "api"
-        if api_dir.exists():
-            # 查找实际存在的 API 文档文件
-            api_files = sorted(api_dir.glob("**/*.md"))
-            if api_files:
-                # 使用第一个找到的 API 文件
-                first_api_file = api_files[0].relative_to(self.docs_dir)
-                nav.append({"API 参考": str(first_api_file)})
+            # 添加生成的 API 文档到导航栏
+            api_dir = self.docs_dir / "api"
+            if api_dir.exists():
+                # 查找实际存在的 API 文档文件
+                api_files = sorted(api_dir.glob("**/*.md"))
+                if api_files:
+                    # 使用第一个找到的 API 文件
+                    first_api_file = api_files[0].relative_to(self.docs_dir)
+                    nav.append({"API 参考": str(first_api_file)})
 
         # 根据是否使用自定义输出目录来设置路径
         if self._custom_output_dir:
             # 使用相对路径，相对于 mkdocs.yml 文件的位置
             site_dir = self.output_dir.name
-            docs_dir = "docs"
+            docs_dir = self.docs_dir.name
         else:
             # 默认情况下使用相对路径
             site_dir = str(self.output_dir.relative_to(self.root_dir))
@@ -305,17 +309,27 @@ AgenticX 是一个统一、可扩展、生产就绪的多智能体应用开发�
             # 清理 mkdocs.yml
             if config_path.exists():
                 config_path.unlink()
+            # 清理临时docs目录
+            if self._custom_output_dir and self.docs_dir.exists():
+                shutil.rmtree(self.docs_dir)
 
         # 文档构建完成
 
 
     def serve_docs(self, port: int = 8000):
         """启动文档服务器"""
-        docs_dir = self.output_dir
-        if not docs_dir.exists():
-            console.print(f"[bold red]错误:[/bold red] 文档目录 '{docs_dir.name}' 不存在。")
-            console.print("请先运行 [bold cyan]agenticx docs generate[/bold cyan] 来生成文档。")
-            raise typer.Exit(1)
+        # 检查当前目录是否包含生成的文档文件
+        current_dir = Path.cwd()
+        if (current_dir / "index.html").exists() and (current_dir / "assets").exists():
+            # 当前目录就是生成的文档目录
+            docs_dir = current_dir
+        else:
+            # 使用默认的输出目录
+            docs_dir = self.output_dir
+            if not docs_dir.exists():
+                console.print(f"[bold red]错误:[/bold red] 文档目录 '{docs_dir.name}' 不存在。")
+                console.print("请先运行 [bold cyan]agenticx docs generate[/bold cyan] 来生成文档。")
+                raise typer.Exit(1)
 
         console.print(f"[bold blue]启动文档服务器于:[/bold blue] http://localhost:{port}")
         console.print(f"服务目录: {docs_dir.resolve()}")
