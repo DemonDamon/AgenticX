@@ -7,16 +7,19 @@ AgenticX 文档生成器
 """
 
 import os
-import json
 import shutil
-import subprocess
-from typing import Dict, List, Optional, Any
+import sys
 from pathlib import Path
-from datetime import datetime
 import http.server
 import socketserver
 import threading
 import webbrowser
+import yaml
+import typer
+import warnings
+
+# 过滤掉 litellm 的 DeprecationWarning
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="litellm")
 
 from rich.console import Console
 
@@ -25,190 +28,327 @@ console = Console()
 
 class DocGenerator:
     """文档生成器"""
-    
-    def __init__(self):
-        self.supported_formats = ["html", "markdown", "pdf", "json"]
-        self.output_dir = Path("docs")
-    
-    def generate_docs(
-        self,
-        source: str = ".",
-        output: str = "docs",
-        format: str = "html"
-    ) -> str:
+
+    def __init__(self, output_dir: str = None):
+        """初始化文档生成器
+        
+        Args:
+            output_dir: 可选的输出目录路径，如果不指定则根据当前工作目录决定生成位置
+        """
+        self._check_dependencies()
+        self.root_dir = self._find_project_root()
+        current_dir = Path.cwd().resolve()
+        
+        if output_dir:
+            # 如果指定了输出目录，使用指定的目录
+            self.output_dir = Path(output_dir).resolve()
+            # 在指定目录下创建 docs 子目录用于存放源文档
+            self.docs_dir = self.output_dir / "docs"
+            self._custom_output_dir = True
+        elif current_dir != self.root_dir:
+            # 如果当前目录不是项目根目录，在当前目录生成文档
+            self.output_dir = current_dir / "site"
+            self.docs_dir = current_dir / "docs"
+            self._custom_output_dir = True
+        else:
+            # 默认行为：在项目根目录下生成
+            self.output_dir = self.root_dir / "site"
+            self.docs_dir = self.root_dir / "docs"
+            self._custom_output_dir = False
+            
+        self.source_dir = self.root_dir / "agenticx" # Python 源码
+
+    def _check_dependencies(self):
+        """检查文档生成所需的依赖是否已安装。"""
+        try:
+            # 检查 pydoc-markdown
+            from pydoc_markdown import PydocMarkdown
+            # 检查 mkdocs
+            import mkdocs.commands.build
+            import mkdocs.config
+        except ImportError as e:
+            console.print("[bold red]错误：缺少文档生成依赖。[/bold red]")
+            console.print("请将 `pydoc-markdown`, `mkdocs`, `mkdocs-material` 添加到您的项目依赖中。")
+            console.print("例如，在 `pyproject.toml` 的 `dependencies` 部分添加它们，然后重新安装。")
+            console.print(f"具体错误: {e}")
+            raise typer.Exit(1)
+
+    def _find_project_root(self, current_path: Path = None) -> Path:
+        """向上查找项目根目录（包含 pyproject.toml 的目录）。"""
+        if current_path is None:
+            current_path = Path.cwd().resolve()
+        
+        if (current_path / "pyproject.toml").exists():
+            return current_path
+        
+        if current_path.parent == current_path:
+            console.print("[bold red]错误:[/bold red] 无法找到项目根目录 (pyproject.toml)。")
+            console.print("请确保您在 AgenticX 项目目录或其子目录中运行此命令。")
+            raise typer.Exit(1)
+            
+        return self._find_project_root(current_path.parent)
+
+
+
+    def generate_docs(self):
         """生成文档"""
-        if format not in self.supported_formats:
-            raise ValueError(f"不支持的格式: {format}")
+        console.print("[bold blue]📚 生成文档[/bold blue]")
+
+        # 确保文档目录存在
+        self.docs_dir.mkdir(parents=True, exist_ok=True)
+
+        # 用于存放生成的 API 文档的目录
+        api_docs_dir = self.docs_dir / "api"
+
+        # 1. 使用 pydoc-markdown 从源代码生成 markdown
+        self._generate_markdown(api_docs_dir)
+
+        # 2. 在项目根目录创建 mkdocs.yml
+        self._create_mkdocs_config()
+
+        # 3. 如果需要，在 `docs` 中创建默认的 index.md
+        self._create_index_md_if_needed()
+
+        # 4. 使用 mkdocs 构建文档
+        self._build_docs()
+
+        console.print(f"[green]✅ 文档已生成到:[/green] [cyan]{self.output_dir}[/cyan]")
+        return str(self.output_dir)
+
+    def _generate_markdown(self, api_docs_dir: Path):
+        """使用 pydoc-markdown 生成 API 文档的 markdown 文件"""
+        package_name = "agenticx"
         
-        console.print(f"[bold blue]生成文档:[/bold blue] {source} -> {output} ({format})")
+        # 确保 API 文档目录存在
+        api_docs_dir.mkdir(parents=True, exist_ok=True)
+
+        # 使用 pydoc-markdown 的 Python API
+        try:
+            from pydoc_markdown import PydocMarkdown
+            from pydoc_markdown.contrib.loaders.python import PythonLoader
+            from pydoc_markdown.contrib.processors.filter import FilterProcessor
+            from pydoc_markdown.contrib.processors.smart import SmartProcessor
+            from pydoc_markdown.contrib.processors.crossref import CrossrefProcessor
+            from pydoc_markdown.contrib.renderers.markdown import MarkdownRenderer
+            
+            # 静默生成 API 文档
+
+            # 创建 PydocMarkdown 实例
+            pydoc_markdown = PydocMarkdown()
+            
+            # 配置 loaders
+            python_loader = PythonLoader()
+            python_loader.search_path = [str(self.root_dir)]
+            python_loader.modules = [package_name]
+            pydoc_markdown.loaders = [python_loader]
+            
+            # 配置 processors
+            pydoc_markdown.processors = [
+                FilterProcessor(),
+                SmartProcessor(),
+                CrossrefProcessor()
+            ]
+            
+            # 配置 renderer
+            markdown_renderer = MarkdownRenderer()
+            markdown_renderer.filename = str(api_docs_dir / "api.md")
+            pydoc_markdown.renderer = markdown_renderer
+            
+            # 执行文档生成
+            modules = pydoc_markdown.load_modules()
+            pydoc_markdown.process(modules)
+            pydoc_markdown.render(modules)
+            
+        except Exception as e:
+            console.print("[bold red]Markdown 文档生成失败。[/bold red]")
+            console.print(f"错误: {e}")
+            import traceback
+            console.print(traceback.format_exc())
+            raise typer.Exit(1)
+
+        # API 文档生成完成
+
+    def _create_mkdocs_config(self):
+        """创建 mkdocs.yml。"""
+        # 静默创建配置文件
+
+        # 扫描用户文档并添加到导航栏
+        nav = []
+        # 确保主页在最前面
+        nav.append({'主页': 'index.md'})
         
-        source_path = Path(source)
-        output_path = Path(output)
-        output_path.mkdir(parents=True, exist_ok=True)
+        # 添加存在的用户文档
+        user_docs = []
+        for path in sorted(self.docs_dir.glob("*.md")):
+            if path.name not in ["index.md", "README.md"]:
+                # 只添加实际存在的文件
+                if path.exists():
+                    user_docs.append({path.stem.replace('_', ' ').title(): path.name})
         
-        # 生成基础文档
-        self._create_basic_docs(source_path, output_path, format)
-        
-        console.print(f"[green]文档生成完成:[/green] {output_path}")
-        return str(output_path)
-    
-    def _create_basic_docs(self, source_path: Path, output_path: Path, format: str):
-        """创建基础文档"""
-        if format == "html":
-            # 创建HTML文档
-            index_content = self._get_html_template()
-            (output_path / "index.html").write_text(index_content, encoding='utf-8')
-        elif format == "markdown":
-            # 创建Markdown文档
-            readme_content = self._get_markdown_template()
-            (output_path / "README.md").write_text(readme_content, encoding='utf-8')
-        elif format == "json":
-            # 创建JSON文档
-            docs_data = {
-                "generated_at": datetime.now().isoformat(),
-                "source_path": str(source_path)
-            }
-            (output_path / "docs.json").write_text(json.dumps(docs_data, indent=2), encoding='utf-8')
-    
-    def _get_html_template(self) -> str:
-        """获取HTML模板"""
-        return """<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>AgenticX 文档</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { text-align: center; margin-bottom: 40px; }
-        .section { margin-bottom: 30px; }
-        .card { border: 1px solid #ddd; padding: 20px; border-radius: 8px; }
-        .code { background: #f8f9fa; padding: 15px; border-radius: 4px; font-family: monospace; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>AgenticX 文档</h1>
-            <p>统一的多智能体框架文档</p>
-        </div>
-        
-        <div class="section">
-            <h2>概述</h2>
-            <div class="card">
-                <p>AgenticX 是一个统一的多智能体框架，提供了从简单自动化助手到复杂协作式智能体系统的全部能力。</p>
-            </div>
-        </div>
-        
-        <div class="section">
-            <h2>快速开始</h2>
-            <div class="card">
-                <div class="code">
-from agenticx import Agent, Task, AgentExecutor
-from agenticx.llms import OpenAIProvider
+        if user_docs:
+            nav.extend(user_docs)
 
-# 创建智能体
-agent = Agent(
-    id="assistant",
-    name="AI助手",
-    role="助手",
-    goal="帮助用户完成任务"
-)
+        # 添加生成的 API 文档到导航栏
+        api_dir = self.docs_dir / "api"
+        if api_dir.exists():
+            # 查找实际存在的 API 文档文件
+            api_files = sorted(api_dir.glob("**/*.md"))
+            if api_files:
+                # 使用第一个找到的 API 文件
+                first_api_file = api_files[0].relative_to(self.docs_dir)
+                nav.append({"API 参考": str(first_api_file)})
 
-# 创建任务
-task = Task(
-    id="greeting",
-    description="向用户问候",
-    expected_output="友好的问候语"
-)
+        # 根据是否使用自定义输出目录来设置路径
+        if self._custom_output_dir:
+            # 使用相对路径，相对于 mkdocs.yml 文件的位置
+            site_dir = self.output_dir.name
+            docs_dir = "docs"
+        else:
+            # 默认情况下使用相对路径
+            site_dir = str(self.output_dir.relative_to(self.root_dir))
+            docs_dir = str(self.docs_dir.relative_to(self.root_dir))
+            
+        mkdocs_config = {
+            "site_name": "AgenticX",
+            "site_dir": site_dir,
+            "docs_dir": docs_dir,
+            "theme": {
+                "name": "material",
+                "features": [
+                    "navigation.tabs",
+                    "navigation.sections",
+                    "navigation.expand",
+                    "search.highlight"
+                ]
+            },
+            "nav": nav,
+            "plugins": [
+                "search"
+            ],
+            "markdown_extensions": [
+                "codehilite",
+                "admonition",
+                "toc"
+            ]
+        }
 
-# 执行任务
-executor = AgentExecutor(agent=agent, llm=OpenAIProvider())
-result = executor.run(task)
-                </div>
-            </div>
-        </div>
-    </div>
-</body>
-</html>"""
-    
-    def _get_markdown_template(self) -> str:
-        """获取Markdown模板"""
-        return f"""# AgenticX 文档
+        # 如果指定了输出目录，将 mkdocs.yml 放在输出目录的父目录
+        if hasattr(self, '_custom_output_dir') and self._custom_output_dir:
+            config_path = self.output_dir.parent / "mkdocs.yml"
+        else:
+            config_path = self.root_dir / "mkdocs.yml"
+            
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(mkdocs_config, f, allow_unicode=True, default_flow_style=False)
 
-生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    def _create_index_md_if_needed(self):
+        """如果主 index.md 文件不存在，则创建它。"""
+        index_path = self.docs_dir / "index.md"
+        if not index_path.exists():
+            # 检查实际存在的 API 文档
+            api_link = ""
+            api_dir = self.docs_dir / "api"
+            if api_dir.exists():
+                api_files = sorted(api_dir.glob("**/*.md"))
+                if api_files:
+                    first_api_file = api_files[0].relative_to(self.docs_dir)
+                    api_link = f"- 要浏览API，请访问 [API 参考]({first_api_file})。\n"
+            
+            # 检查是否存在快速开始文档
+            quickstart_link = ""
+            if (self.docs_dir / "quickstart.md").exists():
+                quickstart_link = "- 要开始使用，请查看 [快速开始](quickstart.md)。\n"
+            
+            index_content = f"""# 欢迎来到 AgenticX 文档
 
-## 概述
+AgenticX 是一个统一、可扩展、生产就绪的多智能体应用开发框架。
 
-AgenticX 是一个统一的多智能体框架，提供了从简单自动化助手到复杂协作式智能体系统的全部能力。
+{quickstart_link}{api_link}"""
+            
+            with open(index_path, "w", encoding="utf-8") as f:
+                f.write(index_content)
 
-## 安装
+    def _build_docs(self):
+        """使用 mkdocs 构建文档。"""
+        if self.output_dir.exists():
+            shutil.rmtree(self.output_dir)
 
-```bash
-pip install agenticx
-```
+        # 使用与 _create_mkdocs_config 相同的逻辑确定配置文件路径
+        if self._custom_output_dir:
+            config_path = self.output_dir.parent / "mkdocs.yml"
+            work_dir = self.output_dir.parent
+        else:
+            config_path = self.root_dir / "mkdocs.yml"
+            work_dir = self.root_dir
+            
+        try:
+            import mkdocs.commands.build
+            import mkdocs.config
+            
+            # 切换工作目录以确保 mkdocs 能正确找到所有路径
+            original_cwd = os.getcwd()
+            os.chdir(work_dir)
+            
+            config = mkdocs.config.load_config(config_file=str(config_path))
+            mkdocs.commands.build.build(config)
 
-## 快速开始
+        except Exception as e:
+            console.print("[bold red]MkDocs 构建失败。[/bold red]")
+            console.print(f"错误: {e}")
+            import traceback
+            console.print(traceback.format_exc())
+            raise typer.Exit(1)
+        finally:
+            # 恢复原始工作目录
+            if 'original_cwd' in locals():
+                os.chdir(original_cwd)
+            # 清理 mkdocs.yml
+            if config_path.exists():
+                config_path.unlink()
 
-```python
-from agenticx import Agent, Task, AgentExecutor
-from agenticx.llms import OpenAIProvider
+        # 文档构建完成
 
-# 创建智能体
-agent = Agent(
-    id="assistant",
-    name="AI助手",
-    role="助手",
-    goal="帮助用户完成任务"
-)
 
-# 创建任务
-task = Task(
-    id="greeting",
-    description="向用户问候",
-    expected_output="友好的问候语"
-)
-
-# 执行任务
-executor = AgentExecutor(agent=agent, llm=OpenAIProvider())
-result = executor.run(task)
-```
-
-## 支持
-
-如果您在使用过程中遇到问题，请查看文档或提交Issue。
-"""
-    
-    def serve_docs(self, docs_path: str = "docs", port: int = 8000):
+    def serve_docs(self, port: int = 8000):
         """启动文档服务器"""
-        docs_dir = Path(docs_path)
+        docs_dir = self.output_dir
         if not docs_dir.exists():
-            raise ValueError(f"文档目录不存在: {docs_path}")
+            console.print(f"[bold red]错误:[/bold red] 文档目录 '{docs_dir.name}' 不存在。")
+            console.print("请先运行 [bold cyan]agenticx docs generate[/bold cyan] 来生成文档。")
+            raise typer.Exit(1)
+
+        console.print(f"[bold blue]启动文档服务器于:[/bold blue] http://localhost:{port}")
+        console.print(f"服务目录: {docs_dir.resolve()}")
+
+        # 使用 mkdocs serve，因为它提供更好的体验（如热重载）
+        # 但为了简单起见，我们继续使用 SimpleHTTPServer
+        # 如果要用 mkdocs serve, 需要在另一个进程中运行
         
-        console.print(f"[bold blue]启动文档服务器:[/bold blue] http://localhost:{port}")
-        
-        # 启动HTTP服务器
         def start_server():
-            os.chdir(docs_dir)
+            # chdir 到 site 目录
+            os.chdir(str(docs_dir.resolve()))
             with socketserver.TCPServer(("", port), http.server.SimpleHTTPRequestHandler) as httpd:
-                console.print(f"[green]文档服务器已启动:[/green] http://localhost:{port}")
+                console.print("[green]文档服务器已启动。按 Ctrl+C 停止。[/green]")
                 try:
                     httpd.serve_forever()
                 except KeyboardInterrupt:
-                    console.print("\n[yellow]文档服务器已停止[/yellow]")
-        
-        # 在新线程中启动服务器
+                    pass
+                finally:
+                    httpd.server_close()
+
+
         server_thread = threading.Thread(target=start_server)
         server_thread.daemon = True
         server_thread.start()
-        
-        # 打开浏览器
-        webbrowser.open(f"http://localhost:{port}")
-        
+
         try:
-            # 保持主线程运行
-            while True:
-                import time
-                time.sleep(1)
+            webbrowser.open(f"http://localhost:{port}")
+        except webbrowser.Error:
+            console.print(f"[yellow]无法自动打开浏览器。请手动访问 http://localhost:{port}[/yellow]")
+
+
+        try:
+            # 等待线程结束（例如通过 KeyboardInterrupt）
+            server_thread.join()
         except KeyboardInterrupt:
-            console.print("\n[yellow]文档服务器已停止[/yellow]")
+            console.print("\n[yellow]正在停止文档服务器...[/yellow]")

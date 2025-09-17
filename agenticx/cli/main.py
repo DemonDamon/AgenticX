@@ -69,7 +69,18 @@ agent_app = typer.Typer(name="agent", help="智能体管理命令")
 workflow_app = typer.Typer(name="workflow", help="工作流管理命令")
 deploy_app = typer.Typer(name="deploy", help="部署相关命令")
 monitor_app = typer.Typer(name="monitor", help="监控相关命令")
-docs_app = typer.Typer(name="docs", help="文档生成命令")
+docs_app = typer.Typer(
+    name="docs", 
+    help="""
+    文档生成与服务。
+    
+    请按照以下步骤操作：
+    
+    1. **生成文档**: `agenticx docs generate`
+    2. **启动服务**: `agenticx docs serve`
+    """,
+    rich_help_panel="Commands"
+)
 
 # 注册子命令
 app.add_typer(project_app)
@@ -414,37 +425,32 @@ def monitor_status():
 # === 文档生成命令 ===
 @docs_app.command("generate")
 def generate_docs(
-    source: str = typer.Option(".", "--source", "-s", help="源代码目录"),
-    output: str = typer.Option("docs", "--output", "-o", help="输出目录"),
-    format: str = typer.Option("html", "--format", "-f", help="输出格式")
+    output_dir: Optional[str] = typer.Option(
+        None, "--output-dir", "-o", 
+        help="指定文档生成的输出目录，如果不指定则使用项目根目录下的 site 目录"
+    )
 ):
     """生成文档"""
-    console.print(f"[bold blue]生成文档:[/bold blue] {source} -> {output}")
-    
     DocGenerator = _get_doc_generator()
-    doc_generator = DocGenerator()
+    doc_generator = DocGenerator(output_dir=output_dir)
     try:
-        doc_path = doc_generator.generate_docs(source, output, format)
-        console.print(f"[bold green]✓ 文档生成完成![/bold green]")
-        console.print(f"文档路径: {doc_path}")
+        doc_path = doc_generator.generate_docs()
     except Exception as e:
-        console.print(f"[bold red]文档生成失败:[/bold red] {e}")
+        console.print(f"[bold red]❌ 文档生成失败:[/bold red] {e}")
         raise typer.Exit(1)
 
 
 @docs_app.command("serve")
 def serve_docs(
-    directory: str = typer.Option("docs", "--dir", "-d", help="文档目录"),
-    port: int = typer.Option(8000, "--port", "-p", help="服务端口"),
-    host: str = typer.Option("127.0.0.1", "--host", "-h", help="服务地址")
+    port: int = typer.Option(8000, "--port", "-p", help="服务端口")
 ):
     """启动文档服务器"""
-    console.print(f"[bold blue]启动文档服务器:[/bold blue] {directory}")
+    console.print(f"[bold blue]启动文档服务器:[/bold blue]")
     
     DocGenerator = _get_doc_generator()
     doc_generator = DocGenerator()
     try:
-        doc_generator.serve_docs(directory, port)  # 修复参数
+        doc_generator.serve_docs(port=port)
         console.print(f"[bold green]✓ 文档服务器启动成功![/bold green]")
         console.print(f"访问地址: http://localhost:{port}")
     except Exception as e:
@@ -458,4 +464,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
