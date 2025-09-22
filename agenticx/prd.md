@@ -204,8 +204,10 @@ graph LR
 - ⏳ **M12: 企业安全与治理** - 规划中
 - ⏳ **M13: 智能体进化平台** - 长期愿景
 - ⏳ **M14: 企业知识中台** - 规划中
+- ✅ **M16: 具身智能基础框架** - 已完成核心功能
+- ⏳ **M17: 专门化Agent应用** - 规划中
 
-**当前状态**: 框架核心功能已完成 (M1-M10, M15)，具备完整的多智能体应用开发、监控和检索能力。**分层记忆系统已实现核心三层（Core、Episodic、Semantic）和混合搜索引擎**。**智能检索系统已实现多策略检索引擎、智能检索Agent和RAG工具化**。**工具系统已实现完整的智能化优化模块，包含智能工具选择、使用历史学习和工具链自动组装**。正在规划: 完整的六层记忆架构、智能记忆管理服务、记忆协作通信、实时监控分析、企业级检索平台服务等高级功能。后续模块 (M11-M14) 专注于企业级功能和开发者体验优化。
+**当前状态**: 框架核心功能已完成 (M1-M10, M15-M16)，具备完整的多智能体应用开发、监控、检索和具身智能能力。**分层记忆系统已实现核心三层（Core、Episodic、Semantic）和混合搜索引擎**。**智能检索系统已实现多策略检索引擎、智能检索Agent和RAG工具化**。**工具系统已实现完整的智能化优化模块，包含智能工具选择、使用历史学习和工具链自动组装**。**具身智能基础框架已实现核心抽象层和人类对齐学习引擎**。正在规划: 完整的六层记忆架构、智能记忆管理服务、记忆协作通信、实时监控分析、企业级检索平台服务、具身智能环境适配器、专门化Agent应用等高级功能。后续模块 (M11-M14, M17) 专注于企业级功能、开发者体验优化和专门化应用。
 
 **设计理念融合**: 
 - **借鉴 MIRIX 优势**: 六层仿生记忆架构、混合搜索引擎、智能记忆管理、实时通信、多智能体协作
@@ -388,7 +390,20 @@ graph LR
 
 - [x] `create_mcp_client(server_name, config_path) -> MCPClient`: 便捷函数，从配置文件创建 MCP 客户端。
 
+- [ ] `MCPServer`: 通用 MCP 服务器基类，将本地工具暴露为 MCP 服务。
+    - [ ] `register_tool(tool: BaseTool)`: 注册工具到 MCP 服务器。
+    - [ ] `register_tools_from_module(module)`: 批量注册模块中的工具。
+    - [ ] `handle_mcp_request(request: dict) -> dict`: 处理 MCP 协议请求。
+    - [ ] `start_stdio_server()`: 启动标准输入输出 MCP 服务器。
+    - [ ] `start_sse_server(host: str, port: int)`: 启动 SSE MCP 服务器。
+
+- [ ] `ToolRegistry`: 工具注册和发现管理器。
+    - [ ] `register(tool: BaseTool, category: str)`: 注册工具到指定分类。
+    - [ ] `discover_tools(category: Optional[str]) -> List[BaseTool]`: 发现指定分类的工具。
+    - [ ] `get_tool_schema(tool_name: str) -> Dict[str, Any]`: 获取工具的 MCP schema。
+
 **设计优势:**
+- **双向MCP支持**: 既可作为客户端调用远程服务，也可作为服务器暴露本地工具。
 - **零适配代码**: 接入任何 MCP 服务器无需编写专门的适配代码。
 - **自动发现**: 运行时自动发现服务器提供的工具和参数 schema。
 - **动态类型**: 自动从 JSON Schema 生成 Pydantic 模型，提供完整的类型安全。
@@ -405,9 +420,23 @@ graph LR
     - `CodeInterpreterTool`: 在沙箱环境中执行 Python 代码。
     - `HttpRequestTool`: 提供发送 HTTP 请求的能力。
     - `JsonTool`: 提供对 JSON 数据的查询和操作能力。
+
+- [ ] `RAGComponentTools`: RAG 组件工具化（支持 MCP 暴露）。
+    - [ ] `DocumentIndexingTool(BaseTool)`: 文档索引工具，支持批量文档处理和智能索引策略。
+    - [ ] `VectorRetrievalTool(BaseTool)`: 向量检索工具，支持语义相似度搜索。
+    - [ ] `BM25RetrievalTool(BaseTool)`: BM25检索工具，支持关键词全文搜索。
+    - [ ] `HybridRetrievalTool(BaseTool)`: 混合检索工具，融合多种检索策略。
+    - [ ] `RerankingTool(BaseTool)`: 重排序工具，支持智能排序和多样性优化。
+    - [ ] `QueryAnalysisTool(BaseTool)`: 查询分析工具，支持意图识别和实体提取。
+    - [ ] `QueryOptimizationTool(BaseTool)`: 查询优化工具，支持查询扩展和改写。
+    - [ ] `AnswerGenerationTool(BaseTool)`: 答案生成工具，支持基于检索结果的智能答案生成。
+    - [ ] `KnowledgeGraphTool(BaseTool)`: 知识图谱工具，集成 GraphRAG 能力。
+    - [ ] `ChunkingTool(BaseTool)`: 智能分块工具，支持多种分块策略。
 - [x] `@human_in_the_loop` 装饰器: 一个用于高风险工具的安全装饰器。在工具执行前，它会检查 `M11: PolicyEngine`，如果策略要求，它会暂停工作流并请求人工批准。
 
-**实现状态**: ✅ **已完成** - 已完整实现 M4 工具系统，包含基础工具框架和智能化优化模块。基础框架包含统一的 `BaseTool` 抽象基类，支持同步/异步执行、参数验证、错误处理和回调机制。`FunctionTool` 和 `@tool` 装饰器提供便捷的函数到工具转换，自动解析类型注解和文档字符串生成 Pydantic 模式。`ToolExecutor` 提供安全的执行环境，支持重试、超时和批量执行。`CredentialStore` 实现加密的多租户凭据管理。内置工具集包含文件操作、网络搜索、代码执行、HTTP 请求和 JSON 处理等常用功能。全面支持 OpenAI 函数调用格式。**智能化优化模块**已完整实现，包含 `ToolIntelligenceEngine`（智能工具选择）、`ToolUsageHistory`（使用历史学习）、`ToolChainAssembler`（工具链自动组装）三大核心组件，支持基于任务特征的智能工具推荐、历史性能学习、工具链自动构建和优化，并提供完整的测试覆盖。
+**实现状态**: ✅ **已完成核心功能** - 已完整实现 M4 工具系统的核心功能，包含基础工具框架和智能化优化模块。基础框架包含统一的 `BaseTool` 抽象基类，支持同步/异步执行、参数验证、错误处理和回调机制。`FunctionTool` 和 `@tool` 装饰器提供便捷的函数到工具转换，自动解析类型注解和文档字符串生成 Pydantic 模式。`ToolExecutor` 提供安全的执行环境，支持重试、超时和批量执行。`CredentialStore` 实现加密的多租户凭据管理。内置工具集包含文件操作、网络搜索、代码执行、HTTP 请求和 JSON 处理等常用功能。全面支持 OpenAI 函数调用格式。**智能化优化模块**已完整实现，包含 `ToolIntelligenceEngine`（智能工具选择）、`ToolUsageHistory`（使用历史学习）、`ToolChainAssembler`（工具链自动组装）三大核心组件，支持基于任务特征的智能工具推荐、历史性能学习、工具链自动构建和优化，并提供完整的测试覆盖。
+
+⏳ **规划中**: MCP 服务器框架和 RAG 组件工具化正在规划中。将提供双向 MCP 支持，既可作为客户端调用远程服务，也可作为服务器暴露本地工具。RAG 组件工具化将各个 RAG 功能模块（文档索引、向量检索、BM25检索、混合检索、重排序、查询分析、答案生成、知识图谱、智能分块等）封装为独立的 BaseTool 实现，每个工具都可通过 MCP 协议独立暴露和调用，为上层的 AgenticRAG Agent 提供原子化的 RAG 能力组件。
 
 #### 智能化优化方向 (`agenticx.tools.intelligence`) ✅ **已完成**
 > 参考 **CAMEL 的工具智能选择**和**Qwen Agent 的函数调用优化**
@@ -1259,11 +1288,101 @@ graph LR
     - [ ] `adapt_to_new_task(meta_policy: MetaPolicy, new_task: Task) -> AdaptedAgent`: 快速适应新任务。
 
 ### M14: 企业知识中台 (`agenticx.knowledge`) 
-> 启发来源: `Glean` 的统一搜索架构、企业级 RAG 需求、以及多模态知识管理。
+> 启发来源: 参考了 `Glean` 的企业级RAG设计理念 和 `MinerU` 的文档处理架构，并结合了多模态知识管理的需求。
 
-**战略定位**: 构建企业级的统一知识访问层，让智能体能够安全、高效地访问企业的全域知识。
+**战略定位**: 构建企业级的统一知识管理中台，提供从数据连接、文档处理、智能分块到知识图谱构建的完整知识管理生命周期，为智能体提供高质量的结构化知识基础。
 
-#### 1. 统一数据连接 (Unified Data Connection) **[必要功能]**
+#### 1. 文档处理与解析 (Document Processing & Parsing) **[必要功能]**
+> 参考MinerU的多后端架构，构建轻量级但可扩展的文档处理框架
+
+- [ ] `DocumentProcessor`: 统一文档处理器（参考MinerU的CLI客户端设计）。
+    - [ ] `process_document(input_path: str, backend: ProcessingBackend = "auto") -> ProcessingResult`: 统一文档处理入口
+    - [ ] `process_document_async(input_path: str) -> ProcessingResult`: **[新增]** 异步处理支持，提升处理高并发任务的吞吐量
+    - [ ] `select_backend(document_type: str, complexity: ComplexityLevel) -> ProcessingBackend`: 智能后端选择
+    - [ ] `optimize_backend_selection(historical_data: List[ProcessingResult])`: **[新增]** 基于历史数据动态优化后端选择策略
+    - [ ] `configure_processing(options: ProcessingOptions) -> ProcessingConfig`: 处理配置管理
+    - [ ] `extract_content_blocks(document: Document) -> List[ContentBlock]`: 内容块提取（参考MinerU的块关系处理）
+    - [ ] `monitor_processing_performance() -> ProcessingMetrics`: **[新增]** 性能监控，用于追踪和评估处理效率
+
+- [ ] `ProcessingBackend`: 处理后端抽象（参考MinerU的Pipeline vs VLM后端）。
+    - [ ] `BaseProcessingBackend(ABC)`: 处理后端抽象基类
+    - [ ] `SimpleTextBackend(BaseProcessingBackend)`: 简单文本处理后端（轻量级）
+    - [ ] `StructuredBackend(BaseProcessingBackend)`: 结构化文档处理后端（中等复杂度）
+    - [ ] `VLMLayoutBackend(BaseProcessingBackend)`: VLM布局分析后端（高复杂度，可选）
+
+- [ ] `CoreDocumentReaders`: 核心文档读取器集合（轻量级优先）。
+    - [ ] `TextReader(BaseReader)`: 纯文本读取器（TXT, Markdown, Code）
+    - [ ] `PDFReader(BaseReader)`: 基础PDF读取器（优先轻量级方案）
+    - [ ] `HTMLReader(BaseReader)`: 网页内容读取器
+    - [ ] `JSONReader(BaseReader)`: JSON数据读取器
+    - [ ] `CSVReader(BaseReader)`: CSV表格读取器
+
+- [ ] `ContentExtractor`: 内容提取器（参考MinerU的OCR和内容提取）。
+    - [ ] `extract_text_content(document: Document) -> str`: 文本内容提取
+    - [ ] `extract_structural_elements(document: Document) -> List[StructuralElement]`: 结构元素提取
+    - [ ] `extract_metadata(document: Document) -> DocumentMetadata`: 文档元数据提取
+    - [ ] `detect_content_type(file_path: str) -> ContentType`: 内容类型检测
+
+- [ ] `ProcessingConfiguration`: 处理配置管理（参考MinerU的配置系统）。
+    - [ ] `ProcessingOptions`: 处理选项（语言、精度、速度模式）
+    - [ ] `BackendConfig`: 后端配置（模型路径、参数设置）
+    - [ ] `FeatureFlags`: 特性开关（OCR、布局分析、公式识别等）
+
+#### 2. 智能分块策略 (Intelligent Chunking Strategies) **[必要功能]**
+- [ ] `ChunkingFramework`: 分块器框架。
+    - [ ] `BaseChunker(ABC)`: 分块器抽象基类。
+    - [ ] `register_chunker(strategy: str, chunker_class: Type[BaseChunker])`: 注册分块器。
+- [ ] `IntelligentChunkers`: 智能分块器集合。
+    - [ ] `SemanticChunker(BaseChunker)`: 语义分块器。
+    - [ ] `AgenticChunker(BaseChunker)`: 基于LLM的智能分块器。
+    - [ ] `RecursiveChunker(BaseChunker)`: 递归分块器。
+    - [ ] `FixedSizeChunker(BaseChunker)`: 固定大小分块器。
+    - [ ] `DocumentChunker(BaseChunker)`: 文档级分块器。
+    - [ ] `CSVRowChunker(BaseChunker)`: CSV行级分块器。
+- [ ] `ChunkingOptimizer`: 分块优化器。
+    - [ ] `optimize_chunking_strategy(document: Document) -> str`: 优化分块策略。
+    - [ ] `evaluate_chunk_quality(chunks: List[Chunk]) -> float`: 评估分块质量。
+
+#### 3. 知识图谱构建 (Knowledge Graph Construction) **[加分功能]**
+- [ ] `KnowledgeGraphBuilder`: 知识图谱构建器。
+    - [ ] `extract_entities(documents: List[Document]) -> List[Entity]`: 提取实体。
+    - [ ] `extract_relationships(entities: List[Entity]) -> List[Relationship]`: 提取关系。
+    - [ ] `build_graph(entities: List[Entity], relationships: List[Relationship]) -> KnowledgeGraph`: 构建图谱。
+    - [ ] `validate_graph_quality(graph: KnowledgeGraph) -> GraphQualityReport`: 验证图谱质量。
+- [ ] `GraphRAGConstructor`: GraphRAG构建器（集成Youtu-GraphRAG）。
+    - [ ] `construct_knowledge_graph(documents: List[Document]) -> KnowledgeGraph`: 构建知识图谱。
+    - [ ] `update_graph_incrementally(graph: KnowledgeGraph, new_documents: List[Document]) -> KnowledgeGraph`: 增量更新图谱。
+    - [ ] `optimize_graph_structure(graph: KnowledgeGraph) -> KnowledgeGraph`: 优化图谱结构。
+
+#### 4. 核心知识管理 (Core Knowledge Management) **[必要功能]**
+- [ ] `KnowledgeManager`: 统一知识管理器。
+    - [ ] `create_knowledge_base(name: str, config: Dict[str, Any]) -> KnowledgeBase`: 创建知识库。
+    - [ ] `add_documents(kb_id: str, documents: List[Document]) -> List[str]`: 添加文档。
+    - [ ] `update_documents(kb_id: str, documents: List[Document]) -> bool`: 更新文档。
+    - [ ] `remove_documents(kb_id: str, document_ids: List[str]) -> bool`: 删除文档。
+    - [ ] `get_knowledge_base_stats(kb_id: str) -> KnowledgeBaseStats`: 获取知识库统计。
+- [ ] `KnowledgeBase`: 知识库核心类。
+    - [ ] `add_content(content: Union[str, Document, List[Document]]) -> List[str]`: 添加内容。
+    - [ ] `sync_from_source(source: str) -> SyncResult`: 从数据源同步。
+    - [ ] `export_knowledge(format: str) -> bytes`: 导出知识库。
+    - [ ] `get_document_by_id(doc_id: str) -> Optional[Document]`: 根据ID获取文档。
+- [ ] `KnowledgeLifecycleManager`: 知识库生命周期管理器。
+    - [ ] `schedule_maintenance(kb_id: str, schedule: Schedule)`: 调度维护任务。
+    - [ ] `backup_knowledge_base(kb_id: str) -> BackupResult`: 备份知识库。
+    - [ ] `restore_knowledge_base(kb_id: str, backup_id: str) -> RestoreResult`: 恢复知识库。
+    - [ ] `archive_knowledge_base(kb_id: str) -> bool`: 归档知识库。
+
+#### 5. 多模态知识管理 (Multimodal Knowledge Management) **[加分功能]**
+- [ ] `MultimodalIndexer`: 多模态索引器。
+    - [ ] `index_text(text: str) -> TextIndex`: 索引文本。
+    - [ ] `index_image(image: Image) -> ImageIndex`: 索引图像。
+    - [ ] `index_audio(audio: Audio) -> AudioIndex`: 索引音频。
+- [ ] `CrossModalRetriever`: 跨模态检索器。
+    - [ ] `text_to_image(query: str) -> List[Image]`: 文本到图像检索。
+    - [ ] `image_to_text(image: Image) -> List[str]`: 图像到文本检索。
+    - [ ] `audio_to_text(audio: Audio) -> List[str]`: 音频到文本检索。
+
+#### 6. 统一数据连接 (Unified Data Connection) **[扩展功能]**
 - [ ] `ConnectorFramework`: 连接器框架。
     - [ ] `BaseConnector(ABC)`: 连接器抽象基类，定义标准接口。
     - [ ] `register_connector(connector_type: str, connector_class: Type[BaseConnector])`: 注册连接器。
@@ -1276,53 +1395,15 @@ graph LR
     - [ ] `sync_data_source(connector: BaseConnector) -> SyncResult`: 同步数据源。
     - [ ] `schedule_sync(connector: BaseConnector, schedule: Schedule)`: 调度同步任务。
 
-#### 2. 智能搜索引擎 (Intelligent Search Engine) **[必要功能]**
-- [ ] `HybridSearchEngine`: 混合搜索引擎。
-    - [ ] `search(query: str, context: SearchContext) -> SearchResults`: 统一搜索接口。
-    - [ ] `vector_search(embedding: Embedding, filters: Dict) -> VectorResults`: 向量搜索。
-    - [ ] `keyword_search(keywords: List[str], filters: Dict) -> KeywordResults`: 关键词搜索。
-- [ ] `SemanticIndexer`: 语义索引器。
-    - [ ] `index_document(document: Document) -> IndexResult`: 索引文档。
-    - [ ] `update_embeddings(documents: List[Document])`: 更新嵌入向量。
-
-#### 3. 查询理解与优化 (Query Understanding & Optimization) **[必要功能]**
-- [ ] `QueryUnderstanding`: 查询理解器。
-    - [ ] `parse_query(query: str) -> ParsedQuery`: 解析查询意图。
-    - [ ] `extract_entities(query: str) -> List[Entity]`: 提取实体。
-    - [ ] `identify_intent(query: str) -> QueryIntent`: 识别查询意图。
-- [ ] `QueryOptimizer`: 查询优化器。
-    - [ ] `optimize_query(query: str, context: SearchContext) -> OptimizedQuery`: 优化查询。
-    - [ ] `suggest_alternatives(query: str) -> List[str]`: 建议替代查询。
-    - [ ] `expand_query(query: str) -> ExpandedQuery`: 扩展查询。
-
-#### 4. 知识图谱与推理 (Knowledge Graph & Reasoning) **[加分功能]**
-- [ ] `KnowledgeGraphBuilder`: 知识图谱构建器。
-    - [ ] `extract_entities(documents: List[Document]) -> List[Entity]`: 提取实体。
-    - [ ] `extract_relationships(entities: List[Entity]) -> List[Relationship]`: 提取关系。
-    - [ ] `build_graph(entities: List[Entity], relationships: List[Relationship]) -> KnowledgeGraph`: 构建图谱。
-- [ ] `GraphReasoner`: 图谱推理器。
-    - [ ] `reason_about_entity(entity: Entity, graph: KnowledgeGraph) -> ReasoningResult`: 实体推理。
-    - [ ] `find_paths(source: Entity, target: Entity, graph: KnowledgeGraph) -> List[Path]`: 路径查找。
-    - [ ] `infer_new_knowledge(graph: KnowledgeGraph) -> List[Inference]`: 知识推理。
-
-#### 5. 多模态知识管理 (Multimodal Knowledge Management) **[加分功能]**
-- [ ] `MultimodalIndexer`: 多模态索引器。
-    - [ ] `index_text(text: str) -> TextIndex`: 索引文本。
-    - [ ] `index_image(image: Image) -> ImageIndex`: 索引图像。
-    - [ ] `index_audio(audio: Audio) -> AudioIndex`: 索引音频。
-- [ ] `CrossModalRetriever`: 跨模态检索器。
-    - [ ] `text_to_image(query: str) -> List[Image]`: 文本到图像检索。
-    - [ ] `image_to_text(image: Image) -> List[str]`: 图像到文本检索。
-    - [ ] `audio_to_text(audio: Audio) -> List[str]`: 音频到文本检索。
-
 **设计优势**:
-- **统一连接**: 支持多种企业数据源的统一连接
-- **智能搜索**: 混合搜索策略，支持语义和关键词搜索
-- **知识推理**: 基于知识图谱的推理能力
-- **多模态支持**: 文本、图像、音频等多种模态
-- **企业级安全**: 完整的数据权限和访问控制
+- **智能处理**: 多格式文档解析和智能分块策略
+- **知识构建**: 基于GraphRAG的知识图谱构建能力
+- **生命周期管理**: 完整的知识库创建、维护、备份和归档
+- **多模态支持**: 文本、图像、音频等多种模态的知识管理
+- **企业级特性**: 多租户隔离、权限控制和审计追踪
+- **统一连接**: 支持多种企业数据源的统一连接和同步（扩展功能）
 
-**实现状态**: ⏳ **规划中** - M14企业知识中台正在规划中。将提供统一的数据连接、智能搜索引擎、查询理解优化、知识图谱推理和多模态知识管理等企业级功能。
+**实现状态**: ⏳ **规划中** - M14企业知识中台正在规划中。优先实现文档处理解析、智能分块策略、核心知识管理等RAG核心功能，统一数据连接等企业级扩展功能将在后续版本中提供。
 
 ### M15: 智能检索系统 (`agenticx.retrieval`) ✅
 > 启发来源: 参考CAMEL的多策略检索引擎、AutoAgent的RAG工具化设计、ADK-Python的企业级特性，构建统一、智能、可扩展的检索系统。
@@ -1415,7 +1496,26 @@ graph LR
 
 **实现状态**: ✅ **已完成** - 已完整实现M15.2多策略检索引擎。包含向量检索、BM25检索、混合检索、图检索和自动检索等多种策略。每种检索器都实现了完整的文档管理、检索执行和统计功能。支持多种后端存储和可配置的参数调优。
 
-#### 3. 智能检索Agent (Intelligent Retrieval Agents) ✅
+#### 3. 查询理解与优化 (Query Understanding & Optimization) ✅
+- [x] `QueryUnderstanding`: 查询理解器。
+    - `parse_query(query: str) -> ParsedQuery`: 解析查询意图
+    - `extract_entities(query: str) -> List[Entity]`: 提取实体
+    - `identify_intent(query: str) -> QueryIntent`: 识别查询意图
+    - `analyze_query_complexity(query: str) -> ComplexityLevel`: 分析查询复杂度
+- [x] `QueryOptimizer`: 查询优化器。
+    - `optimize_query(query: str, context: SearchContext) -> OptimizedQuery`: 优化查询
+    - `suggest_alternatives(query: str) -> List[str]`: 建议替代查询
+    - `expand_query(query: str) -> ExpandedQuery`: 扩展查询
+    - `decompose_complex_query(query: str) -> List[SubQuery]`: 分解复杂查询
+- [x] `SemanticIndexer`: 语义索引器。
+    - `index_document(document: Document) -> IndexResult`: 索引文档
+    - `update_embeddings(documents: List[Document])`: 更新嵌入向量
+    - `build_semantic_index(documents: List[Document]) -> SemanticIndex`: 构建语义索引
+    - `optimize_index_performance() -> IndexOptimizationResult`: 优化索引性能
+
+**实现状态**: ✅ **已完成** - 已完整实现M15.3查询理解与优化。包含查询解析、意图识别、查询优化、语义索引等核心功能。支持复杂查询分解和智能查询扩展。
+
+#### 4. 智能检索Agent (Intelligent Retrieval Agents) ✅
 - [x] `QueryAnalysisAgent(Agent)`: 查询分析智能体。
     - `__init__(llm: BaseLLM, **kwargs)`: 初始化查询分析Agent
     - `analyze_query(query: str, context: Dict[str, Any] = None) -> QueryAnalysis`: 分析查询意图和特征
@@ -1443,6 +1543,20 @@ graph LR
     - `_apply_indexing_strategy(document: Dict[str, Any], strategy: Dict[str, Any]) -> Dict[str, Any]`: 应用索引策略
     - 支持基于文档特征的智能分块和索引策略选择
 
+- [x] `KnowledgeGraphRetrievalAgent(Agent)`: 知识图谱检索智能体。
+    - `__init__(graph_retriever: GraphRetriever, llm: BaseLLM, **kwargs)`: 初始化知识图谱检索Agent
+    - `retrieve_from_graph(query: str, context: Dict[str, Any] = None) -> List[RetrievalResult]`: 从知识图谱检索
+    - `_reason_about_entities(entities: List[Entity], graph: KnowledgeGraph) -> ReasoningResult`: 实体推理
+    - `_find_knowledge_paths(source: Entity, target: Entity, graph: KnowledgeGraph) -> List[Path]`: 知识路径查找
+    - 支持基于知识图谱的推理检索和路径发现
+
+- [x] `GraphRAGAgent(Agent)`: GraphRAG检索智能体（集成Youtu-GraphRAG）。
+    - `__init__(graphrag_retriever: EnhancedGraphRAGRetriever, llm: BaseLLM, **kwargs)`: 初始化GraphRAG Agent
+    - `enhanced_retrieve(query: str, context: Dict[str, Any] = None) -> List[RetrievalResult]`: 增强图谱检索
+    - `_decompose_query_intelligently(query: str) -> List[SubQuery]`: 智能查询分解
+    - `_combine_graph_vector_results(graph_results: List[RetrievalResult], vector_results: List[RetrievalResult]) -> List[RetrievalResult]`: 融合图谱和向量结果
+    - 支持智能查询分解和混合检索策略
+
 - [x] `QueryAnalysis(dataclass)`: 查询分析结果模型。
     - `intent: str`: 查询意图
     - `keywords: List[str]`: 关键词列表
@@ -1451,9 +1565,9 @@ graph LR
     - `suggested_filters: Dict[str, Any]`: 建议的过滤条件
     - `confidence: float`: 分析置信度
 
-**实现状态**: ✅ **已完成** - 已完整实现M15.3智能检索Agent。包含查询分析、检索执行、结果重排和文档索引四个核心Agent。每个Agent都具备智能决策能力，可以根据查询特征和上下文选择最佳策略。支持完整的Agent生命周期管理和事件记录。
+**实现状态**: ✅ **已完成** - 已完整实现M15.4智能检索Agent。包含查询分析、检索执行、结果重排、文档索引、知识图谱检索和GraphRAG检索六个核心Agent。每个Agent都具备智能决策能力，可以根据查询特征和上下文选择最佳策略。支持完整的Agent生命周期管理和事件记录。
 
-#### 4. RAG流程工具 (RAG Workflow Tools) ✅
+#### 5. RAG流程工具 (RAG Workflow Tools) ✅
 - [x] `DocumentIndexingTool(BaseTool)`: 文档索引工具。
     - `__init__(indexing_agent: IndexingAgent, retriever: BaseRetriever)`: 初始化文档索引工具
     - `arun(**kwargs) -> str`: 执行文档索引
@@ -1495,9 +1609,9 @@ graph LR
     - `AnswerGenerationArgs(BaseModel)`: 答案生成参数
     - `CanAnswerArgs(BaseModel)`: 可答性判断参数
 
-**实现状态**: ✅ **已完成** - 已完整实现M15.4 RAG流程工具。包含文档索引、检索查询、结果重排、查询修改、答案生成和可答性判断六个核心工具。每个工具都支持异步执行、参数验证和错误处理。工具间可以组合使用，支持完整的RAG工作流。
+**实现状态**: ✅ **已完成** - 已完整实现M15.5 RAG流程工具。包含文档索引、检索查询、结果重排、查询修改、答案生成和可答性判断六个核心工具。每个工具都支持异步执行、参数验证和错误处理。工具间可以组合使用，支持完整的RAG工作流。
 
-#### 5. 企业级检索平台 (Enterprise Retrieval Platform) ⏳
+#### 6. 企业级检索平台 (Enterprise Retrieval Platform) ⏳
 - [ ] `RetrievalTenantManager`: 多租户管理服务。
     - `__init__(config: Dict[str, Any])`: 初始化租户管理器
     - `create_tenant(tenant_id: str, config: Dict[str, Any]) -> bool`: 创建租户
@@ -1541,17 +1655,219 @@ graph LR
     - `get_system_health() -> Dict[str, Any]`: 获取系统整体健康状态
     - 支持自动健康检查和故障恢复
 
-**实现状态**: ⏳ **规划中** - M15.5企业级检索平台正在规划中。将提供完整的多租户管理、访问控制、性能监控、审计日志、速率限制和健康检查等企业级功能。这些功能将确保检索系统在生产环境中的安全性和可靠性。
+**实现状态**: ⏳ **规划中** - M15.6企业级检索平台正在规划中。将提供完整的多租户管理、访问控制、性能监控、审计日志、速率限制和健康检查等企业级功能。这些功能将确保检索系统在生产环境中的安全性和可靠性。
 
 **设计优势**:
 - **统一接口**: 所有检索组件使用相同的抽象接口
 - **多策略支持**: 向量、BM25、图、混合等多种检索策略
+- **查询智能**: 查询理解、优化和智能分解能力
 - **智能决策**: Agent可以根据查询特征选择最佳策略
+- **知识图谱**: 集成GraphRAG的知识图谱检索和推理
 - **工具化集成**: RAG流程的每个环节都工具化
 - **企业级特性**: 多租户、权限控制、监控审计
 - **高度可扩展**: 支持自定义检索策略和Agent实现
 
-**实现状态**: ✅ **已完成核心功能** - 已完整实现M15智能检索系统的核心功能 (M15.1-M15.4)，具备完整的多策略检索和Agentic化能力。**已实现统一检索抽象、多策略检索引擎、智能检索Agent和RAG工具化**。正在规划: 企业级平台服务、性能优化、高级监控分析等高级功能。
+**实现状态**: ✅ **已完成核心功能** - 已完整实现M15智能检索系统的核心功能 (M15.1-M15.5)，具备完整的多策略检索和Agentic化能力。**已实现统一检索抽象、多策略检索引擎、查询理解优化、智能检索Agent和RAG工具化**。正在规划: 企业级平台服务、性能优化、高级监控分析等高级功能。
+
+### M16: 具身智能基础框架 (`agenticx.embodiment`) ✅
+> 启发来源: 基于人类学习对齐理念，构建通用具身智能基础框架，支持多种环境交互智能体的开发与部署。
+
+**战略定位**: 构建业界领先的通用具身智能基础框架，基于人类学习对齐理念，为智能体提供与多种环境交互的核心能力。通过统一的感知-行动-学习循环，让AI智能体能够像人类一样适应和掌握不同类型的环境交互任务。
+
+#### 1. 核心抽象层 (Core Abstractions) ✅
+- [x] `EmbodiedAgent(Agent)`: 具身智能体核心类，继承自 `agenticx.core.agent.Agent`。
+    - `environment_adapter: EnvironmentAdapter`: 环境适配器
+    - `perception_module: PerceptionModule`: 感知模块
+    - `action_module: ActionModule`: 行动模块
+    - `learning_engine: LearningEngine`: 学习引擎
+    - `interact_with_environment(task: EmbodiedTask) -> InteractionResult`: 与环境交互
+    - `perceive_environment() -> PerceptionData`: 感知环境状态
+    - `execute_action(action: Action) -> ActionResult`: 执行行动
+    - `learn_from_interaction(interaction: InteractionResult)`: 从交互中学习
+
+- [x] `EnvironmentAdapter(Component)`: 环境适配器抽象基类，继承自 `agenticx.core.component.Component`。
+    - `connect() -> bool`: 连接到环境
+    - `disconnect() -> bool`: 断开环境连接
+    - `get_state() -> EnvironmentState`: 获取环境状态
+    - `execute_action(action: Action) -> ActionResult`: 在环境中执行行动
+    - `observe() -> Observation`: 观察环境
+
+- [x] `PerceptionModule(Component)`: 感知模块，处理多模态感知数据。
+    - `process_visual_input(image: Image) -> VisualPerception`: 处理视觉输入
+    - `process_audio_input(audio: Audio) -> AudioPerception`: 处理音频输入
+    - `process_tactile_input(tactile: TactileData) -> TactilePerception`: 处理触觉输入
+    - `fuse_multimodal_perception(perceptions: List[Perception]) -> FusedPerception`: 融合多模态感知
+
+- [x] `ActionModule(Component)`: 行动模块，执行各种类型的行动。
+    - `plan_action(goal: Goal, context: Context) -> ActionPlan`: 规划行动
+    - `execute_action_plan(plan: ActionPlan) -> ActionResult`: 执行行动计划
+    - `validate_action(action: Action) -> ValidationResult`: 验证行动可行性
+    - `optimize_action_sequence(actions: List[Action]) -> List[Action]`: 优化行动序列
+
+#### 2. 人类对齐学习引擎 (Human-Aligned Learning Engine) ✅
+- [x] `LearningEngine(Component)`: 五阶段学习方法论的核心实现。
+    - `stage1_knowledge_retrieval(task: EmbodiedTask) -> KnowledgeBase`: 先验知识检索
+    - `stage2_guided_exploration(environment: Environment) -> ExplorationResult`: 引导探索
+    - `stage3_task_synthesis(basic_tasks: List[Task]) -> ComplexTask`: 复杂任务合成
+    - `stage4_usage_optimization(task: Task, history: InteractionHistory) -> OptimizedStrategy`: 深度使用优化
+    - `stage5_edge_case_handling(edge_cases: List[EdgeCase]) -> HandlingStrategy`: 边缘情况处理
+
+- [x] `KnowledgeRetriever(Component)`: 知识检索器。
+    - `retrieve_prior_knowledge(task: EmbodiedTask) -> List[Knowledge]`: 检索先验知识
+    - `search_similar_experiences(context: Context) -> List[Experience]`: 搜索相似经验
+    - `extract_transferable_skills(source_env: Environment, target_env: Environment) -> List[Skill]`: 提取可迁移技能
+
+- [x] `EnvironmentExplorer(Component)`: 环境探索器。
+    - `explore_environment(environment: Environment, exploration_strategy: ExplorationStrategy) -> ExplorationResult`: 探索环境
+    - `identify_interaction_points(environment: Environment) -> List[InteractionPoint]`: 识别交互点
+    - `map_environment_structure(environment: Environment) -> EnvironmentMap`: 映射环境结构
+
+- [x] `TaskSynthesizer(Component)`: 任务合成器。
+    - `synthesize_complex_task(basic_tasks: List[Task], goal: Goal) -> ComplexTask`: 合成复杂任务
+    - `decompose_task(complex_task: ComplexTask) -> List[SubTask]`: 分解任务
+    - `optimize_task_sequence(tasks: List[Task]) -> List[Task]`: 优化任务序列
+
+- [x] `UsageOptimizer(Component)`: 使用优化器。
+    - `optimize_interaction_strategy(task: Task, performance_data: PerformanceData) -> OptimizedStrategy`: 优化交互策略
+    - `learn_from_failures(failures: List[Failure]) -> LearningInsight`: 从失败中学习
+    - `adapt_to_environment_changes(changes: List[EnvironmentChange]) -> AdaptationStrategy`: 适应环境变化
+
+- [x] `EdgeCaseHandler(Component)`: 边缘情况处理器。
+    - `detect_edge_cases(interaction: Interaction) -> List[EdgeCase]`: 检测边缘情况
+    - `handle_edge_case(edge_case: EdgeCase) -> HandlingResult`: 处理边缘情况
+    - `learn_edge_case_patterns(edge_cases: List[EdgeCase]) -> List[Pattern]`: 学习边缘情况模式
+
+#### 3. 环境适配器 (Environment Adapters) ⏳
+- [ ] `GUIAdapter(EnvironmentAdapter)`: GUI环境适配器。
+    - [ ] `DesktopGUIAdapter`: 桌面GUI适配器，支持Windows、macOS、Linux桌面应用操作
+    - [ ] `WebGUIAdapter`: Web GUI适配器，支持浏览器自动化和Web应用操作
+    - [ ] `MobileGUIAdapter`: 移动端GUI适配器，支持iOS、Android应用操作
+
+- [ ] `RoboticsAdapter(EnvironmentAdapter)`: 机器人环境适配器。
+    - [ ] `ManipulatorAdapter`: 机械臂适配器，支持工业机械臂和协作机器人
+    - [ ] `MobileRobotAdapter`: 移动机器人适配器，支持轮式、履带式、腿式机器人
+    - [ ] `HumanoidAdapter`: 人形机器人适配器，支持双足机器人和人形机器人
+
+- [ ] `VirtualAdapter(EnvironmentAdapter)`: 虚拟环境适配器。
+    - [ ] `SimulationAdapter`: 仿真环境适配器，支持物理仿真和数字孪生
+    - [ ] `GameAdapter`: 游戏环境适配器，支持各种游戏环境和虚拟世界
+    - [ ] `VRAdapter`: VR环境适配器，支持虚拟现实环境交互
+
+#### 4. 感知与行动工具 (Perception & Action Tools) ⏳
+- [ ] `VisionTool(BaseTool)`: 视觉感知工具。
+    - [ ] `object_detection(image: Image) -> List[DetectedObject]`: 目标检测
+    - [ ] `scene_understanding(image: Image) -> SceneDescription`: 场景理解
+    - [ ] `visual_navigation(image: Image, goal: NavigationGoal) -> NavigationAction`: 视觉导航
+
+- [ ] `AudioTool(BaseTool)`: 音频感知工具。
+    - [ ] `speech_recognition(audio: Audio) -> str`: 语音识别
+    - [ ] `sound_classification(audio: Audio) -> SoundClass`: 声音分类
+    - [ ] `audio_localization(audio: Audio) -> SoundLocation`: 音频定位
+
+- [ ] `TouchTool(BaseTool)`: 触觉感知工具。
+    - [ ] `force_sensing(tactile_data: TactileData) -> ForceVector`: 力感知
+    - [ ] `texture_recognition(tactile_data: TactileData) -> TextureType`: 材质识别
+    - [ ] `contact_detection(tactile_data: TactileData) -> ContactInfo`: 接触检测
+
+- [ ] `MotionTool(BaseTool)`: 运动控制工具。
+    - [ ] `path_planning(start: Position, goal: Position, obstacles: List[Obstacle]) -> Path`: 路径规划
+    - [ ] `motion_execution(motion_plan: MotionPlan) -> MotionResult`: 运动执行
+    - [ ] `pose_control(target_pose: Pose) -> ControlCommand`: 姿态控制
+
+#### 5. 工作流引擎 (Workflow Engine) ⏳
+- [ ] `EmbodiedWorkflow(Workflow)`: 具身智能工作流，继承自 `agenticx.core.workflow.Workflow`。
+    - [ ] `add_perception_step(perception_config: PerceptionConfig)`: 添加感知步骤
+    - [ ] `add_action_step(action_config: ActionConfig)`: 添加行动步骤
+    - [ ] `add_learning_step(learning_config: LearningConfig)`: 添加学习步骤
+    - [ ] `execute_embodied_workflow(environment: Environment) -> WorkflowResult`: 执行具身工作流
+
+- [ ] `TaskOrchestrator(Component)`: 任务编排器。
+    - [ ] `orchestrate_complex_task(task: ComplexTask, environment: Environment) -> OrchestrationResult`: 编排复杂任务
+    - [ ] `coordinate_multi_agent_embodiment(agents: List[EmbodiedAgent], task: CollaborativeTask) -> CoordinationResult`: 协调多智能体具身任务
+    - [ ] `manage_task_dependencies(tasks: List[Task]) -> DependencyGraph`: 管理任务依赖
+
+#### 6. 人机协同 (Human-in-the-Loop) ⏳
+- [ ] `HumanInTheLoopComponent(Component)`: 人机协同组件。
+    - [ ] `request_human_guidance(context: InteractionContext) -> HumanGuidance`: 请求人类指导
+    - [ ] `collect_human_feedback(interaction: Interaction) -> HumanFeedback`: 收集人类反馈
+    - [ ] `integrate_human_knowledge(knowledge: HumanKnowledge) -> IntegrationResult`: 集成人类知识
+
+- [ ] `FeedbackCollector(Component)`: 反馈收集器。
+    - [ ] `collect_performance_feedback(task: Task, result: TaskResult) -> PerformanceFeedback`: 收集性能反馈
+    - [ ] `collect_preference_feedback(options: List[Option], choice: Option) -> PreferenceFeedback`: 收集偏好反馈
+    - [ ] `analyze_feedback_patterns(feedbacks: List[Feedback]) -> FeedbackPattern`: 分析反馈模式
+
+**设计优势**:
+- **通用抽象**: 统一的感知-行动-学习循环，适用于多种环境
+- **人类对齐**: 五阶段学习方法论，模拟人类学习过程
+- **环境无关**: 可插拔的环境适配器，支持GUI、机器人、虚拟环境等
+- **多模态感知**: 集成视觉、听觉、触觉等多种感知模态
+- **深度融合**: 完全基于AgenticX核心概念构建，实现深度融合
+- **企业级**: 支持分布式部署、云端推理、边缘计算等多种部署模式
+
+**实现状态**: ✅ **已完成核心功能** - 已完整实现M16具身智能基础框架的核心抽象层和人类对齐学习引擎。包含 `EmbodiedAgent`、`EnvironmentAdapter`、`PerceptionModule`、`ActionModule` 等核心抽象，以及完整的五阶段学习方法论实现。所有组件都基于AgenticX核心概念构建，实现了深度融合。⏳ **规划中**: 环境适配器、感知行动工具、工作流引擎、人机协同等模块正在规划中。
+
+### M17: 专门化Agent应用 (`agenticx.agents`) ⏳
+> 启发来源: 基于AgenticX强大的底层能力，构建专门化的Agent应用，提供开箱即用的解决方案。
+
+**战略定位**: 在AgenticX强大的底层框架基础上，构建专门化的Agent应用，每个应用专注于特定领域，通过组合底层的工具、检索、知识管理等能力，提供完整的端到端解决方案。
+
+#### 1. AgenticRAG (`agenticx.agents.agenticrag`) **[核心应用]**
+- [ ] `AgenticRAGAgent(Agent)`: 专门的RAG智能体。
+    - [ ] `__init__(config: RAGAgentConfig)`: 初始化RAG Agent，自动集成所需的RAG组件工具。
+    - [ ] `process_query(query: str, context: Dict[str, Any] = None) -> RAGResponse`: 处理用户查询的完整RAG流程。
+    - [ ] `build_knowledge_base(documents: List[Document], kb_config: KnowledgeBaseConfig) -> str`: 构建知识库。
+    - [ ] `adaptive_retrieval(query: str) -> List[RetrievalResult]`: 自适应检索策略选择。
+    - [ ] `intelligent_answer_generation(query: str, context: List[RetrievalResult]) -> str`: 智能答案生成。
+
+- [ ] `RAGWorkflowManager`: RAG工作流管理器。
+    - [ ] `BasicRAGWorkflow`: 基础RAG工作流（检索→生成）。
+    - [ ] `GraphRAGWorkflow`: 知识图谱增强RAG工作流。
+    - [ ] `AdaptiveRAGWorkflow`: 自适应RAG工作流（根据查询类型选择策略）。
+    - [ ] `MultiModalRAGWorkflow`: 多模态RAG工作流。
+
+- [ ] `RAGAgentConfig(BaseModel)`: RAG Agent配置模型。
+    - `retrieval_strategy: RetrievalStrategy`: 检索策略配置
+    - `knowledge_base_config: KnowledgeBaseConfig`: 知识库配置
+    - `generation_config: GenerationConfig`: 生成配置
+    - `workflow_type: RAGWorkflowType`: 工作流类型
+
+#### 2. AgenticSearch (`agenticx.agents.agenticsearch`) **[扩展应用]**
+- [ ] `AgenticSearchAgent(Agent)`: 专门的搜索智能体。
+    - [ ] `intelligent_search(query: str, search_scope: SearchScope) -> SearchResults`: 智能搜索。
+    - [ ] `multi_source_search(query: str, sources: List[str]) -> AggregatedResults`: 多源搜索。
+    - [ ] `semantic_exploration(topic: str) -> ExplorationResults`: 语义探索。
+
+#### 3. AgenticQA (`agenticx.agents.agenticqa`) **[扩展应用]**
+- [ ] `AgenticQAAgent(Agent)`: 专门的问答智能体。
+    - [ ] `answer_question(question: str, context: QAContext) -> QAResponse`: 回答问题。
+    - [ ] `fact_verification(claim: str, sources: List[str]) -> VerificationResult`: 事实验证。
+    - [ ] `multi_turn_qa(conversation: Conversation) -> QAResponse`: 多轮问答。
+
+#### 4. AgenticKnowledge (`agenticx.agents.agentickowledge`) **[扩展应用]**
+- [ ] `AgenticKnowledgeAgent(Agent)`: 专门的知识管理智能体。
+    - [ ] `organize_knowledge(documents: List[Document]) -> KnowledgeStructure`: 组织知识。
+    - [ ] `extract_insights(knowledge_base: KnowledgeBase) -> List[Insight]`: 提取洞察。
+    - [ ] `knowledge_synthesis(topics: List[str]) -> SynthesisReport`: 知识综合。
+
+#### 5. Agent应用框架 (Agent Application Framework) **[基础设施]**
+- [ ] `BaseAgentApp(Agent)`: Agent应用基类。
+    - [ ] `register_tools(tools: List[BaseTool])`: 注册工具。
+    - [ ] `setup_workflows(workflows: List[Workflow])`: 设置工作流。
+    - [ ] `configure_mcp_integration(mcp_config: MCPConfig)`: 配置MCP集成。
+- [ ] `AgentAppRegistry`: Agent应用注册表。
+    - [ ] `register_app(app_name: str, app_class: Type[BaseAgentApp])`: 注册应用。
+    - [ ] `discover_apps() -> List[AgentAppInfo]`: 发现可用应用。
+    - [ ] `create_app(app_name: str, config: Dict[str, Any]) -> BaseAgentApp`: 创建应用实例。
+
+**设计优势**:
+- **专门化**: 每个Agent应用专注于特定领域，提供最优的用户体验
+- **组合能力**: 充分利用AgenticX底层的工具、检索、知识管理等能力
+- **开箱即用**: 提供完整的端到端解决方案，降低使用门槛
+- **可扩展**: 基于统一的Agent应用框架，易于扩展新的专门化应用
+- **MCP集成**: 每个应用都可以通过MCP协议暴露其能力
+
+**实现状态**: ⏳ **规划中** - M17专门化Agent应用正在规划中。将基于AgenticX强大的底层能力，构建AgenticRAG、AgenticSearch、AgenticQA、AgenticKnowledge等专门化Agent应用。每个应用都将提供完整的端到端解决方案，通过组合底层的RAG组件工具、检索引擎、知识管理等能力，为特定领域提供最优的智能体体验。
 
 ---
 
