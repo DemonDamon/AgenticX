@@ -1,0 +1,20 @@
+grapher:
+  type: graphrag
+  llm:
+    type: bailian
+    model: qwen3-max-preview
+    api_key: sk-99a14fadaeda426583a8bd011566d34b
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1/
+    provider: bailian
+  graphrag:
+    chunk_size: 1000
+    chunk_overlap: 200
+    prompts:
+      general: You are an expert information extractor...
+    entity_extraction:
+      extraction_method: llm
+    relationship_extraction:
+      extraction_method: llm
+    quality_validation: {}
+    community_detection: {}
+    graph_optimization: {}
