@@ -13,6 +13,7 @@ deploy/data/
 deploy/logs/
 htmlcov/
 rules/
+build/
 markmap/
 progress/
 thirdparty/
