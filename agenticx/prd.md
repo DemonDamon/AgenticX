@@ -63,7 +63,6 @@ graph TD
                 HybridRetriever["Hybrid Retriever"]
                 RetrievalAgent["Retrieval Agent"]
                 RerankingAgent["Reranking Agent"]
-                RAGTools["RAG Tools"]
             end
         end
     end
@@ -108,7 +107,7 @@ graph TD
     AgentExecutor -- "智能检索" --> RetrievalAgent
     RetrievalAgent -- "多策略检索" --> VectorRetriever & BM25Retriever & HybridRetriever
     RetrievalAgent -- "结果重排" --> RerankingAgent
-    AgentExecutor -- "RAG工具" --> RAGTools
+    AgentExecutor -- "智能检索" --> RetrievalAgent
     
     %% Platform Services Connections
     AgentExecutor -- "触发" --> Callbacks
@@ -134,20 +133,23 @@ graph TD
 
 *   **M1: 核心抽象层 (`agenticx.core`)**: 定义框架的基础数据结构。
 *   **M2: LLM 服务提供层 (`agenticx.llms`)**: 对接不同的大语言模型。
-*   **M3: 向量嵌入服务层 (`agenticx.embeddings`)**: 提供统一、可扩展的文本向量化能力，支持多种国内外 embedding 服务。
+*   **M3: 向量嵌入服务层 (`agenticx.embeddings`)**: 提供统一、可扩展的文本向量化能力。
+*   **M3.5: 统一数据存储层 (`agenticx.storage`)**: 提供统一的数据存储抽象层。
 *   **M4: 工具系统 (`agenticx.tools`)**: 定义和管理 Agent 可用的工具。
 *   **M5: 记忆系统 (`agenticx.memory`)**: 为 Agent 提供短期和长期记忆。
 *   **M6: 智能体核心 (`agenticx.agent`)**: 定义 Agent 的生命周期和执行逻辑。
-*   **M7: 任务契约与成果验证 (`agenticx.task`)**: 定义、分配和追踪任务，确保任务产出符合预定义的契约。
+*   **M7: 任务契约与成果验证 (`agenticx.task`)**: 定义、分配和追踪任务。
 *   **M8: 编排与路由引擎 (`agenticx.orchestrator`)**: 负责驱动整个协作流程。
-*   **M8.5: 多智能体协作框架 (`agenticx.collaboration`)**: 支持8种核心协作模式（主从层次、反思、辩论、群聊、并行化、嵌套、动态添加、异步协作），实现从简单任务分发到复杂团队协作的全场景覆盖。
+*   **M8.5: 多智能体协作框架 (`agenticx.collaboration`)**: 支持多种核心协作模式。
 *   **M9: 智能体通信协议 (`agenticx.protocols`)**: 负责 Agent 间和跨平台的通信。
 *   **M10: 可观测性与分析 (`agenticx.observability`)**: 日志、追踪和可视化。
-*   **M11: 用户接口 (`agenticx.interfaces`)**: CLI、SDK 和未来的 Web UI。
-*   **M12: 平台服务层 (`agenticx.platform`)**: 覆盖多租户、安全与治理。
-*   **M13: 知识与数据层 (`agenticx.knowledge`)**: 统一的数据连接、处理和权限化访问。
-*   **M14: 资产中心 (`agenticx.hub`)**: 管理和复用 Agents, Workflows, 和 Models。
-*   **M15: 智能检索系统 (`agenticx.retrieval`)**: 统一、多策略的检索框架，支持向量检索、BM25检索、图检索等多种策略，并实现完全Agentic化的RAG流程。
+*   **M11: 开发者体验 (`agenticx.devex`)**: 包括 CLI、SDK 和未来的 Web UI。
+*   **M12: 企业安全与治理 (`agenticx.governance`)**: 覆盖多租户、安全与治理。
+*   **M13: 智能体进化平台 (`agenticx.evolution`)**: Agent的持续学习与优化。
+*   **M14: 企业知识中台 (`agenticx.knowledge`)**: 统一的数据连接、处理和权限化访问。
+*   **M15: 智能检索系统 (`agenticx.retrieval`)**: 统一、多策略的检索框架。
+*   **M16: 具身智能基础框架 (`agenticx.embodiment`)**: 连接虚拟Agent与物理世界。
+*   **M17: 专门化Agent应用 (`agenticx.agents`)**: 提供开箱即用的高级Agent应用。
 
 ## 4. 智能体全生命周期管理 (Agent Lifecycle Management)
 
@@ -1295,64 +1297,64 @@ graph LR
 #### 1. 文档处理与解析 (Document Processing & Parsing) **[必要功能]**
 > 参考MinerU的多后端架构，构建轻量级但可扩展的文档处理框架
 
-- [ ] `DocumentProcessor`: 统一文档处理器（参考MinerU的CLI客户端设计）。
-    - [ ] `process_document(input_path: str, backend: ProcessingBackend = "auto") -> ProcessingResult`: 统一文档处理入口
-    - [ ] `process_document_async(input_path: str) -> ProcessingResult`: **[新增]** 异步处理支持，提升处理高并发任务的吞吐量
-    - [ ] `select_backend(document_type: str, complexity: ComplexityLevel) -> ProcessingBackend`: 智能后端选择
-    - [ ] `optimize_backend_selection(historical_data: List[ProcessingResult])`: **[新增]** 基于历史数据动态优化后端选择策略
-    - [ ] `configure_processing(options: ProcessingOptions) -> ProcessingConfig`: 处理配置管理
-    - [ ] `extract_content_blocks(document: Document) -> List[ContentBlock]`: 内容块提取（参考MinerU的块关系处理）
-    - [ ] `monitor_processing_performance() -> ProcessingMetrics`: **[新增]** 性能监控，用于追踪和评估处理效率
+- [x] `DocumentProcessor`: 统一文档处理器（参考MinerU的CLI客户端设计）。
+    - [x] `process_document(input_path: str, backend: ProcessingBackend = "auto") -> ProcessingResult`: 统一文档处理入口
+    - [x] `process_document_async(input_path: str) -> ProcessingResult`: **[新增]** 异步处理支持，提升处理高并发任务的吞吐量
+    - [x] `select_backend(document_type: str, complexity: ComplexityLevel) -> ProcessingBackend`: 智能后端选择
+    - [x] `optimize_backend_selection(historical_data: List[ProcessingResult])`: **[新增]** 基于历史数据动态优化后端选择策略
+    - [x] `configure_processing(options: ProcessingOptions) -> ProcessingConfig`: 处理配置管理
+    - [x] `extract_content_blocks(document: Document) -> List[ContentBlock]`: 内容块提取（参考MinerU的块关系处理）
+    - [x] `monitor_processing_performance() -> ProcessingMetrics`: **[新增]** 性能监控，用于追踪和评估处理效率
 
-- [ ] `ProcessingBackend`: 处理后端抽象（参考MinerU的Pipeline vs VLM后端）。
-    - [ ] `BaseProcessingBackend(ABC)`: 处理后端抽象基类
-    - [ ] `SimpleTextBackend(BaseProcessingBackend)`: 简单文本处理后端（轻量级）
-    - [ ] `StructuredBackend(BaseProcessingBackend)`: 结构化文档处理后端（中等复杂度）
-    - [ ] `VLMLayoutBackend(BaseProcessingBackend)`: VLM布局分析后端（高复杂度，可选）
+- [x] `ProcessingBackend`: 处理后端抽象（参考MinerU的Pipeline vs VLM后端）。
+    - [x] `BaseProcessingBackend(ABC)`: 处理后端抽象基类
+    - [x] `SimpleTextBackend(BaseProcessingBackend)`: 简单文本处理后端（轻量级）
+    - [x] `StructuredBackend(BaseProcessingBackend)`: 结构化文档处理后端（中等复杂度）
+    - [x] `VLMLayoutBackend(BaseProcessingBackend)`: VLM布局分析后端（高复杂度，可选）
 
-- [ ] `CoreDocumentReaders`: 核心文档读取器集合（轻量级优先）。
-    - [ ] `TextReader(BaseReader)`: 纯文本读取器（TXT, Markdown, Code）
-    - [ ] `PDFReader(BaseReader)`: 基础PDF读取器（优先轻量级方案）
-    - [ ] `HTMLReader(BaseReader)`: 网页内容读取器
-    - [ ] `JSONReader(BaseReader)`: JSON数据读取器
-    - [ ] `CSVReader(BaseReader)`: CSV表格读取器
+- [x] `CoreDocumentReaders`: 核心文档读取器集合（轻量级优先）。
+    - [x] `TextReader(BaseReader)`: 纯文本读取器（TXT, Markdown, Code）
+    - [x] `PDFReader(BaseReader)`: 基础PDF读取器（优先轻量级方案）
+    - [x] `HTMLReader(BaseReader)`: 网页内容读取器
+    - [x] `JSONReader(BaseReader)`: JSON数据读取器
+    - [x] `CSVReader(BaseReader)`: CSV表格读取器
 
-- [ ] `ContentExtractor`: 内容提取器（参考MinerU的OCR和内容提取）。
-    - [ ] `extract_text_content(document: Document) -> str`: 文本内容提取
-    - [ ] `extract_structural_elements(document: Document) -> List[StructuralElement]`: 结构元素提取
-    - [ ] `extract_metadata(document: Document) -> DocumentMetadata`: 文档元数据提取
-    - [ ] `detect_content_type(file_path: str) -> ContentType`: 内容类型检测
+- [x] `ContentExtractor`: 内容提取器（参考MinerU的OCR和内容提取）。
+    - [x] `extract_text_content(document: Document) -> str`: 文本内容提取
+    - [x] `extract_structural_elements(document: Document) -> List[StructuralElement]`: 结构元素提取
+    - [x] `extract_metadata(document: Document) -> DocumentMetadata`: 文档元数据提取
+    - [x] `detect_content_type(file_path: str) -> ContentType`: 内容类型检测
 
-- [ ] `ProcessingConfiguration`: 处理配置管理（参考MinerU的配置系统）。
-    - [ ] `ProcessingOptions`: 处理选项（语言、精度、速度模式）
-    - [ ] `BackendConfig`: 后端配置（模型路径、参数设置）
-    - [ ] `FeatureFlags`: 特性开关（OCR、布局分析、公式识别等）
+- [x] `ProcessingConfiguration`: 处理配置管理（参考MinerU的配置系统）。
+    - [x] `ProcessingOptions`: 处理选项（语言、精度、速度模式）
+    - [x] `BackendConfig`: 后端配置（模型路径、参数设置）
+    - [x] `FeatureFlags`: 特性开关（OCR、布局分析、公式识别等）
 
 #### 2. 智能分块策略 (Intelligent Chunking Strategies) **[必要功能]**
-- [ ] `ChunkingFramework`: 分块器框架。
-    - [ ] `BaseChunker(ABC)`: 分块器抽象基类。
-    - [ ] `register_chunker(strategy: str, chunker_class: Type[BaseChunker])`: 注册分块器。
-- [ ] `IntelligentChunkers`: 智能分块器集合。
-    - [ ] `SemanticChunker(BaseChunker)`: 语义分块器。
-    - [ ] `AgenticChunker(BaseChunker)`: 基于LLM的智能分块器。
-    - [ ] `RecursiveChunker(BaseChunker)`: 递归分块器。
-    - [ ] `FixedSizeChunker(BaseChunker)`: 固定大小分块器。
-    - [ ] `DocumentChunker(BaseChunker)`: 文档级分块器。
-    - [ ] `CSVRowChunker(BaseChunker)`: CSV行级分块器。
-- [ ] `ChunkingOptimizer`: 分块优化器。
-    - [ ] `optimize_chunking_strategy(document: Document) -> str`: 优化分块策略。
-    - [ ] `evaluate_chunk_quality(chunks: List[Chunk]) -> float`: 评估分块质量。
+- [x] `ChunkingFramework`: 分块器框架。
+    - [x] `BaseChunker(ABC)`: 分块器抽象基类。
+    - [x] `register_chunker(strategy: str, chunker_class: Type[BaseChunker])`: 注册分块器。
+- [x] `IntelligentChunkers`: 智能分块器集合。
+    - [x] `SemanticChunker(BaseChunker)`: 语义分块器。
+    - [x] `AgenticChunker(BaseChunker)`: 基于LLM的智能分块器。
+    - [x] `RecursiveChunker(BaseChunker)`: 递归分块器。
+    - [x] `FixedSizeChunker(BaseChunker)`: 固定大小分块器。
+    - [x] `DocumentChunker(BaseChunker)`: 文档级分块器。
+    - [x] `CSVRowChunker(BaseChunker)`: CSV行级分块器。
+- [x] `ChunkingOptimizer`: 分块优化器。
+    - [x] `optimize_chunking_strategy(document: Document) -> str`: 优化分块策略。
+    - [x] `evaluate_chunk_quality(chunks: List[Chunk]) -> float`: 评估分块质量。
 
 #### 3. 知识图谱构建 (Knowledge Graph Construction) **[加分功能]**
-- [ ] `KnowledgeGraphBuilder`: 知识图谱构建器。
-    - [ ] `extract_entities(documents: List[Document]) -> List[Entity]`: 提取实体。
-    - [ ] `extract_relationships(entities: List[Entity]) -> List[Relationship]`: 提取关系。
-    - [ ] `build_graph(entities: List[Entity], relationships: List[Relationship]) -> KnowledgeGraph`: 构建图谱。
-    - [ ] `validate_graph_quality(graph: KnowledgeGraph) -> GraphQualityReport`: 验证图谱质量。
-- [ ] `GraphRAGConstructor`: GraphRAG构建器（集成Youtu-GraphRAG）。
-    - [ ] `construct_knowledge_graph(documents: List[Document]) -> KnowledgeGraph`: 构建知识图谱。
-    - [ ] `update_graph_incrementally(graph: KnowledgeGraph, new_documents: List[Document]) -> KnowledgeGraph`: 增量更新图谱。
-    - [ ] `optimize_graph_structure(graph: KnowledgeGraph) -> KnowledgeGraph`: 优化图谱结构。
+- [x] `KnowledgeGraphBuilder`: 知识图谱构建器。
+    - [x] `extract_entities(documents: List[Document]) -> List[Entity]`: 提取实体。
+    - [x] `extract_relationships(entities: List[Entity]) -> List[Relationship]`: 提取关系。
+    - [x] `build_graph(entities: List[Entity], relationships: List[Relationship]) -> KnowledgeGraph`: 构建图谱。
+    - [x] `validate_graph_quality(graph: KnowledgeGraph) -> GraphQualityReport`: 验证图谱质量。
+- [x] `GraphRAGConstructor`: GraphRAG构建器（集成Youtu-GraphRAG）。
+    - [x] `construct_knowledge_graph(documents: List[Document]) -> KnowledgeGraph`: 构建知识图谱。
+    - [x] `update_graph_incrementally(graph: KnowledgeGraph, new_documents: List[Document]) -> KnowledgeGraph`: 增量更新图谱。
+    - [x] `optimize_graph_structure(graph: KnowledgeGraph) -> KnowledgeGraph`: 优化图谱结构。
 
 #### 4. 核心知识管理 (Core Knowledge Management) **[必要功能]**
 - [ ] `KnowledgeManager`: 统一知识管理器。
@@ -1405,7 +1407,7 @@ graph LR
 
 **实现状态**: ⏳ **规划中** - M14企业知识中台正在规划中。优先实现文档处理解析、智能分块策略、核心知识管理等RAG核心功能，统一数据连接等企业级扩展功能将在后续版本中提供。
 
-### M15: 智能检索系统 (`agenticx.retrieval`) ✅
+### M15: 智能检索系统 (`agenticx.retrieval`) ⏳
 > 启发来源: 参考CAMEL的多策略检索引擎、AutoAgent的RAG工具化设计、ADK-Python的企业级特性，构建统一、智能、可扩展的检索系统。
 
 **战略定位**: 构建一个统一、智能、可扩展的检索系统，为AgenticX框架提供从基础检索能力到完全Agentic化RAG流程的全栈解决方案，实现检索的智能化、模块化和工具化。
@@ -1496,26 +1498,26 @@ graph LR
 
 **实现状态**: ✅ **已完成** - 已完整实现M15.2多策略检索引擎。包含向量检索、BM25检索、混合检索、图检索和自动检索等多种策略。每种检索器都实现了完整的文档管理、检索执行和统计功能。支持多种后端存储和可配置的参数调优。
 
-#### 3. 查询理解与优化 (Query Understanding & Optimization) ✅
-- [x] `QueryUnderstanding`: 查询理解器。
+#### 3. 查询理解与优化 (Query Understanding & Optimization) ⏳
+- [ ] `QueryUnderstanding`: 查询理解器。
     - `parse_query(query: str) -> ParsedQuery`: 解析查询意图
     - `extract_entities(query: str) -> List[Entity]`: 提取实体
     - `identify_intent(query: str) -> QueryIntent`: 识别查询意图
     - `analyze_query_complexity(query: str) -> ComplexityLevel`: 分析查询复杂度
-- [x] `QueryOptimizer`: 查询优化器。
+- [ ] `QueryOptimizer`: 查询优化器。
     - `optimize_query(query: str, context: SearchContext) -> OptimizedQuery`: 优化查询
     - `suggest_alternatives(query: str) -> List[str]`: 建议替代查询
     - `expand_query(query: str) -> ExpandedQuery`: 扩展查询
     - `decompose_complex_query(query: str) -> List[SubQuery]`: 分解复杂查询
-- [x] `SemanticIndexer`: 语义索引器。
+- [ ] `SemanticIndexer`: 语义索引器。
     - `index_document(document: Document) -> IndexResult`: 索引文档
     - `update_embeddings(documents: List[Document])`: 更新嵌入向量
     - `build_semantic_index(documents: List[Document]) -> SemanticIndex`: 构建语义索引
     - `optimize_index_performance() -> IndexOptimizationResult`: 优化索引性能
 
-**实现状态**: ✅ **已完成** - 已完整实现M15.3查询理解与优化。包含查询解析、意图识别、查询优化、语义索引等核心功能。支持复杂查询分解和智能查询扩展。
+**实现状态**: ⏳ **未完成** - 待完整实现M15.3查询理解与优化。包含查询解析、意图识别、查询优化、语义索引等核心功能。支持复杂查询分解和智能查询扩展。
 
-#### 4. 智能检索Agent (Intelligent Retrieval Agents) ✅
+#### 4. 智能检索Agent (Intelligent Retrieval Agents) ⏳
 - [x] `QueryAnalysisAgent(Agent)`: 查询分析智能体。
     - `__init__(llm: BaseLLM, **kwargs)`: 初始化查询分析Agent
     - `analyze_query(query: str, context: Dict[str, Any] = None) -> QueryAnalysis`: 分析查询意图和特征
@@ -1543,14 +1545,14 @@ graph LR
     - `_apply_indexing_strategy(document: Dict[str, Any], strategy: Dict[str, Any]) -> Dict[str, Any]`: 应用索引策略
     - 支持基于文档特征的智能分块和索引策略选择
 
-- [x] `KnowledgeGraphRetrievalAgent(Agent)`: 知识图谱检索智能体。
+- [ ] `KnowledgeGraphRetrievalAgent(Agent)`: 知识图谱检索智能体。
     - `__init__(graph_retriever: GraphRetriever, llm: BaseLLM, **kwargs)`: 初始化知识图谱检索Agent
     - `retrieve_from_graph(query: str, context: Dict[str, Any] = None) -> List[RetrievalResult]`: 从知识图谱检索
     - `_reason_about_entities(entities: List[Entity], graph: KnowledgeGraph) -> ReasoningResult`: 实体推理
     - `_find_knowledge_paths(source: Entity, target: Entity, graph: KnowledgeGraph) -> List[Path]`: 知识路径查找
     - 支持基于知识图谱的推理检索和路径发现
 
-- [x] `GraphRAGAgent(Agent)`: GraphRAG检索智能体（集成Youtu-GraphRAG）。
+- [ ] `GraphRAGAgent(Agent)`: GraphRAG检索智能体（集成Youtu-GraphRAG）。
     - `__init__(graphrag_retriever: EnhancedGraphRAGRetriever, llm: BaseLLM, **kwargs)`: 初始化GraphRAG Agent
     - `enhanced_retrieve(query: str, context: Dict[str, Any] = None) -> List[RetrievalResult]`: 增强图谱检索
     - `_decompose_query_intelligently(query: str) -> List[SubQuery]`: 智能查询分解
@@ -1565,51 +1567,45 @@ graph LR
     - `suggested_filters: Dict[str, Any]`: 建议的过滤条件
     - `confidence: float`: 分析置信度
 
-**实现状态**: ✅ **已完成** - 已完整实现M15.4智能检索Agent。包含查询分析、检索执行、结果重排、文档索引、知识图谱检索和GraphRAG检索六个核心Agent。每个Agent都具备智能决策能力，可以根据查询特征和上下文选择最佳策略。支持完整的Agent生命周期管理和事件记录。
+**实现状态**: ⏳ **未完成** - 待完整实现M15.4智能检索Agent。包含查询分析、检索执行、结果重排、文档索引、知识图谱检索和GraphRAG检索六个核心Agent。每个Agent都具备智能决策能力，可以根据查询特征和上下文选择最佳策略。支持完整的Agent生命周期管理和事件记录。
 
-#### 5. RAG流程工具 (RAG Workflow Tools) ✅
-- [x] `DocumentIndexingTool(BaseTool)`: 文档索引工具。
-    - `__init__(indexing_agent: IndexingAgent, retriever: BaseRetriever)`: 初始化文档索引工具
-    - `arun(**kwargs) -> str`: 执行文档索引
-    - 支持批量文档处理和智能索引策略
-
-- [x] `RetrievalTool(BaseTool)`: 检索工具。
+#### 5. RAG流程工具 (RAG Workflow Tools) ⏳
+- [ ] `RetrievalTool(BaseTool)`: 检索工具。
     - `__init__(retrieval_agent: RetrievalAgent)`: 初始化检索工具
     - `arun(**kwargs) -> str`: 执行检索查询
     - 支持智能检索和结果格式化
 
-- [x] `RerankingTool(BaseTool)`: 重排序工具。
+- [ ] `RerankingTool(BaseTool)`: 重排序工具。
     - `__init__(reranking_agent: RerankingAgent)`: 初始化重排序工具
     - `arun(**kwargs) -> str`: 执行结果重排序
     - 支持智能排序和多样性优化
 
-- [x] `QueryModificationTool(BaseTool)`: 查询修改工具。
+- [ ] `QueryModificationTool(BaseTool)`: 查询修改工具。
     - `__init__(query_analyzer: QueryAnalysisAgent)`: 初始化查询修改工具
     - `arun(**kwargs) -> str`: 修改查询以改善检索效果
     - `_generate_modified_query(original_query: str, known_information: str, analysis: Any) -> str`: 生成修改后的查询
     - 支持基于已知信息的查询优化
 
-- [x] `AnswerGenerationTool(BaseTool)`: 答案生成工具。
+- [ ] `AnswerGenerationTool(BaseTool)`: 答案生成工具。
     - `__init__(llm)`: 初始化答案生成工具
     - `arun(**kwargs) -> str`: 基于检索结果生成答案
     - `_build_answer_prompt(query: str, supporting_docs: str) -> str`: 构建答案生成提示
     - 支持基于检索结果的智能答案生成
 
-- [x] `CanAnswerTool(BaseTool)`: 可答性判断工具。
+- [ ] `CanAnswerTool(BaseTool)`: 可答性判断工具。
     - `__init__(llm)`: 初始化可答性判断工具
     - `arun(**kwargs) -> str`: 判断查询是否可回答
     - `_build_can_answer_prompt(query: str, supporting_docs: str) -> str`: 构建可答性判断提示
     - 支持基于检索结果的答案可行性评估
 
-- [x] 工具参数模型:
-    - `DocumentIndexingArgs(BaseModel)`: 文档索引参数
+- [ ] 工具参数模型:
     - `RetrievalArgs(BaseModel)`: 检索参数
     - `RerankingArgs(BaseModel)`: 重排序参数
     - `QueryModificationArgs(BaseModel)`: 查询修改参数
     - `AnswerGenerationArgs(BaseModel)`: 答案生成参数
     - `CanAnswerArgs(BaseModel)`: 可答性判断参数
 
-**实现状态**: ✅ **已完成** - 已完整实现M15.5 RAG流程工具。包含文档索引、检索查询、结果重排、查询修改、答案生成和可答性判断六个核心工具。每个工具都支持异步执行、参数验证和错误处理。工具间可以组合使用，支持完整的RAG工作流。
+**实现状态**: ⏳ **未完成** - 待完整实现M15.5 RAG流程工具。包含检索查询、结果重排、查询修改、答案生成和可答性判断五个核心工具。每个工具都支持异步执行、参数验证和错误处理。工具间可以组合使用，支持完整的RAG工作流。
 
 #### 6. 企业级检索平台 (Enterprise Retrieval Platform) ⏳
 - [ ] `RetrievalTenantManager`: 多租户管理服务。
