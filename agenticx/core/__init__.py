@@ -4,9 +4,100 @@ AgenticX Core Module
 This module contains the core abstractions and data structures for the AgenticX framework.
 """
 
+# Core tool components (v2)
+from .tool_v2 import (
+    BaseTool,
+    ToolMetadata,
+    ToolParameter,
+    ToolResult,
+    ToolContext,
+    ToolStatus,
+    ParameterType,
+    ToolCategory,
+)
+
+# Registry and factory
+from .registry import (
+    ToolRegistry,
+    ToolFactory,
+    ToolRegistrationError,
+    ToolNotFoundError,
+    ToolValidationError,
+    get_registry as get_tool_registry,
+    get_factory as get_tool_factory,
+)
+
+# Execution engine
+from .executor import (
+    ToolExecutor,
+    ExecutionConfig,
+    ExecutionMetrics,
+    ResourceMonitor,
+    SandboxedEnvironment,
+    get_executor as get_tool_executor,
+)
+
+# Security management
+from .security import (
+    SecurityManager,
+    SecurityLevel,
+    Permission,
+    SecurityPolicy,
+    AuditLogEntry,
+    SecurityException,
+    PermissionDeniedException,
+    RateLimitExceededException,
+    AuthenticationException,
+    AuthorizationException,
+    CredentialStore,
+    get_security_manager,
+    check_permission,
+    authorize_action,
+    log_audit,
+)
+
+# Protocol adapters
+from .adapters import (
+    ProtocolType,
+    ProtocolAdapter,
+    ProtocolAdapterFactory,
+    OpenAIAdapter,
+    MCPAdapter,
+    MultiProtocolAdapter,
+    create_openai_adapter,
+    create_mcp_adapter,
+    create_multi_protocol_adapter,
+)
+
+# Marketplace
+from .marketplace import (
+    ToolMarketplace,
+    ToolManifest,
+    ToolListing,
+    ToolReview,
+    ToolStatus as MarketplaceToolStatus,
+    ToolCategory as MarketplaceToolCategory,
+    MarketplaceException,
+    ToolNotFoundException as MarketplaceToolNotFoundException,
+    ToolAlreadyExistsException,
+    PermissionDeniedException as MarketplacePermissionDeniedException,
+    RemoteMarketplaceClient,
+    get_marketplace,
+)
+
+# Tool System Integration
+from .tool_system import (
+    ToolSystem,
+    ToolSystemConfig,
+    create_tool_system,
+    get_tool_system,
+    shutdown_tool_system,
+)
+
+# Legacy imports for backward compatibility
 from .agent import Agent, AgentContext, AgentResult
 from .task import Task
-from .tool import BaseTool, FunctionTool, tool
+from .tool import BaseTool as LegacyBaseTool, FunctionTool, tool
 from .workflow import Workflow, WorkflowNode, WorkflowEdge
 from .message import Message, ProtocolMessage
 from .platform import User, Organization
@@ -22,7 +113,7 @@ from .event import (
 from .prompt import PromptManager, ContextRenderer, XMLContextRenderer, PromptTemplate
 from .error_handler import ErrorHandler, ErrorClassifier, CircuitBreaker, CircuitBreakerOpenError
 from .communication import CommunicationInterface, BroadcastCommunication, AsyncCommunicationInterface
-from .agent_executor import AgentExecutor, ToolRegistry, ActionParser
+from .agent_executor import AgentExecutor, ToolRegistry as LegacyToolRegistry, ActionParser
 
 # M6: Task Contract & Outcome Validation
 from .task_validator import (
@@ -43,12 +134,88 @@ from .workflow_engine import (
 WorkflowContext = ExecutionContext
 
 __all__ = [
-    # Core abstractions
+    # Tool System v2 - Core Components
+    "BaseTool",
+    "ToolMetadata", 
+    "ToolParameter",
+    "ToolResult",
+    "ToolContext",
+    "ToolStatus",
+    "ParameterType",
+    "ToolCategory",
+    
+    # Tool System v2 - Registry & Factory
+    "ToolRegistry",
+    "ToolFactory", 
+    "ToolRegistrationError",
+    "ToolNotFoundError",
+    "ToolValidationError",
+    "get_tool_registry",
+    "get_tool_factory",
+    
+    # Tool System v2 - Execution Engine
+    "ToolExecutor",
+    "ExecutionConfig",
+    "ExecutionMetrics", 
+    "ResourceMonitor",
+    "SandboxedEnvironment",
+    "get_tool_executor",
+    
+    # Tool System v2 - Security Management
+    "SecurityManager",
+    "SecurityLevel",
+    "Permission",
+    "SecurityPolicy", 
+    "AuditLogEntry",
+    "SecurityException",
+    "PermissionDeniedException",
+    "RateLimitExceededException",
+    "AuthenticationException", 
+    "AuthorizationException",
+    "CredentialStore",
+    "get_security_manager",
+    "check_permission",
+    "authorize_action",
+    "log_audit",
+    
+    # Tool System v2 - Protocol Adapters
+    "ProtocolType",
+    "ProtocolAdapter",
+    "ProtocolAdapterFactory",
+    "OpenAIAdapter", 
+    "MCPAdapter",
+    "MultiProtocolAdapter",
+    "create_openai_adapter",
+    "create_mcp_adapter",
+    "create_multi_protocol_adapter",
+    
+    # Tool System v2 - Marketplace
+    "ToolMarketplace",
+    "ToolManifest",
+    "ToolListing", 
+    "ToolReview",
+    "MarketplaceToolStatus",
+    "MarketplaceToolCategory",
+    "MarketplaceException",
+    "MarketplaceToolNotFoundException",
+    "ToolAlreadyExistsException",
+    "MarketplacePermissionDeniedException",
+    "RemoteMarketplaceClient",
+    "get_marketplace",
+    
+    # Tool System Integration
+    "ToolSystem",
+    "ToolSystemConfig",
+    "create_tool_system",
+    "get_tool_system",
+    "shutdown_tool_system",
+    
+    # Legacy Core abstractions (for backward compatibility)
     "Agent",
     "AgentContext",
     "AgentResult",
     "Task", 
-    "BaseTool",
+    "LegacyBaseTool",
     "FunctionTool",
     "tool",
     "Workflow",
@@ -91,7 +258,7 @@ __all__ = [
     "AsyncCommunicationInterface",
     # Agent Execution
     "AgentExecutor",
-    "ToolRegistry",
+    "LegacyToolRegistry",
     "ActionParser",
     # Task Validation
     "TaskOutputParser",
