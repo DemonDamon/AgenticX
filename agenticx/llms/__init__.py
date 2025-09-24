@@ -9,6 +9,7 @@ from .response import LLMResponse, LLMChoice, TokenUsage
 from .litellm_provider import LiteLLMProvider
 from .kimi_provider import KimiProvider
 from .bailian_provider import BailianProvider
+from .llm_factory import LlmFactory
 
 # Convenience re-exports for specific models, all using LiteLLMProvider
 # This makes it easy to instantiate a specific provider type.
@@ -51,6 +52,7 @@ __all__ = [
     "LiteLLMProvider",
     "KimiProvider",
     "BailianProvider",
+    "LlmFactory",
     
     # Convenience classes
     "OpenAIProvider",
