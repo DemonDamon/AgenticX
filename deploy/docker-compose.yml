@@ -168,10 +168,10 @@ services:
   
   # Neo4j - 图数据库
   neo4j:
-    image: neo4j:5.15.0
+    image: neo4j:5.26.0
     container_name: agenticx-neo4j
     environment:
-      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-password}
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
       NEO4J_PLUGINS: '["apoc"]'
     ports:
       - "7474:7474"
@@ -358,4 +358,4 @@ volumes:
 networks:
   default:
     name: agenticx-network
-    driver: bridge 
+    driver: bridge
