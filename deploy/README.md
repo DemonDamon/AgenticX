@@ -228,8 +228,66 @@ docker exec -it deploy-milvus-1 milvus_cli
 ```
 
 ### Neo4j
+Neo4j是AgenticX知识图谱的主要存储后端，支持复杂的图查询和可视化。
+
+#### 连接Neo4j
 ```bash
+# 使用cypher-shell连接
 docker exec -it deploy-neo4j-1 cypher-shell -u neo4j -p password
+
+# 或者通过Web界面访问
+# 浏览器打开: http://localhost:7474
+# 用户名: neo4j
+# 密码: password (或环境变量中设置的密码)
+```
+
+#### 知识图谱配置
+在 `agenticx/configs/knowledge_graphers_config.yml` 中配置Neo4j：
+
+```yaml
+grapher:
+  graphrag:
+    neo4j:
+      enabled: true  # 启用Neo4j导出
+      uri: "bolt://localhost:7687"
+      username: "neo4j"
+      password: "password"
+      database: "neo4j"
+      auto_export: true  # 自动导出构建的图谱
+      clear_on_export: true  # 导出前清空现有数据
+```
+
+#### 使用示例
+```python
+from agenticx.knowledge.graphers import KnowledgeGraphBuilder
+
+# 构建知识图谱
+builder = KnowledgeGraphBuilder(config, llm_config)
+graph = builder.build_from_texts(texts)
+
+# 导出到Neo4j
+graph.export_to_neo4j(
+    uri="bolt://localhost:7687",
+    username="neo4j", 
+    password="password"
+)
+```
+
+#### 常用Cypher查询
+```cypher
+// 查看所有节点类型
+MATCH (n) RETURN DISTINCT labels(n), count(n)
+
+// 查看所有关系类型
+MATCH ()-[r]-() RETURN DISTINCT type(r), count(r)
+
+// 查找特定实体
+MATCH (p:Person {name: "张三"}) RETURN p
+
+// 查找关系路径
+MATCH path = (a:Person)-[*1..3]-(b:Organization)
+WHERE a.name = "张三"
+RETURN path LIMIT 10
 ```
 
 ## 🚨 故障排除
@@ -299,4 +357,4 @@ docker exec -it deploy-neo4j-1 cypher-shell -u neo4j -p password
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证。 
+本项目采用 MIT 许可证。
