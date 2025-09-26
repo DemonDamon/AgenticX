@@ -19,7 +19,7 @@ import asyncio
 import time
 import random
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 
 # 导入M10模块
@@ -365,7 +365,7 @@ class ObservabilityDemo:
         ts_data = TimeSeriesData()
         
         # 模拟一周的指标数据
-        base_time = datetime.utcnow() - timedelta(days=7)
+        base_time = datetime.now(timezone.utc) - timedelta(days=7)
         
         for i in range(168):  # 一周的小时数
             timestamp = base_time + timedelta(hours=i)
@@ -448,7 +448,7 @@ class ObservabilityDemo:
         # websocket_stats = self.websocket_handler.get_stats()
         
         report = {
-            "报告时间": datetime.utcnow().isoformat(),
+            "报告时间": datetime.now(timezone.utc).isoformat(),
             "回调系统": {
                 "启用状态": callback_stats["is_enabled"],
                 "已处理事件": callback_stats["processing_stats"]["events_processed"],
@@ -585,4 +585,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
