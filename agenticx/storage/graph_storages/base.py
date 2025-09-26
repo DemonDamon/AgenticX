@@ -175,10 +175,19 @@ class BaseGraphStorage(ABC):
         """关闭图存储连接"""
         pass
 
+    @abstractmethod
+    def store_graph(self, knowledge_graph) -> None:
+        """存储知识图谱到图数据库
+        
+        Args:
+            knowledge_graph: 知识图谱对象
+        """
+        pass
+
     def __enter__(self):
         """上下文管理器入口"""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """上下文管理器出口"""
-        self.close() 
+        self.close()
