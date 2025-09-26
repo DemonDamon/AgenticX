@@ -24,12 +24,18 @@ except ImportError:
 class BailianEmbeddingProvider(BaseEmbeddingProvider):
     """阿里云百炼Embedding提供者"""
     
+    MODEL_DIMENSIONS = {
+        "text-embedding-v1": 1536,
+        "text-embedding-v2": 1024,
+        "text-embedding-v4": 1536,  # 默认模型
+        "multimodal-embedding-v1": 1536,
+    }
+
     def __init__(
         self, 
         api_key: str, 
         model: str = "text-embedding-v4", 
         api_url: Optional[str] = None,  # 修复：使用Optional[str]而不是str = None
-        dimension: int = 1536,
         max_tokens: int = 8192,
         batch_size: int = 100,
         timeout: int = 30,
@@ -51,7 +57,14 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
                 self.api_url = api_url
         else:
             self.api_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        self.dimension = dimension
+        
+        # 动态设置维度
+        custom_dimension = kwargs.get("dimensions") or kwargs.get("dimension")
+        if custom_dimension:
+            self.dimension = int(custom_dimension)
+        else:
+            self.dimension = self.MODEL_DIMENSIONS.get(self.model, 1536)
+
         self.max_tokens = max_tokens
         self.batch_size = batch_size
         self.timeout = timeout
@@ -232,14 +245,14 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
                 }
                 
                 # 如果支持维度参数
-                if self.model in ["text-embedding-v3", "text-embedding-v4"] and self.dimension:
+                if self.dimension:
                     embed_kwargs["dimensions"] = self.dimension
                 
-                print(f"\n🔍 百炼API请求详情 (OpenAI客户端):")
-                print(f"Base URL: {self.api_url}")
-                print(f"Model: {self.model}")
-                print(f"Input: {texts}")
-                print(f"Kwargs: {embed_kwargs}")
+                # print(f"\n🔍 百炼API请求详情 (OpenAI客户端):")
+                # print(f"Base URL: {self.api_url}")
+                # print(f"Model: {self.model}")
+                # print(f"Input: {texts}")
+                # print(f"Kwargs: {embed_kwargs}")
                 
                 # 调用OpenAI客户端
                 response = await self._openai_client.embeddings.create(**embed_kwargs)
@@ -273,13 +286,13 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
         if self.model in ["text-embedding-v3", "text-embedding-v4"] and self.dimension:
             payload["dimensions"] = self.dimension
         
-        # 添加详细的请求日志
-        print(f"\n🔍 百炼API请求详情 (HTTP):")
-        print(f"URL: {api_url}/embeddings")
-        print(f"Headers: {headers}")
-        print(f"Payload: {payload}")
-        print(f"Texts count: {len(texts)}")
-        print(f"First text preview: {texts[0][:100] if texts else 'N/A'}...")
+        # # 添加详细的请求日志
+        # print(f"\n🔍 百炼API请求详情 (HTTP):")
+        # print(f"URL: {api_url}/embeddings")
+        # print(f"Headers: {headers}")
+        # print(f"Payload: {payload}")
+        # print(f"Texts count: {len(texts)}")
+        # print(f"First text preview: {texts[0][:100] if texts else 'N/A'}...")
         
         for attempt in range(self.retry_count + 1):
             try:
