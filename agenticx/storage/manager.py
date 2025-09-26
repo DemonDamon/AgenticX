@@ -168,13 +168,36 @@ class StorageManager:
     
     async def initialize(self) -> None:
         """Initialize all storages"""
-        for config in self.configs:
-            storage = self._create_storage(config)
-            # TODO: Implement async connect for different storage types
-            self.storages.append(storage)
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"🔧 开始初始化 {len(self.configs)} 个存储配置")
+        
+        for i, config in enumerate(self.configs):
+            try:
+                logger.info(f"📦 初始化存储 {i+1}: {config.storage_type.value}")
+                storage = self._create_storage(config)
+                # TODO: Implement async connect for different storage types
+                self.storages.append(storage)
+                
+                # 检查存储类型和方法
+                storage_methods = [method for method in dir(storage) if not method.startswith('_')]
+                logger.debug(f"  存储方法: {storage_methods}")
+                
+                # 特别检查图存储方法
+                if isinstance(storage, BaseGraphStorage):
+                    if hasattr(storage, 'store_graph'):
+                        logger.info(f"  ✅ 图存储方法可用: store_graph")
+                    else:
+                        logger.warning(f"  ❌ 图存储方法不可用: store_graph")
+                    
+            except Exception as e:
+                logger.error(f"❌ 初始化存储 {i+1} 失败: {e}")
+                raise
         
         self.router = StorageRouter(self.storages)
         self._initialized = True
+        logger.info(f"✅ 存储管理器初始化完成，共 {len(self.storages)} 个存储实例")
     
     def get_storage(self, storage_type: StorageType) -> Optional[Union[BaseKeyValueStorage, BaseVectorStorage, BaseGraphStorage, BaseObjectStorage]]:
         """Get a storage instance by its StorageType enum."""
@@ -186,9 +209,50 @@ class StorageManager:
                     return self.storages[i]
         return None
     
-    def _create_storage(self, config: StorageConfig) -> Union[BaseKeyValueStorage, BaseVectorStorage, BaseGraphStorage, BaseObjectStorage]:
-        """Create storage instance from config"""
+    async def get_graph_storage(self, name: str = 'default') -> Optional['BaseGraphStorage']:
+        """Get graph storage instance"""
+        if not self._initialized:
+            return None
         
+        # Look for graph storage by checking if it's a BaseGraphStorage instance
+        for storage in self.storages:
+            # Check if it's a graph storage by looking for graph-specific methods
+            if (hasattr(storage, 'store_graph') and 
+                hasattr(storage, 'add_triplet') and 
+                hasattr(storage, 'add_node')):
+                return storage
+        
+        # If no graph storage found, return None
+        return None
+    
+    async def get_vector_storage(self, name: str = 'default') -> Optional['BaseVectorStorage']:
+        """Get vector storage instance"""
+        if not self._initialized:
+            return None
+        
+        # Look for vector storage
+        for storage in self.storages:
+            if hasattr(storage, 'add') and hasattr(storage, 'query'):  # Check if it's a vector storage
+                return storage
+        
+        return None
+
+    async def get_key_value_storage(self, name: str = 'default') -> Optional['BaseKeyValueStorage']:
+        """Get key-value storage instance"""
+        if not self._initialized:
+            return None
+        
+        # Look for key-value storage
+        for storage in self.storages:
+            if hasattr(storage, 'set') and hasattr(storage, 'get'):  # Check if it's a key-value storage
+                return storage
+        
+        return None
+    
+    def _create_storage(self, config: StorageConfig) -> Any:
+        """Create a storage instance based on the provided configuration."""
+        storage_type = config.storage_type
+
         # Key-Value Storage
         if config.storage_type == StorageType.REDIS:
             from .key_value_storages.redis import RedisStorage
@@ -222,14 +286,14 @@ class StorageManager:
         # Vector Storage
         elif config.storage_type == StorageType.FAISS:
             from .vectordb_storages.faiss import FaissStorage
-            return FaissStorage(dimension=config.extra_params.get("dimension", 768))
+            return FaissStorage(dimension=config.extra_params.get("dimension"))
         
         elif config.storage_type == StorageType.MILVUS:
             from .vectordb_storages.milvus import MilvusStorage
             return MilvusStorage(
                 host=config.host or "localhost",
                 port=config.port or 19530,
-                dimension=config.extra_params.get("dimension", 768)
+                dimension=config.extra_params.get("dimension")
             )
         
         elif config.storage_type == StorageType.QDRANT:
@@ -237,28 +301,28 @@ class StorageManager:
             return QdrantStorage(
                 host=config.host or "localhost",
                 port=config.port or 6333,
-                dimension=config.extra_params.get("dimension", 768)
+                dimension=config.extra_params.get("dimension")
             )
         
         elif config.storage_type == StorageType.PGVECTOR:
             from .vectordb_storages.pgvector import PgVectorStorage
             return PgVectorStorage(
                 connection_string=config.connection_string or "",
-                dimension=config.extra_params.get("dimension", 768)
+                dimension=config.extra_params.get("dimension")
             )
         
         elif config.storage_type == StorageType.CHROMA:
             from .vectordb_storages.chroma import ChromaStorage
             return ChromaStorage(
                 persist_directory=config.extra_params.get("persist_directory", "./chroma_db") or "./chroma_db",
-                dimension=config.extra_params.get("dimension", 768)
+                dimension=config.extra_params.get("dimension")
             )
         
         elif config.storage_type == StorageType.WEAVIATE:
             from .vectordb_storages.weaviate import WeaviateStorage
             return WeaviateStorage(
                 url=config.connection_string or "http://localhost:8080",
-                dimension=config.extra_params.get("dimension", 768)
+                dimension=config.extra_params.get("dimension")
             )
         
         elif config.storage_type == StorageType.PINECONE:
@@ -267,7 +331,7 @@ class StorageManager:
                 api_key=config.extra_params.get("api_key") or "",
                 environment=config.extra_params.get("environment") or "",
                 index_name=config.extra_params.get("index_name") or "",
-                dimension=config.extra_params.get("dimension", 768)
+                dimension=config.extra_params.get("dimension")
             )
         
         # Graph Storage
