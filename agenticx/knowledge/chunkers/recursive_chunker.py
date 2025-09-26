@@ -5,7 +5,7 @@ This module provides enhanced recursive chunking with multiple splitting strateg
 
 import logging
 import time
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from ..base import ChunkingConfig
 from ..document import Document, DocumentMetadata, ChunkMetadata
@@ -21,6 +21,44 @@ class RecursiveChunker(AdvancedBaseChunker):
         super().__init__(config, **kwargs)
         self.separators = kwargs.get('separators', ['\n\n', '\n', '. ', ' '])
         self.keep_separator = kwargs.get('keep_separator', True)
+    
+    def chunk_text(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Split text into chunks using recursive splitting
+        
+        Args:
+            text: Text to chunk
+            metadata: Optional metadata to attach to chunks
+            
+        Returns:
+            List of chunk dictionaries with 'content' and 'metadata' keys
+        """
+        # Create a temporary document for processing
+        doc_metadata = DocumentMetadata(
+            name=metadata.get('name', 'temp_doc') if metadata else 'temp_doc',
+            source=metadata.get('source', 'text') if metadata else 'text',
+            source_type='text'
+        )
+        document = Document(content=text, metadata=doc_metadata)
+        
+        # Use the async method synchronously
+        chunks = self.chunk_document(document)
+        
+        # Convert to the expected format
+        result = []
+        for i, chunk in enumerate(chunks):
+            chunk_metadata = metadata.copy() if metadata else {}
+            chunk_metadata.update({
+                'chunk_index': i,
+                'chunk_size': len(chunk.content),
+                'chunker': 'RecursiveChunker'
+            })
+            
+            result.append({
+                'content': chunk.content,
+                'metadata': chunk_metadata
+            })
+        
+        return result
     
     async def chunk_document_async(self, document: Document) -> ChunkingResult:
         """Recursively chunk document using multiple separators"""
