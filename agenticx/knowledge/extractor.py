@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Tuple
-from datetime import datetime
+from datetime import datetime, timezone, UTC
 
 from .document import Document, DocumentMetadata
 
@@ -276,7 +276,7 @@ class TextContentExtractor(BaseContentExtractor):
             'word_count': len(content.split()),
             'line_count': len(content.split('\n')),
             'paragraph_count': len([p for p in content.split('\n\n') if p.strip()]),
-            'extracted_at': datetime.utcnow().isoformat(),
+            'extracted_at': datetime.now(timezone.utc).isoformat(),
             'extractor': self.name
         }
         
@@ -486,7 +486,7 @@ class MarkdownContentExtractor(BaseContentExtractor):
             'character_count': len(content),
             'word_count': len(content.split()),
             'line_count': len(content.split('\n')),
-            'extracted_at': datetime.utcnow().isoformat(),
+            'extracted_at': datetime.now(UTC).isoformat(),
             'extractor': self.name,
             'format': 'markdown'
         }
