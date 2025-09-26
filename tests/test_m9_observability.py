@@ -15,7 +15,7 @@ sys.path.insert(0, str(project_root))
 import pytest
 import asyncio
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from typing import List, Dict, Any
 import json
 import tempfile
@@ -444,7 +444,7 @@ class TestTimeSeriesData:
         ts_data = TimeSeriesData()
         
         # 添加数据点
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         ts_data.add_point(now, 10.0)
         ts_data.add_point(now + timedelta(seconds=1), 20.0)
         
@@ -458,7 +458,7 @@ class TestTimeSeriesData:
         ts_data = TimeSeriesData()
         
         # 添加测试数据
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         for i in range(10):
             ts_data.add_point(now + timedelta(seconds=i), float(i))
         
@@ -747,4 +747,4 @@ if __name__ == "__main__":
     run_performance_test()
     
     print("\n" + "="*50)
-    print("M9可观测性模块测试完成!") 
+    print("M9可观测性模块测试完成!")
