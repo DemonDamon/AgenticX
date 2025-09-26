@@ -7,7 +7,7 @@ including entities, relationships, and graph structures.
 import json
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone, UTC
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Union
 
@@ -68,7 +68,7 @@ class Entity:
     attributes: Dict[str, Any] = field(default_factory=dict)
     source_chunks: Set[str] = field(default_factory=set)
     confidence: float = 1.0
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     
     def __post_init__(self):
         """Validate entity data after initialization"""
@@ -134,7 +134,7 @@ class Relationship:
     attributes: Dict[str, Any] = field(default_factory=dict)
     source_chunks: Set[str] = field(default_factory=set)
     confidence: float = 1.0
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     
     def __post_init__(self):
         """Validate relationship data after initialization"""
@@ -289,6 +289,24 @@ class GraphQualityReport:
     def add_recommendation(self, recommendation: str) -> None:
         """Add a quality improvement recommendation"""
         self.recommendations.append(recommendation)
+    
+    def summary(self) -> str:
+        """Generate a summary of the quality report"""
+        summary_parts = [
+            f"质量等级: {self.quality_level}",
+            f"总体评分: {self.overall_score:.2f}",
+            f"实体数量: {self.metrics.entity_count}",
+            f"关系数量: {self.metrics.relationship_count}",
+            f"连通性: {self.metrics.density:.3f}"
+        ]
+        
+        if self.issues:
+            summary_parts.append(f"发现问题: {len(self.issues)}个")
+        
+        if self.recommendations:
+            summary_parts.append(f"改进建议: {len(self.recommendations)}个")
+        
+        return " | ".join(summary_parts)
 
 
 class KnowledgeGraph:
@@ -299,8 +317,8 @@ class KnowledgeGraph:
         self.graph = nx.MultiDiGraph()
         self.entities: Dict[str, Entity] = {}
         self.relationships: Dict[str, Relationship] = {}
-        self.created_at = datetime.utcnow()
-        self.updated_at = datetime.utcnow()
+        self.created_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(timezone.utc)
         self.metadata: Dict[str, Any] = {}
     
     def add_entity(self, entity: Entity) -> str:
@@ -321,7 +339,7 @@ class KnowledgeGraph:
             }
         )
         
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
         return entity.id
     
     def add_relationship(self, relationship: Relationship) -> str:
@@ -351,7 +369,7 @@ class KnowledgeGraph:
             attributes=relationship.attributes
         )
         
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
         return relationship.id
     
     def get_entity(self, entity_id: str) -> Optional[Entity]:
@@ -443,7 +461,7 @@ class KnowledgeGraph:
             "confidence": keep_entity.confidence
         })
         
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
         return keep_entity.id
     
     def to_dict(self) -> Dict[str, Any]:
@@ -513,3 +531,89 @@ class KnowledgeGraph:
                 for entity_type in EntityType
             }
         }
+    
+    def export_to_neo4j(self, uri: str, username: str, password: str, 
+                       database: str = "neo4j", clear_existing: bool = True) -> None:
+        """Export knowledge graph to Neo4j database
+        
+        Args:
+            uri: Neo4j database URI (e.g., "bolt://localhost:7687")
+            username: Database username
+            password: Database password
+            database: Database name (default: "neo4j")
+            clear_existing: Whether to clear existing data
+        """
+        try:
+            from .neo4j_exporter import Neo4jExporterContext
+            
+            with Neo4jExporterContext(uri, username, password, database) as exporter:
+                exporter.export_graph(self, clear_existing=clear_existing)
+                
+        except ImportError:
+            raise ImportError("Neo4j exporter not available. Make sure neo4j_exporter.py is in the same directory.")
+    
+    def export_to_spo_json(self, output_path: str) -> None:
+        """Export graph to SPO (Subject-Predicate-Object) JSON format like youtu-graph
+        
+        Args:
+            output_path: Output file path for SPO JSON
+        """
+        try:
+            from .neo4j_exporter import Neo4jExporter
+            
+            # Create a temporary exporter just for SPO export (no connection needed)
+            exporter = Neo4jExporter("", "", "")  # Dummy values
+            exporter.export_to_spo_format(self, output_path)
+            
+        except ImportError:
+            # Fallback implementation without neo4j_exporter
+            import os
+            
+            spo_data = []
+            
+            for relationship in self.relationships.values():
+                source_entity = self.entities.get(relationship.source_entity_id)
+                target_entity = self.entities.get(relationship.target_entity_id)
+                
+                if not source_entity or not target_entity:
+                    continue
+                
+                spo_triple = {
+                    "start_node": {
+                        "label": source_entity.entity_type.value,
+                        "properties": {
+                            "name": source_entity.name,
+                            "id": source_entity.id,
+                            "description": source_entity.description or "",
+                            **source_entity.attributes
+                        }
+                    },
+                    "relation": (
+                        relationship.relation_type.value 
+                        if isinstance(relationship.relation_type, RelationType) 
+                        else relationship.relation_type
+                    ),
+                    "end_node": {
+                        "label": target_entity.entity_type.value,
+                        "properties": {
+                            "name": target_entity.name,
+                            "id": target_entity.id,
+                            "description": target_entity.description or "",
+                            **target_entity.attributes
+                        }
+                    },
+                    "relationship_properties": {
+                        "id": relationship.id,
+                        "description": relationship.description or "",
+                        "confidence": relationship.confidence,
+                        **relationship.attributes
+                    }
+                }
+                
+                spo_data.append(spo_triple)
+            
+            # Save to JSON file
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(spo_data, f, ensure_ascii=False, indent=2)
