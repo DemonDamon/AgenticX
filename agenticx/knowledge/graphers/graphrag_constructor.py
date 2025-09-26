@@ -39,16 +39,20 @@ class GraphRAGConstructor:
         )
         
         self.quality_validator = GraphQualityValidator(
-            config=self.config.quality_validation
+            config=self.config.quality_validation.to_dict()
         )
         
+        # 准备社区检测配置，包含LLM客户端
+        community_config = self.config.community_detection.to_dict()
+        community_config['llm_client'] = llm_client
+        
         self.community_detector = CommunityDetector(
-            llm_client=llm_client,
-            config=self.config.community_detection
+            algorithm=community_config.get('algorithm', 'louvain'),
+            config=community_config
         )
         
         self.graph_optimizer = GraphOptimizer(
-            config=self.config.graph_optimization
+            config=self.config.graph_optimization.to_dict()
         )
         
         self.logger = logging.getLogger(__name__)
