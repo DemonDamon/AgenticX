@@ -6,7 +6,7 @@ including GUIAgent, GUITask, GUIAgentContext, and related data models.
 
 import pytest
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 # Import the core abstractions
@@ -200,7 +200,7 @@ class TestGUIAgentContext:
             action = {
                 "type": "click",
                 "element_id": f"button_{i}",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
             context.add_action(action)
         
