@@ -75,8 +75,13 @@ class EntityExtractor(BaseExtractor):
             raise ValueError(f"Unknown extraction method: {self.method}")
         
         logger.success(f"✅ 实体提取完成，共提取到 {len(entities)} 个实体")
+        logger.info("📋 提取的实体详情:")
         for i, entity in enumerate(entities):
-            logger.debug(f"  📍 实体[{i}]: {entity.name} ({entity.entity_type})")
+            logger.info(f"  📍 实体[{i+1}]: ID='{entity.id}', Name='{entity.name}', Type={entity.entity_type.value}, Confidence={entity.confidence:.2f}")
+            if entity.description:
+                logger.debug(f"      描述: {entity.description[:100]}...")
+            if entity.attributes:
+                logger.debug(f"      属性: {entity.attributes}")
         
         return entities
     
@@ -93,6 +98,7 @@ class EntityExtractor(BaseExtractor):
         
         try:
             # Call LLM
+            logger.debug(f"⏳ 正在提取实体，文本长度: {len(text)} 字符，预计耗时: 30-60秒")
             logger.debug("🚀 调用LLM进行实体提取")
             response = self.llm_client.call(prompt)
             logger.debug(f"📥 LLM原始响应长度: {len(response)} 字符")
@@ -125,6 +131,7 @@ class EntityExtractor(BaseExtractor):
                     # Skip invalid entities
                     continue
             
+            logger.debug(f"✅ 实体提取完成，提取到 {len(entities)} 个实体")
             return entities
             
         except (json.JSONDecodeError, KeyError) as e:
@@ -156,33 +163,16 @@ class EntityExtractor(BaseExtractor):
             "person", "organization", "location", "event", "concept", "object", "time"
         ])
         
-        prompt = f"""
-Extract entities from the following text. Return a JSON array of entities.
+        prompt = f"""从以下文本中提取实体，返回JSON数组：
 
-Text: {text}
+文本：{text}
 
-Extract these types of entities: {', '.join(entity_types)}
+提取类型：{', '.join(entity_types)}
 
-For each entity, provide:
-- name: the entity name
-- type: the entity type from the list above
-- description: brief description (optional)
-- attributes: any relevant attributes (optional)
-- confidence: confidence score 0-1
+格式：
+[{{"name":"实体名","type":"类型","confidence":0.9}}]
 
-Return format:
-[
-  {{
-    "name": "Entity Name",
-    "type": "person",
-    "description": "Brief description",
-    "attributes": {{"key": "value"}},
-    "confidence": 0.9
-  }}
-]
-
-Only return the JSON array, no additional text.
-"""
+只返回JSON，无其他内容。"""
         return prompt.strip()
     
     def deduplicate_entities(self, entities: List[Entity]) -> List[Entity]:
@@ -239,8 +229,13 @@ class RelationshipExtractor(BaseExtractor):
             raise ValueError(f"Unknown extraction method: {self.method}")
         
         logger.success(f"✅ 关系提取完成，共提取到 {len(relationships)} 个关系")
+        logger.info("🔗 提取的关系详情:")
         for i, rel in enumerate(relationships):
-            logger.debug(f"  🔗 关系[{i}]: {rel.source_entity_id} --[{rel.relation_type}]--> {rel.target_entity_id}")
+            logger.info(f"  🔗 关系[{i+1}]: '{rel.source_entity_id}' --[{rel.relation_type.value}]--> '{rel.target_entity_id}' (Confidence={rel.confidence:.2f})")
+            if rel.description:
+                logger.debug(f"      描述: {rel.description}")
+            if rel.attributes:
+                logger.debug(f"      属性: {rel.attributes}")
         
         return relationships
     
@@ -314,48 +309,25 @@ class RelationshipExtractor(BaseExtractor):
     
     def _build_relationship_extraction_prompt(self, text: str, entities: List[Entity], **kwargs) -> str:
         """Build prompt for relationship extraction"""
-        entity_list = [
-            f"- {entity.name} ({entity.entity_type.value})" 
-            for entity in entities
-        ]
-        
         relation_types = kwargs.get("relation_types", [
-            "works_for", "knows", "located_in", "related_to", "part_of", "is_a"
+            "related_to", "part_of", "located_in", "works_for", "created_by"
         ])
         
-        prompt = f"""
-Extract relationships between the following entities from the text.
-Return a JSON array of relationships.
+        # 简化实体列表
+        entity_list = [f"{entity.name}({entity.entity_type.value})" for entity in entities]
+        
+        prompt = f"""从文本中提取实体间关系，返回JSON数组：
 
-Entities:
-{chr(10).join(entity_list)}
+实体：{', '.join(entity_list)}
 
-Text: {text}
+文本：{text}
 
-Extract these types of relationships: {', '.join(relation_types)}
+关系类型：{', '.join(relation_types)}
 
-For each relationship, provide:
-- source_id: ID of the source entity
-- target_id: ID of the target entity  
-- type: relationship type from the list above
-- description: brief description (optional)
-- attributes: any relevant attributes (optional)
-- confidence: confidence score 0-1
+格式：
+[{{"source_id":"实体名1","target_id":"实体名2","type":"关系类型","confidence":0.8}}]
 
-Return format:
-[
-  {{
-    "source_id": "entity_id_1",
-    "target_id": "entity_id_2", 
-    "type": "works_for",
-    "description": "Brief description",
-    "attributes": {{"key": "value"}},
-    "confidence": 0.8
-  }}
-]
-
-Only return the JSON array, no additional text.
-"""
+只返回JSON，无其他内容。"""
         return prompt.strip()
     
     def deduplicate_relationships(self, relationships: List[Relationship]) -> List[Relationship]:
