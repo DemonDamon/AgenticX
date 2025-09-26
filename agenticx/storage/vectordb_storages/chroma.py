@@ -14,7 +14,7 @@ class ChromaStorage(BaseVectorStorage):
     使用Chroma进行本地向量数据库存储。
     """
 
-    def __init__(self, persist_directory: str = "./chroma_db", dimension: int = 768):
+    def __init__(self, dimension: int, persist_directory: str = "./chroma_db"):
         """初始化Chroma存储
         
         Args:
@@ -91,4 +91,4 @@ class ChromaStorage(BaseVectorStorage):
         if self._client:
             # TODO: 实现Chroma连接关闭逻辑
             print("✅ 模拟关闭Chroma连接")
-            self._client = None 
+            self._client = None
