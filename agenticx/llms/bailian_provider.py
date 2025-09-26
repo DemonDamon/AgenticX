@@ -76,6 +76,8 @@ class BailianProvider(BaseLLMProvider):
                 raise ValueError("Client not initialized")
             
             logger.debug("⏳ 正在调用百炼API...")
+            logger.debug(f"🔍 最终请求参数: {list(request_params.keys())}")
+            
             response = self.client.chat.completions.create(**request_params)
             
             # 记录响应详情
