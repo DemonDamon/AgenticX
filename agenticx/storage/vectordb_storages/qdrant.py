@@ -14,7 +14,7 @@ class QdrantStorage(BaseVectorStorage):
     使用Qdrant进行高性能向量搜索引擎存储。
     """
 
-    def __init__(self, host: str = "localhost", port: int = 6333, dimension: int = 768):
+    def __init__(self, dimension: int, host: str = "localhost", port: int = 6333):
         """初始化Qdrant存储
         
         Args:
@@ -93,4 +93,4 @@ class QdrantStorage(BaseVectorStorage):
         if self._client:
             # TODO: 实现Qdrant连接关闭逻辑
             print("✅ 模拟关闭Qdrant连接")
-            self._client = None 
+            self._client = None
