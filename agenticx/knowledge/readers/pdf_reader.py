@@ -132,6 +132,20 @@ class PDFReader(BaseReader):
         logger.debug(f"Read PDF file: {file_path} ({len(content)} characters)")
         return [document]
     
+    async def read_async(self, source: Union[str, Path], **kwargs):
+        """Asynchronously read PDF file and yield documents
+        
+        Args:
+            source: File path to read
+            **kwargs: Additional arguments
+            
+        Yields:
+            Documents one by one
+        """
+        documents = await self.read(source)
+        for document in documents:
+            yield document
+    
     async def _read_with_fitz(self, file_path: Path) -> tuple[str, dict]:
         """Read PDF using PyMuPDF (fitz)"""
         
