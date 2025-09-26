@@ -76,7 +76,7 @@ class RedisStorage(BaseKeyValueStorage):
                 if 'key' in record and 'value' in record:
                     pipe.set(record['key'], str(record['value']))
             pipe.execute()
-        print(f"✅ TODO: Saved {len(records)} records to Redis")
+        logger.info(f"✅ Saved {len(records)} records to Redis")
 
     def load(self) -> List[Dict[str, Any]]:
         """从Redis加载所有记录
@@ -94,7 +94,7 @@ class RedisStorage(BaseKeyValueStorage):
         # Consider using scan_iter for production environments.
         keys = self._client.keys('*')
         values = self._client.mget(keys) if keys else []
-        print("✅ TODO: Loaded records from Redis")
+        logger.info("✅ Loaded records from Redis")
         return [{key: value} for key, value in zip(keys, values)]
 
 
@@ -106,7 +106,7 @@ class RedisStorage(BaseKeyValueStorage):
             return
         if self._client:
             self._client.flushdb()
-        print("✅ TODO: Cleared all records from Redis")
+        logger.info("✅ Cleared all records from Redis")
 
     def get(self, key: str) -> Optional[Any]:
         """根据键获取值
@@ -141,7 +141,7 @@ class RedisStorage(BaseKeyValueStorage):
             return
         if self._client:
             self._client.set(key, value)
-        print(f"✅ TODO: Set value for key: {key} in Redis")
+        logger.info(f"✅ Set value for key: {key} in Redis")
 
     def delete(self, key: str) -> bool:
         """删除指定键
@@ -162,7 +162,7 @@ class RedisStorage(BaseKeyValueStorage):
         if not self._client:
             return False
         deleted_count = self._client.delete(key)
-        print(f"✅ TODO: Deleted key: {key} from Redis")
+        logger.info(f"✅ Deleted key: {key} from Redis")
         return deleted_count > 0
 
     def exists(self, key: str) -> bool:
@@ -182,7 +182,7 @@ class RedisStorage(BaseKeyValueStorage):
         if not self._client:
             return False
         exists = self._client.exists(key) > 0
-        print(f"✅ TODO: Checked existence of key: {key} in Redis")
+        logger.info(f"✅ Checked existence of key: {key} in Redis")
         return exists
 
     def keys(self) -> List[str]:
@@ -199,7 +199,7 @@ class RedisStorage(BaseKeyValueStorage):
         if not self._client:
             return []
         keys = self._client.keys('*')
-        print("✅ TODO: Got all keys from Redis")
+        logger.info("✅ Got all keys from Redis")
         return keys
 
     def values(self) -> List[Any]:
@@ -217,7 +217,7 @@ class RedisStorage(BaseKeyValueStorage):
             return []
         keys = self._client.keys('*')
         values = self._client.mget(keys) if keys else []
-        print("✅ TODO: Got all values from Redis")
+        logger.info("✅ Got all values from Redis")
         return values
 
     def items(self) -> List[tuple]:
@@ -235,7 +235,7 @@ class RedisStorage(BaseKeyValueStorage):
             return []
         keys = self._client.keys('*')
         values = self._client.mget(keys) if keys else []
-        print("✅ TODO: Got all items from Redis")
+        logger.info("✅ Got all items from Redis")
         return list(zip(keys, values))
 
     def count(self) -> int:
@@ -252,7 +252,7 @@ class RedisStorage(BaseKeyValueStorage):
         if not self._client:
             return 0
         count = self._client.dbsize()
-        print("✅ TODO: Got count of records from Redis")
+        logger.info("✅ Got count of records from Redis")
         return count
 
     def close(self) -> None:
