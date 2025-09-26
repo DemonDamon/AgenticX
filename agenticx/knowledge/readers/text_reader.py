@@ -96,6 +96,20 @@ class TextReader(BaseReader):
         logger.debug(f"Read text file: {file_path} ({len(content)} characters)")
         return [document]
     
+    async def read_async(self, source: Union[str, Path], **kwargs):
+        """Asynchronously read text file and yield documents
+        
+        Args:
+            source: File path to read
+            **kwargs: Additional arguments
+            
+        Yields:
+            Documents one by one
+        """
+        documents = await self.read(source)
+        for document in documents:
+            yield document
+    
     async def _detect_encoding(self, file_path: Path) -> str:
         """Detect file encoding
         
