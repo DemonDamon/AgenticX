@@ -18,3 +18,14 @@ grapher:
     quality_validation: {}
     community_detection: {}
     graph_optimization: {}
+    neo4j:
+      enabled: false  # Set to true to enable Neo4j export
+      uri: "bolt://localhost:7687"
+      username: "neo4j"
+      password: "agenticx"  # Change this to your Neo4j password
+      database: "neo4j"  # Use default database
+      auto_export: false  # Automatically export after graph construction
+      clear_on_export: true  # Clear existing data before export
+      create_indexes: true  # Create performance indexes
+      batch_size: 1000  # Batch size for large exports
+      timeout: 30  # Connection timeout in seconds
