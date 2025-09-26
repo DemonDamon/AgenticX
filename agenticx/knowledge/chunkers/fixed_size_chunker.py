@@ -5,7 +5,7 @@ This module provides fixed size chunking with smart boundary detection.
 
 import logging
 import time
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from ..base import ChunkingConfig
 from ..document import Document, DocumentMetadata, ChunkMetadata
@@ -21,6 +21,44 @@ class FixedSizeChunker(AdvancedBaseChunker):
         super().__init__(config, **kwargs)
         self.respect_word_boundaries = kwargs.get('respect_word_boundaries', True)
         self.overlap_size = kwargs.get('overlap_size', self.config.chunk_overlap)
+    
+    def chunk_text(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Split text into fixed-size chunks
+        
+        Args:
+            text: Text to chunk
+            metadata: Optional metadata to attach to chunks
+            
+        Returns:
+            List of chunk dictionaries with 'content' and 'metadata' keys
+        """
+        # Create a temporary document for processing
+        doc_metadata = DocumentMetadata(
+            name=metadata.get('name', 'temp_doc') if metadata else 'temp_doc',
+            source=metadata.get('source', 'text') if metadata else 'text',
+            source_type='text'
+        )
+        document = Document(content=text, metadata=doc_metadata)
+        
+        # Use the async method synchronously
+        chunks = self.chunk_document(document)
+        
+        # Convert to the expected format
+        result = []
+        for i, chunk in enumerate(chunks):
+            chunk_metadata = metadata.copy() if metadata else {}
+            chunk_metadata.update({
+                'chunk_index': i,
+                'chunk_size': len(chunk.content),
+                'chunker': 'FixedSizeChunker'
+            })
+            
+            result.append({
+                'content': chunk.content,
+                'metadata': chunk_metadata
+            })
+        
+        return result
     
     async def chunk_document_async(self, document: Document) -> ChunkingResult:
         """Chunk document into fixed-size chunks"""
