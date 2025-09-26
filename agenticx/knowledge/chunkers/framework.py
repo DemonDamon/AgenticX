@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Type, Union, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..base import BaseChunker, ChunkingConfig
 from ..document import Document, DocumentMetadata
@@ -397,7 +397,7 @@ class ChunkingOptimizer:
             'results': results,
             'best_strategy': best_strategy,
             'best_score': best_score,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
         
         return best_strategy or self.framework._default_strategy
