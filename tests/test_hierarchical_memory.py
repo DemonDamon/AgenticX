@@ -8,7 +8,7 @@ including memory layers, search engine, and decay service.
 import pytest
 import pytest_asyncio
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from typing import List, Dict, Any
 
 from agenticx.memory import (
@@ -317,7 +317,7 @@ class TestEpisodicMemory:
     @pytest.mark.asyncio
     async def test_event_addition(self, episodic_memory):
         """Test adding events to episodic memory."""
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(UTC)
         
         # Add event
         event_id = await episodic_memory.add_event(
@@ -375,7 +375,7 @@ class TestEpisodicMemory:
     @pytest.mark.asyncio
     async def test_temporal_search(self, episodic_memory):
         """Test temporal search functionality."""
-        base_time = datetime.utcnow()
+        base_time = datetime.now(UTC)
         
         # Add events at different times
         await episodic_memory.add_event(
@@ -420,7 +420,7 @@ class TestEpisodicMemory:
     @pytest.mark.asyncio
     async def test_episode_auto_grouping(self, episodic_memory):
         """Test automatic episode grouping."""
-        base_time = datetime.utcnow()
+        base_time = datetime.now(UTC)
         
         # Add events close in time (should group into same episode)
         await episodic_memory.add_event(
@@ -621,8 +621,8 @@ class TestHybridSearchEngine:
                 content="Climate change is a global environmental challenge",
                 metadata={"category": "environment", "importance": 3},
                 tenant_id="test",
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
                 memory_type=MemoryType.SEMANTIC,
                 importance=MemoryImportance.HIGH
             ),
@@ -631,8 +631,8 @@ class TestHybridSearchEngine:
                 content="Solar energy is a renewable energy source",
                 metadata={"category": "energy", "importance": 2},
                 tenant_id="test",
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
                 memory_type=MemoryType.SEMANTIC,
                 importance=MemoryImportance.MEDIUM
             ),
@@ -641,8 +641,8 @@ class TestHybridSearchEngine:
                 content="User asked about sustainable development",
                 metadata={"category": "conversation", "importance": 1},
                 tenant_id="test",
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
                 memory_type=MemoryType.EPISODIC,
                 importance=MemoryImportance.LOW
             )
@@ -724,7 +724,7 @@ class TestMemoryDecayService:
         """Create test memory records."""
         from agenticx.memory.hierarchical import HierarchicalMemoryRecord
         
-        base_time = datetime.utcnow()
+        base_time = datetime.now(UTC)
         
         records = [
             HierarchicalMemoryRecord(
@@ -1014,7 +1014,7 @@ class TestIntegration:
         search_engine = complete_system["search_engine"]
         
         # Add larger dataset
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC)
         
         # Add 100 records to each layer
         for i in range(100):
@@ -1037,11 +1037,11 @@ class TestIntegration:
             )
         
         # Measure insertion time
-        insertion_time = (datetime.utcnow() - start_time).total_seconds()
+        insertion_time = (datetime.now(UTC) - start_time).total_seconds()
         assert insertion_time < 10  # Should complete within 10 seconds
         
         # Index all records
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC)
         
         for memory_type in [MemoryType.CORE, MemoryType.EPISODIC, MemoryType.SEMANTIC]:
             layer = manager.get_layer(memory_type)
@@ -1050,18 +1050,18 @@ class TestIntegration:
                 await search_engine.index_record(record)
         
         # Measure indexing time
-        indexing_time = (datetime.utcnow() - start_time).total_seconds()
+        indexing_time = (datetime.now(UTC) - start_time).total_seconds()
         assert indexing_time < 15  # Should complete within 15 seconds
         
         # Perform searches
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC)
         
         for i in range(10):
             results = await search_engine.search(f"information {i}", limit=10)
             assert len(results) > 0
         
         # Measure search time
-        search_time = (datetime.utcnow() - start_time).total_seconds()
+        search_time = (datetime.now(UTC) - start_time).total_seconds()
         assert search_time < 5  # Should complete within 5 seconds
         
         # Verify final statistics
@@ -1072,4 +1072,4 @@ class TestIntegration:
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"]) 
+    pytest.main([__file__, "-v"])
