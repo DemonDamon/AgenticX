@@ -24,7 +24,7 @@ class FaissStorage(BaseVectorStorage):
     使用FAISS进行高效的向量相似性搜索。
     """
 
-    def __init__(self, index_path: str = "faiss_index", dimension: int = 768):
+    def __init__(self, dimension: int, index_path: str = "faiss_index"):
         """初始化FAISS存储
         
         Args:
@@ -154,4 +154,4 @@ class FaissStorage(BaseVectorStorage):
 
     def close(self) -> None:
         """关闭存储连接"""
-        self._save_index() 
+        self._save_index()
