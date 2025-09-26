@@ -44,6 +44,13 @@ from .optimizer import GraphOptimizer
 from .builder import KnowledgeGraphBuilder
 from .graphrag_constructor import GraphRAGConstructor
 
+# Neo4j导出器
+try:
+    from .neo4j_exporter import Neo4jExporter, Neo4jExporterContext
+    NEO4J_AVAILABLE = True
+except ImportError:
+    NEO4J_AVAILABLE = False
+
 __all__ = [
     # 数据模型
     'EntityType',
@@ -75,5 +82,12 @@ __all__ = [
     
     # 构建器
     'KnowledgeGraphBuilder',
-    'GraphRAGConstructor'
+    'GraphRAGConstructor',
+    
+    # Neo4j支持
+    'NEO4J_AVAILABLE'
 ]
+
+# 条件导出Neo4j功能
+if NEO4J_AVAILABLE:
+    __all__.extend(['Neo4jExporter', 'Neo4jExporterContext'])
