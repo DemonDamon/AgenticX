@@ -10,7 +10,7 @@ from pathlib import Path
 @dataclass
 class DocumentMetadata:
     """Metadata for documents in the knowledge base"""
-    
+
     # Core identification
     document_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: Optional[str] = None
