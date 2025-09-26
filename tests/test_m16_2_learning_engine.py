@@ -6,7 +6,7 @@ in the M16.2 Human-Aligned Learning Engine.
 
 import pytest
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from unittest.mock import Mock, AsyncMock, patch
 from typing import Dict, Any, List
 
@@ -368,8 +368,8 @@ class TestLearningEngineIntegration:
             content="test app behavior",
             metadata={'app_name': app_name, 'action': 'test'},
             tenant_id="test_tenant",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
             memory_type=MemoryType.SEMANTIC,
             importance=MemoryImportance.MEDIUM,
             sensitivity=MemorySensitivity.INTERNAL
