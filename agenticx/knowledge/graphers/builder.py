@@ -1,12 +1,15 @@
 """Knowledge Graph Builder - Main orchestrator for knowledge graph construction"""
 
 import json
+import os
 from typing import Any, Dict, List, Optional, Union
 from loguru import logger
 
 from .config import GraphRagConfig, LLMConfig
 from .models import Entity, Relationship, KnowledgeGraph, EntityType, RelationType
 from .extractors import EntityExtractor, RelationshipExtractor
+from .spo_extractor import SPOExtractor
+from .schema_generator import SchemaGenerator
 from .validators import GraphQualityValidator
 from .community import CommunityDetector
 from .optimizer import GraphOptimizer
@@ -22,6 +25,21 @@ class KnowledgeGraphBuilder:
         # Delayed import to avoid circular dependency
         from agenticx.llms import LlmFactory
         llm_client = LlmFactory.create_llm(self.llm_config)
+        self.llm_client = llm_client  # 保存为实例属性（轻量模型）
+        
+        # 创建强模型客户端（用于文档分析和Schema生成）
+        try:
+            # 尝试从配置中获取强模型配置
+            strong_model_config = getattr(self.config, 'strong_model_config', None)
+            if strong_model_config:
+                self.strong_llm_client = LlmFactory.create_llm(strong_model_config)
+                logger.info("🚀 强模型客户端初始化完成")
+            else:
+                self.strong_llm_client = llm_client  # 回退到默认模型
+                logger.warning("⚠️ 未找到强模型配置，使用默认模型")
+        except Exception as e:
+            logger.warning(f"⚠️ 强模型初始化失败，使用默认模型: {e}")
+            self.strong_llm_client = llm_client
         
         # Initialize components
         self.entity_extractor = EntityExtractor(
@@ -33,6 +51,38 @@ class KnowledgeGraphBuilder:
             llm_client=llm_client,
             config=self.config.relationship_extraction
         )
+        
+        # Initialize extraction method
+        self.extraction_method = getattr(self.config, 'extraction_method', 'separate')
+        
+        # Initialize prompt manager - 使用当前工作目录的相对路径
+        prompts_dir = os.path.join(os.getcwd(), 'prompts')
+        
+        # 动态导入PromptManager（避免循环导入）
+        try:
+            import sys
+            sys.path.append(os.getcwd())
+            from prompt_manager import PromptManager
+            self.prompt_manager = PromptManager(prompts_dir)
+        except ImportError as e:
+            logger.warning(f"⚠️ 无法导入PromptManager: {e}")
+            self.prompt_manager = None
+        
+        # Initialize schema generator
+        base_schema_path = os.path.join(os.getcwd(), 'schema.json')
+        self.schema_generator = SchemaGenerator(
+            llm_client=llm_client,
+            strong_llm_client=self.strong_llm_client,  # 传入强模型客户端
+            prompt_manager=self.prompt_manager,
+            base_schema_path=base_schema_path if os.path.exists(base_schema_path) else None
+        )
+        
+        # Initialize SPO extractor (will be configured with custom schema later)
+        if self.extraction_method == 'spo':
+            self.spo_extractor = None  # Will be initialized with custom schema
+            logger.info(f"🔧 使用两阶段SPO抽取方法（Schema生成 + SPO抽取）")
+        else:
+            logger.info(f"🔧 使用传统分离抽取方法")
         
         self.quality_validator = GraphQualityValidator(
             config=self.config.quality_validation.to_dict()
@@ -62,6 +112,41 @@ class KnowledgeGraphBuilder:
         logger.debug("📊 初始化知识图谱")
         graph = KnowledgeGraph()
         
+        # Stage 1: Generate custom schema if using SPO method
+        custom_schema = None
+        if self.extraction_method == 'spo':
+            logger.info("🎯 阶段1: 智能Schema生成")
+            logger.info(f"📊 抽取方法: {self.extraction_method} (两阶段SPO抽取)")
+            
+            # Analyze documents to generate custom schema
+            logger.info("📄 开始文档分析...")
+            analysis_result = self.schema_generator.analyze_documents(texts)
+            logger.info(f"📋 文档分析完成: {analysis_result.get('category', '未知类别')}, {analysis_result.get('domain', '未知领域')}")
+            
+            logger.info("🔧 开始生成定制Schema...")
+            custom_schema = self.schema_generator.generate_custom_schema(analysis_result)
+            
+            # Save custom schema for reference
+            custom_schema_path = os.path.join(os.getcwd(), 'custom_schema.json')
+            self.schema_generator.save_custom_schema(custom_schema, custom_schema_path)
+            logger.info(f"💾 定制Schema已保存: {custom_schema_path}")
+            
+            # Initialize SPO extractor with custom schema
+            logger.info("🔧 初始化SPO抽取器...")
+            self.spo_extractor = SPOExtractor(
+                llm_client=self.llm_client,
+                prompt_manager=self.prompt_manager,
+                custom_schema=custom_schema,
+                config=self.config.entity_extraction.to_dict()
+            )
+            
+            logger.success(f"✅ 阶段1完成 - 定制Schema生成，领域: {custom_schema.get('domain_info', {}).get('primary_domain', '通用')}")
+        else:
+            logger.info(f"📊 抽取方法: {self.extraction_method} (传统分离抽取)")
+        
+        # Stage 2: Extract entities and relationships
+        logger.info("🔍 阶段2: 知识抽取")
+        
         # Process each text
         for i, text in enumerate(texts):
             chunk_id = f"chunk_{i}"
@@ -73,27 +158,80 @@ class KnowledgeGraphBuilder:
             if chunk_metadata:
                 logger.debug(f"📋 文本块元数据: {chunk_metadata}")
             
-            # Extract entities
-            logger.debug("🔍 开始实体提取")
-            entities = self.entity_extractor.extract(text, chunk_id=chunk_id)
-            logger.debug(f"📍 提取到 {len(entities)} 个实体")
+            if self.extraction_method == 'spo':
+                # Use SPO extractor for unified extraction
+                logger.debug("🔍 开始SPO抽取（实体+关系一次性抽取）")
+                entities, relationships = self.spo_extractor.extract(text, chunk_id=chunk_id)
+                
+                logger.info(f"📊 SPO抽取结果: {len(entities)} 个实体, {len(relationships)} 个关系")
+                
+                # Add entities to graph
+                for entity in entities:
+                    graph.add_entity(entity)
+                    logger.trace(f"➕ 添加实体: {entity.name} ({entity.entity_type})")
+                
+                # Add relationships to graph (no need for ID fixing since they're created together)
+                for relationship in relationships:
+                    try:
+                        graph.add_relationship(relationship)
+                        logger.trace(f"➕ 添加关系: {relationship.source_entity_id} --[{relationship.relation_type}]--> {relationship.target_entity_id}")
+                    except Exception as e:
+                        logger.error(f"❌ 添加关系失败: {e}")
+                        logger.debug(f"   关系详情: {relationship.source_entity_id} --[{relationship.relation_type}]--> {relationship.target_entity_id}")
             
-            for entity in entities:
-                graph.add_entity(entity)
-                logger.trace(f"➕ 添加实体: {entity.name} ({entity.entity_type})")
-            
-            # Extract relationships
-            logger.debug("🔗 开始关系提取")
-            relationships = self.relationship_extractor.extract(
-                text, 
-                entities=entities,
-                chunk_id=chunk_id
-            )
-            logger.debug(f"🔗 提取到 {len(relationships)} 个关系")
-            
-            for relationship in relationships:
-                graph.add_relationship(relationship)
-                logger.trace(f"➕ 添加关系: {relationship.source_entity_id} --[{relationship.relation_type}]--> {relationship.target_entity_id}")
+            else:
+                # Use traditional separate extraction
+                logger.debug("🔍 开始传统分离抽取")
+                
+                # Extract entities
+                logger.debug("👥 开始实体提取")
+                entities = self.entity_extractor.extract(text, chunk_id=chunk_id)
+                logger.debug(f"👥 提取到 {len(entities)} 个实体")
+                
+                for entity in entities:
+                    graph.add_entity(entity)
+                    logger.trace(f"➕ 添加实体: {entity.name} ({entity.entity_type})")
+                
+                # Extract relationships
+                logger.debug("🔗 开始关系提取")
+                relationships = self.relationship_extractor.extract(
+                    text, 
+                    entities=entities,
+                    chunk_id=chunk_id
+                )
+                logger.debug(f"🔗 提取到 {len(relationships)} 个关系")
+                
+                for relationship in relationships:
+                    # 检查源实体和目标实体是否存在（需要ID修复）
+                    source_exists = relationship.source_entity_id in graph.entities
+                    target_exists = relationship.target_entity_id in graph.entities
+                    
+                    if not source_exists:
+                        # 尝试通过名称查找实体
+                        source_entity = self._find_entity_by_name(graph, relationship.source_entity_id)
+                        if source_entity:
+                            logger.info(f"🔄 修复源实体ID: '{relationship.source_entity_id}' -> '{source_entity.id}'")
+                            relationship.source_entity_id = source_entity.id
+                        else:
+                            logger.warning(f"⚠️ 跳过关系：源实体 '{relationship.source_entity_id}' 不存在")
+                            continue
+                            
+                    if not target_exists:
+                        # 尝试通过名称查找实体
+                        target_entity = self._find_entity_by_name(graph, relationship.target_entity_id)
+                        if target_entity:
+                            logger.info(f"🔄 修复目标实体ID: '{relationship.target_entity_id}' -> '{target_entity.id}'")
+                            relationship.target_entity_id = target_entity.id
+                        else:
+                            logger.warning(f"⚠️ 跳过关系：目标实体 '{relationship.target_entity_id}' 不存在")
+                            continue
+                    
+                    try:
+                        graph.add_relationship(relationship)
+                        logger.trace(f"➕ 添加关系: {relationship.source_entity_id} --[{relationship.relation_type}]--> {relationship.target_entity_id}")
+                    except Exception as e:
+                        logger.error(f"❌ 添加关系失败: {e}")
+                        logger.debug(f"   关系详情: {relationship.source_entity_id} --[{relationship.relation_type}]--> {relationship.target_entity_id}")
         
         # Post-processing
         logger.info("🔧 开始后处理")
@@ -122,6 +260,22 @@ class KnowledgeGraphBuilder:
             logger.info(f"⚡ 图谱优化结果: {optimization_stats}")
         
         logger.success(f"🎉 知识图谱构建完成！实体数量: {len(graph.entities)}, 关系数量: {len(graph.relationships)}")
+        
+        # Auto export to Neo4j if enabled
+        if self.config.neo4j.enabled and self.config.neo4j.auto_export:
+            logger.info("🗄️ 自动导出到Neo4j数据库")
+            try:
+                graph.export_to_neo4j(
+                    uri=self.config.neo4j.uri,
+                    username=self.config.neo4j.username,
+                    password=self.config.neo4j.password,
+                    database=self.config.neo4j.database,
+                    clear_existing=self.config.neo4j.clear_on_export
+                )
+                logger.success("✅ Neo4j导出成功")
+            except Exception as e:
+                logger.error(f"❌ Neo4j导出失败: {e}")
+                logger.warning("💡 请检查Neo4j服务是否运行，以及连接配置是否正确")
         
         return graph
     
@@ -188,6 +342,16 @@ class KnowledgeGraphBuilder:
         logger.success(f"✅ 增量构建完成: {len(new_graph.entities)} 个实体, {len(new_graph.relationships)} 个关系")
         
         return new_graph
+    
+    def _find_entity_by_name(self, graph: KnowledgeGraph, name: str) -> Optional[Entity]:
+        """通过名称查找实体"""
+        for entity in graph.entities.values():
+            if entity.name == name:
+                return entity
+            # 尝试模糊匹配（去除空格和大小写）
+            if entity.name.strip().lower() == name.strip().lower():
+                return entity
+        return None
     
     def _merge_duplicate_entities(self, graph: KnowledgeGraph) -> int:
         """Merge duplicate entities based on name similarity"""
