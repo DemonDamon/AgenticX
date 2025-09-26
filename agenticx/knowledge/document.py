@@ -1,7 +1,7 @@
 """Document models for AgenticX Knowledge Management System"""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,7 +24,7 @@ class DocumentMetadata:
     size: Optional[int] = None  # Content size in bytes
     
     # Timestamps
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = None
     indexed_at: Optional[datetime] = None
     
@@ -229,19 +229,19 @@ class Document:
             else:
                 self.metadata.custom[key] = value
         
-        self.metadata.updated_at = datetime.utcnow()
+        self.metadata.updated_at = datetime.now(timezone.utc)
     
     def add_tag(self, tag: str) -> None:
         """Add a tag to the document"""
         if tag not in self.metadata.tags:
             self.metadata.tags.append(tag)
-            self.metadata.updated_at = datetime.utcnow()
+            self.metadata.updated_at = datetime.now(timezone.utc)
     
     def remove_tag(self, tag: str) -> None:
         """Remove a tag from the document"""
         if tag in self.metadata.tags:
             self.metadata.tags.remove(tag)
-            self.metadata.updated_at = datetime.utcnow()
+            self.metadata.updated_at = datetime.now(timezone.utc)
     
     def has_tag(self, tag: str) -> bool:
         """Check if document has a specific tag"""
