@@ -1,6 +1,7 @@
 .idea/
 .cursor/
 .qoder/
+.trae/
 .pytest_cache/
 
 __pycache__/ 
