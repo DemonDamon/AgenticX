@@ -14,7 +14,7 @@ class PgVectorStorage(BaseVectorStorage):
     使用PostgreSQL + pgvector扩展进行向量存储。
     """
 
-    def __init__(self, connection_string: str = "postgresql://localhost:5432/agenticx", dimension: int = 768):
+    def __init__(self, dimension: int, connection_string: str = "postgresql://localhost:5432/agenticx"):
         """初始化pgvector存储
         
         Args:
