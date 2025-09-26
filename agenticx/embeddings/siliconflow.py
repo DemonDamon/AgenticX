@@ -3,15 +3,17 @@ from typing import List, Optional
 from .base import BaseEmbeddingProvider, EmbeddingError
 
 class SiliconFlowEmbeddingProvider(BaseEmbeddingProvider):
-    def __init__(self, api_key: str, model: str = "BAAI/bge-large-zh-v1.5", api_url: str = "https://api.siliconflow.cn/v1/embeddings", **kwargs):
+    def __init__(self, api_key: str, model: str = "BAAI/bge-large-zh-v1.5", api_url: str = "https://api.siliconflow.cn/v1/embeddings", dimensions: Optional[int] = None, **kwargs):
         super().__init__(kwargs)
         self.api_key = api_key
         self.model = model
         self.api_url = api_url
+        self.dimensions = dimensions
 
     def embed(self, texts: List[str], **kwargs) -> List[List[float]]:
         encoding_format = kwargs.get("encoding_format", "float")
-        dimensions = kwargs.get("dimensions", None)
+        # 使用实例的dimensions或kwargs中的dimensions
+        dimensions = kwargs.get("dimensions", self.dimensions)
         
         payload = {
             "model": self.model,
