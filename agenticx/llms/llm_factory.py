@@ -43,6 +43,10 @@ class LlmFactory:
                 model=config.model,
                 api_key=config.api_key,
                 base_url=config.base_url,
+                timeout=config.timeout,
+                max_retries=config.max_retries,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens
             )
         else:
             raise ValueError(f"Unknown LLM type: {config.type}")
