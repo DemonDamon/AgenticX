@@ -188,6 +188,15 @@ class NebulaStorage(BaseGraphStorage):
         """提供对底层图数据库客户端的访问"""
         return self._client
 
+    def store_graph(self, knowledge_graph) -> None:
+        """存储知识图谱到Nebula数据库
+        
+        Args:
+            knowledge_graph: 知识图谱对象
+        """
+        # TODO: 实现Nebula图存储逻辑
+        print(f"✅ 模拟存储知识图谱到Nebula: {len(knowledge_graph.entities)} 个实体, {len(knowledge_graph.relationships)} 个关系")
+
     def close(self) -> None:
         """关闭Nebula连接"""
         if self._client:
