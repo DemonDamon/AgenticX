@@ -99,7 +99,7 @@ class KnowledgeGraphBuilder:
             config=self.config.graph_optimization.to_dict()
         )
     
-    def build_from_texts(
+    async def build_from_texts(
         self, 
         texts: List[str], 
         metadata: Optional[List[Dict[str, Any]]] = None,
@@ -147,39 +147,61 @@ class KnowledgeGraphBuilder:
         # Stage 2: Extract entities and relationships
         logger.info("🔍 阶段2: 知识抽取")
         
-        # Process each text
-        for i, text in enumerate(texts):
-            chunk_id = f"chunk_{i}"
-            logger.info(f"📝 处理文本块 {i+1}/{len(texts)} (ID: {chunk_id})")
-            logger.debug(f"📏 文本长度: {len(text)} 字符")
+        if self.extraction_method == 'spo':
+            # 使用批处理SPO抽取（性能优化）
+            logger.info("🚀 使用批处理SPO抽取，显著提升性能")
+            batch_size = getattr(self.config, 'spo_batch_size', 5)  # 从配置获取批处理大小
             
-            # Get metadata for this text chunk if provided
-            chunk_metadata = metadata[i] if metadata and i < len(metadata) else {}
-            if chunk_metadata:
-                logger.debug(f"📋 文本块元数据: {chunk_metadata}")
-            
-            if self.extraction_method == 'spo':
-                # Use SPO extractor for unified extraction
-                logger.debug("🔍 开始SPO抽取（实体+关系一次性抽取）")
-                entities, relationships = self.spo_extractor.extract(text, chunk_id=chunk_id)
+            try:
+                entities, relationships = await self.spo_extractor.extract_batch(
+                    texts=texts, 
+                    batch_size=batch_size,
+                    **kwargs
+                )
                 
-                logger.info(f"📊 SPO抽取结果: {len(entities)} 个实体, {len(relationships)} 个关系")
+                logger.info(f"📊 批处理SPO抽取完成: {len(entities)} 个实体, {len(relationships)} 个关系")
                 
-                # Add entities to graph
+                # 批量添加实体到图谱
                 for entity in entities:
                     graph.add_entity(entity)
-                    logger.trace(f"➕ 添加实体: {entity.name} ({entity.entity_type})")
                 
-                # Add relationships to graph (no need for ID fixing since they're created together)
+                # 批量添加关系到图谱
                 for relationship in relationships:
                     try:
                         graph.add_relationship(relationship)
-                        logger.trace(f"➕ 添加关系: {relationship.source_entity_id} --[{relationship.relation_type}]--> {relationship.target_entity_id}")
                     except Exception as e:
                         logger.error(f"❌ 添加关系失败: {e}")
-                        logger.debug(f"   关系详情: {relationship.source_entity_id} --[{relationship.relation_type}]--> {relationship.target_entity_id}")
-            
-            else:
+                        
+            except Exception as e:
+                logger.error(f"❌ 批处理SPO抽取失败，回退到逐个处理: {e}")
+                # 回退到原来的逐个处理方式
+                for i, text in enumerate(texts):
+                    chunk_id = f"chunk_{i}"
+                    logger.debug(f"📝 处理文本块 {i+1}/{len(texts)} (ID: {chunk_id})")
+                    
+                    entities, relationships = self.spo_extractor.extract(text, chunk_id=chunk_id)
+                    
+                    for entity in entities:
+                        graph.add_entity(entity)
+                    
+                    for relationship in relationships:
+                        try:
+                            graph.add_relationship(relationship)
+                        except Exception as rel_e:
+                            logger.error(f"❌ 添加关系失败: {rel_e}")
+        
+        else:
+            # 传统分离抽取（逐个处理）
+            logger.info("📝 使用传统分离抽取（逐个处理）")
+            for i, text in enumerate(texts):
+                chunk_id = f"chunk_{i}"
+                logger.info(f"📝 处理文本块 {i+1}/{len(texts)} (ID: {chunk_id})")
+                logger.debug(f"📏 文本长度: {len(text)} 字符")
+                
+                # Get metadata for this text chunk if provided
+                chunk_metadata = metadata[i] if metadata and i < len(metadata) else {}
+                if chunk_metadata:
+                    logger.debug(f"📋 文本块元数据: {chunk_metadata}")
                 # Use traditional separate extraction
                 logger.debug("🔍 开始传统分离抽取")
                 

@@ -118,6 +118,7 @@ class AdvancedBaseChunker(BaseChunker):
         self.quality_threshold = kwargs.get('quality_threshold', 0.7)
         self.adaptive_sizing = kwargs.get('adaptive_sizing', False)
         self.preserve_structure = kwargs.get('preserve_structure', True)
+        self.embedding_model = kwargs.get('embedding_model')  # 添加嵌入模型支持
     
     @abstractmethod
     async def chunk_document_async(self, document: Document) -> ChunkingResult:
