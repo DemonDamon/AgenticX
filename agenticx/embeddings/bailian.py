@@ -48,6 +48,11 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
         super().__init__(kwargs or {})  # 修复：确保传入的是一个字典而不是None
         self.api_key = api_key
         self.model = model
+        self.dimensions = kwargs.get('dimensions', self.MODEL_DIMENSIONS.get(model, 1536))
+
+    def get_embedding_dim(self) -> int:
+        """获取嵌入维度"""
+        return self.dimensions
         # 根据官方文档，使用base_url格式，OpenAI客户端会自动添加/embeddings
         if api_url:
             # 如果传入的是完整的embeddings URL，提取base_url
