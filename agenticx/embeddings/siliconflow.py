@@ -10,6 +10,10 @@ class SiliconFlowEmbeddingProvider(BaseEmbeddingProvider):
         self.api_url = api_url
         self.dimensions = dimensions
 
+    def get_embedding_dim(self) -> int:
+        """获取嵌入维度"""
+        return self.dimensions or 1024  # 默认返回1024维度
+
     def embed(self, texts: List[str], **kwargs) -> List[List[float]]:
         encoding_format = kwargs.get("encoding_format", "float")
         # 使用实例的dimensions或kwargs中的dimensions
