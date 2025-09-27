@@ -87,6 +87,166 @@ class SPOExtractor:
             logger.debug(f"❌ 错误堆栈: {traceback.format_exc()}")
             return [], []
     
+    async def extract_batch(self, texts: List[str], batch_size: int = 5, **kwargs) -> Tuple[List[Entity], List[Relationship]]:
+        """批处理SPO抽取，显著提高性能
+        
+        Args:
+            texts: 文本列表
+            batch_size: 批处理大小
+            **kwargs: 额外参数
+            
+        Returns:
+            Tuple of (all_entities, all_relationships)
+        """
+        logger.info(f"🚀 开始批处理SPO抽取，总文本数: {len(texts)}, 批大小: {batch_size}")
+        
+        all_entities = []
+        all_relationships = []
+        
+        # 分批处理
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            batch_num = i // batch_size + 1
+            total_batches = (len(texts) + batch_size - 1) // batch_size
+            
+            logger.info(f"📦 处理批次 {batch_num}/{total_batches} ({len(batch_texts)} 个文本)")
+            
+            try:
+                # 构建批处理提示词
+                batch_prompt = self._build_batch_spo_prompt(batch_texts)
+                
+                # 调用LLM
+                logger.debug("🤖 调用LLM进行批处理SPO抽取")
+                response = self.llm_client.call(batch_prompt)
+                
+                # 解析批处理响应
+                batch_entities, batch_relationships = self._parse_batch_spo_response(response, batch_texts, i, **kwargs)
+                
+                all_entities.extend(batch_entities)
+                all_relationships.extend(batch_relationships)
+                
+                logger.info(f"✅ 批次 {batch_num} 完成: {len(batch_entities)} 个实体, {len(batch_relationships)} 个关系")
+                
+            except Exception as e:
+                logger.error(f"❌ 批次 {batch_num} 处理失败: {e}")
+                # 回退到单个处理
+                for j, text in enumerate(batch_texts):
+                    try:
+                        entities, relationships = self.extract(text, chunk_id=f"chunk_{i+j}", **kwargs)
+                        all_entities.extend(entities)
+                        all_relationships.extend(relationships)
+                    except Exception as single_e:
+                        logger.error(f"❌ 单个文本处理也失败: {single_e}")
+        
+        logger.success(f"🎉 批处理SPO抽取完成: 总计 {len(all_entities)} 个实体, {len(all_relationships)} 个关系")
+        return all_entities, all_relationships
+    
+    def _build_batch_spo_prompt(self, texts: List[str]) -> str:
+        """构建批处理SPO抽取提示词"""
+        schema_str = json.dumps(self.schema, ensure_ascii=False, indent=2)
+        
+        # 构建批处理文本
+        batch_content = ""
+        for i, text in enumerate(texts):
+            batch_content += f"\n=== 文档片段 {i+1} ===\n{text}\n"
+        
+        prompt = f"""你是一个专业的知识图谱构建专家。请从以下多个文档片段中抽取实体、关系和属性，构建结构化的知识图谱。
+
+领域信息：{self.primary_domain}
+关键概念：{self.key_concepts}
+
+Schema定义：
+{schema_str}
+
+请分析以下文档片段：
+{batch_content}
+
+请按照以下JSON格式输出结果：
+{{
+    "entity_types": {{
+        "实体名称": {{
+            "type": "实体类型",
+            "description": "实体描述",
+            "attributes": {{"属性名": "属性值"}},
+            "source_chunks": ["chunk_0", "chunk_1"]
+        }}
+    }},
+    "triples": [
+        {{
+            "subject": "主体实体名称",
+            "predicate": "关系类型", 
+            "object": "客体实体名称",
+            "description": "关系描述",
+            "confidence": 0.8,
+            "source_chunks": ["chunk_0"]
+        }}
+    ]
+}}
+
+注意：
+1. 实体名称要准确、一致
+2. 关系要明确、有意义
+3. 属性要丰富、准确
+4. 标注每个实体和关系来源的文档片段编号"""
+        
+        return prompt
+    
+    def _parse_batch_spo_response(self, response: str, texts: List[str], start_index: int, **kwargs) -> Tuple[List[Entity], List[Relationship]]:
+        """解析批处理SPO响应"""
+        try:
+            # 清理和解析响应
+            cleaned_response = self._clean_llm_response(response)
+            logger.debug(f"🔍 清理后的响应长度: {len(cleaned_response)}")
+            
+            try:
+                spo_data = json.loads(cleaned_response)
+            except json.JSONDecodeError as json_error:
+                logger.warning(f"⚠️ JSON解析失败: {json_error}")
+                logger.debug(f"🔍 问题JSON片段: {cleaned_response[:200]}...")
+                
+                # 尝试更激进的修复
+                fixed_response = self._aggressive_json_fix(cleaned_response)
+                try:
+                    spo_data = json.loads(fixed_response)
+                    logger.info("✅ 激进修复成功")
+                except:
+                    logger.error("❌ 激进修复也失败，返回空结果")
+                    return [], []
+            
+            # 转换为实体和关系对象
+            entities, relationships = self._convert_spo_to_objects(spo_data, "\n".join(texts), **kwargs)
+            
+            # 更新chunk_id映射
+            for entity in entities:
+                if hasattr(entity, 'source_chunks'):
+                    # 将相对chunk编号转换为绝对编号
+                    updated_chunks = set()
+                    for chunk_ref in entity.source_chunks:
+                        if chunk_ref.startswith('chunk_'):
+                            chunk_num = int(chunk_ref.split('_')[1])
+                            updated_chunks.add(f"chunk_{start_index + chunk_num}")
+                        else:
+                            updated_chunks.add(chunk_ref)
+                    entity.source_chunks = updated_chunks
+            
+            for relationship in relationships:
+                if hasattr(relationship, 'source_chunks'):
+                    # 将相对chunk编号转换为绝对编号
+                    updated_chunks = set()
+                    for chunk_ref in relationship.source_chunks:
+                        if chunk_ref.startswith('chunk_'):
+                            chunk_num = int(chunk_ref.split('_')[1])
+                            updated_chunks.add(f"chunk_{start_index + chunk_num}")
+                        else:
+                            updated_chunks.add(chunk_ref)
+                    relationship.source_chunks = updated_chunks
+            
+            return entities, relationships
+            
+        except Exception as e:
+            logger.error(f"❌ 批处理响应解析失败: {e}")
+            return [], []
+    
     def _find_entity_id(self, entity_name: str, entity_id_map: Dict[str, str]) -> Optional[str]:
         """查找实体ID，支持智能模糊匹配"""
         # 1. 精确匹配
@@ -460,7 +620,9 @@ class SPOExtractor:
             return {"attributes": {}, "triples": [], "entity_types": {}}
     
     def _clean_llm_response(self, response: str) -> str:
-        """Clean LLM response to extract JSON"""
+        """Clean LLM response to extract valid JSON with enhanced error handling"""
+        import re
+        
         # Remove markdown code blocks
         response = response.strip()
         if response.startswith('```json'):
@@ -473,7 +635,7 @@ class SPOExtractor:
         # Find JSON content - look for the first complete JSON object
         start_idx = response.find('{')
         if start_idx == -1:
-            return "{}"
+            return '{"entity_types": {}, "triples": []}'
         
         # Find the matching closing brace
         brace_count = 0
@@ -496,9 +658,69 @@ class SPOExtractor:
             if end_idx > start_idx:
                 json_content = response[start_idx:end_idx+1]
             else:
-                json_content = "{}"
+                json_content = '{"entity_types": {}, "triples": []}'
+        
+        # 尝试修复常见的JSON错误
+        json_content = self._fix_json_errors(json_content)
         
         return json_content.strip()
+    
+    def _fix_json_errors(self, json_str: str) -> str:
+        """修复常见的JSON格式错误"""
+        import re
+        
+        # 修复尾随逗号
+        json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+        
+        # 修复缺少逗号的问题
+        json_str = re.sub(r'"\s*\n\s*"', '",\n"', json_str)
+        json_str = re.sub(r'}\s*\n\s*"', '},\n"', json_str)
+        json_str = re.sub(r']\s*\n\s*"', '],\n"', json_str)
+        
+        # 修复单引号为双引号
+        json_str = re.sub(r"'([^']*)':", r'"\1":', json_str)
+        
+        # 确保基本结构存在
+        if '"entity_types"' not in json_str:
+            json_str = json_str.replace('{', '{"entity_types": {},', 1)
+        if '"triples"' not in json_str:
+            json_str = json_str.replace('}', ', "triples": []}', 1)
+        
+        return json_str
+    
+    def _aggressive_json_fix(self, json_str: str) -> str:
+        """更激进的JSON修复方法，处理复杂的格式错误"""
+        import re
+        
+        # 移除所有注释
+        json_str = re.sub(r'//.*?\n', '\n', json_str)
+        json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
+        
+        # 修复属性名没有双引号的问题
+        json_str = re.sub(r'(\w+)(\s*:)', r'"\1"\2', json_str)
+        
+        # 修复字符串值没有双引号的问题（但要避免数字和布尔值）
+        json_str = re.sub(r':\s*([^"\d\[\{][^,\}\]]*?)([,\}\]])', r': "\1"\2', json_str)
+        
+        # 修复多余的逗号
+        json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+        
+        # 修复缺少逗号的问题
+        json_str = re.sub(r'([}\]"])\s*\n\s*(["\[{])', r'\1,\n\2', json_str)
+        
+        # 确保基本结构
+        if not json_str.strip().startswith('{'):
+            json_str = '{' + json_str
+        if not json_str.strip().endswith('}'):
+            json_str = json_str + '}'
+        
+        # 如果还是有问题，返回最小有效JSON
+        try:
+            json.loads(json_str)
+            return json_str
+        except:
+            logger.warning("🔧 返回最小有效JSON结构")
+            return '{"entity_types": {}, "triples": []}'
     
     def _convert_spo_to_objects(self, spo_data: Dict[str, Any], source_text: str, **kwargs) -> Tuple[List[Entity], List[Relationship]]:
         """Convert SPO data to Entity and Relationship objects"""
@@ -510,28 +732,44 @@ class SPOExtractor:
         entity_types = spo_data.get('entity_types', {})
         attributes = spo_data.get('attributes', {})
         
-        for entity_name, entity_type in entity_types.items():
+        for entity_name, entity_data in entity_types.items():
             # Generate unique ID
             entity_id = f"entity_{len(entities) + 1}"
             entity_id_map[entity_name] = entity_id
             
-            # Get entity attributes
-            entity_attrs = attributes.get(entity_name, [])
-            attr_dict = {}
-            description_parts = []
-            
-            for attr in entity_attrs:
-                if ':' in attr:
-                    key, value = attr.split(':', 1)
-                    attr_dict[key.strip()] = value.strip()
-                    description_parts.append(attr)
-                else:
-                    description_parts.append(attr)
+            # 处理不同的数据格式
+            if isinstance(entity_data, dict):
+                # 新的批处理格式
+                entity_type = entity_data.get('type', 'concept')
+                entity_description = entity_data.get('description', '')
+                entity_attrs = entity_data.get('attributes', {})
+                
+                # 转换属性格式
+                attr_dict = entity_attrs if isinstance(entity_attrs, dict) else {}
+                description_parts = [entity_description] if entity_description else []
+            else:
+                # 旧的简单格式
+                entity_type = entity_data
+                entity_attrs = attributes.get(entity_name, [])
+                attr_dict = {}
+                description_parts = []
+                
+                for attr in entity_attrs:
+                    if ':' in str(attr):
+                        key, value = str(attr).split(':', 1)
+                        attr_dict[key.strip()] = value.strip()
+                        description_parts.append(str(attr))
+                    else:
+                        description_parts.append(str(attr))
             
             # Create entity
             try:
-                entity_type_enum = EntityType(entity_type.lower())
-            except ValueError:
+                # 确保entity_type是字符串
+                if isinstance(entity_type, dict):
+                    entity_type = entity_type.get('type', 'concept')
+                entity_type_str = str(entity_type).lower()
+                entity_type_enum = EntityType(entity_type_str)
+            except (ValueError, AttributeError):
                 entity_type_enum = EntityType.CONCEPT  # Default fallback
             
             entity = Entity(
@@ -551,11 +789,26 @@ class SPOExtractor:
         triples = spo_data.get('triples', [])
         
         for triple in triples:
-            if len(triple) != 3:
-                logger.warning(f"⚠️ 跳过无效三元组: {triple}")
+            # 处理不同的三元组格式
+            if isinstance(triple, dict):
+                # 新的批处理格式
+                source_name = triple.get('subject', '')
+                relation = triple.get('predicate', '')
+                target_name = triple.get('object', '')
+            elif isinstance(triple, (list, tuple)) and len(triple) == 3:
+                # 旧的简单格式
+                source_name, relation, target_name = triple
+            else:
+                logger.warning(f"⚠️ 跳过无效三元组格式: {triple}")
                 continue
             
-            source_name, relation, target_name = triple
+            # 确保所有字段都是字符串
+            source_name = str(source_name).strip()
+            target_name = str(target_name).strip()
+            
+            if not source_name or not target_name:
+                logger.warning(f"⚠️ 跳过空实体名称的三元组: {triple}")
+                continue
             
             # Get entity IDs with fuzzy matching
             source_id = self._find_entity_id(source_name, entity_id_map)
@@ -581,8 +834,12 @@ class SPOExtractor:
             
             # Create relationship
             try:
-                relation_type_enum = RelationType(relation.lower().replace(' ', '_'))
-            except ValueError:
+                # 确保relation是字符串
+                if isinstance(relation, dict):
+                    relation = relation.get('type', 'related_to')
+                relation_str = str(relation).lower().replace(' ', '_')
+                relation_type_enum = RelationType(relation_str)
+            except (ValueError, AttributeError):
                 relation_type_enum = RelationType.RELATED_TO  # Default fallback
             
             relationship = Relationship(

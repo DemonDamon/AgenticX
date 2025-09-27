@@ -37,8 +37,11 @@ class MilvusStorage(BaseVectorStorage):
         self.port = port
         self.dimension = dimension
         self.collection_name = collection_name
-        # 从kwargs获取recreate_if_exists，它由StorageConfig中的extra_params传递
+        # 从kwargs获取参数
         self.recreate_if_exists = kwargs.get('recreate_if_exists', False)
+        self.username = kwargs.get('username')
+        self.password = kwargs.get('password')
+        self.database = kwargs.get('database', 'default')
         self._client = None
         self.collection = None
         
@@ -47,8 +50,23 @@ class MilvusStorage(BaseVectorStorage):
             return
             
         try:
+            # 构建连接参数
+            connect_params = {
+                "host": self.host,
+                "port": str(self.port)  # 端口应该是字符串
+            }
+            
+            # 只在有认证信息时才添加
+            if self.username:
+                connect_params["user"] = self.username
+            if self.password:
+                connect_params["password"] = self.password
+            if self.database and self.database != 'default':
+                connect_params["db_name"] = self.database
+            
             # 连接到Milvus
-            connections.connect("default", host=self.host, port=str(self.port)) # 端口应该是字符串
+            logger.info(f"🔍 Milvus连接参数: {connect_params}")
+            connections.connect("default", **connect_params)
             logger.info("✅ Successfully connected to Milvus.")
             self._client = "default"
             
@@ -77,12 +95,19 @@ class MilvusStorage(BaseVectorStorage):
                 logger.info(f"✅ 使用现有集合: {self.collection_name}")
             else:
                 # 创建新集合
+                logger.info(f"🔍 创建集合参数: collection_name={self.collection_name}, dimension={self.dimension}")
+                
+                # 确保dimension是整数
+                if not isinstance(self.dimension, int) or self.dimension <= 0:
+                    raise ValueError(f"Invalid dimension: {self.dimension}, must be positive integer")
+                
                 fields = [
                     FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=255, is_primary=True),
-                    FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=self.dimension),
-                    FieldSchema(name="metadata", dtype=DataType.JSON, default_value={}) # 添加默认值
+                    FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=int(self.dimension)),
+                    FieldSchema(name="metadata", dtype=DataType.VARCHAR, max_length=65535)  # 改为VARCHAR避免JSON兼容性问题
                 ]
-                schema = CollectionSchema(fields, description="AgenticX vector collection", enable_dynamic_field=True) # 启用动态字段
+                schema = CollectionSchema(fields, description="AgenticX vector collection")  # 移除enable_dynamic_field
+                logger.info(f"🔍 创建集合Schema完成")
                 self.collection = Collection(self.collection_name, schema)
                 
                 # 创建索引
@@ -114,12 +139,15 @@ class MilvusStorage(BaseVectorStorage):
             
         try:
             # 准备数据
+            import json
             data_to_insert = []
             for record in records:
+                # 将metadata序列化为JSON字符串
+                metadata_str = json.dumps(record.payload or {}, ensure_ascii=False)
                 data_to_insert.append({
                     "id": record.id,
                     "vector": record.vector,
-                    "metadata": record.payload or {}
+                    "metadata": metadata_str
                 })
 
             # 插入数据
@@ -200,13 +228,21 @@ class MilvusStorage(BaseVectorStorage):
             )
             
             # 转换结果
+            import json
             query_results = []
             if results:
                 for hit in results[0]:
+                    # 反序列化metadata JSON字符串
+                    metadata_str = hit.entity.get("metadata", "{}")
+                    try:
+                        metadata_dict = json.loads(metadata_str) if isinstance(metadata_str, str) else metadata_str
+                    except (json.JSONDecodeError, TypeError):
+                        metadata_dict = {}
+                    
                     record = VectorRecord(
                         id=hit.entity.get("id"),
                         vector=query.query_vector,  # 查询向量本身
-                        payload=hit.entity.get("metadata", {})
+                        payload=metadata_dict
                     )
                     result = VectorDBQueryResult(
                         record=record,

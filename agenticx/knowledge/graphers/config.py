@@ -159,6 +159,7 @@ class GraphRagConfig:
     schema_path: str = "schema.json"  # 基础Schema文件路径
     enable_custom_schema: bool = True  # 启用定制Schema生成
     prompts_dir: str = "prompts"  # 提示词文件夹路径
+    spo_batch_size: int = 5  # SPO批处理大小
     prompts: GraphRagPrompts = field(default_factory=GraphRagPrompts)
     entity_extraction: EntityExtractionConfig = field(default_factory=EntityExtractionConfig)
     relationship_extraction: RelationshipExtractionConfig = field(default_factory=RelationshipExtractionConfig)
@@ -186,6 +187,7 @@ class GraphRagConfig:
             schema_path=data.get('schema_path', 'schema.json'),
             enable_custom_schema=data.get('enable_custom_schema', True),
             prompts_dir=data.get('prompts_dir', 'prompts'),
+            spo_batch_size=data.get('spo_batch_size', 5),  # 添加spo_batch_size参数处理
             prompts=GraphRagPrompts.from_dict(prompts_data),
             entity_extraction=EntityExtractionConfig.from_dict(entity_extraction_data),
             relationship_extraction=RelationshipExtractionConfig.from_dict(relationship_extraction_data),

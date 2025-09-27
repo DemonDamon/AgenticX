@@ -88,6 +88,30 @@ services:
       timeout: 20s
       retries: 3
 
+  # Attu - Milvus 可视化管理界面
+  attu:
+    image: zilliz/attu:v2.4.9
+    container_name: agenticx-attu
+    environment:
+      MILVUS_URL: milvus:19530
+    ports:
+      - "3001:3000"  # 避免与Grafana端口冲突
+    depends_on:
+      - milvus
+    restart: unless-stopped
+
+  # Redis Commander - Redis 可视化管理界面
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: agenticx-redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
   # Qdrant - 向量搜索引擎
   qdrant:
     image: qdrant/qdrant:v1.7.4

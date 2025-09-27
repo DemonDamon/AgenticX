@@ -290,10 +290,20 @@ class StorageManager:
         
         elif config.storage_type == StorageType.MILVUS:
             from .vectordb_storages.milvus import MilvusStorage
+            # 处理嵌套的extra_params结构
+            extra_params = config.extra_params
+            if 'extra_params' in extra_params:
+                extra_params = extra_params['extra_params']
+            
+            dimension = extra_params.get("dimension")
+            if dimension is None:
+                raise ValueError(f"Milvus storage requires 'dimension' parameter. Got: {config.extra_params}")
             return MilvusStorage(
+                dimension=dimension,  # dimension作为第一个参数
                 host=config.host or "localhost",
                 port=config.port or 19530,
-                dimension=config.extra_params.get("dimension")
+                collection_name=extra_params.get("collection_name", "agenticx_vectors"),
+                **{k: v for k, v in extra_params.items() if k not in ["dimension", "collection_name"]}
             )
         
         elif config.storage_type == StorageType.QDRANT:

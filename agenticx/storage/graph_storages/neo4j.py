@@ -469,6 +469,32 @@ class Neo4jStorage(BaseGraphStorage):
             logger.error(f"❌ 存储知识图谱到Neo4j失败: {e}")
             raise
 
+    def execute_query(self, query: str, parameters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """执行自定义Cypher查询
+        
+        Args:
+            query: Cypher查询语句
+            parameters: 查询参数
+            
+        Returns:
+            查询结果列表
+        """
+        if not self._client:
+            logger.info(f"✅ 模拟执行查询: {query}")
+            return []
+            
+        try:
+            with self._client.session() as session:
+                result = session.run(query, parameters or {})
+                records = []
+                for record in result:
+                    records.append(dict(record))
+                logger.info(f"✅ 执行查询成功，返回 {len(records)} 条记录")
+                return records
+        except Exception as e:
+            logger.error(f"❌ 执行查询失败: {e}")
+            return []
+
     def close(self) -> None:
         """关闭Neo4j连接"""
         if self._client:

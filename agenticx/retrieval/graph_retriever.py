@@ -206,9 +206,9 @@ class GraphRetriever(BaseRetriever):
         """Search for nodes in the graph."""
         
         try:
-            # Search nodes by content similarity using query
+            # Search nodes by name and description using query
             nodes = self.graph_storage.query(
-                query=f"MATCH (n) WHERE n.content CONTAINS '{query}' RETURN n LIMIT 10"
+                query=f"MATCH (n) WHERE n.name CONTAINS '{query}' OR n.description CONTAINS '{query}' RETURN n LIMIT 10"
             )
             
             results = []
@@ -234,9 +234,9 @@ class GraphRetriever(BaseRetriever):
         """Search for relationships in the graph."""
         
         try:
-            # Search relationships by type and properties using query
+            # Search relationships by type and entity properties using query
             relationships = self.graph_storage.query(
-                query=f"MATCH (a)-[r]->(b) WHERE r.type CONTAINS '{query}' OR a.content CONTAINS '{query}' OR b.content CONTAINS '{query}' RETURN a, r, b LIMIT 10"
+                query=f"MATCH (a)-[r]->(b) WHERE r.type CONTAINS '{query}' OR a.name CONTAINS '{query}' OR b.name CONTAINS '{query}' OR a.description CONTAINS '{query}' OR b.description CONTAINS '{query}' RETURN a, r, b LIMIT 10"
             )
             
             results = []
