@@ -30,3 +30,4 @@ coverage.xml
 scan_structure.py
 .DS_Store
 **/.DS_Store
+.pypirc
