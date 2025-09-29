@@ -16,5 +16,5 @@ class BaseEmbeddingProvider(ABC):
         pass
     
     async def aembed(self, texts: List[str], **kwargs) -> List[List[float]]:
-        """异步将文本列表转为向量列表"""
-        return self.embed(texts, **kwargs) 
+        """Asynchronous embedding interface"""
+        raise NotImplementedError("Provider does not support async embedding")
