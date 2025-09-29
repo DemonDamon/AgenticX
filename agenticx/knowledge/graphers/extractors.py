@@ -63,9 +63,8 @@ class EntityExtractor(BaseExtractor):
     
     def extract(self, text: str, **kwargs) -> List[Entity]:
         """Extract entities from text"""
-        logger.info(f"🔍 开始实体提取，方法: {self.method}")
-        logger.debug(f"📝 文本长度: {len(text)} 字符")
-        logger.debug(f"📄 文本预览: {text[:100]}..." if len(text) > 100 else f"📄 文本内容: {text}")
+        logger.info(f"开始实体提取: 方法={self.method}, 文本长度={len(text)}字符")
+        logger.debug(f"文本预览: {text[:100]}..." if len(text) > 100 else f"文本内容: {text}")
         
         if self.method == "llm":
             entities = self._extract_with_llm(text, **kwargs)
@@ -87,14 +86,14 @@ class EntityExtractor(BaseExtractor):
     
     def _extract_with_llm(self, text: str, **kwargs) -> List[Entity]:
         """Extract entities using LLM"""
-        logger.debug("🤖 使用LLM进行实体提取")
+        logger.debug("使用LLM进行实体提取")
         if not self.llm_client:
             raise ValueError("LLM client is required for LLM-based extraction")
         
         # Build extraction prompt
-        logger.debug("📝 构建实体提取提示词")
+        logger.debug("构建实体提取提示词")
         prompt = self._build_entity_extraction_prompt(text, **kwargs)
-        logger.trace(f"🔍 完整提示词: {prompt}")
+        logger.trace(f"完整提示词: {prompt}")
         
         try:
             # Call LLM
@@ -102,16 +101,16 @@ class EntityExtractor(BaseExtractor):
             logger.debug("🚀 调用LLM进行实体提取")
             response = self.llm_client.call(prompt)
             logger.debug(f"📥 LLM原始响应长度: {len(response)} 字符")
-            logger.trace(f"🔍 LLM原始响应: {response}")
+            logger.trace(f"LLM原始响应: {response}")
             
             # Clean response
             logger.debug("🧹 清理LLM响应")
             cleaned_response = self.clean_llm_response(response)
             logger.debug(f"✨ 清理后响应长度: {len(cleaned_response)} 字符")
-            logger.trace(f"🔍 清理后响应: {cleaned_response}")
+            logger.trace(f"清理后响应: {cleaned_response}")
             
             # Parse JSON response
-            logger.debug("📊 解析JSON响应")
+            logger.debug("解析JSON响应")
             entities_data = json.loads(cleaned_response)
             logger.debug(f"📋 解析到 {len(entities_data)} 个实体数据")
             
@@ -215,8 +214,7 @@ class RelationshipExtractor(BaseExtractor):
     
     def extract(self, text: str, entities: List[Entity], **kwargs) -> List[Relationship]:
         """Extract relationships from text given a list of entities"""
-        logger.info(f"🔗 开始关系提取，方法: {self.method}")
-        logger.debug(f"📝 文本长度: {len(text)} 字符")
+        logger.info(f"开始关系提取: 方法={self.method}, 文本长度={len(text)}字符")
         logger.debug(f"👥 输入实体数量: {len(entities)}")
         for i, entity in enumerate(entities):
             logger.debug(f"  📍 实体[{i}]: {entity.name} ({entity.entity_type})")
