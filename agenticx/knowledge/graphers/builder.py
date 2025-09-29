@@ -33,7 +33,7 @@ class KnowledgeGraphBuilder:
             strong_model_config = getattr(self.config, 'strong_model_config', None)
             if strong_model_config:
                 self.strong_llm_client = LlmFactory.create_llm(strong_model_config)
-                logger.info("🚀 强模型客户端初始化完成")
+                # logger.info("🚀 强模型客户端初始化完成")
             else:
                 self.strong_llm_client = llm_client  # 回退到默认模型
                 logger.warning("⚠️ 未找到强模型配置，使用默认模型")
@@ -80,9 +80,9 @@ class KnowledgeGraphBuilder:
         # Initialize SPO extractor (will be configured with custom schema later)
         if self.extraction_method == 'spo':
             self.spo_extractor = None  # Will be initialized with custom schema
-            logger.info(f"🔧 使用两阶段SPO抽取方法（Schema生成 + SPO抽取）")
+            logger.info(f"使用两阶段SPO抽取方法（Schema生成 + SPO抽取）")
         else:
-            logger.info(f"🔧 使用传统分离抽取方法")
+            logger.info(f"使用传统分离抽取方法")
         
         self.quality_validator = GraphQualityValidator(
             config=self.config.quality_validation.to_dict()
@@ -106,33 +106,29 @@ class KnowledgeGraphBuilder:
         **kwargs
     ) -> KnowledgeGraph:
         """Build knowledge graph from a list of texts"""
-        logger.info(f"🏗️ 开始构建知识图谱，输入文本数量: {len(texts)}")
+        logger.info(f"开始构建知识图谱，输入文本数量: {len(texts)}")
         
         # Initialize graph
-        logger.debug("📊 初始化知识图谱")
+        logger.debug("初始化知识图谱")
         graph = KnowledgeGraph()
         
         # Stage 1: Generate custom schema if using SPO method
         custom_schema = None
         if self.extraction_method == 'spo':
-            logger.info("🎯 阶段1: 智能Schema生成")
-            logger.info(f"📊 抽取方法: {self.extraction_method} (两阶段SPO抽取)")
+            logger.info("阶段1: 智能Schema生成")
+            logger.info(f"抽取方法: {self.extraction_method} (两阶段SPO抽取)")
             
-            # Analyze documents to generate custom schema
-            logger.info("📄 开始文档分析...")
-            analysis_result = self.schema_generator.analyze_documents(texts)
-            logger.info(f"📋 文档分析完成: {analysis_result.get('category', '未知类别')}, {analysis_result.get('domain', '未知领域')}")
-            
-            logger.info("🔧 开始生成定制Schema...")
-            custom_schema = self.schema_generator.generate_custom_schema(analysis_result)
+            # 直接基于完整文档生成定制schema（新方法）
+            logger.info("开始基于完整文档生成定制Schema...")
+            custom_schema = self.schema_generator.generate_custom_schema_from_documents(texts)
             
             # Save custom schema for reference
             custom_schema_path = os.path.join(os.getcwd(), 'custom_schema.json')
             self.schema_generator.save_custom_schema(custom_schema, custom_schema_path)
-            logger.info(f"💾 定制Schema已保存: {custom_schema_path}")
+            logger.info(f"定制Schema已保存: {custom_schema_path}")
             
             # Initialize SPO extractor with custom schema
-            logger.info("🔧 初始化SPO抽取器...")
+            logger.info("初始化SPO抽取器...")
             self.spo_extractor = SPOExtractor(
                 llm_client=self.llm_client,
                 prompt_manager=self.prompt_manager,
@@ -142,15 +138,15 @@ class KnowledgeGraphBuilder:
             
             logger.success(f"✅ 阶段1完成 - 定制Schema生成，领域: {custom_schema.get('domain_info', {}).get('primary_domain', '通用')}")
         else:
-            logger.info(f"📊 抽取方法: {self.extraction_method} (传统分离抽取)")
+            logger.info(f"抽取方法: {self.extraction_method} (传统分离抽取)")
         
         # Stage 2: Extract entities and relationships
-        logger.info("🔍 阶段2: 知识抽取")
+        logger.info("阶段2: 知识抽取")
         
         if self.extraction_method == 'spo':
             # 使用批处理SPO抽取（性能优化）
-            logger.info("🚀 使用批处理SPO抽取，显著提升性能")
-            batch_size = getattr(self.config, 'spo_batch_size', 5)  # 从配置获取批处理大小
+            # logger.info("🚀 使用批处理SPO抽取，显著提升性能")
+            batch_size = getattr(self.config, 'spo_batch_size', 1)  # 从配置获取批处理大小，默认为1避免网络问题
             
             try:
                 entities, relationships = await self.spo_extractor.extract_batch(
@@ -159,7 +155,7 @@ class KnowledgeGraphBuilder:
                     **kwargs
                 )
                 
-                logger.info(f"📊 批处理SPO抽取完成: {len(entities)} 个实体, {len(relationships)} 个关系")
+                logger.info(f"批处理SPO抽取完成: {len(entities)} 个实体, {len(relationships)} 个关系")
                 
                 # 批量添加实体到图谱
                 for entity in entities:
@@ -177,7 +173,7 @@ class KnowledgeGraphBuilder:
                 # 回退到原来的逐个处理方式
                 for i, text in enumerate(texts):
                     chunk_id = f"chunk_{i}"
-                    logger.debug(f"📝 处理文本块 {i+1}/{len(texts)} (ID: {chunk_id})")
+                    logger.debug(f"处理文本块 {i+1}/{len(texts)} (ID: {chunk_id})")
                     
                     entities, relationships = self.spo_extractor.extract(text, chunk_id=chunk_id)
                     
@@ -192,18 +188,17 @@ class KnowledgeGraphBuilder:
         
         else:
             # 传统分离抽取（逐个处理）
-            logger.info("📝 使用传统分离抽取（逐个处理）")
+            logger.info("使用传统分离抽取（逐个处理）")
             for i, text in enumerate(texts):
                 chunk_id = f"chunk_{i}"
-                logger.info(f"📝 处理文本块 {i+1}/{len(texts)} (ID: {chunk_id})")
-                logger.debug(f"📏 文本长度: {len(text)} 字符")
+                logger.info(f"处理文本块 {i+1}/{len(texts)}: ID={chunk_id}, 长度={len(text)}字符")
                 
                 # Get metadata for this text chunk if provided
                 chunk_metadata = metadata[i] if metadata and i < len(metadata) else {}
                 if chunk_metadata:
                     logger.debug(f"📋 文本块元数据: {chunk_metadata}")
                 # Use traditional separate extraction
-                logger.debug("🔍 开始传统分离抽取")
+                logger.debug("开始传统分离抽取")
                 
                 # Extract entities
                 logger.debug("👥 开始实体提取")
@@ -256,7 +251,7 @@ class KnowledgeGraphBuilder:
                         logger.debug(f"   关系详情: {relationship.source_entity_id} --[{relationship.relation_type}]--> {relationship.target_entity_id}")
         
         # Post-processing
-        logger.info("🔧 开始后处理")
+        logger.info("开始后处理")
         
         # Merge duplicate entities
         if kwargs.get("merge_entities", True):
@@ -266,9 +261,9 @@ class KnowledgeGraphBuilder:
         
         # Validate quality
         if kwargs.get("validate_quality", True):
-            logger.debug("🔍 进行质量验证")
+            logger.debug("进行质量验证")
             quality_report = self.quality_validator.validate(graph)
-            logger.info(f"📊 质量验证结果: {quality_report.summary()}")
+            logger.info(f"质量验证结果: {quality_report.summary()}")
         
         # Detect communities
         if kwargs.get("detect_communities", False):
@@ -333,7 +328,7 @@ class KnowledgeGraphBuilder:
         # Process new texts
         for i, text in enumerate(new_texts):
             chunk_id = f"incremental_chunk_{i}"
-            logger.info(f"📝 处理增量文本块 {i+1}/{len(new_texts)}")
+            logger.info(f"处理增量文本块 {i+1}/{len(new_texts)}")
             
             # Extract entities
             entities = self.entity_extractor.extract(text, chunk_id=chunk_id)
@@ -355,7 +350,7 @@ class KnowledgeGraphBuilder:
         
         if kwargs.get("validate_quality", True):
             quality_report = self.quality_validator.validate(new_graph)
-            logger.info(f"🔍 增量质量验证: {quality_report.summary()}")
+            logger.info(f"增量质量验证: {quality_report.summary()}")
         
         if kwargs.get("optimize_graph", True):
             optimization_stats = self.graph_optimizer.optimize(new_graph)
