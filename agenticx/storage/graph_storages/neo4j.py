@@ -319,7 +319,7 @@ class Neo4jStorage(BaseGraphStorage):
                     logger.info("✅ 现有数据已清空")
                 
                 # 存储实体
-                logger.info("📦 开始存储实体...")
+                logger.info("开始存储实体...")
                 entity_count = 0
                 for i, entity in enumerate(knowledge_graph.entities.values()):
                     query = """
@@ -406,7 +406,7 @@ class Neo4jStorage(BaseGraphStorage):
                 logger.info(f"✅ 关系存储完成，共存储 {relationship_count} 个关系")
                 
                 # 验证数据是否真的插入了
-                logger.info("🔍 验证数据插入...")
+                logger.info("验证数据插入...")
                 try:
                     # 查询实体数量
                     entity_result = session.run("MATCH (n:Entity) RETURN count(n) as count")
@@ -416,7 +416,7 @@ class Neo4jStorage(BaseGraphStorage):
                     rel_result = session.run("MATCH ()-[r]-() RETURN count(r) as count")
                     rel_db_count = rel_result.single()["count"]
                     
-                    logger.info(f"📊 数据库验证结果:")
+                    logger.info(f"数据库验证结果:")
                     logger.info(f"  - 实体数量: {entity_db_count} (预期: {entity_count})")
                     logger.info(f"  - 关系数量: {rel_db_count} (预期: {relationship_count})")
                     
