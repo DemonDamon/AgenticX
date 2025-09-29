@@ -2,11 +2,11 @@
 
 AgenticX框架的智能检索系统，提供统一、智能、可扩展的检索能力，支持从基础检索到完全Agentic化RAG流程的全栈解决方案。
 
-## 🎯 战略定位
+## 战略定位
 
 构建一个统一、智能、可扩展的检索系统，为AgenticX框架提供从基础检索能力到完全Agentic化RAG流程的全栈解决方案，实现检索的智能化、模块化和工具化。
 
-## 🏗️ 架构设计
+## 架构设计
 
 ### 核心组件
 
@@ -28,7 +28,7 @@ M15 智能检索系统
 - **企业级特性**: 多租户、权限控制、监控审计
 - **高度可扩展**: 支持自定义检索策略和Agent实现
 
-## 📦 核心模块
+## 核心模块
 
 ### 1. 统一检索抽象层 (`agenticx.retrieval.base`)
 
@@ -425,7 +425,7 @@ pytest tests/test_m15_retrieval.py -v
 pytest tests/test_m15_retrieval.py::TestM15RetrievalSystem::test_bm25_retriever -v
 ```
 
-## 📊 性能监控
+## 性能监控
 
 ### 获取统计信息
 
@@ -447,7 +447,7 @@ print(f"Agent performance: {agent_stats}")
 - **吞吐量**: 每秒查询处理量
 - **资源使用**: CPU、内存、存储使用情况
 
-## 🔧 配置
+## 配置
 
 ### 检索器配置
 
@@ -526,7 +526,7 @@ access_config = {
 
 欢迎贡献代码！请查看我们的贡献指南。
 
-## 📄 许可证
+## 许可证
 
 本项目采用 MIT 许可证。
 
