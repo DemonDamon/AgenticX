@@ -20,8 +20,48 @@ def read_readme():
 
 # 读取requirements.txt
 def read_requirements():
-    with open(os.path.join(here, 'requirements.txt'), encoding='utf-8') as f:
-        return [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    # 检查是否使用test.pypi.org的最小依赖
+    use_testpypi = os.getenv('USE_TESTPYPI_DEPS', '').lower() in ('true', '1', 'yes')
+    
+    if use_testpypi:
+        # 使用test.pypi.org兼容的最小依赖
+        requirements_file = 'requirements-testpypi.txt'
+    else:
+        # 使用完整的requirements.txt
+        requirements_file = 'requirements.txt'
+    
+    requirements_path = os.path.join(here, requirements_file)
+    if not os.path.exists(requirements_path):
+        # 如果test.pypi.org文件不存在，回退到主文件但过滤不兼容的包
+        requirements_path = os.path.join(here, 'requirements.txt')
+        use_testpypi = True
+    
+    with open(requirements_path, encoding='utf-8') as f:
+        requirements = []
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                if use_testpypi and requirements_file == 'requirements.txt':
+                    # 过滤掉test.pypi.org上不可用的包
+                    skip_packages = [
+                        'litellm', 'openai', 'anthropic', 'ollama', 'mcp',
+                        'mem0ai', 'chromadb', 'qdrant-client', 'redis',
+                        'prometheus-client', 'opentelemetry-api', 'opentelemetry-sdk',
+                        'pandas', 'numpy', 'networkx', 'neo4j', 'cdlib',
+                        'mkdocs', 'mkdocs-material', 'pydoc-markdown',
+                        'fastapi', 'uvicorn', 'httpx', 'aiohttp', 'websockets',
+                        'asyncio-mqtt', 'typer'
+                    ]
+                    package_name = line.split('>=')[0].split('==')[0].split('<')[0]
+                    if any(skip in package_name for skip in skip_packages):
+                        continue
+                    # 调整pydantic版本
+                    if line.startswith('pydantic>=2.0.0'):
+                        requirements.append('pydantic>=1.4,<2.0')
+                        continue
+                
+                requirements.append(line)
+        return requirements
 
 # 从__init__.py读取版本号
 def read_version():
@@ -38,48 +78,8 @@ long_description = read_readme()
 # 版本号
 version = read_version()
 
-# 基本依赖
-install_requires = [
-    # 核心依赖
-    "pydantic>=2.0.0,<3.0.0",
-    "typing-extensions>=4.0.0",
-    "loguru>=0.7.0",
-    "rich>=13.0.0",
-    "aiohttp>=3.8.0",
-    "asyncio-mqtt>=0.13.0",
-    "websockets>=11.0.0",
-    
-    # LLM依赖
-    "litellm>=1.40.0",
-    "openai>=1.0.0",
-    "anthropic>=0.25.0",
-    "ollama>=0.2.0",
-    
-    # 工具依赖
-    "mcp>=1.0.0",
-    "httpx>=0.25.0",
-    "requests>=2.31.0",
-    
-    # 记忆依赖
-    "mem0ai>=0.1.0",
-    "chromadb>=0.4.0",
-    "qdrant-client>=1.7.0",
-    
-    # 监控依赖
-    "prometheus-client>=0.18.0",
-    "opentelemetry-api>=1.20.0",
-    "opentelemetry-sdk>=1.20.0",
-    
-    # 数据处理
-    "pandas>=2.0.0",
-    "numpy>=1.24.0",
-    
-    # 实用工具
-    "python-dotenv>=1.0.0",
-    "click>=8.0.0",
-    "PyYAML>=6.0.0",
-    "jinja2>=3.0.0",
-]
+# 基本依赖 - 从requirements.txt读取
+install_requires = read_requirements()
 
 # 额外依赖
 extras_require = {
@@ -171,4 +171,4 @@ setup(
             "**/*.toml",
         ],
     },
-) 
+)

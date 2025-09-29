@@ -1,0 +1,24 @@
+# Core dependencies for test.pypi.org compatibility
+# Note: Many packages may not be available on test.pypi.org
+# This file contains minimal dependencies that are likely to be available
+
+# Core Python packages (usually available on test.pypi.org)
+pydantic>=1.4,<2.0  # test.pypi.org only has 1.4a1, 1.5a1
+typing-extensions>=4.0.0
+loguru>=0.7.0
+rich>=13.0.0
+click>=8.0.0
+PyYAML>=6.0.0
+python-dotenv>=1.0.0
+
+# Web framework dependencies (may not be available on test.pypi.org)
+# fastapi>=0.104.0
+# uvicorn>=0.24.0
+
+# HTTP clients (basic ones might be available)
+requests>=2.31.0
+# httpx>=0.25.0
+
+# Note: Most AI/ML packages (litellm, openai, anthropic, etc.) 
+# are unlikely to be available on test.pypi.org
+# Users should install from regular PyPI for full functionality
