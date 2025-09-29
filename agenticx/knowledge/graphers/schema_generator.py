@@ -29,7 +29,7 @@ class SchemaGenerator:
                 "Attributes": ["name", "description", "type", "date", "status"]
             }
         
-        logger.info("🔧 Schema生成器初始化完成")
+        logger.info("Schema生成器初始化完成")
     
     def analyze_documents(self, documents: List[str]) -> Dict[str, Any]:
         """分析文档内容，生成文档分析报告
@@ -40,7 +40,7 @@ class SchemaGenerator:
         Returns:
             文档分析结果
         """
-        logger.info(f"📊 开始分析 {len(documents)} 个文档")
+        logger.info(f"开始分析 {len(documents)} 个文档")
         
         if not self.strong_llm_client or not self.prompt_manager:
             logger.error("❌ 缺少LLM客户端或提示词管理器")
@@ -56,8 +56,8 @@ class SchemaGenerator:
                 document_content=combined_content
             )
             
-            logger.debug("🤖 调用强模型进行文档分析")
-            logger.info(f"📊 分析内容长度: {len(combined_content)} 字符")
+            logger.debug("调用强模型进行文档分析")
+            logger.info(f"分析内容长度: {len(combined_content)} 字符")
             response = self.strong_llm_client.call(prompt)
             
             # 解析响应
@@ -73,7 +73,7 @@ class SchemaGenerator:
     
     def _prepare_documents_for_analysis(self, documents: List[str]) -> str:
         """智能准备文档内容用于分析，充分利用128k上下文"""
-        logger.info(f"📝 准备文档内容，充分利用128k上下文能力")
+        logger.info(f"准备文档内容，充分利用128k上下文能力")
         
         # 估算token数量 (粗略估算：1 token ≈ 0.75个英文单词 ≈ 1.5个中文字符)
         max_chars = 120000  # 预留8k tokens给提示词和响应
@@ -81,11 +81,11 @@ class SchemaGenerator:
         # 策略1：如果文档总量不大，全部使用
         total_length = sum(len(doc) for doc in documents)
         if total_length <= max_chars:
-            logger.info(f"📄 文档总长度 {total_length} 字符，全部用于分析")
+            logger.info(f"文档总长度 {total_length} 字符，全部用于分析")
             return "\n\n".join(documents)
         
         # 策略2：智能采样 - 确保覆盖所有文档
-        logger.info(f"📄 文档总长度 {total_length} 字符，使用智能采样策略")
+        logger.info(f"文档总长度 {total_length} 字符，使用智能采样策略")
         
         # 为每个文档分配空间
         doc_count = len(documents)
@@ -96,7 +96,7 @@ class SchemaGenerator:
             if len(doc) <= chars_per_doc:
                 # 短文档全部使用
                 sampled_docs.append(doc)
-                logger.debug(f"📄 文档 {i+1}: 完整使用 ({len(doc)} 字符)")
+                logger.debug(f"文档 {i+1}: 完整使用 ({len(doc)} 字符)")
             else:
                 # 长文档采样：开头 + 中间 + 结尾
                 start_size = chars_per_doc // 3
@@ -110,15 +110,75 @@ class SchemaGenerator:
                 
                 sampled_doc = f"{start_part}\n...[中间内容]...\n{middle_part}\n...[后续内容]...\n{end_part}"
                 sampled_docs.append(sampled_doc)
-                logger.debug(f"📄 文档 {i+1}: 智能采样 ({len(sampled_doc)} 字符，原长度 {len(doc)})")
+                logger.debug(f"文档 {i+1}: 智能采样 ({len(sampled_doc)} 字符，原长度 {len(doc)})")
         
         combined_content = "\n\n=== 文档分隔 ===\n\n".join(sampled_docs)
         logger.info(f"✅ 文档准备完成: {len(combined_content)} 字符，覆盖 {len(documents)} 个文档")
         
         return combined_content
     
+    def generate_custom_schema_from_documents(self, documents: List[str]) -> Dict[str, Any]:
+        """直接基于完整文档内容生成定制schema（推荐方法）
+        
+        Args:
+            documents: 完整文档内容列表
+            
+        Returns:
+            定制化的schema
+        """
+        logger.info("开始基于完整文档生成定制Schema")
+        
+        if not self.strong_llm_client or not self.prompt_manager:
+            logger.error("❌ 缺少LLM客户端或提示词管理器")
+            return self.base_schema
+        
+        try:
+            # 智能文档内容处理，充分利用128k上下文
+            combined_content = self._prepare_documents_for_analysis(documents)
+            
+            # 使用完整文档内容生成schema
+            prompt = self.prompt_manager.format_prompt(
+                "schema_generation",
+                base_schema=json.dumps(self.base_schema, ensure_ascii=False, indent=2),
+                document_content=combined_content,
+                document_category="学术论文",  # 可以从文档分析中获取
+                document_tags="AI, 基准测试, 未来预测"  # 可以从文档分析中获取
+            )
+            
+            logger.debug("调用强模型基于完整文档生成定制Schema")
+            response = self.strong_llm_client.call(prompt)
+            
+            # 解析响应
+            custom_schema = self._parse_schema_response(response)
+            
+            # 验证和优化schema
+            validated_schema = self._validate_schema(custom_schema)
+            
+            logger.success(f"✅ 基于完整文档的定制Schema生成完成")
+            logger.debug(f"📋 实体类型: {len(validated_schema.get('Nodes', []))}")
+            logger.debug(f"📋 关系类型: {len(validated_schema.get('Relations', []))}")
+            logger.debug(f"📋 属性类型: {len(validated_schema.get('Attributes', []))}")
+            
+            # 打印生成的Schema详情
+            logger.info("生成的定制Schema:")
+            logger.info(f"📋 实体类型 ({len(validated_schema.get('Nodes', []))}): {validated_schema.get('Nodes', [])}")
+            logger.info(f"🔗 关系类型 ({len(validated_schema.get('Relations', []))}): {validated_schema.get('Relations', [])}")
+            logger.info(f"属性类型 ({len(validated_schema.get('Attributes', []))}): {validated_schema.get('Attributes', [])}")
+            
+            if 'domain_info' in validated_schema:
+                domain_info = validated_schema['domain_info']
+                logger.info(f"领域信息: {domain_info.get('primary_domain', '未知')}")
+                logger.info(f"核心概念: {domain_info.get('key_concepts', [])}")
+            
+            return validated_schema
+            
+        except Exception as e:
+            logger.error(f"❌ Schema生成失败: {e}")
+            logger.warning("🔄 回退到基础Schema")
+            return self.base_schema
+
     def generate_custom_schema(self, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
-        """基于文档分析结果生成定制schema
+        """基于文档分析结果生成定制schema（兼容旧方法）
         
         Args:
             analysis_result: 文档分析结果
@@ -126,7 +186,7 @@ class SchemaGenerator:
         Returns:
             定制化的schema
         """
-        logger.info("🎯 开始生成定制Schema")
+        logger.warning("⚠️ 使用基于摘要的Schema生成方法，建议使用generate_custom_schema_from_documents")
         
         if not self.strong_llm_client or not self.prompt_manager:
             logger.error("❌ 缺少LLM客户端或提示词管理器")
@@ -142,12 +202,12 @@ class SchemaGenerator:
             prompt = self.prompt_manager.format_prompt(
                 "schema_generation",
                 base_schema=json.dumps(self.base_schema, ensure_ascii=False, indent=2),
-                document_summary=document_summary,
+                document_content=document_summary,  # 改为使用document_content参数
                 document_category=document_category,
                 document_tags=document_tags
             )
             
-            logger.debug("🤖 调用强模型生成定制Schema")
+            logger.debug("调用强模型生成定制Schema")
             response = self.strong_llm_client.call(prompt)
             
             # 解析响应
@@ -162,15 +222,15 @@ class SchemaGenerator:
             logger.debug(f"📋 属性类型: {len(validated_schema.get('Attributes', []))}")
             
             # 打印生成的Schema详情
-            logger.info("🎯 生成的定制Schema:")
+            logger.info("生成的定制Schema:")
             logger.info(f"📋 实体类型 ({len(validated_schema.get('Nodes', []))}): {validated_schema.get('Nodes', [])}")
             logger.info(f"🔗 关系类型 ({len(validated_schema.get('Relations', []))}): {validated_schema.get('Relations', [])}")
-            logger.info(f"📊 属性类型 ({len(validated_schema.get('Attributes', []))}): {validated_schema.get('Attributes', [])}")
+            logger.info(f"属性类型 ({len(validated_schema.get('Attributes', []))}): {validated_schema.get('Attributes', [])}")
             
             if 'domain_info' in validated_schema:
                 domain_info = validated_schema['domain_info']
-                logger.info(f"🏷️ 领域信息: {domain_info.get('primary_domain', '未知')}")
-                logger.info(f"🔑 核心概念: {domain_info.get('key_concepts', [])}")
+                logger.info(f"领域信息: {domain_info.get('primary_domain', '未知')}")
+                logger.info(f"核心概念: {domain_info.get('key_concepts', [])}")
             
             return validated_schema
             
@@ -271,7 +331,7 @@ class SchemaGenerator:
         if 'domain_info' in schema:
             validated_schema['domain_info'] = schema['domain_info']
         
-        logger.debug(f"🔍 Schema验证完成: {len(validated_schema['Nodes'])} 实体类型, {len(validated_schema['Relations'])} 关系类型")
+        logger.debug(f"Schema验证完成: {len(validated_schema['Nodes'])} 实体类型, {len(validated_schema['Relations'])} 关系类型")
         
         return validated_schema
     
@@ -289,7 +349,7 @@ class SchemaGenerator:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(schema, f, ensure_ascii=False, indent=2)
             
-            logger.info(f"💾 定制Schema已保存: {file_path}")
+            logger.info(f"定制Schema已保存: {file_path}")
             return True
             
         except Exception as e:
