@@ -181,7 +181,7 @@ class Neo4jExporter:
     
     def _create_indexes(self) -> None:
         """Create indexes for better query performance"""
-        logger.info("📊 创建索引以提升查询性能")
+        logger.info("创建索引以提升查询性能")
         
         indexes = [
             # Entity indexes
@@ -235,7 +235,7 @@ class Neo4jExporter:
             graph: Knowledge graph to export
             output_path: Output file path for SPO JSON
         """
-        logger.info(f"📄 导出SPO格式到: {output_path}")
+        logger.info(f"导出SPO格式到: {output_path}")
         
         spo_data = []
         
