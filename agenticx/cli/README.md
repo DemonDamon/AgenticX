@@ -379,7 +379,7 @@ agx run main.py --verbose
 
 AgenticX CLI 模块位于 `agenticx/cli` 目录，是一个功能完整的命令行工具套件，基于 Typer 框架构建。
 
-### 🏗️ 核心架构
+### 核心架构
 
 **主要文件结构：**
 - **`main.py`** - CLI 主程序，定义所有命令和子命令
@@ -476,7 +476,7 @@ agenticx docs serve
 agenticx deploy prepare ./deploy --platform docker
 ```
 
-### 🎯 设计亮点
+### 设计亮点
 
 1. **模块化设计**：每个功能独立模块，延迟加载提升启动速度
 2. **模板系统**：丰富的项目和组件模板，快速启动开发
