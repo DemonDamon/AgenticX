@@ -29,12 +29,12 @@ The memory system consists of several key components:
 - Automatic content analysis and tagging
 - Memory consolidation to reduce redundancy
 
-### 🔍 Advanced Search
+### Advanced Search
 - Semantic search across all memory types
 - Metadata filtering and scoping
 - Cross-memory search capabilities
 
-### 📊 History Tracking
+### History Tracking
 - Complete audit trail of memory operations
 - Operation statistics and analytics
 - Error tracking and debugging support
