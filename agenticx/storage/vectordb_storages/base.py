@@ -103,7 +103,7 @@ class BaseVectorStorage(ABC):
     """
 
     @abstractmethod
-    def add(self, records: List[VectorRecord], **kwargs: Any) -> None:
+    async def add(self, records: List[VectorRecord], **kwargs: Any) -> None:
         """保存向量记录列表到存储
         
         Args:
@@ -230,4 +230,4 @@ class BaseVectorStorage(ABC):
 
     def close(self) -> None:
         """关闭向量存储连接"""
-        pass 
+        pass
