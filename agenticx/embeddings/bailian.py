@@ -35,48 +35,61 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
         self, 
         api_key: str, 
         model: str = "text-embedding-v4", 
-        api_url: Optional[str] = None,  # 修复：使用Optional[str]而不是str = None
+        api_url: Optional[str] = None,
         max_tokens: int = 8192,
         batch_size: int = 100,
         timeout: int = 30,
         retry_count: int = 3,
         retry_delay: float = 1.0,
-        use_dashscope_sdk: bool = True,  # 优先使用dashscope SDK
+        use_dashscope_sdk: bool = True,
         multimodal_model: str = "multimodal-embedding-v1",
         **kwargs
     ):
-        super().__init__(kwargs or {})  # 修复：确保传入的是一个字典而不是None
+        super().__init__(kwargs or {})
         self.api_key = api_key
         self.model = model
-        self.dimensions = kwargs.get('dimensions', self.MODEL_DIMENSIONS.get(model, 1536))
-
-    def get_embedding_dim(self) -> int:
-        """获取嵌入维度"""
-        return self.dimensions
-        # 根据官方文档，使用base_url格式，OpenAI客户端会自动添加/embeddings
+        self.max_tokens = max_tokens
+        self.batch_size = batch_size
+        self.timeout = timeout
+        self.retry_count = retry_count  # 修复：应该是retry_count而不是retry_delay
+        self.retry_delay = retry_delay
+        
+        # 极端错误检查：确保类型正确
+        if not isinstance(self.retry_count, int):
+            print(f"🚨 CRITICAL ERROR: retry_count must be int, got {type(self.retry_count)}: {self.retry_count}")
+            print(f"🚨 This will cause 'float object cannot be interpreted as an integer' error!")
+            import sys
+            sys.exit(1)
+        
+        if not isinstance(self.batch_size, int):
+            print(f"🚨 CRITICAL ERROR: batch_size must be int, got {type(self.batch_size)}: {self.batch_size}")
+            import sys
+            sys.exit(1)
+        self.use_dashscope_sdk = use_dashscope_sdk and DASHSCOPE_AVAILABLE
+        self.multimodal_model = multimodal_model
+        
+        # 设置API URL
         if api_url:
-            # 如果传入的是完整的embeddings URL，提取base_url
             if api_url.endswith('/embeddings'):
-                self.api_url = api_url[:-11]  # 移除'/embeddings'
+                self.api_url = api_url[:-11]
             else:
                 self.api_url = api_url
         else:
             self.api_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         
-        # 动态设置维度
+        # 设置维度
         custom_dimension = kwargs.get("dimensions") or kwargs.get("dimension")
         if custom_dimension:
-            self.dimension = int(custom_dimension)
+            self.dimensions = int(custom_dimension)
         else:
-            self.dimension = self.MODEL_DIMENSIONS.get(self.model, 1536)
-
-        self.max_tokens = max_tokens
-        self.batch_size = batch_size
-        self.timeout = timeout
-        self.retry_count = retry_count
-        self.retry_delay = retry_delay
-        self.use_dashscope_sdk = use_dashscope_sdk and DASHSCOPE_AVAILABLE
-        self.multimodal_model = multimodal_model
+            self.dimensions = self.MODEL_DIMENSIONS.get(self.model, 1536)
+        
+        # 极端错误检查：确保dimensions是整数
+        if not isinstance(self.dimensions, int):
+            print(f"🚨 CRITICAL ERROR: dimensions must be int, got {type(self.dimensions)}: {self.dimensions}")
+            print(f"🚨 This will cause type errors in API calls!")
+            import sys
+            sys.exit(1)
         
         # HTTP会话管理
         self._session = None
@@ -92,6 +105,10 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
         # 初始化dashscope
         if self.use_dashscope_sdk and dashscope:
             dashscope.api_key = self.api_key
+
+    def get_embedding_dim(self) -> int:
+        """获取嵌入维度"""
+        return self.dimensions
     
     async def _get_session(self) -> aiohttp.ClientSession:
         """获取HTTP会话"""
@@ -108,11 +125,27 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
             )
         return self._session
     
+
+    
     def embed(self, texts: List[str], **kwargs) -> List[List[float]]:
         """同步embedding接口"""
         return asyncio.run(self.aembed(texts, **kwargs))
-    
+
     async def aembed(self, texts: List[str], **kwargs) -> List[List[float]]:
+        """异步embedding接口"""
+        if not texts:
+            return []
+        
+        # 分批处理
+        all_embeddings = []
+        for i in range(0, len(texts), self.batch_size):
+            batch = texts[i:i + self.batch_size]
+            batch_embeddings = await self._embed_batch(batch, **kwargs)
+            all_embeddings.extend(batch_embeddings)
+        
+        return all_embeddings
+
+    async def aembed_documents(self, texts: List[str], **kwargs) -> List[List[float]]:
         """异步embedding接口"""
         if not texts:
             return []
@@ -238,10 +271,11 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
     
     async def _embed_batch(self, texts: List[str], **kwargs) -> List[List[float]]:
         """处理单个批次的embedding"""
-        # 优先使用OpenAI客户端（兼容接口）
-        if self._openai_client:
+        # 暂时跳过 OpenAI 兼容接口，直接使用原生百炼API
+        # 因为百炼的 OpenAI 兼容接口参数格式有问题
+        if False and self._openai_client:
             try:
-                # 准备参数
+                # 准备参数 - 使用 OpenAI 兼容接口格式
                 embed_kwargs = {
                     "model": self.model,
                     "input": texts,
@@ -250,14 +284,8 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
                 }
                 
                 # 如果支持维度参数
-                if self.dimension:
-                    embed_kwargs["dimensions"] = self.dimension
-                
-                # print(f"\n🔍 百炼API请求详情 (OpenAI客户端):")
-                # print(f"Base URL: {self.api_url}")
-                # print(f"Model: {self.model}")
-                # print(f"Input: {texts}")
-                # print(f"Kwargs: {embed_kwargs}")
+                if self.dimensions:
+                    embed_kwargs["dimensions"] = self.dimensions
                 
                 # 调用OpenAI客户端
                 response = await self._openai_client.embeddings.create(**embed_kwargs)
@@ -280,6 +308,25 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
         # 修复：确保api_url不为None
         api_url = self.api_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
         
+        # 极端错误检查：验证texts参数类型
+        if not isinstance(texts, list):
+            print(f"🚨 CRITICAL ERROR: texts must be list, got {type(texts)}: {texts}")
+            import traceback
+            print("🚨 调用栈:")
+            traceback.print_stack()
+            import sys
+            sys.exit(1)
+        
+        for i, text in enumerate(texts):
+            if not isinstance(text, str):
+                print(f"🚨 CRITICAL ERROR: texts[{i}] must be str, got {type(text)}: {text}")
+                print(f"🚨 完整texts内容: {texts}")
+                import traceback
+                print("🚨 调用栈:")
+                traceback.print_stack()
+                import sys
+                sys.exit(1)
+        
         payload = {
             "model": self.model,
             "input": texts,  # 直接传递文本列表，兼容OpenAI格式
@@ -288,22 +335,20 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
         }
         
         # 如果支持维度参数（text-embedding-v3及以上）
-        if self.model in ["text-embedding-v3", "text-embedding-v4"] and self.dimension:
-            payload["dimensions"] = self.dimension
+        if self.model in ["text-embedding-v3", "text-embedding-v4"] and self.dimensions:
+            payload["dimensions"] = self.dimensions
         
-        # # 添加详细的请求日志
+        # 添加详细的请求日志（可选调试）
         # print(f"\n🔍 百炼API请求详情 (HTTP):")
         # print(f"URL: {api_url}/embeddings")
-        # print(f"Headers: {headers}")
         # print(f"Payload: {payload}")
         # print(f"Texts count: {len(texts)}")
-        # print(f"First text preview: {texts[0][:100] if texts else 'N/A'}...")
         
         for attempt in range(self.retry_count + 1):
             try:
                 session = await self._get_session()
                 async with session.post(
-                    api_url,  # 修复：使用确保不为None的api_url
+                    f"{api_url}/embeddings",  # 修复：添加 /embeddings 端点
                     headers=headers,
                     json=payload
                 ) as response:
@@ -359,5 +404,9 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
     
     def __del__(self):
         """析构函数"""
-        if self._session and not self._session.closed:
-            asyncio.create_task(self.close())
+        if hasattr(self, '_session') and self._session and not self._session.closed:
+            try:
+                asyncio.create_task(self.close())
+            except Exception:
+                # 忽略析构函数中的异常
+                pass
