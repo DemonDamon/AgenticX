@@ -177,10 +177,17 @@ class VectorRetriever(BaseRetriever):
         """Generate embedding for text."""
         
         try:
-            embeddings = await self.embedding_provider.aembed([text])
-            if embeddings and len(embeddings) > 0:
-                return np.array(embeddings[0])
-            return None
+            # 修复：根据provider类型选择正确的调用方式
+            if hasattr(self.embedding_provider, 'aembed_text'):
+                # EmbeddingRouter类型，使用aembed_text处理单个字符串
+                embedding = await self.embedding_provider.aembed_text(text)
+                return np.array(embedding)
+            else:
+                # BaseEmbeddingProvider类型，使用aembed处理字符串列表
+                embeddings = await self.embedding_provider.aembed([text])
+                if embeddings and len(embeddings) > 0:
+                    return np.array(embeddings[0])
+                return None
             
         except Exception as e:
             print(f"Failed to generate embedding: {e}")
