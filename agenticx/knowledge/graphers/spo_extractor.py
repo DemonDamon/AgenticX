@@ -429,9 +429,10 @@ class SPOExtractor:
         
         return common_chars / max_len
     
-    def _create_missing_entity(self, entity_name: str, entities: List, entity_id_map: Dict[str, str]) -> Optional[str]:
-        """动态创建缺失的实体"""
+    def _create_missing_entity(self, entity_name: str, entities: List, entity_id_map: Dict[str, str], source_text: str = "") -> Optional[str]:
+        """动态创建缺失的实体，从原文中提取描述"""
         import uuid
+        import re
         from .models import Entity, EntityType
         
         # 过滤掉过短或无意义的实体名称
@@ -460,16 +461,19 @@ class SPOExtractor:
             from .models import EntityType
             entity_type = EntityType.CONCEPT
         
+        # 从原文中提取实体描述
+        entity_description = self._extract_entity_description_from_text(entity_name, source_text)
+        
         # 创建新实体
         try:
             new_entity = Entity(
                 id=entity_id,
                 name=entity_name,
                 entity_type=entity_type,
-                description=f"动态创建的实体: {entity_name}",
+                description=entity_description,
                 confidence=0.7  # 动态创建的实体置信度较低
             )
-            logger.debug(f"✅ 成功创建实体: {entity_name} ({entity_type.value})")
+            logger.debug(f"✅ 成功创建实体: {entity_name} ({entity_type.value}) - {entity_description[:50]}...")
         except Exception as e:
             logger.error(f"❌ 创建实体失败: {e}")
             return None
@@ -514,8 +518,78 @@ class SPOExtractor:
         if any(word in name_lower for word in ['算法', '方法', '技术', '理论', '概念', 'algorithm', 'method', 'technique', 'theory', 'concept', 'approach']):
             return EntityType.CONCEPT
         
-        # 默认为概念
+        # 默认返回概念类型
         return EntityType.CONCEPT
+    
+    def _extract_entity_description_from_text(self, entity_name: str, source_text: str) -> str:
+        """从原文中提取实体的描述信息"""
+        import re
+        
+        if not source_text or not entity_name:
+            return f"实体: {entity_name}"
+        
+        # 尝试多种模式提取实体描述
+        patterns = [
+            # 模式1: "实体名称是/为/指..."
+            rf"{re.escape(entity_name)}(?:是|为|指|表示|代表)([^。，；！？\n]+)",
+            # 模式2: "实体名称，描述..."
+            rf"{re.escape(entity_name)}，([^。，；！？\n]+)",
+            # 模式3: "实体名称：描述..."
+            rf"{re.escape(entity_name)}：([^。，；！？\n]+)",
+            # 模式4: "实体名称 - 描述..."
+            rf"{re.escape(entity_name)}\s*-\s*([^。，；！？\n]+)",
+            # 模式5: "实体名称(描述)"
+            rf"{re.escape(entity_name)}\s*\(([^)]+)\)",
+            # 模式6: 英文模式 "EntityName is/are..."
+            rf"{re.escape(entity_name)}\s+(?:is|are|refers to|represents?)\s+([^.;,!?\n]+)",
+            # 模式7: 前后文描述
+            rf"([^。，；！？\n]*{re.escape(entity_name)}[^。，；！？\n]*)"
+        ]
+        
+        best_description = ""
+        max_length = 0
+        
+        for pattern in patterns:
+            try:
+                matches = re.finditer(pattern, source_text, re.IGNORECASE)
+                for match in matches:
+                    if len(match.groups()) > 0:
+                        desc = match.group(1).strip()
+                        # 过滤掉过短或无意义的描述
+                        if len(desc) > max_length and len(desc) > 5:
+                            # 清理描述文本
+                            desc = re.sub(r'\s+', ' ', desc)  # 规范化空白字符
+                            desc = desc.strip('，。；！？.,;!?')  # 移除标点符号
+                            if desc and not desc.lower() in ['是', 'is', 'are', 'the', 'a', 'an']:
+                                best_description = desc
+                                max_length = len(desc)
+            except Exception as e:
+                logger.debug(f"模式匹配失败: {pattern}, 错误: {e}")
+                continue
+        
+        # 如果没有找到好的描述，尝试提取实体周围的上下文
+        if not best_description and source_text:
+            try:
+                # 查找实体在文本中的位置
+                entity_pos = source_text.lower().find(entity_name.lower())
+                if entity_pos != -1:
+                    # 提取前后各50个字符作为上下文
+                    start = max(0, entity_pos - 50)
+                    end = min(len(source_text), entity_pos + len(entity_name) + 50)
+                    context = source_text[start:end].strip()
+                    
+                    # 清理上下文
+                    context = re.sub(r'\s+', ' ', context)
+                    if len(context) > 20:
+                        best_description = f"上下文: {context}"
+            except Exception as e:
+                logger.debug(f"上下文提取失败: {e}")
+        
+        # 如果仍然没有描述，使用实体名称本身
+        if not best_description:
+            best_description = f"实体: {entity_name}"
+        
+        return best_description
     
     def _build_spo_prompt(self, text: str) -> str:
         """Build SPO extraction prompt using prompt manager and custom schema"""
@@ -831,7 +905,7 @@ class SPOExtractor:
             
             if not source_id:
                 # 动态创建缺失的源实体
-                source_id = self._create_missing_entity(source_name, entities, entity_id_map)
+                source_id = self._create_missing_entity(source_name, entities, entity_id_map, source_text)
                 if not source_id:
                     logger.warning(f"⚠️ 源实体未找到且无法创建: {source_name}")
                     continue
@@ -840,7 +914,7 @@ class SPOExtractor:
                     
             if not target_id:
                 # 动态创建缺失的目标实体
-                target_id = self._create_missing_entity(target_name, entities, entity_id_map)
+                target_id = self._create_missing_entity(target_name, entities, entity_id_map, source_text)
                 if not target_id:
                     logger.warning(f"⚠️ 目标实体未找到且无法创建: {target_name}")
                     continue
