@@ -7,17 +7,19 @@ name = "agenticx"
 dynamic = ["version"]
 description = "A unified, scalable, production-ready multi-agent application development framework"
 authors = [
-    {name = "AgenticX Team", email = "team@agenticx.ai"},
+    {name = "Ziran Li", email = "bingzhenli@hotmail.com"},
 ]
 license = {text = "Apache-2.0"}
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.8"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -29,98 +31,88 @@ classifiers = [
 keywords = ["ai", "agents", "multi-agent", "framework", "automation", "llm", "workflow", "orchestration"]
 
 dependencies = [
-    # 核心依赖
-    "pydantic>=2.0.0,<3.0.0",
-    "typing-extensions>=4.0.0",
-    "loguru>=0.7.0",
-    "rich>=13.0.0",
-    "aiohttp>=3.8.0",
-    "websockets>=11.0.0",
-    
-    # LLM基础依赖
-    "litellm>=1.40.0",
-    
-    # 工具依赖
-    "httpx>=0.25.0",
-    "requests>=2.31.0",
-    
-    # 实用工具
-    "python-dotenv>=1.0.0",
-    "click>=8.0.0",
-    "PyYAML>=6.0.0",
-    "jinja2>=3.0.0",
-    "typer>=0.9.0",
-    
+    # 核心依赖 - TestPyPI兼容
+    "pydantic",
+    "typing-extensions",
+    "loguru",
+    "rich",
+    "click",
+    "PyYAML>=6.0",
+    "jinja2",
+    "python-dotenv",
+    "httpx",
+    "requests",
+    "pytest",
+    "pytest-asyncio",
+    "psutil",
+    "aiohttp",
+    "websockets",
+    "fastapi",
+    "uvicorn",
+    "structlog",
+    "typer",
+    "cryptography",
+    "psycopg2-binary",
+    "chardet",
+    "docstring_parser",
+    "SQLAlchemy",
+    "ujson",
+    "tqdm",
+    "joblib",
+    # 核心LLM依赖
+    "openai",
+    "litellm",
+    "tiktoken",
+    "tokenizers",
+    "huggingface-hub",
+    # 核心记忆系统依赖
+    "mem0ai",
+    "redis",
+    "pymilvus",
+    # LLM提供者（全部）
+    "anthropic",
+    "ollama",
+    # 记忆系统（全部）
+    "chromadb",
+    "qdrant-client",
+    # 监控和可观测性
+    "prometheus-client",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    # 数据处理
+    "pandas",
+    "numpy",
+    "scikit-learn",
+    "scipy",
+    "matplotlib",
+    "seaborn",
+    "plotly",
+    # 通信协议
+    "asyncio-mqtt",
+    "mcp",
+    # 文档处理
+    "PyMuPDF",
+    "pypdf",
+    "PyPDF2",
+    "python-Levenshtein",
+    "RapidFuzz",
+    # 图分析和网络分析
+    "networkx",
+    "cdlib",
+    "wurlitzer",
+    "bayanpy", 
+    "infomap",
+    "neo4j",
+    "pyclustering",
+    "ASLPAw",
+    "leidenalg",
     # 文档工具
-    "mkdocs>=1.5.0",
-    "mkdocs-material>=9.0.0",
-    "pydoc-markdown>=4.8.0",
+    "mkdocs",
+    "mkdocs-material",
+    "pydoc-markdown"
 ]
 
-[project.optional-dependencies]
-# LLM提供者
-llms = [
-    "openai>=1.0.0",
-    "anthropic>=0.25.0,<0.30.0",  # 避免与chromadb冲突
-    "ollama>=0.2.0",
-]
 
-# 记忆系统
-memory = [
-    "mem0ai>=0.1.0",
-    "chromadb>=0.4.0,<1.1.0",  # 使用稳定版本避免冲突
-    "qdrant-client>=1.7.0",
-]
-
-# 监控和可观测性
-monitoring = [
-    "prometheus-client>=0.18.0",
-    "opentelemetry-api>=1.20.0",
-    "opentelemetry-sdk>=1.20.0",
-]
-
-# 数据处理
-data = [
-    "pandas>=2.0.0",
-    "numpy>=1.24.0",
-]
-
-# 通信协议
-protocols = [
-    "asyncio-mqtt>=0.12.0",
-    "mcp>=1.0.0",
-]
-
-# 开发工具
-dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.0.0",
-    "black>=23.0.0",
-    "flake8>=6.0.0",
-    "mypy>=1.0.0",
-    "pre-commit>=3.0.0",
-    "twine>=4.0.0",
-    "build>=0.10.0",
-]
-
-# 文档工具
-docs = [
-]
-
-# 所有功能
-all = [
-    "agenticx[llms,memory,monitoring,data,protocols]",
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.0.0",
-    "black>=23.0.0",
-    "flake8>=6.0.0",
-    "mypy>=1.0.0",
-    "pre-commit>=3.0.0",
-    "twine>=4.0.0",
-    "build>=0.10.0",
-]
 
 [project.urls]
 Homepage = "https://github.com/DemonDamon/AgenticX"
