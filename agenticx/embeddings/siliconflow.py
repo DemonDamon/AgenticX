@@ -1,4 +1,5 @@
 import requests
+import asyncio
 from typing import List, Optional
 from .base import BaseEmbeddingProvider, EmbeddingError
 
@@ -21,7 +22,7 @@ class SiliconFlowEmbeddingProvider(BaseEmbeddingProvider):
         
         payload = {
             "model": self.model,
-            "input": texts if len(texts) > 1 else texts[0],
+            "input": texts,  # 始终传递列表格式
             "encoding_format": encoding_format
         }
         if dimensions:
@@ -39,3 +40,12 @@ class SiliconFlowEmbeddingProvider(BaseEmbeddingProvider):
             return [item["embedding"] for item in data["data"]]
         except Exception as e:
             raise EmbeddingError(f"SiliconFlow embedding error: {e}")
+
+    async def aembed(self, texts: List[str], **kwargs) -> List[List[float]]:
+        """异步embedding接口"""
+        # 在线程池中运行同步的embed方法
+        loop = asyncio.get_event_loop()
+        # 使用 functools.partial 来正确传递 kwargs
+        import functools
+        func = functools.partial(self.embed, texts, **kwargs)
+        return await loop.run_in_executor(None, func)
