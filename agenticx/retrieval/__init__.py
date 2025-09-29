@@ -9,7 +9,7 @@ from .base import BaseRetriever, RetrievalResult, RetrievalQuery, RetrievalType,
 from .vector_retriever import VectorRetriever
 from .bm25_retriever import BM25Retriever
 from .hybrid_retriever import HybridRetriever, HybridConfig
-from .graph_retriever import GraphRetriever, GraphNode, GraphRelationship
+from .graph_retriever import GraphRetriever, GraphNode, GraphRelationship, GraphVectorConfig
 from .auto_retriever import AutoRetriever, StrategyPerformance
 from .reranker import Reranker, RerankingConfig
 
@@ -55,6 +55,7 @@ __all__ = [
     "GraphRetriever",
     "GraphNode",
     "GraphRelationship",
+    "GraphVectorConfig",
     "AutoRetriever",
     "StrategyPerformance",
     "Reranker",
@@ -82,4 +83,4 @@ __all__ = [
     "QueryModificationArgs",
     "AnswerGenerationArgs",
     "CanAnswerArgs"
-] 
+]
