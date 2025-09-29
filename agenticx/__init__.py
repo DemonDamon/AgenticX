@@ -25,8 +25,8 @@ AgenticX是一个完整的多智能体应用开发框架，提供从核心抽象
 """
 
 # 版本信息
-__version__ = "0.2.4"
-__author__ = "AgenticX Team"
+__version__ = "0.1.3"
+__author__ = "Ziran Li"
 __email__ = "bingzhenli@hotmail.com"
 
 # 核心模块导出
