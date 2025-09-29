@@ -171,11 +171,11 @@ class StorageManager:
         import logging
         logger = logging.getLogger(__name__)
         
-        logger.info(f"🔧 开始初始化 {len(self.configs)} 个存储配置")
+        logger.info(f"开始初始化 {len(self.configs)} 个存储配置")
         
         for i, config in enumerate(self.configs):
             try:
-                logger.info(f"📦 初始化存储 {i+1}: {config.storage_type.value}")
+                logger.info(f"初始化存储 {i+1}: {config.storage_type.value}")
                 storage = self._create_storage(config)
                 # TODO: Implement async connect for different storage types
                 self.storages.append(storage)
