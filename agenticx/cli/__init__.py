@@ -11,7 +11,7 @@ from .debug import DebugServer
 from .docs import DocGenerator
 from .deploy import DeployManager
 
-__version__ = "0.2.4"
+__version__ = "0.1.3"
 
 __all__ = [
     "main",
