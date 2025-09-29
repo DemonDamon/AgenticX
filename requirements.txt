@@ -1,63 +1,97 @@
 # Core dependencies
-pydantic>=2.0.0,<3.0.0
-typing-extensions>=4.0.0
-loguru>=0.7.0
-rich>=13.0.0
-aiohttp>=3.8.0
-asyncio-mqtt>=0.16.1
-websockets>=11.0.0
-typer>=0.9.0
-click>=8.0.0
-PyYAML>=6.0.0
-jinja2>=3.0.0
-python-dotenv>=1.0.0
+pydantic
+typing-extensions
+loguru
+rich
+aiohttp
+asyncio-mqtt
+websockets
+typer
+click
+PyYAML
+jinja2
+python-dotenv
+cryptography
+psycopg2-binary
+chardet
+cdlib
+docstring_parser
 
 # Web framework dependencies
-fastapi>=0.104.0
-uvicorn>=0.24.0
+fastapi
+uvicorn
+mem0ai
 
 # LLM dependencies
-litellm>=1.40.0
-openai>=1.0.0
-anthropic>=0.25.0
-ollama>=0.2.0
+litellm
+openai
+anthropic
+ollama
+tiktoken
+tokenizers
+huggingface-hub
+
+# Text processing
+python-Levenshtein
+RapidFuzz
 
 # Tool dependencies
-mcp>=1.0.0
-httpx>=0.25.0
-requests>=2.31.0
+mcp
+httpx
+requests
+SQLAlchemy
+ujson
+tqdm
+joblib
 
 # Memory dependencies
-mem0ai>=0.1.0
-chromadb>=0.4.0
-qdrant-client>=1.7.0
-redis>=5.0.0
+mem0ai
+chromadb
+qdrant-client
+redis
+pymilvus
 
 # Monitoring dependencies
-prometheus-client>=0.18.0
-opentelemetry-api>=1.20.0
-opentelemetry-sdk>=1.20.0
+prometheus-client
+opentelemetry-api
+opentelemetry-sdk
 
 # Data processing
-pandas>=2.0.0
-numpy>=1.24.0
+pandas
+numpy
+scikit-learn
+scipy
+matplotlib
+seaborn
+plotly
+
+# Document processing
+PyMuPDF
+pypdf
+PyPDF2
 
 # Knowledge Graph dependencies
-networkx>=3.0.0
-neo4j>=5.0.0
-cdlib>=0.3.0  # Community detection
+networkx
+neo4j
+cdlib
 
 # Docs dependencies
-mkdocs>=1.5.0
-mkdocs-material>=9.0.0
-pydoc-markdown>=4.8.0
-docstring-parser>=0.15.0
+mkdocs
+mkdocs-material
+pydoc-markdown
+docstring-parser
 
 # Demo and development dependencies
-psutil>=5.9.0
-structlog>=23.0.0
-pytest>=7.0.0
-pytest-asyncio>=0.21.0
-black>=23.0.0
-isort>=5.12.0
-flake8>=6.0.0
+psutil
+structlog
+pytest
+pytest-asyncio
+black
+isort
+flake8
+
+wurlitzer
+bayanpy
+infomap
+pyclustering
+ASLPAw

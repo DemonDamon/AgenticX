@@ -20,46 +20,21 @@ def read_readme():
 
 # 读取requirements.txt
 def read_requirements():
-    # 检查是否使用test.pypi.org的最小依赖
-    use_testpypi = os.getenv('USE_TESTPYPI_DEPS', '').lower() in ('true', '1', 'yes')
+    # 检查是否为TestPyPI构建
+    use_testpypi = os.environ.get('USE_TESTPYPI_DEPS', 'false').lower() == 'true'
     
     if use_testpypi:
-        # 使用test.pypi.org兼容的最小依赖
-        requirements_file = 'requirements-testpypi.txt'
+        requirements_path = os.path.join(here, 'requirements-testpypi.txt')
+        print("使用TestPyPI兼容的最小依赖")
     else:
-        # 使用完整的requirements.txt
-        requirements_file = 'requirements.txt'
-    
-    requirements_path = os.path.join(here, requirements_file)
-    if not os.path.exists(requirements_path):
-        # 如果test.pypi.org文件不存在，回退到主文件但过滤不兼容的包
         requirements_path = os.path.join(here, 'requirements.txt')
-        use_testpypi = True
+        print("使用完整依赖")
     
     with open(requirements_path, encoding='utf-8') as f:
         requirements = []
         for line in f:
             line = line.strip()
             if line and not line.startswith('#'):
-                if use_testpypi and requirements_file == 'requirements.txt':
-                    # 过滤掉test.pypi.org上不可用的包
-                    skip_packages = [
-                        'litellm', 'openai', 'anthropic', 'ollama', 'mcp',
-                        'mem0ai', 'chromadb', 'qdrant-client', 'redis',
-                        'prometheus-client', 'opentelemetry-api', 'opentelemetry-sdk',
-                        'pandas', 'numpy', 'networkx', 'neo4j', 'cdlib',
-                        'mkdocs', 'mkdocs-material', 'pydoc-markdown',
-                        'fastapi', 'uvicorn', 'httpx', 'aiohttp', 'websockets',
-                        'asyncio-mqtt', 'typer'
-                    ]
-                    package_name = line.split('>=')[0].split('==')[0].split('<')[0]
-                    if any(skip in package_name for skip in skip_packages):
-                        continue
-                    # 调整pydantic版本
-                    if line.startswith('pydantic>=2.0.0'):
-                        requirements.append('pydantic>=1.4,<2.0')
-                        continue
-                
                 requirements.append(line)
         return requirements
 
@@ -135,7 +110,7 @@ setup(
     packages=find_packages(exclude=["tests*", "examples*", "docs*"]),
     include_package_data=True,
     zip_safe=False,
-    python_requires=">=3.10",
+    python_requires=">=3.8",
     install_requires=install_requires,
     extras_require=extras_require,
     classifiers=[
@@ -144,6 +119,8 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
