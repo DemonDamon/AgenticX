@@ -593,7 +593,30 @@ class GraphRetriever(BaseRetriever):
         # 如果没有content，才使用备用生成逻辑
         if not content:
             if result_type == 'node':
-                content = f"Entity: {metadata.get('name', '')}. {metadata.get('description', '')}"
+                name = metadata.get('name', '')
+                description = metadata.get('description', '')
+                
+                # 过滤掉无用的"动态创建的实体"描述
+                if description.startswith('动态创建的实体:') or description.startswith('实体:'):
+                    # 尝试从其他字段获取更好的描述
+                    if 'properties' in metadata and isinstance(metadata['properties'], dict):
+                        props = metadata['properties']
+                        # 查找可能的描述字段
+                        for key in ['description', 'summary', 'content', 'definition', 'info']:
+                            if key in props and props[key] and not props[key].startswith('动态创建的实体:'):
+                                description = props[key]
+                                break
+                        else:
+                            # 如果没有找到好的描述，使用实体类型信息
+                            entity_type = props.get('type', props.get('entity_type', ''))
+                            if entity_type:
+                                description = f"类型为{entity_type}的实体"
+                            else:
+                                description = f"知识图谱中的{name}实体"
+                    else:
+                        description = f"知识图谱中的{name}实体"
+                
+                content = f"Entity: {name}. {description}" if description else f"Entity: {name}"
             elif result_type == 'relation':
                 content = f"Relationship: {metadata.get('relation_name', '')}"
             elif result_type == 'triple':
