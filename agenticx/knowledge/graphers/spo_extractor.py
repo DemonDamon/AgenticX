@@ -23,7 +23,7 @@ class SPOExtractor:
         # Use custom schema if provided, otherwise use default
         if custom_schema:
             self.schema = custom_schema
-            logger.info("🎯 使用定制Schema")
+            logger.info("使用定制Schema")
         else:
             # Default schema
             self.schema = {
@@ -38,9 +38,8 @@ class SPOExtractor:
         self.primary_domain = self.domain_info.get('primary_domain', '通用')
         self.key_concepts = ', '.join(self.domain_info.get('key_concepts', []))
         
-        logger.info(f"🔧 SPO抽取器初始化完成")
-        logger.debug(f"📋 Schema: {len(self.schema['Nodes'])} 实体类型, {len(self.schema['Relations'])} 关系类型, {len(self.schema['Attributes'])} 属性类型")
-        logger.debug(f"🎯 主要领域: {self.primary_domain}")
+        logger.info(f"SPO抽取器初始化: {len(self.schema['Nodes'])}实体类型, {len(self.schema['Relations'])}关系类型, {len(self.schema['Attributes'])}属性类型")
+        logger.debug(f"主要领域: {self.primary_domain}")
     
     def extract(self, text: str, **kwargs) -> Tuple[List[Entity], List[Relationship]]:
         """Extract entities and relationships in a single call
@@ -52,25 +51,25 @@ class SPOExtractor:
         Returns:
             Tuple of (entities, relationships)
         """
-        logger.info(f"🔍 开始SPO抽取，文本长度: {len(text)} 字符")
+        logger.info(f"开始SPO抽取，文本长度: {len(text)} 字符")
         
         if not self.llm_client:
             raise ValueError("LLM client is required for SPO extraction")
         
         try:
             # Build prompt
-            logger.debug("📝 构建SPO抽取提示词...")
+            logger.debug("构建SPO抽取提示词...")
             prompt = self._build_spo_prompt(text)
             
             # Call LLM
-            logger.debug("🤖 调用LLM进行SPO抽取")
+            logger.debug("调用LLM进行SPO抽取")
             response = self.llm_client.call(prompt)
-            logger.debug(f"📄 LLM响应长度: {len(response)} 字符")
+            logger.debug(f"LLM响应长度: {len(response)} 字符")
             
             # Parse response
-            logger.debug("🔍 解析LLM响应...")
+            logger.debug("解析LLM响应...")
             spo_data = self._parse_spo_response(response)
-            logger.debug(f"📊 解析结果: {len(spo_data.get('entity_types', {}))} 个实体类型, {len(spo_data.get('triples', []))} 个三元组")
+            logger.debug(f"解析结果: {len(spo_data.get('entity_types', {}))} 个实体类型, {len(spo_data.get('triples', []))} 个三元组")
             
             # Convert to entities and relationships
             logger.debug("🔄 转换为实体和关系对象...")
@@ -87,7 +86,7 @@ class SPOExtractor:
             logger.debug(f"❌ 错误堆栈: {traceback.format_exc()}")
             return [], []
     
-    async def extract_batch(self, texts: List[str], batch_size: int = 5, **kwargs) -> Tuple[List[Entity], List[Relationship]]:
+    async def extract_batch(self, texts: List[str], batch_size: int = 1, **kwargs) -> Tuple[List[Entity], List[Relationship]]:
         """批处理SPO抽取，显著提高性能
         
         Args:
@@ -98,7 +97,12 @@ class SPOExtractor:
         Returns:
             Tuple of (all_entities, all_relationships)
         """
-        logger.info(f"🚀 开始批处理SPO抽取，总文本数: {len(texts)}, 批大小: {batch_size}")
+        # 计算文本统计信息
+        total_chars = sum(len(text) for text in texts)
+        avg_chars = total_chars / len(texts) if texts else 0
+        
+        logger.info(f"开始批处理SPO抽取，总文本数: {len(texts)}, 批大小: {batch_size}")
+        logger.info(f"文本统计: 总字符数={total_chars}, 平均字符数={avg_chars:.0f}/文本")
         
         all_entities = []
         all_relationships = []
@@ -109,14 +113,18 @@ class SPOExtractor:
             batch_num = i // batch_size + 1
             total_batches = (len(texts) + batch_size - 1) // batch_size
             
-            logger.info(f"📦 处理批次 {batch_num}/{total_batches} ({len(batch_texts)} 个文本)")
+            # 计算当前批次的字符数统计
+            batch_chars = sum(len(text) for text in batch_texts)
+            batch_avg_chars = batch_chars / len(batch_texts) if batch_texts else 0
+            
+            logger.info(f"处理批次 {batch_num}/{total_batches} ({len(batch_texts)}个文本, {batch_chars}字符, 平均{batch_avg_chars:.0f}字符/文本)")
             
             try:
                 # 构建批处理提示词
                 batch_prompt = self._build_batch_spo_prompt(batch_texts)
                 
                 # 调用LLM
-                logger.debug("🤖 调用LLM进行批处理SPO抽取")
+                logger.debug("调用LLM进行批处理SPO抽取")
                 response = self.llm_client.call(batch_prompt)
                 
                 # 解析批处理响应
@@ -150,32 +158,33 @@ class SPOExtractor:
         for i, text in enumerate(texts):
             batch_content += f"\n=== 文档片段 {i+1} ===\n{text}\n"
         
-        prompt = f"""你是一个专业的知识图谱构建专家。请从以下多个文档片段中抽取实体、关系和属性，构建结构化的知识图谱。
+        prompt = f"""你是专业的知识图谱构建专家。请从以下文档片段中抽取实体、关系和属性。
 
-领域信息：{self.primary_domain}
-关键概念：{self.key_concepts}
+领域：{self.primary_domain}
+核心概念：{self.key_concepts}
 
-Schema定义：
-{schema_str}
+可用的实体类型：{', '.join(self.schema.get('Nodes', []))}
+可用的关系类型：{', '.join(self.schema.get('Relations', []))}
 
-请分析以下文档片段：
+文档片段：
 {batch_content}
 
-请按照以下JSON格式输出结果：
+请严格按照以下JSON格式返回，确保JSON语法正确：
+
 {{
     "entity_types": {{
         "实体名称": {{
             "type": "实体类型",
             "description": "实体描述",
             "attributes": {{"属性名": "属性值"}},
-            "source_chunks": ["chunk_0", "chunk_1"]
+            "source_chunks": ["chunk_0"]
         }}
     }},
     "triples": [
         {{
-            "subject": "主体实体名称",
-            "predicate": "关系类型", 
-            "object": "客体实体名称",
+            "subject": "主体实体",
+            "predicate": "关系类型",
+            "object": "客体实体",
             "description": "关系描述",
             "confidence": 0.8,
             "source_chunks": ["chunk_0"]
@@ -183,11 +192,11 @@ Schema定义：
     ]
 }}
 
-注意：
-1. 实体名称要准确、一致
-2. 关系要明确、有意义
-3. 属性要丰富、准确
-4. 标注每个实体和关系来源的文档片段编号"""
+要求：
+1. 抽取尽可能多的实体和关系
+2. 使用Schema中定义的类型
+3. 确保JSON格式正确，注意逗号和引号
+4. 只返回JSON，不要其他文字"""
         
         return prompt
     
@@ -196,13 +205,13 @@ Schema定义：
         try:
             # 清理和解析响应
             cleaned_response = self._clean_llm_response(response)
-            logger.debug(f"🔍 清理后的响应长度: {len(cleaned_response)}")
+            logger.debug(f"清理后的响应长度: {len(cleaned_response)}")
             
             try:
                 spo_data = json.loads(cleaned_response)
             except json.JSONDecodeError as json_error:
                 logger.warning(f"⚠️ JSON解析失败: {json_error}")
-                logger.debug(f"🔍 问题JSON片段: {cleaned_response[:200]}...")
+                logger.debug(f"问题JSON片段: {cleaned_response[:200]}...")
                 
                 # 尝试更激进的修复
                 fixed_response = self._aggressive_json_fix(cleaned_response)
@@ -257,7 +266,7 @@ Schema定义：
         normalized_target = self._normalize_entity_name(entity_name)
         for name, entity_id in entity_id_map.items():
             if self._normalize_entity_name(name) == normalized_target:
-                logger.debug(f"🔍 标准化匹配成功: '{entity_name}' -> '{name}'")
+                logger.debug(f"标准化匹配成功: '{entity_name}' -> '{name}'")
                 return entity_id
         
         # 3. 相似度匹配（处理复合词、缩写等）
@@ -271,14 +280,14 @@ Schema定义：
                 best_match = (name, entity_id)
         
         if best_match:
-            logger.debug(f"🔍 相似度匹配成功: '{entity_name}' -> '{best_match[0]}' (相似度: {best_score:.2f})")
+            logger.debug(f"相似度匹配成功: '{entity_name}' -> '{best_match[0]}' (相似度: {best_score:.2f})")
             return best_match[1]
         
         # 4. 包含关系匹配（降低优先级）
         for name, entity_id in entity_id_map.items():
             if len(normalized_target) > 3:  # 避免短词误匹配
                 if normalized_target in self._normalize_entity_name(name) or self._normalize_entity_name(name) in normalized_target:
-                    logger.debug(f"🔍 包含匹配成功: '{entity_name}' -> '{name}'")
+                    logger.debug(f"包含匹配成功: '{entity_name}' -> '{name}'")
                     return entity_id
         
         return None
@@ -311,7 +320,7 @@ Schema定义：
             
             # 技术领域
             if any(keyword in domain_lower for keyword in ['技术', '科技', '人工智能', 'ai', 'technology', 'tech']):
-                logger.debug(f"🔧 检测到技术领域: {self.primary_domain}")
+                logger.debug(f"检测到技术领域: {self.primary_domain}")
                 return "domain_templates.technology"
             
             # 商业领域
@@ -330,7 +339,7 @@ Schema定义：
         # 技术文档特征
         tech_keywords = ['算法', '模型', '框架', '系统', '代码', 'algorithm', 'model', 'framework', 'system']
         if any(keyword in text_lower for keyword in tech_keywords):
-            logger.debug("🔧 根据内容特征选择技术模板")
+            logger.debug("根据内容特征选择技术模板")
             return "domain_templates.technology"
         
         # 商业文档特征
@@ -346,7 +355,7 @@ Schema定义：
             return "domain_templates.academic"
         
         # 4. 默认使用主模板
-        logger.debug("📄 使用默认主模板")
+        logger.debug("使用默认主模板")
         return "template"
     
     def _calculate_similarity(self, name1: str, name2: str) -> float:
@@ -445,7 +454,7 @@ Schema定义：
         # 推断实体类型（简单的启发式规则）
         try:
             entity_type = self._infer_entity_type(entity_name)
-            logger.debug(f"🔍 推断实体类型: {entity_name} -> {entity_type.value}")
+            logger.debug(f"推断实体类型: {entity_name} -> {entity_type.value}")
         except Exception as e:
             logger.warning(f"⚠️ 实体类型推断失败: {e}，使用默认类型")
             from .models import EntityType
@@ -518,7 +527,7 @@ Schema定义：
                 
                 # 智能选择模板
                 template_name = self._select_template(text)
-                logger.info(f"🎯 选择模板: {template_name}")
+                logger.info(f"选择模板: {template_name}")
                 
                 # 处理领域模板路径
                 if template_name.startswith("domain_templates."):
@@ -527,6 +536,9 @@ Schema定义：
                         "spo_extraction",
                         template_key=f"domain_templates.{domain_type}.template",
                         custom_schema=custom_schema_str,
+                        node_types=', '.join(self.schema.get('Nodes', [])),
+                        relation_types=', '.join(self.schema.get('Relations', [])),
+                        attribute_types=', '.join(self.schema.get('Attributes', [])),
                         primary_domain=self.primary_domain,
                         key_concepts=self.key_concepts,
                         text=text
@@ -536,13 +548,16 @@ Schema定义：
                         "spo_extraction",
                         template_key=template_name,
                         custom_schema=custom_schema_str,
+                        node_types=', '.join(self.schema.get('Nodes', [])),
+                        relation_types=', '.join(self.schema.get('Relations', [])),
+                        attribute_types=', '.join(self.schema.get('Attributes', [])),
                         primary_domain=self.primary_domain,
                         key_concepts=self.key_concepts,
                         text=text
                     )
                 
                 if prompt:
-                    logger.debug(f"📄 使用{template_name}模板生成SPO抽取提示词")
+                    logger.debug(f"使用{template_name}模板生成SPO抽取提示词")
                     return prompt
                 else:
                     logger.warning("⚠️ 提示词模板加载失败，使用默认提示词")
@@ -719,7 +734,7 @@ Schema定义：
             json.loads(json_str)
             return json_str
         except:
-            logger.warning("🔧 返回最小有效JSON结构")
+            logger.warning("返回最小有效JSON结构")
             return '{"entity_types": {}, "triples": []}'
     
     def _convert_spo_to_objects(self, spo_data: Dict[str, Any], source_text: str, **kwargs) -> Tuple[List[Entity], List[Relationship]]:
@@ -821,7 +836,7 @@ Schema定义：
                     logger.warning(f"⚠️ 源实体未找到且无法创建: {source_name}")
                     continue
                 else:
-                    logger.info(f"🔧 动态创建源实体: {source_name}")
+                    logger.info(f"动态创建源实体: {source_name}")
                     
             if not target_id:
                 # 动态创建缺失的目标实体
@@ -830,7 +845,7 @@ Schema定义：
                     logger.warning(f"⚠️ 目标实体未找到且无法创建: {target_name}")
                     continue
                 else:
-                    logger.info(f"🔧 动态创建目标实体: {target_name}")
+                    logger.info(f"动态创建目标实体: {target_name}")
             
             # Create relationship
             try:
