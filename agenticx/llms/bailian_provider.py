@@ -1,6 +1,8 @@
 from typing import Any, Optional, Dict, List, AsyncGenerator, Generator, Union
 import openai
 import json
+import requests
+import aiohttp
 from pydantic import Field
 from loguru import logger
 from .base import BaseLLMProvider
@@ -28,6 +30,90 @@ class BailianProvider(BaseLLMProvider):
             max_retries=self.max_retries or 3
         )
     
+    def _needs_native_request(self, model_name: str) -> bool:
+        """检查是否需要使用原生HTTP请求（因为有百炼特有参数）"""
+        model_lower = model_name.lower()
+        return any(model in model_lower for model in ["qwen3-32b", "qwen3-8b", "qwen-plus", "qwen-turbo"])
+    
+    def _make_native_request(self, request_params: Dict[str, Any]) -> Any:
+         """使用原生HTTP请求调用百炼API"""
+         headers = {
+             "Authorization": f"Bearer {self.api_key}",
+             "Content-Type": "application/json"
+         }
+         
+         # 添加百炼特有参数
+         if self._needs_native_request(request_params.get("model", "")):
+             request_params["enable_thinking"] = False
+             logger.debug(f"为模型 {request_params.get('model')} 设置 enable_thinking=false")
+         
+         url = f"{self.base_url}/chat/completions"
+         
+         try:
+             # 禁用代理以避免连接问题
+             proxies = {
+                 'http': None,
+                 'https': None
+             }
+             
+             response = requests.post(
+                 url,
+                 headers=headers,
+                 json=request_params,
+                 timeout=self.timeout,
+                 proxies=proxies,
+                 verify=True  # 保持SSL验证
+             )
+             response.raise_for_status()
+             return response.json()
+         except Exception as e:
+             raise Exception(f"Native Bailian API call failed: {str(e)}")
+    
+    def _convert_native_response(self, response_data: Dict[str, Any]) -> Any:
+         """将原生响应转换为OpenAI格式的对象"""
+         # 创建一个简单的对象来模拟OpenAI响应格式
+         class MockResponse:
+             def __init__(self, data):
+                 self.id = data.get('id', '')
+                 self.model = data.get('model', '')
+                 self.created = data.get('created', 0)
+                 self.choices = []
+                 self.usage = None
+                 
+                 # 处理choices
+                 for choice_data in data.get('choices', []):
+                     choice = type('Choice', (), {})()
+                     choice.index = choice_data.get('index', 0)
+                     choice.finish_reason = choice_data.get('finish_reason', '')
+                     
+                     # 处理message
+                     message_data = choice_data.get('message', {})
+                     message = type('Message', (), {})()
+                     message.content = message_data.get('content', '')
+                     message.role = message_data.get('role', 'assistant')
+                     choice.message = message
+                     
+                     self.choices.append(choice)
+                 
+                 # 处理usage
+                 usage_data = data.get('usage', {})
+                 if usage_data:
+                     usage = type('Usage', (), {})()
+                     usage.prompt_tokens = usage_data.get('prompt_tokens', 0)
+                     usage.completion_tokens = usage_data.get('completion_tokens', 0)
+                     usage.total_tokens = usage_data.get('total_tokens', 0)
+                     self.usage = usage
+         
+         return MockResponse(response_data)
+     
+    def _prepare_bailian_params(self, request_params: Dict[str, Any]) -> Dict[str, Any]:
+         """处理百炼特定的参数，确保与OpenAI客户端兼容"""
+         # 创建参数副本
+         params = request_params.copy()
+         
+         # 如果需要百炼特有参数，不在这里添加，而是在调用时判断使用原生请求
+         return params
+    
     def invoke(
         self, prompt: Union[str, List[Dict]], tools: Optional[List[Dict]] = None, **kwargs
     ) -> LLMResponse:
@@ -52,10 +138,7 @@ class BailianProvider(BaseLLMProvider):
                 request_params["tools"] = tools
             
             # 记录请求详情
-            logger.info(f"🤖 发送请求到百炼API")
-            logger.debug(f"📝 模型: {self.model}")
-            logger.debug(f"🌡️ 温度: {request_params.get('temperature', self.temperature)}")
-            logger.debug(f"💬 消息数量: {len(messages)}")
+            logger.info(f"发送请求到百炼API: 模型={self.model}, 温度={request_params.get('temperature', self.temperature)}, 消息数={len(messages)}")
             
             # 记录消息内容（截断长消息）
             for i, msg in enumerate(messages):
@@ -67,37 +150,39 @@ class BailianProvider(BaseLLMProvider):
                     logger.debug(f"📨 消息[{i}] ({msg.get('role', 'unknown')}): [复杂内容]")
             
             if tools:
-                logger.debug(f"🔧 工具数量: {len(tools)}")
+                logger.debug(f"工具数量: {len(tools)}")
             
-            # 记录完整请求参数（调试级别）
-            logger.trace(f"🔍 完整请求参数: {json.dumps(request_params, ensure_ascii=False, indent=2)}")
-            
-            if self.client is None:
-                raise ValueError("Client not initialized")
-            
-            logger.debug("⏳ 正在调用百炼API...")
-            logger.debug(f"🔍 最终请求参数: {list(request_params.keys())}")
-            
-            response = self.client.chat.completions.create(**request_params)
+            # 检查是否需要使用原生HTTP请求
+            if self._needs_native_request(self.model):
+                logger.debug("使用原生HTTP请求调用百炼API")
+                response_data = self._make_native_request(request_params)
+                # 将原生响应转换为OpenAI格式的对象
+                response = self._convert_native_response(response_data)
+            else:
+                # 使用OpenAI客户端
+                final_params = self._prepare_bailian_params(request_params)
+                logger.trace(f"完整请求参数: {json.dumps(final_params, ensure_ascii=False, indent=2)}")
+                
+                if self.client is None:
+                    raise ValueError("Client not initialized")
+                
+                logger.debug(f"正在调用百炼API: 参数={list(final_params.keys())}")
+                response = self.client.chat.completions.create(**final_params)
             
             # 记录响应详情
             logger.info("✅ 百炼API响应成功")
             if hasattr(response, 'usage') and response.usage:
-                logger.debug(f"📊 Token使用情况:")
-                logger.debug(f"  - 输入Token: {response.usage.prompt_tokens}")
-                logger.debug(f"  - 输出Token: {response.usage.completion_tokens}")
-                logger.debug(f"  - 总Token: {response.usage.total_tokens}")
+                logger.debug(f"Token使用: 输入={response.usage.prompt_tokens}, 输出={response.usage.completion_tokens}, 总计={response.usage.total_tokens}")
             
             if hasattr(response, 'choices') and response.choices:
                 choice = response.choices[0]
                 if hasattr(choice, 'message') and choice.message:
                     content = choice.message.content or ""
                     content_preview = content[:300] + "..." if len(content) > 300 else content
-                    logger.debug(f"💬 响应内容预览: {content_preview}")
-                    logger.debug(f"📏 响应长度: {len(content)} 字符")
+                    logger.debug(f"响应内容: {len(content)}字符 - {content_preview}")
             
             # 记录完整响应（trace级别）
-            logger.trace(f"🔍 完整API响应: {response}")
+            logger.trace(f"完整API响应: {response}")
             
             parsed_response = self._parse_response(response)
             logger.debug(f"✨ 响应解析完成")
@@ -136,7 +221,10 @@ class BailianProvider(BaseLLMProvider):
             if tools:
                 request_params["tools"] = tools
             
-            response = await async_client.chat.completions.create(**request_params)
+            # 处理百炼特定参数
+            final_params = self._prepare_bailian_params(request_params)
+            
+            response = await async_client.chat.completions.create(**final_params)
             return self._parse_response(response)
         except Exception as e:
             raise Exception(f"Bailian API async call failed: {str(e)}")
