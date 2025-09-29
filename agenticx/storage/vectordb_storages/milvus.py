@@ -65,7 +65,7 @@ class MilvusStorage(BaseVectorStorage):
                 connect_params["db_name"] = self.database
             
             # 连接到Milvus
-            logger.info(f"🔍 Milvus连接参数: {connect_params}")
+            logger.info(f"Milvus连接参数: {connect_params}")
             connections.connect("default", **connect_params)
             logger.info("✅ Successfully connected to Milvus.")
             self._client = "default"
@@ -95,7 +95,7 @@ class MilvusStorage(BaseVectorStorage):
                 logger.info(f"✅ 使用现有集合: {self.collection_name}")
             else:
                 # 创建新集合
-                logger.info(f"🔍 创建集合参数: collection_name={self.collection_name}, dimension={self.dimension}")
+                logger.info(f"创建集合参数: collection_name={self.collection_name}, dimension={self.dimension}")
                 
                 # 确保dimension是整数
                 if not isinstance(self.dimension, int) or self.dimension <= 0:
@@ -107,7 +107,7 @@ class MilvusStorage(BaseVectorStorage):
                     FieldSchema(name="metadata", dtype=DataType.VARCHAR, max_length=65535)  # 改为VARCHAR避免JSON兼容性问题
                 ]
                 schema = CollectionSchema(fields, description="AgenticX vector collection")  # 移除enable_dynamic_field
-                logger.info(f"🔍 创建集合Schema完成")
+                logger.info(f"创建集合Schema完成")
                 self.collection = Collection(self.collection_name, schema)
                 
                 # 创建索引
@@ -126,7 +126,7 @@ class MilvusStorage(BaseVectorStorage):
             logger.error(f"❌ 创建/获取集合失败: {e}")
             self.collection = None
 
-    def add(self, records: List[VectorRecord], **kwargs: Any) -> None:
+    async def add(self, records: List[VectorRecord], **kwargs: Any) -> None:
         """添加向量记录
         
         Args:
