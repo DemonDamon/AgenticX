@@ -31,7 +31,7 @@ classifiers = [
 keywords = ["ai", "agents", "multi-agent", "framework", "automation", "llm", "workflow", "orchestration"]
 
 dependencies = [
-    # 核心依赖 - TestPyPI兼容
+    # 核心依赖
     "pydantic",
     "typing-extensions",
     "loguru",
