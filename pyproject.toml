@@ -91,9 +91,19 @@ dependencies = [
     "asyncio-mqtt",
     "mcp",
     # 文档处理
+    # 注意：以下功能需要额外的系统依赖，请参考 INSTALL.md 安装指南
+    # - pytesseract 需要 tesseract (brew install tesseract)
+    # - pdf2image 需要 poppler (brew install poppler)  
+    # - docx2txt 处理旧版 .doc 文件需要 antiword (brew install antiword)
     "PyMuPDF",
     "pypdf",
     "PyPDF2",
+    "python-docx",
+    "python-pptx",
+    "docx2txt",
+    "pytesseract",
+    "pdf2image",
+    "easyocr",
     "python-Levenshtein",
     "RapidFuzz",
     # 图分析和网络分析
