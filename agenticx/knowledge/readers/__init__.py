@@ -10,6 +10,8 @@ from .pdf_reader import PDFReader
 from .web_reader import WebReader
 from .json_reader import JSONReader
 from .csv_reader import CSVReader
+from .word_reader import WordReader
+from .powerpoint_reader import PowerPointReader
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,8 @@ READER_REGISTRY: Dict[str, Type[BaseReader]] = {
     'web': WebReader,
     'json': JSONReader,
     'csv': CSVReader,
+    'word': WordReader,
+    'powerpoint': PowerPointReader,
 }
 
 # File extension to reader mapping
@@ -41,6 +45,10 @@ EXTENSION_MAPPING = {
     '.tsv': 'csv',
     '.log': 'text',
     '.pdf': 'pdf',
+    '.doc': 'word',
+    '.docx': 'word',
+    '.ppt': 'powerpoint',
+    '.pptx': 'powerpoint',
 }
 
 
@@ -115,6 +123,8 @@ __all__ = [
     'WebReader',
     'JSONReader',
     'CSVReader',
+    'WordReader',
+    'PowerPointReader',
     'register_reader',
     'get_reader',
     'list_readers',
