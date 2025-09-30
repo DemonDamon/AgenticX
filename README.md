@@ -67,6 +67,8 @@ pip install -r requirements.txt
 export OPENAI_API_KEY="your-api-key"
 ```
 
+> 📋 **Complete Installation Guide**: For system dependencies (antiword, tesseract) and advanced document processing features, see [INSTALL.md](INSTALL.md)
+
 ### Create Your First Agent
 
 ```python
