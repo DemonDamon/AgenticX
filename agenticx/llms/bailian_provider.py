@@ -33,7 +33,7 @@ class BailianProvider(BaseLLMProvider):
     def _needs_native_request(self, model_name: str) -> bool:
         """检查是否需要使用原生HTTP请求（因为有百炼特有参数）"""
         model_lower = model_name.lower()
-        return any(model in model_lower for model in ["qwen3-32b", "qwen3-8b", "qwen-plus", "qwen-turbo"])
+        return any(model in model_lower for model in ["qwen3-32b", "qwen3-8b", "qwen3-235", "qwen-plus", "qwen-turbo"])
     
     def _make_native_request(self, request_params: Dict[str, Any]) -> Any:
          """使用原生HTTP请求调用百炼API"""
@@ -69,6 +69,31 @@ class BailianProvider(BaseLLMProvider):
          except Exception as e:
              raise Exception(f"Native Bailian API call failed: {str(e)}")
     
+    async def _make_native_request_async(self, request_params: Dict[str, Any]) -> Any:
+        """异步版本的原生HTTP请求"""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # 为需要特殊参数的模型添加enable_thinking=false
+        request_params["enable_thinking"] = False
+        logger.debug(f"为模型 {request_params.get('model')} 设置 enable_thinking=false (异步原生请求)")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=request_params,
+                timeout=aiohttp.ClientTimeout(total=self.timeout)
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"HTTP {response.status}: {error_text}")
+                
+                response_data = await response.json()
+                return response_data
+
     def _convert_native_response(self, response_data: Dict[str, Any]) -> Any:
          """将原生响应转换为OpenAI格式的对象"""
          # 创建一个简单的对象来模拟OpenAI响应格式
@@ -111,7 +136,11 @@ class BailianProvider(BaseLLMProvider):
          # 创建参数副本
          params = request_params.copy()
          
-         # 如果需要百炼特有参数，不在这里添加，而是在调用时判断使用原生请求
+         # 为需要特殊参数的模型添加enable_thinking=false
+         if self._needs_native_request(params.get("model", "")):
+             params["enable_thinking"] = False
+             logger.debug(f"为模型 {params.get('model')} 设置 enable_thinking=false (OpenAI客户端)")
+         
          return params
     
     def invoke(
@@ -204,13 +233,6 @@ class BailianProvider(BaseLLMProvider):
             else:
                 raise ValueError("Prompt must be either a string or a list of message dictionaries")
             
-            async_client = openai.AsyncOpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                timeout=self.timeout,
-                max_retries=self.max_retries or 3
-            )
-            
             request_params = {
                 "model": self.model,
                 "messages": messages,
@@ -221,11 +243,24 @@ class BailianProvider(BaseLLMProvider):
             if tools:
                 request_params["tools"] = tools
             
-            # 处理百炼特定参数
-            final_params = self._prepare_bailian_params(request_params)
-            
-            response = await async_client.chat.completions.create(**final_params)
-            return self._parse_response(response)
+            # 检查是否需要使用原生HTTP请求
+            if self._needs_native_request(self.model):
+                response_data = await self._make_native_request_async(request_params)
+                response = self._convert_native_response(response_data)
+                return self._parse_response(response)
+            else:
+                async_client = openai.AsyncOpenAI(
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                    timeout=self.timeout,
+                    max_retries=self.max_retries or 3
+                )
+                
+                # 处理百炼特定参数
+                final_params = self._prepare_bailian_params(request_params)
+                
+                response = await async_client.chat.completions.create(**final_params)
+                return self._parse_response(response)
         except Exception as e:
             raise Exception(f"Bailian API async call failed: {str(e)}")
     
