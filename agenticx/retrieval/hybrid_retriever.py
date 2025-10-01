@@ -72,7 +72,10 @@ class HybridRetriever(BaseRetriever):
         
         # Convert query to RetrievalQuery if needed
         if isinstance(query, str):
-            retrieval_query = RetrievalQuery(text=query)
+            # 🔧 修复：使用kwargs中的top_k和min_score，而不是硬编码的默认值
+            limit = kwargs.get('top_k', 10)
+            min_score = kwargs.get('min_score', 0.0)
+            retrieval_query = RetrievalQuery(text=query, limit=limit, min_score=min_score)
         else:
             retrieval_query = query
         

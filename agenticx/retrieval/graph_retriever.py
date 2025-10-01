@@ -124,7 +124,10 @@ class GraphRetriever(BaseRetriever):
         
         # Convert query to RetrievalQuery if needed
         if isinstance(query, str):
-            retrieval_query = RetrievalQuery(text=query)
+            # 🔧 修复：使用kwargs中的top_k和min_score，而不是硬编码的默认值
+            limit = kwargs.get('top_k', 10)
+            min_score = kwargs.get('min_score', 0.0)
+            retrieval_query = RetrievalQuery(text=query, limit=limit, min_score=min_score)
         else:
             retrieval_query = query
         
@@ -285,9 +288,15 @@ class GraphRetriever(BaseRetriever):
             results = []
             for node_data in nodes:
                 node = node_data.get("n", {})
+                # 基于内容相关性计算分数，而不是固定高分
+                content = node.get("content", "")
+                relevance_score = self._calculate_content_relevance(content, query)
+                base_score = 0.2  # 基础分数
+                final_score = base_score + (relevance_score * 0.6)  # 相关性主导分数
+                
                 results.append({
-                    "content": node.get("content", ""),
-                    "score": 0.7,  # Default score
+                    "content": content,
+                    "score": final_score,
                     "metadata": {
                         "node_id": node.get("id"),
                         "label": node.get("label", "Node"),
@@ -318,9 +327,14 @@ class GraphRetriever(BaseRetriever):
                 
                 content = f"{source_node.get('content', '')} {relationship.get('type', '')} {target_node.get('content', '')}"
                 
+                # 基于内容相关性计算分数
+                relevance_score = self._calculate_content_relevance(content, query)
+                base_score = 0.15  # 关系的基础分数稍低于节点
+                final_score = base_score + (relevance_score * 0.65)  # 相关性主导分数
+                
                 results.append({
                     "content": content,
-                    "score": 0.6,  # Default score
+                    "score": final_score,
                     "metadata": {
                         "relationship_id": relationship.get("id"),
                         "source_id": source_node.get("id"),
