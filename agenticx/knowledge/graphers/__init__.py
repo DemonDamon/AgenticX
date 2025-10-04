@@ -24,12 +24,7 @@ from .models import (
 # 文档模型
 from ..document import Document, DocumentMetadata
 
-# 提取器
-from .extractors import (
-    BaseExtractor,
-    EntityExtractor,
-    RelationshipExtractor
-)
+# Note: Traditional extractors removed - using SPO extraction only
 
 # 验证器
 from .validators import GraphQualityValidator
@@ -42,7 +37,6 @@ from .optimizer import GraphOptimizer
 
 # 构建器
 from .builder import KnowledgeGraphBuilder
-from .graphrag_constructor import GraphRAGConstructor
 
 # Neo4j导出器
 try:
@@ -66,10 +60,7 @@ __all__ = [
     'Document',
     'DocumentMetadata',
     
-    # 提取器
-    'BaseExtractor',
-    'EntityExtractor',
-    'RelationshipExtractor',
+    # Note: Traditional extractors removed
     
     # 验证器
     'GraphQualityValidator',
@@ -82,7 +73,6 @@ __all__ = [
     
     # 构建器
     'KnowledgeGraphBuilder',
-    'GraphRAGConstructor',
     
     # Neo4j支持
     'NEO4J_AVAILABLE'

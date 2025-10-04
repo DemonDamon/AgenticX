@@ -208,18 +208,34 @@ class SPOExtractor:
             logger.debug(f"清理后的响应长度: {len(cleaned_response)}")
             
             try:
-                spo_data = json.loads(cleaned_response)
+                # 应用和query_decomposer.py相同的清理逻辑
+                raw_content = cleaned_response.strip()
+                
+                # 移除markdown代码块标记（更彻底的清理）
+                if raw_content.startswith('```json'):
+                    raw_content = raw_content[7:]  # 移除 ```json
+                if raw_content.startswith('```'):
+                    raw_content = raw_content[3:]   # 移除 ```
+                if raw_content.endswith('```'):
+                    raw_content = raw_content[:-3]  # 移除结尾的 ```
+                
+                raw_content = raw_content.strip()
+                logger.debug(f"二次清理后的JSON内容长度: {len(raw_content)}")
+                
+                spo_data = json.loads(raw_content)
+                logger.debug("✅ JSON解析成功")
             except json.JSONDecodeError as json_error:
                 logger.warning(f"⚠️ JSON解析失败: {json_error}")
-                logger.debug(f"问题JSON片段: {cleaned_response[:200]}...")
+                logger.debug(f"原始响应: {response[:200]}...")
+                logger.debug(f"清理后内容: {raw_content[:200] if 'raw_content' in locals() else cleaned_response[:200]}...")
                 
                 # 尝试更激进的修复
-                fixed_response = self._aggressive_json_fix(cleaned_response)
+                fixed_response = self._aggressive_json_fix(raw_content if 'raw_content' in locals() else cleaned_response)
                 try:
                     spo_data = json.loads(fixed_response)
                     logger.info("✅ 激进修复成功")
                 except:
-                    logger.error("❌ 激进修复也失败，返回空结果")
+                    logger.warning("❌ 激进修复也失败，返回最小有效JSON结构")
                     return [], []
             
             # 转换为实体和关系对象
