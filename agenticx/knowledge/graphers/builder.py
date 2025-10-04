@@ -7,7 +7,7 @@ from loguru import logger
 
 from .config import GraphRagConfig, LLMConfig
 from .models import Entity, Relationship, KnowledgeGraph, EntityType, RelationType
-from .extractors import EntityExtractor, RelationshipExtractor
+# Note: Traditional extractors removed - using SPO extraction only
 from .spo_extractor import SPOExtractor
 from .schema_generator import SchemaGenerator
 from .validators import GraphQualityValidator
@@ -41,16 +41,7 @@ class KnowledgeGraphBuilder:
             logger.warning(f"⚠️ 强模型初始化失败，使用默认模型: {e}")
             self.strong_llm_client = llm_client
         
-        # Initialize components
-        self.entity_extractor = EntityExtractor(
-            llm_client=llm_client,
-            config=self.config.entity_extraction
-        )
-        
-        self.relationship_extractor = RelationshipExtractor(
-            llm_client=llm_client,
-            config=self.config.relationship_extraction
-        )
+        # Note: Traditional extractors removed - using SPO extraction only
         
         # Initialize extraction method
         self.extraction_method = getattr(self.config, 'extraction_method', 'separate')
@@ -187,68 +178,10 @@ class KnowledgeGraphBuilder:
                             logger.error(f"❌ 添加关系失败: {rel_e}")
         
         else:
-            # 传统分离抽取（逐个处理）
-            logger.info("使用传统分离抽取（逐个处理）")
-            for i, text in enumerate(texts):
-                chunk_id = f"chunk_{i}"
-                logger.info(f"处理文本块 {i+1}/{len(texts)}: ID={chunk_id}, 长度={len(text)}字符")
-                
-                # Get metadata for this text chunk if provided
-                chunk_metadata = metadata[i] if metadata and i < len(metadata) else {}
-                if chunk_metadata:
-                    logger.debug(f"📋 文本块元数据: {chunk_metadata}")
-                # Use traditional separate extraction
-                logger.debug("开始传统分离抽取")
-                
-                # Extract entities
-                logger.debug("👥 开始实体提取")
-                entities = self.entity_extractor.extract(text, chunk_id=chunk_id)
-                logger.debug(f"👥 提取到 {len(entities)} 个实体")
-                
-                for entity in entities:
-                    graph.add_entity(entity)
-                    logger.trace(f"➕ 添加实体: {entity.name} ({entity.entity_type})")
-                
-                # Extract relationships
-                logger.debug("🔗 开始关系提取")
-                relationships = self.relationship_extractor.extract(
-                    text, 
-                    entities=entities,
-                    chunk_id=chunk_id
-                )
-                logger.debug(f"🔗 提取到 {len(relationships)} 个关系")
-                
-                for relationship in relationships:
-                    # 检查源实体和目标实体是否存在（需要ID修复）
-                    source_exists = relationship.source_entity_id in graph.entities
-                    target_exists = relationship.target_entity_id in graph.entities
-                    
-                    if not source_exists:
-                        # 尝试通过名称查找实体
-                        source_entity = self._find_entity_by_name(graph, relationship.source_entity_id)
-                        if source_entity:
-                            logger.info(f"🔄 修复源实体ID: '{relationship.source_entity_id}' -> '{source_entity.id}'")
-                            relationship.source_entity_id = source_entity.id
-                        else:
-                            logger.warning(f"⚠️ 跳过关系：源实体 '{relationship.source_entity_id}' 不存在")
-                            continue
-                            
-                    if not target_exists:
-                        # 尝试通过名称查找实体
-                        target_entity = self._find_entity_by_name(graph, relationship.target_entity_id)
-                        if target_entity:
-                            logger.info(f"🔄 修复目标实体ID: '{relationship.target_entity_id}' -> '{target_entity.id}'")
-                            relationship.target_entity_id = target_entity.id
-                        else:
-                            logger.warning(f"⚠️ 跳过关系：目标实体 '{relationship.target_entity_id}' 不存在")
-                            continue
-                    
-                    try:
-                        graph.add_relationship(relationship)
-                        logger.trace(f"➕ 添加关系: {relationship.source_entity_id} --[{relationship.relation_type}]--> {relationship.target_entity_id}")
-                    except Exception as e:
-                        logger.error(f"❌ 添加关系失败: {e}")
-                        logger.debug(f"   关系详情: {relationship.source_entity_id} --[{relationship.relation_type}]--> {relationship.target_entity_id}")
+            # 传统分离抽取模式已移除，强制使用SPO模式
+            logger.error(f"❌ 不支持的抽取方法: {self.extraction_method}")
+            logger.error("💡 传统分离抽取模式已移除，请使用 'spo' 模式")
+            raise ValueError(f"不支持的抽取方法: {self.extraction_method}，请使用 'spo' 模式")
         
         # Post-processing
         logger.info("开始后处理")
@@ -307,7 +240,7 @@ class KnowledgeGraphBuilder:
         
         return self.build_from_texts(texts, metadata, **kwargs)
     
-    def build_incremental(
+    async def build_incremental(
         self, 
         existing_graph: KnowledgeGraph,
         new_texts: List[str],
@@ -325,24 +258,32 @@ class KnowledgeGraphBuilder:
         # Copy NetworkX graph
         new_graph.graph = existing_graph.graph.copy()
         
-        # Process new texts
-        for i, text in enumerate(new_texts):
-            chunk_id = f"incremental_chunk_{i}"
-            logger.info(f"处理增量文本块 {i+1}/{len(new_texts)}")
-            
-            # Extract entities
-            entities = self.entity_extractor.extract(text, chunk_id=chunk_id)
-            for entity in entities:
-                new_graph.add_entity(entity)
-            
-            # Extract relationships
-            relationships = self.relationship_extractor.extract(
-                text, 
-                entities=entities,
-                chunk_id=chunk_id
-            )
-            for relationship in relationships:
-                new_graph.add_relationship(relationship)
+        # Process new texts using SPO extraction
+        if self.spo_extractor:
+            try:
+                # Use batch SPO extraction for incremental texts
+                entities, relationships = await self.spo_extractor.extract_batch(
+                    texts=new_texts,
+                    batch_size=1,  # Conservative batch size for incremental
+                    **kwargs
+                )
+                
+                # Add extracted entities and relationships
+                for entity in entities:
+                    new_graph.add_entity(entity)
+                
+                for relationship in relationships:
+                    try:
+                        new_graph.add_relationship(relationship)
+                    except Exception as e:
+                        logger.error(f"❌ 增量添加关系失败: {e}")
+                        
+            except Exception as e:
+                logger.error(f"❌ 增量SPO抽取失败: {e}")
+                logger.warning("💡 增量构建失败，请检查SPO抽取器配置")
+        else:
+            logger.error("❌ SPO抽取器未初始化，无法进行增量构建")
+            raise ValueError("SPO抽取器未初始化，无法进行增量构建")
         
         # Post-processing for incremental build
         if kwargs.get("merge_entities", True):
