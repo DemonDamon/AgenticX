@@ -20,6 +20,11 @@ class SPOExtractor:
         self.prompt_manager = prompt_manager
         self.config = config or {}
         
+        # 从配置中读取置信度参数
+        self.default_entity_confidence = self.config.get('default_confidence', 0.8)
+        self.default_relationship_confidence = self.config.get('default_confidence', 0.8)
+        self.enable_dynamic_confidence = self.config.get('dynamic_confidence', False)
+        
         # Use custom schema if provided, otherwise use default
         if custom_schema:
             self.schema = custom_schema
@@ -158,7 +163,14 @@ class SPOExtractor:
         for i, text in enumerate(texts):
             batch_content += f"\n=== 文档片段 {i+1} ===\n{text}\n"
         
-        prompt = f"""你是专业的知识图谱构建专家。请从以下文档片段中抽取实体、关系和属性。
+        prompt = f"""你是专业的知识图谱构建专家。请从以下文档片段中抽取尽可能多的实体、关系和属性。
+
+**重要指导原则：**
+1. **宁可多抽取，不要遗漏**：即使不确定，也要尝试抽取可能的实体和关系
+2. **灵活使用Schema**：可以适当扩展类型，不要严格限制
+3. **关注隐含关系**：抽取文本中隐含的关系，不仅仅是明确表述的
+4. **细粒度抽取**：将复合概念拆分为多个实体和关系
+5. **包含推测性内容**：基于上下文的合理推测也要抽取
 
 领域：{self.primary_domain}
 核心概念：{self.key_concepts}
@@ -169,13 +181,24 @@ class SPOExtractor:
 文档片段：
 {batch_content}
 
+**抽取要求：**
+- 每个实体都要有描述和置信度评分（0.1-1.0）
+- 每个关系都要有描述和置信度评分（0.1-1.0）
+- 置信度基于文本中的证据强度：
+  * 0.9-1.0: 明确直接的表述
+  * 0.7-0.8: 较强的暗示或推理
+  * 0.5-0.6: 弱暗示或可能的关系
+  * 0.3-0.4: 推测性的关系
+- 优先抽取高置信度的内容，但也包含一些低置信度的推测
+
 请严格按照以下JSON格式返回，确保JSON语法正确：
 
 {{
     "entity_types": {{
         "实体名称": {{
             "type": "实体类型",
-            "description": "实体描述",
+            "description": "详细描述",
+            "confidence": 0.85,
             "attributes": {{"属性名": "属性值"}},
             "source_chunks": ["chunk_0"]
         }}
@@ -186,15 +209,16 @@ class SPOExtractor:
             "predicate": "关系类型",
             "object": "客体实体",
             "description": "关系描述",
-            "confidence": 0.8,
+            "confidence": 0.75,
+            "evidence": "支持证据",
             "source_chunks": ["chunk_0"]
         }}
     ]
 }}
 
 要求：
-1. 抽取尽可能多的实体和关系
-2. 使用Schema中定义的类型
+1. 抽取尽可能多的实体和关系，宁可多抽取
+2. 可以灵活扩展Schema中的类型
 3. 确保JSON格式正确，注意逗号和引号
 4. 只返回JSON，不要其他文字"""
         
@@ -413,6 +437,97 @@ class SPOExtractor:
         
         return final_score
     
+    def _calculate_dynamic_confidence(self, entity_name: str, entity_description: str, source_text: str) -> float:
+        """动态计算实体置信度"""
+        if not self.enable_dynamic_confidence:
+            return self.default_entity_confidence
+            
+        confidence = 0.5  # 基础置信度
+        
+        # 基于名称长度和复杂度
+        if len(entity_name) >= 2:
+            confidence += 0.1
+        if len(entity_name) >= 4:
+            confidence += 0.1
+            
+        # 基于描述质量
+        if entity_description and len(entity_description) > 10:
+            confidence += 0.1
+        if entity_description and len(entity_description) > 30:
+            confidence += 0.1
+            
+        # 基于在原文中的出现频率
+        occurrences = source_text.lower().count(entity_name.lower())
+        if occurrences > 1:
+            confidence += min(0.2, occurrences * 0.05)
+            
+        # 基于上下文质量
+        if self._has_strong_context(entity_name, source_text):
+            confidence += 0.1
+            
+        return min(1.0, confidence)
+    
+    def _calculate_relationship_confidence(self, subject: str, predicate: str, object_name: str, source_text: str) -> float:
+        """动态计算关系置信度"""
+        if not self.enable_dynamic_confidence:
+            return self.default_relationship_confidence
+            
+        confidence = 0.4  # 基础置信度
+        
+        # 检查主体和客体是否都在文本中
+        subject_in_text = subject.lower() in source_text.lower()
+        object_in_text = object_name.lower() in source_text.lower()
+        
+        if subject_in_text and object_in_text:
+            confidence += 0.3
+        elif subject_in_text or object_in_text:
+            confidence += 0.1
+            
+        # 检查关系词的强度
+        strong_relation_words = ["是", "为", "属于", "包含", "管理", "负责", "创建", "开发"]
+        weak_relation_words = ["相关", "涉及", "可能", "似乎"]
+        
+        for word in strong_relation_words:
+            if word in source_text:
+                confidence += 0.1
+                break
+                
+        for word in weak_relation_words:
+            if word in source_text:
+                confidence -= 0.05
+                break
+                
+        # 基于距离（主体和客体在文本中的距离）
+        try:
+            subject_pos = source_text.lower().find(subject.lower())
+            object_pos = source_text.lower().find(object_name.lower())
+            if subject_pos != -1 and object_pos != -1:
+                distance = abs(subject_pos - object_pos)
+                if distance < 100:  # 距离很近
+                    confidence += 0.1
+                elif distance < 300:  # 距离适中
+                    confidence += 0.05
+        except:
+            pass
+            
+        return min(1.0, max(0.1, confidence))
+    
+    def _has_strong_context(self, entity_name: str, source_text: str) -> bool:
+        """检查实体是否有强上下文"""
+        import re
+        # 查找实体周围的描述性词汇
+        descriptive_patterns = [
+            rf"{re.escape(entity_name)}[是为]([^。，；！？\n]+)",
+            rf"([^。，；！？\n]+){re.escape(entity_name)}",
+            rf"{re.escape(entity_name)}：([^。，；！？\n]+)",
+            rf"{re.escape(entity_name)}\s*\(([^)]+)\)"
+        ]
+        
+        for pattern in descriptive_patterns:
+            if re.search(pattern, source_text, re.IGNORECASE):
+                return True
+        return False
+    
     def _is_abbreviation_match(self, name1: str, name2: str) -> bool:
         """检查是否为缩写匹配"""
         words1 = name1.split()
@@ -482,12 +597,21 @@ class SPOExtractor:
         
         # 创建新实体
         try:
+            # 计算动态置信度
+            entity_confidence = self._calculate_dynamic_confidence(
+                entity_name, 
+                entity_description, 
+                source_text
+            )
+            # 动态创建的实体降低置信度
+            entity_confidence *= 0.8
+            
             new_entity = Entity(
                 id=entity_id,
                 name=entity_name,
                 entity_type=entity_type,
                 description=entity_description,
-                confidence=0.7  # 动态创建的实体置信度较低
+                confidence=entity_confidence  # 🔧 改进：使用动态置信度
             )
             logger.debug(f"✅ 成功创建实体: {entity_name} ({entity_type.value}) - {entity_description[:50]}...")
         except Exception as e:
@@ -659,9 +783,16 @@ class SPOExtractor:
         # 回退到默认提示词
         schema_str = json.dumps(self.schema, ensure_ascii=False, indent=2)
         
-        prompt = f"""你是专业的知识图谱构建专家。请基于定制Schema分析文本，抽取尽可能多的有价值实体、属性和关系，以结构化JSON格式返回。
+        prompt = f"""你是专业的知识图谱构建专家。请从以下文本中抽取尽可能多的实体、关系和属性。
 
-定制Schema：
+**重要指导原则：**
+1. **宁可多抽取，不要遗漏**：即使不确定，也要尝试抽取可能的实体和关系
+2. **灵活使用Schema**：可以适当扩展Schema中的类型，不要严格限制
+3. **关注隐含关系**：抽取文本中隐含的关系，不仅仅是明确表述的
+4. **细粒度抽取**：将复合概念拆分为多个实体和关系
+5. **包含推测性内容**：基于上下文的合理推测也要抽取
+
+可用Schema：
 ```json
 {schema_str}
 ```
@@ -675,29 +806,41 @@ class SPOExtractor:
 {text}
 ```
 
-抽取指导：
-1. **优先使用定制Schema**：严格按照上述Schema中的类型进行抽取
-2. **完整性**：不遗漏文本中的重要信息
-3. **准确性**：确保抽取的实体和关系准确无误
-4. **简洁性**：避免冗余和重复信息
-5. **一致性**：实体名称在整个抽取过程中保持一致
+**抽取要求：**
+- 每个实体都要有描述和置信度评分（0.1-1.0）
+- 每个关系都要有描述和置信度评分（0.1-1.0）
+- 置信度基于文本中的证据强度：
+  * 0.9-1.0: 明确直接的表述
+  * 0.7-0.8: 较强的暗示或推理
+  * 0.5-0.6: 弱暗示或可能的关系
+  * 0.3-0.4: 推测性的关系
+- 优先抽取高置信度的内容，但也包含一些低置信度的推测
 
-输出格式：
+输出格式（严格JSON）：
 ```json
 {{
-  "attributes": {{
-    "实体名称": ["属性1: 值1", "属性2: 值2"]
-  }},
-  "triples": [
-    ["实体1", "关系", "实体2"]
-  ],
-  "entity_types": {{
-    "实体名称": "实体类型"
-  }}
+    "entity_types": {{
+        "实体名称": {{
+            "type": "实体类型",
+            "description": "详细描述",
+            "confidence": 0.85,
+            "attributes": {{"属性名": "属性值"}}
+        }}
+    }},
+    "triples": [
+        {{
+            "subject": "主体实体",
+            "predicate": "关系类型", 
+            "object": "客体实体",
+            "description": "关系描述",
+            "confidence": 0.75,
+            "evidence": "支持证据"
+        }}
+    ]
 }}
 ```
 
-只返回JSON，无其他内容。"""
+只返回JSON，不要其他内容。"""
         
         return prompt.strip()
     
@@ -877,12 +1020,22 @@ class SPOExtractor:
             except (ValueError, AttributeError):
                 entity_type_enum = EntityType.CONCEPT  # Default fallback
             
+            # 获取置信度（优先使用LLM提供的，否则动态计算）
+            if isinstance(entity_data, dict) and 'confidence' in entity_data:
+                entity_confidence = float(entity_data['confidence'])
+            else:
+                entity_confidence = self._calculate_dynamic_confidence(
+                    entity_name, 
+                    '; '.join(description_parts), 
+                    source_text
+                )
+            
             entity = Entity(
                 id=entity_id,
                 name=entity_name,
                 entity_type=entity_type_enum,
                 description='; '.join(description_parts),
-                confidence=0.8,  # Default confidence
+                confidence=entity_confidence,  # 🔧 改进：使用动态置信度
                 attributes=attr_dict,
                 source_chunks={kwargs.get('chunk_id', 'unknown')}
             )
@@ -947,12 +1100,23 @@ class SPOExtractor:
             except (ValueError, AttributeError):
                 relation_type_enum = RelationType.RELATED_TO  # Default fallback
             
+            # 获取置信度（优先使用LLM提供的，否则动态计算）
+            if isinstance(triple, dict) and 'confidence' in triple:
+                relationship_confidence = float(triple['confidence'])
+            else:
+                relationship_confidence = self._calculate_relationship_confidence(
+                    source_name, 
+                    relation, 
+                    target_name, 
+                    source_text
+                )
+            
             relationship = Relationship(
                 source_entity_id=source_id,
                 target_entity_id=target_id,
                 relation_type=relation_type_enum,
                 description=f"{source_name} {relation} {target_name}",
-                confidence=0.8,  # Default confidence
+                confidence=relationship_confidence,  # 🔧 改进：使用动态置信度
                 source_chunks={kwargs.get('chunk_id', 'unknown')}
             )
             
