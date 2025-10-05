@@ -3,6 +3,8 @@
 .qoder/
 .trae/
 .pytest_cache/
+.mypy_cache/
+.lingma/
 
 __pycache__/ 
 **/__pycache__/
