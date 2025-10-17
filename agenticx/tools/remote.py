@@ -499,3 +499,655 @@ async def create_mcp_client(server_name: str, config_path: str = "~/.cursor/mcp.
         raise ValueError(f"Server '{server_name}' not found in config. Available servers: {available_servers}")
     
     return MCPClient(configs[server_name]) 
+
+
+# ==================== MinerU 特定远程工具支持 ====================
+
+import aiohttp
+import aiofiles
+import zipfile
+import tempfile
+from pathlib import Path
+from typing import BinaryIO, AsyncIterator
+from urllib.parse import urljoin
+
+class MinerUConfig(BaseModel):
+    """MinerU 配置管理"""
+    api_key: Optional[str] = Field(default=None, description="MinerU API 密钥")
+    base_url: Optional[str] = Field(default="https://api.mineru.com", description="MinerU API 基础 URL")
+    timeout: float = Field(default=300.0, description="请求超时时间（秒）")
+    max_retries: int = Field(default=3, description="最大重试次数")
+    retry_delay: float = Field(default=1.0, description="重试延迟（秒）")
+    
+    @classmethod
+    def from_env(cls) -> "MinerUConfig":
+        """从环境变量创建配置"""
+        return cls(
+            api_key=os.getenv("MINERU_API_KEY"),
+            base_url=os.getenv("MINERU_BASE_URL", "https://api.mineru.com"),
+            timeout=float(os.getenv("MINERU_TIMEOUT", "300.0")),
+            max_retries=int(os.getenv("MINERU_MAX_RETRIES", "3")),
+            retry_delay=float(os.getenv("MINERU_RETRY_DELAY", "1.0"))
+        )
+    
+    def validate_config(self) -> None:
+        """验证配置有效性"""
+        if not self.api_key:
+            raise ValueError("MinerU API key is required")
+        if not self.base_url:
+            raise ValueError("MinerU base URL is required")
+
+
+class MinerUTaskStatus(BaseModel):
+    """MinerU 任务状态"""
+    task_id: str
+    status: str  # pending, processing, completed, failed
+    progress: float = Field(default=0.0, description="进度百分比 (0-100)")
+    message: Optional[str] = None
+    result_url: Optional[str] = None
+    error: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class MinerUBatchUploadResult(BaseModel):
+    """批量上传结果"""
+    task_id: str
+    uploaded_files: List[str]
+    failed_files: List[Dict[str, str]]  # [{"file": "path", "error": "reason"}]
+    total_files: int
+    success_count: int
+    failure_count: int
+
+
+class MinerUAPIClient:
+    """MinerU API 客户端"""
+    
+    def __init__(self, config: Optional[MinerUConfig] = None):
+        self.config = config or MinerUConfig.from_env()
+        self.config.validate_config()
+        self._session: Optional[aiohttp.ClientSession] = None
+    
+    async def __aenter__(self):
+        """异步上下文管理器入口"""
+        self._session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=self.config.timeout),
+            headers={
+                "Authorization": f"Bearer {self.config.api_key}",
+                "User-Agent": "AgenticX-MinerU/1.0.0"
+            }
+        )
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """异步上下文管理器退出"""
+        if self._session:
+            await self._session.close()
+    
+    async def _make_request(
+        self, 
+        method: str, 
+        endpoint: str, 
+        **kwargs
+    ) -> Dict[str, Any]:
+        """发送 HTTP 请求，带重试机制"""
+        if not self._session:
+            raise RuntimeError("Client not initialized. Use async context manager.")
+        
+        url = urljoin(self.config.base_url, endpoint)
+        
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                async with self._session.request(method, url, **kwargs) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    elif response.status == 429:  # Rate limit
+                        if attempt < self.config.max_retries:
+                            await asyncio.sleep(self.config.retry_delay * (2 ** attempt))
+                            continue
+                    
+                    # 其他错误状态
+                    error_text = await response.text()
+                    raise aiohttp.ClientResponseError(
+                        request_info=response.request_info,
+                        history=response.history,
+                        status=response.status,
+                        message=f"API request failed: {error_text}"
+                    )
+            
+            except aiohttp.ClientError as e:
+                if attempt < self.config.max_retries:
+                    logger.warning(f"Request failed (attempt {attempt + 1}): {e}")
+                    await asyncio.sleep(self.config.retry_delay * (2 ** attempt))
+                    continue
+                raise ToolError(f"API request failed after {self.config.max_retries} retries: {e}", "MinerUAPIClient")
+        
+        raise ToolError("Maximum retries exceeded", "MinerUAPIClient")
+    
+    async def upload_file(self, file_path: str) -> str:
+        """上传单个文件"""
+        file_path = Path(file_path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+        
+        data = aiohttp.FormData()
+        data.add_field('file', 
+                      open(file_path, 'rb'), 
+                      filename=file_path.name,
+                      content_type='application/octet-stream')
+        
+        result = await self._make_request("POST", "/api/v1/upload", data=data)
+        return result.get("file_id", "")
+    
+    async def upload_files_batch(self, file_paths: List[str]) -> MinerUBatchUploadResult:
+        """批量上传文件"""
+        uploaded_files = []
+        failed_files = []
+        
+        for file_path in file_paths:
+            try:
+                file_id = await self.upload_file(file_path)
+                uploaded_files.append(file_id)
+                logger.info(f"Successfully uploaded: {file_path} -> {file_id}")
+            except Exception as e:
+                failed_files.append({"file": file_path, "error": str(e)})
+                logger.error(f"Failed to upload {file_path}: {e}")
+        
+        return MinerUBatchUploadResult(
+            task_id="",  # 批量上传不返回任务ID
+            uploaded_files=uploaded_files,
+            failed_files=failed_files,
+            total_files=len(file_paths),
+            success_count=len(uploaded_files),
+            failure_count=len(failed_files)
+        )
+    
+    async def submit_parse_task(
+        self, 
+        file_ids: List[str], 
+        parse_params: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """提交解析任务"""
+        payload = {
+            "file_ids": file_ids,
+            "parse_params": parse_params or {}
+        }
+        
+        result = await self._make_request("POST", "/api/v1/parse", json=payload)
+        return result.get("task_id", "")
+    
+    async def get_task_status(self, task_id: str) -> MinerUTaskStatus:
+        """获取任务状态"""
+        result = await self._make_request("GET", f"/api/v1/tasks/{task_id}")
+        return MinerUTaskStatus(**result)
+    
+    async def download_result(self, task_id: str, output_path: str) -> str:
+        """下载解析结果"""
+        if not self._session:
+            raise RuntimeError("Client not initialized")
+        
+        url = urljoin(self.config.base_url, f"/api/v1/tasks/{task_id}/download")
+        
+        async with self._session.get(url) as response:
+            if response.status != 200:
+                error_text = await response.text()
+                raise ToolError(f"Download failed: {error_text}", "MinerUAPIClient")
+            
+            output_path = Path(output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            async with aiofiles.open(output_path, 'wb') as f:
+                async for chunk in response.content.iter_chunked(8192):
+                    await f.write(chunk)
+        
+        return str(output_path)
+    
+    async def stream_download(self, task_id: str) -> AsyncIterator[bytes]:
+        """流式下载解析结果"""
+        if not self._session:
+            raise RuntimeError("Client not initialized")
+        
+        url = urljoin(self.config.base_url, f"/api/v1/tasks/{task_id}/download")
+        
+        async with self._session.get(url) as response:
+            if response.status != 200:
+                error_text = await response.text()
+                raise ToolError(f"Stream download failed: {error_text}", "MinerUAPIClient")
+            
+            async for chunk in response.content.iter_chunked(8192):
+                yield chunk
+    
+    async def get_supported_languages(self) -> List[str]:
+        """获取支持的 OCR 语言列表"""
+        result = await self._make_request("GET", "/api/v1/languages")
+        return result.get("languages", [])
+
+
+class MinerURemoteTool(BaseTool):
+    """MinerU 远程工具基类"""
+    
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        args_schema: Type[BaseModel],
+        config: Optional[MinerUConfig] = None,
+        organization_id: Optional[str] = None,
+    ):
+        super().__init__(
+            name=name,
+            description=description,
+            args_schema=args_schema,
+            organization_id=organization_id,
+        )
+        self.config = config or MinerUConfig.from_env()
+    
+    async def _arun(self, **kwargs) -> Any:
+        """异步执行工具"""
+        async with MinerUAPIClient(self.config) as client:
+            return await self._execute_with_client(client, **kwargs)
+    
+    def _run(self, **kwargs) -> Any:
+        """同步执行工具"""
+        return asyncio.run(self._arun(**kwargs))
+    
+    async def _execute_with_client(self, client: MinerUAPIClient, **kwargs) -> Any:
+        """使用客户端执行具体逻辑，子类需要实现"""
+        raise NotImplementedError("Subclasses must implement _execute_with_client")
+
+
+class MinerUParseRemoteTool(MinerURemoteTool):
+    """MinerU 远程解析工具"""
+    
+    def __init__(self, config: Optional[MinerUConfig] = None):
+        from .mineru import MinerUParseArgs  # 避免循环导入
+        
+        super().__init__(
+            name="mineru_parse_remote",
+            description="Parse documents using MinerU remote API service",
+            args_schema=MinerUParseArgs,
+            config=config,
+        )
+    
+    async def _execute_with_client(self, client: MinerUAPIClient, **kwargs) -> Dict[str, Any]:
+        """执行远程解析"""
+        file_paths = kwargs.get("file_paths", [])
+        if not file_paths:
+            raise ValueError("file_paths is required")
+        
+        # 1. 批量上传文件
+        logger.info(f"Uploading {len(file_paths)} files...")
+        upload_result = await client.upload_files_batch(file_paths)
+        
+        if upload_result.failure_count > 0:
+            logger.warning(f"Failed to upload {upload_result.failure_count} files")
+        
+        if not upload_result.uploaded_files:
+            raise ToolError("No files were successfully uploaded", self.name)
+        
+        # 2. 提交解析任务
+        parse_params = {
+            "output_format": kwargs.get("output_format", "markdown"),
+            "parse_method": kwargs.get("parse_method", "auto"),
+            "ocr_language": kwargs.get("ocr_language", ["en", "zh"]),
+        }
+        
+        logger.info("Submitting parse task...")
+        task_id = await client.submit_parse_task(upload_result.uploaded_files, parse_params)
+        
+        # 3. 轮询任务状态
+        logger.info(f"Polling task status: {task_id}")
+        max_wait_time = kwargs.get("max_wait_time", 600)  # 10分钟
+        poll_interval = kwargs.get("poll_interval", 5)  # 5秒
+        
+        start_time = asyncio.get_event_loop().time()
+        while True:
+            status = await client.get_task_status(task_id)
+            
+            if status.status == "completed":
+                logger.info("Task completed successfully")
+                break
+            elif status.status == "failed":
+                raise ToolError(f"Parse task failed: {status.error}", self.name)
+            elif asyncio.get_event_loop().time() - start_time > max_wait_time:
+                raise ToolError(f"Task timeout after {max_wait_time} seconds", self.name)
+            
+            logger.info(f"Task status: {status.status}, progress: {status.progress}%")
+            await asyncio.sleep(poll_interval)
+        
+        # 4. 下载结果
+        output_dir = kwargs.get("output_dir", tempfile.mkdtemp(prefix="mineru_"))
+        output_path = Path(output_dir) / f"{task_id}_result.zip"
+        
+        logger.info(f"Downloading result to: {output_path}")
+        downloaded_file = await client.download_result(task_id, str(output_path))
+        
+        # 5. 解压结果
+        extract_dir = Path(output_dir) / f"{task_id}_extracted"
+        extract_dir.mkdir(exist_ok=True)
+        
+        with zipfile.ZipFile(downloaded_file, 'r') as zip_ref:
+            zip_ref.extractall(extract_dir)
+        
+        return {
+            "task_id": task_id,
+            "status": "completed",
+            "output_dir": str(extract_dir),
+            "downloaded_file": downloaded_file,
+            "upload_summary": {
+                "total_files": upload_result.total_files,
+                "success_count": upload_result.success_count,
+                "failure_count": upload_result.failure_count,
+                "failed_files": upload_result.failed_files
+            }
+        }
+
+
+class MinerULanguagesRemoteTool(MinerURemoteTool):
+    """MinerU 远程语言查询工具"""
+    
+    def __init__(self, config: Optional[MinerUConfig] = None):
+        from .mineru import MinerUOCRLanguagesArgs  # 避免循环导入
+        
+        super().__init__(
+            name="mineru_languages_remote",
+            description="Get supported OCR languages from MinerU remote API",
+            args_schema=MinerUOCRLanguagesArgs,
+            config=config,
+        )
+    
+    async def _execute_with_client(self, client: MinerUAPIClient, **kwargs) -> Dict[str, Any]:
+        """获取支持的语言列表"""
+        logger.info("Fetching supported OCR languages...")
+        languages = await client.get_supported_languages()
+        
+        return {
+            "languages": languages,
+            "count": len(languages),
+            "source": "remote_api"
+        }
+
+
+# ==================== 工厂函数 ====================
+
+def create_mineru_remote_tools(config: Optional[MinerUConfig] = None) -> List[MinerURemoteTool]:
+    """创建所有 MinerU 远程工具"""
+    return [
+        MinerUParseRemoteTool(config),
+        MinerULanguagesRemoteTool(config),
+    ]
+
+
+def create_mineru_api_client(config: Optional[MinerUConfig] = None) -> MinerUAPIClient:
+    """创建 MinerU API 客户端"""
+    return MinerUAPIClient(config)
+
+
+# ==================== 配置加载函数 ====================
+
+def load_mineru_config(config_path: Optional[str] = None) -> MinerUConfig:
+    """加载 MinerU 配置
+    
+    Args:
+        config_path: 配置文件路径，如果为 None 则从环境变量加载
+    
+    Returns:
+        MinerUConfig: 配置对象
+    """
+    if config_path:
+        config_path = Path(config_path).expanduser()
+        if config_path.exists():
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+            return MinerUConfig(**config_data)
+        else:
+            logger.warning(f"Config file not found: {config_path}, falling back to environment variables")
+    
+    return MinerUConfig.from_env()
+
+
+# ==================== 批量处理工具 ====================
+
+class MinerUBatchProcessor:
+    """MinerU 批量处理器"""
+    
+    def __init__(self, config: Optional[MinerUConfig] = None):
+        self.config = config or MinerUConfig.from_env()
+    
+    async def process_directory(
+        self, 
+        input_dir: str, 
+        output_dir: str,
+        file_patterns: List[str] = None,
+        **parse_kwargs
+    ) -> Dict[str, Any]:
+        """批量处理目录中的文件"""
+        input_path = Path(input_dir)
+        if not input_path.exists():
+            raise FileNotFoundError(f"Input directory not found: {input_dir}")
+        
+        # 收集文件
+        patterns = file_patterns or ["*.pdf", "*.png", "*.jpg", "*.jpeg"]
+        files = []
+        for pattern in patterns:
+            files.extend(input_path.glob(pattern))
+        
+        if not files:
+            raise ValueError(f"No files found in {input_dir} matching patterns: {patterns}")
+        
+        logger.info(f"Found {len(files)} files to process")
+        
+        # 使用远程解析工具处理
+        parse_tool = MinerUParseRemoteTool(self.config)
+        result = await parse_tool._arun(
+            file_paths=[str(f) for f in files],
+            output_dir=output_dir,
+            **parse_kwargs
+        )
+        
+        return result
+    
+    async def process_files_with_callback(
+        self,
+        file_paths: List[str],
+        callback_url: Optional[str] = None,
+        **parse_kwargs
+    ) -> str:
+        """处理文件并支持回调通知"""
+        async with MinerUAPIClient(self.config) as client:
+            # 上传文件
+            upload_result = await client.upload_files_batch(file_paths)
+            
+            if not upload_result.uploaded_files:
+                raise ToolError("No files were successfully uploaded", "MinerUBatchProcessor")
+            
+            # 添加回调参数
+            parse_params = parse_kwargs.copy()
+            if callback_url:
+                parse_params["callback_url"] = callback_url
+            
+            # 提交任务
+            task_id = await client.submit_parse_task(upload_result.uploaded_files, parse_params)
+            
+            return task_id
+    
+    async def process_files_with_progress(
+        self,
+        file_paths: List[str],
+        output_dir: str,
+        progress_callback: Optional[callable] = None,
+        **parse_kwargs
+    ) -> Dict[str, Any]:
+        """处理文件并提供进度回调"""
+        async with MinerUAPIClient(self.config) as client:
+            # 上传文件
+            logger.info(f"开始上传 {len(file_paths)} 个文件...")
+            upload_result = await client.upload_files_batch(file_paths)
+            
+            if progress_callback:
+                progress_callback("upload", 100, f"上传完成: {upload_result.success_count}/{upload_result.total_files}")
+            
+            if not upload_result.uploaded_files:
+                raise ToolError("No files were successfully uploaded", "MinerUBatchProcessor")
+            
+            # 提交解析任务
+            logger.info("提交解析任务...")
+            task_id = await client.submit_parse_task(upload_result.uploaded_files, parse_kwargs)
+            
+            # 轮询任务状态
+            logger.info(f"开始轮询任务状态: {task_id}")
+            while True:
+                status = await client.get_task_status(task_id)
+                
+                if progress_callback:
+                    progress_callback("parse", status.progress, status.message or f"状态: {status.status}")
+                
+                if status.status == "completed":
+                    # 下载结果
+                    logger.info("任务完成，开始下载结果...")
+                    result_path = await client.download_result(task_id, output_dir)
+                    
+                    if progress_callback:
+                        progress_callback("download", 100, f"下载完成: {result_path}")
+                    
+                    return {
+                        "success": True,
+                        "task_id": task_id,
+                        "result_path": result_path,
+                        "upload_result": upload_result.dict(),
+                        "final_status": status.dict()
+                    }
+                elif status.status == "failed":
+                    raise ToolError(f"Task failed: {status.error}", "MinerUBatchProcessor")
+                
+                # 等待一段时间再次检查
+                await asyncio.sleep(5)
+    
+    async def get_task_progress(self, task_id: str) -> MinerUTaskStatus:
+        """获取任务进度"""
+        async with MinerUAPIClient(self.config) as client:
+            return await client.get_task_status(task_id)
+    
+    async def cancel_task(self, task_id: str) -> bool:
+        """取消任务"""
+        async with MinerUAPIClient(self.config) as client:
+            try:
+                await client._make_request("POST", f"/tasks/{task_id}/cancel")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to cancel task {task_id}: {e}")
+                return False
+
+
+class MinerUBatchRemoteTool(MinerURemoteTool):
+    """MinerU 批量处理远程工具"""
+    
+    def __init__(self, config: Optional[MinerUConfig] = None):
+        from ..tools.mineru import MinerUBatchArgs  # 避免循环导入
+        
+        super().__init__(
+            name="mineru_batch_parse",
+            description="批量解析多个文档文件，支持进度跟踪和回调通知",
+            args_schema=MinerUBatchArgs,
+            config=config
+        )
+        self.processor = MinerUBatchProcessor(config)
+    
+    async def _execute_with_client(self, client: MinerUAPIClient, **kwargs) -> Dict[str, Any]:
+        """执行批量解析"""
+        file_paths = kwargs.get("file_paths", [])
+        output_dir = kwargs.get("output_dir", "./outputs")
+        callback_url = kwargs.get("callback_url")
+        
+        if not file_paths:
+            raise ToolError("No file paths provided", self.name)
+        
+        # 验证文件存在
+        missing_files = []
+        for file_path in file_paths:
+            if not Path(file_path).exists():
+                missing_files.append(file_path)
+        
+        if missing_files:
+            raise ToolError(f"Files not found: {missing_files}", self.name)
+        
+        # 如果提供了回调URL，使用异步处理
+        if callback_url:
+            task_id = await self.processor.process_files_with_callback(
+                file_paths=file_paths,
+                callback_url=callback_url,
+                **{k: v for k, v in kwargs.items() if k not in ["file_paths", "output_dir", "callback_url"]}
+            )
+            return {
+                "success": True,
+                "task_id": task_id,
+                "message": "任务已提交，将通过回调URL通知结果",
+                "callback_url": callback_url
+            }
+        else:
+            # 同步处理并等待结果
+            result = await self.processor.process_files_with_progress(
+                file_paths=file_paths,
+                output_dir=output_dir,
+                **{k: v for k, v in kwargs.items() if k not in ["file_paths", "output_dir", "callback_url"]}
+            )
+            return result
+
+
+# ==================== 进度跟踪工具 ====================
+
+class MinerUProgressTracker:
+    """MinerU 进度跟踪器"""
+    
+    def __init__(self, config: Optional[MinerUConfig] = None):
+        self.config = config or MinerUConfig.from_env()
+        self.active_tasks: Dict[str, MinerUTaskStatus] = {}
+    
+    async def track_task(self, task_id: str, update_interval: float = 5.0) -> AsyncIterator[MinerUTaskStatus]:
+        """跟踪任务进度"""
+        async with MinerUAPIClient(self.config) as client:
+            while True:
+                try:
+                    status = await client.get_task_status(task_id)
+                    self.active_tasks[task_id] = status
+                    yield status
+                    
+                    if status.status in ["completed", "failed"]:
+                        break
+                    
+                    await asyncio.sleep(update_interval)
+                except Exception as e:
+                    logger.error(f"Error tracking task {task_id}: {e}")
+                    break
+    
+    def get_task_status(self, task_id: str) -> Optional[MinerUTaskStatus]:
+        """获取缓存的任务状态"""
+        return self.active_tasks.get(task_id)
+    
+    def get_all_active_tasks(self) -> Dict[str, MinerUTaskStatus]:
+        """获取所有活跃任务"""
+        return {
+            task_id: status for task_id, status in self.active_tasks.items()
+            if status.status not in ["completed", "failed"]
+        }
+
+
+# ==================== 更新的工厂函数 ====================
+
+def create_mineru_remote_tools(config: Optional[MinerUConfig] = None) -> List[MinerURemoteTool]:
+    """创建所有 MinerU 远程工具"""
+    return [
+        MinerUParseRemoteTool(config),
+        MinerULanguagesRemoteTool(config),
+        MinerUBatchRemoteTool(config),  # 新增批量处理工具
+    ]
+
+
+def create_mineru_batch_processor(config: Optional[MinerUConfig] = None) -> MinerUBatchProcessor:
+    """创建 MinerU 批量处理器"""
+    return MinerUBatchProcessor(config)
+
+
+def create_mineru_progress_tracker(config: Optional[MinerUConfig] = None) -> MinerUProgressTracker:
+    """创建 MinerU 进度跟踪器"""
+    return MinerUProgressTracker(config)
