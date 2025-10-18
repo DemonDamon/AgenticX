@@ -120,7 +120,7 @@ class MinerUAdapter(DocumentAdapter):
             # 如果没有安装相关依赖，创建一个模拟适配器
             return MockVLMAdapter(debug=self.debug)
     
-    def parse_document(
+    async def parse_document(
         self,
         input_path: str,
         output_dir: str,
@@ -165,12 +165,12 @@ class MinerUAdapter(DocumentAdapter):
             # 调用后端适配器进行解析
             if hasattr(self._backend_adapter, 'parse') and asyncio.iscoroutinefunction(self._backend_adapter.parse):
                 # 异步调用 (真正的 PipelineAdapter)
-                parsed_artifacts = asyncio.run(self._backend_adapter.parse(
+                parsed_artifacts = await self._backend_adapter.parse(
                     file_path=input_path_obj,
                     output_dir=output_path,
                     page_ranges=pages,
                     **kwargs
-                ))
+                )
                 # 将 ParsedArtifacts 转换为字典格式
                 result = {
                     'success': True,
@@ -275,8 +275,8 @@ class MinerUAdapter(DocumentAdapter):
         **kwargs
     ):
         """实现异步解析接口"""
-        # 调用同步解析方法
-        return self.parse_document(
+        # 调用异步解析方法
+        return await self.parse_document(
             input_path=str(file_path),
             output_dir=str(output_dir),
             pages=page_ranges,
