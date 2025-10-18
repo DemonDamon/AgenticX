@@ -20,6 +20,8 @@ build/
 markmap/
 progress/
 thirdparty/
+outputs/
+**/outputs/
 
 # prd.md
 
