@@ -1,0 +1,10 @@
+# --- Kimi (Moonshot AI) ---
+KIMI_API_KEY=
+KIMI_API_BASE=https://api.moonshot.cn/v1
+KIMI_MODEL_NAME=kimi-k2-0711-preview
+
+BAILIAN_API_KEY=
+BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+BAILIAN_MODEL_NAME=qwen3-max
+
+MINERU_API_TOKEN=

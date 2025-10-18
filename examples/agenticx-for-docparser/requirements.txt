@@ -1,0 +1,43 @@
+# AgenticX 文档解析器 Demo 依赖包
+
+# 核心框架
+agenticx>=0.1.0
+
+# 环境配置
+python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# 用户界面
+rich>=13.0.0
+
+# 异步支持
+asyncio-mqtt>=0.11.0
+
+# 数据处理
+pydantic>=2.0.0
+typing-extensions>=4.0.0
+
+# 日志和调试
+loguru>=0.7.0
+
+# HTTP客户端（用于API调用）
+httpx>=0.24.0
+requests>=2.28.0
+
+# 文件处理
+pathlib2>=2.3.0
+
+# 可选：本地MinerU支持（如果需要本地模式）
+# torch>=2.0.0
+# torchvision>=0.15.0
+# transformers>=4.30.0
+# opencv-python>=4.8.0
+# pillow>=10.0.0
+# numpy>=1.24.0
+# pandas>=2.0.0
+
+# 开发和测试工具（可选）
+# pytest>=7.0.0
+# pytest-asyncio>=0.21.0
+# black>=23.0.0
+# flake8>=6.0.0
