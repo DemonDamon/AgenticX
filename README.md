@@ -11,8 +11,6 @@
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/agenticx)](https://pypi.org/project/agenticx/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/DemonDamon/AgenticX)
 
-**A unified, scalable, production-ready multi-agent application development framework**
-
 [Features](#-core-features) • [Quick Start](#-quick-start) • [Examples](#-complete-examples) • [Architecture](#️-technical-architecture) • [Progress](#-development-progress)
 
 </div>
