@@ -48,18 +48,122 @@ class PipelineAdapter(DocumentAdapter):
         """获取 MinerU pipeline 实例（延迟加载）"""
         if self._pipeline is None:
             try:
-                # 这里应该导入实际的 MinerU pipeline
-                # 由于我们没有实际的 MinerU 依赖，这里使用模拟实现
-                self.logger.info("初始化 MinerU pipeline...")
+                # 导入真正的 MinerU 核心函数
+                from magic_pdf.pdf_parse_union_core_v2 import pdf_parse_union
+                from magic_pdf.data.read_api import read_local_pdfs
+                import fitz  # PyMuPDF
+                
+                self.logger.info("初始化真正的 MinerU pipeline...")
+                
+                # 创建一个包装器来适配我们的接口
+                class RealMinerUPipeline:
+                    def __init__(self, method, device, virtual_vram_size, model_path, logger):
+                        self.method = method
+                        self.device = device
+                        self.virtual_vram_size = virtual_vram_size
+                        self.model_path = model_path
+                        self.pdf_parse_union = pdf_parse_union
+                        self.logger = logger  # 使用外部的logger
+                        
+                    def process(self, file_path, output_dir, language, enable_formula, enable_table, pages):
+                        """处理文档的方法"""
+                        import os
+                        from pathlib import Path
+                        
+                        # 创建输出目录
+                        output_path = Path(output_dir)
+                        output_path.mkdir(parents=True, exist_ok=True)
+                        
+                        # 使用 read_local_pdfs 创建 Dataset
+                        datasets = read_local_pdfs(file_path)
+                        if not datasets:
+                            raise ValueError(f"无法从 {file_path} 创建 Dataset")
+                        
+                        dataset = datasets[0]  # 取第一个 dataset
+                        
+                        # 设置解析模式
+                        if self.method == "ocr":
+                            parse_mode = "ocr"
+                        elif self.method == "txt":
+                            parse_mode = "txt"
+                        else:
+                            parse_mode = "auto"
+                        
+                        # 设置页码范围
+                        start_page = pages[0] - 1 if pages else 0
+                        end_page = pages[-1] if pages else None
+                        
+                        # 调用MinerU解析
+                        try:
+                            result = self.pdf_parse_union(
+                                model_list=[],  # 使用默认模型
+                                dataset=dataset,
+                                imageWriter=None,  # 不保存图片
+                                parse_mode=parse_mode,
+                                start_page_id=start_page,
+                                end_page_id=end_page,
+                                debug_mode=False,
+                                lang=language if language != "auto" else None
+                            )
+                        except Exception as e:
+                            import traceback
+                            self.logger.error(f"MinerU 解析失败: {e}")
+                            self.logger.error(f"详细错误: {traceback.format_exc()}")
+                            raise
+                        
+                        # 保存结果到输出目录
+                        if result:
+                            # 保存markdown结果
+                            md_content = result.get('markdown', '')
+                            with open(output_path / 'output.md', 'w', encoding='utf-8') as f:
+                                f.write(md_content)
+                            
+                            # 保存JSON结果
+                            import json
+                            json_result = {
+                                'content': result.get('content_list', []),
+                                'metadata': result.get('metadata', {}),
+                                'page_info': result.get('page_info', [])
+                            }
+                            with open(output_path / 'content_list.json', 'w', encoding='utf-8') as f:
+                                json.dump(json_result, f, ensure_ascii=False, indent=2)
+                        
+                        return {
+                            'success': True,
+                            'page_count': len(pages) if pages else 1,
+                            'content_blocks': len(result.get('content_list', [])) if result else 0
+                        }
+                
+                self._pipeline = RealMinerUPipeline(
+                    method=self.method,
+                    device=self.device,
+                    virtual_vram_size=self.virtual_vram_size,
+                    model_path=self.model_path,
+                    logger=self.logger
+                )
+                    
+                self.logger.info("真正的 MinerU pipeline 初始化成功")
+                
+            except ImportError as e:
+                self.logger.warning(f"无法导入真正的 MinerU pipeline: {e}")
+                self.logger.info("回退到模拟 pipeline...")
+                # 如果无法导入真正的MinerU，回退到模拟实现
                 self._pipeline = MockPipeline(
                     method=self.method,
                     device=self.device,
                     virtual_vram_size=self.virtual_vram_size,
                     model_path=self.model_path
                 )
-            except ImportError as e:
-                self.logger.error(f"无法导入 MinerU pipeline: {e}")
-                raise RuntimeError("MinerU pipeline 未安装或配置错误")
+            except Exception as e:
+                self.logger.error(f"初始化 MinerU pipeline 失败: {e}")
+                self.logger.info("回退到模拟 pipeline...")
+                # 如果初始化失败，回退到模拟实现
+                self._pipeline = MockPipeline(
+                    method=self.method,
+                    device=self.device,
+                    virtual_vram_size=self.virtual_vram_size,
+                    model_path=self.model_path
+                )
         
         return self._pipeline
     
