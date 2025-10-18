@@ -1,0 +1,51 @@
+# AgenticX 文档解析器配置文件
+
+# LLM配置
+llm:
+  provider: bailian
+  model: qwen3-max
+  api_key: ${BAILIAN_API_KEY}
+  base_url: ${BAILIAN_BASE_URL}
+  temperature: 0.7
+  max_tokens: 4000
+
+# MinerU配置
+mineru:
+  # 默认解析模式：local/remote_api/remote_mcp
+  default_mode: remote_api
+  
+  # 远程API配置
+  api:
+    base: "https://mineru.net/api/v4"
+    token: ${MINERU_API_TOKEN}
+    
+  # 本地配置
+  local:
+    backend: pipeline
+    device: auto
+    
+  # 默认解析参数
+  defaults:
+    language: auto
+    enable_formula: true
+    enable_table: true
+    page_ranges: null
+
+# 智能体配置
+agent:
+  name: "DocumentParser"
+  role: "文档解析专家"
+  goal: "高效准确地解析各种格式的文档，提取结构化内容"
+  backstory: "我是一个专业的文档解析助手，擅长处理PDF、Word、PPT等各种格式的文档，能够准确提取文本、表格、公式和图片等内容。"
+  
+# 输出配置
+output:
+  default_format: markdown
+  include_metadata: true
+  save_artifacts: true
+  output_dir: "./outputs"
+
+# 日志配置
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
