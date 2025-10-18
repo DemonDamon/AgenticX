@@ -63,9 +63,9 @@ class ArtifactIndex:
         # 查找常见输出文件
         common_files = {
             "markdown": "*.md",
-            "model_json": "model.json",
-            "middle_json": "middle.json", 
-            "content_list_json": "content_list.json",
+            "model_json": "*_model.json",
+            "middle_json": "*_middle.json", 
+            "content_list_json": "*_content_list.json",
             "layout_pdf": "*_layout.pdf",
             "spans_pdf": "*_spans.pdf"
         }
@@ -83,8 +83,9 @@ class ArtifactIndex:
             artifacts["images"] = [str(f.relative_to(outputs_dir)) for f in image_files]
         
         # 尝试从 content_list.json 获取源文件信息
-        content_list_path = outputs_dir / "content_list.json"
-        if content_list_path.exists():
+        content_list_files = list(outputs_dir.glob("*_content_list.json"))
+        if content_list_files:
+            content_list_path = content_list_files[0]
             try:
                 with open(content_list_path, 'r', encoding='utf-8') as f:
                     content_data = json.load(f)
@@ -208,7 +209,13 @@ class ResultFetcher:
     def __init__(self, api_base: str, api_token: str, timeout: float = 30.0):
         self.api_base = api_base.rstrip('/')
         self.api_token = api_token
-        self.client = httpx.AsyncClient(timeout=timeout)
+        # 配置更宽松的httpx客户端
+        self.client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout, connect=60.0, read=60.0),
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            follow_redirects=True,
+            verify=False  # 暂时禁用SSL验证以排除SSL问题
+        )
     
     async def poll_task(self, task_id: str, interval_s: int = 3, max_attempts: int = 100) -> Dict[str, Any]:
         """
@@ -225,20 +232,57 @@ class ResultFetcher:
         for attempt in range(max_attempts):
             try:
                 response = await self.client.get(
-                    f"{self.api_base}/extract_progress",
-                    params={"task_id": task_id},
-                    headers={"Authorization": f"Bearer {self.api_token}"}
+                    f"{self.api_base}/extract/task/{task_id}",
+                    headers={
+                        "Authorization": f"Bearer {self.api_token}",
+                        "Content-Type": "application/json",
+                        "Accept": "*/*"
+                    }
                 )
                 response.raise_for_status()
                 
                 data = response.json()
-                status = data.get("status")
+                logger.debug(f"轮询响应数据: {data}")
                 
-                if status in ["completed", "failed"]:
-                    return data
-                
-                logger.info(f"任务 {task_id} 状态: {status}, 进度: {data.get('progress', 0)}%")
-                await asyncio.sleep(interval_s)
+                # 处理官方API的响应格式
+                if data.get("code") == 0 and "data" in data:
+                    task_data = data["data"]
+                    state = task_data.get("state", "").lower()
+                    logger.debug(f"任务状态: {state}, 完整数据: {task_data}")
+                    
+                    if state == "done":
+                        # 任务完成，返回完整的任务数据
+                        full_zip_url = task_data.get("full_zip_url")
+                        logger.info(f"任务完成，ZIP URL: {full_zip_url}")
+                        return {
+                            "status": "completed",
+                            "task_id": task_id,
+                            "full_zip_url": full_zip_url,
+                            "markdown_url": task_data.get("markdown_url"),
+                            "data": task_data
+                        }
+                    elif state == "failed":
+                        # 任务失败
+                        return {
+                            "status": "failed",
+                            "task_id": task_id,
+                            "error": task_data.get("error", "任务失败"),
+                            "data": task_data
+                        }
+                    elif state in ["pending", "running", "converting"]:
+                        # 任务进行中
+                        logger.info(f"任务 {task_id} 状态: {state}")
+                        await asyncio.sleep(interval_s)
+                        continue
+                    else:
+                        # 未知状态，继续等待
+                        logger.warning(f"任务 {task_id} 未知状态: {state}")
+                        await asyncio.sleep(interval_s)
+                        continue
+                else:
+                    # API调用失败
+                    error_msg = data.get("msg", "API调用失败")
+                    raise ValueError(f"API响应错误: {error_msg}")
                 
             except Exception as e:
                 logger.error(f"轮询任务状态失败 (尝试 {attempt + 1}): {e}")
@@ -247,6 +291,91 @@ class ResultFetcher:
                 await asyncio.sleep(interval_s)
         
         raise TimeoutError(f"任务 {task_id} 轮询超时")
+    
+    async def poll_batch_task(self, batch_id: str, interval_s: int = 3, max_attempts: int = 100) -> Dict[str, Any]:
+        """
+        轮询批量任务状态
+        
+        Args:
+            batch_id: 批量任务ID
+            interval_s: 轮询间隔（秒）
+            max_attempts: 最大尝试次数
+            
+        Returns:
+            批量任务状态信息
+        """
+        for attempt in range(max_attempts):
+            try:
+                response = await self.client.get(
+                    f"{self.api_base}/extract-results/batch/{batch_id}",
+                    headers={
+                        "Authorization": f"Bearer {self.api_token}",
+                        "Content-Type": "application/json",
+                        "Accept": "*/*"
+                    }
+                )
+                response.raise_for_status()
+                
+                data = response.json()
+                logger.debug(f"批量任务轮询响应数据: {data}")
+                
+                # 处理批量任务API的响应格式
+                if data.get("code") == 0 and "data" in data:
+                    extract_results = data["data"].get("extract_result", [])
+                    if not extract_results:
+                        logger.warning(f"批量任务 {batch_id} 暂无结果，继续等待")
+                        await asyncio.sleep(interval_s)
+                        continue
+                    
+                    # 获取第一个文件的解析结果
+                    result = extract_results[0]
+                    state = result.get("state", "").lower()
+                    logger.debug(f"批量任务状态: {state}, 完整数据: {result}")
+                    
+                    if state == "done":
+                        # 批量任务完成，返回完整的任务数据
+                        full_zip_url = result.get("full_zip_url")
+                        logger.info(f"批量任务完成，ZIP URL: {full_zip_url}")
+                        return {
+                            "status": "completed",
+                            "task_id": batch_id,
+                            "full_zip_url": full_zip_url,
+                            "data": result
+                        }
+                    elif state == "failed":
+                        # 批量任务失败
+                        error_msg = result.get("err_msg", "批量任务失败")
+                        return {
+                            "status": "failed",
+                            "task_id": batch_id,
+                            "error": error_msg,
+                            "data": result
+                        }
+                    elif state in ["pending", "running", "converting"]:
+                        # 批量任务进行中
+                        progress = result.get("extract_progress", {})
+                        extracted_pages = progress.get("extracted_pages", 0)
+                        total_pages = progress.get("total_pages", 0)
+                        logger.info(f"批量任务 {batch_id} 状态: {state}, 进度: {extracted_pages}/{total_pages}")
+                        await asyncio.sleep(interval_s)
+                        continue
+                    else:
+                        # 未知状态，继续等待
+                        logger.warning(f"批量任务 {batch_id} 未知状态: {state}")
+                        await asyncio.sleep(interval_s)
+                        continue
+                else:
+                    # API调用失败
+                    error_msg = data.get("msg", "批量任务API调用失败")
+                    raise ValueError(f"批量任务API响应错误: {error_msg}")
+                
+            except Exception as e:
+                logger.error(f"轮询批量任务状态失败 (尝试 {attempt + 1}): {e}")
+                if attempt == max_attempts - 1:
+                    raise
+                await asyncio.sleep(interval_s)
+        
+        raise TimeoutError(f"批量任务 {batch_id} 轮询超时")
     
     async def fetch_batch(self, batch_id: str) -> Dict[str, Any]:
         """
@@ -260,8 +389,7 @@ class ResultFetcher:
         """
         try:
             response = await self.client.get(
-                f"{self.api_base}/batch_extract_progress",
-                params={"batch_id": batch_id},
+                f"{self.api_base}/extract-results/batch/{batch_id}",
                 headers={"Authorization": f"Bearer {self.api_token}"}
             )
             response.raise_for_status()
@@ -270,6 +398,114 @@ class ResultFetcher:
             logger.error(f"获取批量任务状态失败: {e}")
             raise
     
+    async def download_zip_with_curl(self, zip_url: str, dst_dir: Path) -> Path:
+        """
+        使用curl命令下载ZIP文件
+        """
+        import subprocess
+        
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        zip_filename = f"result_{int(time.time())}.zip"
+        zip_path = dst_dir / zip_filename
+        
+        logger.info(f"开始下载ZIP文件（使用curl）: {zip_url}")
+        try:
+            # 使用curl命令下载文件
+            cmd = [
+                'curl',
+                '-L',  # 跟随重定向
+                '-k',  # 忽略SSL证书错误
+                '--connect-timeout', '60',
+                '--max-time', '300',
+                '-o', str(zip_path),
+                zip_url
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            
+            if result.returncode != 0:
+                raise Exception(f"curl命令失败: {result.stderr}")
+            
+            if not zip_path.exists():
+                raise Exception("下载的文件不存在")
+            
+            file_size = zip_path.stat().st_size
+            logger.info(f"ZIP文件下载完成: {zip_path} ({file_size} bytes)")
+            return zip_path
+            
+        except Exception as e:
+            import traceback
+            logger.error(f"ZIP文件下载失败: {e}")
+            logger.error(f"异常类型: {type(e).__name__}")
+            logger.error(f"异常详情: {str(e)}")
+            logger.error(f"堆栈跟踪: {traceback.format_exc()}")
+            logger.error(f"ZIP URL: {zip_url}")
+            logger.error(f"目标路径: {zip_path}")
+            # 清理失败的下载文件
+            if zip_path.exists():
+                zip_path.unlink()
+            raise
+
+    async def download_zip_with_urllib(self, zip_url: str, dst_dir: Path) -> Path:
+        """
+        使用urllib下载ZIP文件（同步方式）
+        """
+        import urllib.request
+        import urllib.error
+        import ssl
+        
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        zip_filename = f"result_{int(time.time())}.zip"
+        zip_path = dst_dir / zip_filename
+        
+        logger.info(f"开始下载ZIP文件（使用urllib）: {zip_url}")
+        try:
+            # 创建不验证SSL的上下文
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            # 创建请求
+            req = urllib.request.Request(
+                zip_url,
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
+            )
+            
+            with urllib.request.urlopen(req, context=ssl_context, timeout=60) as response:
+                total_size = int(response.headers.get("content-length", 0))
+                downloaded = 0
+                logger.info(f"文件大小: {total_size} bytes")
+                
+                with open(zip_path, "wb") as f:
+                    while True:
+                        chunk = response.read(8192)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        if total_size > 0:
+                            progress = (downloaded / total_size) * 100
+                            logger.debug(f"下载进度: {progress:.1f}%")
+            
+            logger.info(f"ZIP文件下载完成: {zip_path} ({downloaded} bytes)")
+            return zip_path
+            
+        except Exception as e:
+            import traceback
+            logger.error(f"ZIP文件下载失败: {e}")
+            logger.error(f"异常类型: {type(e).__name__}")
+            logger.error(f"异常详情: {str(e)}")
+            logger.error(f"堆栈跟踪: {traceback.format_exc()}")
+            logger.error(f"ZIP URL: {zip_url}")
+            logger.error(f"目标路径: {zip_path}")
+            # 清理失败的下载文件
+            if zip_path.exists():
+                zip_path.unlink()
+            raise
+
     async def download_zip(self, zip_url: str, dst_dir: Path) -> Path:
         """
         下载ZIP文件
@@ -285,12 +521,16 @@ class ResultFetcher:
         zip_filename = f"result_{int(time.time())}.zip"
         zip_path = dst_dir / zip_filename
         
+        logger.info(f"开始下载ZIP文件: {zip_url}")
         try:
+            logger.debug(f"发起HTTP请求到: {zip_url}")
             async with self.client.stream("GET", zip_url) as response:
+                logger.info(f"HTTP响应状态: {response.status_code}")
                 response.raise_for_status()
                 
                 total_size = int(response.headers.get("content-length", 0))
                 downloaded = 0
+                logger.info(f"文件大小: {total_size} bytes")
                 
                 with open(zip_path, "wb") as f:
                     async for chunk in response.aiter_bytes():
@@ -305,7 +545,13 @@ class ResultFetcher:
             return zip_path
             
         except Exception as e:
+            import traceback
             logger.error(f"ZIP文件下载失败: {e}")
+            logger.error(f"异常类型: {type(e).__name__}")
+            logger.error(f"异常详情: {str(e)}")
+            logger.error(f"堆栈跟踪: {traceback.format_exc()}")
+            logger.error(f"ZIP URL: {zip_url}")
+            logger.error(f"目标路径: {zip_path}")
             # 清理失败的下载文件
             if zip_path.exists():
                 zip_path.unlink()
@@ -508,34 +754,94 @@ class ParseDocumentsTool:
                     errors.append(error_msg)
                     continue
                 
-                # 生成任务ID
+                # 生成任务ID和输出目录名
                 task_id = self._generate_task_id(file_path)
-                output_dir = self.output_base_dir / task_id
+                output_dir_name = self._generate_output_dir_name(file_path)
+                output_dir = self.output_base_dir / output_dir_name
                 
                 # 执行解析（带重试）
-                artifacts = await self._parse_with_retry(
+                parse_result = await self._parse_with_retry(
                     adapter, file_path, output_dir, args
                 )
                 
-                # 构建索引
-                index = ArtifactIndex.from_outputs(output_dir, task_id)
-                
-                # 验证解压内容
-                validation = ZipExtractor.validate_extracted_content(output_dir)
-                
-                results.append({
-                    "task_id": task_id,
-                    "source_file": str(file_path),
-                    "artifacts": index,
-                    "validation": validation,
-                    "success": True
-                })
+                # 处理ParseResult对象
+                if hasattr(parse_result, 'success'):
+                    # 这是一个ParseResult对象
+                    if not parse_result.success:
+                        error_msg = f"解析文件 {file_source} 失败: {parse_result.error_message}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                        continue
+                    
+                    # 使用ParseResult中的实际输出目录
+                    actual_output_dir = Path(parse_result.output_dir)
+                    
+                    # 检查是否有子目录（MinerUAdapter可能创建子目录）
+                    if actual_output_dir.exists():
+                        subdirs = [d for d in actual_output_dir.iterdir() if d.is_dir()]
+                        if len(subdirs) == 1:
+                            # 如果只有一个子目录，使用子目录作为实际的输出目录
+                            actual_output_dir = subdirs[0]
+                    
+                    # 构建索引
+                    index = ArtifactIndex.from_outputs(actual_output_dir, task_id)
+                    
+                    # 验证解压内容
+                    validation = ZipExtractor.validate_extracted_content(actual_output_dir)
+                    
+                    results.append({
+                        "task_id": task_id,
+                        "source_file": str(file_path),
+                        "output_dir": str(actual_output_dir),
+                        "artifacts": index,
+                        "validation": validation,
+                        "success": True
+                    })
+                else:
+                    # 这是一个字典结果（旧格式）
+                    # 检查是否有子目录（MinerUAdapter可能创建子目录）
+                    actual_output_dir = output_dir
+                    if output_dir.exists():
+                        # 查找可能的子目录
+                        subdirs = [d for d in output_dir.iterdir() if d.is_dir()]
+                        if len(subdirs) == 1:
+                            actual_output_dir = subdirs[0]
+                    
+                    # 构建索引
+                    index = ArtifactIndex.from_outputs(actual_output_dir, task_id)
+                    
+                    # 验证解压内容
+                    validation = ZipExtractor.validate_extracted_content(actual_output_dir)
+                    
+                    results.append({
+                        "task_id": task_id,
+                        "source_file": str(file_path),
+                        "output_dir": str(actual_output_dir),
+                        "artifacts": index,
+                        "validation": validation,
+                        "success": True
+                    })
                 
             except Exception as e:
                 error_msg = f"解析文件 {file_source} 失败: {e}"
                 logger.error(error_msg)
                 errors.append(error_msg)
         
+        # 如果只有一个文件，返回简化的结果格式
+        if len(args.file_sources) == 1 and len(results) == 1:
+            result = results[0]
+            return {
+                "success": True,
+                "mode": "local",
+                "task_id": result["task_id"],
+                "output_dir": result.get("output_dir", str(self.output_base_dir / self._generate_output_dir_name(Path(args.file_sources[0])))),
+                "artifacts": result["artifacts"].artifacts if hasattr(result["artifacts"], 'artifacts') else {},
+                "metadata": result["artifacts"].metadata if hasattr(result["artifacts"], 'metadata') else {},
+                "source_file": result["source_file"],
+                "validation": result["validation"]
+            }
+        
+        # 多文件情况返回完整结果
         return {
             "success": len(results) > 0,
             "mode": "local",
@@ -579,16 +885,35 @@ class ParseDocumentsTool:
         try:
             # 提交解析任务（带重试）
             task_data = await self._submit_remote_task_with_retry(args, fetcher)
-            task_id = task_data["task_id"]
+            logger.info(f"任务提交响应: {task_data}")
             
-            # 轮询任务状态
-            result = await fetcher.poll_task(task_id)
+            # 安全地获取task_id
+            if "task_id" not in task_data:
+                logger.error(f"API响应中缺少task_id: {task_data}")
+                raise ValueError(f"API响应格式错误，缺少task_id: {task_data}")
+            
+            task_id = task_data["task_id"]
+            is_batch = task_data.get("is_batch", False)
+            
+            # 轮询任务状态（根据是否为批量任务选择不同的轮询方法）
+            if is_batch:
+                result = await fetcher.poll_batch_task(task_id)
+            else:
+                result = await fetcher.poll_task(task_id)
             
             if result["status"] == "completed":
                 # 下载结果
                 zip_url = result["full_zip_url"]
-                output_dir = self.output_base_dir / task_id
-                zip_path = await fetcher.download_zip(zip_url, output_dir)
+                if not zip_url:
+                    raise ValueError(f"API返回的ZIP URL为空: {result}")
+                # 为远程API生成带文件名的输出目录
+                if args.file_sources:
+                    first_file = Path(args.file_sources[0] if isinstance(args.file_sources, list) else args.file_sources)
+                    output_dir_name = self._generate_output_dir_name(first_file)
+                    output_dir = self.output_base_dir / output_dir_name
+                else:
+                    output_dir = self.output_base_dir / task_id
+                zip_path = await fetcher.download_zip_with_curl(zip_url, output_dir)
                 
                 # 解压并构建索引
                 index = ZipExtractor.extract(zip_path, output_dir, task_id)
@@ -638,34 +963,162 @@ class ParseDocumentsTool:
         raise NotImplementedError("MCP远程解析功能待实现")
     
     async def _submit_remote_task(self, args: MinerUParseArgs, fetcher: ResultFetcher) -> Dict[str, Any]:
-        """提交远程解析任务"""
-        # 构建请求数据
+        """提交远程解析任务 - 支持URL和本地文件上传"""
+        # 获取第一个文件源（官方API一次只能处理一个文件）
+        file_source = args.file_sources[0] if isinstance(args.file_sources, list) else args.file_sources
+        
+        # 判断是本地文件还是URL
+        if self._is_url(file_source):
+            # 直接使用URL提交单文件解析任务
+            return await self._submit_url_task(file_source, args, fetcher)
+        else:
+            # 本地文件使用批量文件上传API
+            return await self._upload_local_file(file_source, args, fetcher)
+    
+    async def _submit_url_task(self, file_url: str, args: MinerUParseArgs, fetcher: ResultFetcher) -> Dict[str, Any]:
+        """提交URL文件解析任务"""
+        # 构建符合官方API格式的请求数据
         request_data = {
-            "file_sources": args.file_sources,
-            "language": args.language,
+            "url": file_url,  # 官方API使用 "url" 字段
+            "is_ocr": True,   # 启用OCR
             "enable_formula": args.enable_formula,
-            "enable_table": args.enable_table,
-            "page_ranges": args.page_ranges
+            "enable_table": args.enable_table
         }
         
-        if args.callback_url:
-            request_data["callback_url"] = args.callback_url
-            request_data["callback_secret"] = args.callback_secret
+        # 添加语言参数（如果不是auto）
+        if args.language and args.language != "auto":
+            request_data["language"] = args.language
+            
+        # 添加页码范围（如果指定）
+        if args.page_ranges:
+            request_data["page_ranges"] = args.page_ranges
         
-        # 提交任务
+        logger.info(f"提交URL解析任务，请求数据: {request_data}")
+        
+        # 提交任务到正确的端点
         response = await fetcher.client.post(
-            f"{fetcher.api_base}/extract",
+            f"{fetcher.api_base}/extract/task",
             json=request_data,
-            headers={"Authorization": f"Bearer {fetcher.api_token}"}
+            headers={
+                "Authorization": f"Bearer {fetcher.api_token}",
+                "Content-Type": "application/json",
+                "Accept": "*/*"
+            }
         )
         response.raise_for_status()
         
-        return response.json()
+        data = response.json()
+        logger.info(f"API响应数据: {data}")
+        
+        # 处理官方API的响应格式
+        if data.get("code") == 0 and "data" in data:
+            task_id = data["data"].get("task_id")
+            if task_id:
+                return {"task_id": task_id}
+            else:
+                raise ValueError(f"API响应中缺少task_id: {data}")
+        else:
+            raise ValueError(f"API请求失败: {data}")
+    
+    async def _upload_local_file(self, file_path: str, args: MinerUParseArgs, fetcher: ResultFetcher) -> Dict[str, Any]:
+        """上传本地文件并提交解析任务"""
+        from pathlib import Path
+        
+        file_path_obj = Path(file_path)
+        if not file_path_obj.exists():
+            raise ValueError(f"文件不存在: {file_path}")
+        
+        # 1. 获取文件上传URL
+        upload_request = {
+            "files": [
+                {
+                    "name": file_path_obj.name,
+                    "is_ocr": True,
+                    "data_id": f"upload_{int(time.time())}"
+                }
+            ],
+            "enable_formula": args.enable_formula,
+            "enable_table": args.enable_table
+        }
+        
+        # 添加语言参数（如果不是auto）
+        if args.language and args.language != "auto":
+            upload_request["language"] = args.language
+            
+        # 添加页码范围（如果指定）
+        if args.page_ranges:
+            upload_request["page_ranges"] = args.page_ranges
+        
+        logger.info(f"请求文件上传URL，数据: {upload_request}")
+        
+        response = await fetcher.client.post(
+            f"{fetcher.api_base}/file-urls/batch",
+            json=upload_request,
+            headers={
+                "Authorization": f"Bearer {fetcher.api_token}",
+                "Content-Type": "application/json",
+                "Accept": "*/*"
+            }
+        )
+        response.raise_for_status()
+        
+        upload_data = response.json()
+        logger.info(f"上传URL响应: {upload_data}")
+        
+        if upload_data.get("code") != 0 or "data" not in upload_data:
+            raise ValueError(f"获取上传URL失败: {upload_data}")
+        
+        batch_data = upload_data["data"]
+        batch_id = batch_data.get("batch_id")
+        file_urls = batch_data.get("file_urls", [])
+        
+        if not batch_id or not file_urls:
+            raise ValueError(f"响应中缺少batch_id或file_urls: {batch_data}")
+        
+        # 2. 上传文件到获取的URL
+        upload_url = file_urls[0]  # file_urls 是字符串列表，不是字典列表
+        logger.info(f"上传文件到: {upload_url}")
+        
+        with open(file_path, 'rb') as f:
+            file_content = f.read()
+        
+        upload_response = await fetcher.client.put(
+            upload_url,
+            content=file_content,
+            headers={
+                # 不设置Content-Type，让系统自动检测
+            }
+        )
+        upload_response.raise_for_status()
+        
+        logger.info(f"文件上传成功，batch_id: {batch_id}")
+        
+        # 返回batch_id作为task_id，用于后续状态查询
+        return {"task_id": batch_id, "is_batch": True}
+    
+    def _is_url(self, path: str) -> bool:
+        """判断是否为URL"""
+        return path.startswith(('http://', 'https://'))
+    
+
     
     def _generate_task_id(self, file_path: Path) -> str:
         """生成任务ID"""
         content = f"{file_path.name}_{int(time.time() * 1000)}"
         return hashlib.md5(content.encode()).hexdigest()[:12]
+    
+    def _generate_output_dir_name(self, file_path: Path) -> str:
+        """生成输出目录名称，格式为：文件名-UUID"""
+        # 获取文件名（不含扩展名）
+        file_stem = file_path.stem
+        # 生成UUID
+        task_id = self._generate_task_id(file_path)
+        # 清理文件名中的特殊字符，确保目录名有效
+        safe_filename = "".join(c for c in file_stem if c.isalnum() or c in (' ', '-', '_', '.')).strip()
+        # 替换空格为下划线
+        safe_filename = safe_filename.replace(' ', '_')
+        # 组合文件名和UUID
+        return f"{safe_filename}-{task_id}"
 
 
 class GetOCRLanguagesTool:
