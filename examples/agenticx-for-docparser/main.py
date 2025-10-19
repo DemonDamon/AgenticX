@@ -87,12 +87,42 @@ class DocumentParserDemo:
             with open(config_file, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
             
+            # 递归替换配置中的环境变量占位符
+            config = self._replace_env_variables(config)
+            
             logger.info(f"配置文件加载成功: {config_path}")
             return config
             
         except Exception as e:
             logger.error(f"配置文件加载失败: {e}")
             raise
+    
+    def _replace_env_variables(self, obj: Any) -> Any:
+        """递归替换配置中的环境变量占位符"""
+        import re
+        
+        if isinstance(obj, dict):
+            return {key: self._replace_env_variables(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._replace_env_variables(item) for item in obj]
+        elif isinstance(obj, str):
+            # 匹配 ${VAR_NAME} 格式的环境变量占位符
+            pattern = r'\$\{([^}]+)\}'
+            
+            def replace_var(match):
+                var_name = match.group(1)
+                env_value = os.getenv(var_name)
+                
+                if env_value is not None:
+                    logger.debug(f"替换环境变量 ${{{var_name}}} -> {env_value[:10]}...")
+                    return env_value
+                else:
+                    logger.warning(f"环境变量 {var_name} 未设置，保持原始值")
+                    return match.group(0)  # 保持原始占位符
+            
+            return re.sub(pattern, replace_var, obj)
+        else:
+            return obj
     
     def _initialize_components(self):
         """初始化组件"""
