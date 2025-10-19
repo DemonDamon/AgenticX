@@ -13,6 +13,7 @@ import hashlib
 import zipfile
 import logging
 import tempfile
+import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Literal
 from urllib.parse import urlparse
@@ -22,7 +23,7 @@ from enum import Enum
 import httpx
 from pydantic import BaseModel, Field, validator
 
-from .remote import RemoteTool, MCPServerConfig
+from .remote import RemoteTool, MCPServerConfig, MCPClient
 from .adapters.base import ParsedArtifacts, DocumentAdapter
 from .adapters.mineru import MinerUAdapter
 
@@ -434,7 +435,6 @@ class ResultFetcher:
             return zip_path
             
         except Exception as e:
-            import traceback
             logger.error(f"ZIP文件下载失败: {e}")
             logger.error(f"异常类型: {type(e).__name__}")
             logger.error(f"异常详情: {str(e)}")
@@ -494,7 +494,6 @@ class ResultFetcher:
             return zip_path
             
         except Exception as e:
-            import traceback
             logger.error(f"ZIP文件下载失败: {e}")
             logger.error(f"异常类型: {type(e).__name__}")
             logger.error(f"异常详情: {str(e)}")
@@ -545,7 +544,6 @@ class ResultFetcher:
             return zip_path
             
         except Exception as e:
-            import traceback
             logger.error(f"ZIP文件下载失败: {e}")
             logger.error(f"异常类型: {type(e).__name__}")
             logger.error(f"异常详情: {str(e)}")
@@ -959,8 +957,272 @@ class ParseDocumentsTool:
     
     async def _parse_remote_mcp(self, args: MinerUParseArgs) -> Dict[str, Any]:
         """远程MCP解析"""
-        # TODO: 实现MCP远程解析
-        raise NotImplementedError("MCP远程解析功能待实现")
+        try:
+            # 从配置中获取MCP服务器配置
+            mcp_config = self.config.get("mcp", {})
+            server_config_dict = mcp_config.get("server", {})
+            
+            # 如果配置中没有MCP配置，使用默认配置
+            if not server_config_dict:
+                logger.warning("配置中未找到MCP服务器配置，使用默认配置")
+                server_config_dict = {
+                    "command": "mineru-mcp",
+                    "args": ["--transport", "stdio"],
+                    "timeout": 300.0,
+                    "env": {}
+                }
+            
+            # 构建环境变量
+            env_config = server_config_dict.get("env", {})
+            env_vars = {
+                "MINERU_API_BASE": env_config.get("MINERU_API_BASE", args.api_base or "https://mineru.net"),
+                "MINERU_API_KEY": env_config.get("MINERU_API_KEY", args.api_token or os.environ.get("MINERU_API_TOKEN", "")),
+                "OUTPUT_DIR": env_config.get("OUTPUT_DIR", str(self.output_base_dir))
+            }
+            
+            # 添加其他环境变量
+            for key, value in env_config.items():
+                if key not in env_vars:
+                    env_vars[key] = value
+            
+            # 创建 MCP 服务器配置
+            server_config = MCPServerConfig(
+                name=server_config_dict.get("name", "mineru-mcp"),
+                command=server_config_dict.get("command", "python"),
+                args=server_config_dict.get("args", ["-m", "mineru.cli", "--transport", "stdio"]),
+                env=env_vars,
+                timeout=server_config_dict.get("timeout", args.timeout if hasattr(args, 'timeout') else 300.0)
+            )
+            
+            # 创建 MCP 客户端
+            from .remote import MCPClient
+            client = MCPClient(server_config)
+            
+            # 创建 parse_documents 工具
+            parse_tool = await client.create_tool("parse_documents")
+            
+            # 准备调用参数
+            file_sources_str = args.file_sources
+            if isinstance(args.file_sources, list):
+                file_sources_str = ", ".join(args.file_sources)
+            
+            mcp_params = {
+                "file_sources": file_sources_str,
+                "enable_ocr": True,  # MCP 服务器默认启用 OCR
+                "language": args.language,
+            }
+            
+            # 添加页码范围参数（如果提供）
+            if args.page_ranges:
+                mcp_params["page_ranges"] = args.page_ranges
+            
+            logger.info(f"准备调用 MCP parse_documents 工具")
+            logger.info(f"MCP 服务器配置: {server_config}")
+            logger.info(f"解析工具对象: {parse_tool}")
+            logger.info(f"调用 MCP parse_documents 工具，参数: {mcp_params}")
+            
+            # 调用 MCP 工具
+            logger.info(f"开始执行 MCP 工具调用...")
+            start_time = time.time()
+            try:
+                # 添加超时控制
+                timeout = getattr(server_config, 'timeout', 300.0)
+                mcp_result = await asyncio.wait_for(
+                    parse_tool._arun(**mcp_params),
+                    timeout=timeout
+                )
+                end_time = time.time()
+                logger.info(f"MCP 工具调用完成，耗时: {end_time - start_time:.2f}秒")
+            except asyncio.TimeoutError:
+                end_time = time.time()
+                logger.error(f"MCP 工具调用超时，耗时: {end_time - start_time:.2f}秒")
+                
+                # 检查是否有输出文件生成（即使超时）
+                if args.file_sources:
+                    first_file = Path(args.file_sources[0] if isinstance(args.file_sources, list) else args.file_sources)
+                    task_id = self._generate_task_id(first_file)
+                    output_dir_name = self._generate_output_dir_name(first_file)
+                    output_dir = self.output_base_dir / output_dir_name
+                    
+                    if output_dir.exists() and any(output_dir.iterdir()):
+                        logger.info(f"检测到输出文件已生成，尝试恢复结果: {output_dir}")
+                        try:
+                            # 尝试从输出目录恢复结果
+                            index = ArtifactIndex.from_outputs(output_dir, task_id)
+                            validation = ZipExtractor.validate_extracted_content(output_dir)
+                            
+                            return {
+                                "success": True,
+                                "mode": "remote_mcp",
+                                "task_id": task_id,
+                                "artifacts": index,
+                                "validation": validation,
+                                "output_dir": str(output_dir),
+                                "warning": "MCP工具调用超时，但已从输出文件恢复结果"
+                            }
+                        except Exception as recovery_error:
+                            logger.error(f"从输出文件恢复结果失败: {recovery_error}")
+                
+                raise Exception(f"MCP 工具调用超时 ({timeout}秒)")
+            except Exception as call_error:
+                end_time = time.time()
+                logger.error(f"MCP 工具调用异常，耗时: {end_time - start_time:.2f}秒")
+                logger.error(f"调用异常详情: {call_error}")
+                logger.error(f"异常类型: {type(call_error).__name__}")
+                
+                # 检查是否有输出文件生成（即使异常）
+                if args.file_sources:
+                    first_file = Path(args.file_sources[0] if isinstance(args.file_sources, list) else args.file_sources)
+                    task_id = self._generate_task_id(first_file)
+                    output_dir_name = self._generate_output_dir_name(first_file)
+                    output_dir = self.output_base_dir / output_dir_name
+                    
+                    if output_dir.exists() and any(output_dir.iterdir()):
+                        logger.info(f"检测到输出文件已生成，尝试恢复结果: {output_dir}")
+                        try:
+                            # 尝试从输出目录恢复结果
+                            index = ArtifactIndex.from_outputs(output_dir, task_id)
+                            validation = ZipExtractor.validate_extracted_content(output_dir)
+                            
+                            return {
+                                "success": True,
+                                "mode": "remote_mcp",
+                                "task_id": task_id,
+                                "artifacts": index,
+                                "validation": validation,
+                                "output_dir": str(output_dir),
+                                "warning": f"MCP工具调用异常({type(call_error).__name__})，但已从输出文件恢复结果"
+                            }
+                        except Exception as recovery_error:
+                            logger.error(f"从输出文件恢复结果失败: {recovery_error}")
+                
+                raise call_error
+            
+            logger.info(f"MCP 工具调用结果: {mcp_result}")
+            
+            # 检查 MCP 调用结果
+            if not mcp_result or mcp_result.get("status") != "success":
+                error_msg = mcp_result.get("error", "MCP 调用失败") if mcp_result else "MCP 调用返回空结果"
+                return {
+                    "success": False,
+                    "mode": "remote_mcp",
+                    "error": error_msg,
+                    "mcp_result": mcp_result
+                }
+            
+            # 生成任务 ID
+            if args.file_sources:
+                first_file = Path(args.file_sources[0] if isinstance(args.file_sources, list) else args.file_sources)
+                task_id = self._generate_task_id(first_file)
+                output_dir_name = self._generate_output_dir_name(first_file)
+                output_dir = self.output_base_dir / output_dir_name
+            else:
+                task_id = f"mcp_{int(time.time())}"
+                output_dir = self.output_base_dir / task_id
+            
+            # 确保输出目录存在
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 处理 MCP 返回的结果
+            if "content" in mcp_result:
+                # 单文件结果，直接保存内容
+                content = mcp_result["content"]
+                
+                # 保存 Markdown 文件
+                md_file = output_dir / f"{task_id}.md"
+                with open(md_file, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                
+                # 创建工件索引
+                artifacts = {
+                    "markdown": [str(md_file.relative_to(output_dir))],
+                    "content": content
+                }
+                
+                index = ArtifactIndex(
+                    task_id=task_id,
+                    source_files=[file_sources_str],
+                    output_dir=str(output_dir),
+                    artifacts=artifacts,
+                    metadata={
+                        "mode": "remote_mcp",
+                        "language": args.language,
+                        "enable_formula": args.enable_formula,
+                        "enable_table": args.enable_table,
+                        "page_ranges": args.page_ranges
+                    }
+                )
+                
+            elif "results" in mcp_result:
+                # 多文件结果
+                results = mcp_result["results"]
+                artifacts = {"markdown": [], "results": results}
+                
+                # 保存每个文件的结果
+                for i, result in enumerate(results):
+                    if result.get("status") == "success" and "content" in result:
+                        md_file = output_dir / f"{task_id}_file_{i+1}.md"
+                        with open(md_file, 'w', encoding='utf-8') as f:
+                            f.write(result["content"])
+                        artifacts["markdown"].append(str(md_file.relative_to(output_dir)))
+                
+                index = ArtifactIndex(
+                    task_id=task_id,
+                    source_files=[file_sources_str],
+                    output_dir=str(output_dir),
+                    artifacts=artifacts,
+                    metadata={
+                        "mode": "remote_mcp",
+                        "language": args.language,
+                        "enable_formula": args.enable_formula,
+                        "enable_table": args.enable_table,
+                        "page_ranges": args.page_ranges,
+                        "file_count": len(results)
+                    }
+                )
+            else:
+                # 未知结果格式
+                return {
+                    "success": False,
+                    "mode": "remote_mcp",
+                    "error": "MCP 返回的结果格式不支持",
+                    "mcp_result": mcp_result
+                }
+            
+            # 验证输出内容
+            validation = ZipExtractor.validate_extracted_content(output_dir)
+            
+            return {
+                "success": True,
+                "mode": "remote_mcp",
+                "task_id": task_id,
+                "artifacts": index,
+                "validation": validation,
+                "output_dir": str(output_dir),
+                "mcp_result": mcp_result
+            }
+            
+        except Exception as e:
+            logger.error(f"MCP 远程解析失败: {e}")
+            logger.error(f"异常类型: {type(e).__name__}")
+            logger.error(f"异常模块: {e.__class__.__module__}")
+            logger.error(f"错误详情: {traceback.format_exc()}")
+            
+            # 检查是否是特定类型的异常
+            if "timeout" in str(e).lower():
+                logger.error("检测到超时异常，可能是MCP服务器响应超时")
+            elif "connection" in str(e).lower():
+                logger.error("检测到连接异常，可能是MCP服务器连接问题")
+            elif "json" in str(e).lower():
+                logger.error("检测到JSON解析异常，可能是MCP服务器返回格式问题")
+            
+            return {
+                "success": False,
+                "mode": "remote_mcp",
+                "error": f"MCP 远程解析异常: {str(e)}",
+                "error_type": type(e).__name__,
+                "error_module": e.__class__.__module__
+            }
     
     async def _submit_remote_task(self, args: MinerUParseArgs, fetcher: ResultFetcher) -> Dict[str, Any]:
         """提交远程解析任务 - 支持URL和本地文件上传"""
