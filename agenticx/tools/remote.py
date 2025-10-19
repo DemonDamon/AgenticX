@@ -19,6 +19,7 @@ class MCPServerConfig(BaseModel):
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
     timeout: float = 60.0
+    cwd: Optional[str] = Field(default=None, description="工作目录")
 
 class MCPToolCall(BaseModel):
     jsonrpc: str = Field(default="2.0", description="JSON-RPC version")
@@ -97,14 +98,16 @@ class RemoteTool(BaseTool):
             for key, value in self.server_config.env.items():
                 logger.debug(f"  {key}: {value[:50]}..." if len(value) > 50 else f"  {key}: {value}")
             
-            command_str = f'"{self.server_config.command}" {" ".join(self.server_config.args)}'
+            # 构建完整的命令列表
+            cmd_list = [self.server_config.command] + self.server_config.args
             
-            logger.debug(f"Executing command: {command_str}")
+            logger.debug(f"Executing command: {cmd_list} in {self.server_config.cwd}")
 
             # 使用交互式进程通信，增加缓冲区限制以处理大响应
-            process = await asyncio.create_subprocess_shell(
-                command_str,
+            process = await asyncio.create_subprocess_exec(
+                *cmd_list,
                 env=env,
+                cwd=self.server_config.cwd,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -123,7 +126,7 @@ class RemoteTool(BaseTool):
                     "method": "initialize",
                     "params": {
                         "protocolVersion": "2024-11-05",
-                        "capabilities": {"tools": {}},
+                        "capabilities": {},
                         "clientInfo": {"name": "AgenticX", "version": "1.0.0"}
                     }
                 }
@@ -184,9 +187,28 @@ class RemoteTool(BaseTool):
                 process.stdin.write(tool_data.encode('utf-8'))
                 await process.stdin.drain()
                 
-                # 等待工具调用响应
-                tool_response_line = await process.stdout.readline()
-                logger.debug(f"Tool response: {tool_response_line.decode('utf-8', 'ignore').strip()}")
+                # 等待工具调用响应，跳过非JSON行
+                tool_response = None
+                max_attempts = 10  # 最多尝试读取10行
+                for _ in range(max_attempts):
+                    line = await process.stdout.readline()
+                    if not line:
+                        break
+                    line_str = line.decode('utf-8', 'ignore').strip()
+                    if not line_str:
+                        continue
+                    logger.debug(f"Tool response line: {line_str}")
+                    try:
+                        # 尝试解析JSON
+                        response_data = json.loads(line_str)
+                        # 检查是否是我们期望的工具调用响应
+                        if (response_data.get('jsonrpc') == '2.0' and 
+                            response_data.get('id') == 3):
+                            tool_response = response_data
+                            break
+                    except json.JSONDecodeError:
+                        # 跳过非JSON行（如ASCII艺术、日志等）
+                        continue
                 
                 # 关闭输入流
                 process.stdin.close()
@@ -206,14 +228,10 @@ class RemoteTool(BaseTool):
                         self.name
                     )
 
-                if not tool_response_line:
-                    raise ToolError("No tool response received from MCP server", self.name)
+                if tool_response is None:
+                    raise ToolError("No valid tool response received from MCP server", self.name)
                 
-                try:
-                    response_data = json.loads(tool_response_line)
-                    return MCPToolResponse(**response_data)
-                except json.JSONDecodeError as e:
-                    raise ToolError(f"JSON decode failed. Raw response: '{tool_response_line.decode('utf-8', 'ignore').strip()}'.", self.name) from e
+                return MCPToolResponse(**tool_response)
                     
             finally:
                 # 确保进程被清理
@@ -263,19 +281,24 @@ class MCPClient:
         if self._tools_cache is not None:
             return self._tools_cache
             
+        process = None
         try:
             # 构建环境变量
             env = dict(os.environ)
             env.update(self.server_config.env)
             
-            command_str = f'"{self.server_config.command}" {" ".join(self.server_config.args)}'
+            # 构建完整的命令列表
+            cmd_list = [self.server_config.command] + self.server_config.args
             
-            logger.debug(f"Discovering tools from: {command_str}")
+            logger.info(f"Starting MCP server discovery: {' '.join(cmd_list)}")
+            logger.debug(f"Working directory: {self.server_config.cwd}")
+            logger.debug(f"Environment variables: {list(self.server_config.env.keys())}")
 
             # 使用交互式进程通信
-            process = await asyncio.create_subprocess_shell(
-                command_str,
+            process = await asyncio.create_subprocess_exec(
+                *cmd_list,
                 env=env,
+                cwd=self.server_config.cwd,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -285,6 +308,19 @@ class MCPClient:
             # 确保流不为 None
             if process.stdin is None or process.stdout is None or process.stderr is None:
                 raise ToolError("Failed to create process streams", "MCPClient")
+
+            # 检查进程是否立即退出
+            try:
+                await asyncio.wait_for(process.wait(), timeout=0.1)
+                # 如果进程立即退出，读取错误信息
+                stderr_output = await process.stderr.read()
+                error_msg = stderr_output.decode('utf-8', errors='ignore')
+                logger.error(f"MCP server process exited immediately with code {process.returncode}")
+                logger.error(f"Error output: {error_msg}")
+                raise ToolError(f"MCP server failed to start (exit code {process.returncode}): {error_msg}", "MCPClient")
+            except asyncio.TimeoutError:
+                # 进程仍在运行，这是正常的
+                logger.debug("MCP server process started successfully")
 
             try:
                 # 初始化握手
@@ -299,15 +335,74 @@ class MCPClient:
                     }
                 }
                 
+                logger.debug("Sending initialization request")
                 init_data = json.dumps(initialize_request) + "\n"
                 process.stdin.write(init_data.encode('utf-8'))
                 await process.stdin.drain()
                 
-                # 等待初始化响应
-                init_response_line = await process.stdout.readline()
-                init_response = json.loads(init_response_line)
+                # 等待初始化响应，跳过非JSON行
+                init_response = None
+                max_attempts = 20  # 最多尝试读取20行
+                all_lines = []  # 用于调试
+                
+                # 等待一小段时间让进程启动
+                await asyncio.sleep(0.5)
+                
+                for attempt in range(max_attempts):
+                    try:
+                        # 使用超时读取，避免无限等待
+                        line = await asyncio.wait_for(process.stdout.readline(), timeout=3.0)
+                        if not line:
+                            logger.debug(f"No more output after {attempt} attempts")
+                            break
+                        line_str = line.decode('utf-8').strip()
+                        all_lines.append(line_str)  # 记录所有行用于调试
+                        
+                        if not line_str:
+                            continue
+                            
+                        logger.debug(f"Received line {attempt}: {line_str[:200]}...")  # 限制日志长度
+                        
+                        try:
+                            # 尝试解析JSON
+                            response_data = json.loads(line_str)
+                            # 检查是否是我们期望的初始化响应
+                            if (response_data.get('jsonrpc') == '2.0' and 
+                                response_data.get('id') == 1):
+                                init_response = response_data
+                                logger.debug("Received valid initialization response")
+                                break
+                        except json.JSONDecodeError:
+                            # 跳过非JSON行（如ASCII艺术、日志等）
+                            logger.debug(f"Skipping non-JSON line: {line_str[:100]}...")
+                            continue
+                    except asyncio.TimeoutError:
+                        logger.debug(f"Timeout waiting for line {attempt}")
+                        # 检查进程是否还在运行
+                        if process.returncode is not None:
+                            stderr_output = await process.stderr.read()
+                            error_msg = stderr_output.decode('utf-8', errors='ignore')
+                            logger.error(f"Process exited during initialization with code {process.returncode}")
+                            logger.error(f"Error output: {error_msg}")
+                            raise ToolError(f"MCP server crashed during initialization: {error_msg}", "MCPClient")
+                        continue
+                
+                if init_response is None:
+                    # 添加调试信息
+                    stderr_output = await process.stderr.read()
+                    error_msg = stderr_output.decode('utf-8', errors='ignore')
+                    logger.error(f"Failed to get valid initialization response")
+                    logger.error(f"All lines received: {all_lines[:5]}...")  # 只显示前5行
+                    logger.error(f"Process stderr: {error_msg}")
+                    logger.error(f"Process return code: {process.returncode}")
+                    raise ToolError("Failed to initialize MCP server - no valid response received", "MCPClient")
+                
                 if init_response.get('error'):
-                    raise ToolError(f"MCP initialization failed: {init_response['error']}", "MCPClient")
+                    error_info = init_response['error']
+                    logger.error(f"MCP initialization error: {error_info}")
+                    raise ToolError(f"MCP initialization failed: {error_info}", "MCPClient")
+                
+                logger.debug("MCP server initialized successfully")
                 
                 # 发送 initialized 通知
                 initialized_notification = {
@@ -329,47 +424,101 @@ class MCPClient:
                     "params": {}
                 }
                 
+                logger.debug("Requesting tools list")
                 tools_data = json.dumps(tools_request) + "\n"
                 process.stdin.write(tools_data.encode('utf-8'))
                 await process.stdin.drain()
                 
-                # 等待工具列表响应
-                tools_response_line = await process.stdout.readline()
-                tools_response = json.loads(tools_response_line)
+                # 等待工具列表响应，跳过非JSON行
+                tools_response = None
+                max_attempts = 10  # 最多尝试读取10行
+                for attempt in range(max_attempts):
+                    try:
+                        line = await asyncio.wait_for(process.stdout.readline(), timeout=3.0)
+                        if not line:
+                            logger.debug(f"No more output for tools list after {attempt} attempts")
+                            break
+                        line_str = line.decode('utf-8').strip()
+                        if not line_str:
+                            continue
+                            
+                        logger.debug(f"Tools response line {attempt}: {line_str[:200]}...")
+                        
+                        try:
+                            # 尝试解析JSON
+                            response_data = json.loads(line_str)
+                            # 检查是否是我们期望的工具列表响应
+                            if (response_data.get('jsonrpc') == '2.0' and 
+                                response_data.get('id') == 2):
+                                tools_response = response_data
+                                logger.debug("Received valid tools list response")
+                                break
+                        except json.JSONDecodeError:
+                            # 跳过非JSON行（如ASCII艺术、日志等）
+                            logger.debug(f"Skipping non-JSON tools line: {line_str[:100]}...")
+                            continue
+                    except asyncio.TimeoutError:
+                        logger.debug(f"Timeout waiting for tools response line {attempt}")
+                        continue
                 
-                # 关闭输入流
-                process.stdin.close()
-                await process.wait()
+                if tools_response is None:
+                    logger.error("Failed to get valid tools list response")
+                    raise ToolError("Failed to get tools list from MCP server", "MCPClient")
                 
                 if tools_response.get('error'):
-                    raise ToolError(f"Failed to get tools list: {tools_response['error']}", "MCPClient")
+                    error_info = tools_response['error']
+                    logger.error(f"Tools list error: {error_info}")
+                    raise ToolError(f"Failed to get tools list: {error_info}", "MCPClient")
                 
                 # 解析工具信息
                 tools_data = tools_response.get('result', {}).get('tools', [])
                 tools = []
                 for tool_data in tools_data:
-                    tool_info = MCPToolInfo(
-                        name=tool_data['name'],
-                        description=tool_data.get('description', ''),
-                        inputSchema=tool_data.get('inputSchema', {})
-                    )
-                    tools.append(tool_info)
+                    try:
+                        tool_info = MCPToolInfo(
+                            name=tool_data['name'],
+                            description=tool_data.get('description', ''),
+                            inputSchema=tool_data.get('inputSchema', {})
+                        )
+                        tools.append(tool_info)
+                        logger.debug(f"Discovered tool: {tool_info.name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to parse tool data {tool_data}: {e}")
+                        continue
                 
+                logger.info(f"Successfully discovered {len(tools)} tools from MCP server")
                 self._tools_cache = tools
                 return tools
                 
             finally:
                 # 确保进程被清理
-                if process.returncode is None:
+                if process and process.returncode is None:
+                    logger.debug("Cleaning up MCP server process")
+                    try:
+                        process.stdin.close()
+                    except:
+                        pass
                     process.terminate()
                     try:
                         await asyncio.wait_for(process.wait(), timeout=5.0)
                     except asyncio.TimeoutError:
+                        logger.warning("MCP server process did not terminate gracefully, killing it")
                         process.kill()
         
         except Exception as e:
+            if process and process.returncode is None:
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=2.0)
+                except:
+                    try:
+                        process.kill()
+                    except:
+                        pass
+            
             if isinstance(e, ToolError):
                 raise
+            logger.error(f"Unexpected error during tool discovery: {e}")
             raise ToolError(f"Failed to discover tools: {e}", "MCPClient") from e
     
     def _create_pydantic_model_from_schema(self, schema: Dict[str, Any], model_name: str) -> Type[BaseModel]:
