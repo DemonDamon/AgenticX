@@ -15,6 +15,7 @@ from typing import Dict, Any, List, Optional
 import zipfile
 import tempfile
 import shutil
+from datetime import datetime
 
 import aiohttp
 
@@ -595,6 +596,9 @@ class DocumentParserAgent(Agent):
         # 初始化工具
         self._initialize_tools()
         
+        # 初始化LLM
+        self._initialize_llm()
+        
         logger.info(f"文档解析智能体 {self.name} 初始化完成")
     
     @property
@@ -651,6 +655,11 @@ class DocumentParserAgent(Agent):
             解析结果
         """
         tool = self.memory_config["tools"]["mineru_tool"]
+        mineru_config = self.memory_config["mineru_config"]
+        
+        # 获取默认模式（如果未指定）
+        if not mode:
+            mode = mineru_config.get("default_mode", "remote_api")
         
         # 构建解析参数
         parse_args = MinerUParseArgs(
@@ -658,15 +667,26 @@ class DocumentParserAgent(Agent):
             language=language or "auto",
             enable_formula=enable_formula if enable_formula is not None else True,
             enable_table=enable_table if enable_table is not None else True,
+            mode=mode
         )
         
         # 添加页码范围（如果指定）
         if page_ranges:
             parse_args.page_ranges = page_ranges
         
-        # 如果指定了模式，添加到参数中
-        if mode:
-            parse_args.mode = mode
+        # 根据模式设置API配置
+        if mode in ["remote_api", "remote_mcp"]:
+            # 从配置中获取API基础URL
+            api_config = mineru_config.get("api", {})
+            api_base = api_config.get("base")
+            if api_base:
+                parse_args.api_base = api_base
+            
+            # 从配置或环境变量获取API Token
+            import os
+            api_token = api_config.get("token") or os.getenv("MINERU_API_KEY")
+            if api_token:
+                parse_args.api_token = api_token
         
         return await tool.parse(parse_args)
     
@@ -830,19 +850,25 @@ class DocumentParserAgent(Agent):
 
 我支持解析 PDF、Word、PowerPoint 等格式的文档，可以提取文本、表格、公式等内容。"""
                 else:
-                    # 首次问候或其他询问
+                    # 首次问候或其他询问 - 都通过LLM处理
                     if not self.conversation_state.get('has_introduced', False):
                         self.update_conversation_state(has_introduced=True)
-                        return self._get_introduction_response(user_input)
-                    else:
-                        return self._get_contextual_response(user_input)
+                    
+                    # 所有输入都通过LLM处理，包括第一次
+                    return await self._get_contextual_response(user_input)
             
             elif self.conversation_state['stage'] == 'waiting_for_file':
                 if detected_file_path:
                     # 用户提供了文件路径
                     return await self._handle_file_path_provided(detected_file_path)
                 else:
-                    return """请提供您要解析的文件路径。
+                    # 用户没有提供文件路径，通过大模型智能判断用户意图
+                    # 优先使用大模型处理，只有在LLM不可用时才使用固定回复
+                    try:
+                        return await self._get_contextual_response(user_input)
+                    except Exception as e:
+                        logger.warning(f"LLM处理失败，使用固定回复: {e}")
+                        return """请提供您要解析的文件路径。
 
 例如：
 • `/Users/damon/Desktop/dinov3_paper.pdf`
@@ -870,13 +896,110 @@ class DocumentParserAgent(Agent):
 或者您可以输入 'quit' 退出对话。"""
                     else:
                         # 用户询问其他问题，使用智能回复
-                        return self._get_contextual_response(user_input)
+                        return await self._get_contextual_response(user_input)
             
-            return self._get_contextual_response(user_input)
+            return await self._get_contextual_response(user_input)
             
         except Exception as e:
             logger.error(f"处理用户请求失败: {e}")
             return f"抱歉，处理您的请求时出现错误：{str(e)}"
+    
+    async def process_document_request_stream(self, user_input: str):
+        """
+        处理用户的文档解析请求（流式版本）
+        
+        Args:
+            user_input: 用户输入的文本
+            
+        Yields:
+            str: 智能体的回复片段
+        """
+        try:
+            user_input_lower = user_input.lower().strip()
+            
+            # 检测文件路径
+            detected_file_path = self._detect_file_path(user_input)
+            
+            # 检测解析意图
+            parse_keywords = ['解析', 'parse', '处理', 'process', '分析', 'analyze', '提取', 'extract']
+            has_parse_intent = any(keyword in user_input_lower for keyword in parse_keywords)
+            
+            # 状态机处理
+            if self.conversation_state['stage'] == 'initial':
+                if detected_file_path:
+                    # 用户直接提供了文件路径，使用流式处理
+                    async for chunk in self._handle_file_path_provided_stream(detected_file_path):
+                        yield chunk
+                elif has_parse_intent or any(word in user_input_lower for word in ['文档', 'pdf', 'word', 'ppt']):
+                    # 用户表达了解析意图但没有提供路径
+                    self.update_conversation_state(stage='waiting_for_file', has_introduced=True)
+                    yield """好的！我来帮您解析文档。
+
+请提供您要解析的文件路径，例如：
+• `/Users/用户名/Desktop/文档.pdf`
+• `C:\\Users\\用户名\\Documents\\文档.docx`
+
+我支持解析 PDF、Word、PowerPoint 等格式的文档，可以提取文本、表格、公式等内容。"""
+                else:
+                    # 首次问候或其他询问 - 都通过LLM处理
+                    if not self.conversation_state.get('has_introduced', False):
+                        self.update_conversation_state(has_introduced=True)
+                    
+                    # 所有输入都通过LLM处理，包括第一次
+                    async for chunk in self._get_contextual_response_stream(user_input):
+                        yield chunk
+            
+            elif self.conversation_state['stage'] == 'waiting_for_file':
+                if detected_file_path:
+                    # 用户提供了文件路径，使用流式处理
+                    async for chunk in self._handle_file_path_provided_stream(detected_file_path):
+                        yield chunk
+                else:
+                    # 用户没有提供文件路径，通过大模型智能判断用户意图
+                    # 优先使用大模型处理，只有在LLM不可用时才使用固定回复
+                    try:
+                        async for chunk in self._get_contextual_response_stream(user_input):
+                            yield chunk
+                    except Exception as e:
+                        logger.warning(f"LLM流式处理失败，使用固定回复: {e}")
+                        yield """请提供您要解析的文件路径。
+
+例如：
+• `/Users/damon/Desktop/dinov3_paper.pdf`
+• `C:\\Documents\\报告.docx`
+
+或者您可以输入 'quit' 退出对话。"""
+            
+            elif self.conversation_state['stage'] == 'parsing':
+                yield "文档正在解析中，请耐心等待..."
+            
+            elif self.conversation_state['stage'] == 'completed':
+                if detected_file_path:
+                    # 用户想解析新文件，使用流式处理
+                    async for chunk in self._handle_file_path_provided_stream(detected_file_path):
+                        yield chunk
+                else:
+                    # 检查用户是否有解析意图
+                    if has_parse_intent or any(word in user_input_lower for word in ['文档', 'pdf', 'word', 'ppt', '解析', '处理']):
+                        # 用户想要解析新文档但没有提供路径
+                        yield """好的！我来帮您解析新的文档。
+
+请提供您要解析的文件路径，例如：
+• `/Users/用户名/Desktop/文档.pdf`
+• `C:\\Users\\用户名\\Documents\\文档.docx`
+
+或者您可以输入 'quit' 退出对话。"""
+                    else:
+                        # 用户询问其他问题，使用智能回复
+                        async for chunk in self._get_contextual_response_stream(user_input):
+                            yield chunk
+            else:
+                async for chunk in self._get_contextual_response_stream(user_input):
+                    yield chunk
+            
+        except Exception as e:
+            logger.error(f"处理用户请求失败: {e}")
+            yield f"抱歉，处理您的请求时出现错误：{str(e)}"
     
     def _detect_file_path(self, user_input: str) -> Optional[str]:
         """检测用户输入中的文件路径"""
@@ -982,14 +1105,21 @@ class DocumentParserAgent(Agent):
             else:
                 self.conversation_state['stage'] = 'initial'
                 error_msg = result.get('error', '未知错误')
-                return f"""❌ 文档解析失败：{error_msg}
+                
+                # 保存错误上下文到对话状态
+                self.update_conversation_state(
+                    last_error=error_msg,
+                    last_failed_file=file_path,
+                    error_timestamp=str(datetime.now())
+                )
+                
+                # 使用LLM生成智能的错误解释和建议
+                error_context = f"""文档解析失败，具体错误信息：{error_msg}
+文件路径：{file_path}
 
-请检查：
-• 文件是否损坏
-• 文件是否加密
-• 网络连接是否正常
-
-您可以重新提供文件路径，或输入 'quit' 退出对话。"""
+请根据具体的错误信息，为用户提供针对性的解释和解决建议。"""
+                
+                return await self._get_contextual_response(error_context)
                 
         except Exception as e:
             self.update_conversation_state(stage='initial')
@@ -997,6 +1127,102 @@ class DocumentParserAgent(Agent):
             return f"""❌ 解析过程中出现错误：{str(e)}
 
 请重新提供文件路径，或输入 'quit' 退出对话。"""
+    
+    async def _handle_file_path_provided_stream(self, file_path: str):
+        """流式处理用户提供的文件路径"""
+        try:
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                error_msg = f"文件不存在: {file_path}"
+                self.update_conversation_state(
+                    last_error=error_msg,
+                    last_failed_file=file_path,
+                    error_timestamp=str(datetime.now())
+                )
+                
+                error_context = f"""文档解析失败，具体错误信息：{error_msg}
+文件路径：{file_path}
+
+请根据具体的错误信息，为用户提供针对性的解释和解决建议。"""
+                
+                async for chunk in self._get_contextual_response_stream(error_context):
+                    yield chunk
+                return
+            
+            self.update_conversation_state(stage='parsing', current_file=file_path)
+            
+            yield f"🤖 智能体: 开始解析文档: {file_path}\n"
+            
+            # 显示进度信息
+            yield "正在连接 MinerU 服务...\n"
+            yield "正在上传文档...\n"
+            yield "正在解析文档内容...\n"
+            
+            # 执行解析
+            try:
+                result = await self.parse_document(file_path)
+            except Exception as e:
+                logger.error(f"解析文档时出错: {e}")
+                raise e
+            
+            if result and result.get('success', False):
+                # 下载并解压解析结果
+                output_path = await self._download_and_extract_results(file_path, result)
+                
+                self.update_conversation_state(stage='completed')
+                
+                yield f"""✅ 文档解析完成！
+
+📄 **原文件**: `{file_path}`
+📁 **结果文件夹**: `{output_path}`
+
+📊 **解析内容**:
+• 完整的Markdown文档 (full.md)
+• 提取的图片文件夹 (images/)
+• 布局信息文件 (layout.json)
+• 原始PDF文件
+
+您可以：
+• 提供新的文件路径继续解析其他文档
+• 输入 'quit' 退出对话"""
+            else:
+                self.conversation_state['stage'] = 'initial'
+                error_msg = result.get('error', '未知错误') if result else '解析失败'
+                
+                # 保存错误上下文到对话状态
+                self.update_conversation_state(
+                    last_error=error_msg,
+                    last_failed_file=file_path,
+                    error_timestamp=str(datetime.now())
+                )
+                
+                # 使用LLM生成智能的错误解释和建议
+                error_context = f"""文档解析失败，具体错误信息：{error_msg}
+文件路径：{file_path}
+
+请根据具体的错误信息，为用户提供针对性的解释和解决建议。"""
+                
+                async for chunk in self._get_contextual_response_stream(error_context):
+                    yield chunk
+                
+        except Exception as e:
+            self.update_conversation_state(stage='initial')
+            logger.error(f"解析文档时出错: {e}")
+            
+            # 保存错误上下文
+            self.update_conversation_state(
+                last_error=str(e),
+                last_failed_file=file_path,
+                error_timestamp=str(datetime.now())
+            )
+            
+            error_context = f"""解析过程中出现错误：{str(e)}
+文件路径：{file_path}
+
+请根据具体的错误信息，为用户提供针对性的解释和解决建议。"""
+            
+            async for chunk in self._get_contextual_response_stream(error_context):
+                yield chunk
     
     async def _download_and_extract_results(self, original_file_path: str, result: Dict[str, Any]) -> str:
         """下载并解压MinerU返回的ZIP文件"""
@@ -1123,8 +1349,125 @@ class DocumentParserAgent(Agent):
 
 请提供您要解析的文件路径，我会为您提取文档中的内容。"""
     
-    def _get_contextual_response(self, user_input: str) -> str:
-        """基于上下文的响应"""
+    async def _get_contextual_response(self, user_input: str) -> str:
+        """基于上下文的智能响应"""
+        try:
+            # 确保LLM已初始化
+            if not hasattr(self, '_llm') or not self._llm:
+                logger.warning("LLM未初始化，重新尝试初始化...")
+                self._initialize_llm()
+            
+            # 优先使用LLM生成智能回复
+            if hasattr(self, '_llm') and self._llm and not isinstance(self._llm, type(self._create_fallback_llm())):
+                logger.info("使用LLM生成回复")
+                return await self._get_llm_response(user_input)
+            else:
+                logger.warning("LLM不可用，使用回退回复")
+                # 回退到硬编码回复
+                return self._get_fallback_contextual_response(user_input)
+        except Exception as e:
+            logger.error(f"生成智能回复失败: {e}")
+            return self._get_fallback_contextual_response(user_input)
+    
+    async def _get_contextual_response_stream(self, user_input: str):
+        """基于上下文的智能响应（流式）"""
+        try:
+            # 确保LLM已初始化
+            if not hasattr(self, '_llm') or not self._llm:
+                logger.warning("LLM未初始化，重新尝试初始化...")
+                self._initialize_llm()
+            
+            # 优先使用LLM生成智能回复
+            if hasattr(self, '_llm') and self._llm and not isinstance(self._llm, type(self._create_fallback_llm())):
+                logger.info("使用LLM流式生成回复")
+                async for chunk in self._get_llm_response_stream(user_input):
+                    yield chunk
+            else:
+                logger.warning("LLM不可用，使用回退回复")
+                # 回退到硬编码回复
+                yield self._get_fallback_contextual_response(user_input)
+        except Exception as e:
+            logger.error(f"生成智能回复失败: {e}")
+            yield self._get_fallback_contextual_response(user_input)
+    
+    async def _get_llm_response(self, user_input: str) -> str:
+        """使用LLM生成智能回复（非流式）"""
+        try:
+            # 构建系统提示
+            system_prompt = f"""你是一个专业的文档解析助手，名字是{self.name}。你的主要职责是：
+
+1. 帮助用户解析PDF、Word、PowerPoint等格式的文档
+2. 提取文档中的文本、表格、公式等内容
+3. 回答用户关于文档解析功能的问题
+4. 引导用户正确使用文档解析功能
+
+你的特点：
+- 专业、友好、耐心
+- 对文档解析技术有深入了解
+- 能够清晰地解释复杂的技术概念
+- 总是尽力帮助用户解决问题
+
+当前对话状态：{self.conversation_state}
+
+请根据用户的问题，提供有帮助的、专业的回复。如果用户询问文档解析相关的问题，请详细解答。如果用户想要解析文档但没有提供文件路径，请引导他们提供文件路径。"""
+
+            # 构建用户消息
+            user_message = f"用户问题：{user_input}"
+            
+            # 调用LLM - 根据chat_with_bailian.py的正确用法
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ]
+            
+            # 非流式调用
+            response = await self._llm.ainvoke(messages)
+            return response.content.strip()
+            
+        except Exception as e:
+            logger.error(f"LLM调用失败: {e}")
+            raise
+    
+    async def _get_llm_response_stream(self, user_input: str):
+        """使用LLM生成智能回复（流式）"""
+        try:
+            # 构建系统提示
+            system_prompt = f"""你是一个专业的文档解析助手，名字是{self.name}。你的主要职责是：
+
+1. 帮助用户解析PDF、Word、PowerPoint等格式的文档
+2. 提取文档中的文本、表格、公式等内容
+3. 回答用户关于文档解析功能的问题
+4. 引导用户正确使用文档解析功能
+
+你的特点：
+- 专业、友好、耐心
+- 对文档解析技术有深入了解
+- 能够清晰地解释复杂的技术概念
+- 总是尽力帮助用户解决问题
+
+当前对话状态：{self.conversation_state}
+
+请根据用户的问题，提供有帮助的、专业的回复。如果用户询问文档解析相关的问题，请详细解答。如果用户想要解析文档但没有提供文件路径，请引导他们提供文件路径。"""
+
+            # 构建用户消息
+            user_message = f"用户问题：{user_input}"
+            
+            # 调用LLM - 根据chat_with_bailian.py的正确用法
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ]
+            
+            # 流式调用
+            for chunk in self._llm.stream(messages):
+                yield chunk
+            
+        except Exception as e:
+            logger.error(f"LLM流式调用失败: {e}")
+            raise
+    
+    def _get_fallback_contextual_response(self, user_input: str) -> str:
+        """回退的硬编码响应"""
         user_input_lower = user_input.lower().strip()
         
         if any(word in user_input_lower for word in ['功能', '能做什么', 'help', '帮助']):
@@ -1348,27 +1691,55 @@ class DocumentParserAgent(Agent):
     def _initialize_llm(self):
         """初始化LLM"""
         try:
-            from agenticx.llms.bailian_provider import BailianProvider
-            from agenticx.llms.kimi_provider import KimiProvider
+            logger.info("开始初始化LLM...")
             
             # 获取LLM配置
             config = self.memory_config.get("config", {})
             llm_config = config.get("llm", {})
             
+            logger.info(f"LLM配置: {llm_config}")
+            
             provider = llm_config.get("provider", "bailian")
+            logger.info(f"使用LLM提供商: {provider}")
+            
+            # 尝试导入LLM提供商
+            try:
+                from agenticx.llms.bailian_provider import BailianProvider
+                logger.info("成功导入BailianProvider")
+            except ImportError as e:
+                logger.error(f"导入BailianProvider失败: {e}")
+                raise
+            
+            try:
+                from agenticx.llms.kimi_provider import KimiProvider
+                logger.info("成功导入KimiProvider")
+            except ImportError as e:
+                logger.error(f"导入KimiProvider失败: {e}")
+                raise
             
             if provider == "bailian":
+                api_key = llm_config.get("api_key")
+                base_url = llm_config.get("base_url")
+                model = llm_config.get("model", "qwen3-max")
+                
+                logger.info(f"初始化Bailian - 模型: {model}, API密钥: {'已设置' if api_key else '未设置'}, 基础URL: {base_url}")
+                
                 self._llm = BailianProvider(
-                    model=llm_config.get("model", "qwen3-max"),
-                    api_key=llm_config.get("api_key"),
-                    base_url=llm_config.get("base_url"),
+                    model=model,
+                    api_key=api_key,
+                    base_url=base_url,
                     temperature=llm_config.get("temperature", 0.7),
                     max_tokens=llm_config.get("max_tokens", 4000)
                 )
             elif provider == "kimi":
+                api_key = llm_config.get("api_key")
+                model = llm_config.get("model", "moonshot-v1-8k")
+                
+                logger.info(f"初始化Kimi - 模型: {model}, API密钥: {'已设置' if api_key else '未设置'}")
+                
                 self._llm = KimiProvider(
-                    model=llm_config.get("model", "moonshot-v1-8k"),
-                    api_key=llm_config.get("api_key"),
+                    model=model,
+                    api_key=api_key,
                     temperature=llm_config.get("temperature", 0.7),
                     max_tokens=llm_config.get("max_tokens", 4000)
                 )
@@ -1379,7 +1750,11 @@ class DocumentParserAgent(Agent):
             
         except Exception as e:
             logger.error(f"LLM初始化失败: {e}")
+            logger.error(f"错误类型: {type(e).__name__}")
+            import traceback
+            logger.error(f"错误堆栈: {traceback.format_exc()}")
             # 创建一个简单的回退LLM
+            logger.warning("使用回退LLM")
             self._llm = self._create_fallback_llm()
     
     def _create_fallback_llm(self):
