@@ -46,7 +46,7 @@ from agenticx.tools.mineru import (
 # 导入本地模块
 from agents.document_parser import DocumentParserAgent
 
-# 设置日志
+# 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -55,6 +55,20 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+# 隐藏第三方库的详细日志
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('httpcore').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('requests').setLevel(logging.WARNING)
+logging.getLogger('aiohttp').setLevel(logging.WARNING)
+logging.getLogger('litellm').setLevel(logging.WARNING)
+logging.getLogger('openai').setLevel(logging.WARNING)
+logging.getLogger('anthropic').setLevel(logging.WARNING)
+logging.getLogger('dashscope').setLevel(logging.WARNING)
+logging.getLogger('agenticx.llms').setLevel(logging.WARNING)
+logging.getLogger('agenticx.tools.adapters').setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 # 创建控制台对象
@@ -590,20 +604,24 @@ class DocumentParserDemo:
                     console.print("👋 退出对话模式")
                     break
                 
-                # 智能体处理请求
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    console=console
-                ) as progress:
-                    task = progress.add_task("智能体思考中...", total=None)
-                    
-                    response = await self.agent.process_document_request(user_input)
-                    
-                    progress.update(task, completed=True)
+                # 智能体流式处理请求
+                console.print("🤖 智能体: ", end="")
                 
-                # 显示智能体回复
-                console.print(f"🤖 智能体: {response}\n")
+                try:
+                    # 检查是否有流式方法
+                    if hasattr(self.agent, 'process_document_request_stream'):
+                        async for chunk in self.agent.process_document_request_stream(user_input):
+                            console.print(chunk, end="", style="green")
+                    else:
+                        # 回退到非流式方法
+                        response = await self.agent.process_document_request(user_input)
+                        console.print(response, style="green")
+                except Exception as e:
+                    logger.error(f"流式处理失败，回退到非流式: {e}")
+                    response = await self.agent.process_document_request(user_input)
+                    console.print(response, style="green")
+                
+                console.print("\n")  # 换行
                 
         except Exception as e:
             console.print(f"❌ 对话过程中发生错误: {e}", style="red")
