@@ -257,7 +257,7 @@ class MinerUAdapter(DocumentAdapter):
     
     def get_supported_formats(self) -> List[str]:
         """获取支持的文件格式"""
-        return ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.bmp']
+        return ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.doc', '.docx']
     
     def validate_config(self) -> bool:
         """验证配置是否有效"""
