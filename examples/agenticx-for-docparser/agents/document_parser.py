@@ -1086,6 +1086,10 @@ class DocumentParserAgent(Agent):
                 # 下载并解压解析结果
                 output_path = await self._download_and_extract_results(file_path, result)
                 
+                # 添加调试日志
+                logger.info(f"解析成功，返回的输出路径: {output_path}")
+                logger.info(f"输出路径类型: {type(output_path)}")
+                
                 self.update_conversation_state(stage='completed')
                 
                 return f"""✅ 文档解析完成！
@@ -1151,7 +1155,7 @@ class DocumentParserAgent(Agent):
             
             self.update_conversation_state(stage='parsing', current_file=file_path)
             
-            yield f"🤖 智能体: 开始解析文档: {file_path}\n"
+            yield f"开始解析文档: {file_path}\n"
             
             # 显示进度信息
             yield "正在连接 MinerU 服务...\n"
@@ -1165,9 +1169,13 @@ class DocumentParserAgent(Agent):
                 logger.error(f"解析文档时出错: {e}")
                 raise e
             
-            if result and result.get('success', False):
+            if result.get('success', False):
                 # 下载并解压解析结果
                 output_path = await self._download_and_extract_results(file_path, result)
+                
+                # 添加调试日志
+                logger.info(f"流式解析成功，返回的输出路径: {output_path}")
+                logger.info(f"输出路径类型: {type(output_path)}")
                 
                 self.update_conversation_state(stage='completed')
                 
@@ -1227,6 +1235,23 @@ class DocumentParserAgent(Agent):
     async def _download_and_extract_results(self, original_file_path: str, result: Dict[str, Any]) -> str:
         """下载并解压MinerU返回的ZIP文件"""
         try:
+            # 首先检查是否已经存在解压好的文件夹
+            output_dir = Path("./outputs")
+            if output_dir.exists():
+                original_name = Path(original_file_path).stem
+                # 查找以原文件名开头的文件夹
+                import glob
+                pattern = str(output_dir / f"{original_name}-*")
+                existing_folders = glob.glob(pattern)
+                
+                if existing_folders:
+                    # 找到现有文件夹，检查是否不为空
+                    for folder_path in existing_folders:
+                        folder = Path(folder_path)
+                        if folder.is_dir() and any(folder.iterdir()):  # 文件夹存在且不为空
+                            logger.info(f"找到已存在的解压文件夹: {folder}")
+                            return str(folder.resolve())
+            
             # 获取ZIP下载链接
             full_zip_url = result.get('full_zip_url')
             if not full_zip_url:
@@ -1277,8 +1302,10 @@ class DocumentParserAgent(Agent):
             # 清理临时文件
             os.unlink(temp_zip_path)
             
-            logger.info(f"ZIP文件解压完成: {output_folder}")
-            return str(output_folder)
+            # 返回绝对路径，确保路径显示一致
+            absolute_path = output_folder.resolve()
+            logger.info(f"ZIP文件解压完成: {absolute_path}")
+            return str(absolute_path)
             
         except Exception as e:
             logger.error(f"下载解压ZIP文件失败: {e}")
@@ -1291,48 +1318,69 @@ class DocumentParserAgent(Agent):
         output_dir = Path("./outputs")
         output_dir.mkdir(exist_ok=True)
         
-        # 生成输出文件名
+        # 生成输出文件夹名，与 _download_and_extract_results 保持一致的命名规则
         original_name = Path(original_file_path).stem
-        timestamp = __import__('datetime').datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = output_dir / f"{original_name}_parsed_{timestamp}.txt"
+        task_id = result.get('task_id', '')
+        if task_id:
+            # 使用类似 dinov3_paper-2f2e3594f64f 的格式
+            folder_name = f"{original_name}-{task_id[:12]}"
+        else:
+            # 如果没有task_id，使用时间戳
+            timestamp = __import__('datetime').datetime.now().strftime("%Y%m%d_%H%M%S")
+            folder_name = f"{original_name}_{timestamp}"
+        
+        output_folder = output_dir / folder_name
+        
+        # 如果文件夹已存在，删除它
+        if output_folder.exists():
+            shutil.rmtree(output_folder)
+        
+        # 创建输出文件夹
+        output_folder.mkdir(exist_ok=True)
         
         # 构建输出内容
         content_lines = []
-        content_lines.append(f"文档解析结果")
-        content_lines.append(f"原文件: {original_file_path}")
-        content_lines.append(f"解析时间: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        content_lines.append("=" * 50)
+        content_lines.append(f"# 文档解析结果")
+        content_lines.append("")
+        content_lines.append(f"**原文件**: {original_file_path}")
+        content_lines.append(f"**解析时间**: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        content_lines.append("")
+        content_lines.append("---")
         content_lines.append("")
         
         # 添加文本内容
         if result.get('text'):
-            content_lines.append("📄 提取的文本内容:")
-            content_lines.append("-" * 30)
+            content_lines.append("## 📄 提取的文本内容")
+            content_lines.append("")
             content_lines.append(result['text'])
             content_lines.append("")
         
         # 添加表格内容
         if result.get('tables'):
-            content_lines.append("📊 提取的表格:")
-            content_lines.append("-" * 30)
+            content_lines.append("## 📊 提取的表格")
+            content_lines.append("")
             for i, table in enumerate(result['tables'], 1):
-                content_lines.append(f"表格 {i}:")
+                content_lines.append(f"### 表格 {i}")
+                content_lines.append("")
                 content_lines.append(str(table))
                 content_lines.append("")
         
         # 添加公式内容
         if result.get('formulas'):
-            content_lines.append("🧮 提取的公式:")
-            content_lines.append("-" * 30)
-            for i, formula in enumerate(result['formulas'], 1):
-                content_lines.append(f"公式 {i}: {formula}")
+            content_lines.append("## 🧮 提取的公式")
             content_lines.append("")
+            for i, formula in enumerate(result['formulas'], 1):
+                content_lines.append(f"**公式 {i}**: {formula}")
+                content_lines.append("")
         
-        # 写入文件
-        with open(output_file, 'w', encoding='utf-8') as f:
+        # 写入 full.md 文件
+        full_md_file = output_folder / "full.md"
+        with open(full_md_file, 'w', encoding='utf-8') as f:
             f.write('\n'.join(content_lines))
         
-        return str(output_file)
+        # 返回文件夹的绝对路径，确保路径显示一致
+        absolute_path = output_folder.resolve()
+        return str(absolute_path)
     
     def _get_introduction_response(self, user_input: str) -> str:
         """首次介绍响应"""
@@ -1379,7 +1427,6 @@ class DocumentParserAgent(Agent):
             
             # 优先使用LLM生成智能回复
             if hasattr(self, '_llm') and self._llm and not isinstance(self._llm, type(self._create_fallback_llm())):
-                logger.info("使用LLM流式生成回复")
                 async for chunk in self._get_llm_response_stream(user_input):
                     yield chunk
             else:
