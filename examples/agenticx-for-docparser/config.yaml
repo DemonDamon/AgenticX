@@ -17,7 +17,19 @@ mineru:
   # 远程API配置
   api:
     base: "https://mineru.net/api/v4"
-    token: ${MINERU_API_TOKEN}
+    token: ${MINERU_API_KEY}
+    
+  # 远程MCP配置
+  mcp:
+    # MCP服务器配置 - 连接到独立运行的mineru-mcp服务器
+    server:
+      command: "mineru-mcp"
+      args: ["--transport", "stdio"]
+      timeout: 600.0
+      env:
+        MINERU_API_BASE: "https://mineru.net"
+        MINERU_API_KEY: "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI4NTUwMzI4OCIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc2MDc4NDUzNSwiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiIiwib3BlbklkIjpudWxsLCJ1dWlkIjoiZWI5NGVkNmMtNTQ1OC00NzhiLTlhYTgtY2Y2Y2NjNjhjMzcxIiwiZW1haWwiOiJiaW5nemhlbmxpQGhvdG1haWwuY29tIiwiZXhwIjoxNzYxOTk0MTM1fQ.5we5B7k3kwhgOr-w1V5kJGvytZSZ4vUGwf2M6-ufSQQmK_6WbRo9OC706OK2gf8ORlh7OA7HyD-Lupem8LerkQ"
+        OUTPUT_DIR: "./outputs"
     
   # 本地配置
   local:
