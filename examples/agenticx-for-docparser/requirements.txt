@@ -1,7 +1,7 @@
 # AgenticX 文档解析器 Demo 依赖包
 
 # 核心框架
-agenticx>=0.1.0
+agenticx==0.1.8
 
 # 环境配置
 python-dotenv>=1.0.0
