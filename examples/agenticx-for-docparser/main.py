@@ -148,8 +148,9 @@ class DocumentParserDemo:
     
     def _display_mineru_status(self, mineru_config: Dict[str, Any]):
         """显示MinerU服务状态"""
-        default_mode = mineru_config.get("default_mode", "local")
+        default_mode = mineru_config.get("default_mode", "remote_api")
         api_config = mineru_config.get("api", {})
+        mcp_config = mineru_config.get("mcp", {})
         
         status_table = Table(title="🔧 MinerU 服务状态", show_header=True, header_style="bold magenta")
         status_table.add_column("配置项", style="cyan", no_wrap=True)
@@ -171,7 +172,7 @@ class DocumentParserDemo:
         # 如果是远程API模式，显示API配置
         if default_mode == "remote_api":
             api_base = api_config.get("base", "")
-            api_token = os.getenv("MINERU_API_TOKEN", "")
+            api_token = os.getenv("MINERU_API_KEY", "")
             
             status_table.add_row(
                 "API 端点",
@@ -190,6 +191,90 @@ class DocumentParserDemo:
                     "服务状态",
                     "使用官方远程API服务",
                     "🌐 在线"
+                )
+            else:
+                status_table.add_row(
+                    "服务状态",
+                    "配置不完整",
+                    "⚠️ 警告"
+                )
+        
+        # 如果是远程MCP模式，显示MCP配置
+        elif default_mode == "remote_mcp":
+            server_config = mcp_config.get("server", {})
+            command = server_config.get("command", "")
+            args = server_config.get("args", [])
+            env_config = server_config.get("env", {})
+            api_token = os.getenv("MINERU_API_KEY", "")
+            
+            # 显示MCP服务器命令
+            mcp_command = f"{command} {' '.join(args)}" if command and args else "未配置"
+            status_table.add_row(
+                "MCP 服务器",
+                mcp_command,
+                "✅ 已配置" if command and args else "❌ 未配置"
+            )
+            
+            # 显示API端点
+            api_base = env_config.get("MINERU_API_BASE", "")
+            status_table.add_row(
+                "API 端点",
+                api_base if api_base else "未配置",
+                "✅ 已配置" if api_base else "❌ 未配置"
+            )
+            
+            # 显示API密钥
+            status_table.add_row(
+                "API 密钥",
+                "已设置" if api_token else "未设置",
+                "✅ 已配置" if api_token else "❌ 未配置"
+            )
+            
+            # 显示输出目录
+            output_dir = env_config.get("OUTPUT_DIR", "")
+            status_table.add_row(
+                "输出目录",
+                output_dir if output_dir else "未配置",
+                "✅ 已配置" if output_dir else "❌ 未配置"
+            )
+            
+            # 显示服务状态
+            if command and args and api_base and api_token:
+                status_table.add_row(
+                    "服务状态",
+                    "使用MCP协议连接远程服务",
+                    "🔗 MCP"
+                )
+            else:
+                status_table.add_row(
+                    "服务状态",
+                    "配置不完整",
+                    "⚠️ 警告"
+                )
+        
+        # 如果是本地模式，显示本地配置
+        elif default_mode == "local":
+            local_config = mineru_config.get("local", {})
+            backend = local_config.get("backend", "")
+            device = local_config.get("device", "")
+            
+            status_table.add_row(
+                "后端引擎",
+                backend if backend else "未配置",
+                "✅ 已配置" if backend else "❌ 未配置"
+            )
+            
+            status_table.add_row(
+                "计算设备",
+                device if device else "未配置",
+                "✅ 已配置" if device else "❌ 未配置"
+            )
+            
+            if backend and device:
+                status_table.add_row(
+                    "服务状态",
+                    "使用本地解析引擎",
+                    "💻 本地"
                 )
             else:
                 status_table.add_row(
@@ -278,26 +363,43 @@ class DocumentParserDemo:
                 page_ranges=page_ranges if page_ranges else None
             )
             
-            # 如果是远程API模式，添加API配置
+            # 根据模式添加相应配置
             if mode == "remote_api":
                 mineru_config = self.config.get("mineru", {})
                 api_config = mineru_config.get("api", {})
                 
                 api_base = api_config.get("base")
-                api_token = os.getenv("MINERU_API_TOKEN")
+                api_token = os.getenv("MINERU_API_KEY")
                 
                 if not api_base:
                     console.print("❌ 配置中缺少 API base URL", style="red")
                     return
                     
                 if not api_token:
-                    console.print("❌ 环境变量中缺少 MINERU_API_TOKEN", style="red")
+                    console.print("❌ 环境变量中缺少 MINERU_API_KEY", style="red")
                     return
                 
                 parse_args.api_base = api_base
                 parse_args.api_token = api_token
                 
                 console.print(f"🌐 使用远程 API 服务: {api_base}", style="blue")
+                
+            elif mode == "remote_mcp":
+                mineru_config = self.config.get("mineru", {})
+                mcp_config = mineru_config.get("mcp", {})
+                
+                api_token = os.getenv("MINERU_API_KEY")
+                
+                if not mcp_config:
+                    console.print("❌ 配置中缺少 MCP 配置", style="red")
+                    return
+                    
+                if not api_token:
+                    console.print("❌ 环境变量中缺少 MINERU_API_KEY", style="red")
+                    return
+                
+                # MCP模式下，配置信息会从配置文件中读取
+                console.print("🔗 使用远程 MCP 服务", style="blue")
             
             # 开始解析
             console.print(f"\n🚀 开始解析文档: {file_path}")
@@ -323,6 +425,26 @@ class DocumentParserDemo:
                             console.print(f"📋 任务ID: {result['task_id']}", style="cyan")
                         if "output_dir" in result:
                             console.print(f"📁 输出目录: {result['output_dir']}", style="cyan")
+                            
+                elif mode == "remote_mcp":
+                    # 远程MCP模式的详细状态显示
+                    task = progress.add_task("🔗 启动MCP服务器连接...", total=None)
+                    
+                    progress.update(task, description="📤 通过MCP协议提交解析任务...")
+                    
+                    result = await self.parse_tool.parse(parse_args)
+                    
+                    progress.update(task, description="✅ MCP解析完成")
+                    progress.update(task, completed=True)
+                    
+                    # 显示MCP处理信息
+                    if result.get("success"):
+                        console.print("🔗 MCP协议处理成功", style="green")
+                        if "output_dir" in result:
+                            console.print(f"📁 输出目录: {result['output_dir']}", style="cyan")
+                        if "artifacts" in result:
+                            console.print(f"📄 解析文件数: {len(result['artifacts'])}", style="cyan")
+                            
                 else:
                     # 本地模式
                     task = progress.add_task("🔧 本地解析处理中...", total=None)
@@ -340,7 +462,7 @@ class DocumentParserDemo:
     
     async def parse_example_pdf(self):
         """解析示例PDF文件"""
-        example_pdf = Path(__file__).parent / "DINOv3 license.pdf"
+        example_pdf = Path(__file__).parent / "example.pdf"
         
         if not example_pdf.exists():
             console.print("❌ 示例PDF文件不存在", style="red")
@@ -366,14 +488,14 @@ class DocumentParserDemo:
             api_config = mineru_config.get("api", {})
             
             api_base = api_config.get("base")
-            api_token = os.getenv("MINERU_API_TOKEN")
+            api_token = os.getenv("MINERU_API_KEY")
             
             if not api_base:
                 console.print("❌ 配置中缺少 API base URL", style="red")
                 return
                 
             if not api_token:
-                console.print("❌ 环境变量中缺少 MINERU_API_TOKEN", style="red")
+                console.print("❌ 环境变量中缺少 MINERU_API_KEY", style="red")
                 return
             
             console.print(f"🌐 使用远程 API 服务: {api_base}", style="blue")
