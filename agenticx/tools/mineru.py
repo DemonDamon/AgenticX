@@ -826,18 +826,30 @@ class ParseDocumentsTool:
                 errors.append(error_msg)
         
         # 如果只有一个文件，返回简化的结果格式
-        if len(args.file_sources) == 1 and len(results) == 1:
-            result = results[0]
-            return {
-                "success": True,
-                "mode": "local",
-                "task_id": result["task_id"],
-                "output_dir": result.get("output_dir", str(self.output_base_dir / self._generate_output_dir_name(Path(args.file_sources[0])))),
-                "artifacts": result["artifacts"].artifacts if hasattr(result["artifacts"], 'artifacts') else {},
-                "metadata": result["artifacts"].metadata if hasattr(result["artifacts"], 'metadata') else {},
-                "source_file": result["source_file"],
-                "validation": result["validation"]
-            }
+        if len(args.file_sources) == 1:
+            if len(results) == 1:
+                # 解析成功
+                result = results[0]
+                return {
+                    "success": True,
+                    "mode": "local",
+                    "task_id": result["task_id"],
+                    "output_dir": result.get("output_dir", str(self.output_base_dir / self._generate_output_dir_name(Path(args.file_sources[0])))),
+                    "artifacts": result["artifacts"].artifacts if hasattr(result["artifacts"], 'artifacts') else {},
+                    "metadata": result["artifacts"].metadata if hasattr(result["artifacts"], 'metadata') else {},
+                    "source_file": result["source_file"],
+                    "validation": result["validation"]
+                }
+            else:
+                # 解析失败
+                error_msg = errors[0] if errors else "解析失败"
+                return {
+                    "success": False,
+                    "mode": "local",
+                    "error": error_msg,
+                    "task_id": None,
+                    "artifacts": None
+                }
         
         # 多文件情况返回完整结果
         return {
