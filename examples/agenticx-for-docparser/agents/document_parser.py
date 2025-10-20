@@ -23,6 +23,7 @@ from agenticx.core.agent import Agent, AgentContext, AgentResult
 from agenticx.core.task import Task
 from agenticx.llms.base import BaseLLMProvider
 from agenticx.tools.base import BaseTool
+from agenticx.tools.mineru import ParseDocumentsTool, MinerUParseArgs
 
 logger = logging.getLogger(__name__)
 
@@ -612,8 +613,10 @@ class DocumentParserAgent(Agent):
         try:
             mineru_config = self.memory_config["mineru_config"]
             
-            # 初始化MinerU工具
-            self.memory_config["tools"]["parse_document_tool"] = ParseDocumentTool(mineru_config)
+            # 初始化AgenticX核心MinerU工具
+            self.memory_config["tools"]["mineru_tool"] = ParseDocumentsTool(mineru_config)
+            
+            # 保留其他自定义工具
             self.memory_config["tools"]["get_languages_tool"] = GetSupportedLanguagesTool(mineru_config)
             self.memory_config["tools"]["analyze_structure_tool"] = AnalyzeDocumentStructureTool()
             self.memory_config["tools"]["extract_metadata_tool"] = ExtractDocumentMetadataTool()
@@ -638,23 +641,34 @@ class DocumentParserAgent(Agent):
         
         Args:
             file_path: 文档文件路径
-            mode: 解析模式 (已弃用，现在总是使用远程API)
+            mode: 解析模式 (local/remote_api/remote_mcp)
             language: OCR语言
-            enable_formula: 是否启用公式识别 (已弃用)
-            enable_table: 是否启用表格识别 (已弃用)
+            enable_formula: 是否启用公式识别
+            enable_table: 是否启用表格识别
             page_ranges: 页码范围
             
         Returns:
             解析结果
         """
-        tool = self.memory_config["tools"]["parse_document_tool"]
+        tool = self.memory_config["tools"]["mineru_tool"]
         
-        return await tool._arun(
-            file_path=file_path,
-            language=language or "ch",
-            enable_ocr=True,
-            page_ranges=page_ranges
+        # 构建解析参数
+        parse_args = MinerUParseArgs(
+            file_sources=file_path,
+            language=language or "auto",
+            enable_formula=enable_formula if enable_formula is not None else True,
+            enable_table=enable_table if enable_table is not None else True,
         )
+        
+        # 添加页码范围（如果指定）
+        if page_ranges:
+            parse_args.page_ranges = page_ranges
+        
+        # 如果指定了模式，添加到参数中
+        if mode:
+            parse_args.mode = mode
+        
+        return await tool.parse(parse_args)
     
     async def get_supported_languages(self, mode: Optional[str] = None) -> List[str]:
         """
