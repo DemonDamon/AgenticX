@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class PipelineAdapter(DocumentAdapter):
     """本地 Pipeline 后端适配器"""
     
-    SUPPORTED_FORMATS = [".pdf", ".png", ".jpg", ".jpeg"]
+    SUPPORTED_FORMATS = [".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx"]
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
@@ -74,10 +74,31 @@ class PipelineAdapter(DocumentAdapter):
                         output_path = Path(output_dir)
                         output_path.mkdir(parents=True, exist_ok=True)
                         
-                        # 使用 read_local_pdfs 创建 Dataset
-                        datasets = read_local_pdfs(file_path)
-                        if not datasets:
-                            raise ValueError(f"无法从 {file_path} 创建 Dataset")
+                        # 检查文件格式
+                        file_ext = Path(file_path).suffix.lower()
+                        
+                        # 使用 read_local_pdfs 创建 Dataset（仅支持PDF和图片）
+                        try:
+                            datasets = read_local_pdfs(file_path)
+                            if not datasets:
+                                raise ValueError(f"无法从 {file_path} 创建 Dataset")
+                        except Exception as e:
+                            if file_ext in ['.pdf', '.png', '.jpg', '.jpeg']:
+                                # 对于支持的格式，抛出原始错误
+                                raise ValueError(f"文件 {file_path} 处理失败: {str(e)}")
+                            elif file_ext in ['.doc', '.docx']:
+                                # 对于Word文档，提供转换建议
+                                raise ValueError(
+                                    f"Word文档格式 {file_ext} 需要转换为PDF格式才能处理。"
+                                    f"建议使用Microsoft Word、WPS或在线转换工具将文档另存为PDF格式后重新上传。"
+                                )
+                            else:
+                                # 对于其他不支持的格式，提供通用提示
+                                raise ValueError(
+                                    f"不支持的文件格式 {file_ext}。"
+                                    f"MinerU目前支持的格式：PDF、PNG、JPG、JPEG。"
+                                    f"请将文件转换为支持的格式后重新上传。"
+                                )
                         
                         dataset = datasets[0]  # 取第一个 dataset
                         
