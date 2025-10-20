@@ -1,0 +1,23 @@
+# 环境变量文件 - 包含敏感信息，不应提交到版本控制
+.env
+
+# 输出目录
+outputs/
+*.log
+
+# Python缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 操作系统文件
+.DS
