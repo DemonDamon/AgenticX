@@ -334,7 +334,7 @@ class DocumentParserDemo:
             mode = Prompt.ask(
                 "选择解析模式",
                 choices=mode_options,
-                default="local"
+                default="remote_api"
             )
             
             # OCR语言
@@ -538,24 +538,33 @@ class DocumentParserDemo:
                 if languages:
                     table = Table(title="支持的OCR语言", show_header=True)
                     table.add_column("语言代码", style="cyan")
-                    table.add_column("说明", style="green")
-                    
-                    # 语言代码映射
-                    lang_map = {
-                        "auto": "自动检测",
-                        "zh": "中文",
-                        "en": "英文",
-                        "ja": "日文",
-                        "ko": "韩文",
-                        "fr": "法文",
-                        "de": "德文",
-                        "es": "西班牙文",
-                        "ru": "俄文"
-                    }
+                    table.add_column("语言名称", style="green")
+                    table.add_column("描述", style="yellow")
                     
                     for lang in languages:
-                        description = lang_map.get(lang, "其他语言")
-                        table.add_row(lang, description)
+                        # 处理两种数据格式：字典格式和字符串格式
+                        if isinstance(lang, dict):
+                            # 新格式：字典包含 code, name, description
+                            code = lang.get("code", "unknown")
+                            name = lang.get("name", "未知语言")
+                            description = lang.get("description", "")
+                            table.add_row(code, name, description)
+                        else:
+                            # 旧格式：简单字符串
+                            # 语言代码映射（向后兼容）
+                            lang_map = {
+                                "auto": "自动检测",
+                                "zh": "中文",
+                                "en": "英文",
+                                "ja": "日文",
+                                "ko": "韩文",
+                                "fr": "法文",
+                                "de": "德文",
+                                "es": "西班牙文",
+                                "ru": "俄文"
+                            }
+                            description = lang_map.get(lang, "其他语言")
+                            table.add_row(lang, description, "")
                     
                     console.print(table)
                 else:
