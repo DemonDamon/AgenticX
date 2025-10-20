@@ -12,14 +12,15 @@ import os
 import sys
 import asyncio
 import logging
+import readline
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-# 添加项目根目录到Python路径
+# 添加项目根目录到 Python 路径
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-# 导入必要的模块
+# 第三方库导入
 import yaml
 from rich.console import Console
 from rich.panel import Panel
@@ -596,16 +597,29 @@ class DocumentParserDemo:
             console.print("💬 进入智能体对话模式")
             console.print("您可以询问关于文档解析的任何问题，输入 'quit' 退出对话\n")
             
+            # 配置 readline 以提供更好的输入体验
+            readline.set_startup_hook(None)
+            readline.clear_history()
+            
             while True:
-                # 获取用户输入
-                user_input = Prompt.ask("您")
+                # 获取用户输入 - 使用稳定的 readline 输入方式
+                try:
+                    # 使用 rich 样式显示用户提示符
+                    console.print("Me: ", style="bold cyan", end="")
+                    user_input = input().strip()
+                except (KeyboardInterrupt, EOFError):
+                    console.print("\n👋 退出对话模式")
+                    break
                 
+                if not user_input:  # 处理空输入
+                    continue
+                    
                 if user_input.lower() in ['quit', 'exit', '退出']:
                     console.print("👋 退出对话模式")
                     break
                 
                 # 智能体流式处理请求
-                console.print("🤖 智能体: ", end="")
+                console.print("\nAgent: ", style="bold cyan", end="")
                 
                 try:
                     # 检查是否有流式方法
