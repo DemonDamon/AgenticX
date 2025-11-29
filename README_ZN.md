@@ -236,53 +236,7 @@ python examples/microsandbox_example.py
 技术博客: [examples/microsandbox_blog.md](examples/microsandbox_blog.md)
 
 ## 🏗️ 技术架构
-
-```mermaid
-graph TD
-    subgraph "用户接口层"
-        SDK[Python SDK]
-        CLI[CLI 工具]
-        UI[Web UI]
-    end
-
-    subgraph "核心框架层"
-        subgraph "编排引擎"
-            Orchestrator[工作流编排器]
-        end
-        subgraph "执行引擎"
-            AgentExecutor[智能体执行器]
-            TaskValidator[任务验证器]
-        end
-        subgraph "核心组件"
-            Agent[智能体]
-            Task[任务]
-            Tool[工具]
-            Memory[记忆]
-            LLM[LLM提供者]
-        end
-    end
-
-    subgraph "平台服务层"
-        subgraph "可观测性"
-            Monitoring[监控系统]
-        end
-        subgraph "通信协议"
-            Protocols[协议处理器]
-        end
-        subgraph "安全治理"
-            Security[安全服务]
-        end
-    end
-
-    SDK --> Orchestrator
-    Orchestrator --> AgentExecutor
-    AgentExecutor --> Agent
-    Agent --> Tool
-    Agent --> Memory
-    Agent --> LLM
-    AgentExecutor --> Monitoring
-    Agent --> Protocols
-```
+![智能体系统架构图](assets/智能体系统架构图.png)
 
 ## 📈 开发进展
 
