@@ -49,6 +49,7 @@ dependencies = [
     "websockets",
     "fastapi",
     "uvicorn",
+    "aiofiles",
     "structlog",
     "typer",
     "cryptography",
