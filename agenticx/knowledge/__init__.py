@@ -78,23 +78,20 @@ from .chunkers import (
     create_chunking_optimizer,
     create_chunking_config,
 )
-from .graphers import (
-    # Data models
+from .graphers.models import (
     Entity,
     Relationship,
     KnowledgeGraph,
     EntityType,
     RelationType,
     NodeLevel,
-    # Quality assessment
     GraphQualityMetrics,
     GraphQualityReport,
-    # Core builders
-    KnowledgeGraphBuilder,
-    GraphQualityValidator,
-    CommunityDetector,
-    GraphOptimizer,
 )
+from .graphers.builder import KnowledgeGraphBuilder
+from .graphers.validators import GraphQualityValidator
+from .graphers.community import CommunityDetector
+from .graphers.optimizer import GraphOptimizer
 
 __all__ = [
     # Base classes

@@ -71,36 +71,49 @@ class Neo4jExporter:
             session.run("MATCH (n) DELETE n")
             logger.info("🧹 已清空Neo4j数据库")
     
-    def export_graph(self, graph: KnowledgeGraph, clear_existing: bool = True) -> None:
+    def _clear_tenant_data(self, tenant_id: str) -> None:
+        """Clear all nodes and relationships for a specific tenant."""
+        if not self.driver:
+            raise RuntimeError("Not connected to Neo4j. Call connect() first.")
+    
+        with self.driver.session(database=self.database) as session:
+            # Delete all relationships for the tenant
+            session.run("MATCH ()-[r {tenant_id: $tenant_id}]-() DELETE r", tenant_id=tenant_id)
+            # Then delete all nodes for the tenant
+            session.run("MATCH (n {tenant_id: $tenant_id}) DELETE n", tenant_id=tenant_id)
+            logger.info(f"🧹 已清空租户 '{tenant_id}' 的数据")
+    
+    def export_graph(self, graph: KnowledgeGraph, tenant_id: str, clear_existing: bool = True) -> None:
         """Export knowledge graph to Neo4j
-        
+    
         Args:
             graph: Knowledge graph to export
-            clear_existing: Whether to clear existing data
+            tenant_id: The ID of the tenant
+            clear_existing: Whether to clear existing data for the tenant
         """
         if not self.driver:
             raise RuntimeError("Not connected to Neo4j. Call connect() first.")
-        
-        logger.info(f"🚀 开始导出知识图谱到Neo4j: {graph.name}")
-        
+    
+        logger.info(f"🚀 开始导出知识图谱到Neo4j: {graph.name} (租户: {tenant_id})")
+    
         if clear_existing:
-            self.clear_database()
-        
+            self._clear_tenant_data(tenant_id)
+    
         # Export entities as nodes
-        self._export_entities(graph.entities)
-        
+        self._export_entities(graph.entities, tenant_id)
+    
         # Export relationships as edges
-        self._export_relationships(graph.relationships)
-        
+        self._export_relationships(graph.relationships, tenant_id)
+    
         # Create indexes for better performance
         self._create_indexes()
-        
+    
         logger.success(f"✅ 知识图谱导出完成！实体: {len(graph.entities)}, 关系: {len(graph.relationships)}")
     
-    def _export_entities(self, entities: Dict[str, Entity]) -> None:
+    def _export_entities(self, entities: Dict[str, Entity], tenant_id: str) -> None:
         """Export entities as Neo4j nodes"""
         logger.info(f"📍 导出 {len(entities)} 个实体")
-        
+    
         with self.driver.session(database=self.database) as session:
             for entity in entities.values():
                 # Create node with entity type as label
@@ -111,13 +124,14 @@ class Neo4jExporter:
                     e.description = $description,
                     e.confidence = $confidence,
                     e.created_at = $created_at,
-                    e.updated_at = $updated_at
+                    e.updated_at = $updated_at,
+                    e.tenant_id = $tenant_id
                 """
-                
+    
                 # Add attributes as properties
                 for key, value in entity.attributes.items():
                     cypher += f", e.{self._sanitize_property_name(key)} = ${key}"
-                
+    
                 params = {
                     "id": entity.id,
                     "name": entity.name,
@@ -125,43 +139,45 @@ class Neo4jExporter:
                     "confidence": entity.confidence,
                     "created_at": entity.created_at.isoformat() if entity.created_at else "",
                     "updated_at": entity.updated_at.isoformat() if entity.updated_at else "",
+                    "tenant_id": tenant_id,
                     **entity.attributes
                 }
-                
+    
                 try:
                     session.run(cypher, params)
                     logger.trace(f"✅ 创建实体节点: {entity.name} ({entity.entity_type.value})")
                 except Exception as e:
                     logger.error(f"❌ 创建实体节点失败 {entity.name}: {e}")
     
-    def _export_relationships(self, relationships: Dict[str, Relationship]) -> None:
+    def _export_relationships(self, relationships: Dict[str, Relationship], tenant_id: str) -> None:
         """Export relationships as Neo4j edges"""
         logger.info(f"🔗 导出 {len(relationships)} 个关系")
-        
+    
         with self.driver.session(database=self.database) as session:
             for relationship in relationships.values():
                 # Create relationship between nodes
                 relation_type = self._sanitize_relationship_type(
-                    relationship.relation_type.value 
-                    if isinstance(relationship.relation_type, RelationType) 
+                    relationship.relation_type.value
+                    if isinstance(relationship.relation_type, RelationType)
                     else relationship.relation_type
                 )
-                
+    
                 cypher = f"""
-                MATCH (source {{id: $source_id}})
-                MATCH (target {{id: $target_id}})
+                MATCH (source {{id: $source_id, tenant_id: $tenant_id}})
+                MATCH (target {{id: $target_id, tenant_id: $tenant_id}})
                 CREATE (source)-[r:{relation_type}]->(target)
                 SET r.id = $id,
                     r.description = $description,
                     r.confidence = $confidence,
                     r.created_at = $created_at,
-                    r.updated_at = $updated_at
+                    r.updated_at = $updated_at,
+                    r.tenant_id = $tenant_id
                 """
-                
+    
                 # Add attributes as properties
                 for key, value in relationship.attributes.items():
                     cypher += f", r.{self._sanitize_property_name(key)} = ${key}"
-                
+    
                 params = {
                     "source_id": relationship.source_entity_id,
                     "target_id": relationship.target_entity_id,
@@ -170,9 +186,10 @@ class Neo4jExporter:
                     "confidence": relationship.confidence,
                     "created_at": relationship.created_at.isoformat() if relationship.created_at else "",
                     "updated_at": relationship.updated_at.isoformat() if relationship.updated_at else "",
+                    "tenant_id": tenant_id,
                     **relationship.attributes
                 }
-                
+    
                 try:
                     session.run(cypher, params)
                     logger.trace(f"✅ 创建关系: {relationship.source_entity_id} --[{relation_type}]--> {relationship.target_entity_id}")
