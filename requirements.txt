@@ -4,6 +4,7 @@ typing-extensions
 loguru
 rich
 aiohttp
+aiofiles
 asyncio-mqtt
 websockets
 typer
