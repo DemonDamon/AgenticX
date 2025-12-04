@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import logging
 import warnings
 from .base import BaseGraphStorage
+from agenticx.knowledge.graphers.models import KnowledgeGraph
 
 try:
     from neo4j import GraphDatabase
@@ -288,17 +289,39 @@ class Neo4jStorage(BaseGraphStorage):
         # TODO: 实现Neo4j边删除逻辑
         print(f"✅ 模拟从Neo4j删除边 {from_node} -> {to_node}")
 
-    def clear(self) -> None:
-        """清空图数据库"""
-        # TODO: 实现Neo4j清空逻辑
-        print("✅ 模拟清空Neo4j图数据库")
+    def clear(self, tenant_id: str = None) -> None:
+        """清除图数据库中的所有数据或指定租户的数据。
 
-    @property
-    def client(self) -> Any:
-        """提供对底层图数据库客户端的访问"""
-        return self._client
+        Args:
+            tenant_id: 租户ID，如果提供，则只删除该租户的数据。
+        """
+        if not self._client:
+            logger.info("✅ 模拟清除图数据库")
+            return
 
-    def store_graph(self, knowledge_graph, clear_existing: bool = True) -> None:
+        try:
+            with self._client.session() as session:
+                if tenant_id:
+                    logger.info(f"🧹 开始清除租户 '{tenant_id}' 的数据...")
+                    # 删除与租户相关的节点和关系
+                    query = """
+                    MATCH (n {tenant_id: $tenant_id})
+                    DETACH DELETE n
+                    """
+                    result = session.run(query, {"tenant_id": tenant_id})
+                    summary = result.consume()
+                    logger.info(f"✅ 租户 '{tenant_id}' 的数据清除完成。删除了 {summary.counters.nodes_deleted} 个节点和 {summary.counters.relationships_deleted} 个关系。")
+                else:
+                    logger.info("🧹 开始清除图数据库中的所有数据...")
+                    query = "MATCH (n) DETACH DELETE n"
+                    result = session.run(query)
+                    summary = result.consume()
+                    logger.info(f"✅ 图数据库清除完成。删除了 {summary.counters.nodes_deleted} 个节点和 {summary.counters.relationships_deleted} 个关系。")
+        except Exception as e:
+            logger.error(f"❌ 清除图数据库失败: {e}")
+            raise
+
+    def store_graph(self, knowledge_graph: KnowledgeGraph, clear_existing: bool = False) -> None:
         """存储知识图谱到Neo4j数据库
         
         Args:
@@ -468,6 +491,81 @@ class Neo4jStorage(BaseGraphStorage):
         except Exception as e:
             logger.error(f"❌ 存储知识图谱到Neo4j失败: {e}")
             raise
+
+    def get_all_graph_data(self, tenant_id: str) -> Dict[str, Any]:
+        """获取指定租户的所有图谱数据，包括实体和关系。"""
+        logger.info(f"🔍 开始获取租户 '{tenant_id}' 的所有图谱数据...")
+        entities = self.get_entities(tenant_id=tenant_id, limit=1000)  # 假设limit足够大
+        relationships = self.get_relationships(tenant_id=tenant_id, limit=2000) # 假设limit足够大
+        
+        logger.info(f"✅ 成功获取到 {len(entities)} 个实体和 {len(relationships)} 个关系。")
+        
+        return {
+            "nodes": entities,
+            "relationships": relationships
+        }
+
+    def get_entities(self, tenant_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """获取图数据库中指定租户的实体列表"""
+        if not self._client:
+            logger.info("✅ 模拟获取实体列表")
+            return []
+            
+        try:
+            with self._client.session() as session:
+                query = """
+                MATCH (n:Entity {tenant_id: $tenant_id})
+                RETURN n.id as id, n.name as name, n.type as type, 
+                       n.description as description, n.confidence as confidence
+                LIMIT $limit
+                """
+                result = session.run(query, {"tenant_id": tenant_id, "limit": limit})
+                entities = []
+                for record in result:
+                    entities.append({
+                        "id": record["id"],
+                        "name": record["name"],
+                        "type": record["type"],
+                        "description": record["description"] or "",
+                        "confidence": record["confidence"] or 1.0
+                    })
+                logger.info(f"✅ 获取到 {len(entities)} 个实体")
+                return entities
+        except Exception as e:
+            logger.error(f"❌ 获取实体列表失败: {e}")
+            return []
+
+    def get_relationships(self, tenant_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """获取图数据库中指定租户的关系列表"""
+        if not self._client:
+            logger.info("✅ 模拟获取关系列表")
+            return []
+            
+        try:
+            with self._client.session() as session:
+                query = """
+                MATCH (source:Entity {tenant_id: $tenant_id})-[r]->(target:Entity {tenant_id: $tenant_id})
+                RETURN r.id as id, source.id as source_id, target.id as target_id,
+                       r.description as description, r.confidence as confidence,
+                       type(r) as type
+                LIMIT $limit
+                """
+                result = session.run(query, {"tenant_id": tenant_id, "limit": limit})
+                relationships = []
+                for record in result:
+                    relationships.append({
+                        "id": record["id"],
+                        "source_id": record["source_id"],
+                        "target_id": record["target_id"],
+                        "type": record["type"],
+                        "description": record["description"] or "",
+                        "confidence": record["confidence"] or 1.0
+                    })
+                logger.info(f"✅ 获取到 {len(relationships)} 个关系")
+                return relationships
+        except Exception as e:
+            logger.error(f"❌ 获取关系列表失败: {e}")
+            return []
 
     def execute_query(self, query: str, parameters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """执行自定义Cypher查询
