@@ -69,6 +69,7 @@ class Entity:
     source_chunks: Set[str] = field(default_factory=set)
     confidence: float = 1.0
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     
     def __post_init__(self):
         """Validate entity data after initialization"""
@@ -96,7 +97,8 @@ class Entity:
             "attributes": self.attributes,
             "source_chunks": list(self.source_chunks),
             "confidence": self.confidence,
-            "created_at": self.created_at.isoformat()
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat()
         }
     
     @classmethod
@@ -135,6 +137,7 @@ class Relationship:
     source_chunks: Set[str] = field(default_factory=set)
     confidence: float = 1.0
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     
     def __post_init__(self):
         """Validate relationship data after initialization"""
@@ -533,7 +536,7 @@ class KnowledgeGraph:
         }
     
     def export_to_neo4j(self, uri: str, username: str, password: str, 
-                       database: str = "neo4j", clear_existing: bool = True) -> None:
+                       database: str = "neo4j", clear_existing: bool = True, tenant_id: str = None) -> None:
         """Export knowledge graph to Neo4j database
         
         Args:
@@ -542,16 +545,17 @@ class KnowledgeGraph:
             password: Database password
             database: Database name (default: "neo4j")
             clear_existing: Whether to clear existing data
+            tenant_id: The tenant ID for data isolation
         """
         try:
             from .neo4j_exporter import Neo4jExporterContext
             
             with Neo4jExporterContext(uri, username, password, database) as exporter:
-                exporter.export_graph(self, clear_existing=clear_existing)
+                exporter.export_graph(self, clear_existing=clear_existing, tenant_id=tenant_id)
                 
         except ImportError:
             raise ImportError("Neo4j exporter not available. Make sure neo4j_exporter.py is in the same directory.")
-    
+
     def export_to_spo_json(self, output_path: str) -> None:
         """Export graph to SPO (Subject-Predicate-Object) JSON format like youtu-graph
         

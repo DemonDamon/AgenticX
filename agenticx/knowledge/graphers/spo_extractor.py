@@ -250,15 +250,17 @@ class SPOExtractor:
                 logger.debug("✅ JSON解析成功")
             except json.JSONDecodeError as json_error:
                 logger.warning(f"⚠️ JSON解析失败: {json_error}")
-                logger.debug(f"原始响应: {response[:200]}...")
-                logger.debug(f"清理后内容: {raw_content[:200] if 'raw_content' in locals() else cleaned_response[:200]}...")
+                logger.error(f"🔍 完整原始响应内容:\n{response}")
+                logger.error(f"🔍 完整清理后内容:\n{raw_content if 'raw_content' in locals() else cleaned_response}")
                 
                 # 尝试更激进的修复
                 fixed_response = self._aggressive_json_fix(raw_content if 'raw_content' in locals() else cleaned_response)
+                logger.debug(f"🔧 激进修复后的内容:\n{fixed_response}")
                 try:
                     spo_data = json.loads(fixed_response)
                     logger.info("✅ 激进修复成功")
-                except:
+                except Exception as fix_error:
+                    logger.error(f"❌ 激进修复也失败: {fix_error}")
                     logger.warning("❌ 激进修复也失败，返回最小有效JSON结构")
                     return [], []
             

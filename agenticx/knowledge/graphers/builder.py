@@ -213,14 +213,15 @@ class KnowledgeGraphBuilder:
         
         # Auto export to Neo4j if enabled
         if self.config.neo4j.enabled and self.config.neo4j.auto_export:
-            logger.info("🗄️ 自动导出到Neo4j数据库")
             try:
+                logger.info("🗄️ 自动导出到Neo4j...")
                 graph.export_to_neo4j(
                     uri=self.config.neo4j.uri,
                     username=self.config.neo4j.username,
                     password=self.config.neo4j.password,
                     database=self.config.neo4j.database,
-                    clear_existing=self.config.neo4j.clear_on_export
+                    clear_existing=self.config.neo4j.clear_on_export,
+                    tenant_id=graph.name  # Use graph name as tenant_id
                 )
                 logger.success("✅ Neo4j导出成功")
             except Exception as e:
