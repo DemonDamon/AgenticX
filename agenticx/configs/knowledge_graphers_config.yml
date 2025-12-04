@@ -19,13 +19,19 @@ grapher:
     community_detection: {}
     graph_optimization: {}
     neo4j:
-      enabled: false  # Set to true to enable Neo4j export
+      enabled: true  # Set to true to enable Neo4j export
       uri: "bolt://localhost:7687"
       username: "neo4j"
       password: "agenticx"  # Change this to your Neo4j password
       database: "neo4j"  # Use default database
-      auto_export: false  # Automatically export after graph construction
-      clear_on_export: true  # Clear existing data before export
+      auto_export: false  # 🔧 改为手动控制导出，避免意外清空数据
+      clear_on_export: false  # 🔧 改为不自动清空，保护现有数据
       create_indexes: true  # Create performance indexes
       batch_size: 1000  # Batch size for large exports
       timeout: 30  # Connection timeout in seconds
+      
+      # 🆕 新增数据集管理配置
+      dataset_management:
+        enable_isolation: true  # 启用数据集隔离
+        default_dataset: "default"  # 默认数据集名称
+        preserve_other_datasets: true  # 保护其他数据集
