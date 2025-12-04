@@ -140,10 +140,18 @@ class MilvusStorage(BaseVectorStorage):
         try:
             # 准备数据
             import json
+            from datetime import datetime
+            
+            def datetime_serializer(obj):
+                """自定义JSON序列化器，处理datetime对象"""
+                if isinstance(obj, datetime):
+                    return obj.isoformat()
+                raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+            
             data_to_insert = []
             for record in records:
-                # 将metadata序列化为JSON字符串
-                metadata_str = json.dumps(record.payload or {}, ensure_ascii=False)
+                # 将metadata序列化为JSON字符串，使用自定义序列化器处理datetime
+                metadata_str = json.dumps(record.payload or {}, ensure_ascii=False, default=datetime_serializer)
                 data_to_insert.append({
                     "id": record.id,
                     "vector": record.vector,
@@ -155,6 +163,9 @@ class MilvusStorage(BaseVectorStorage):
             
             # 刷新以确保数据持久化
             self.collection.flush()
+            
+            # 重新加载集合以确保数据可查询
+            self.collection.load()
             
             logger.info(f"✅ 成功添加 {len(records)} 个向量到Milvus")
             
