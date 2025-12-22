@@ -1,0 +1,147 @@
+# AgenticX 最小化配置 - 仅核心服务
+# 用于网络问题排查和快速启动
+
+services:
+  # ========== 数据库服务 ==========
+  
+  # PostgreSQL - 关系型数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: agenticx-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agenticx}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis - 缓存数据库
+  redis:
+    image: redis:7.2-alpine
+    container_name: agenticx-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-password}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MongoDB - 文档数据库
+  mongodb:
+    image: mongo:7.0
+    container_name: agenticx-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:-password}
+      MONGO_INITDB_DATABASE: ${MONGODB_DB:-agenticx}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ========== 文档处理服务 ==========
+  
+  # MinerU API - 文档解析服务
+  mineru-api:
+    image: opendatalab/mineru:latest
+    container_name: agenticx-mineru-api
+    environment:
+      - MINERU_API_HOST=0.0.0.0
+      - MINERU_API_PORT=8080
+      - MINERU_MODEL_PATH=/app/models
+      - MINERU_TEMP_DIR=/app/temp
+      - MINERU_OUTPUT_DIR=/app/output
+      - MINERU_MAX_WORKERS=${MINERU_MAX_WORKERS:-2}
+      - MINERU_ENABLE_GPU=${MINERU_ENABLE_GPU:-false}
+    ports:
+      - "8080:8080"
+    volumes:
+      - mineru_models:/app/models
+      - mineru_temp:/app/temp
+      - mineru_output:/app/output
+      - mineru_config:/app/config
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      - postgres
+      - redis
+      - mongodb
+
+  # MinerU Web UI - 文档解析管理界面
+  mineru-web:
+    image: opendatalab/mineru-web:latest
+    container_name: agenticx-mineru-web
+    environment:
+      - MINERU_API_URL=http://mineru-api:8080
+      - WEB_PORT=3002
+    ports:
+      - "3002:3002"
+    depends_on:
+      - mineru-api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ========== 负载均衡 ==========
+  
+  # Nginx - 反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: agenticx-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./configs/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - postgres
+      - redis
+      - mongodb
+      - mineru-api
+      - mineru-web
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+  redis_data:
+  mongodb_data:
+  mineru_models:
+  mineru_temp:
+  mineru_output:
+  mineru_config:
+
+networks:
+  default:
+    name: agenticx-network
+    driver: bridge
