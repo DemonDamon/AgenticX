@@ -242,6 +242,63 @@ services:
       - ./data/nebula/storaged:/usr/local/nebula/data
     restart: unless-stopped
 
+  # ========== Document Processing ==========
+  
+  # MinerU API - 文档解析服务
+  mineru-api:
+    image: opendatalab/mineru:latest
+    container_name: agenticx-mineru-api
+    environment:
+      - MINERU_API_HOST=0.0.0.0
+      - MINERU_API_PORT=8080
+      - MINERU_MODEL_PATH=/app/models
+      - MINERU_TEMP_DIR=/app/temp
+      - MINERU_OUTPUT_DIR=/app/output
+      - MINERU_MAX_WORKERS=${MINERU_MAX_WORKERS:-4}
+      - MINERU_ENABLE_GPU=${MINERU_ENABLE_GPU:-false}
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/mineru/models:/app/models
+      - ./data/mineru/temp:/app/temp
+      - ./data/mineru/output:/app/output
+      - ./data/mineru/config:/app/config
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # GPU 支持（如果需要）
+    # runtime: nvidia
+
+  # MinerU Web UI - 文档解析管理界面
+  mineru-web:
+    image: opendatalab/mineru-web:latest
+    container_name: agenticx-mineru-web
+    environment:
+      - MINERU_API_URL=http://mineru-api:8080
+      - WEB_PORT=3002
+    ports:
+      - "3002:3002"
+    depends_on:
+      - mineru-api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # ========== Object Storage ==========
   
   # MinIO - S3兼容对象存储
@@ -327,7 +384,7 @@ services:
 
   # Jaeger - 分布式追踪
   jaeger:
-    image: jaegertracing/all-in-one:1.48.0
+    image: jaegertracing/all-in-one:1.74.0
     container_name: agenticx-jaeger
     environment:
       COLLECTOR_OTLP_ENABLED: true
@@ -361,6 +418,8 @@ services:
       - weaviate
       - neo4j
       - minio
+      - mineru-api
+      - mineru-web
     restart: unless-stopped
 
 volumes:
@@ -375,6 +434,10 @@ volumes:
   neo4j_data:
   nebula_data:
   minio_data:
+  mineru_models:
+  mineru_temp:
+  mineru_output:
+  mineru_config:
   etcd_data:
   prometheus_data:
   grafana_data:
