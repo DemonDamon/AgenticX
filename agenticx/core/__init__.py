@@ -108,9 +108,25 @@ from .event import (
     Event, EventLog, AnyEvent,
     TaskStartEvent, TaskEndEvent, ToolCallEvent, ToolResultEvent,
     ErrorEvent, LLMCallEvent, LLMResponseEvent, HumanRequestEvent,
-    HumanResponseEvent, FinishTaskEvent
+    HumanResponseEvent, FinishTaskEvent,
+    # Context Compiler 新增
+    CompactedEvent, CompactionConfig
 )
-from .prompt import PromptManager, ContextRenderer, XMLContextRenderer, PromptTemplate
+from .prompt import PromptManager, ContextRenderer, XMLContextRenderer, PromptTemplate, CompiledContextRenderer
+
+# Context Compiler (内化自 ADK 的 Compiled View)
+from .context_compiler import (
+    ContextCompiler, EventSummarizer, LLMEventSummarizer, SimpleEventSummarizer,
+    create_context_compiler, create_mining_compiler,
+    DEFAULT_COMPACTION_PROMPT, MINING_TASK_PROMPT, PROMPT_TEMPLATES,
+    CompactionStrategy
+)
+
+# Token Counter (精确 Token 计数)
+from .token_counter import (
+    TokenCounter, TokenStats, ModelFamily,
+    count_tokens, estimate_cost, truncate_text
+)
 from .error_handler import ErrorHandler, ErrorClassifier, CircuitBreaker, CircuitBreakerOpenError
 from .communication import CommunicationInterface, BroadcastCommunication, AsyncCommunicationInterface
 from .agent_executor import AgentExecutor, ToolRegistry as LegacyToolRegistry, ActionParser
@@ -242,10 +258,31 @@ __all__ = [
     "HumanRequestEvent",
     "HumanResponseEvent",
     "FinishTaskEvent",
+    # Context Compiler (内化自 ADK)
+    "CompactedEvent",
+    "CompactionConfig",
+    "ContextCompiler",
+    "EventSummarizer",
+    "LLMEventSummarizer",
+    "SimpleEventSummarizer",
+    "create_context_compiler",
+    "create_mining_compiler",
+    "DEFAULT_COMPACTION_PROMPT",
+    "MINING_TASK_PROMPT",
+    "PROMPT_TEMPLATES",
+    "CompactionStrategy",
+    # Token Counter
+    "TokenCounter",
+    "TokenStats",
+    "ModelFamily",
+    "count_tokens",
+    "estimate_cost",
+    "truncate_text",
     # Prompt Management
     "PromptManager",
     "ContextRenderer",
     "XMLContextRenderer", 
+    "CompiledContextRenderer",
     "PromptTemplate",
     # Error Handling
     "ErrorHandler",

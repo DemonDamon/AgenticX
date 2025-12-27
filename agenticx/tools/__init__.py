@@ -22,6 +22,8 @@ from .builtin import (
     JsonTool,
 )
 from .security import human_in_the_loop, ApprovalRequiredError
+from .tool_context import ToolContext, LlmRequest
+from .openapi_toolset import OpenAPIToolset, RestApiTool
 
 __all__ = [
     # Base classes
@@ -29,6 +31,9 @@ __all__ = [
     "ToolError",
     "ToolTimeoutError", 
     "ToolValidationError",
+    # Tool Context (ADK-inspired)
+    "ToolContext",
+    "LlmRequest",
     # Security
     "human_in_the_loop",
     "ApprovalRequiredError",
@@ -52,6 +57,9 @@ __all__ = [
     "MCPServerConfig",
     "load_mcp_config",
     "create_mcp_client",
+    # OpenAPI tools (ADK-inspired)
+    "OpenAPIToolset",
+    "RestApiTool",
     # MinerU 工具
     "create_mineru_parse_tool",
     "create_mineru_ocr_languages_tool",

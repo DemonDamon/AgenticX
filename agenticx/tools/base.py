@@ -430,6 +430,81 @@ class BaseTool(ABC):
             }
         }
     
+    # ========== ADK 借鉴的新方法 ==========
+    
+    def get_declaration(self) -> Dict[str, Any]:
+        """
+        获取工具的声明信息（JSON Schema 格式）
+        
+        这是 to_openai_schema 的简化版本，返回纯粹的工具声明。
+        借鉴 ADK 的 _get_declaration 设计。
+        
+        Returns:
+            工具声明字典，包含 name, description, parameters
+        """
+        parameters = {"type": "object", "properties": {}, "required": []}
+        
+        if self.args_schema:
+            schema = self.args_schema.model_json_schema()
+            parameters["properties"] = schema.get("properties", {})
+            parameters["required"] = schema.get("required", [])
+            # 移除 $defs 等额外字段
+            if "$defs" in parameters:
+                del parameters["$defs"]
+        
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": parameters
+        }
+    
+    async def process_llm_request(
+        self,
+        tool_context: Optional[Any] = None,
+        llm_request: Optional[Any] = None
+    ) -> None:
+        """
+        在 LLM 调用前处理请求（可选实现）
+        
+        借鉴 ADK 的 process_llm_request 设计，允许工具：
+        - 主动将自己的声明添加到请求
+        - 修改系统提示
+        - 调整生成参数
+        - 添加额外的上下文信息
+        
+        默认行为：将工具声明添加到请求的 tools 列表
+        
+        Args:
+            tool_context: 工具执行上下文 (ToolContext)
+            llm_request: LLM 请求对象 (LlmRequest)
+        """
+        if llm_request is None:
+            return
+        
+        # 默认行为：添加工具声明
+        declaration = self.get_declaration()
+        
+        # 检查 llm_request 是否有 append_tools 方法
+        if hasattr(llm_request, 'append_tools'):
+            llm_request.append_tools([self.to_openai_schema()])
+        elif hasattr(llm_request, 'tools'):
+            # 直接操作 tools 列表
+            if isinstance(llm_request.tools, list):
+                llm_request.tools.append(self.to_openai_schema())
+    
+    def is_long_running(self) -> bool:
+        """
+        检查工具是否是长时间运行的
+        
+        长时间运行的工具可能需要特殊处理（如异步执行、进度报告等）
+        
+        Returns:
+            是否为长时间运行工具
+        """
+        return getattr(self, '_is_long_running', False)
+    
+    # ========== 结束 ADK 借鉴的新方法 ==========
+    
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name='{self.name}')"
     

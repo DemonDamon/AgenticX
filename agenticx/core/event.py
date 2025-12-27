@@ -110,6 +110,73 @@ class ActionCorrectionEvent(Event[Literal["action_correction"]]):
     type: Literal["action_correction"] = "action_correction"
     action: Dict[str, Any] = Field(description="The corrected action to be executed.")
 
+
+# ============================================================================
+# Context Compiler 相关事件（内化自 ADK 的 Compiled View 机制）
+# ============================================================================
+
+class CompactedEvent(Event[Literal["compacted"]]):
+    """
+    压缩事件：对一段原始事件流的语义摘要。
+    
+    设计理念（借鉴 ADK）：
+    - Source of Truth: 原始事件仍保留在 EventLog 中，CompactedEvent 是"编译产物"。
+    - 渲染时遮蔽：当 Renderer 遇到 CompactedEvent 时，会跳过其覆盖范围内的原始事件。
+    - 保持语义连续性：通过 overlap 机制，相邻的压缩事件之间会有重叠，防止语义断层。
+    
+    Attributes:
+        summary: LLM 生成的语义摘要文本。
+        start_timestamp: 被压缩事件范围的起始时间戳（包含）。
+        end_timestamp: 被压缩事件范围的结束时间戳（包含）。
+        compressed_event_ids: 被此事件压缩的原始事件 ID 列表。
+        token_count_before: 压缩前的估计 token 数。
+        token_count_after: 压缩后（即 summary）的估计 token 数。
+    """
+    type: Literal["compacted"] = "compacted"
+    summary: str = Field(description="LLM-generated semantic summary of the compacted events.")
+    start_timestamp: float = Field(description="Start timestamp of the compacted range (inclusive).")
+    end_timestamp: float = Field(description="End timestamp of the compacted range (inclusive).")
+    compressed_event_ids: List[str] = Field(default_factory=list, description="IDs of original events covered by this compaction.")
+    token_count_before: Optional[int] = Field(default=None, description="Estimated tokens before compaction.")
+    token_count_after: Optional[int] = Field(default=None, description="Estimated tokens after compaction (summary only).")
+    
+    def covers_event(self, event: "Event") -> bool:
+        """Check if this compacted event covers the given event."""
+        if not hasattr(event, 'timestamp') or event.timestamp is None:
+            return False
+        event_ts = event.timestamp.timestamp() if isinstance(event.timestamp, datetime) else event.timestamp
+        return self.start_timestamp <= event_ts <= self.end_timestamp
+    
+    def get_compression_ratio(self) -> float:
+        """Calculate the compression ratio (lower is better)."""
+        if self.token_count_before and self.token_count_before > 0:
+            return (self.token_count_after or 0) / self.token_count_before
+        return 1.0
+
+
+class CompactionConfig(BaseModel):
+    """
+    上下文压缩配置。
+    
+    Attributes:
+        enabled: 是否启用压缩。
+        compaction_interval: 触发压缩的新事件数阈值（例如：每 10 个新事件触发一次）。
+        overlap_size: 相邻压缩之间的重叠事件数（保持语义连续性）。
+        max_context_tokens: 触发紧急压缩的 token 上限。
+        summarizer_model: 用于生成摘要的 LLM 模型名称。
+        summarizer_prompt: 自定义压缩提示词模板。
+    """
+    enabled: bool = Field(default=True, description="Whether compaction is enabled.")
+    compaction_interval: int = Field(default=10, description="Number of new events before triggering compaction.")
+    overlap_size: int = Field(default=2, description="Number of overlapping events between consecutive compactions.")
+    max_context_tokens: int = Field(default=8000, description="Token threshold to trigger emergency compaction.")
+    summarizer_model: Optional[str] = Field(default=None, description="Model to use for summarization.")
+    summarizer_prompt: Optional[str] = Field(
+        default=None,
+        description="Custom prompt template for summarization. Use {events} placeholder."
+    )
+
+
 # Union type for all event types
 AnyEvent = Union[
     TaskStartEvent,
@@ -124,6 +191,7 @@ AnyEvent = Union[
     FinishTaskEvent,
     ReplanningRequiredEvent,
     ActionCorrectionEvent,
+    CompactedEvent,  # Context Compiler 新增
     Event[str]  # Fallback for custom events
 ]
 
@@ -201,6 +269,66 @@ class EventLog(BaseModel):
     def is_complete(self) -> bool:
         """Check if the task is complete."""
         return self.get_current_state()["status"] in ["completed", "failed"]
+    
+    # =========================================================================
+    # Context Compiler 辅助方法
+    # =========================================================================
+    
+    def get_last_compaction(self) -> Optional["CompactedEvent"]:
+        """获取最后一个压缩事件。"""
+        for event in reversed(self.events):
+            if isinstance(event, CompactedEvent):
+                return event
+        return None
+    
+    def get_events_since_last_compaction(self) -> List[AnyEvent]:
+        """获取自最后一次压缩以来的所有新事件。"""
+        last_compaction = self.get_last_compaction()
+        if not last_compaction:
+            return [e for e in self.events if not isinstance(e, CompactedEvent)]
+        
+        new_events = []
+        for event in self.events:
+            if isinstance(event, CompactedEvent):
+                continue
+            event_ts = event.timestamp.timestamp() if isinstance(event.timestamp, datetime) else float(event.timestamp)
+            if event_ts > last_compaction.end_timestamp:
+                new_events.append(event)
+        return new_events
+    
+    def get_compaction_count(self) -> int:
+        """获取当前 EventLog 中压缩事件的数量。"""
+        return len([e for e in self.events if isinstance(e, CompactedEvent)])
+    
+    def estimate_token_count(self, chars_per_token: int = 4) -> int:
+        """
+        估算当前 EventLog 的 token 数。
+        这是一个粗略估计，实际 token 数取决于分词器。
+        """
+        total_chars = 0
+        for event in self.events:
+            total_chars += len(str(event.model_dump()))
+        return total_chars // chars_per_token
+    
+    def should_compact(self, config: "CompactionConfig") -> bool:
+        """
+        根据配置判断是否应该触发压缩。
+        
+        触发条件（满足任一即可）：
+        1. 自上次压缩以来的新事件数 >= compaction_interval
+        2. 估计的 token 数 > max_context_tokens
+        """
+        if not config.enabled:
+            return False
+        
+        new_events = self.get_events_since_last_compaction()
+        if len(new_events) >= config.compaction_interval:
+            return True
+        
+        if self.estimate_token_count() > config.max_context_tokens:
+            return True
+        
+        return False
 
 
 def listens_to(event_type: str) -> Callable:
