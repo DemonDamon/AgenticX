@@ -2,6 +2,7 @@ import json
 import asyncio
 from typing import Dict, Any, List, Optional, Callable, Union
 from abc import ABC, abstractmethod
+import logging
 
 from ..llms.base import BaseLLMProvider
 from ..llms.response import LLMResponse
@@ -12,11 +13,15 @@ from .task import Task
 from .event import (
     EventLog, AnyEvent, TaskStartEvent, TaskEndEvent, ToolCallEvent, 
     ToolResultEvent, ErrorEvent, LLMCallEvent, LLMResponseEvent,
-    HumanRequestEvent, HumanResponseEvent, FinishTaskEvent
+    HumanRequestEvent, HumanResponseEvent, FinishTaskEvent,
+    CompactionConfig
 )
-from .prompt import PromptManager
+from .prompt import PromptManager, CompiledContextRenderer
 from .error_handler import ErrorHandler
 from .communication import CommunicationInterface
+from .context_compiler import ContextCompiler, create_context_compiler
+
+logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
@@ -89,6 +94,10 @@ class AgentExecutor:
     """
     The core execution engine for agents.
     Implements the "Own Your Control Flow" principle from 12-Factor Agents.
+    
+    新增功能（内化自 ADK）：
+    - Context Compiler: 自动压缩长对话历史，控制 Token 成本。
+    - Compiled Context Renderer: 使用"编译视图"渲染上下文。
     """
     
     def __init__(
@@ -98,13 +107,32 @@ class AgentExecutor:
         prompt_manager: Optional[PromptManager] = None,
         error_handler: Optional[ErrorHandler] = None,
         communication: Optional[CommunicationInterface] = None,
-        max_iterations: int = 50
+        max_iterations: int = 50,
+        # Context Compiler 配置
+        compaction_config: Optional[CompactionConfig] = None,
+        enable_context_compilation: bool = True
     ):
         self.llm_provider = llm_provider
-        self.prompt_manager = prompt_manager or PromptManager()
         self.error_handler = error_handler or ErrorHandler()
         self.communication = communication
         self.max_iterations = max_iterations
+        
+        # Context Compiler 配置
+        self.compaction_config = compaction_config or CompactionConfig()
+        self.enable_context_compilation = enable_context_compilation
+        
+        # 如果启用上下文编译，使用 CompiledContextRenderer
+        if enable_context_compilation:
+            compiled_renderer = CompiledContextRenderer()
+            self.prompt_manager = prompt_manager or PromptManager(context_renderer=compiled_renderer)
+            self.context_compiler = create_context_compiler(
+                llm_provider=llm_provider,
+                config=self.compaction_config,
+                use_simple_summarizer=False  # 使用 LLM 进行高质量摘要
+            )
+        else:
+            self.prompt_manager = prompt_manager or PromptManager()
+            self.context_compiler = None
         
         # Initialize tool registry
         self.tool_registry = ToolRegistry()
@@ -220,6 +248,13 @@ class AgentExecutor:
                 break
             
             try:
+                # === Context Compilation Check ===
+                # 在每次 LLM 调用前检查是否需要压缩上下文
+                if self.context_compiler and self.enable_context_compilation:
+                    asyncio.get_event_loop().run_until_complete(
+                        self._maybe_compact_context(event_log)
+                    )
+                
                 # Get next action from LLM
                 action = self._get_next_action(agent, task, event_log)
                 
@@ -505,3 +540,47 @@ class AgentExecutor:
     def list_tools(self) -> List[str]:
         """List all available tools."""
         return self.tool_registry.list_tools() 
+    
+    # =========================================================================
+    # Context Compiler 集成方法
+    # =========================================================================
+    
+    async def _maybe_compact_context(self, event_log: EventLog) -> None:
+        """
+        检查并执行上下文压缩（如果需要）。
+        
+        这是 ADK "Compiled View" 机制的核心入口。
+        在每次 LLM 调用前检查 EventLog 是否需要压缩。
+        """
+        if not self.context_compiler:
+            return
+        
+        try:
+            compacted_event = await self.context_compiler.maybe_compact(event_log)
+            if compacted_event:
+                logger.info(
+                    f"Context compacted: {len(compacted_event.compressed_event_ids)} events -> "
+                    f"{compacted_event.token_count_after} tokens "
+                    f"(ratio: {compacted_event.get_compression_ratio():.2f})"
+                )
+        except Exception as e:
+            logger.warning(f"Context compaction failed (non-blocking): {e}")
+    
+    def set_compaction_config(self, config: CompactionConfig) -> None:
+        """动态更新压缩配置。"""
+        self.compaction_config = config
+        if self.context_compiler:
+            self.context_compiler.config = config
+    
+    def disable_context_compilation(self) -> None:
+        """禁用上下文编译。"""
+        self.enable_context_compilation = False
+    
+    def enable_context_compilation_feature(self) -> None:
+        """启用上下文编译。"""
+        self.enable_context_compilation = True
+        if not self.context_compiler:
+            self.context_compiler = create_context_compiler(
+                llm_provider=self.llm_provider,
+                config=self.compaction_config
+            )

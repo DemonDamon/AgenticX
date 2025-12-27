@@ -1,0 +1,809 @@
+"""
+Context Compiler (上下文编译器) - 增强版
+
+内化自 Google ADK 的 "Compiled View" 机制。
+核心思想：上下文不是事件的简单拼接，而是对 EventLog 的按需"编译"。
+
+增强功能（v2）：
+- 精确 Token 计数：使用 tiktoken 进行精确统计
+- 多策略压缩：滑动窗口、主题分块、紧急压缩等
+- 挖掘任务专用 Prompt：保留失败路径和探索线索
+- 可观测性：原始视图 vs 编译视图对照
+"""
+
+from abc import ABC, abstractmethod
+from typing import List, Optional, Dict, Any, Callable, Literal
+from datetime import datetime, timezone
+from enum import Enum
+import logging
+
+from .event import (
+    EventLog, AnyEvent, CompactedEvent, CompactionConfig,
+    ToolCallEvent, ToolResultEvent, ErrorEvent, LLMCallEvent, LLMResponseEvent,
+    TaskStartEvent, TaskEndEvent, FinishTaskEvent, HumanRequestEvent, HumanResponseEvent
+)
+from .token_counter import TokenCounter, TokenStats, count_tokens
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# 压缩策略枚举
+# =============================================================================
+
+class CompactionStrategy(str, Enum):
+    """压缩策略"""
+    SLIDING_WINDOW = "sliding_window"    # 滑动窗口（默认）
+    TOPIC_BASED = "topic_based"          # 按主题分块
+    TIME_BASED = "time_based"            # 按时间窗口
+    EMERGENCY = "emergency"              # 紧急压缩（超过 token 阈值时）
+    HYBRID = "hybrid"                    # 混合策略
+
+
+# =============================================================================
+# 专用 Prompt 模板库
+# =============================================================================
+
+# 默认通用 Prompt
+DEFAULT_COMPACTION_PROMPT = """You are a context summarizer for an AI agent system. Your job is to compress a sequence of events into a concise summary while preserving critical information.
+
+## Events to Summarize
+{events}
+
+## Requirements
+1. Preserve key information:
+   - What tools were called and their results (especially errors and failures)
+   - Important decisions made by the agent
+   - Any user inputs or human feedback
+   - Critical state changes
+
+2. Be concise but complete. Aim for 30-50% compression ratio.
+
+3. Use structured format:
+   - Start with a one-sentence overall summary
+   - List key actions and their outcomes
+   - Note any important lessons learned
+
+## Output
+Provide your summary directly, without any preamble."""
+
+
+# 智能体自动挖掘专用 Prompt（优化版）
+MINING_TASK_PROMPT = """You are summarizing the execution history of an AI agent performing an **automatic exploration/mining task**.
+
+## Events to Summarize
+{events}
+
+## Critical Requirements for Mining Tasks
+
+### 1. MUST Preserve (Critical for avoiding repeated failures):
+- **Failed Paths**: List every approach that was tried and failed, with reasons
+- **Dead Ends**: Resources/APIs/methods that were found to be unusable
+- **Error Patterns**: Common error types encountered and their triggers
+- **Blocked Directions**: Paths that were explicitly blocked or rate-limited
+
+### 2. MUST Preserve (Critical for continued exploration):
+- **Discovered Patterns**: Any patterns or insights found during exploration
+- **Successful Techniques**: Methods that worked, even partially
+- **Unexplored Leads**: Promising directions not yet fully investigated
+- **Resource States**: Current status of external resources (APIs, files, etc.)
+
+### 3. Progress Tracking:
+- Overall exploration coverage estimate (e.g., "~40% of potential paths explored")
+- Priority ranking for remaining directions
+- Key milestones achieved
+
+## Output Format
+```
+📊 EXPLORATION SUMMARY
+[One-sentence progress summary]
+
+❌ TRIED & FAILED:
+- [path/method]: [why it failed]
+- ...
+
+✅ WORKING APPROACHES:
+- [method]: [what worked and results]
+- ...
+
+🔍 UNEXPLORED LEADS:
+- [direction]: [priority: high/medium/low]
+- ...
+
+⚠️ IMPORTANT NOTES:
+- [any critical warnings or constraints]
+```
+
+Provide your summary now:"""
+
+
+# 对话历史压缩 Prompt
+CONVERSATION_PROMPT = """Summarize this conversation history between a user and an AI agent.
+
+## Conversation Events
+{events}
+
+## Requirements
+1. Preserve the key topics discussed
+2. Keep important user requests and agent responses
+3. Maintain the logical flow of the conversation
+4. Note any unresolved questions or pending tasks
+
+## Output
+A concise summary that would allow the conversation to continue seamlessly."""
+
+
+# 工具执行序列压缩 Prompt
+TOOL_SEQUENCE_PROMPT = """Summarize this sequence of tool executions.
+
+## Tool Events
+{events}
+
+## Requirements
+1. Group related tool calls together
+2. Highlight successes and failures
+3. Note any patterns or dependencies between tools
+4. Preserve error details for failed calls
+
+## Output
+A structured summary of what tools were used and their outcomes."""
+
+
+# Prompt 模板映射
+PROMPT_TEMPLATES = {
+    "default": DEFAULT_COMPACTION_PROMPT,
+    "mining": MINING_TASK_PROMPT,
+    "conversation": CONVERSATION_PROMPT,
+    "tool_sequence": TOOL_SEQUENCE_PROMPT,
+}
+
+
+# =============================================================================
+# 事件摘要器
+# =============================================================================
+
+class EventSummarizer(ABC):
+    """
+    事件摘要生成器的抽象基类。
+    """
+    
+    @abstractmethod
+    async def summarize(
+        self, 
+        events: List[AnyEvent], 
+        prompt_template: Optional[str] = None,
+        task_type: Optional[str] = None
+    ) -> str:
+        """
+        生成事件列表的摘要。
+        
+        Args:
+            events: 需要摘要的事件列表。
+            prompt_template: 自定义的提示词模板（可选）。
+            task_type: 任务类型，用于选择专用 Prompt（如 'mining'）。
+            
+        Returns:
+            摘要文本。
+        """
+        pass
+
+
+class LLMEventSummarizer(EventSummarizer):
+    """
+    基于 LLM 的事件摘要生成器。
+    
+    使用 LLM 来理解事件语义并生成高质量摘要。
+    """
+    
+    def __init__(
+        self, 
+        llm_provider: Any,
+        model: Optional[str] = None,
+        default_task_type: str = "default",
+        token_counter: Optional[TokenCounter] = None
+    ):
+        """
+        Args:
+            llm_provider: LLM 提供者实例。
+            model: 指定的模型名称（可选）。
+            default_task_type: 默认任务类型（用于选择 Prompt）。
+            token_counter: Token 计数器（可选）。
+        """
+        self.llm_provider = llm_provider
+        self.model = model
+        self.default_task_type = default_task_type
+        self.token_counter = token_counter or TokenCounter(model=model)
+        self.stats = TokenStats(model=model)
+    
+    async def summarize(
+        self, 
+        events: List[AnyEvent], 
+        prompt_template: Optional[str] = None,
+        task_type: Optional[str] = None
+    ) -> str:
+        """使用 LLM 生成摘要。"""
+        if not events:
+            return "No events to summarize."
+        
+        # 将事件格式化为文本
+        events_text = self._format_events_for_llm(events)
+        
+        # 选择 Prompt 模板
+        if prompt_template:
+            template = prompt_template
+        else:
+            task = task_type or self.default_task_type
+            template = PROMPT_TEMPLATES.get(task, DEFAULT_COMPACTION_PROMPT)
+        
+        prompt = template.format(events=events_text)
+        
+        # 记录输入 token
+        input_tokens = self.token_counter.count_tokens(prompt)
+        logger.debug(f"Summarization prompt: {input_tokens} tokens")
+        
+        # 调用 LLM
+        try:
+            response = self.llm_provider.invoke([{"role": "user", "content": prompt}])
+            summary = response.content
+            
+            # 记录统计
+            self.stats.record(prompt, summary, {"event_count": len(events)})
+            
+            return summary
+        except Exception as e:
+            logger.error(f"LLM summarization failed: {e}")
+            return self._fallback_summary(events)
+    
+    def _format_events_for_llm(self, events: List[AnyEvent]) -> str:
+        """将事件列表格式化为 LLM 可读的文本。"""
+        lines = []
+        for i, event in enumerate(events, 1):
+            line = self._format_single_event(event, i)
+            if line:
+                lines.append(line)
+        return "\n".join(lines)
+    
+    def _format_single_event(self, event: AnyEvent, index: int) -> str:
+        """格式化单个事件。"""
+        if isinstance(event, ToolCallEvent):
+            args_str = str(event.tool_args)[:100] + "..." if len(str(event.tool_args)) > 100 else str(event.tool_args)
+            return f"{index}. [TOOL_CALL] {event.tool_name}({args_str}) - Intent: {event.intent}"
+        elif isinstance(event, ToolResultEvent):
+            status = "✓" if event.success else "✗"
+            result = event.result if event.success else event.error
+            result_str = str(result)[:200] + "..." if result and len(str(result)) > 200 else str(result)
+            return f"{index}. [TOOL_RESULT] {event.tool_name} {status}: {result_str}"
+        elif isinstance(event, ErrorEvent):
+            return f"{index}. [ERROR] {event.error_type}: {event.error_message}"
+        elif isinstance(event, LLMCallEvent):
+            return f"{index}. [LLM_CALL] Model: {event.model}"
+        elif isinstance(event, LLMResponseEvent):
+            tokens = event.token_usage.get('total_tokens', 'N/A') if event.token_usage else 'N/A'
+            response_preview = event.response[:200] + "..." if len(event.response) > 200 else event.response
+            return f"{index}. [LLM_RESPONSE] Tokens: {tokens}, Preview: {response_preview}"
+        elif isinstance(event, TaskStartEvent):
+            return f"{index}. [TASK_START] {event.task_description}"
+        elif isinstance(event, TaskEndEvent):
+            return f"{index}. [TASK_END] Success: {event.success}"
+        elif isinstance(event, FinishTaskEvent):
+            result_str = str(event.final_result)[:200] + "..." if len(str(event.final_result)) > 200 else str(event.final_result)
+            return f"{index}. [FINISH] Result: {result_str}"
+        elif isinstance(event, HumanRequestEvent):
+            return f"{index}. [HUMAN_REQUEST] {event.question}"
+        elif isinstance(event, HumanResponseEvent):
+            return f"{index}. [HUMAN_RESPONSE] {event.response}"
+        else:
+            return f"{index}. [{event.type.upper()}] {event.data}"
+    
+    def _fallback_summary(self, events: List[AnyEvent]) -> str:
+        """降级摘要：当 LLM 调用失败时使用。"""
+        tool_calls = [e for e in events if isinstance(e, ToolCallEvent)]
+        tool_results = [e for e in events if isinstance(e, ToolResultEvent)]
+        errors = [e for e in events if isinstance(e, ErrorEvent)]
+        
+        parts = [f"📊 Summary of {len(events)} events"]
+        
+        if tool_calls:
+            tools_used = set(e.tool_name for e in tool_calls)
+            parts.append(f"Tools: {', '.join(sorted(tools_used))}")
+        
+        if tool_results:
+            successes = sum(1 for e in tool_results if e.success)
+            failures = len(tool_results) - successes
+            parts.append(f"Results: {successes} success, {failures} failures")
+        
+        if errors:
+            parts.append(f"Errors: {len(errors)}")
+            # 包含最后一个错误
+            last_error = errors[-1]
+            parts.append(f"Last error: {last_error.error_message[:100]}")
+        
+        return ". ".join(parts) + "."
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """获取摘要统计信息。"""
+        return self.stats.get_summary()
+
+
+class SimpleEventSummarizer(EventSummarizer):
+    """
+    简单的事件摘要生成器（不使用 LLM）。
+    
+    适用于测试或低成本场景。
+    """
+    
+    async def summarize(
+        self, 
+        events: List[AnyEvent], 
+        prompt_template: Optional[str] = None,
+        task_type: Optional[str] = None
+    ) -> str:
+        """生成基于规则的简单摘要。"""
+        if not events:
+            return "No events."
+        
+        # 统计各类事件
+        stats = {
+            "tool_calls": 0,
+            "tool_successes": 0,
+            "tool_failures": 0,
+            "errors": 0,
+            "llm_calls": 0
+        }
+        
+        tool_names = set()
+        error_messages = []
+        failed_tools = []
+        
+        for event in events:
+            if isinstance(event, ToolCallEvent):
+                stats["tool_calls"] += 1
+                tool_names.add(event.tool_name)
+            elif isinstance(event, ToolResultEvent):
+                if event.success:
+                    stats["tool_successes"] += 1
+                else:
+                    stats["tool_failures"] += 1
+                    failed_tools.append(f"{event.tool_name}: {event.error}")
+            elif isinstance(event, ErrorEvent):
+                stats["errors"] += 1
+                error_messages.append(event.error_message)
+            elif isinstance(event, LLMCallEvent):
+                stats["llm_calls"] += 1
+        
+        # 构建摘要
+        parts = []
+        parts.append(f"📊 Period summary ({len(events)} events)")
+        
+        if tool_names:
+            parts.append(f"Tools: {', '.join(sorted(tool_names))}")
+        
+        if stats["tool_calls"] > 0:
+            success_rate = stats["tool_successes"] / stats["tool_calls"] * 100
+            parts.append(f"Tool calls: {stats['tool_calls']} ({success_rate:.0f}% success)")
+        
+        if failed_tools:
+            parts.append(f"❌ Failed: {'; '.join(failed_tools[:3])}")
+        
+        if stats["errors"] > 0:
+            parts.append(f"⚠️ Errors: {stats['errors']}")
+            if error_messages:
+                parts.append(f"Last error: {error_messages[-1][:100]}")
+        
+        return ". ".join(parts) + "."
+
+
+# =============================================================================
+# 上下文编译器（增强版）
+# =============================================================================
+
+class ContextCompiler:
+    """
+    上下文编译器：实现 EventLog 的智能压缩（增强版）。
+    
+    核心功能：
+    1. 精确 Token 计数（使用 tiktoken）
+    2. 多策略压缩支持
+    3. 任务类型感知（针对挖掘任务优化）
+    4. 可观测性增强
+    
+    设计原则（借鉴 ADK）：
+    - 滑动窗口：使用 overlap 保持语义连续性
+    - 按需编译：仅在必要时触发压缩
+    - 渐进压缩：每次压缩固定数量的事件
+    """
+    
+    def __init__(
+        self,
+        summarizer: Optional[EventSummarizer] = None,
+        config: Optional[CompactionConfig] = None,
+        strategy: CompactionStrategy = CompactionStrategy.SLIDING_WINDOW,
+        task_type: str = "default",
+        model: Optional[str] = None
+    ):
+        """
+        Args:
+            summarizer: 事件摘要生成器。
+            config: 压缩配置。
+            strategy: 压缩策略。
+            task_type: 任务类型（'default', 'mining', 'conversation', 'tool_sequence'）。
+            model: 模型名称（用于精确 token 计数）。
+        """
+        self.summarizer = summarizer or SimpleEventSummarizer()
+        self.config = config or CompactionConfig()
+        self.strategy = strategy
+        self.task_type = task_type
+        self.token_counter = TokenCounter(model=model)
+        
+        # 统计信息
+        self.compaction_history: List[Dict[str, Any]] = []
+        self.total_tokens_saved = 0
+    
+    async def maybe_compact(self, event_log: EventLog) -> Optional[CompactedEvent]:
+        """
+        检查并执行压缩（如果需要）。
+        """
+        should_compact, reason = self._should_compact(event_log)
+        
+        if not should_compact:
+            return None
+        
+        logger.info(f"Triggering compaction. Reason: {reason}")
+        return await self.compact(event_log, reason=reason)
+    
+    def _should_compact(self, event_log: EventLog) -> tuple:
+        """
+        判断是否应该压缩。
+        
+        Returns:
+            (should_compact, reason)
+        """
+        if not self.config.enabled:
+            return False, None
+        
+        # 获取新事件
+        new_events = event_log.get_events_since_last_compaction()
+        
+        # 策略 1：事件数阈值
+        if len(new_events) >= self.config.compaction_interval:
+            return True, f"event_count ({len(new_events)} >= {self.config.compaction_interval})"
+        
+        # 策略 2：Token 阈值（紧急压缩）
+        total_tokens = self._count_event_log_tokens(event_log)
+        if total_tokens > self.config.max_context_tokens:
+            return True, f"token_overflow ({total_tokens} > {self.config.max_context_tokens})"
+        
+        return False, None
+    
+    def _count_event_log_tokens(self, event_log: EventLog) -> int:
+        """精确计算 EventLog 的 token 数。"""
+        total = 0
+        for event in event_log.events:
+            if isinstance(event, CompactedEvent):
+                total += self.token_counter.count_tokens(event.summary)
+            else:
+                # 序列化事件并计数
+                event_str = self._event_to_string(event)
+                total += self.token_counter.count_tokens(event_str)
+        return total
+    
+    def _event_to_string(self, event: AnyEvent) -> str:
+        """将事件转换为字符串（用于 token 计数）。"""
+        if isinstance(event, ToolCallEvent):
+            return f"Tool: {event.tool_name}, Args: {event.tool_args}, Intent: {event.intent}"
+        elif isinstance(event, ToolResultEvent):
+            return f"Result: {event.tool_name}, Success: {event.success}, Data: {event.result or event.error}"
+        elif isinstance(event, ErrorEvent):
+            return f"Error: {event.error_type} - {event.error_message}"
+        elif isinstance(event, LLMResponseEvent):
+            return f"LLM Response: {event.response}"
+        else:
+            return str(event.model_dump())
+    
+    async def compact(
+        self, 
+        event_log: EventLog,
+        reason: Optional[str] = None
+    ) -> Optional[CompactedEvent]:
+        """
+        执行压缩操作。
+        """
+        # 根据策略获取待压缩的事件
+        events_to_compact = self._get_events_to_compact(event_log)
+        
+        if not events_to_compact:
+            logger.debug("No events to compact.")
+            return None
+        
+        logger.info(f"Compacting {len(events_to_compact)} events (strategy: {self.strategy.value})...")
+        
+        # 计算时间范围
+        start_ts = self._get_event_timestamp(events_to_compact[0])
+        end_ts = self._get_event_timestamp(events_to_compact[-1])
+        
+        # 精确计算压缩前的 token 数
+        token_count_before = sum(
+            self.token_counter.count_tokens(self._event_to_string(e))
+            for e in events_to_compact
+        )
+        
+        # 生成摘要（传递任务类型）
+        summary = await self.summarizer.summarize(
+            events_to_compact,
+            self.config.summarizer_prompt,
+            task_type=self.task_type
+        )
+        
+        # 精确计算压缩后的 token 数
+        token_count_after = self.token_counter.count_tokens(summary)
+        
+        # 计算节省的 token
+        tokens_saved = token_count_before - token_count_after
+        self.total_tokens_saved += max(0, tokens_saved)
+        
+        # 创建 CompactedEvent
+        compacted_event = CompactedEvent(
+            summary=summary,
+            start_timestamp=start_ts,
+            end_timestamp=end_ts,
+            compressed_event_ids=[e.id for e in events_to_compact],
+            token_count_before=token_count_before,
+            token_count_after=token_count_after,
+            agent_id=event_log.agent_id,
+            task_id=event_log.task_id
+        )
+        
+        # 追加到 EventLog
+        event_log.append(compacted_event)
+        
+        # 记录历史
+        self.compaction_history.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "events_compacted": len(events_to_compact),
+            "token_before": token_count_before,
+            "token_after": token_count_after,
+            "compression_ratio": compacted_event.get_compression_ratio(),
+            "strategy": self.strategy.value,
+            "reason": reason
+        })
+        
+        logger.info(
+            f"Compaction complete. "
+            f"Tokens: {token_count_before} -> {token_count_after} "
+            f"(saved: {tokens_saved}, ratio: {compacted_event.get_compression_ratio():.2f})"
+        )
+        
+        return compacted_event
+    
+    def _get_events_to_compact(self, event_log: EventLog) -> List[AnyEvent]:
+        """
+        根据策略确定本次压缩的事件范围。
+        """
+        if self.strategy == CompactionStrategy.SLIDING_WINDOW:
+            return self._sliding_window_events(event_log)
+        elif self.strategy == CompactionStrategy.EMERGENCY:
+            return self._emergency_events(event_log)
+        elif self.strategy == CompactionStrategy.TIME_BASED:
+            return self._time_based_events(event_log)
+        elif self.strategy == CompactionStrategy.TOPIC_BASED:
+            return self._topic_based_events(event_log)
+        else:
+            # 默认使用滑动窗口
+            return self._sliding_window_events(event_log)
+    
+    def _sliding_window_events(self, event_log: EventLog) -> List[AnyEvent]:
+        """滑动窗口策略：标准的渐进压缩。"""
+        last_compaction = event_log.get_last_compaction()
+        
+        if not last_compaction:
+            # 首次压缩
+            events = [e for e in event_log.events if not isinstance(e, CompactedEvent)]
+            if len(events) > self.config.compaction_interval:
+                return events[:-self.config.overlap_size] if self.config.overlap_size > 0 else events
+            return events
+        
+        # 找到 overlap 事件和新事件
+        overlap_events = []
+        new_events = []
+        
+        for event in event_log.events:
+            if isinstance(event, CompactedEvent):
+                continue
+            
+            event_ts = self._get_event_timestamp(event)
+            
+            if event_ts <= last_compaction.end_timestamp:
+                overlap_events.append(event)
+            else:
+                new_events.append(event)
+        
+        overlap_selected = overlap_events[-self.config.overlap_size:] if overlap_events else []
+        return overlap_selected + new_events
+    
+    def _emergency_events(self, event_log: EventLog) -> List[AnyEvent]:
+        """紧急压缩策略：压缩更多事件以快速降低 token 数。"""
+        events = [e for e in event_log.events if not isinstance(e, CompactedEvent)]
+        
+        # 紧急模式下，保留更少的最近事件
+        keep_recent = max(3, self.config.overlap_size)
+        if len(events) > keep_recent:
+            return events[:-keep_recent]
+        
+        return events
+    
+    def _time_based_events(self, event_log: EventLog) -> List[AnyEvent]:
+        """基于时间的压缩策略：按时间窗口分组压缩。"""
+        # TODO: 实现按时间窗口的压缩逻辑
+        return self._sliding_window_events(event_log)
+    
+    def _topic_based_events(self, event_log: EventLog) -> List[AnyEvent]:
+        """基于主题的压缩策略：将相关事件分组压缩。"""
+        # TODO: 实现按主题聚类的压缩逻辑
+        return self._sliding_window_events(event_log)
+    
+    def _get_event_timestamp(self, event: AnyEvent) -> float:
+        """获取事件时间戳。"""
+        if hasattr(event, 'timestamp'):
+            ts = event.timestamp
+            if isinstance(ts, datetime):
+                return ts.timestamp()
+            return float(ts)
+        return 0.0
+    
+    # =========================================================================
+    # 可观测性方法
+    # =========================================================================
+    
+    def get_compaction_stats(self) -> Dict[str, Any]:
+        """获取压缩统计信息。"""
+        if not self.compaction_history:
+            return {
+                "total_compactions": 0,
+                "total_tokens_saved": 0,
+                "average_compression_ratio": 0.0
+            }
+        
+        avg_ratio = sum(h["compression_ratio"] for h in self.compaction_history) / len(self.compaction_history)
+        total_events = sum(h["events_compacted"] for h in self.compaction_history)
+        
+        return {
+            "total_compactions": len(self.compaction_history),
+            "total_events_compacted": total_events,
+            "total_tokens_saved": self.total_tokens_saved,
+            "average_compression_ratio": round(avg_ratio, 3),
+            "history": self.compaction_history[-10:]  # 最近 10 次
+        }
+    
+    def compare_views(self, event_log: EventLog) -> Dict[str, Any]:
+        """
+        对比原始视图和编译视图。
+        
+        Returns:
+            包含两种视图 token 统计的对比信息。
+        """
+        # 原始视图：所有非压缩事件
+        original_events = [e for e in event_log.events if not isinstance(e, CompactedEvent)]
+        original_tokens = sum(
+            self.token_counter.count_tokens(self._event_to_string(e))
+            for e in original_events
+        )
+        
+        # 编译视图：压缩事件的摘要 + 未被覆盖的原始事件
+        compiled_tokens = self._count_compiled_view_tokens(event_log)
+        
+        return {
+            "original_view": {
+                "event_count": len(original_events),
+                "token_count": original_tokens
+            },
+            "compiled_view": {
+                "event_count": len(event_log.events),
+                "token_count": compiled_tokens
+            },
+            "savings": {
+                "tokens_saved": original_tokens - compiled_tokens,
+                "compression_ratio": round(compiled_tokens / max(original_tokens, 1), 3)
+            }
+        }
+    
+    def _count_compiled_view_tokens(self, event_log: EventLog) -> int:
+        """计算编译视图的 token 数。"""
+        # 实现逆序编译算法来计算实际会被渲染的 token 数
+        compaction_boundaries = []
+        for event in event_log.events:
+            if isinstance(event, CompactedEvent):
+                compaction_boundaries.append((event.start_timestamp, event.end_timestamp, event))
+        
+        if not compaction_boundaries:
+            return self._count_event_log_tokens(event_log)
+        
+        compaction_boundaries.sort(key=lambda x: x[1], reverse=True)
+        
+        total_tokens = 0
+        mask_end_time = float('inf')
+        
+        for event in reversed(event_log.events):
+            event_ts = self._get_event_timestamp(event)
+            
+            if isinstance(event, CompactedEvent):
+                if event_ts < mask_end_time:
+                    total_tokens += self.token_counter.count_tokens(event.summary)
+                    mask_end_time = min(mask_end_time, event.start_timestamp)
+            else:
+                if event_ts < mask_end_time:
+                    total_tokens += self.token_counter.count_tokens(self._event_to_string(event))
+        
+        return total_tokens
+
+
+# =============================================================================
+# 便捷工厂函数
+# =============================================================================
+
+def create_context_compiler(
+    llm_provider: Optional[Any] = None,
+    config: Optional[CompactionConfig] = None,
+    use_simple_summarizer: bool = False,
+    strategy: CompactionStrategy = CompactionStrategy.SLIDING_WINDOW,
+    task_type: str = "default",
+    model: Optional[str] = None
+) -> ContextCompiler:
+    """
+    创建 ContextCompiler 实例的便捷工厂函数。
+    
+    Args:
+        llm_provider: LLM 提供者（如果使用 LLM 摘要）。
+        config: 压缩配置。
+        use_simple_summarizer: 是否使用简单摘要（不调用 LLM）。
+        strategy: 压缩策略。
+        task_type: 任务类型（'default', 'mining', 'conversation'）。
+        model: 模型名称（用于精确 token 计数）。
+        
+    Returns:
+        配置好的 ContextCompiler 实例。
+    """
+    if use_simple_summarizer or llm_provider is None:
+        summarizer = SimpleEventSummarizer()
+    else:
+        summarizer = LLMEventSummarizer(
+            llm_provider, 
+            model=model,
+            default_task_type=task_type
+        )
+    
+    return ContextCompiler(
+        summarizer=summarizer,
+        config=config,
+        strategy=strategy,
+        task_type=task_type,
+        model=model
+    )
+
+
+def create_mining_compiler(
+    llm_provider: Any,
+    model: Optional[str] = None,
+    compaction_interval: int = 15,
+    overlap_size: int = 3
+) -> ContextCompiler:
+    """
+    创建针对"自动挖掘"任务优化的 ContextCompiler。
+    
+    特点：
+    - 使用 MINING_TASK_PROMPT 保留失败路径
+    - 较大的 overlap 确保探索线索不丢失
+    """
+    config = CompactionConfig(
+        enabled=True,
+        compaction_interval=compaction_interval,
+        overlap_size=overlap_size,
+        max_context_tokens=12000,  # 挖掘任务通常需要更多上下文
+    )
+    
+    return create_context_compiler(
+        llm_provider=llm_provider,
+        config=config,
+        strategy=CompactionStrategy.SLIDING_WINDOW,
+        task_type="mining",
+        model=model
+    )
