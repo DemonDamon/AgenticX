@@ -15,7 +15,10 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Callable, Literal
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 import logging
+import math
+import json
 
 from .event import (
     EventLog, AnyEvent, CompactedEvent, CompactionConfig,
@@ -587,6 +590,8 @@ class ContextCompiler:
             return self._time_based_events(event_log)
         elif self.strategy == CompactionStrategy.TOPIC_BASED:
             return self._topic_based_events(event_log)
+        elif self.strategy == CompactionStrategy.HYBRID:
+            return self._hybrid_events(event_log)
         else:
             # 默认使用滑动窗口
             return self._sliding_window_events(event_log)
@@ -632,14 +637,180 @@ class ContextCompiler:
         return events
     
     def _time_based_events(self, event_log: EventLog) -> List[AnyEvent]:
-        """基于时间的压缩策略：按时间窗口分组压缩。"""
-        # TODO: 实现按时间窗口的压缩逻辑
-        return self._sliding_window_events(event_log)
+        """
+        基于时间的压缩策略：按时间窗口分组压缩。
+        
+        算法：
+        1. 根据配置的时间窗口大小（默认 5 分钟），将事件分组
+        2. 选择最早的、已完成的时间窗口进行压缩
+        3. 保留当前活跃时间窗口内的事件
+        """
+        events = [e for e in event_log.events if not isinstance(e, CompactedEvent)]
+        if not events:
+            return []
+        
+        # 时间窗口大小（秒）
+        window_size = self.config.time_window_seconds
+        
+        # 按时间窗口分组
+        time_buckets: Dict[int, List[AnyEvent]] = {}
+        for event in events:
+            event_ts = self._get_event_timestamp(event)
+            bucket_key = int(event_ts // window_size)
+            if bucket_key not in time_buckets:
+                time_buckets[bucket_key] = []
+            time_buckets[bucket_key].append(event)
+        
+        if len(time_buckets) < 2:
+            # 只有一个时间窗口，不压缩
+            return []
+        
+        # 对 bucket_key 排序，压缩最早的窗口（保留最近的窗口）
+        sorted_keys = sorted(time_buckets.keys())
+        
+        # 压缩所有已完成的时间窗口（除了最后一个）
+        events_to_compact = []
+        for key in sorted_keys[:-1]:
+            events_to_compact.extend(time_buckets[key])
+        
+        return events_to_compact
     
     def _topic_based_events(self, event_log: EventLog) -> List[AnyEvent]:
-        """基于主题的压缩策略：将相关事件分组压缩。"""
-        # TODO: 实现按主题聚类的压缩逻辑
-        return self._sliding_window_events(event_log)
+        """
+        基于主题的压缩策略：将相关事件聚类后压缩。
+        
+        算法：
+        1. 按事件类型分组（ToolCall/ToolResult, LLM, Error, Human）
+        2. 在同一类型内，按工具名或其他特征进一步聚类
+        3. 选择可以安全压缩的聚类（已完成的工具调用链等）
+        """
+        events = [e for e in event_log.events if not isinstance(e, CompactedEvent)]
+        if not events:
+            return []
+        
+        # 按主题分类
+        topic_groups: Dict[str, List[AnyEvent]] = {
+            "tool_chains": [],      # 工具调用链（ToolCall + ToolResult）
+            "llm_interactions": [], # LLM 交互
+            "errors": [],           # 错误事件
+            "human_io": [],         # 人类交互
+            "others": []            # 其他
+        }
+        
+        # 追踪未完成的工具调用
+        pending_tool_calls: Dict[str, ToolCallEvent] = {}
+        completed_tool_chains: List[AnyEvent] = []
+        
+        for event in events:
+            if isinstance(event, ToolCallEvent):
+                pending_tool_calls[event.tool_name] = event
+            elif isinstance(event, ToolResultEvent):
+                # 找到对应的 ToolCall，形成完整链
+                if event.tool_name in pending_tool_calls:
+                    completed_tool_chains.append(pending_tool_calls.pop(event.tool_name))
+                    completed_tool_chains.append(event)
+                else:
+                    topic_groups["tool_chains"].append(event)
+            elif isinstance(event, (LLMCallEvent, LLMResponseEvent)):
+                topic_groups["llm_interactions"].append(event)
+            elif isinstance(event, ErrorEvent):
+                topic_groups["errors"].append(event)
+            elif isinstance(event, (HumanRequestEvent, HumanResponseEvent)):
+                topic_groups["human_io"].append(event)
+            else:
+                topic_groups["others"].append(event)
+        
+        # 只压缩已完成的工具调用链
+        topic_groups["tool_chains"] = completed_tool_chains
+        
+        # 保留未完成的工具调用（不压缩）
+        # pending_tool_calls 中的事件不会被压缩
+        
+        # 决定压缩哪些主题（优先压缩已完成的工具链和 LLM 交互）
+        events_to_compact = []
+        
+        # 工具链：只有当链足够长时才压缩
+        if len(topic_groups["tool_chains"]) >= self.config.compaction_interval:
+            # 保留最近的几个事件作为 overlap
+            events_to_compact.extend(topic_groups["tool_chains"][:-self.config.overlap_size])
+        
+        # LLM 交互：通常可以安全压缩
+        if len(topic_groups["llm_interactions"]) >= self.config.compaction_interval:
+            events_to_compact.extend(topic_groups["llm_interactions"][:-self.config.overlap_size])
+        
+        return events_to_compact
+    
+    def _hybrid_events(self, event_log: EventLog) -> List[AnyEvent]:
+        """
+        混合策略：根据上下文动态选择最优压缩方案。
+        
+        决策逻辑：
+        1. 如果事件跨度超过时间阈值，使用 TIME_BASED
+        2. 如果存在明显的主题聚类，使用 TOPIC_BASED
+        3. 否则使用 SLIDING_WINDOW
+        """
+        events = [e for e in event_log.events if not isinstance(e, CompactedEvent)]
+        if not events:
+            return []
+        
+        # 计算时间跨度
+        timestamps = [self._get_event_timestamp(e) for e in events]
+        time_span = max(timestamps) - min(timestamps) if timestamps else 0
+        
+        # 计算主题多样性
+        topic_diversity = self._calculate_topic_diversity(events)
+        
+        # 决策阈值
+        time_threshold = self.config.time_window_seconds * 2  # 2 个时间窗口
+        diversity_threshold = 0.6  # 主题多样性阈值
+        
+        logger.debug(
+            f"Hybrid strategy analysis: time_span={time_span:.0f}s, "
+            f"topic_diversity={topic_diversity:.2f}"
+        )
+        
+        # 选择策略
+        if time_span > time_threshold:
+            logger.info("Hybrid: Selecting TIME_BASED strategy (large time span)")
+            return self._time_based_events(event_log)
+        elif topic_diversity > diversity_threshold:
+            logger.info("Hybrid: Selecting TOPIC_BASED strategy (high topic diversity)")
+            return self._topic_based_events(event_log)
+        else:
+            logger.info("Hybrid: Selecting SLIDING_WINDOW strategy (default)")
+            return self._sliding_window_events(event_log)
+    
+    def _calculate_topic_diversity(self, events: List[AnyEvent]) -> float:
+        """
+        计算事件的主题多样性（0-1）。
+        
+        Returns:
+            0 = 所有事件同一主题，1 = 完全不同的主题
+        """
+        if not events:
+            return 0.0
+        
+        # 统计各类事件
+        type_counts: Dict[str, int] = {}
+        for event in events:
+            event_type = type(event).__name__
+            type_counts[event_type] = type_counts.get(event_type, 0) + 1
+        
+        # 如果只有一种类型，多样性为 0
+        if len(type_counts) == 1:
+            return 0.0
+        
+        # 计算 Shannon 熵作为多样性指标
+        total = len(events)
+        entropy = 0.0
+        for count in type_counts.values():
+            p = count / total
+            if p > 0:
+                entropy -= p * math.log2(p)
+        
+        # 归一化到 0-1（最大熵 = log2(类型数)）
+        max_entropy = math.log2(len(type_counts)) if len(type_counts) > 1 else 1
+        return entropy / max_entropy if max_entropy > 0 else 0.0
     
     def _get_event_timestamp(self, event: AnyEvent) -> float:
         """获取事件时间戳。"""
@@ -673,6 +844,89 @@ class ContextCompiler:
             "average_compression_ratio": round(avg_ratio, 3),
             "history": self.compaction_history[-10:]  # 最近 10 次
         }
+    
+    # =========================================================================
+    # 持久化方法
+    # =========================================================================
+    
+    def export_stats(self, file_path: Optional[str] = None) -> Dict[str, Any]:
+        """
+        导出压缩统计信息到 JSON 文件或返回字典。
+        
+        Args:
+            file_path: 可选的文件路径。如果提供，将导出到文件。
+            
+        Returns:
+            导出的统计数据字典。
+        """
+        export_data = {
+            "version": "2.2",
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "config": {
+                "enabled": self.config.enabled,
+                "compaction_interval": self.config.compaction_interval,
+                "overlap_size": self.config.overlap_size,
+                "max_context_tokens": self.config.max_context_tokens,
+                "time_window_seconds": self.config.time_window_seconds,
+            },
+            "strategy": self.strategy.value,
+            "task_type": self.task_type,
+            "statistics": {
+                "total_compactions": len(self.compaction_history),
+                "total_tokens_saved": self.total_tokens_saved,
+                "average_compression_ratio": (
+                    sum(h["compression_ratio"] for h in self.compaction_history) / 
+                    len(self.compaction_history) if self.compaction_history else 0.0
+                ),
+            },
+            "history": self.compaction_history,
+        }
+        
+        if file_path:
+            path = Path(file_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, indent=2, ensure_ascii=False)
+            logger.info(f"Compaction stats exported to {file_path}")
+        
+        return export_data
+    
+    def import_stats(self, file_path: str) -> None:
+        """
+        从 JSON 文件导入压缩统计信息。
+        
+        这允许在重启后恢复历史统计。
+        
+        Args:
+            file_path: JSON 文件路径。
+        """
+        path = Path(file_path)
+        if not path.exists():
+            logger.warning(f"Stats file not found: {file_path}")
+            return
+        
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # 恢复历史记录
+            if "history" in data:
+                self.compaction_history = data["history"]
+            
+            # 恢复统计
+            if "statistics" in data:
+                self.total_tokens_saved = data["statistics"].get("total_tokens_saved", 0)
+            
+            logger.info(f"Imported {len(self.compaction_history)} compaction records from {file_path}")
+            
+        except Exception as e:
+            logger.error(f"Failed to import stats from {file_path}: {e}")
+    
+    def reset_stats(self) -> None:
+        """重置所有统计信息。"""
+        self.compaction_history = []
+        self.total_tokens_saved = 0
+        logger.info("Compaction stats reset")
     
     def compare_views(self, event_log: EventLog) -> Dict[str, Any]:
         """

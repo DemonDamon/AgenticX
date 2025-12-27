@@ -883,6 +883,476 @@ class TestFactoryFunctionsAdvanced:
 
 
 # =============================================================================
+# 15. TIME_BASED 策略测试
+# =============================================================================
+
+class TestTimeBasedStrategy:
+    """测试基于时间的压缩策略"""
+    
+    @pytest.fixture
+    def time_spread_event_log(self, sample_agent, sample_task):
+        """创建时间跨度较大的事件日志"""
+        import time
+        event_log = EventLog(agent_id=sample_agent.id, task_id=sample_task.id)
+        
+        # 模拟不同时间点的事件（跨越两个时间窗口）
+        base_time = time.time() - 600  # 10 分钟前
+        
+        # 第一个时间窗口的事件（约 10 分钟前）
+        for i in range(5):
+            event = ToolCallEvent(
+                tool_name=f"tool_{i}",
+                tool_args={"arg": i},
+                intent="test intent",
+                agent_id=sample_agent.id,
+                task_id=sample_task.id
+            )
+            event.timestamp = base_time + i * 10  # 每 10 秒一个事件
+            event_log.append(event)
+        
+        # 第二个时间窗口的事件（最近）
+        current_time = time.time()
+        for i in range(5):
+            event = ToolCallEvent(
+                tool_name=f"recent_tool_{i}",
+                tool_args={"arg": i},
+                intent="recent intent",
+                agent_id=sample_agent.id,
+                task_id=sample_task.id
+            )
+            event.timestamp = current_time - 50 + i * 10
+            event_log.append(event)
+        
+        return event_log
+    
+    @pytest.mark.asyncio
+    async def test_time_based_strategy_groups_by_window(self, time_spread_event_log):
+        """测试时间策略按窗口分组"""
+        config = CompactionConfig(
+            enabled=True,
+            compaction_interval=3,
+            time_window_seconds=300  # 5 分钟窗口
+        )
+        compiler = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=config,
+            strategy=CompactionStrategy.TIME_BASED
+        )
+        
+        # 获取待压缩事件
+        events_to_compact = compiler._time_based_events(time_spread_event_log)
+        
+        # 应该压缩较早的时间窗口，保留最近的窗口
+        assert len(events_to_compact) > 0
+        # 最近的事件（recent_tool_*）不应该被压缩
+        recent_tool_names = [e.tool_name for e in events_to_compact if hasattr(e, 'tool_name')]
+        assert not any('recent_tool' in name for name in recent_tool_names)
+    
+    @pytest.mark.asyncio
+    async def test_time_based_single_window_no_compact(self, populated_event_log):
+        """测试单窗口情况不压缩"""
+        config = CompactionConfig(
+            enabled=True,
+            compaction_interval=3,
+            time_window_seconds=3600  # 1 小时窗口（所有事件在同一窗口）
+        )
+        compiler = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=config,
+            strategy=CompactionStrategy.TIME_BASED
+        )
+        
+        events_to_compact = compiler._time_based_events(populated_event_log)
+        # 所有事件在同一时间窗口，不应该压缩
+        assert len(events_to_compact) == 0
+
+
+# =============================================================================
+# 16. TOPIC_BASED 策略测试
+# =============================================================================
+
+class TestTopicBasedStrategy:
+    """测试基于主题的压缩策略"""
+    
+    @pytest.fixture
+    def mixed_topic_event_log(self, sample_agent, sample_task):
+        """创建包含多种主题的事件日志"""
+        event_log = EventLog(agent_id=sample_agent.id, task_id=sample_task.id)
+        
+        # 添加多组工具调用链
+        for i in range(5):
+            # 工具调用
+            call_event = ToolCallEvent(
+                tool_name=f"search_tool",
+                tool_args={"query": f"query_{i}"},
+                intent="search intent",
+                agent_id=sample_agent.id,
+                task_id=sample_task.id
+            )
+            event_log.append(call_event)
+            
+            # 工具结果
+            result_event = ToolResultEvent(
+                tool_name=f"search_tool",
+                result=f"result_{i}",
+                success=True,
+                agent_id=sample_agent.id,
+                task_id=sample_task.id
+            )
+            event_log.append(result_event)
+        
+        # 添加 LLM 交互
+        for i in range(5):
+            llm_call = LLMCallEvent(
+                model="gpt-4",
+                prompt=f"prompt_{i}",
+                agent_id=sample_agent.id,
+                task_id=sample_task.id
+            )
+            event_log.append(llm_call)
+            
+            llm_response = LLMResponseEvent(
+                model="gpt-4",
+                response=f"response_{i}",
+                token_usage={"total_tokens": 100},
+                agent_id=sample_agent.id,
+                task_id=sample_task.id
+            )
+            event_log.append(llm_response)
+        
+        return event_log
+    
+    @pytest.mark.asyncio
+    async def test_topic_based_groups_events(self, mixed_topic_event_log):
+        """测试主题策略按类型分组"""
+        config = CompactionConfig(
+            enabled=True,
+            compaction_interval=3,
+            overlap_size=2
+        )
+        compiler = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=config,
+            strategy=CompactionStrategy.TOPIC_BASED
+        )
+        
+        events_to_compact = compiler._topic_based_events(mixed_topic_event_log)
+        
+        # 应该有事件被选中压缩（完整的工具链或 LLM 交互）
+        assert len(events_to_compact) > 0
+    
+    @pytest.mark.asyncio
+    async def test_topic_based_preserves_incomplete_chains(self, sample_agent, sample_task):
+        """测试主题策略保留未完成的工具调用"""
+        event_log = EventLog(agent_id=sample_agent.id, task_id=sample_task.id)
+        
+        # 添加一个未完成的工具调用（只有 call，没有 result）
+        incomplete_call = ToolCallEvent(
+            tool_name="incomplete_tool",
+            tool_args={"arg": "value"},
+            intent="incomplete call",
+            agent_id=sample_agent.id,
+            task_id=sample_task.id
+        )
+        event_log.append(incomplete_call)
+        
+        config = CompactionConfig(
+            enabled=True,
+            compaction_interval=1
+        )
+        compiler = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=config,
+            strategy=CompactionStrategy.TOPIC_BASED
+        )
+        
+        events_to_compact = compiler._topic_based_events(event_log)
+        
+        # 未完成的工具调用不应该被压缩
+        incomplete_ids = [e.id for e in events_to_compact if hasattr(e, 'tool_name') and e.tool_name == "incomplete_tool"]
+        assert len(incomplete_ids) == 0
+
+
+# =============================================================================
+# 17. HYBRID 策略测试
+# =============================================================================
+
+class TestHybridStrategy:
+    """测试混合压缩策略"""
+    
+    @pytest.mark.asyncio
+    async def test_hybrid_selects_sliding_window_for_simple_case(self, populated_event_log):
+        """测试简单情况下混合策略选择滑动窗口"""
+        config = CompactionConfig(
+            enabled=True,
+            compaction_interval=3,
+            time_window_seconds=300
+        )
+        compiler = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=config,
+            strategy=CompactionStrategy.HYBRID
+        )
+        
+        events_to_compact = compiler._hybrid_events(populated_event_log)
+        
+        # 简单情况下应该能选择一种策略并返回事件
+        # 具体选择哪种策略取决于事件特征
+        assert isinstance(events_to_compact, list)
+    
+    @pytest.mark.asyncio
+    async def test_hybrid_calculates_topic_diversity(self, sample_agent, sample_task):
+        """测试主题多样性计算"""
+        event_log = EventLog(agent_id=sample_agent.id, task_id=sample_task.id)
+        
+        # 添加多种类型的事件
+        event_log.append(ToolCallEvent(
+            tool_name="tool1", tool_args={}, intent="intent",
+            agent_id=sample_agent.id, task_id=sample_task.id
+        ))
+        event_log.append(ToolResultEvent(
+            tool_name="tool1", result="result", success=True,
+            agent_id=sample_agent.id, task_id=sample_task.id
+        ))
+        event_log.append(ErrorEvent(
+            error_type="TestError", error_message="test error",
+            agent_id=sample_agent.id, task_id=sample_task.id
+        ))
+        event_log.append(LLMCallEvent(
+            model="gpt-4", prompt="prompt",
+            agent_id=sample_agent.id, task_id=sample_task.id
+        ))
+        
+        config = CompactionConfig(enabled=True, compaction_interval=3)
+        compiler = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=config,
+            strategy=CompactionStrategy.HYBRID
+        )
+        
+        events = [e for e in event_log.events if not isinstance(e, CompactedEvent)]
+        diversity = compiler._calculate_topic_diversity(events)
+        
+        # 多种事件类型应该有较高的多样性
+        assert 0 <= diversity <= 1
+        assert diversity > 0.5  # 4 种不同类型应该有较高多样性
+    
+    @pytest.mark.asyncio
+    async def test_hybrid_zero_diversity_for_single_type(self, sample_agent, sample_task):
+        """测试单一类型事件的多样性为 0"""
+        event_log = EventLog(agent_id=sample_agent.id, task_id=sample_task.id)
+        
+        # 只添加一种类型的事件
+        for i in range(5):
+            event_log.append(ToolCallEvent(
+                tool_name=f"tool_{i}", tool_args={}, intent="intent",
+                agent_id=sample_agent.id, task_id=sample_task.id
+            ))
+        
+        config = CompactionConfig(enabled=True, compaction_interval=3)
+        compiler = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=config,
+            strategy=CompactionStrategy.HYBRID
+        )
+        
+        events = [e for e in event_log.events if not isinstance(e, CompactedEvent)]
+        diversity = compiler._calculate_topic_diversity(events)
+        
+        # 单一类型应该多样性为 0
+        assert diversity == 0.0
+
+
+# =============================================================================
+# 18. CompactionConfig 新字段测试
+# =============================================================================
+
+class TestCompactionConfigExtended:
+    """测试 CompactionConfig 扩展字段"""
+    
+    def test_time_window_seconds_default(self):
+        """测试 time_window_seconds 默认值"""
+        config = CompactionConfig()
+        assert config.time_window_seconds == 300  # 5 分钟
+    
+    def test_time_window_seconds_custom(self):
+        """测试 time_window_seconds 自定义值"""
+        config = CompactionConfig(time_window_seconds=600)
+        assert config.time_window_seconds == 600
+
+
+# =============================================================================
+# 19. 持久化测试
+# =============================================================================
+
+class TestPersistence:
+    """测试压缩统计持久化功能"""
+    
+    @pytest.mark.asyncio
+    async def test_export_stats_dict(self, populated_event_log):
+        """测试导出统计到字典"""
+        config = CompactionConfig(enabled=True, compaction_interval=3)
+        compiler = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=config
+        )
+        
+        # 执行压缩
+        await compiler.compact(populated_event_log)
+        
+        # 导出（不保存文件）
+        exported = compiler.export_stats()
+        
+        assert "version" in exported
+        assert "config" in exported
+        assert "statistics" in exported
+        assert "history" in exported
+        assert exported["statistics"]["total_compactions"] == 1
+    
+    @pytest.mark.asyncio
+    async def test_export_import_stats(self, populated_event_log, tmp_path):
+        """测试导出和导入统计"""
+        config = CompactionConfig(enabled=True, compaction_interval=3)
+        compiler1 = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=config
+        )
+        
+        # 执行压缩
+        await compiler1.compact(populated_event_log)
+        original_tokens_saved = compiler1.total_tokens_saved
+        
+        # 导出到文件
+        export_path = tmp_path / "compaction_stats.json"
+        compiler1.export_stats(str(export_path))
+        
+        assert export_path.exists()
+        
+        # 创建新的编译器并导入
+        compiler2 = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=config
+        )
+        
+        assert len(compiler2.compaction_history) == 0
+        
+        compiler2.import_stats(str(export_path))
+        
+        assert len(compiler2.compaction_history) == 1
+        assert compiler2.total_tokens_saved == original_tokens_saved
+    
+    def test_import_nonexistent_file(self):
+        """测试导入不存在的文件"""
+        compiler = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=CompactionConfig()
+        )
+        
+        # 不应该抛出异常
+        compiler.import_stats("/nonexistent/path/stats.json")
+        
+        # 历史应该仍然为空
+        assert len(compiler.compaction_history) == 0
+    
+    @pytest.mark.asyncio
+    async def test_reset_stats(self, populated_event_log):
+        """测试重置统计"""
+        config = CompactionConfig(enabled=True, compaction_interval=3)
+        compiler = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=config
+        )
+        
+        await compiler.compact(populated_event_log)
+        assert len(compiler.compaction_history) > 0
+        
+        compiler.reset_stats()
+        
+        assert len(compiler.compaction_history) == 0
+        assert compiler.total_tokens_saved == 0
+
+
+# =============================================================================
+# 20. 缓存优化测试
+# =============================================================================
+
+class TestCompiledContextRendererCache:
+    """测试 CompiledContextRenderer 缓存优化"""
+    
+    def test_cache_hit(self, populated_event_log, sample_agent, sample_task):
+        """测试缓存命中"""
+        renderer = CompiledContextRenderer(enable_cache=True)
+        
+        # 第一次渲染（缓存未命中）
+        result1 = renderer.render(populated_event_log, sample_agent, sample_task)
+        stats1 = renderer.get_cache_stats()
+        
+        assert stats1["cache_misses"] == 1
+        assert stats1["cache_hits"] == 0
+        
+        # 第二次渲染（相同事件，应该缓存命中）
+        result2 = renderer.render(populated_event_log, sample_agent, sample_task)
+        stats2 = renderer.get_cache_stats()
+        
+        assert stats2["cache_hits"] == 1
+        assert result1 == result2
+    
+    def test_cache_miss_on_new_event(self, populated_event_log, sample_agent, sample_task):
+        """测试添加新事件后缓存未命中"""
+        renderer = CompiledContextRenderer(enable_cache=True)
+        
+        # 第一次渲染
+        renderer.render(populated_event_log, sample_agent, sample_task)
+        
+        # 添加新事件
+        new_event = ToolCallEvent(
+            tool_name="new_tool",
+            tool_args={"arg": "value"},
+            intent="new intent",
+            agent_id=sample_agent.id,
+            task_id=sample_task.id
+        )
+        populated_event_log.append(new_event)
+        
+        # 第二次渲染（应该缓存未命中）
+        renderer.render(populated_event_log, sample_agent, sample_task)
+        stats = renderer.get_cache_stats()
+        
+        assert stats["cache_misses"] == 2
+    
+    def test_cache_disabled(self, populated_event_log, sample_agent, sample_task):
+        """测试禁用缓存"""
+        renderer = CompiledContextRenderer(enable_cache=False)
+        
+        renderer.render(populated_event_log, sample_agent, sample_task)
+        renderer.render(populated_event_log, sample_agent, sample_task)
+        
+        stats = renderer.get_cache_stats()
+        
+        # 禁用缓存时，不应该有缓存统计
+        assert stats["cache_enabled"] == False
+        assert stats["cache_hits"] == 0
+    
+    def test_clear_cache(self, populated_event_log, sample_agent, sample_task):
+        """测试清除缓存"""
+        renderer = CompiledContextRenderer(enable_cache=True)
+        
+        renderer.render(populated_event_log, sample_agent, sample_task)
+        renderer.render(populated_event_log, sample_agent, sample_task)  # 缓存命中
+        
+        stats_before = renderer.get_cache_stats()
+        assert stats_before["cache_hits"] == 1
+        
+        renderer.clear_cache()
+        
+        renderer.render(populated_event_log, sample_agent, sample_task)  # 缓存未命中
+        stats_after = renderer.get_cache_stats()
+        
+        # clear_cache 不重置统计，只清除缓存内容
+        assert stats_after["cache_misses"] == 2
+
+
+# =============================================================================
 # 运行测试
 # =============================================================================
 

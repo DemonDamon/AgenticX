@@ -163,6 +163,7 @@ class CompactionConfig(BaseModel):
         compaction_interval: 触发压缩的新事件数阈值（例如：每 10 个新事件触发一次）。
         overlap_size: 相邻压缩之间的重叠事件数（保持语义连续性）。
         max_context_tokens: 触发紧急压缩的 token 上限。
+        time_window_seconds: 基于时间策略的窗口大小（秒）。
         summarizer_model: 用于生成摘要的 LLM 模型名称。
         summarizer_prompt: 自定义压缩提示词模板。
     """
@@ -170,6 +171,7 @@ class CompactionConfig(BaseModel):
     compaction_interval: int = Field(default=10, description="Number of new events before triggering compaction.")
     overlap_size: int = Field(default=2, description="Number of overlapping events between consecutive compactions.")
     max_context_tokens: int = Field(default=8000, description="Token threshold to trigger emergency compaction.")
+    time_window_seconds: int = Field(default=300, description="Time window size in seconds for TIME_BASED strategy.")
     summarizer_model: Optional[str] = Field(default=None, description="Model to use for summarization.")
     summarizer_prompt: Optional[str] = Field(
         default=None,
