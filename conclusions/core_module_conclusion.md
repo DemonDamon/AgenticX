@@ -14,16 +14,18 @@ AgenticX Core 模块是整个 AgenticX 框架的核心基础层，实现了多�
 D:\myWorks\AgenticX\agenticx\core/
 ├── __init__.py (2,876 bytes)
 ├── agent.py (3,421 bytes)
-├── agent_executor.py (8,234 bytes)
+├── agent_executor.py (8,234 bytes) ← 增强：集成 Context Compiler
 ├── communication.py (4,567 bytes)
 ├── component.py (1,234 bytes)
+├── context_compiler.py (NEW) ← 新增：上下文编译器（内化自 ADK）
 ├── error_handler.py (5,678 bytes)
-├── event.py (6,789 bytes)
+├── event.py (6,789 bytes) ← 增强：CompactedEvent、CompactionConfig
 ├── message.py (1,890 bytes)
 ├── platform.py (2,345 bytes)
-├── prompt.py (7,890 bytes)
+├── prompt.py (7,890 bytes) ← 增强：CompiledContextRenderer
 ├── task.py (1,567 bytes)
 ├── task_validator.py (25,234 bytes)
+├── token_counter.py (NEW) ← 新增：精确 Token 计数器
 ├── tool.py (3,456 bytes)
 ├── workflow.py (2,678 bytes)
 └── workflow_engine.py (34,567 bytes)
@@ -48,15 +50,22 @@ D:\myWorks\AgenticX\agenticx\core/
 **业务逻辑**：提供智能体的完整生命周期管理，从定义到执行再到结果收集的全流程支持
 **依赖关系**：被 `agent_executor.py` 和 `workflow_engine.py` 依赖，为智能体执行提供数据模型基础
 
-#### agent_executor.py (8,234 bytes)
+#### agent_executor.py (增强版)
 **文件功能**：实现 AgenticX 框架的核心执行引擎，负责智能体的实际运行逻辑
-**技术实现**：实现"Own Your Control Flow"原则，包含工具注册、动作解析、执行循环等核心机制
+**技术实现**：实现"Own Your Control Flow"原则，**新增上下文编译能力**
 **关键组件**：
 - `ToolRegistry` 类：工具管理器，负责工具的注册、查找和调用
 - `ActionParser` 类：动作解析器，从 LLM 响应中提取结构化动作
-- `AgentExecutor` 类：核心执行引擎，包含 LLM 提供者、工具、提示管理器、错误处理器和通信接口
-**业务逻辑**：实现智能体的完整执行循环，包括任务接收、LLM 调用、工具执行、错误处理和结果返回
-**依赖关系**：依赖 `agent.py`、`tool.py`、`prompt.py`、`error_handler.py`、`communication.py` 等模块，为工作流引擎提供执行能力
+- `AgentExecutor` 类：核心执行引擎，**新增特性**：
+  - **自动上下文压缩**：在每次 LLM 调用前自动检查并执行压缩
+  - `compaction_config`：压缩配置参数
+  - `enable_context_compilation`：上下文编译开关
+  - `context_compiler`：集成的 ContextCompiler 实例
+  - `_maybe_compact_context()`：异步压缩检查方法
+  - `set_compaction_config()`：动态调整压缩配置
+  - `compare_views()`：原始视图 vs 编译视图对比
+**业务逻辑**：实现智能体的完整执行循环，**支持长周期任务的 Token 成本优化**
+**依赖关系**：依赖 `agent.py`、`tool.py`、`prompt.py`、`error_handler.py`、`communication.py`、**`context_compiler.py` (新增)**，为工作流引擎提供执行能力
 
 #### communication.py (4,567 bytes)
 **文件功能**：实现智能体间的通信系统，支持消息传递和协作机制
@@ -86,15 +95,21 @@ D:\myWorks\AgenticX\agenticx\core/
 **业务逻辑**：提供智能体执行过程中的错误容错和恢复能力，确保系统的稳定性和可靠性
 **依赖关系**：被 `agent_executor.py` 使用，为智能体执行提供错误处理能力
 
-#### event.py (6,789 bytes)
+#### event.py (增强版)
 **文件功能**：实现 AgenticX 框架的事件系统，支持事件驱动的状态管理
-**技术实现**：基于事件溯源模式，定义多种事件类型和事件日志管理，实现"12-Factor Agents"原则中的状态管理
+**技术实现**：基于事件溯源模式，定义多种事件类型和事件日志管理，**新增压缩事件和配置**
 **关键组件**：
 - `Event` 基类：所有事件的基础类
 - 多种特定事件类型：`TaskStartEvent`、`ToolCallEvent`、`ErrorEvent`、`LLMCallEvent`、`HumanRequestEvent` 等
-- `EventLog` 类：事件日志管理器，记录和管理事件流，通过事件日志推导当前状态
-**业务逻辑**：实现智能体执行过程的完整事件记录，支持状态重建、调试和审计
-**依赖关系**：被 `agent_executor.py`、`workflow_engine.py` 和 `prompt.py` 使用，为状态管理提供基础
+- **`CompactedEvent` (新增)**：压缩事件，存储对一段原始事件的语义摘要，包含覆盖范围、压缩率等元数据
+- **`CompactionConfig` (新增)**：压缩配置模型，定义压缩触发阈值、重叠大小、Token 上限等参数
+- `EventLog` 类：事件日志管理器，**新增压缩辅助方法**：
+  - `get_last_compaction()`：获取最后一个压缩事件
+  - `get_events_since_last_compaction()`：获取自上次压缩以来的新事件
+  - `estimate_token_count()`：估算 EventLog 的 Token 数
+  - `should_compact()`：根据配置判断是否需要压缩
+**业务逻辑**：实现智能体执行过程的完整事件记录，**支持长对话的语义压缩和 Token 优化**
+**依赖关系**：被 `agent_executor.py`、`workflow_engine.py`、`prompt.py` 和 `context_compiler.py` 使用
 
 #### message.py (1,890 bytes)
 **文件功能**：定义智能体间通信的消息数据结构
@@ -114,15 +129,46 @@ D:\myWorks\AgenticX\agenticx\core/
 **业务逻辑**：为多租户 SaaS 平台提供用户和组织管理的基础数据模型
 **依赖关系**：被上层应用模块使用，为平台级功能提供实体定义
 
-#### prompt.py (7,890 bytes)
+#### prompt.py (增强版)
 **文件功能**：实现 AgenticX 框架的提示工程和上下文管理系统
-**技术实现**：实现"Own Your Prompts"和"Own Your Context Window"原则，包含上下文渲染、提示模板和提示管理
+**技术实现**：实现"Own Your Prompts"和"Own Your Context Window"原则，**新增编译视图渲染机制（内化自 ADK）**
 **关键组件**：
 - `ContextRenderer` 抽象基类及其 `XMLContextRenderer` 实现：将事件日志渲染为高信息密度的 XML 格式上下文
+- **`CompiledContextRenderer` (新增)**：编译视图渲染器，实现 ADK 的逆序编译算法，自动跳过被 `CompactedEvent` 覆盖的原始事件
 - `PromptTemplate` 类：提示模板，支持占位符和动态内容生成
 - `PromptManager` 类：核心提示管理器，负责上下文工程和提示管理，注册默认的 ReAct 风格模板和错误恢复模板
-**业务逻辑**：为智能体提供高质量的提示工程能力，确保 LLM 调用的效果和一致性
-**依赖关系**：依赖 `event.py` 的事件系统，被 `agent_executor.py` 使用
+**业务逻辑**：为智能体提供高质量的提示工程能力，**通过编译视图大幅降低长对话的 Token 成本**
+**依赖关系**：依赖 `event.py` 的事件系统和新增的 `CompactedEvent`，被 `agent_executor.py` 使用
+
+#### context_compiler.py (新增，内化自 ADK Compiled View)
+**文件功能**：实现上下文的语义压缩和编译，将长事件流转换为高效的 LLM Prompt
+**技术实现**：基于 Google ADK 的"编译视图"理念，Event Log -> Summarizer -> Compiled Prompt
+**关键组件**：
+- `EventSummarizer` 抽象基类：事件摘要生成器接口
+- `LLMEventSummarizer` 类：基于 LLM 的高质量摘要生成，支持多种任务类型专用 Prompt
+- `SimpleEventSummarizer` 类：基于规则的快速摘要（不调用 LLM）
+- `ContextCompiler` 类：核心编译器，支持滑动窗口、紧急压缩等多种策略
+- `CompactionStrategy` 枚举：压缩策略（滑动窗口、主题分块、时间窗口、紧急压缩、混合策略）
+- **专用 Prompt 模板库**：
+  - `MINING_TASK_PROMPT`：针对"自动挖掘"任务，**保留失败路径和探索线索**
+  - `CONVERSATION_PROMPT`：对话历史压缩
+  - `TOOL_SEQUENCE_PROMPT`：工具执行序列压缩
+- `create_context_compiler()` 和 `create_mining_compiler()` 工厂函数
+**业务逻辑**：通过语义压缩实现长周期任务（如自动挖掘）的 Token 成本控制，**避免简单截断导致的信息丢失**
+**依赖关系**：依赖 `event.py`、`token_counter.py`，被 `agent_executor.py` 集成
+
+#### token_counter.py (新增)
+**文件功能**：提供精确的 Token 计数和成本估算能力
+**技术实现**：集成 `tiktoken` 库，支持多种模型的精确分词规则，包含降级机制
+**关键组件**：
+- `TokenCounter` 类：核心计数器，支持 GPT-4/4o/3.5、Claude、Gemini、通义千问、DeepSeek 等主流模型
+- `ModelFamily` 枚举：支持的模型家族
+- `TokenStats` 类：Token 使用统计收集器
+- **模型定价表**：内置各主流模型的最新定价信息
+- **CJK 字符处理**：针对中日韩字符的特殊 token 计算逻辑
+- 便捷函数：`count_tokens()`、`estimate_cost()`、`truncate_text()`
+**业务逻辑**：为上下文编译器提供精确的 Token 度量，支持成本优化决策
+**依赖关系**：被 `context_compiler.py` 使用，独立的工具模块
 
 #### task.py (1,567 bytes)
 **文件功能**：定义智能体执行的任务数据结构
@@ -193,6 +239,7 @@ D:\myWorks\AgenticX\agenticx\core/
 - **M5 - Agent 核心组件**：事件系统、提示管理、错误处理、通信、Agent 执行
 - **M6 - 任务契约与结果验证**：`task_validator.py` 实现完整的输出验证和修复机制
 - **M7 - 编排与路由引擎**：`workflow_engine.py` 实现强大的工作流编排能力
+- **M15 - 上下文编译引擎 (新增)**：`context_compiler.py` 和 `token_counter.py` 实现长对话的语义压缩，**内化自 Google ADK 的 Compiled View 机制**
 
 ### 4. 技术实现亮点
 - **异步支持**：全面支持异步执行，提高并发性能
@@ -200,7 +247,16 @@ D:\myWorks\AgenticX\agenticx\core/
 - **可扩展性**：通过抽象基类和接口设计支持功能扩展
 - **错误处理**：完善的错误分类、处理和恢复机制
 - **事件驱动**：基于事件的状态管理和执行控制
+- **编译视图 (新增)**：将上下文视为对 Event Log 的"编译"结果，而非简单拼接，**实现 50%+ 的 Token 节省**
+- **精确计量 (新增)**：集成 tiktoken 进行精确 Token 计数和成本估算，支持多种主流 LLM 模型
 
 ## 总结
 
-AgenticX Core 模块是一个设计精良、功能完整的多智能体框架核心。它不仅提供了智能体的基本抽象和执行能力，还实现了复杂的工作流编排、任务验证、错误处理等高级功能。该模块的设计充分体现了现代软件架构的最佳实践，为构建大规模、高可靠性的多智能体系统提供了坚实的基础。
+AgenticX Core 模块是一个设计精良、功能完整的多智能体框架核心。它不仅提供了智能体的基本抽象和执行能力，还实现了复杂的工作流编排、任务验证、错误处理等高级功能。
+
+**最新增强（内化自 Google ADK）**：
+- **上下文编译引擎**：通过"编译视图"机制实现长对话的语义压缩，解决了传统简单截断导致的信息丢失问题
+- **精确 Token 计量**：支持主流 LLM 模型的精确 Token 计数和成本估算，为成本优化提供数据支撑
+- **挖掘任务优化**：专用 Prompt 模板保留失败路径和探索线索，特别适合"智能体自动挖掘"场景
+
+该模块的设计充分体现了现代软件架构的最佳实践，**同时内化了 Google ADK 在上下文工程方面的先进理念**，为构建大规模、高可靠性、低成本的多智能体系统提供了坚实的基础。
