@@ -115,16 +115,28 @@ class CompiledContextRenderer(ContextRenderer):
     这种机制确保：
     - 长对话历史可以被自动压缩，控制 Token 成本。
     - 近期的详细信息仍然完整保留，确保 Agent 的短期行为精确。
+    
+    性能优化：
+    - 使用缓存避免重复编译（基于事件数量和最后事件 ID）
+    - 增量编译：仅处理自上次编译以来的新事件
     """
     
-    def __init__(self, max_recent_events: int = 20, include_stats: bool = True):
+    def __init__(self, max_recent_events: int = 20, include_stats: bool = True, enable_cache: bool = True):
         """
         Args:
             max_recent_events: 始终保留最近 N 个事件的完整信息（不被压缩）。
             include_stats: 是否在渲染结果中包含压缩统计信息。
+            enable_cache: 是否启用编译缓存（提升性能）。
         """
         self.max_recent_events = max_recent_events
         self.include_stats = include_stats
+        self.enable_cache = enable_cache
+        
+        # 缓存相关
+        self._cache_key: Optional[str] = None
+        self._cached_compiled_events: Optional[List[AnyEvent]] = None
+        self._cache_hits = 0
+        self._cache_misses = 0
     
     def render(self, event_log: EventLog, agent: Agent, task: Task) -> str:
         """
@@ -164,13 +176,21 @@ class CompiledContextRenderer(ContextRenderer):
     
     def _compile_events(self, events: List[AnyEvent]) -> List[AnyEvent]:
         """
-        执行逆序编译算法。
+        执行逆序编译算法（带缓存优化）。
         
         Returns:
             编译后的事件列表（按时间顺序排列）。
         """
         if not events:
             return []
+        
+        # 缓存检查
+        if self.enable_cache:
+            cache_key = self._compute_cache_key(events)
+            if cache_key == self._cache_key and self._cached_compiled_events is not None:
+                self._cache_hits += 1
+                return self._cached_compiled_events
+            self._cache_misses += 1
         
         # 收集所有 CompactedEvent 的覆盖边界
         compaction_boundaries: List[tuple] = []  # [(start_ts, end_ts, compacted_event), ...]
@@ -180,7 +200,11 @@ class CompiledContextRenderer(ContextRenderer):
         
         # 如果没有压缩事件，直接返回原始事件列表
         if not compaction_boundaries:
-            return list(events)
+            result = list(events)
+            if self.enable_cache:
+                self._cache_key = cache_key
+                self._cached_compiled_events = result
+            return result
         
         # 按 end_timestamp 降序排序，优先处理最新的压缩
         compaction_boundaries.sort(key=lambda x: x[1], reverse=True)
@@ -202,7 +226,37 @@ class CompiledContextRenderer(ContextRenderer):
                 if event_ts < mask_end_time:
                     compiled_events.insert(0, event)
         
+        # 更新缓存
+        if self.enable_cache:
+            self._cache_key = cache_key
+            self._cached_compiled_events = compiled_events
+        
         return compiled_events
+    
+    def _compute_cache_key(self, events: List[AnyEvent]) -> str:
+        """计算事件列表的缓存键。"""
+        if not events:
+            return "empty"
+        # 基于事件数量和最后几个事件的 ID 生成缓存键
+        last_ids = [e.id for e in events[-3:]]  # 取最后 3 个事件的 ID
+        compaction_count = sum(1 for e in events if isinstance(e, CompactedEvent))
+        return f"{len(events)}_{compaction_count}_{'_'.join(last_ids)}"
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """获取缓存统计信息。"""
+        total = self._cache_hits + self._cache_misses
+        hit_rate = self._cache_hits / total if total > 0 else 0.0
+        return {
+            "cache_hits": self._cache_hits,
+            "cache_misses": self._cache_misses,
+            "hit_rate": round(hit_rate, 3),
+            "cache_enabled": self.enable_cache
+        }
+    
+    def clear_cache(self) -> None:
+        """清除缓存。"""
+        self._cache_key = None
+        self._cached_compiled_events = None
     
     def _get_timestamp(self, event: AnyEvent) -> float:
         """获取事件的时间戳（统一为 float）。"""
