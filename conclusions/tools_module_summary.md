@@ -9,15 +9,17 @@ AgenticX Tools 模块是一个功能完整的工具系统，提供了统一的�
 ```
 agenticx/tools/
 ├── README.md                    # 模块文档说明
-├── __init__.py                  # 模块导出接口
-├── base.py                      # 工具基类定义
+├── __init__.py                  # 模块导出接口 ← 更新：新增导出
+├── base.py                      # 工具基类定义 ← 增强：Tool 接口升级
 ├── builtin.py                   # 内置工具实现
 ├── credentials.py               # 凭据管理系统
 ├── executor.py                  # 工具执行器
 ├── function_tool.py             # 函数工具装饰器
 ├── mineru.py                    # MinerU工具集成
+├── openapi_toolset.py (NEW)     # OpenAPI 工具集 ← 新增：内化自 ADK
 ├── remote.py                    # 远程工具和MCP客户端
 ├── security.py                  # 安全审批机制
+├── tool_context.py (NEW)        # 工具上下文 ← 新增：内化自 ADK
 └── intelligence/                # 智能化功能模块
     ├── __init__.py
     └── models.py                # 智能化数据模型
@@ -27,15 +29,39 @@ agenticx/tools/
 
 ### 1. 工具基础架构
 
-#### BaseTool (base.py)
+#### BaseTool (base.py，增强版)
 - **功能**: 定义了所有工具的统一抽象基类
-- **技术实现**: 基于Pydantic的参数验证和序列化
+- **技术实现**: 基于Pydantic的参数验证和序列化，**新增主动式请求修改能力（内化自 ADK）**
 - **关键组件**:
   - `ToolError`、`ToolTimeoutError`、`ToolValidationError`等异常类
-  - `BaseTool`抽象基类，定义`run()`和`arun()`方法
+  - `BaseTool`抽象基类，定义`run()`和`arun()`方法，**新增方法**：
+    - **`_get_declaration()`**：返回工具的声明（用于 LLM function calling）
+    - **`process_llm_request()`**：允许工具在 LLM 调用前修改请求（如添加工具声明、调整上下文）
+    - **`to_openai_schema()`**：转换为 OpenAI 函数调用格式的 schema
   - 支持同步和异步执行模式
-- **业务逻辑**: 提供工具的标准化接口，确保所有工具具有一致的调用方式
-- **依赖关系**: 被所有具体工具实现继承
+- **业务逻辑**: 提供工具的标准化接口，**赋予工具"感知和修改环境"的能力**，提升工具调用的灵活性
+- **依赖关系**: 依赖 `tool_context.py` (新增)，被所有具体工具实现继承
+
+#### tool_context.py (新增，内化自 ADK)
+- **功能**: 为工具提供执行上下文和 LLM 请求修改能力
+- **技术实现**: Pydantic 数据模型，支持工具的有状态执行
+- **关键组件**:
+  - `ToolContext` 类：提供工具调用的上下文信息（session_id、invocation_id、agent_id、state、artifacts 等）
+  - `LlmRequest` 类：LLM 请求的结构化表示，支持 messages、tools、tool_choice 等参数的动态修改
+  - 工厂方法和辅助方法：`create()`、`get_state()`、`set_state()`、`add_artifact()` 等
+- **业务逻辑**: 使工具不再是"被动的函数"，而是可以主动感知和影响 LLM 调用的"智能组件"
+- **依赖关系**: 被 `base.py` 导入，为 BaseTool 提供上下文能力
+
+#### openapi_toolset.py (新增，内化自 ADK)
+- **功能**: 从 OpenAPI 规范自动生成工具集
+- **技术实现**: 解析 OpenAPI spec，动态创建 BaseTool 实例
+- **关键组件**:
+  - `OpenAPIToolset` 类：OpenAPI 工具集生成器
+  - `load_from_file()` / `load_from_url()`：从文件或 URL 加载规范
+  - `_parse_openapi_spec()`：解析 OpenAPI 规范
+  - `_generate_tools()`：自动生成工具实例
+- **业务逻辑**: 快速集成任何符合 OpenAPI 标准的 API，**零代码**接入第三方服务
+- **依赖关系**: 依赖 `base.py`，为 Agent 提供批量工具注册能力
 
 #### FunctionTool (function_tool.py)
 - **功能**: 提供`@tool`装饰器，将普通函数转换为工具
@@ -142,9 +168,14 @@ agenticx/tools/
 模块通过`__init__.py`统一导出以下接口：
 
 ### 核心抽象
-- `BaseTool`及相关异常类
+- `BaseTool`及相关异常类（**增强**：新增 `_get_declaration`、`process_llm_request`、`to_openai_schema` 方法）
 - `FunctionTool`和`@tool`装饰器
 - `ToolExecutor`执行器
+
+### ADK 增强 (新增)
+- **`ToolContext`**：工具执行上下文，支持有状态执行
+- **`LlmRequest`**：LLM 请求的结构化表示，支持主动修改
+- **`OpenAPIToolset`**：从 OpenAPI 规范自动生成工具集
 
 ### 安全和凭据
 - `CredentialStore`凭据管理
@@ -167,6 +198,8 @@ agenticx/tools/
 5. **扩展性**: 支持本地和远程工具的无缝集成
 6. **智能化**: 提供性能监控和智能优化能力
 7. **零适配**: MCP客户端支持任何标准远程服务
+8. **主动式交互 (新增)**：工具可通过 `process_llm_request` 主动修改 LLM 请求，提升环境感知能力
+9. **OpenAPI 集成 (新增)**：支持从 OpenAPI 规范自动生成工具，快速接入第三方 API
 
 ## 架构优势
 
