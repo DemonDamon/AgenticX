@@ -1353,6 +1353,272 @@ class TestCompiledContextRendererCache:
 
 
 # =============================================================================
+# FastHeuristicCompressor 测试（DeerFlow 内化）
+# =============================================================================
+
+class TestFastHeuristicCompressor:
+    """FastHeuristicCompressor 快速压缩器测试"""
+    
+    @pytest.fixture
+    def compressor(self):
+        """创建测试用压缩器"""
+        from agenticx.core.context_compiler import FastHeuristicCompressor
+        return FastHeuristicCompressor(
+            token_limit=1000,
+            preserve_prefix_count=2
+        )
+    
+    def test_compressor_initialization(self, compressor):
+        """测试压缩器初始化"""
+        assert compressor.token_limit == 1000
+        assert compressor.preserve_prefix_count == 2
+        assert compressor.max_message_tokens == 2000  # 默认值
+    
+    def test_estimate_event_tokens(self, compressor):
+        """测试启发式 token 估算"""
+        # 纯英文事件
+        english_event = TaskStartEvent(
+            task_description="This is a test task",
+            agent_id="agent-1",
+            task_id="task-1"
+        )
+        english_tokens = compressor._estimate_event_tokens(english_event)
+        assert english_tokens > 0
+        
+        # 中文事件
+        chinese_event = TaskStartEvent(
+            task_description="这是一个测试任务",
+            agent_id="agent-1",
+            task_id="task-1"
+        )
+        chinese_tokens = compressor._estimate_event_tokens(chinese_event)
+        assert chinese_tokens > 0
+        
+        # 中文 token 估算应该更多（1 char/token vs 4 char/token）
+        assert chinese_tokens > english_tokens
+    
+    def test_compress_preserves_prefix(self, compressor, populated_event_log):
+        """测试压缩保留前缀事件"""
+        original_count = len(populated_event_log.events)
+        
+        compressed = compressor.compress(populated_event_log)
+        
+        # 至少保留了前缀
+        assert len(compressed) >= compressor.preserve_prefix_count
+        assert len(compressed) <= original_count
+        
+        # 前缀事件应该被保留
+        for i in range(min(compressor.preserve_prefix_count, len(compressed))):
+            assert compressed[i].id == populated_event_log.events[i].id
+    
+    def test_compress_respects_token_limit(self, compressor):
+        """测试压缩遵守 token 限制"""
+        # 创建大量事件
+        event_log = EventLog(agent_id="agent-1", task_id="task-1")
+        for i in range(50):
+            event_log.append(ToolCallEvent(
+                tool_name=f"tool_{i}",
+                tool_args={"arg": f"value_{i}" * 100},  # 长参数
+                intent=f"Intent {i}",
+                agent_id="agent-1",
+                task_id="task-1"
+            ))
+        
+        compressed = compressor.compress(event_log)
+        
+        # 压缩后的 token 应该在限制内
+        compressed_tokens = compressor.estimate_total_tokens(compressed)
+        assert compressed_tokens <= compressor.token_limit
+    
+    def test_estimate_total_tokens(self, compressor, populated_event_log):
+        """测试总 token 估算"""
+        total = compressor.estimate_total_tokens(populated_event_log.events)
+        assert total > 0
+        assert isinstance(total, int)
+    
+    def test_is_over_limit(self, compressor):
+        """测试是否超过限制判断"""
+        # 创建小的事件列表
+        small_log = EventLog(agent_id="agent-1", task_id="task-1")
+        small_log.append(TaskStartEvent(
+            task_description="Short task",
+            agent_id="agent-1",
+            task_id="task-1"
+        ))
+        
+        assert not compressor.is_over_limit(small_log.events)
+        
+        # 创建大的事件列表
+        large_log = EventLog(agent_id="agent-1", task_id="task-1")
+        for i in range(100):
+            large_log.append(ToolCallEvent(
+                tool_name=f"tool_{i}",
+                tool_args={"data": "x" * 1000},
+                intent="Test",
+                agent_id="agent-1",
+                task_id="task-1"
+            ))
+        
+        assert compressor.is_over_limit(large_log.events)
+    
+    def test_get_compression_ratio(self, compressor, populated_event_log):
+        """测试压缩比率计算"""
+        original = populated_event_log.events
+        compressed = compressor.compress(populated_event_log)
+        
+        ratio = compressor.get_compression_ratio(original, compressed)
+        
+        assert 0.0 <= ratio <= 1.0
+        # 压缩后应该更小
+        assert ratio < 1.0 or len(compressed) == len(original)
+
+
+class TestContextCompilerEmergencyMode:
+    """ContextCompiler 紧急模式测试"""
+    
+    @pytest.fixture
+    def emergency_compiler(self):
+        """创建带快速降级的编译器"""
+        from agenticx.core.context_compiler import ContextCompiler, SimpleEventSummarizer
+        
+        config = CompactionConfig(
+            enabled=True,
+            max_context_tokens=500  # 较低的限制以触发紧急模式
+        )
+        
+        return ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=config,
+            enable_fast_fallback=True
+        )
+    
+    def test_emergency_compiler_has_fast_compressor(self, emergency_compiler):
+        """测试紧急编译器初始化了快速压缩器"""
+        assert emergency_compiler.fast_compressor is not None
+        assert emergency_compiler.enable_fast_fallback is True
+    
+    def test_is_emergency_detection(self, emergency_compiler):
+        """测试紧急情况检测"""
+        # 低于 95% 不是紧急
+        assert not emergency_compiler._is_emergency(400)
+        
+        # 95% 以上是紧急
+        assert emergency_compiler._is_emergency(476)  # 500 * 0.95 = 475
+        assert emergency_compiler._is_emergency(500)
+    
+    def test_fast_compress_execution(self, emergency_compiler):
+        """测试快速压缩执行"""
+        # 创建大量事件触发紧急压缩
+        event_log = EventLog(agent_id="agent-1", task_id="task-1")
+        for i in range(50):
+            event_log.append(ToolCallEvent(
+                tool_name=f"tool_{i}",
+                tool_args={"data": "x" * 100},
+                intent="Test",
+                agent_id="agent-1",
+                task_id="task-1"
+            ))
+        
+        original_count = len(event_log.events)
+        
+        # 执行快速压缩
+        result = emergency_compiler._fast_compress(event_log, reason="test")
+        
+        # 快速压缩返回 None（直接修改 event_log）
+        assert result is None
+        
+        # 事件数量应该减少
+        assert len(event_log.events) < original_count
+        
+        # 应该记录了紧急压缩
+        assert emergency_compiler.emergency_compressions == 1
+    
+    def test_emergency_triggers_fast_compress(self, emergency_compiler):
+        """测试紧急情况触发快速压缩"""
+        # 创建足够多的事件触发紧急模式
+        event_log = EventLog(agent_id="agent-1", task_id="task-1")
+        for i in range(100):
+            event_log.append(ToolCallEvent(
+                tool_name=f"tool_{i}",
+                tool_args={"data": "This is a test with some data" * 10},
+                intent="Test intent",
+                agent_id="agent-1",
+                task_id="task-1"
+            ))
+        
+        # 验证超过了限制
+        current_tokens = emergency_compiler._count_event_log_tokens(event_log)
+        assert emergency_compiler._is_emergency(current_tokens)
+        
+        # 记录原始事件数
+        original_count = len(event_log.events)
+        
+        # 执行压缩（应该触发紧急模式）
+        import asyncio
+        result = asyncio.run(emergency_compiler.compact(event_log, reason="test"))
+        
+        # 快速压缩返回 None
+        assert result is None
+        
+        # 事件应该被压缩
+        assert len(event_log.events) < original_count
+        
+        # 统计应该记录紧急压缩
+        assert len(emergency_compiler.compaction_history) > 0
+        assert emergency_compiler.compaction_history[-1]["strategy"] == "emergency"
+        assert emergency_compiler.compaction_history[-1]["fast_compression"] is True
+
+
+class TestContextCompilerIntegration:
+    """ContextCompiler 快速压缩集成测试"""
+    
+    def test_normal_vs_emergency_compression(self):
+        """测试正常压缩 vs 紧急压缩的切换"""
+        from agenticx.core.context_compiler import ContextCompiler, SimpleEventSummarizer
+        
+        # 正常配置（高限制）
+        normal_config = CompactionConfig(
+            enabled=True,
+            max_context_tokens=10000
+        )
+        normal_compiler = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=normal_config,
+            enable_fast_fallback=True
+        )
+        
+        # 紧急配置（低限制）
+        emergency_config = CompactionConfig(
+            enabled=True,
+            max_context_tokens=500
+        )
+        emergency_compiler = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=emergency_config,
+            enable_fast_fallback=True
+        )
+        
+        # 创建中等大小的事件日志
+        event_log = EventLog(agent_id="agent-1", task_id="task-1")
+        for i in range(30):
+            event_log.append(ToolCallEvent(
+                tool_name=f"tool_{i}",
+                tool_args={"data": "test data" * 5},
+                intent="Test",
+                agent_id="agent-1",
+                task_id="task-1"
+            ))
+        
+        # 正常编译器应该不触发紧急模式
+        normal_tokens = normal_compiler._count_event_log_tokens(event_log)
+        assert not normal_compiler._is_emergency(normal_tokens)
+        
+        # 紧急编译器应该触发紧急模式
+        emergency_tokens = emergency_compiler._count_event_log_tokens(event_log)
+        assert emergency_compiler._is_emergency(emergency_tokens)
+
+
+# =============================================================================
 # 运行测试
 # =============================================================================
 

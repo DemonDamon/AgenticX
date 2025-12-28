@@ -397,6 +397,239 @@ class SimpleEventSummarizer(EventSummarizer):
 
 
 # =============================================================================
+# 快速启发式压缩器（内化自 DeerFlow ContextManager）
+# =============================================================================
+
+class FastHeuristicCompressor:
+    """
+    快速启发式压缩器（零 LLM 调用）。
+    
+    灵感来自 DeerFlow 的 ContextManager，用于紧急情况下的快速压缩。
+    使用启发式 token 估算和截断策略，避免 LLM 调用开销。
+    
+    核心策略：
+    1. 启发式 token 估算（英文 4 char/token，中文 1 char/token）
+    2. 保留前缀消息（系统 prompts、初始目标）
+    3. 从尾部添加消息直到达到 token 限制
+    4. 单条消息过长时截断而非丢弃
+    
+    适用场景：
+    - Token 即将溢出（紧急压缩）
+    - 成本敏感型任务
+    - 快速迭代开发/测试
+    
+    与 AgenticX ContextCompiler 的对比：
+    - ContextCompiler: 语义摘要（LLM），保留关键信息，成本较高
+    - FastHeuristicCompressor: 截断（无 LLM），速度快，成本零，可能丢失细节
+    """
+    
+    def __init__(
+        self, 
+        token_limit: int = 8000,
+        preserve_prefix_count: int = 2,
+        max_message_tokens: int = 2000
+    ):
+        """
+        Args:
+            token_limit: Token 上限（超过此值触发压缩）
+            preserve_prefix_count: 保留的前缀事件数量（通常是系统消息和初始目标）
+            max_message_tokens: 单条消息的最大 token 数（超过则截断）
+        """
+        self.token_limit = token_limit
+        self.preserve_prefix_count = preserve_prefix_count
+        self.max_message_tokens = max_message_tokens
+        logger.info(
+            f"FastHeuristicCompressor initialized: "
+            f"limit={token_limit}, preserve_prefix={preserve_prefix_count}"
+        )
+    
+    def compress(self, event_log: EventLog) -> List[AnyEvent]:
+        """
+        快速压缩事件日志。
+        
+        策略：
+        1. 保留前 N 个事件（prefix）
+        2. 从尾部向前添加事件，直到达到 token 限制
+        3. 返回压缩后的事件列表
+        
+        Args:
+            event_log: 需要压缩的事件日志
+            
+        Returns:
+            压缩后的事件列表
+        """
+        events = event_log.events
+        
+        if not events:
+            return []
+        
+        # 1. 计算可用 token 预算
+        available_tokens = self.token_limit
+        
+        # 2. 保留前缀事件（系统消息、初始目标等）
+        prefix_count = min(self.preserve_prefix_count, len(events))
+        prefix_events = events[:prefix_count]
+        
+        # 计算前缀消耗的 tokens
+        for event in prefix_events:
+            event_tokens = self._estimate_event_tokens(event)
+            available_tokens -= event_tokens
+        
+        logger.debug(
+            f"Preserved {prefix_count} prefix events, "
+            f"remaining budget: {available_tokens} tokens"
+        )
+        
+        # 3. 从尾部添加事件，直到达到限制
+        suffix_events = []
+        remaining_events = events[prefix_count:]
+        
+        for event in reversed(remaining_events):
+            event_tokens = self._estimate_event_tokens(event)
+            
+            # 如果单条消息过长，截断而非完全丢弃
+            if event_tokens > self.max_message_tokens:
+                truncated_event = self._truncate_event(event, self.max_message_tokens)
+                event_tokens = self._estimate_event_tokens(truncated_event)
+                event = truncated_event
+            
+            if event_tokens <= available_tokens:
+                suffix_events.insert(0, event)
+                available_tokens -= event_tokens
+            else:
+                # Token 预算耗尽，停止添加
+                break
+        
+        # 4. 合并前缀和后缀
+        result = prefix_events + suffix_events
+        
+        # 日志记录压缩统计
+        original_count = len(events)
+        result_count = len(result)
+        dropped_count = original_count - result_count
+        
+        logger.info(
+            f"Fast compression: {original_count} -> {result_count} events "
+            f"({dropped_count} dropped, {available_tokens} tokens remaining)"
+        )
+        
+        return result
+    
+    def _estimate_event_tokens(self, event: AnyEvent) -> int:
+        """
+        启发式 token 估算（来自 DeerFlow）。
+        
+        规则：
+        - 英文字符：4 char/token
+        - 非英文字符（中文等）：1 char/token
+        
+        注意：这是近似估算，误差约 ±20%，但速度快（无需 tiktoken）
+        
+        Args:
+            event: 事件对象
+            
+        Returns:
+            估算的 token 数
+        """
+        # 将事件转换为字符串
+        content = str(event.model_dump())
+        
+        # 统计英文和非英文字符
+        english_chars = sum(1 for c in content if ord(c) < 128)
+        non_english_chars = len(content) - english_chars
+        
+        # 计算 tokens（英文 4 char/token，中文 1 char/token）
+        estimated_tokens = (english_chars // 4) + non_english_chars
+        
+        return max(1, estimated_tokens)  # 至少 1 token
+    
+    def _truncate_event(self, event: AnyEvent, max_tokens: int) -> AnyEvent:
+        """
+        截断单条事件内容。
+        
+        策略：保留事件的关键字段，截断较长的字段（如 result, response）
+        
+        Args:
+            event: 原始事件
+            max_tokens: 最大允许 token 数
+            
+        Returns:
+            截断后的事件
+        """
+        # 复制事件数据
+        event_data = event.model_dump()
+        
+        # 识别需要截断的长字段
+        truncatable_fields = ["result", "response", "error", "description", "content"]
+        
+        for field in truncatable_fields:
+            if field in event_data and isinstance(event_data[field], str):
+                original_value = event_data[field]
+                
+                # 根据 token 限制计算允许的字符数
+                # 保守估计：假设全英文（4 char/token）
+                max_chars = max_tokens * 4
+                
+                if len(original_value) > max_chars:
+                    truncated_value = original_value[:max_chars] + "... [truncated]"
+                    event_data[field] = truncated_value
+                    logger.debug(f"Truncated field '{field}': {len(original_value)} -> {len(truncated_value)} chars")
+        
+        # 重建事件对象
+        event_type = type(event)
+        try:
+            truncated_event = event_type(**event_data)
+            return truncated_event
+        except Exception as e:
+            logger.warning(f"Failed to rebuild truncated event: {e}, returning original")
+            return event
+    
+    def estimate_total_tokens(self, events: List[AnyEvent]) -> int:
+        """
+        估算事件列表的总 token 数。
+        
+        Args:
+            events: 事件列表
+            
+        Returns:
+            估算的总 token 数
+        """
+        return sum(self._estimate_event_tokens(e) for e in events)
+    
+    def is_over_limit(self, events: List[AnyEvent]) -> bool:
+        """
+        判断事件列表是否超过 token 限制。
+        
+        Args:
+            events: 事件列表
+            
+        Returns:
+            True 如果超过限制
+        """
+        total = self.estimate_total_tokens(events)
+        return total > self.token_limit
+    
+    def get_compression_ratio(self, original_events: List[AnyEvent], compressed_events: List[AnyEvent]) -> float:
+        """
+        计算压缩比率。
+        
+        Args:
+            original_events: 原始事件列表
+            compressed_events: 压缩后事件列表
+            
+        Returns:
+            压缩比率（0-1，越小压缩越多）
+        """
+        original_tokens = self.estimate_total_tokens(original_events)
+        compressed_tokens = self.estimate_total_tokens(compressed_events)
+        
+        if original_tokens == 0:
+            return 1.0
+        
+        return compressed_tokens / original_tokens
+
+
+# =============================================================================
 # 上下文编译器（增强版）
 # =============================================================================
 
@@ -422,7 +655,8 @@ class ContextCompiler:
         config: Optional[CompactionConfig] = None,
         strategy: CompactionStrategy = CompactionStrategy.SLIDING_WINDOW,
         task_type: str = "default",
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        enable_fast_fallback: bool = True
     ):
         """
         Args:
@@ -431,16 +665,27 @@ class ContextCompiler:
             strategy: 压缩策略。
             task_type: 任务类型（'default', 'mining', 'conversation', 'tool_sequence'）。
             model: 模型名称（用于精确 token 计数）。
+            enable_fast_fallback: 是否启用快速压缩降级（DeerFlow 风格）。
         """
         self.summarizer = summarizer or SimpleEventSummarizer()
         self.config = config or CompactionConfig()
         self.strategy = strategy
         self.task_type = task_type
         self.token_counter = TokenCounter(model=model)
+        self.enable_fast_fallback = enable_fast_fallback
+        
+        # 快速压缩器（用于紧急情况）
+        self.fast_compressor: Optional[FastHeuristicCompressor] = None
+        if enable_fast_fallback:
+            self.fast_compressor = FastHeuristicCompressor(
+                token_limit=config.max_context_tokens if config else 8000,
+                preserve_prefix_count=2
+            )
         
         # 统计信息
         self.compaction_history: List[Dict[str, Any]] = []
         self.total_tokens_saved = 0
+        self.emergency_compressions = 0  # 紧急压缩次数
     
     async def maybe_compact(self, event_log: EventLog) -> Optional[CompactedEvent]:
         """
@@ -509,8 +754,21 @@ class ContextCompiler:
         reason: Optional[str] = None
     ) -> Optional[CompactedEvent]:
         """
-        执行压缩操作。
+        执行压缩操作（增强版：支持紧急快速压缩）。
         """
+        # 判断是否需要紧急压缩
+        current_tokens = self._count_event_log_tokens(event_log)
+        is_emergency = self._is_emergency(current_tokens)
+        
+        # 紧急情况下使用快速压缩器（DeerFlow 风格）
+        if is_emergency and self.enable_fast_fallback and self.fast_compressor:
+            logger.warning(
+                f"EMERGENCY compaction triggered: {current_tokens} tokens "
+                f"(limit: {self.config.max_context_tokens}). Using fast heuristic compression."
+            )
+            return self._fast_compress(event_log, reason="emergency_token_overflow")
+        
+        # 正常情况：使用语义摘要（原 AgenticX 方式）
         # 根据策略获取待压缩的事件
         events_to_compact = self._get_events_to_compact(event_log)
         
@@ -577,6 +835,76 @@ class ContextCompiler:
         )
         
         return compacted_event
+    
+    def _is_emergency(self, current_tokens: int) -> bool:
+        """
+        判断是否为紧急情况（接近 token 限制）。
+        
+        Args:
+            current_tokens: 当前 token 数
+            
+        Returns:
+            True 如果超过限制的 95%
+        """
+        threshold = self.config.max_context_tokens * 0.95
+        return current_tokens >= threshold
+    
+    def _fast_compress(self, event_log: EventLog, reason: str = "emergency") -> Optional[CompactedEvent]:
+        """
+        快速压缩（使用 FastHeuristicCompressor）。
+        
+        注意：这是同步操作，不调用 LLM
+        
+        Args:
+            event_log: 事件日志
+            reason: 压缩原因
+            
+        Returns:
+            CompactedEvent 或 None
+        """
+        if not self.fast_compressor:
+            logger.error("Fast compressor not initialized, cannot perform emergency compression")
+            return None
+        
+        original_events = event_log.events.copy()
+        
+        # 执行快速压缩
+        compressed_events = self.fast_compressor.compress(event_log)
+        
+        # 替换 EventLog 的事件列表
+        event_log.events = compressed_events
+        
+        # 统计
+        self.emergency_compressions += 1
+        original_count = len(original_events)
+        compressed_count = len(compressed_events)
+        dropped_count = original_count - compressed_count
+        
+        # 估算 token 节省（使用启发式）
+        original_tokens = self.fast_compressor.estimate_total_tokens(original_events)
+        compressed_tokens = self.fast_compressor.estimate_total_tokens(compressed_events)
+        tokens_saved = original_tokens - compressed_tokens
+        
+        # 记录历史
+        self.compaction_history.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "events_compacted": dropped_count,
+            "token_before": original_tokens,
+            "token_after": compressed_tokens,
+            "compression_ratio": compressed_tokens / original_tokens if original_tokens > 0 else 1.0,
+            "strategy": "emergency",
+            "reason": reason,
+            "fast_compression": True
+        })
+        
+        logger.warning(
+            f"Emergency fast compression complete. "
+            f"Events: {original_count} -> {compressed_count} (dropped: {dropped_count}). "
+            f"Tokens: {original_tokens} -> {compressed_tokens} (saved: {tokens_saved})"
+        )
+        
+        # 快速压缩不生成 CompactedEvent，而是直接截断事件列表
+        return None
     
     def _get_events_to_compact(self, event_log: EventLog) -> List[AnyEvent]:
         """

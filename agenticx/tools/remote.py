@@ -1,6 +1,8 @@
 """
 RemoteTool: 用于连接 MCP (Model Context Protocol) 服务的通用远程工具
 """
+from __future__ import annotations  # 启用延迟类型注解
+
 import asyncio
 import json
 import logging
@@ -20,6 +22,15 @@ class MCPServerConfig(BaseModel):
     env: Dict[str, str] = Field(default_factory=dict)
     timeout: float = 60.0
     cwd: Optional[str] = Field(default=None, description="工作目录")
+    # DeerFlow-inspired enhancements
+    enabled_tools: List[str] = Field(
+        default_factory=list,
+        description="启用的工具名称列表（空列表表示全部启用）"
+    )
+    assign_to_agents: List[str] = Field(
+        default_factory=list,
+        description="分配给哪些智能体（空列表表示全部智能体可用）"
+    )
 
 class MCPToolCall(BaseModel):
     jsonrpc: str = Field(default="2.0", description="JSON-RPC version")
@@ -265,6 +276,203 @@ class RemoteTool(BaseTool):
         else:
             schema["function"]["parameters"] = {"type": "object", "properties": {}, "required": []}
         return schema
+
+
+class MCPToolManager:
+    """
+    MCP 工具管理器 - 配置驱动的工具分配（内化自 DeerFlow）
+    
+    核心功能：
+    1. 从配置文件加载多个 MCP 服务器配置
+    2. 根据 enabled_tools 过滤工具
+    3. 根据 assign_to_agents 分配工具给特定智能体
+    4. 缓存已加载的工具避免重复发现
+    
+    与 DeerFlow 的对比：
+    - DeerFlow: 使用 MultiServerMCPClient 统一管理
+    - AgenticX: 为每个服务器创建单独的 MCPClient，提供更精细的控制
+    """
+    
+    def __init__(self, servers_config: Dict[str, MCPServerConfig]):
+        """
+        Args:
+            servers_config: 服务器名称 -> 配置的映射
+        """
+        self.servers_config = servers_config
+        self.clients: Dict[str, MCPClient] = {}  # 服务器名 -> MCPClient
+        self.loaded_tools: Dict[str, List[MCPToolInfo]] = {}  # 服务器名 -> 工具列表
+        logger.info(f"MCPToolManager initialized with {len(servers_config)} servers")
+    
+    async def load_tools_for_agent(
+        self, 
+        agent_name: str,
+        organization_id: Optional[str] = None
+    ) -> List[BaseTool]:
+        """
+        为特定智能体加载 MCP 工具。
+        
+        根据 server_config.assign_to_agents 过滤服务器，
+        根据 server_config.enabled_tools 过滤工具。
+        
+        Args:
+            agent_name: 智能体名称
+            organization_id: 组织 ID（用于工具实例化）
+            
+        Returns:
+            该智能体可用的工具列表
+        """
+        tools = []
+        
+        for server_name, config in self.servers_config.items():
+            # 检查此服务器是否分配给当前智能体
+            if config.assign_to_agents and agent_name not in config.assign_to_agents:
+                logger.debug(f"Server '{server_name}' not assigned to agent '{agent_name}', skipping")
+                continue
+            
+            logger.info(f"Loading tools from server '{server_name}' for agent '{agent_name}'")
+            
+            # 获取或创建 MCP Client
+            client = await self._get_or_create_client(server_name, config)
+            
+            # 发现工具
+            server_tools = await self._discover_tools(server_name, client)
+            
+            # 过滤并创建工具实例
+            for tool_info in server_tools:
+                # 检查工具是否启用
+                if config.enabled_tools and tool_info.name not in config.enabled_tools:
+                    logger.debug(f"Tool '{tool_info.name}' not enabled for server '{server_name}', skipping")
+                    continue
+                
+                # 创建 RemoteTool 实例
+                args_schema = client._create_pydantic_model_from_schema(
+                    tool_info.inputSchema,
+                    f"{tool_info.name.title().replace('_', '')}Args"
+                )
+                
+                remote_tool = RemoteTool(
+                    server_config=config,
+                    tool_name=tool_info.name,
+                    name=f"{server_name}_{tool_info.name}",
+                    description=f"{tool_info.description} (Source: MCP Server '{server_name}')",
+                    args_schema=args_schema,
+                    organization_id=organization_id
+                )
+                
+                tools.append(remote_tool)
+                logger.debug(f"Loaded tool: {remote_tool.name}")
+        
+        logger.info(f"Loaded {len(tools)} tools for agent '{agent_name}'")
+        return tools
+    
+    async def _get_or_create_client(
+        self, 
+        server_name: str, 
+        config: MCPServerConfig
+    ) -> MCPClient:
+        """获取或创建 MCP Client（带缓存）"""
+        if server_name not in self.clients:
+            self.clients[server_name] = MCPClient(config)
+            logger.debug(f"Created MCPClient for server '{server_name}'")
+        return self.clients[server_name]
+    
+    async def _discover_tools(
+        self, 
+        server_name: str, 
+        client: MCPClient
+    ) -> List[MCPToolInfo]:
+        """发现工具（带缓存）"""
+        if server_name in self.loaded_tools:
+            logger.debug(f"Using cached tools for server '{server_name}'")
+            return self.loaded_tools[server_name]
+        
+        try:
+            tools = await client.discover_tools()
+            self.loaded_tools[server_name] = tools
+            logger.info(f"Discovered {len(tools)} tools from server '{server_name}'")
+            return tools
+        except Exception as e:
+            logger.error(f"Failed to discover tools from server '{server_name}': {e}")
+            return []
+    
+    async def get_all_tools(
+        self, 
+        organization_id: Optional[str] = None
+    ) -> Dict[str, List[BaseTool]]:
+        """
+        获取所有服务器的所有工具。
+        
+        Returns:
+            服务器名 -> 工具列表的映射
+        """
+        all_tools = {}
+        
+        for server_name, config in self.servers_config.items():
+            client = await self._get_or_create_client(server_name, config)
+            server_tools_info = await self._discover_tools(server_name, client)
+            
+            tools = []
+            for tool_info in server_tools_info:
+                # 过滤启用的工具
+                if config.enabled_tools and tool_info.name not in config.enabled_tools:
+                    continue
+                
+                args_schema = client._create_pydantic_model_from_schema(
+                    tool_info.inputSchema,
+                    f"{tool_info.name.title().replace('_', '')}Args"
+                )
+                
+                remote_tool = RemoteTool(
+                    server_config=config,
+                    tool_name=tool_info.name,
+                    name=f"{server_name}_{tool_info.name}",
+                    description=f"{tool_info.description} (Source: MCP Server '{server_name}')",
+                    args_schema=args_schema,
+                    organization_id=organization_id
+                )
+                tools.append(remote_tool)
+            
+            all_tools[server_name] = tools
+        
+        return all_tools
+    
+    def get_tool_assignment_summary(self) -> Dict[str, Any]:
+        """
+        获取工具分配摘要（用于调试和可观测性）。
+        
+        Returns:
+            包含服务器、工具和分配信息的摘要
+        """
+        summary = {
+            "total_servers": len(self.servers_config),
+            "servers": {}
+        }
+        
+        for server_name, config in self.servers_config.items():
+            server_info = {
+                "command": config.command,
+                "enabled_tools": config.enabled_tools if config.enabled_tools else "all",
+                "assigned_agents": config.assign_to_agents if config.assign_to_agents else "all",
+                "tools_discovered": len(self.loaded_tools.get(server_name, [])) if server_name in self.loaded_tools else "not yet loaded"
+            }
+            summary["servers"][server_name] = server_info
+        
+        return summary
+    
+    async def refresh_tools(self, server_name: Optional[str] = None):
+        """
+        刷新工具缓存。
+        
+        Args:
+            server_name: 特定服务器名称（None 表示全部刷新）
+        """
+        if server_name:
+            if server_name in self.loaded_tools:
+                del self.loaded_tools[server_name]
+                logger.info(f"Refreshed tools cache for server '{server_name}'")
+        else:
+            self.loaded_tools.clear()
+            logger.info("Refreshed all tools caches")
 
 
 class MCPClient:
