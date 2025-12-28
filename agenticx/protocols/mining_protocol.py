@@ -40,12 +40,38 @@ class MiningStepType(str, Enum):
 
 
 class MiningStepStatus(str, Enum):
-    """Status of a mining step execution."""
-    PENDING = "pending"
+    """
+    Status of a mining step execution.
+    
+    兼容 AgentScope 的 SubTask 状态 (todo/in_progress/done/abandoned)
+    """
+    PENDING = "pending"       # 等同于 AgentScope 的 "todo"
     IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
+    COMPLETED = "completed"   # 等同于 AgentScope 的 "done"
     FAILED = "failed"
-    SKIPPED = "skipped"
+    SKIPPED = "skipped"       # 等同于 AgentScope 的 "abandoned"
+    
+    @classmethod
+    def from_agentscope(cls, state: str) -> "MiningStepStatus":
+        """从 AgentScope SubTask 状态转换"""
+        mapping = {
+            "todo": cls.PENDING,
+            "in_progress": cls.IN_PROGRESS,
+            "done": cls.COMPLETED,
+            "abandoned": cls.SKIPPED,
+        }
+        return mapping.get(state, cls.PENDING)
+    
+    def to_agentscope(self) -> str:
+        """转换为 AgentScope SubTask 状态"""
+        mapping = {
+            self.PENDING: "todo",
+            self.IN_PROGRESS: "in_progress",
+            self.COMPLETED: "done",
+            self.FAILED: "abandoned",
+            self.SKIPPED: "abandoned",
+        }
+        return mapping.get(self, "todo")
 
 
 class MiningStep(BaseModel):
@@ -98,6 +124,23 @@ class MiningStep(BaseModel):
         default=None,
         description="Error message if step failed"
     )
+    # 新增字段：与 AgentScope SubTask 对齐
+    outcome: Optional[str] = Field(
+        default=None,
+        description="实际成果（内化自 AgentScope SubTask.outcome）"
+    )
+    expected_outcome: Optional[str] = Field(
+        default=None,
+        description="预期成果（内化自 AgentScope SubTask.expected_outcome）"
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="创建时间"
+    )
+    finished_at: Optional[datetime] = Field(
+        default=None,
+        description="完成时间"
+    )
     
     model_config = ConfigDict(use_enum_values=True)
     
@@ -105,6 +148,7 @@ class MiningStep(BaseModel):
         """Mark step as completed with result."""
         self.status = MiningStepStatus.COMPLETED
         self.execution_result = result
+        self.finished_at = datetime.now(timezone.utc)
         if insights:
             self.learned_insights.extend(insights)
     
@@ -112,6 +156,7 @@ class MiningStep(BaseModel):
         """Mark step as failed with error message."""
         self.status = MiningStepStatus.FAILED
         self.error = error
+        self.finished_at = datetime.now(timezone.utc)
     
     def can_retry(self) -> bool:
         """Check if step can be retried based on exploration budget."""
@@ -123,6 +168,74 @@ class MiningStep(BaseModel):
             self.exploration_budget -= 1
             return True
         return False
+    
+    # =========================================================================
+    # 与 AgentScope SubTask 兼容的方法（内化自 AgentScope）
+    # =========================================================================
+    
+    def finish(self, outcome: str) -> None:
+        """
+        完成步骤并设置成果（内化自 AgentScope SubTask.finish）
+        
+        Args:
+            outcome: 步骤的实际成果
+        """
+        self.status = MiningStepStatus.COMPLETED
+        self.outcome = outcome
+        self.execution_result = outcome
+        self.finished_at = datetime.now(timezone.utc)
+    
+    def to_subtask_dict(self) -> Dict[str, Any]:
+        """
+        转换为 AgentScope SubTask 格式的字典
+        
+        Returns:
+            与 PlanNotebook.create_plan() subtasks 参数兼容的字典
+        """
+        return {
+            "name": self.title,
+            "description": self.description,
+            "expected_outcome": self.expected_outcome or f"Complete {self.title}",
+            "outcome": self.outcome,
+            "state": self.status.to_agentscope() if isinstance(self.status, MiningStepStatus) else MiningStepStatus(self.status).to_agentscope(),
+        }
+    
+    def to_oneline_markdown(self) -> str:
+        """转换为单行 Markdown（内化自 AgentScope SubTask）"""
+        status_map = {
+            MiningStepStatus.PENDING: "- [ ]",
+            MiningStepStatus.IN_PROGRESS: "- [ ][WIP]",
+            MiningStepStatus.COMPLETED: "- [x]",
+            MiningStepStatus.FAILED: "- [ ][Failed]",
+            MiningStepStatus.SKIPPED: "- [ ][Skipped]",
+        }
+        status = self.status if isinstance(self.status, MiningStepStatus) else MiningStepStatus(self.status)
+        return f"{status_map.get(status, '- [ ]')} {self.title}"
+    
+    @classmethod
+    def from_subtask(cls, subtask_dict: Dict[str, Any], step_type: MiningStepType = MiningStepType.ANALYZE) -> "MiningStep":
+        """
+        从 AgentScope SubTask 字典创建 MiningStep
+        
+        Args:
+            subtask_dict: SubTask 格式的字典
+            step_type: 步骤类型（默认为 ANALYZE）
+            
+        Returns:
+            MiningStep 实例
+        """
+        state = subtask_dict.get("state", "todo")
+        status = MiningStepStatus.from_agentscope(state)
+        
+        return cls(
+            step_type=step_type,
+            title=subtask_dict.get("name", "Untitled"),
+            description=subtask_dict.get("description", ""),
+            expected_outcome=subtask_dict.get("expected_outcome"),
+            outcome=subtask_dict.get("outcome"),
+            status=status,
+            need_external_info=step_type == MiningStepType.SEARCH,
+        )
 
 
 class ExplorationStrategy(str, Enum):
