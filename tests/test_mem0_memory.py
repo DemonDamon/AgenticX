@@ -1,12 +1,16 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
-from agenticx.llms.base import BaseLLM, LLMResponse
+from agenticx.llms.base import BaseLLMProvider
+from agenticx.llms.response import LLMResponse
 from agenticx.memory.mem0_memory import Mem0
 from agenticx.integrations.mem0.configs.base import MemoryConfig
 
 # Mock AgenticX LLM for testing purposes
-class MockAgenticXLLM(BaseLLM):
+class MockAgenticXLLM(BaseLLMProvider):
+    def __init__(self):
+        super().__init__(model="mock_model")
+    
     def invoke(self, messages, **kwargs):
         return LLMResponse(
             content=f"Mock response to: {messages[-1]['content']}",
@@ -17,6 +21,12 @@ class MockAgenticXLLM(BaseLLM):
     
     async def ainvoke(self, messages, **kwargs):
         return self.invoke(messages, **kwargs)
+    
+    def stream(self, messages, **kwargs):
+        yield "Mock stream response"
+    
+    async def astream(self, messages, **kwargs):
+        yield "Mock async stream response"
 
 @pytest.fixture
 def mock_llm():
