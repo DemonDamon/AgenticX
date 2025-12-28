@@ -5,6 +5,7 @@
 .pytest_cache/
 .mypy_cache/
 .lingma/
+.agenticx/
 
 __pycache__/ 
 **/__pycache__/
