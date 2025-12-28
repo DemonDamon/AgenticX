@@ -146,6 +146,29 @@ from .workflow_engine import (
     WorkflowResult
 )
 
+# Plan Notebook (内化自 AgentScope 的 Plan Module)
+from .plan_storage import (
+    Plan, SubTask, 
+    PlanStorageBase, InMemoryPlanStorage, SQLitePlanStorage
+)
+from .plan_notebook import (
+    PlanNotebook, DefaultPlanToHint, ToolResult as PlanToolResult
+)
+
+# Discovery Loop (内化自 AgentScope 的动态能力扩展)
+from .discovery import (
+    Discovery, DiscoveryType, DiscoveryPriority, DiscoveryStatus,
+    DiscoveryBus, DiscoveryRegistry, DiscoveryEvent,
+    get_discovery_bus, reset_discovery_bus,
+)
+
+# Interruption & State Recovery (内化自 AgentScope 的 Realtime Steering)
+from .interruption import (
+    InterruptSignal, InterruptReason, InterruptStrategy,
+    ExecutionSnapshot, InterruptionManager, InterruptibleTask,
+    get_interrupt_manager, reset_interrupt_manager,
+)
+
 # 为了向后兼容，添加 WorkflowContext 别名
 WorkflowContext = ExecutionContext
 
@@ -318,5 +341,33 @@ __all__ = [
     "WorkflowResult",
     "NodeExecution",
     "WorkflowStatus",
-    "NodeStatus"
+    "NodeStatus",
+    # Plan Notebook (内化自 AgentScope)
+    "Plan",
+    "SubTask",
+    "PlanStorageBase",
+    "InMemoryPlanStorage",
+    "SQLitePlanStorage",
+    "PlanNotebook",
+    "DefaultPlanToHint",
+    "PlanToolResult",
+    # Discovery Loop (内化自 AgentScope)
+    "Discovery",
+    "DiscoveryType",
+    "DiscoveryPriority",
+    "DiscoveryStatus",
+    "DiscoveryBus",
+    "DiscoveryRegistry",
+    "DiscoveryEvent",
+    "get_discovery_bus",
+    "reset_discovery_bus",
+    # Interruption & State Recovery (内化自 AgentScope)
+    "InterruptSignal",
+    "InterruptReason",
+    "InterruptStrategy",
+    "ExecutionSnapshot",
+    "InterruptionManager",
+    "InterruptibleTask",
+    "get_interrupt_manager",
+    "reset_interrupt_manager",
 ]
