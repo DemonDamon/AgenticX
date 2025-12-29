@@ -6,13 +6,13 @@ including base tool interface, metadata models, and execution framework.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union, Type, TypeVar, Generic
+from typing import Any, Dict, List, Optional, Union, Type, TypeVar, Generic, Callable
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
 import asyncio
 import logging
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, ValidationError
 
 
 class ToolStatus(str, Enum):
@@ -209,6 +209,135 @@ class ToolContext(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Custom metadata")
 
 
+@dataclass
+class ValidationFeedback:
+    """
+    Structured feedback when tool parameter validation fails.
+    
+    This class captures validation errors from Pydantic and provides
+    a structured format for retry mechanisms.
+    
+    Inspired by Pydantic AI's RetryPromptPart mechanism.
+    Source: pydantic-ai/pydantic_ai/_parts_manager.py
+    """
+    tool_name: str
+    errors: List[Dict[str, Any]]  # Pydantic error dictionaries
+    original_params: Dict[str, Any]
+    retry_count: int = 0
+    timestamp: datetime = field(default_factory=datetime.now)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert feedback to dictionary format."""
+        return {
+            "tool_name": self.tool_name,
+            "errors": self.errors,
+            "original_params": self.original_params,
+            "retry_count": self.retry_count,
+            "timestamp": self.timestamp.isoformat()
+        }
+
+
+class ValidationErrorHandler:
+    """
+    Handler for Pydantic validation errors in tool execution.
+    
+    This class intercepts ValidationError exceptions and converts them
+    into structured feedback that can be used for automatic retry with LLMs.
+    
+    Inspired by Pydantic AI's error handling in _tool_manager.py
+    """
+    
+    def __init__(self):
+        self._logger = logging.getLogger("agenticx.tool.validation")
+    
+    def handle(
+        self, 
+        error: ValidationError, 
+        tool_name: str, 
+        parameters: Dict[str, Any],
+        retry_count: int = 0
+    ) -> ValidationFeedback:
+        """
+        Handle a Pydantic validation error.
+        
+        Args:
+            error: The Pydantic ValidationError
+            tool_name: Name of the tool being executed
+            parameters: Original parameters that failed validation
+            retry_count: Current retry attempt number
+            
+        Returns:
+            ValidationFeedback object with structured error information
+        """
+        errors = []
+        for err in error.errors():
+            errors.append({
+                "loc": err.get("loc", ()),
+                "msg": err.get("msg", "Unknown error"),
+                "type": err.get("type", "unknown"),
+            })
+        
+        self._logger.warning(
+            f"Validation failed for tool '{tool_name}' (retry {retry_count}): "
+            f"{len(errors)} error(s)"
+        )
+        
+        return ValidationFeedback(
+            tool_name=tool_name,
+            errors=errors,
+            original_params=parameters,
+            retry_count=retry_count
+        )
+
+
+class ValidationErrorTranslator:
+    """
+    Translates Pydantic validation errors into natural language prompts for LLMs.
+    
+    This translator converts structured validation errors into human-readable
+    messages that help LLMs understand what went wrong and how to fix it.
+    
+    Inspired by Pydantic AI's retry prompt generation mechanism.
+    """
+    
+    @staticmethod
+    def translate(feedback: ValidationFeedback) -> str:
+        """
+        Translate validation feedback into natural language.
+        
+        Args:
+            feedback: ValidationFeedback object
+            
+        Returns:
+            Natural language description of the validation errors
+            
+        Example output:
+            "Tool 'search_api' parameter validation failed:
+             - Field 'query' is required but was not provided.
+             - Field 'limit' must be <= 100, but you provided 200.
+             Please correct these parameters and try again."
+        """
+        lines = [f"Tool '{feedback.tool_name}' parameter validation failed:"]
+        
+        for err in feedback.errors:
+            loc = err.get("loc", ())
+            msg = err.get("msg", "Unknown error")
+            
+            # Format location path
+            if loc:
+                field_path = ".".join(str(part) for part in loc)
+                lines.append(f" - Field '{field_path}': {msg}")
+            else:
+                lines.append(f" - {msg}")
+        
+        lines.append("\nPlease correct these parameters and try again.")
+        
+        if feedback.retry_count > 0:
+            lines.append(f"(Retry attempt {feedback.retry_count})")
+        
+        return "\n".join(lines)
+
+
 T = TypeVar('T')
 
 
@@ -220,11 +349,14 @@ class BaseTool(ABC, Generic[T]):
     parameter validation, and lifecycle management.
     """
     
-    def __init__(self, metadata: ToolMetadata):
+    def __init__(self, metadata: ToolMetadata, enable_auto_retry: bool = False):
         """Initialize tool with metadata."""
         self._metadata = metadata
         self._logger = logging.getLogger(f"agenticx.tool.{metadata.name}")
         self._parameters: Dict[str, ToolParameter] = {}
+        self._enable_auto_retry = enable_auto_retry
+        self._validation_handler = ValidationErrorHandler()
+        self._error_translator = ValidationErrorTranslator()
         self._setup_parameters()
     
     @property
@@ -343,3 +475,107 @@ class BaseTool(ABC, Generic[T]):
     def __repr__(self) -> str:
         """Detailed representation."""
         return f"{self.__class__.__name__}(metadata={self._metadata!r})"
+    
+    async def aexecute_with_retry(
+        self,
+        parameters: Dict[str, Any],
+        context: ToolContext,
+        retry_callback: Optional[Callable[[str], Dict[str, Any]]] = None
+    ) -> ToolResult:
+        """
+        Execute tool with automatic retry on validation failures.
+        
+        This method implements the core self-healing mechanism inspired by
+        Pydantic AI's validation feedback loop. When parameter validation fails,
+        it generates natural language feedback and allows retry with corrected parameters.
+        
+        Args:
+            parameters: Initial parameters for tool execution
+            context: Execution context
+            retry_callback: Optional callback to simulate LLM correction.
+                            Takes error message (str), returns corrected parameters (Dict).
+                            If None, no retry will be attempted.
+            
+        Returns:
+            ToolResult with execution outcome
+            
+        Raises:
+            ValueError: If max retries exceeded
+            
+        Inspired by: pydantic-ai/pydantic_ai/_tool_manager.py
+        """
+        max_retries = context.max_retries or self._metadata.max_retries
+        retry_count = 0
+        current_params = parameters.copy()
+        
+        while retry_count <= max_retries:
+            try:
+                # Attempt validation
+                validated_params = await self.validate_parameters_async(current_params)
+                
+                # Execute if validation passed
+                result = await self.aexecute(validated_params, context)
+                
+                # Add retry metadata if retries occurred
+                if retry_count > 0:
+                    result.metadata["retry_count"] = retry_count
+                    result.metadata["auto_corrected"] = True
+                
+                return result
+                
+            except ValidationError as e:
+                # Handle validation failure
+                feedback = self._validation_handler.handle(
+                    error=e,
+                    tool_name=self.name,
+                    parameters=current_params,
+                    retry_count=retry_count
+                )
+                
+                # Check if retry is enabled and possible
+                if not self._enable_auto_retry or retry_callback is None:
+                    # No retry - return failure result
+                    error_msg = self._error_translator.translate(feedback)
+                    return ToolResult(
+                        status=ToolStatus.FAILED,
+                        error=error_msg,
+                        metadata=feedback.to_dict()
+                    )
+                
+                if retry_count >= max_retries:
+                    # Max retries exceeded
+                    error_msg = self._error_translator.translate(feedback)
+                    error_msg += f"\n\nMax retries ({max_retries}) exceeded."
+                    return ToolResult(
+                        status=ToolStatus.FAILED,
+                        error=error_msg,
+                        metadata=feedback.to_dict()
+                    )
+                
+                # Generate feedback for LLM
+                feedback_text = self._error_translator.translate(feedback)
+                
+                try:
+                    # Simulate LLM correction via callback
+                    corrected_params = retry_callback(feedback_text)
+                    current_params = corrected_params
+                    retry_count += 1
+                    
+                    self._logger.info(
+                        f"Retry {retry_count}/{max_retries} for tool '{self.name}' "
+                        f"with corrected parameters"
+                    )
+                    
+                except Exception as callback_err:
+                    # Callback failed - return error
+                    return ToolResult(
+                        status=ToolStatus.FAILED,
+                        error=f"Retry callback failed: {str(callback_err)}",
+                        metadata=feedback.to_dict()
+                    )
+        
+        # Should not reach here
+        return ToolResult(
+            status=ToolStatus.FAILED,
+            error="Unexpected retry loop exit"
+        )
