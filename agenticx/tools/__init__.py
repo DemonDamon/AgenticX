@@ -13,6 +13,7 @@ from .function_tool import FunctionTool, tool
 from .executor import ToolExecutor, ExecutionResult
 from .credentials import CredentialStore
 from .remote import RemoteTool, MCPClient, MCPServerConfig, load_mcp_config, create_mcp_client
+from .remote_v2 import MCPClientV2, RemoteToolV2
 from .mineru import create_mineru_parse_tool, create_mineru_ocr_languages_tool
 from .builtin import (
     WebSearchTool,
@@ -51,12 +52,15 @@ __all__ = [
     "CodeInterpreterTool",
     "HttpRequestTool",
     "JsonTool",
-    # Remote/MCP tools
+    # Remote/MCP tools (legacy)
     "RemoteTool",
     "MCPClient",
     "MCPServerConfig",
     "load_mcp_config",
     "create_mcp_client",
+    # Remote/MCP tools V2 (基于官方 SDK，持久化会话)
+    "MCPClientV2",
+    "RemoteToolV2",
     # OpenAPI tools (ADK-inspired)
     "OpenAPIToolset",
     "RestApiTool",
