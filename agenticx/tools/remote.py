@@ -280,7 +280,7 @@ class RemoteTool(BaseTool):
 
 class MCPToolManager:
     """
-    MCP 工具管理器 - 配置驱动的工具分配（内化自 DeerFlow）
+    MCP 工具管理器 - 配置驱动的工具分配（参考自 DeerFlow）
     
     核心功能：
     1. 从配置文件加载多个 MCP 服务器配置

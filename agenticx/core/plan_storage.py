@@ -1,7 +1,7 @@
 """
 Plan Storage - 计划存储抽象层
 
-内化自 AgentScope 的 plan/_storage_base.py 和 plan/_in_memory_storage.py
+参考自 AgentScope 的 plan/_storage_base.py 和 plan/_in_memory_storage.py
 
 提供计划的持久化存储能力，支持内存存储和 SQLite 存储。
 """
@@ -26,7 +26,7 @@ class SubTask(BaseModel):
     """
     计划中的子任务模型。
     
-    内化自 AgentScope 的 plan/_plan_model.py::SubTask
+    参考自 AgentScope 的 plan/_plan_model.py::SubTask
     """
     name: str = Field(
         description="子任务名称，应简洁、描述性强，不超过10个词"
@@ -103,7 +103,7 @@ class Plan(BaseModel):
     """
     计划模型，包含子任务列表。
     
-    内化自 AgentScope 的 plan/_plan_model.py::Plan
+    参考自 AgentScope 的 plan/_plan_model.py::Plan
     """
     id: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
@@ -185,7 +185,7 @@ class PlanStorageBase(ABC):
     """
     计划存储抽象基类。
     
-    内化自 AgentScope 的 plan/_storage_base.py::PlanStorageBase
+    参考自 AgentScope 的 plan/_storage_base.py::PlanStorageBase
     """
     
     @abstractmethod
@@ -217,7 +217,7 @@ class InMemoryPlanStorage(PlanStorageBase):
     """
     内存计划存储。
     
-    内化自 AgentScope 的 plan/_in_memory_storage.py::InMemoryPlanStorage
+    参考自 AgentScope 的 plan/_in_memory_storage.py::InMemoryPlanStorage
     """
     
     def __init__(self) -> None:

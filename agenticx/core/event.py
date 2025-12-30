@@ -112,7 +112,7 @@ class ActionCorrectionEvent(Event[Literal["action_correction"]]):
 
 
 # ============================================================================
-# Context Compiler 相关事件（内化自 ADK 的 Compiled View 机制）
+# Context Compiler 相关事件（参考自 ADK 的 Compiled View 机制）
 # ============================================================================
 
 class CompactedEvent(Event[Literal["compacted"]]):

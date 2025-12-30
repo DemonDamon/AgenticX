@@ -1,5 +1,5 @@
 """
-性能监控模块 (内化自 Agno)
+性能监控模块 (参考自 Agno)
 
 设计原理：
 - Agno 提供 `PerformanceEval` 用于测量 Agent 的实例化时间和内存占用
@@ -116,7 +116,7 @@ class PerformanceReport:
 
 class Timer:
     """
-    轻量级计时器（内化自 Agno 的 utils/timer.py）。
+    轻量级计时器（参考自 Agno 的 utils/timer.py）。
     
     支持两种使用方式：
     1. 上下文管理器
@@ -296,7 +296,7 @@ class MemoryTracker:
 
 class PerformanceMonitor:
     """
-    性能监控器（内化自 Agno 的 PerformanceEval）。
+    性能监控器（参考自 Agno 的 PerformanceEval）。
     
     提供统一的性能监控接口，支持：
     - 延迟测量

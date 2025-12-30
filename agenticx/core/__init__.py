@@ -114,7 +114,7 @@ from .event import (
 )
 from .prompt import PromptManager, ContextRenderer, XMLContextRenderer, PromptTemplate, CompiledContextRenderer
 
-# Context Compiler (内化自 ADK 的 Compiled View)
+# Context Compiler (参考自 ADK 的 Compiled View)
 from .context_compiler import (
     ContextCompiler, EventSummarizer, LLMEventSummarizer, SimpleEventSummarizer,
     create_context_compiler, create_mining_compiler,
@@ -146,7 +146,7 @@ from .workflow_engine import (
     WorkflowResult
 )
 
-# Plan Notebook (内化自 AgentScope 的 Plan Module)
+# Plan Notebook (参考自 AgentScope 的 Plan Module)
 from .plan_storage import (
     Plan, SubTask, 
     PlanStorageBase, InMemoryPlanStorage, SQLitePlanStorage
@@ -155,14 +155,14 @@ from .plan_notebook import (
     PlanNotebook, DefaultPlanToHint, ToolResult as PlanToolResult
 )
 
-# Discovery Loop (内化自 AgentScope 的动态能力扩展)
+# Discovery Loop (参考自 AgentScope 的动态能力扩展)
 from .discovery import (
     Discovery, DiscoveryType, DiscoveryPriority, DiscoveryStatus,
     DiscoveryBus, DiscoveryRegistry, DiscoveryEvent,
     get_discovery_bus, reset_discovery_bus,
 )
 
-# Interruption & State Recovery (内化自 AgentScope 的 Realtime Steering)
+# Interruption & State Recovery (参考自 AgentScope 的 Realtime Steering)
 from .interruption import (
     InterruptSignal, InterruptReason, InterruptStrategy,
     ExecutionSnapshot, InterruptionManager, InterruptibleTask,
@@ -281,7 +281,7 @@ __all__ = [
     "HumanRequestEvent",
     "HumanResponseEvent",
     "FinishTaskEvent",
-    # Context Compiler (内化自 ADK)
+    # Context Compiler (参考自 ADK)
     "CompactedEvent",
     "CompactionConfig",
     "ContextCompiler",
@@ -342,7 +342,7 @@ __all__ = [
     "NodeExecution",
     "WorkflowStatus",
     "NodeStatus",
-    # Plan Notebook (内化自 AgentScope)
+    # Plan Notebook (参考自 AgentScope)
     "Plan",
     "SubTask",
     "PlanStorageBase",
@@ -351,7 +351,7 @@ __all__ = [
     "PlanNotebook",
     "DefaultPlanToHint",
     "PlanToolResult",
-    # Discovery Loop (内化自 AgentScope)
+    # Discovery Loop (参考自 AgentScope)
     "Discovery",
     "DiscoveryType",
     "DiscoveryPriority",
@@ -361,7 +361,7 @@ __all__ = [
     "DiscoveryEvent",
     "get_discovery_bus",
     "reset_discovery_bus",
-    # Interruption & State Recovery (内化自 AgentScope)
+    # Interruption & State Recovery (参考自 AgentScope)
     "InterruptSignal",
     "InterruptReason",
     "InterruptStrategy",

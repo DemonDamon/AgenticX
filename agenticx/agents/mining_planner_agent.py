@@ -5,7 +5,7 @@ Mining Planner Agent - 智能挖掘规划器
 1. 多轮澄清机制（避免在错误方向浪费 token）
 2. LLM 驱动的任务分解为结构化计划
 3. 人工审查和修改计划（human-in-the-loop）
-4. [NEW] Plan-as-a-Tool 机制（内化自 AgentScope PlanNotebook）
+4. [NEW] Plan-as-a-Tool 机制（参考自 AgentScope PlanNotebook）
 
 设计原则：
 - 结构化计划优于自由探索
@@ -51,14 +51,14 @@ class MiningPlannerAgent(Agent):
     2. 生成结构化挖掘计划（LLM 驱动）
     3. 人工审查计划（可选）
     4. 自动验证和修复约束
-    5. [NEW] Plan-as-a-Tool: 计划状态管理工具（内化自 AgentScope）
+    5. [NEW] Plan-as-a-Tool: 计划状态管理工具（参考自 AgentScope）
     
     Attributes:
         enable_clarification: 是否启用澄清机制
         max_clarification_rounds: 最大澄清轮数
         auto_accept: 是否自动接受计划（跳过人工审查）
         llm_provider: LLM 提供者（用于生成计划）
-        plan_notebook: [NEW] 计划笔记本（内化自 AgentScope）
+        plan_notebook: [NEW] 计划笔记本（参考自 AgentScope）
     """
     
     def __init__(
@@ -118,7 +118,7 @@ class MiningPlannerAgent(Agent):
         object.__setattr__(self, 'clarifications_performed', 0)
         object.__setattr__(self, 'auto_repairs_applied', 0)
         
-        # [NEW] Plan-as-a-Tool: 计划笔记本（内化自 AgentScope）
+        # [NEW] Plan-as-a-Tool: 计划笔记本（参考自 AgentScope）
         object.__setattr__(self, 'plan_notebook', plan_notebook)
         
         # 如果提供了 plan_notebook，注册计划变更钩子
@@ -128,7 +128,7 @@ class MiningPlannerAgent(Agent):
                 self._on_plan_change
             )
         
-        # [NEW] Discovery Loop: 发现总线（内化自 AgentScope）
+        # [NEW] Discovery Loop: 发现总线（参考自 AgentScope）
         discovery_bus = get_discovery_bus()
         object.__setattr__(self, 'discovery_bus', discovery_bus)
         object.__setattr__(self, '_pending_discoveries', [])
@@ -140,7 +140,7 @@ class MiningPlannerAgent(Agent):
             discovery_types=[DiscoveryType.TOOL, DiscoveryType.API, DiscoveryType.INSIGHT],
         )
         
-        # [NEW] Recursive Worker: Worker 生成器（内化自 AgentScope）
+        # [NEW] Recursive Worker: Worker 生成器（参考自 AgentScope）
         worker_spawner = WorkerSpawner(
             llm_provider=llm_provider,
             discovery_bus=discovery_bus,
@@ -552,14 +552,14 @@ Generate a revised plan (JSON format):"""
         return stats
     
     # =========================================================================
-    # [NEW] Plan-as-a-Tool 方法（内化自 AgentScope）
+    # [NEW] Plan-as-a-Tool 方法（参考自 AgentScope）
     # =========================================================================
     
     async def _sync_plan_to_notebook(self, plan: MiningPlan) -> None:
         """
         将 MiningPlan 同步到 PlanNotebook。
         
-        内化自 AgentScope 的"计划即工具"理念：
+        参考自 AgentScope 的"计划即工具"理念：
         - MiningPlan 的 steps 转换为 SubTask
         - 自动在 PlanNotebook 中创建对应的计划
         
@@ -600,7 +600,7 @@ Generate a revised plan (JSON format):"""
     
     def get_plan_tools(self) -> List[Callable[..., Coroutine[Any, Any, PlanToolResult]]]:
         """
-        获取计划管理工具列表（内化自 AgentScope）。
+        获取计划管理工具列表（参考自 AgentScope）。
         
         这些工具可以被 LLM 调用来管理计划状态。
         
@@ -624,7 +624,7 @@ Generate a revised plan (JSON format):"""
     
     async def get_current_plan_hint(self) -> Optional[str]:
         """
-        获取当前计划的状态提示（内化自 AgentScope）。
+        获取当前计划的状态提示（参考自 AgentScope）。
         
         提示会根据计划状态自动生成，引导 LLM 下一步应该做什么。
         
@@ -668,7 +668,7 @@ Generate a revised plan (JSON format):"""
         return result.success
     
     # =========================================================================
-    # [NEW] Recursive Worker 方法（内化自 AgentScope create_worker）
+    # [NEW] Recursive Worker 方法（参考自 AgentScope create_worker）
     # =========================================================================
     
     async def spawn_worker(
@@ -680,7 +680,7 @@ Generate a revised plan (JSON format):"""
         context: Optional[Dict[str, Any]] = None
     ) -> WorkerResult:
         """
-        创建子 Worker 执行特定任务（内化自 AgentScope create_worker）。
+        创建子 Worker 执行特定任务（参考自 AgentScope create_worker）。
         
         这是"递归 Worker"机制的核心方法，允许 Planner 动态创建
         专门的 Worker 来执行具体任务。
@@ -791,7 +791,7 @@ Please complete this task and report your findings."""
         return self.worker_spawner.get_stats()
     
     # =========================================================================
-    # [NEW] Discovery Loop 方法（内化自 AgentScope 动态能力扩展）
+    # [NEW] Discovery Loop 方法（参考自 AgentScope 动态能力扩展）
     # =========================================================================
     
     def _on_discovery(self, discovery: Discovery) -> None:

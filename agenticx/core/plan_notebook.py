@@ -1,7 +1,7 @@
 """
 Plan Notebook - 计划笔记本组件
 
-内化自 AgentScope 的 plan/_plan_notebook.py
+参考自 AgentScope 的 plan/_plan_notebook.py
 
 提供"计划即工具"的核心能力：
 - 将计划状态管理封装为 Agent 可调用的工具
@@ -62,7 +62,7 @@ class DefaultPlanToHint:
     """
     默认的计划提示生成器。
     
-    内化自 AgentScope 的 plan/_plan_notebook.py::DefaultPlanToHint
+    参考自 AgentScope 的 plan/_plan_notebook.py::DefaultPlanToHint
     
     根据当前计划状态生成引导提示，帮助 Agent 理解下一步应该做什么。
     """
@@ -198,7 +198,7 @@ class PlanNotebook:
     """
     计划笔记本 - 将计划管理封装为 Agent 可调用的工具。
     
-    内化自 AgentScope 的 plan/_plan_notebook.py::PlanNotebook
+    参考自 AgentScope 的 plan/_plan_notebook.py::PlanNotebook
     
     核心功能:
     - 创建和管理计划
