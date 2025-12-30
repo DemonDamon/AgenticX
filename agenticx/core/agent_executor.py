@@ -599,7 +599,7 @@ class AgentExecutor:
     
     def list_tools(self) -> List[str]:
         """List all available tools."""
-        return self.tool_registry.list_tools()
+        return self.tool_registry.list_tools() 
     
     # =========================================================================
     # 并行工具执行方法 (内化自 Agno)
