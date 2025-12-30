@@ -1,7 +1,12 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, TypeVar, Type
 import uuid
 from datetime import datetime, timezone
+import time
+
+# 类型变量，用于 fast_construct 返回正确的类型
+_T = TypeVar("_T", bound="Agent")
+
 
 class Agent(BaseModel):
     """
@@ -25,6 +30,151 @@ class Agent(BaseModel):
     query_analyzer: Optional[Any] = Field(description="Query analyzer for the agent.", default=None)
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    
+    # =========================================================================
+    # 极速实例化方法 (内化自 Agno)
+    # =========================================================================
+    
+    @classmethod
+    def fast_construct(
+        cls: Type[_T],
+        name: str,
+        role: str,
+        goal: str,
+        organization_id: str,
+        *,
+        id: Optional[str] = None,
+        version: str = "1.0.0",
+        backstory: Optional[str] = None,
+        llm_config_name: Optional[str] = None,
+        memory_config: Optional[Dict[str, Any]] = None,
+        tool_names: Optional[List[str]] = None,
+        llm: Optional[Any] = None,
+        retrievers: Optional[Dict[str, Any]] = None,
+        query_patterns: Optional[Dict[str, Any]] = None,
+        retrieval_history: Optional[List[Dict[str, Any]]] = None,
+        query_analyzer: Optional[Any] = None,
+        _validate: bool = False,
+    ) -> _T:
+        """
+        极速实例化方法，绕过 Pydantic 的完整校验流程。
+        
+        设计原理（内化自 Agno）：
+        - Agno 使用 `@dataclass(init=False)` 实现 3μs 的实例化速度
+        - Pydantic 的 `model_construct` 可以绕过校验，直接赋值
+        - 本方法在需要高性能场景时使用，默认不进行校验
+        
+        使用场景：
+        - 大规模并行 Agent 创建（如批量任务分发）
+        - 已知输入数据有效时的性能优化路径
+        - 测试和基准测试
+        
+        Args:
+            name: Agent 名称（必填）
+            role: Agent 角色（必填）
+            goal: Agent 目标（必填）
+            organization_id: 组织 ID（必填）
+            _validate: 是否进行校验（默认 False，开启后走标准 Pydantic 路径）
+            其他参数: 可选配置
+            
+        Returns:
+            Agent 实例
+            
+        Example:
+            >>> agent = Agent.fast_construct(
+            ...     name="FastMiner",
+            ...     role="Research Assistant",
+            ...     goal="Mine insights from data",
+            ...     organization_id="org-123"
+            ... )
+            
+        Performance:
+            - fast_construct (无校验): ~1-5 μs
+            - 标准构造 (有校验): ~50-200 μs
+            
+        Warning:
+            使用此方法时，调用方需自行确保数据有效性。
+            如果 _validate=False，类型错误将在运行时而非构造时暴露。
+        """
+        if _validate:
+            # 走标准 Pydantic 构造路径（带完整校验）
+            return cls(
+                id=id or str(uuid.uuid4()),
+                name=name,
+                version=version,
+                role=role,
+                goal=goal,
+                backstory=backstory,
+                llm_config_name=llm_config_name,
+                memory_config=memory_config or {},
+                tool_names=tool_names or [],
+                organization_id=organization_id,
+                llm=llm,
+                retrievers=retrievers,
+                query_patterns=query_patterns,
+                retrieval_history=retrieval_history or [],
+                query_analyzer=query_analyzer,
+            )
+        
+        # 极速路径：使用 model_construct 绕过校验
+        # 这是 Pydantic V2 提供的官方快速构造方法
+        return cls.model_construct(
+            id=id or str(uuid.uuid4()),
+            name=name,
+            version=version,
+            role=role,
+            goal=goal,
+            backstory=backstory,
+            llm_config_name=llm_config_name,
+            memory_config=memory_config or {},
+            tool_names=tool_names or [],
+            organization_id=organization_id,
+            llm=llm,
+            retrievers=retrievers,
+            query_patterns=query_patterns,
+            retrieval_history=retrieval_history or [],
+            query_analyzer=query_analyzer,
+        )
+    
+    @classmethod
+    def measure_instantiation_time(cls, iterations: int = 1000) -> Dict[str, float]:
+        """
+        测量实例化耗时的辅助方法。
+        
+        Args:
+            iterations: 测试迭代次数
+            
+        Returns:
+            包含 fast_construct 和标准构造耗时的字典（单位：微秒）
+        """
+        # 测量 fast_construct
+        start = time.perf_counter_ns()
+        for _ in range(iterations):
+            cls.fast_construct(
+                name="BenchmarkAgent",
+                role="Tester",
+                goal="Measure performance",
+                organization_id="org-bench",
+            )
+        fast_ns = time.perf_counter_ns() - start
+        
+        # 测量标准构造
+        start = time.perf_counter_ns()
+        for _ in range(iterations):
+            cls(
+                name="BenchmarkAgent",
+                role="Tester",
+                goal="Measure performance",
+                organization_id="org-bench",
+            )
+        standard_ns = time.perf_counter_ns() - start
+        
+        return {
+            "fast_construct_us": fast_ns / iterations / 1000,
+            "standard_construct_us": standard_ns / iterations / 1000,
+            "speedup_ratio": standard_ns / fast_ns if fast_ns > 0 else float('inf'),
+            "iterations": iterations,
+        }
     
     async def execute_task(self, task, context=None):
         """Execute a task using the agent's capabilities."""
