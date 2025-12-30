@@ -1,8 +1,12 @@
 import json
 import asyncio
-from typing import Dict, Any, List, Optional, Callable, Union
+import time
+from typing import Dict, Any, List, Optional, Callable, Union, Tuple
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 import logging
+from concurrent.futures import ThreadPoolExecutor
+import traceback
 
 from ..llms.base import BaseLLMProvider
 from ..llms.response import LLMResponse
@@ -22,6 +26,62 @@ from .communication import CommunicationInterface
 from .context_compiler import ContextCompiler, create_context_compiler
 
 logger = logging.getLogger(__name__)
+
+
+# =========================================================================
+# 并行工具执行支持 (内化自 Agno)
+# =========================================================================
+
+@dataclass
+class ParallelToolResult:
+    """
+    并行工具执行的结果容器。
+    
+    设计原理（内化自 Agno）：
+    - Agno 支持在单次迭代中并行执行 LLM 返回的多个工具调用
+    - 使用 asyncio.gather 实现并发，显著降低多工具场景下的延迟
+    - 单个工具失败不应阻断其他工具的执行
+    """
+    tool_name: str
+    tool_args: Dict[str, Any]
+    success: bool
+    result: Any = None
+    error: Optional[str] = None
+    execution_time_ms: float = 0.0
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "tool_name": self.tool_name,
+            "tool_args": self.tool_args,
+            "success": self.success,
+            "result": self.result,
+            "error": self.error,
+            "execution_time_ms": self.execution_time_ms,
+        }
+
+
+@dataclass
+class ParallelExecutionSummary:
+    """并行执行的汇总信息。"""
+    total_tools: int
+    successful: int
+    failed: int
+    total_time_ms: float
+    results: List[ParallelToolResult] = field(default_factory=list)
+    
+    @property
+    def success_rate(self) -> float:
+        return self.successful / self.total_tools if self.total_tools > 0 else 0.0
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "total_tools": self.total_tools,
+            "successful": self.successful,
+            "failed": self.failed,
+            "total_time_ms": self.total_time_ms,
+            "success_rate": self.success_rate,
+            "results": [r.to_dict() for r in self.results],
+        }
 
 
 class ToolRegistry:
@@ -539,7 +599,188 @@ class AgentExecutor:
     
     def list_tools(self) -> List[str]:
         """List all available tools."""
-        return self.tool_registry.list_tools() 
+        return self.tool_registry.list_tools()
+    
+    # =========================================================================
+    # 并行工具执行方法 (内化自 Agno)
+    # =========================================================================
+    
+    async def execute_parallel_tool_calls(
+        self,
+        tool_calls: List[Dict[str, Any]],
+        event_log: Optional[EventLog] = None,
+        fail_fast: bool = False,
+        max_concurrency: Optional[int] = None,
+    ) -> ParallelExecutionSummary:
+        """
+        并行执行多个工具调用。
+        
+        设计原理（内化自 Agno）：
+        - Agno 在单次迭代中支持并行执行 LLM 返回的多个独立工具调用
+        - 使用 asyncio.gather 实现真正的并发执行
+        - 单个工具失败默认不阻断其他工具（除非 fail_fast=True）
+        
+        Args:
+            tool_calls: 工具调用列表，每个元素包含 {"tool": "tool_name", "args": {...}}
+            event_log: 可选的事件日志，用于记录执行过程
+            fail_fast: 如果为 True，任一工具失败立即终止所有执行
+            max_concurrency: 最大并发数，None 表示不限制
+            
+        Returns:
+            ParallelExecutionSummary: 并行执行的汇总结果
+            
+        Example:
+            >>> tool_calls = [
+            ...     {"tool": "search", "args": {"query": "AI"}},
+            ...     {"tool": "calculator", "args": {"expr": "2+2"}},
+            ... ]
+            >>> summary = await executor.execute_parallel_tool_calls(tool_calls)
+            >>> print(f"成功: {summary.successful}/{summary.total_tools}")
+        """
+        start_time = time.perf_counter()
+        results: List[ParallelToolResult] = []
+        
+        if not tool_calls:
+            return ParallelExecutionSummary(
+                total_tools=0,
+                successful=0,
+                failed=0,
+                total_time_ms=0.0,
+                results=[],
+            )
+        
+        # 创建异步任务列表
+        async def execute_single_tool(call: Dict[str, Any]) -> ParallelToolResult:
+            tool_name = call.get("tool", call.get("tool_name", "unknown"))
+            tool_args = call.get("args", call.get("tool_args", {}))
+            tool_start = time.perf_counter()
+            
+            try:
+                tool = self.tool_registry.get(tool_name)
+                if not tool:
+                    raise ValueError(f"Tool '{tool_name}' not found")
+                
+                # 使用 ToolExecutor 执行工具
+                from ..tools.executor import ToolExecutor
+                executor = ToolExecutor()
+                execution_result = executor.execute(tool, **tool_args)
+                
+                execution_time_ms = (time.perf_counter() - tool_start) * 1000
+                
+                if execution_result.success:
+                    return ParallelToolResult(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        success=True,
+                        result=execution_result.result,
+                        execution_time_ms=execution_time_ms,
+                    )
+                else:
+                    return ParallelToolResult(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        success=False,
+                        error=str(execution_result.error) if execution_result.error else "Unknown error",
+                        execution_time_ms=execution_time_ms,
+                    )
+                    
+            except Exception as e:
+                execution_time_ms = (time.perf_counter() - tool_start) * 1000
+                return ParallelToolResult(
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    success=False,
+                    error=str(e),
+                    execution_time_ms=execution_time_ms,
+                )
+        
+        # 使用 asyncio.gather 并行执行
+        if max_concurrency and max_concurrency > 0:
+            # 使用信号量限制并发数
+            semaphore = asyncio.Semaphore(max_concurrency)
+            
+            async def limited_execute(call: Dict[str, Any]) -> ParallelToolResult:
+                async with semaphore:
+                    return await execute_single_tool(call)
+            
+            tasks = [limited_execute(call) for call in tool_calls]
+        else:
+            tasks = [execute_single_tool(call) for call in tool_calls]
+        
+        if fail_fast:
+            # 任一失败立即抛出异常
+            results = await asyncio.gather(*tasks)
+            # 检查是否有失败
+            for result in results:
+                if not result.success:
+                    raise RuntimeError(f"Tool '{result.tool_name}' failed: {result.error}")
+        else:
+            # 收集所有结果，不管成功或失败
+            results = await asyncio.gather(*tasks, return_exceptions=False)
+        
+        # 记录事件日志（如果提供）
+        if event_log:
+            for result in results:
+                tool_call_event = ToolCallEvent(
+                    tool_name=result.tool_name,
+                    tool_args=result.tool_args,
+                    intent=f"Parallel execution",
+                    agent_id=event_log.agent_id,
+                    task_id=event_log.task_id,
+                )
+                event_log.append(tool_call_event)
+                
+                tool_result_event = ToolResultEvent(
+                    tool_name=result.tool_name,
+                    success=result.success,
+                    result=result.result if result.success else None,
+                    error=result.error if not result.success else None,
+                    agent_id=event_log.agent_id,
+                    task_id=event_log.task_id,
+                )
+                event_log.append(tool_result_event)
+        
+        total_time_ms = (time.perf_counter() - start_time) * 1000
+        successful = sum(1 for r in results if r.success)
+        failed = len(results) - successful
+        
+        logger.info(
+            f"Parallel tool execution completed: {successful}/{len(results)} successful "
+            f"in {total_time_ms:.2f}ms"
+        )
+        
+        return ParallelExecutionSummary(
+            total_tools=len(results),
+            successful=successful,
+            failed=failed,
+            total_time_ms=total_time_ms,
+            results=results,
+        )
+    
+    def execute_parallel_tool_calls_sync(
+        self,
+        tool_calls: List[Dict[str, Any]],
+        event_log: Optional[EventLog] = None,
+        fail_fast: bool = False,
+        max_concurrency: Optional[int] = None,
+    ) -> ParallelExecutionSummary:
+        """
+        并行工具执行的同步版本（便于在非异步上下文中使用）。
+        """
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        return loop.run_until_complete(
+            self.execute_parallel_tool_calls(
+                tool_calls=tool_calls,
+                event_log=event_log,
+                fail_fast=fail_fast,
+                max_concurrency=max_concurrency,
+            )
+        )
     
     # =========================================================================
     # Context Compiler 集成方法
