@@ -1,8 +1,12 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, Dict, Any, List, TypeVar, Type
+from typing import Optional, Dict, Any, List, TypeVar, Type, Callable, TYPE_CHECKING
 import uuid
 from datetime import datetime, timezone
 import time
+
+if TYPE_CHECKING:
+    from ..hooks.llm_hooks import LLMCallHookContext
+    from ..hooks.tool_hooks import ToolCallHookContext
 
 # 类型变量，用于 fast_construct 返回正确的类型
 _T = TypeVar("_T", bound="Agent")
@@ -11,6 +15,11 @@ _T = TypeVar("_T", bound="Agent")
 class Agent(BaseModel):
     """
     Represents an agent in the AgenticX framework.
+    
+    Agent的扩展字段：
+    - allow_delegation: 允许委派任务给其他 Agent
+    - llm_hooks: LLM 调用钩子列表（Agent 级别）
+    - tool_hooks: 工具调用钩子列表（Agent 级别）
     """
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for the agent.")
     name: str = Field(description="The name of the agent.")
@@ -29,10 +38,42 @@ class Agent(BaseModel):
     retrieval_history: Optional[List[Dict[str, Any]]] = Field(description="Retrieval history for the agent.", default_factory=list)
     query_analyzer: Optional[Any] = Field(description="Query analyzer for the agent.", default=None)
     
+    # =========================================================================
+    # 字段
+    # =========================================================================
+    
+    allow_delegation: bool = Field(
+        default=False,
+        description="Whether this agent can delegate tasks to other agents. "
+                    "When True, DelegateWorkTool and AskQuestionTool will be added."
+    )
+    
+    llm_hooks: Optional[Dict[str, List[Callable]]] = Field(
+        default=None,
+        description="Agent-level LLM hooks. Keys: 'before', 'after'. "
+                    "Values: List of hook functions. These are in addition to global hooks."
+    )
+    
+    tool_hooks: Optional[Dict[str, List[Callable]]] = Field(
+        default=None,
+        description="Agent-level Tool hooks. Keys: 'before', 'after'. "
+                    "Values: List of hook functions. These are in addition to global hooks."
+    )
+    
+    max_iterations: int = Field(
+        default=25,
+        description="Maximum number of iterations for agent execution loop."
+    )
+    
+    max_retry_limit: int = Field(
+        default=2,
+        description="Maximum number of retries on tool/LLM errors."
+    )
+    
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
     # =========================================================================
-    # 极速实例化方法 (内化自 Agno)
+    # 极速实例化方法
     # =========================================================================
     
     @classmethod
@@ -54,12 +95,18 @@ class Agent(BaseModel):
         query_patterns: Optional[Dict[str, Any]] = None,
         retrieval_history: Optional[List[Dict[str, Any]]] = None,
         query_analyzer: Optional[Any] = None,
+        # 字段
+        allow_delegation: bool = False,
+        llm_hooks: Optional[Dict[str, List[Callable]]] = None,
+        tool_hooks: Optional[Dict[str, List[Callable]]] = None,
+        max_iterations: int = 25,
+        max_retry_limit: int = 2,
         _validate: bool = False,
     ) -> _T:
         """
         极速实例化方法，绕过 Pydantic 的完整校验流程。
         
-        设计原理（内化自 Agno）：
+        设计原理：
         - Agno 使用 `@dataclass(init=False)` 实现 3μs 的实例化速度
         - Pydantic 的 `model_construct` 可以绕过校验，直接赋值
         - 本方法在需要高性能场景时使用，默认不进行校验
@@ -114,6 +161,12 @@ class Agent(BaseModel):
                 query_patterns=query_patterns,
                 retrieval_history=retrieval_history or [],
                 query_analyzer=query_analyzer,
+                # 字段
+                allow_delegation=allow_delegation,
+                llm_hooks=llm_hooks,
+                tool_hooks=tool_hooks,
+                max_iterations=max_iterations,
+                max_retry_limit=max_retry_limit,
             )
         
         # 极速路径：使用 model_construct 绕过校验
@@ -134,6 +187,12 @@ class Agent(BaseModel):
             query_patterns=query_patterns,
             retrieval_history=retrieval_history or [],
             query_analyzer=query_analyzer,
+            # 字段
+            allow_delegation=allow_delegation,
+            llm_hooks=llm_hooks,
+            tool_hooks=tool_hooks,
+            max_iterations=max_iterations,
+            max_retry_limit=max_retry_limit,
         )
     
     @classmethod
