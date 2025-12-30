@@ -93,6 +93,37 @@ from .protocols import (
     A2AClientError, A2AConnectionError, A2ATaskError
 )
 
+# crewAI 参考: Hooks 系统
+from .hooks import (
+    # LLM Hooks
+    LLMCallHookContext,
+    register_before_llm_call_hook,
+    register_after_llm_call_hook,
+    clear_all_llm_call_hooks,
+    
+    # Tool Hooks
+    ToolCallHookContext,
+    register_before_tool_call_hook,
+    register_after_tool_call_hook,
+    clear_all_tool_call_hooks,
+)
+
+# crewAI 参考: Flow 系统
+from .flow import (
+    Flow, FlowState, FlowMeta,
+    start, listen, router,
+    or_, and_,
+    StartMethod, ListenMethod, RouterMethod,
+)
+
+# crewAI 参考: Delegation 工具
+from .collaboration.delegation import (
+    DelegateWorkTool,
+    AskQuestionTool,
+    DelegationContext,
+    create_delegation_tools,
+)
+
 # M9: 可观测性模块导出
 from .observability import (
     # 核心回调系统
@@ -185,5 +216,20 @@ __all__ = [
     "TrajectorySummarizer", "FailureAnalyzer", "BottleneckDetector",
     "MetricsCalculator", "BenchmarkRunner", "AutoEvaluator",
     "WebSocketCallbackHandler", "EventStream", "RealtimeMonitor",
-    "EventProcessor", "TimeSeriesData", "StatisticsCalculator", "DataExporter"
+    "EventProcessor", "TimeSeriesData", "StatisticsCalculator", "DataExporter",
+    
+    # crewAI 参考: Hooks 系统
+    "LLMCallHookContext", "ToolCallHookContext",
+    "register_before_llm_call_hook", "register_after_llm_call_hook",
+    "register_before_tool_call_hook", "register_after_tool_call_hook",
+    "clear_all_llm_call_hooks", "clear_all_tool_call_hooks",
+    
+    # crewAI 参考: Flow 系统
+    "Flow", "FlowState", "FlowMeta",
+    "start", "listen", "router", "or_", "and_",
+    "StartMethod", "ListenMethod", "RouterMethod",
+    
+    # crewAI 参考: Delegation 工具
+    "DelegateWorkTool", "AskQuestionTool", "DelegationContext",
+    "create_delegation_tools",
 ]
