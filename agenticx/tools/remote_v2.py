@@ -1,7 +1,7 @@
 """
 MCP Client V2: 基于官方 SDK 的持久化会话实现
 
-本模块将官方 MCP Python SDK 内化进 AgenticX，实现：
+本模块将官方 MCP Python SDK 参考进 AgenticX，实现：
 1. 持久化会话（消除每次调用重启进程的开销）
 2. 完整的协议支持（Tools, Resources, Sampling）
 3. 智能体自动挖掘能力（通过 Sampling 实现工具内推理）

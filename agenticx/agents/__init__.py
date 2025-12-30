@@ -16,7 +16,7 @@ from .spawn_worker import (
 
 __all__ = [
     "MiningPlannerAgent",
-    # Recursive Worker (内化自 AgentScope)
+    # Recursive Worker (参考自 AgentScope)
     "WorkerSpawner",
     "WorkerConfig",
     "WorkerResult",

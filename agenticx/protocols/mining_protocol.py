@@ -127,11 +127,11 @@ class MiningStep(BaseModel):
     # 新增字段：与 AgentScope SubTask 对齐
     outcome: Optional[str] = Field(
         default=None,
-        description="实际成果（内化自 AgentScope SubTask.outcome）"
+        description="实际成果（参考自 AgentScope SubTask.outcome）"
     )
     expected_outcome: Optional[str] = Field(
         default=None,
-        description="预期成果（内化自 AgentScope SubTask.expected_outcome）"
+        description="预期成果（参考自 AgentScope SubTask.expected_outcome）"
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -170,12 +170,12 @@ class MiningStep(BaseModel):
         return False
     
     # =========================================================================
-    # 与 AgentScope SubTask 兼容的方法（内化自 AgentScope）
+    # 与 AgentScope SubTask 兼容的方法（参考自 AgentScope）
     # =========================================================================
     
     def finish(self, outcome: str) -> None:
         """
-        完成步骤并设置成果（内化自 AgentScope SubTask.finish）
+        完成步骤并设置成果（参考自 AgentScope SubTask.finish）
         
         Args:
             outcome: 步骤的实际成果
@@ -201,7 +201,7 @@ class MiningStep(BaseModel):
         }
     
     def to_oneline_markdown(self) -> str:
-        """转换为单行 Markdown（内化自 AgentScope SubTask）"""
+        """转换为单行 Markdown（参考自 AgentScope SubTask）"""
         status_map = {
             MiningStepStatus.PENDING: "- [ ]",
             MiningStepStatus.IN_PROGRESS: "- [ ][WIP]",

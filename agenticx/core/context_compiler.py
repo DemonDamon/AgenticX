@@ -1,7 +1,7 @@
 """
 Context Compiler (上下文编译器) - 增强版
 
-内化自 Google ADK 的 "Compiled View" 机制。
+参考自 Google ADK 的 "Compiled View" 机制。
 核心思想：上下文不是事件的简单拼接，而是对 EventLog 的按需"编译"。
 
 增强功能（v2）：
@@ -397,7 +397,7 @@ class SimpleEventSummarizer(EventSummarizer):
 
 
 # =============================================================================
-# 快速启发式压缩器（内化自 DeerFlow ContextManager）
+# 快速启发式压缩器（参考自 DeerFlow ContextManager）
 # =============================================================================
 
 class FastHeuristicCompressor:

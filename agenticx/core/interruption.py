@@ -1,7 +1,7 @@
 """
 Interruption & State Recovery - 实时中断与状态恢复
 
-内化自 AgentScope 的 Realtime Steering 机制
+参考自 AgentScope 的 Realtime Steering 机制
 
 提供长周期任务的实时中断能力：
 - 优雅中断正在执行的 Worker
@@ -56,7 +56,7 @@ class InterruptSignal(BaseModel):
     """
     中断信号。
     
-    内化自 AgentScope 的 _is_interrupted 元数据模式。
+    参考自 AgentScope 的 _is_interrupted 元数据模式。
     """
     id: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")[:16]

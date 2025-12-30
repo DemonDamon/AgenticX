@@ -1,7 +1,7 @@
 """
 Spawn Worker - 递归 Worker 工具
 
-内化自 AgentScope 的 meta_planner_agent/tool.py::create_worker
+参考自 AgentScope 的 meta_planner_agent/tool.py::create_worker
 
 提供"递归 Worker"能力：
 - Planner 可以动态创建子 Worker 执行具体任务
@@ -36,14 +36,14 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# 结果模型（内化自 AgentScope 的 ResultModel）
+# 结果模型（参考自 AgentScope 的 ResultModel）
 # =============================================================================
 
 class WorkerResult(BaseModel):
     """
     Worker 执行结果模型。
     
-    内化自 AgentScope 的 ResultModel，用于结构化返回子任务结果。
+    参考自 AgentScope 的 ResultModel，用于结构化返回子任务结果。
     """
     success: bool = Field(
         description="任务是否成功完成"
@@ -197,7 +197,7 @@ class WorkerSpawner:
     """
     Worker 生成器 - 提供递归 Worker 创建能力。
     
-    内化自 AgentScope 的 create_worker 模式，提供：
+    参考自 AgentScope 的 create_worker 模式，提供：
     - 动态创建子 Worker
     - 任务执行和结果收集
     - 流式响应（可选）
@@ -416,7 +416,7 @@ When you complete the task, provide:
         """
         执行 Worker（流式）。
         
-        内化自 AgentScope 的流式响应模式。
+        参考自 AgentScope 的流式响应模式。
         
         Args:
             execution: 执行记录

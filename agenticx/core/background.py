@@ -1,5 +1,5 @@
 """
-后台任务池 (内化自 Agno)
+后台任务池 (参考自 Agno)
 
 设计原理：
 - Agno 使用共享线程池执行 Memory 持久化、Session 更新等非关键任务
@@ -96,7 +96,7 @@ class BackgroundTaskPool:
     """
     后台任务池，用于执行非阻塞的后台任务。
     
-    设计原理（内化自 Agno）：
+    设计原理（参考自 Agno）：
     - 使用 ThreadPoolExecutor 处理 CPU 密集型或同步阻塞任务
     - 使用 asyncio.create_task 处理异步任务
     - 提供任务追踪和优雅关闭机制

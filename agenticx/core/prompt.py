@@ -102,7 +102,7 @@ class CompiledContextRenderer(ContextRenderer):
     """
     编译视图渲染器（Compiled View Renderer）。
     
-    核心思想（内化自 ADK）：
+    核心思想（参考自 ADK）：
     - 上下文不是事件的简单拼接，而是对 EventLog 的"编译"结果。
     - 当存在 CompactedEvent 时，其覆盖的原始事件会被"遮蔽"，仅输出摘要。
     

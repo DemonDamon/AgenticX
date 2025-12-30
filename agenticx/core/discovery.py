@@ -1,7 +1,7 @@
 """
 Discovery Module - 发现循环机制
 
-内化自 AgentScope 的动态能力扩展理念
+参考自 AgentScope 的动态能力扩展理念
 
 提供 Worker -> Planner 的发现通知能力：
 - Worker 在执行任务时发现新工具/API/能力
