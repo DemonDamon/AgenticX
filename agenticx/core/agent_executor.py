@@ -25,11 +25,23 @@ from .error_handler import ErrorHandler
 from .communication import CommunicationInterface
 from .context_compiler import ContextCompiler, create_context_compiler
 
+# Hooks 系统
+from ..hooks.llm_hooks import (
+    LLMCallHookContext,
+    execute_before_llm_call_hooks,
+    execute_after_llm_call_hooks,
+)
+from ..hooks.tool_hooks import (
+    ToolCallHookContext,
+    execute_before_tool_call_hooks,
+    execute_after_tool_call_hooks,
+)
+
 logger = logging.getLogger(__name__)
 
 
 # =========================================================================
-# 并行工具执行支持 (内化自 Agno)
+# 并行工具执行支持
 # =========================================================================
 
 @dataclass
@@ -37,7 +49,7 @@ class ParallelToolResult:
     """
     并行工具执行的结果容器。
     
-    设计原理（内化自 Agno）：
+    设计原理：
     - Agno 支持在单次迭代中并行执行 LLM 返回的多个工具调用
     - 使用 asyncio.gather 实现并发，显著降低多工具场景下的延迟
     - 单个工具失败不应阻断其他工具的执行
@@ -155,7 +167,7 @@ class AgentExecutor:
     The core execution engine for agents.
     Implements the "Own Your Control Flow" principle from 12-Factor Agents.
     
-    新增功能（内化自 ADK）：
+    新增功能：
     - Context Compiler: 自动压缩长对话历史，控制 Token 成本。
     - Compiled Context Renderer: 使用"编译视图"渲染上下文。
     """
@@ -318,8 +330,8 @@ class AgentExecutor:
                 # Get next action from LLM
                 action = self._get_next_action(agent, task, event_log)
                 
-                # Execute the action
-                self._execute_action(action, event_log)
+                # Execute the action (pass agent for hooks access)
+                self._execute_action(action, event_log, agent)
                 
             except ApprovalRequiredError:
                 # 重新抛出 ApprovalRequiredError，让 run 方法处理
@@ -369,6 +381,43 @@ class AgentExecutor:
             # Use regular template
             prompt = self.prompt_manager.build_prompt("react", event_log, agent, task)
         
+        # 准备消息列表
+        messages = [{"role": "user", "content": prompt}]
+        
+        # === Before LLM Call Hooks ===
+        iteration_count = len(event_log.get_events_by_type("llm_call"))
+        hook_context = LLMCallHookContext(
+            messages=messages,
+            agent_id=agent.id,
+            agent_name=agent.name,
+            task_id=task.id,
+            iterations=iteration_count,
+            model_name=getattr(self.llm_provider, 'model', 'unknown'),
+        )
+        
+        # 执行全局 before hooks
+        should_continue = execute_before_llm_call_hooks(hook_context)
+        
+        # 执行 Agent 级别的 before hooks
+        if should_continue and agent.llm_hooks and agent.llm_hooks.get('before'):
+            for hook in agent.llm_hooks['before']:
+                try:
+                    result = hook(hook_context)
+                    if result is False:
+                        should_continue = False
+                        break
+                except Exception as e:
+                    logger.warning(f"Agent LLM before hook error: {e}")
+        
+        if not should_continue:
+            # Hooks 阻止了 LLM 调用，返回默认 finish 动作
+            logger.info("LLM call blocked by hook")
+            return {
+                "action": "finish_task",
+                "result": "LLM call blocked by hook",
+                "reasoning": "A registered hook blocked the LLM call"
+            }
+        
         # Call LLM
         llm_call_event = LLMCallEvent(
             prompt=prompt,
@@ -378,8 +427,8 @@ class AgentExecutor:
         )
         event_log.append(llm_call_event)
 
-        # 始终用self.llm_provider调用LLM，不用agent.model
-        response = self.llm_provider.invoke([{"role": "user", "content": prompt}])
+        # 使用可能被 hooks 修改的 messages
+        response = self.llm_provider.invoke(hook_context.messages)
 
         # Handle token usage safely
         token_usage = None
@@ -389,8 +438,28 @@ class AgentExecutor:
             elif isinstance(response.token_usage, dict):
                 token_usage = response.token_usage
         
+        # === After LLM Call Hooks ===
+        hook_context.response = response.content
+        
+        # 执行全局 after hooks
+        modified_response = execute_after_llm_call_hooks(hook_context)
+        
+        # 执行 Agent 级别的 after hooks
+        if agent.llm_hooks and agent.llm_hooks.get('after'):
+            for hook in agent.llm_hooks['after']:
+                try:
+                    result = hook(hook_context)
+                    if result is not None:
+                        modified_response = result
+                        hook_context.response = result
+                except Exception as e:
+                    logger.warning(f"Agent LLM after hook error: {e}")
+        
+        # 使用可能被修改的响应
+        final_response = modified_response if modified_response is not None else response.content
+        
         llm_response_event = LLMResponseEvent(
-            response=response.content,
+            response=final_response,
             token_usage=token_usage,
             cost=response.cost,
             agent_id=agent.id,
@@ -399,11 +468,11 @@ class AgentExecutor:
         event_log.append(llm_response_event)
 
         # Parse action
-        action = self.action_parser.parse_action(response.content)
+        action = self.action_parser.parse_action(final_response)
         
         return action
     
-    def _execute_action(self, action: Dict[str, Any], event_log: EventLog):
+    def _execute_action(self, action: Dict[str, Any], event_log: EventLog, agent: Optional[Agent] = None):
         """
         Execute an action based on its type.
         This is the core switch statement that routes actions.
@@ -411,11 +480,12 @@ class AgentExecutor:
         Args:
             action: The action to execute
             event_log: Event log to record events
+            agent: The agent (optional, for accessing agent-level hooks)
         """
         action_type = action["action"]
         
         if action_type == "tool_call":
-            self._execute_tool_call(action, event_log)
+            self._execute_tool_call(action, event_log, agent)
         elif action_type == "human_request":
             self._execute_human_request(action, event_log)
         elif action_type == "finish_task":
@@ -423,11 +493,54 @@ class AgentExecutor:
         else:
             raise ValueError(f"Unknown action type: {action_type}")
     
-    def _execute_tool_call(self, action: Dict[str, Any], event_log: EventLog):
-        """Execute a tool call action."""
+    def _execute_tool_call(self, action: Dict[str, Any], event_log: EventLog, agent: Optional[Agent] = None):
+        """Execute a tool call action with Hooks integration."""
         tool_name = action["tool"]
         tool_args = action.get("args", {})
         intent = action.get("reasoning", "No reasoning provided")
+        
+        # Get tool first for hook context
+        tool = self.tool_registry.get(tool_name)
+        
+        # === Before Tool Call Hooks ===
+        hook_context = ToolCallHookContext(
+            tool_name=tool_name,
+            tool_input=tool_args.copy(),  # 复制以便 hooks 可以修改
+            tool=tool,
+            agent_id=event_log.agent_id,
+            agent_name=agent.name if agent else None,
+            task_id=event_log.task_id,
+        )
+        
+        # 执行全局 before hooks
+        should_continue = execute_before_tool_call_hooks(hook_context)
+        
+        # 执行 Agent 级别的 before hooks
+        if should_continue and agent and agent.tool_hooks and agent.tool_hooks.get('before'):
+            for hook in agent.tool_hooks['before']:
+                try:
+                    result = hook(hook_context)
+                    if result is False:
+                        should_continue = False
+                        break
+                except Exception as e:
+                    logger.warning(f"Agent Tool before hook error: {e}")
+        
+        if not should_continue:
+            # Hooks 阻止了工具调用
+            logger.info(f"Tool call '{tool_name}' blocked by hook")
+            tool_result_event = ToolResultEvent(
+                tool_name=tool_name,
+                success=False,
+                error="Tool call blocked by hook",
+                agent_id=event_log.agent_id,
+                task_id=event_log.task_id
+            )
+            event_log.append(tool_result_event)
+            raise ValueError(f"Tool call '{tool_name}' blocked by hook")
+        
+        # 使用可能被 hooks 修改的参数
+        tool_args = hook_context.tool_input
         
         # Record tool call event
         tool_call_event = ToolCallEvent(
@@ -439,8 +552,6 @@ class AgentExecutor:
         )
         event_log.append(tool_call_event)
         
-        # Get tool
-        tool = self.tool_registry.get(tool_name)
         if not tool:
             # Record the error before raising
             tool_result_event = ToolResultEvent(
@@ -461,10 +572,30 @@ class AgentExecutor:
             execution_result = executor.execute(tool, **tool_args)
             
             if execution_result.success:
+                # === After Tool Call Hooks ===
+                hook_context.tool_result = str(execution_result.result) if execution_result.result else ""
+                
+                # 执行全局 after hooks
+                modified_result = execute_after_tool_call_hooks(hook_context)
+                
+                # 执行 Agent 级别的 after hooks
+                if agent and agent.tool_hooks and agent.tool_hooks.get('after'):
+                    for hook in agent.tool_hooks['after']:
+                        try:
+                            result = hook(hook_context)
+                            if result is not None:
+                                modified_result = result
+                                hook_context.tool_result = result
+                        except Exception as e:
+                            logger.warning(f"Agent Tool after hook error: {e}")
+                
+                # 使用可能被修改的结果
+                final_result = modified_result if modified_result is not None else execution_result.result
+                
                 tool_result_event = ToolResultEvent(
                     tool_name=tool_name,
                     success=True,
-                    result=execution_result.result,
+                    result=final_result,
                     agent_id=event_log.agent_id,
                     task_id=event_log.task_id
                 )
@@ -602,7 +733,7 @@ class AgentExecutor:
         return self.tool_registry.list_tools() 
     
     # =========================================================================
-    # 并行工具执行方法 (内化自 Agno)
+    # 并行工具执行方法
     # =========================================================================
     
     async def execute_parallel_tool_calls(
@@ -615,7 +746,7 @@ class AgentExecutor:
         """
         并行执行多个工具调用。
         
-        设计原理（内化自 Agno）：
+        设计原理：
         - Agno 在单次迭代中支持并行执行 LLM 返回的多个独立工具调用
         - 使用 asyncio.gather 实现真正的并发执行
         - 单个工具失败默认不阻断其他工具（除非 fail_fast=True）
