@@ -26,6 +26,7 @@ class ExecutionResult:
         error: Optional[Exception] = None,
         execution_time: float = 0.0,
         retry_count: int = 0,
+        state: Any = None,
     ):
         self.tool_name = tool_name
         self.success = success
@@ -33,6 +34,7 @@ class ExecutionResult:
         self.error = error
         self.execution_time = execution_time
         self.retry_count = retry_count
+        self.state = state
     
     def __repr__(self) -> str:
         status = "SUCCESS" if self.success else "FAILED"
@@ -238,6 +240,9 @@ class ToolExecutor:
                 
                 # 执行工具
                 result = tool.run(**kwargs)
+                state_out = None
+                if hasattr(tool, "post_state_hook") and callable(getattr(tool, "post_state_hook")):
+                    state_out = getattr(tool, "post_state_hook")()
                 
                 # 记录成功
                 execution_time = time.time() - start_time
@@ -248,6 +253,7 @@ class ToolExecutor:
                     tool_name=tool.name,
                     success=True,
                     result=result,
+                    state=state_out,
                     execution_time=execution_time,
                     retry_count=retry_count,
                 )
@@ -312,6 +318,15 @@ class ToolExecutor:
                 
                 # 执行工具
                 result = await tool.arun(**kwargs)
+                state_out = None
+                if hasattr(tool, "post_state_hook") and callable(getattr(tool, "post_state_hook")):
+                    # 允许 post_state_hook 是协程或同步函数
+                    hook = getattr(tool, "post_state_hook")
+                    maybe_coro = hook()
+                    if asyncio.iscoroutine(maybe_coro):
+                        state_out = await maybe_coro
+                    else:
+                        state_out = maybe_coro
                 
                 # 记录成功
                 execution_time = time.time() - start_time
@@ -322,6 +337,7 @@ class ToolExecutor:
                     tool_name=tool.name,
                     success=True,
                     result=result,
+                    state=state_out,
                     execution_time=execution_time,
                     retry_count=retry_count,
                 )
