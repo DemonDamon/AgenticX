@@ -141,6 +141,34 @@ class BaseTool(ABC):
                 tool_name=self.name,
                 details={"input_args": kwargs, "validation_error": str(e)}
             )
+
+    def validate_bash_syntax(self, command: str) -> None:
+        """
+        针对 bash 类工具的轻量语法预检。
+        仅在需要时由子类显式调用。
+        """
+        import subprocess
+
+        try:
+            completed = subprocess.run(
+                ["bash", "-n", "-c", command],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+        except subprocess.TimeoutExpired as exc:  # pragma: no cover - unlikely
+            raise ToolValidationError(
+                "bash syntax check timeout",
+                tool_name=self.name,
+                details={"command": command},
+            ) from exc
+        if completed.returncode != 0:
+            raise ToolValidationError(
+                "bash syntax invalid",
+                tool_name=self.name,
+                details={"command": command, "stderr": completed.stderr},
+            )
     
     @abstractmethod
     def _run(self, **kwargs) -> Any:
