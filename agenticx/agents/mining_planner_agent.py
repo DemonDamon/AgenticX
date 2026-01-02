@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from agenticx.core.agent import Agent, AgentContext, AgentResult
 from agenticx.core.plan_notebook import PlanNotebook, ToolResult as PlanToolResult
 from agenticx.core.plan_storage import Plan, SubTask
+from agenticx.core.slave_parallel_executor import SlaveParallelExecutor, ParallelTaskResult
 from agenticx.protocols.mining_protocol import (
     MiningPlan,
     MiningStep,
@@ -73,6 +74,7 @@ class MiningPlannerAgent(Agent):
         auto_accept: bool = False,
         organization_id: str = "default",
         plan_notebook: Optional[PlanNotebook] = None,
+        sop_registry: Optional[Any] = None,
         **kwargs
     ):
         """
@@ -120,6 +122,8 @@ class MiningPlannerAgent(Agent):
         
         # [NEW] Plan-as-a-Tool: 计划笔记本（参考自 AgentScope）
         object.__setattr__(self, 'plan_notebook', plan_notebook)
+        # [NEW] SOP Registry: 轻量 SOP 召回（参考 JoyAgent）
+        object.__setattr__(self, 'sop_registry', sop_registry)
         
         # 如果提供了 plan_notebook，注册计划变更钩子
         if plan_notebook:
@@ -153,7 +157,11 @@ class MiningPlannerAgent(Agent):
         context: Optional[AgentContext] = None,
         background_context: Optional[str] = None,
         auto_accept: Optional[bool] = None,
-        sync_to_notebook: bool = True
+        sync_to_notebook: bool = True,
+        run_parallel: bool = False,
+        parallel_worker: Optional[Callable[[str], Any]] = None,
+        parallel_fail_fast: bool = False,
+        parallel_max_concurrency: Optional[int] = None,
     ) -> MiningPlan:
         """
         生成挖掘计划。
@@ -197,6 +205,13 @@ class MiningPlannerAgent(Agent):
         combined_context = background_context or ""
         if plan_hint:
             combined_context = f"{combined_context}\n\n[Plan Notebook Hint]:\n{plan_hint}"
+        # [NEW] SOP 召回提示
+        if self.sop_registry:
+            try:
+                sop_mode, sop_prompt = self.sop_registry.build_prompt(clarified_goal)
+                combined_context = f"{combined_context}\n\n[SOP {sop_mode}]:\n{sop_prompt}".strip()
+            except Exception as e:
+                logger.warning(f"SOP recall failed: {e}")
         
         raw_plan = await self._generate_plan_with_llm(
             clarified_goal,
@@ -221,6 +236,28 @@ class MiningPlannerAgent(Agent):
         
         object.__setattr__(self, 'plans_generated', self.plans_generated + 1)
         logger.info(f"Plan generated successfully: {len(final_plan.steps)} steps")
+
+        # [NEW] 如果启用并行执行，运行并同步状态
+        if run_parallel and parallel_worker:
+            try:
+                parallel_results = await self.execute_plan_in_parallel(
+                    worker=parallel_worker,
+                    fail_fast=parallel_fail_fast,
+                    max_concurrency=parallel_max_concurrency,
+                )
+                # 简单统计
+                success = sum(1 for r in parallel_results if r.success)
+                fail = len(parallel_results) - success
+                summary = {
+                    "total": len(parallel_results),
+                    "success": success,
+                    "failed": fail,
+                    "duration_ms_total": sum(r.duration_ms for r in parallel_results),
+                }
+                object.__setattr__(self, "_last_parallel_summary", summary)
+                logger.info(f"Parallel execution summary: {summary}")
+            except Exception as e:
+                logger.warning(f"Parallel execution skipped: {e}")
         
         return final_plan
     
@@ -485,6 +522,55 @@ Generate the plan (JSON only, no explanation):"""
             return await self._revise_plan(plan, edit_instructions, context)
         
         return plan  # [ACCEPTED]
+
+    # =========================================================================
+    # [NEW] 并行子任务执行（参考 JoyAgent 的 Slave Executor 思路）
+    # =========================================================================
+
+    async def execute_plan_in_parallel(
+        self,
+        worker: Callable[[str], Any],
+        fail_fast: bool = False,
+        max_concurrency: Optional[int] = None,
+    ) -> List[ParallelTaskResult]:
+        """
+        并行执行 PlanNotebook 当前计划的所有子任务。
+
+        Args:
+            worker: 接受任务描述字符串的函数或协程，返回任意结果
+            fail_fast: 任一失败是否立即中断
+            max_concurrency: 最大并发量，None 表示不限制
+
+        Returns:
+            ParallelTaskResult 列表
+        """
+        if not self.plan_notebook or not self.plan_notebook.current_plan:
+            raise ValueError("No active plan to execute in parallel.")
+
+        plan = self.plan_notebook.current_plan
+        tasks = [
+            f"{st.name}: {st.description}"
+            for st in plan.subtasks
+        ]
+
+        executor = SlaveParallelExecutor(
+            max_concurrency=max_concurrency,
+            fail_fast=fail_fast,
+        )
+        results = await executor.run_tasks(tasks, worker)
+
+        # 同步成功结果到 PlanNotebook（轻量处理）
+        for idx, res in enumerate(results):
+            if idx >= len(plan.subtasks):
+                continue
+            if res.success:
+                outcome = str(res.result) if res.result is not None else "completed"
+                await self.plan_notebook.finish_subtask(idx, outcome)
+            else:
+                # 标记为放弃，保留失败原因
+                await self.plan_notebook.update_subtask_state(idx, "abandoned")
+
+        return results
     
     async def _revise_plan(
         self,
