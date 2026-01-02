@@ -82,6 +82,23 @@ from .base import (
     Flow,
 )
 
+from .execution_plan import (
+    SubtaskStatus,
+    StageStatus,
+    InterventionState,
+    Subtask,
+    ExecutionStage,
+    ExecutionPlan,
+)
+
+from .execution_plan_manager import (
+    PlanStorageProtocol,
+    InMemoryPlanStorage,
+    FilePlanStorage,
+    PlanEvent,
+    ExecutionPlanManager,
+)
+
 
 __all__ = [
     # Types
@@ -111,6 +128,19 @@ __all__ = [
     # Base class
     "FlowMeta",
     "Flow",
+    # ExecutionPlan (Intervenable Agent Support)
+    "SubtaskStatus",
+    "StageStatus",
+    "InterventionState",
+    "Subtask",
+    "ExecutionStage",
+    "ExecutionPlan",
+    # ExecutionPlanManager
+    "PlanStorageProtocol",
+    "InMemoryPlanStorage",
+    "FilePlanStorage",
+    "PlanEvent",
+    "ExecutionPlanManager",
     # Utility functions
     "is_flow_method_name",
     "is_flow_condition_dict",
