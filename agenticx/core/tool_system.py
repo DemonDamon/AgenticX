@@ -14,7 +14,11 @@ from .registry import ToolRegistry, ToolFactory, get_registry as get_tool_regist
 from .executor import ToolExecutor, ExecutionConfig, get_executor as get_tool_executor
 from .security import SecurityManager, get_security_manager
 from .adapters import ProtocolAdapter, create_multi_protocol_adapter
-from .marketplace import ToolMarketplace, get_marketplace
+try:
+    from .marketplace import ToolMarketplace, get_marketplace
+except Exception:  # pragma: no cover - sandbox may block SSL for requests
+    ToolMarketplace = None  # type: ignore
+    get_marketplace = None  # type: ignore
 
 
 @dataclass
