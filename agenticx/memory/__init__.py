@@ -11,8 +11,12 @@ from .short_term import ShortTermMemory
 from .mcp_memory import MCPMemory
 from .component import MemoryComponent
 from .knowledge_base import KnowledgeBase
-from .mem0_memory import Mem0 as AsyncMem0
-from .mem0_wrapper import Mem0
+try:
+    from .mem0_memory import Mem0 as AsyncMem0
+    from .mem0_wrapper import Mem0
+except Exception:  # pragma: no cover - sandbox may block requests/ssl
+    AsyncMem0 = None  # type: ignore
+    Mem0 = None  # type: ignore
 
 # Hierarchical Memory Components
 from .hierarchical import (
@@ -42,6 +46,9 @@ from .memory_decay import (
     DecayParameters,
     DecayAnalysis
 )
+
+# SOP Registry (JoyAgent-inspired, lightweight)
+from .sop_registry import SOPRegistry, SOPItem, SOPMode
 
 # For backward compatibility
 Mem0Wrapper = Mem0
@@ -91,5 +98,10 @@ __all__ = [
     "MemoryDecayService",
     "DecayStrategy",
     "DecayParameters",
-    "DecayAnalysis"
+    "DecayAnalysis",
+
+    # SOP Registry
+    "SOPRegistry",
+    "SOPItem",
+    "SOPMode",
 ] 
