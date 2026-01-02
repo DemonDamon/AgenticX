@@ -69,21 +69,35 @@ from .adapters import (
     create_multi_protocol_adapter,
 )
 
-# Marketplace
-from .marketplace import (
-    ToolMarketplace,
-    ToolManifest,
-    ToolListing,
-    ToolReview,
-    ToolStatus as MarketplaceToolStatus,
-    ToolCategory as MarketplaceToolCategory,
-    MarketplaceException,
-    ToolNotFoundException as MarketplaceToolNotFoundException,
-    ToolAlreadyExistsException,
-    PermissionDeniedException as MarketplacePermissionDeniedException,
-    RemoteMarketplaceClient,
-    get_marketplace,
-)
+# Marketplace (lazy / best-effort import to avoid sandbox SSL issues)
+try:
+    from .marketplace import (
+        ToolMarketplace,
+        ToolManifest,
+        ToolListing,
+        ToolReview,
+        ToolStatus as MarketplaceToolStatus,
+        ToolCategory as MarketplaceToolCategory,
+        MarketplaceException,
+        ToolNotFoundException as MarketplaceToolNotFoundException,
+        ToolAlreadyExistsException,
+        PermissionDeniedException as MarketplacePermissionDeniedException,
+        RemoteMarketplaceClient,
+        get_marketplace,
+    )
+except Exception:  # pragma: no cover - sandbox may block requests SSL
+    ToolMarketplace = None  # type: ignore
+    ToolManifest = None  # type: ignore
+    ToolListing = None  # type: ignore
+    ToolReview = None  # type: ignore
+    MarketplaceToolStatus = None  # type: ignore
+    MarketplaceToolCategory = None  # type: ignore
+    MarketplaceException = None  # type: ignore
+    MarketplaceToolNotFoundException = None  # type: ignore
+    ToolAlreadyExistsException = None  # type: ignore
+    MarketplacePermissionDeniedException = None  # type: ignore
+    RemoteMarketplaceClient = None  # type: ignore
+    get_marketplace = None  # type: ignore
 
 # Tool System Integration
 from .tool_system import (
@@ -145,6 +159,12 @@ from .workflow_engine import (
     ExecutionContext, NodeExecution, WorkflowStatus, NodeStatus,
     WorkflowResult
 )
+
+# Code-as-Action executor (lightweight, sandboxed)
+from .code_action_executor import CodeActionExecutor, CodeActionResult
+
+# Slave Parallel Executor (task-level parallelism)
+from .slave_parallel_executor import SlaveParallelExecutor, ParallelTaskResult
 
 # Plan Notebook (参考自 AgentScope 的 Plan Module)
 from .plan_storage import (
@@ -339,6 +359,14 @@ __all__ = [
     "ExecutionContext",
     "WorkflowContext",  # 别名
     "WorkflowResult",
+
+    # Code-as-Action
+    "CodeActionExecutor",
+    "CodeActionResult",
+
+    # Slave Parallelism
+    "SlaveParallelExecutor",
+    "ParallelTaskResult",
     "NodeExecution",
     "WorkflowStatus",
     "NodeStatus",
