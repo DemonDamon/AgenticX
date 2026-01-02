@@ -15,6 +15,8 @@ from .credentials import CredentialStore
 from .remote import RemoteTool, MCPClient, MCPServerConfig, load_mcp_config, create_mcp_client
 from .remote_v2 import MCPClientV2, RemoteToolV2
 from .mineru import create_mineru_parse_tool, create_mineru_ocr_languages_tool
+from .windowed import WindowedFileTool
+from .shell_bundle import ShellBundleLoader, ShellScriptTool
 try:
     from .builtin import (
         WebSearchTool,
@@ -74,4 +76,7 @@ __all__ = [
     # MinerU 工具
     "create_mineru_parse_tool",
     "create_mineru_ocr_languages_tool",
+    "WindowedFileTool",
+    "ShellBundleLoader",
+    "ShellScriptTool",
 ] 
