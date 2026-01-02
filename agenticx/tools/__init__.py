@@ -15,13 +15,20 @@ from .credentials import CredentialStore
 from .remote import RemoteTool, MCPClient, MCPServerConfig, load_mcp_config, create_mcp_client
 from .remote_v2 import MCPClientV2, RemoteToolV2
 from .mineru import create_mineru_parse_tool, create_mineru_ocr_languages_tool
-from .builtin import (
-    WebSearchTool,
-    FileTool,
-    CodeInterpreterTool,
-    HttpRequestTool,
-    JsonTool,
-)
+try:
+    from .builtin import (
+        WebSearchTool,
+        FileTool,
+        CodeInterpreterTool,
+        HttpRequestTool,
+        JsonTool,
+    )
+except Exception:  # pragma: no cover - sandbox may block requests SSL
+    WebSearchTool = None  # type: ignore
+    FileTool = None  # type: ignore
+    CodeInterpreterTool = None  # type: ignore
+    HttpRequestTool = None  # type: ignore
+    JsonTool = None  # type: ignore
 from .security import human_in_the_loop, ApprovalRequiredError
 from .tool_context import ToolContext, LlmRequest
 from .openapi_toolset import OpenAPIToolset, RestApiTool
