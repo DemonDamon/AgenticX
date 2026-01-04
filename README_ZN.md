@@ -51,19 +51,62 @@ AgenticX 旨在打造一个统一、可扩展、生产就绪的多智能体应�
 
 ## 🚀 快速开始
 
-### 基础安装
+### 安装
+
+#### 方式一：使用 `uv`（推荐 - 更快）
 
 ```bash
 # 克隆仓库
 git clone https://github.com/DemonDamon/AgenticX.git
 cd AgenticX
 
-# 安装依赖
-pip install -r requirements.txt
+# 安装 uv（如果尚未安装）
+pip install uv
 
+# 以可编辑模式安装（包含所有依赖）
+uv pip install -e .
+
+# 或使用锁定文件安装（确保可重现构建）
+uv pip install -r requirements.lock
+uv pip install -e . --no-deps
+
+# 安装可选依赖
+uv pip install -e ".[dev]"      # 包含开发工具
+uv pip install -e ".[docs]"     # 包含文档工具
+uv pip install -e ".[all]"     # 包含所有可选依赖
+```
+
+#### 方式二：使用 `pip`（传统方式）
+
+```bash
+# 克隆仓库
+git clone https://github.com/DemonDamon/AgenticX.git
+cd AgenticX
+
+# 以可编辑模式安装
+pip install -e .
+
+# 或从 requirements.txt 安装
+pip install -r requirements.txt
+pip install -e . --no-deps
+
+# 安装可选依赖
+pip install -e ".[dev]"      # 包含开发工具
+pip install -e ".[docs]"     # 包含文档工具
+pip install -e ".[all]"      # 包含所有可选依赖
+```
+
+#### 环境配置
+
+```bash
 # 设置环境变量
 export OPENAI_API_KEY="your-api-key"
+export ANTHROPIC_API_KEY="your-api-key"  # 可选
 ```
+
+> 📋 **完整安装指南**: 关于系统依赖（antiword、tesseract）和高级文档处理功能的详细信息，请参阅 [INSTALL.md](INSTALL.md)
+> 
+> 💡 **提示**: 使用 `uv` 比 `pip` 快 10-100 倍。`requirements.lock` 文件确保在不同环境中构建的可重现性。
 
 ### 创建第一个智能体
 
