@@ -53,21 +53,62 @@
 
 ## 🚀 Quick Start
 
-### Basic Installation
+### Installation
+
+#### Option 1: Using `uv` (Recommended - Faster)
 
 ```bash
 # Clone repository
 git clone https://github.com/DemonDamon/AgenticX.git
 cd AgenticX
 
-# Install dependencies
-pip install -r requirements.txt
+# Install uv (if not already installed)
+pip install uv
 
+# Install in editable mode with all dependencies
+uv pip install -e .
+
+# Or install with locked dependencies (for reproducible builds)
+uv pip install -r requirements.lock
+uv pip install -e . --no-deps
+
+# Install with optional dependencies
+uv pip install -e ".[dev]"      # Include development tools
+uv pip install -e ".[docs]"     # Include documentation tools
+uv pip install -e ".[all]"      # Include all optional dependencies
+```
+
+#### Option 2: Using `pip` (Traditional)
+
+```bash
+# Clone repository
+git clone https://github.com/DemonDamon/AgenticX.git
+cd AgenticX
+
+# Install in editable mode
+pip install -e .
+
+# Or install from requirements.txt
+pip install -r requirements.txt
+pip install -e . --no-deps
+
+# Install with optional dependencies
+pip install -e ".[dev]"      # Include development tools
+pip install -e ".[docs]"     # Include documentation tools
+pip install -e ".[all]"      # Include all optional dependencies
+```
+
+#### Environment Setup
+
+```bash
 # Set environment variables
 export OPENAI_API_KEY="your-api-key"
+export ANTHROPIC_API_KEY="your-api-key"  # Optional
 ```
 
 > 📋 **Complete Installation Guide**: For system dependencies (antiword, tesseract) and advanced document processing features, see [INSTALL.md](INSTALL.md)
+> 
+> 💡 **Tip**: Using `uv` is 10-100x faster than `pip` for dependency resolution. The `requirements.lock` file ensures reproducible builds across different environments.
 
 ### Create Your First Agent
 
