@@ -39,6 +39,15 @@ from .monitoring import (
     PrometheusExporter
 )
 
+# OpenTelemetry AI 语义约定
+from .ai_attributes import (
+    AiObservationAttributes,
+    AiOperationType,
+    LegacyMetricNames,
+    OTelMetricNames,
+    METRIC_NAME_MAPPING
+)
+
 # 轨迹分析
 from .trajectory import (
     TrajectoryCollector,
@@ -100,6 +109,13 @@ __all__ = [
     "PerformanceMetrics",
     "SystemMetrics",
     "PrometheusExporter",
+    
+    # OpenTelemetry AI 语义约定
+    "AiObservationAttributes",
+    "AiOperationType",
+    "LegacyMetricNames",
+    "OTelMetricNames",
+    "METRIC_NAME_MAPPING",
     
     # 轨迹分析
     "TrajectoryCollector",
