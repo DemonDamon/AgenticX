@@ -291,64 +291,162 @@ class PrometheusExporter:
     Prometheus指标导出器
     
     将收集的指标导出为Prometheus格式。
+    
+    支持两种命名风格:
+    - OpenTelemetry 语义约定 (use_otel_naming=True, 默认)
+    - 旧版 AgenticX 命名 (use_otel_naming=False, 向后兼容)
+    
+    参考: OpenTelemetry Semantic Conventions for GenAI
+    内化来源: Spring AI ChatModelObservationDocumentation
     """
     
-    def __init__(self, metrics_collector: MetricsCollector):
+    def __init__(self, metrics_collector: MetricsCollector, use_otel_naming: bool = True):
+        """
+        初始化 Prometheus 导出器
+        
+        Args:
+            metrics_collector: 指标收集器实例
+            use_otel_naming: 是否使用 OpenTelemetry 语义约定命名
+                            True (默认): 使用 gen_ai.* 和 agenticx.* 命名空间
+                            False: 使用旧版 agenticx_* 命名（向后兼容）
+        """
         self.metrics_collector = metrics_collector
+        self.use_otel_naming = use_otel_naming
     
     def export_metrics(self) -> str:
-        """导出Prometheus格式的指标"""
-        metrics_lines = []
+        """
+        导出 Prometheus 格式的指标
         
-        # 性能指标
+        根据 use_otel_naming 参数选择命名风格:
+        - True: OpenTelemetry 语义约定
+        - False: 旧版命名（向后兼容）
+        """
+        if self.use_otel_naming:
+            return self._export_otel_format()
+        else:
+            return self._export_legacy_format()
+    
+    def _export_otel_format(self) -> str:
+        """导出 OpenTelemetry 语义约定格式的指标"""
+        metrics_lines = []
+        performance = self.metrics_collector.performance_metrics
+        
+        # ========== 任务指标 (agenticx.tasks.*) ==========
+        metrics_lines.append('# HELP agenticx_tasks_total Total number of tasks')
+        metrics_lines.append('# TYPE agenticx_tasks_total counter')
+        metrics_lines.append(f'agenticx_tasks_total{{status="success"}} {performance.task_success_count}')
+        metrics_lines.append(f'agenticx_tasks_total{{status="failure"}} {performance.task_failure_count}')
+        
+        metrics_lines.append('# HELP agenticx_tasks_duration_seconds Task execution duration')
+        metrics_lines.append('# TYPE agenticx_tasks_duration_seconds gauge')
+        metrics_lines.append(f'agenticx_tasks_duration_seconds{{stat="avg"}} {performance.task_duration_avg}')
+        metrics_lines.append(f'agenticx_tasks_duration_seconds{{stat="max"}} {performance.task_duration_max}')
+        min_duration = performance.task_duration_min if performance.task_duration_min != float('inf') else 0
+        metrics_lines.append(f'agenticx_tasks_duration_seconds{{stat="min"}} {min_duration}')
+        
+        # ========== 工具指标 (agenticx.tools.*) ==========
+        metrics_lines.append('# HELP agenticx_tools_calls_total Total number of tool calls')
+        metrics_lines.append('# TYPE agenticx_tools_calls_total counter')
+        metrics_lines.append(f'agenticx_tools_calls_total{{status="success"}} {performance.tool_success_count}')
+        metrics_lines.append(f'agenticx_tools_calls_total{{status="failure"}} {performance.tool_failure_count}')
+        
+        metrics_lines.append('# HELP agenticx_tools_duration_seconds Tool execution duration')
+        metrics_lines.append('# TYPE agenticx_tools_duration_seconds gauge')
+        metrics_lines.append(f'agenticx_tools_duration_seconds{{stat="avg"}} {performance.tool_duration_avg}')
+        
+        # ========== LLM 指标 (遵循 OpenTelemetry GenAI 语义约定) ==========
+        # gen_ai.client.token.usage - Token 用量
+        metrics_lines.append('# HELP gen_ai_client_token_usage Number of tokens used')
+        metrics_lines.append('# TYPE gen_ai_client_token_usage counter')
+        metrics_lines.append(f'gen_ai_client_token_usage{{token_type="total"}} {performance.llm_token_usage}')
+        
+        # agenticx.llm.* - AgenticX 扩展的 LLM 指标
+        metrics_lines.append('# HELP agenticx_llm_calls_total Total number of LLM calls')
+        metrics_lines.append('# TYPE agenticx_llm_calls_total counter')
+        metrics_lines.append(f'agenticx_llm_calls_total {performance.llm_call_count}')
+        
+        metrics_lines.append('# HELP agenticx_llm_cost_dollars Total cost of LLM calls in dollars')
+        metrics_lines.append('# TYPE agenticx_llm_cost_dollars counter')
+        metrics_lines.append(f'agenticx_llm_cost_dollars {performance.llm_cost_total}')
+        
+        metrics_lines.append('# HELP agenticx_llm_duration_seconds LLM call duration')
+        metrics_lines.append('# TYPE agenticx_llm_duration_seconds gauge')
+        metrics_lines.append(f'agenticx_llm_duration_seconds{{stat="avg"}} {performance.llm_duration_avg}')
+        
+        # ========== 错误指标 (agenticx.errors.*) ==========
+        metrics_lines.append('# HELP agenticx_errors_total Total number of errors')
+        metrics_lines.append('# TYPE agenticx_errors_total counter')
+        metrics_lines.append(f'agenticx_errors_total {performance.error_count}')
+        
+        metrics_lines.append('# HELP agenticx_errors_rate Error rate')
+        metrics_lines.append('# TYPE agenticx_errors_rate gauge')
+        metrics_lines.append(f'agenticx_errors_rate {performance.error_rate}')
+        
+        # ========== 系统指标 (agenticx.system.*) ==========
+        if self.metrics_collector.system_metrics_history:
+            latest_system = self.metrics_collector.system_metrics_history[-1]
+            
+            metrics_lines.append('# HELP agenticx_system_cpu_usage CPU usage ratio')
+            metrics_lines.append('# TYPE agenticx_system_cpu_usage gauge')
+            metrics_lines.append(f'agenticx_system_cpu_usage {latest_system.cpu_percent / 100.0}')
+            
+            metrics_lines.append('# HELP agenticx_system_memory_usage Memory usage ratio')
+            metrics_lines.append('# TYPE agenticx_system_memory_usage gauge')
+            metrics_lines.append(f'agenticx_system_memory_usage {latest_system.memory_percent / 100.0}')
+        
+        return '\n'.join(metrics_lines)
+    
+    def _export_legacy_format(self) -> str:
+        """导出旧版 AgenticX 格式的指标（向后兼容）"""
+        metrics_lines = []
         performance = self.metrics_collector.performance_metrics
         
         # 任务指标
-        metrics_lines.append(f'# HELP agenticx_tasks_total Total number of tasks')
-        metrics_lines.append(f'# TYPE agenticx_tasks_total counter')
+        metrics_lines.append('# HELP agenticx_tasks_total Total number of tasks')
+        metrics_lines.append('# TYPE agenticx_tasks_total counter')
         metrics_lines.append(f'agenticx_tasks_total {performance.task_count}')
         
-        metrics_lines.append(f'# HELP agenticx_tasks_success_total Total number of successful tasks')
-        metrics_lines.append(f'# TYPE agenticx_tasks_success_total counter')
+        metrics_lines.append('# HELP agenticx_tasks_success_total Total number of successful tasks')
+        metrics_lines.append('# TYPE agenticx_tasks_success_total counter')
         metrics_lines.append(f'agenticx_tasks_success_total {performance.task_success_count}')
         
-        metrics_lines.append(f'# HELP agenticx_tasks_failure_total Total number of failed tasks')
-        metrics_lines.append(f'# TYPE agenticx_tasks_failure_total counter')
+        metrics_lines.append('# HELP agenticx_tasks_failure_total Total number of failed tasks')
+        metrics_lines.append('# TYPE agenticx_tasks_failure_total counter')
         metrics_lines.append(f'agenticx_tasks_failure_total {performance.task_failure_count}')
         
         # 工具指标
-        metrics_lines.append(f'# HELP agenticx_tool_calls_total Total number of tool calls')
-        metrics_lines.append(f'# TYPE agenticx_tool_calls_total counter')
+        metrics_lines.append('# HELP agenticx_tool_calls_total Total number of tool calls')
+        metrics_lines.append('# TYPE agenticx_tool_calls_total counter')
         metrics_lines.append(f'agenticx_tool_calls_total {performance.tool_call_count}')
         
         # LLM指标
-        metrics_lines.append(f'# HELP agenticx_llm_calls_total Total number of LLM calls')
-        metrics_lines.append(f'# TYPE agenticx_llm_calls_total counter')
+        metrics_lines.append('# HELP agenticx_llm_calls_total Total number of LLM calls')
+        metrics_lines.append('# TYPE agenticx_llm_calls_total counter')
         metrics_lines.append(f'agenticx_llm_calls_total {performance.llm_call_count}')
         
-        metrics_lines.append(f'# HELP agenticx_llm_tokens_total Total number of tokens used')
-        metrics_lines.append(f'# TYPE agenticx_llm_tokens_total counter')
+        metrics_lines.append('# HELP agenticx_llm_tokens_total Total number of tokens used')
+        metrics_lines.append('# TYPE agenticx_llm_tokens_total counter')
         metrics_lines.append(f'agenticx_llm_tokens_total {performance.llm_token_usage}')
         
-        metrics_lines.append(f'# HELP agenticx_llm_cost_total Total cost of LLM calls')
-        metrics_lines.append(f'# TYPE agenticx_llm_cost_total counter')
+        metrics_lines.append('# HELP agenticx_llm_cost_total Total cost of LLM calls')
+        metrics_lines.append('# TYPE agenticx_llm_cost_total counter')
         metrics_lines.append(f'agenticx_llm_cost_total {performance.llm_cost_total}')
         
         # 错误指标
-        metrics_lines.append(f'# HELP agenticx_errors_total Total number of errors')
-        metrics_lines.append(f'# TYPE agenticx_errors_total counter')
+        metrics_lines.append('# HELP agenticx_errors_total Total number of errors')
+        metrics_lines.append('# TYPE agenticx_errors_total counter')
         metrics_lines.append(f'agenticx_errors_total {performance.error_count}')
         
         # 系统指标
         if self.metrics_collector.system_metrics_history:
             latest_system = self.metrics_collector.system_metrics_history[-1]
             
-            metrics_lines.append(f'# HELP agenticx_cpu_usage_percent CPU usage percentage')
-            metrics_lines.append(f'# TYPE agenticx_cpu_usage_percent gauge')
+            metrics_lines.append('# HELP agenticx_cpu_usage_percent CPU usage percentage')
+            metrics_lines.append('# TYPE agenticx_cpu_usage_percent gauge')
             metrics_lines.append(f'agenticx_cpu_usage_percent {latest_system.cpu_percent}')
             
-            metrics_lines.append(f'# HELP agenticx_memory_usage_percent Memory usage percentage')
-            metrics_lines.append(f'# TYPE agenticx_memory_usage_percent gauge')
+            metrics_lines.append('# HELP agenticx_memory_usage_percent Memory usage percentage')
+            metrics_lines.append('# TYPE agenticx_memory_usage_percent gauge')
             metrics_lines.append(f'agenticx_memory_usage_percent {latest_system.memory_percent}')
         
         return '\n'.join(metrics_lines)
@@ -622,9 +720,16 @@ class MonitoringCallbackHandler(BaseCallbackHandler):
         """获取所有监控指标"""
         return self.metrics_collector.get_all_metrics()
     
-    def get_prometheus_metrics(self) -> str:
-        """获取Prometheus格式的指标"""
-        exporter = PrometheusExporter(self.metrics_collector)
+    def get_prometheus_metrics(self, use_otel_naming: bool = True) -> str:
+        """
+        获取 Prometheus 格式的指标
+        
+        Args:
+            use_otel_naming: 是否使用 OpenTelemetry 语义约定命名
+                            True (默认): 使用 gen_ai.* 和 agenticx.* 命名空间
+                            False: 使用旧版 agenticx_* 命名（向后兼容）
+        """
+        exporter = PrometheusExporter(self.metrics_collector, use_otel_naming=use_otel_naming)
         return exporter.export_metrics()
     
     def reset_metrics(self):
