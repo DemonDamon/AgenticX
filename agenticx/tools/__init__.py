@@ -17,6 +17,7 @@ from .remote_v2 import MCPClientV2, RemoteToolV2
 from .mineru import create_mineru_parse_tool, create_mineru_ocr_languages_tool
 from .windowed import WindowedFileTool
 from .shell_bundle import ShellBundleLoader, ShellScriptTool
+from .skill_bundle import SkillBundleLoader, SkillTool, SkillMetadata
 try:
     from .builtin import (
         WebSearchTool,
@@ -79,4 +80,8 @@ __all__ = [
     "WindowedFileTool",
     "ShellBundleLoader",
     "ShellScriptTool",
+    # Skill Bundle (Anthropic SKILL.md 规范)
+    "SkillBundleLoader",
+    "SkillTool",
+    "SkillMetadata",
 ] 
