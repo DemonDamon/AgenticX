@@ -9,13 +9,13 @@ description = "A unified, scalable, production-ready multi-agent application dev
 authors = [
     {name = "Ziran Li", email = "bingzhenli@hotmail.com"},
 ]
-license = {text = "Apache-2.0"}
+license = {text = "AGPL-3.0"}
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
