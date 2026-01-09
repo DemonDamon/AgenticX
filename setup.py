@@ -75,6 +75,14 @@ extras_require = {
         "mkdocstrings>=0.22.0",
         "mkdocs-autorefs>=0.4.0",
     ],
+    # OpenTelemetry 集成（可选）
+    # 内化来源: alibaba/loongsuite-python-agent
+    "otel": [
+        "opentelemetry-api>=1.20.0",
+        "opentelemetry-sdk>=1.20.0",
+        "opentelemetry-exporter-otlp>=1.20.0",
+        "opentelemetry-semantic-conventions>=0.42b0",
+    ],
     "all": [
         "pytest>=7.0.0",
         "pytest-asyncio>=0.21.0",
@@ -89,6 +97,11 @@ extras_require = {
         "mkdocs-material>=9.0.0",
         "mkdocstrings>=0.22.0",
         "mkdocs-autorefs>=0.4.0",
+        # OpenTelemetry
+        "opentelemetry-api>=1.20.0",
+        "opentelemetry-sdk>=1.20.0",
+        "opentelemetry-exporter-otlp>=1.20.0",
+        "opentelemetry-semantic-conventions>=0.42b0",
     ],
 }
 
