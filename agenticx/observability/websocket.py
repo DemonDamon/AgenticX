@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Dict, Any, List, Optional, Set, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import Enum
 import uuid
 import websockets
