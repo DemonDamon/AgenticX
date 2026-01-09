@@ -6,12 +6,18 @@ AgenticX M9: 可观测性与分析模块 (Observability & Analytics)
 - 实时监控：系统指标收集和推送
 - 轨迹分析：执行轨迹收集和分析
 - 评估基准：性能评估和基准测试
+- OpenTelemetry 集成：标准化 Traces/Metrics/Logs 导出
 
 设计理念：
 1. 基于现有的事件系统构建，无缝集成
 2. 提供多种回调处理器，支持不同的观测需求
 3. 实现智能分析，从数据中提取洞察
 4. 支持实时监控和可视化
+5. 🆕 支持 OpenTelemetry 标准导出（可选依赖）
+
+OpenTelemetry 使用:
+    from agenticx.observability.otel import enable_otel
+    enable_otel(service_name="my-agent")
 """
 
 # 核心回调系统
@@ -91,6 +97,13 @@ from .utils import (
     DataExporter
 )
 
+# SpanTree (用于 Span 层次结构分析)
+from .span_tree import (
+    SpanTree,
+    SpanNode,
+    SpanQuery
+)
+
 __all__ = [
     # 核心回调系统
     "BaseCallbackHandler",
@@ -147,5 +160,10 @@ __all__ = [
     "EventProcessor",
     "TimeSeriesData",
     "StatisticsCalculator",
-    "DataExporter"
+    "DataExporter",
+    
+    # SpanTree
+    "SpanTree",
+    "SpanNode",
+    "SpanQuery",
 ] 
