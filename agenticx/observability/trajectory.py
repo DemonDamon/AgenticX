@@ -8,7 +8,7 @@ AgenticX M9: 执行轨迹收集 (Trajectory Collection)
 import uuid
 from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import Enum
 import json
 from collections import defaultdict
@@ -58,7 +58,7 @@ class TrajectoryStep:
     step_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     step_type: StepType = StepType.TASK_START
     status: StepStatus = StepStatus.PENDING
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     duration: Optional[float] = None
     
     # 执行上下文
