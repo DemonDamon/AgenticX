@@ -36,38 +36,91 @@ class BailianProvider(BaseLLMProvider):
         return any(model in model_lower for model in ["qwen3-32b", "qwen3-8b", "qwen3-235", "qwen-plus", "qwen-turbo"])
     
     def _make_native_request(self, request_params: Dict[str, Any]) -> Any:
-         """使用原生HTTP请求调用百炼API"""
-         headers = {
-             "Authorization": f"Bearer {self.api_key}",
-             "Content-Type": "application/json"
-         }
-         
-         # 添加百炼特有参数
-         if self._needs_native_request(request_params.get("model", "")):
-             request_params["enable_thinking"] = False
-             logger.debug(f"为模型 {request_params.get('model')} 设置 enable_thinking=false")
-         
-         url = f"{self.base_url}/chat/completions"
-         
-         try:
-             # 禁用代理以避免连接问题
-             proxies = {
-                 'http': None,
-                 'https': None
-             }
-             
-             response = requests.post(
-                 url,
-                 headers=headers,
-                 json=request_params,
-                 timeout=self.timeout,
-                 proxies=proxies,
-                 verify=True  # 保持SSL验证
-             )
-             response.raise_for_status()
-             return response.json()
-         except Exception as e:
-             raise Exception(f"Native Bailian API call failed: {str(e)}")
+        """使用原生HTTP请求调用百炼API（带重试机制）"""
+        import time
+        
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # 添加百炼特有参数
+        if self._needs_native_request(request_params.get("model", "")):
+            request_params["enable_thinking"] = False
+            logger.debug(f"为模型 {request_params.get('model')} 设置 enable_thinking=false")
+        
+        url = f"{self.base_url}/chat/completions"
+        
+        # 禁用代理以避免连接问题
+        proxies = {
+            'http': None,
+            'https': None
+        }
+        
+        # 重试逻辑
+        max_retries = self.max_retries or 3
+        last_error = None
+        
+        for attempt in range(max_retries + 1):
+            try:
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json=request_params,
+                    timeout=self.timeout,
+                    proxies=proxies,
+                    verify=True  # 保持SSL验证
+                )
+                
+                # 检查状态码
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code == 500:
+                    # 500错误可能是临时性的，进行重试
+                    if attempt < max_retries:
+                        wait_time = (2 ** attempt) * 1.0  # 指数退避：1s, 2s, 4s
+                        error_text = response.text[:200] if response.text else "No error details"
+                        logger.warning(f"百炼API返回500错误，{wait_time:.1f}秒后重试 ({attempt + 1}/{max_retries}): {error_text}")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        error_text = response.text[:500] if response.text else "No error details"
+                        raise Exception(f"百炼API返回500错误，已达到最大重试次数: {error_text}")
+                else:
+                    # 其他错误直接抛出
+                    response.raise_for_status()
+                    return response.json()
+                    
+            except requests.exceptions.Timeout as e:
+                last_error = e
+                if attempt < max_retries:
+                    wait_time = (2 ** attempt) * 1.0
+                    logger.warning(f"百炼API请求超时，{wait_time:.1f}秒后重试 ({attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise Exception(f"Native Bailian API call timeout after {max_retries} retries: {str(e)}")
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                if attempt < max_retries:
+                    wait_time = (2 ** attempt) * 1.0
+                    logger.warning(f"百炼API请求失败，{wait_time:.1f}秒后重试 ({attempt + 1}/{max_retries}): {str(e)}")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise Exception(f"Native Bailian API call failed after {max_retries} retries: {str(e)}")
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    wait_time = (2 ** attempt) * 1.0
+                    logger.warning(f"百炼API调用异常，{wait_time:.1f}秒后重试 ({attempt + 1}/{max_retries}): {str(e)}")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise Exception(f"Native Bailian API call failed: {str(e)}")
+        
+        # 所有重试都失败了
+        raise Exception(f"Native Bailian API call failed after {max_retries} retries. Last error: {str(last_error)}")
     
     async def _make_native_request_async(self, request_params: Dict[str, Any]) -> Any:
         """异步版本的原生HTTP请求"""
