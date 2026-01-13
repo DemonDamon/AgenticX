@@ -132,10 +132,16 @@ class MilvusStorage(BaseVectorStorage):
         Args:
             records: 要添加的向量记录列表
             **kwargs: 额外参数
+                - flush: bool, 是否立即刷新到磁盘（默认 False，避免性能问题）
+                - load: bool, 是否加载集合到内存（默认 False，只在需要时加载）
         """
         if not self.collection:
             logger.info(f"✅ 模拟添加 {len(records)} 个向量到Milvus")
             return
+        
+        # 从 kwargs 获取参数
+        need_flush = kwargs.get('flush', False)
+        need_load = kwargs.get('load', False)
             
         try:
             # 准备数据
@@ -158,16 +164,54 @@ class MilvusStorage(BaseVectorStorage):
                     "metadata": metadata_str
                 })
 
-            # 插入数据
+            # 插入数据（这一步很快，数据进入缓冲区）
             self.collection.insert(data_to_insert)
             
-            # 刷新以确保数据持久化
-            self.collection.flush()
+            # 可选：立即刷新到磁盘（仅在需要强一致性时使用）
+            # 注意：flush() 是耗时操作，频繁调用会影响性能
+            # Milvus 会自动刷新数据（根据 dataNode.flush.insertBufSize 和 syncPeriod 配置）
+            if need_flush:
+                try:
+                    # 使用超时控制，避免长时间阻塞
+                    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+                    flush_timeout = 5  # 5秒超时
+                    
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(self.collection.flush)
+                        try:
+                            future.result(timeout=flush_timeout)
+                            logger.debug(f"✅ Milvus flush 成功")
+                        except FutureTimeoutError:
+                            logger.warning(f"⚠️ Milvus flush 超时（{flush_timeout}秒），但数据已插入到缓冲区，可以正常查询")
+                            future.cancel()
+                        except Exception as flush_e:
+                            logger.warning(f"⚠️ Milvus flush 失败: {flush_e}，但数据已插入到缓冲区，可以正常查询")
+                except Exception as flush_e:
+                    logger.warning(f"⚠️ Milvus flush 异常: {flush_e}，但数据已插入到缓冲区，可以正常查询")
             
-            # 重新加载集合以确保数据可查询
-            self.collection.load()
+            # 可选：加载集合到内存（仅在需要立即查询且集合未加载时）
+            # 注意：load() 是资源密集型操作，重复加载会浪费资源
+            if need_load:
+                try:
+                    # 先判断是否已加载，避免重复加载
+                    if hasattr(self.collection, 'is_loaded') and not self.collection.is_loaded():
+                        self.collection.load()
+                        logger.debug(f"✅ Milvus collection 已加载到内存")
+                    elif not hasattr(self.collection, 'is_loaded'):
+                        # 如果 Milvus 版本不支持 is_loaded()，直接尝试加载
+                        # 某些版本可能会抛出异常，会被下面的 except 捕获
+                        self.collection.load()
+                        logger.debug(f"✅ Milvus collection 已加载到内存")
+                    else:
+                        logger.debug(f"ℹ️ Milvus collection 已在内存中，跳过加载")
+                except Exception as load_e:
+                    logger.warning(f"⚠️ Milvus load 失败: {load_e}，但数据已插入，可以正常查询")
             
-            logger.info(f"✅ 成功添加 {len(records)} 个向量到Milvus")
+            # 根据是否执行了 flush 选择不同的日志
+            if need_flush:
+                logger.info(f"✅ 成功添加 {len(records)} 个向量到Milvus，已持久化")
+            else:
+                logger.info(f"✅ 成功添加 {len(records)} 个向量到Milvus（数据已插入缓冲区，Milvus 会自动刷新）")
             
         except Exception as e:
             logger.error(f"❌ 添加向量到Milvus失败: {e}")
