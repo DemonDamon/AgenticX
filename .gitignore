@@ -9,6 +9,7 @@
 
 __pycache__/ 
 **/__pycache__/
+**/.docs/
 
 *.egg-info/
 dist/
