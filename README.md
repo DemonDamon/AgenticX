@@ -11,47 +11,48 @@
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/agenticx)](https://pypi.org/project/agenticx/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/DemonDamon/AgenticX)
 
-[Features](#-core-features) • [Quick Start](#-quick-start) • [Examples](#-complete-examples) • [Architecture](#️-technical-architecture) • [Progress](#-development-progress)
+[Features](#core-features) • [Quick Start](#quick-start) • [Examples](#complete-examples) • [Architecture](#technical-architecture) • [Progress](#development-progress)
 
 </div>
 
 ---
 
-**🌍 Language / 语言**: [English](README.md) | [中文](README_ZN.md)
+**Language / 语言**: [English](README.md) | [中文](README_ZN.md)
 
 ---
 
-## 🎯 Vision
+## Vision
 
 **AgenticX** aims to create a unified, scalable, production-ready multi-agent application development framework, empowering developers to build everything from simple automation assistants to complex collaborative intelligent agent systems.
 
-## ✨ Core Features
+## Core Features
 
-### 🔧 Core Framework (Completed)
-- **🤖 Agent Core**: Agent execution engine based on 12-Factor Agents methodology
-- **🔗 Orchestration Engine**: Graph-based orchestration engine supporting complex workflows, conditional routing, and parallel execution
-- **🛠️ Tool System**: Unified tool interface supporting function decorators, remote tools (MCP), and built-in toolsets
-- **🧠 Memory System**: Deep integration with Mem0 for long-term memory, supporting arbitrary LLM models
-- **💬 Communication Protocol**: A2A inter-agent communication, MCP resource access protocol
-- **✅ Task Validation**: Pydantic-based output parsing and auto-repair
+### Core Framework (Completed)
+- **Agent Core**: Agent execution engine based on 12-Factor Agents methodology
+- **Orchestration Engine**: Graph-based orchestration engine supporting complex workflows, conditional routing, and parallel execution
+- **Tool System**: Unified tool interface supporting function decorators, remote tools (MCP), and built-in toolsets
+- **Memory System**: Deep integration with Mem0 for long-term memory, supporting arbitrary LLM models
+- **Communication Protocol**: A2A inter-agent communication, MCP resource access protocol
+- **Task Validation**: Pydantic-based output parsing and auto-repair
+- **GUI Agent / Embodiment**: Complete GUI automation framework with action reflection, stuck detection, action caching, REACT parsing, device-cloud routing, and DAG task verification
 
-### 🔍 Enterprise-Grade Monitoring (Completed)
-- **📊 Observability**: Complete callback system, real-time monitoring, trajectory analysis
-- **📈 Performance Monitoring**: Real-time metrics collection, Prometheus integration, system monitoring
-- **🔍 Trajectory Analysis**: Execution path tracing, failure analysis, performance bottleneck identification
-- **📁 Data Export**: Multi-format export (JSON/CSV/Prometheus), time series analysis
+### Enterprise-Grade Monitoring (Completed)
+- **Observability**: Complete callback system, real-time monitoring, trajectory analysis
+- **Performance Monitoring**: Real-time metrics collection, Prometheus integration, system monitoring
+- **Trajectory Analysis**: Execution path tracing, failure analysis, performance bottleneck identification
+- **Data Export**: Multi-format export (JSON/CSV/Prometheus), time series analysis
 
-### 🎛️ Developer Experience (Planned)
-- **🖥️ CLI Tools**: Command-line tools for project creation, deployment, and monitoring
-- **📱 Web UI**: Visual agent management and monitoring interface
-- **🔌 IDE Integration**: VS Code extension, Jupyter kernel support
+### Developer Experience (Planned)
+- **CLI Tools**: Command-line tools for project creation, deployment, and monitoring
+- **Web UI**: Visual agent management and monitoring interface
+- **IDE Integration**: VS Code extension, Jupyter kernel support
 
-### 🔒 Enterprise Security (Planned)
-- **🔐 Security Sandbox**: Secure code execution environment and resource isolation
-- **👥 Multi-tenancy**: RBAC permission control, data isolation
-- **✋ Human Approval**: Human-in-the-loop workflows, risk control
+### Enterprise Security (Planned)
+- **Security Sandbox**: Secure code execution environment and resource isolation
+- **Multi-tenancy**: RBAC permission control, data isolation
+- **Human Approval**: Human-in-the-loop workflows, risk control
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
@@ -106,9 +107,9 @@ export OPENAI_API_KEY="your-api-key"
 export ANTHROPIC_API_KEY="your-api-key"  # Optional
 ```
 
-> 📋 **Complete Installation Guide**: For system dependencies (antiword, tesseract) and advanced document processing features, see [INSTALL.md](INSTALL.md)
+> **Complete Installation Guide**: For system dependencies (antiword, tesseract) and advanced document processing features, see [INSTALL.md](INSTALL.md)
 > 
-> 💡 **Tip**: Using `uv` is 10-100x faster than `pip` for dependency resolution. The `requirements.lock` file ensures reproducible builds across different environments.
+> **Tip**: Using `uv` is 10-100x faster than `pip` for dependency resolution. The `requirements.lock` file ensures reproducible builds across different environments.
 
 ### Create Your First Agent
 
@@ -159,11 +160,11 @@ def search_web(query: str) -> str:
 # Agents will automatically invoke these tools
 ```
 
-## 📚 Complete Examples
+## Complete Examples
 
 We provide rich examples demonstrating various framework capabilities:
 
-### 🤖 Agent Core (M5)
+### Agent Core (M5)
 
 **Single Agent Example**
 ```bash
@@ -183,7 +184,7 @@ python examples/m5_multi_agent_demo.py
 - Task distribution and result aggregation
 - Inter-agent communication
 
-### 🔗 Orchestration & Validation (M6 & M7)
+### Orchestration & Validation (M6 & M7)
 
 **Simple Workflow**
 ```bash
@@ -203,7 +204,7 @@ python examples/m6_m7_comprehensive_demo.py
 - Parallel execution and conditional branching
 - Complete lifecycle management
 
-### 💬 Agent Communication (M8)
+### Agent Communication (M8)
 
 **A2A Protocol Demo**
 ```bash
@@ -214,7 +215,7 @@ python examples/m8_a2a_demo.py
 - Distributed agent systems
 - Service discovery and skill invocation
 
-### 📊 Observability Monitoring (M9)
+### Observability Monitoring (M9)
 
 **Complete Monitoring Demo**
 ```bash
@@ -226,7 +227,7 @@ python examples/m9_observability_demo.py
 - Failure analysis and recovery recommendations
 - Data export and report generation
 
-### 🧠 Memory System
+### Memory System
 
 **Basic Memory Usage**
 ```bash
@@ -244,7 +245,7 @@ python examples/mem0_healthcare_example.py
 - Medical knowledge memory and application
 - Personalized patient information management
 
-### 👤 Human-in-the-Loop
+### Human-in-the-Loop
 
 **Human Intervention Flow**
 ```bash
@@ -257,7 +258,7 @@ python examples/human_in_the_loop_example.py
 
 Detailed documentation: [examples/README_HITL.md](examples/README_HITL.md)
 
-### 💬 LLM Integration
+### LLM Integration
 
 **Chatbot**
 ```bash
@@ -268,7 +269,7 @@ python examples/llm_chat_example.py
 - Streaming response handling
 - Cost control and monitoring
 
-### 🔒 Security Sandbox
+### Security Sandbox
 
 **Code Execution Sandbox**
 ```bash
@@ -280,7 +281,31 @@ python examples/microsandbox_example.py
 
 Technical blog: [examples/microsandbox_blog.md](examples/microsandbox_blog.md)
 
-## 🏗️ Technical Architecture
+### GUI Agent / Embodiment (M16)
+
+**GUI Automation Agent**
+```bash
+# GUI Agent example
+python examples/agenticx-for-guiagent/AgenticX-GUIAgent/main.py
+```
+- Complete GUI automation framework with human-aligned learning
+- Action reflection (A/B/C classification) and stuck detection
+- Action caching system for performance optimization
+- REACT output parsing and compact action schema
+- Device-Cloud routing for intelligent model selection
+- DAG-based task verification
+
+Key capabilities:
+- **Action Reflection**: Automatic action result classification (success/wrong_state/no_change)
+- **Stuck Detection**: Continuous failure detection and recovery strategy recommendation
+- **Action Caching**: Trajectory caching with exact and fuzzy matching (up to 9x speedup)
+- **REACT Parsing**: Standardized REACT format output parsing
+- **Smart Routing**: Dynamic device-cloud model selection based on task complexity and sensitivity
+- **DAG Verification**: Multi-path task verification with dual-semantic dependencies
+
+See: [examples/agenticx-for-guiagent/](examples/agenticx-for-guiagent/)
+
+## Technical Architecture
 
 ```mermaid
 graph TD
@@ -329,9 +354,9 @@ graph TD
     Agent --> Protocols
 ```
 
-## 📈 Development Progress
+## Development Progress
 
-### ✅ Completed Modules (M1-M9)
+### ✅ Completed Modules (M1-M9, M16)
 
 | Module | Status | Description |
 |---------|--------|-------------|
@@ -344,8 +369,9 @@ graph TD
 | **M7** | ✅ | Orchestration Engine - Graph-based workflows, conditional routing, parallel execution |
 | **M8** | ✅ | Communication Protocols - A2A agent communication, MCP resource access |
 | **M9** | ✅ | Observability - Complete monitoring, trajectory analysis, performance metrics |
+| **M16** | ✅ | Embodiment Module - GUI Agent framework with action reflection, stuck detection, action caching, REACT output parsing, device-cloud routing, and DAG task verification |
 
-### 🔄 Planned Modules (M10-M13)
+### Planned Modules (M10-M13)
 
 | Module | Status | Description |
 |---------|--------|-------------|
@@ -354,23 +380,23 @@ graph TD
 | **M12** | 🚧 | Agent Evolution - Architecture search, knowledge distillation |
 | **M13** | 🚧 | Knowledge Hub - Enterprise data connection, unified search |
 
-## 🌟 Core Advantages
+## Core Advantages
 
-- **🎯 Unified Abstraction**: Clear and consistent core abstractions, avoiding conceptual confusion
-- **🔌 Pluggable Architecture**: All components are replaceable, avoiding vendor lock-in
-- **📊 Enterprise-Grade Monitoring**: Complete observability, production-ready
-- **🛡️ Security First**: Built-in security mechanisms and multi-tenant support
-- **🚀 High Performance**: Optimized execution engine and concurrent processing
-- **📚 Rich Ecosystem**: Complete toolset and example library
+- **Unified Abstraction**: Clear and consistent core abstractions, avoiding conceptual confusion
+- **Pluggable Architecture**: All components are replaceable, avoiding vendor lock-in
+- **Enterprise-Grade Monitoring**: Complete observability, production-ready
+- **Security First**: Built-in security mechanisms and multi-tenant support
+- **High Performance**: Optimized execution engine and concurrent processing
+- **Rich Ecosystem**: Complete toolset and example library
 
-## 🛠️ System Requirements
+## System Requirements
 
 - **Python**: 3.10+
 - **Memory**: 4GB+ RAM recommended
 - **System**: Windows / Linux / macOS
 - **Dependencies**: See `requirements.txt`
 
-## 🤝 Contributing
+## Contributing
 
 We welcome community contributions! Please refer to:
 
@@ -379,11 +405,11 @@ We welcome community contributions! Please refer to:
 3. Submit Pull Requests, ensuring all tests pass
 4. Participate in code reviews and discussions
 
-## 📄 License
+## License
 
 This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0) - see [LICENSE](LICENSE) file for details
 
-## ⭐ Star History
+## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=DemonDamon/AgenticX&type=Date)](https://star-history.com/#DemonDamon/AgenticX&Date)
 
@@ -391,7 +417,7 @@ This project is licensed under the GNU Affero General Public License v3.0 (AGPL-
 
 <div align="center">
 
-**🌟 If AgenticX helps you, please give us a Star!**
+**If AgenticX helps you, please give us a Star!**
 
 [GitHub](https://github.com/DemonDamon/AgenticX) • [Documentation](coming-soon) • [Examples](examples/) • [Discussions](https://github.com/DemonDamon/AgenticX/discussions)
 
