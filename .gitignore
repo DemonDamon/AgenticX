@@ -2,6 +2,7 @@
 .cursor/
 .qoder/
 .trae/
+.kiro/
 .pytest_cache/
 .mypy_cache/
 .lingma/
