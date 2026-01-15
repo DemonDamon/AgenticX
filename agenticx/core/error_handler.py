@@ -38,6 +38,9 @@ class ErrorClassifier:
         Returns:
             Error category string
         """
+        if error.__class__.__name__ == "GuideRailsAbortError":
+            return "guiderails_abort"
+
         error_str = str(error).lower()
         error_type = type(error).__name__.lower()
         
@@ -69,7 +72,8 @@ class ErrorClassifier:
         
         # These are generally not recoverable
         non_recoverable_categories = {
-            "permission_error"
+            "permission_error",
+            "guiderails_abort",
         }
         
         if category in non_recoverable_categories:
@@ -253,6 +257,9 @@ class ErrorHandler:
         
         elif error_type == "permission_error":
             return f"Access denied: {error_str}"
+
+        elif error_type == "guiderails_abort":
+            return f"GuideRails aborted output: {error_str}"
         
         else:
             # For unknown errors, provide the original message but clean it up
