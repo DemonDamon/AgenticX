@@ -179,7 +179,13 @@ class CompactionConfig(BaseModel):
     )
 
 
+# ============================================================================
+# Handoff 事件（参考自 AIGNE Framework）
+# Note: AgentHandoffEvent 定义在 handoff.py 中，此处仅为 AnyEvent Union 引用
+# ============================================================================
+
 # Union type for all event types
+# Note: AgentHandoffEvent is imported lazily to avoid circular imports
 AnyEvent = Union[
     TaskStartEvent,
     TaskEndEvent,
@@ -194,7 +200,7 @@ AnyEvent = Union[
     ReplanningRequiredEvent,
     ActionCorrectionEvent,
     CompactedEvent,  # Context Compiler 新增
-    Event[str]  # Fallback for custom events
+    Event[str]  # Fallback for custom events (includes AgentHandoffEvent)
 ]
 
 class EventLog(BaseModel):
