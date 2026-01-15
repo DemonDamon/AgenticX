@@ -13,6 +13,7 @@ from ..llms.response import LLMResponse
 from ..tools.base import BaseTool
 from agenticx.tools.security import ApprovalRequiredError
 from .agent import Agent
+from .guiderails import GuideRailsAction, GuideRailsContext, GuideRailsAbortError
 from .task import Task
 from .event import (
     EventLog, AnyEvent, TaskStartEvent, TaskEndEvent, ToolCallEvent, 
@@ -489,7 +490,7 @@ class AgentExecutor:
         elif action_type == "human_request":
             self._execute_human_request(action, event_log)
         elif action_type == "finish_task":
-            self._execute_finish_task(action, event_log)
+            self._execute_finish_task(action, event_log, agent)
         else:
             raise ValueError(f"Unknown action type: {action_type}")
     
@@ -647,10 +648,45 @@ class AgentExecutor:
         )
         event_log.append(human_request_event)
     
-    def _execute_finish_task(self, action: Dict[str, Any], event_log: EventLog):
+    def _execute_finish_task(
+        self,
+        action: Dict[str, Any],
+        event_log: EventLog,
+        agent: Optional[Agent] = None,
+    ):
         """Execute a finish task action."""
         result = action["result"]
         reasoning = action.get("reasoning", "Task completed")
+
+        if agent and agent.guiderails:
+            context = GuideRailsContext(
+                agent_id=event_log.agent_id,
+                task_id=event_log.task_id,
+                metadata={"reasoning": reasoning},
+            )
+            guiderails_result = agent.guiderails.run(
+                result,
+                context,
+                config=agent.guiderails_config,
+            )
+
+            if guiderails_result.action == GuideRailsAction.ABORT:
+                # Record abort event to event log before raising exception
+                abort_summary = guiderails_result.summary()
+                abort_event = ErrorEvent(
+                    error_type="guiderails_abort",
+                    error_message=abort_summary,
+                    recoverable=False,
+                    agent_id=event_log.agent_id,
+                    task_id=event_log.task_id
+                )
+                event_log.append(abort_event)
+                raise GuideRailsAbortError(abort_summary)
+
+            if guiderails_result.action == GuideRailsAction.MODIFY:
+                result = guiderails_result.output
+                if guiderails_result.reasons:
+                    reasoning = f"{reasoning}\nGuideRails: {guiderails_result.summary()}"
         
         finish_event = FinishTaskEvent(
             final_result=result,
