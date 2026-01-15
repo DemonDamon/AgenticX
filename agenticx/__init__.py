@@ -50,6 +50,17 @@ from .core import (
     TaskOutputParser, TaskResultValidator, OutputRepairLoop,
     ParseResult, ValidationResult, RepairStrategy,
     ParseError, ValidationError, RepairError,
+
+    # GuideRails
+    GuideRailsAction, GuideRailsResult, GuideRailsConfig, GuideRailsContext,
+    GuideRailsAbortError, GuideRailsRunResult, GuideRailsValidator,
+    BaseGuideRailsValidator, GuideRails,
+    
+    # Handoff Mechanism (参考自 AIGNE)
+    HandoffOutput, AgentHandoffEvent, AgentHandoffError,
+    HandoffCycleError, HandoffTargetNotFoundError,
+    is_handoff_output, parse_handoff_output,
+    create_handoff_event, check_handoff_cycle,
     
     # M7: Orchestration & Routing Engine
     WorkflowEngine, WorkflowGraph, TriggerService,
@@ -182,6 +193,17 @@ __all__ = [
     # 任务验证
     "TaskOutputParser", "TaskResultValidator", "OutputRepairLoop",
     "ParseResult", "ValidationResult", "RepairStrategy",
+
+    # GuideRails
+    "GuideRailsAction", "GuideRailsResult", "GuideRailsConfig", "GuideRailsContext",
+    "GuideRailsAbortError", "GuideRailsRunResult", "GuideRailsValidator",
+    "BaseGuideRailsValidator", "GuideRails",
+    
+    # Handoff Mechanism
+    "HandoffOutput", "AgentHandoffEvent", "AgentHandoffError",
+    "HandoffCycleError", "HandoffTargetNotFoundError",
+    "is_handoff_output", "parse_handoff_output",
+    "create_handoff_event", "check_handoff_cycle",
     
     # 工作流引擎
     "WorkflowEngine", "WorkflowGraph", "TriggerService",
