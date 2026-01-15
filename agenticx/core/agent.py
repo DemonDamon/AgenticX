@@ -7,6 +7,7 @@ import time
 if TYPE_CHECKING:
     from ..hooks.llm_hooks import LLMCallHookContext
     from ..hooks.tool_hooks import ToolCallHookContext
+    from .guiderails import GuideRails, GuideRailsConfig
 
 # 类型变量，用于 fast_construct 返回正确的类型
 _T = TypeVar("_T", bound="Agent")
@@ -59,6 +60,16 @@ class Agent(BaseModel):
         description="Agent-level Tool hooks. Keys: 'before', 'after'. "
                     "Values: List of hook functions. These are in addition to global hooks."
     )
+
+    guiderails: Optional["GuideRails"] = Field(
+        default=None,
+        description="GuideRails chain for validating or modifying agent output."
+    )
+
+    guiderails_config: Optional["GuideRailsConfig"] = Field(
+        default=None,
+        description="GuideRails configuration for the agent."
+    )
     
     max_iterations: int = Field(
         default=25,
@@ -99,6 +110,8 @@ class Agent(BaseModel):
         allow_delegation: bool = False,
         llm_hooks: Optional[Dict[str, List[Callable]]] = None,
         tool_hooks: Optional[Dict[str, List[Callable]]] = None,
+        guiderails: Optional["GuideRails"] = None,
+        guiderails_config: Optional["GuideRailsConfig"] = None,
         max_iterations: int = 25,
         max_retry_limit: int = 2,
         _validate: bool = False,
@@ -165,6 +178,8 @@ class Agent(BaseModel):
                 allow_delegation=allow_delegation,
                 llm_hooks=llm_hooks,
                 tool_hooks=tool_hooks,
+                guiderails=guiderails,
+                guiderails_config=guiderails_config,
                 max_iterations=max_iterations,
                 max_retry_limit=max_retry_limit,
             )
@@ -191,6 +206,8 @@ class Agent(BaseModel):
             allow_delegation=allow_delegation,
             llm_hooks=llm_hooks,
             tool_hooks=tool_hooks,
+            guiderails=guiderails,
+            guiderails_config=guiderails_config,
             max_iterations=max_iterations,
             max_retry_limit=max_retry_limit,
         )
