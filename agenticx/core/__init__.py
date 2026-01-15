@@ -189,6 +189,29 @@ from .interruption import (
     get_interrupt_manager, reset_interrupt_manager,
 )
 
+# Memory Extraction Pipeline (参考自 AIGNE Framework)
+from .memory_extraction import (
+    MemoryFact, MemoryScope, MemoryExtractionConfig, ExtractionResult,
+    BaseMemoryExtractor, LLMMemoryExtractor, SimpleMemoryExtractor,
+    SessionMemoryManager, UserMemoryManager,
+    create_memory_extractor, create_session_memory_manager,
+)
+
+# GuideRails (post-output validation)
+from .guiderails import (
+    GuideRailsAction, GuideRailsResult, GuideRailsConfig, GuideRailsContext,
+    GuideRailsAbortError, GuideRailsRunResult, GuideRailsValidator,
+    BaseGuideRailsValidator, GuideRails,
+)
+
+# Handoff Mechanism (参考自 AIGNE Framework)
+from .handoff import (
+    HandoffOutput, AgentHandoffEvent, AgentHandoffError,
+    HandoffCycleError, HandoffTargetNotFoundError,
+    is_handoff_output, parse_handoff_output,
+    create_handoff_event, check_handoff_cycle,
+)
+
 # 为了向后兼容，添加 WorkflowContext 别名
 WorkflowContext = ExecutionContext
 
@@ -398,4 +421,36 @@ __all__ = [
     "InterruptibleTask",
     "get_interrupt_manager",
     "reset_interrupt_manager",
+    # Memory Extraction Pipeline (参考自 AIGNE)
+    "MemoryFact",
+    "MemoryScope",
+    "MemoryExtractionConfig",
+    "ExtractionResult",
+    "BaseMemoryExtractor",
+    "LLMMemoryExtractor",
+    "SimpleMemoryExtractor",
+    "SessionMemoryManager",
+    "UserMemoryManager",
+    "create_memory_extractor",
+    "create_session_memory_manager",
+    # GuideRails
+    "GuideRailsAction",
+    "GuideRailsResult",
+    "GuideRailsConfig",
+    "GuideRailsContext",
+    "GuideRailsAbortError",
+    "GuideRailsRunResult",
+    "GuideRailsValidator",
+    "BaseGuideRailsValidator",
+    "GuideRails",
+    # Handoff Mechanism (参考自 AIGNE)
+    "HandoffOutput",
+    "AgentHandoffEvent",
+    "AgentHandoffError",
+    "HandoffCycleError",
+    "HandoffTargetNotFoundError",
+    "is_handoff_output",
+    "parse_handoff_output",
+    "create_handoff_event",
+    "check_handoff_cycle",
 ]
