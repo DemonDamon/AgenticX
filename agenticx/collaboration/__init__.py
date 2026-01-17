@@ -15,7 +15,12 @@ AgenticX M8.5: 多智能体协作框架模块 (Multi-Agent Collaboration Framewo
 """
 
 from .enums import CollaborationMode, ConflictResolutionStrategy, RepairStrategy
-from .config import CollaborationConfig, CollaborationManagerConfig, CollaborationMemoryConfig
+from .config import (
+    CollaborationConfig, 
+    CollaborationManagerConfig, 
+    CollaborationMemoryConfig,
+    RolePlayingConfig,
+)
 from .base import BaseCollaborationPattern, CollaborationResult, CollaborationState
 # 协作模式
 from .patterns import (
@@ -29,6 +34,7 @@ from .patterns import (
     DynamicPattern,
     AsyncPattern,
 )
+from .role_playing import RolePlayingPattern
 from .manager import CollaborationManager
 from .memory import CollaborationMemory, CollaborationEvent
 from .metrics import CollaborationMetrics, EfficiencyMetrics, ContributionMetrics
@@ -41,6 +47,7 @@ __all__ = [
     'CollaborationConfig',
     'CollaborationManagerConfig',
     'CollaborationMemoryConfig',
+    'RolePlayingConfig',
     
     # 基础抽象
     'BaseCollaborationPattern',
@@ -50,6 +57,7 @@ __all__ = [
     # 协作模式（已实现）
     'MasterSlavePattern',
     'ReflectionPattern',
+    'RolePlayingPattern',
     
     # 管理服务
     'CollaborationManager',
