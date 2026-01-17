@@ -5,7 +5,7 @@ MinerU 解析结果数据模型
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict  # type: ignore
 from enum import Enum
 import json
 

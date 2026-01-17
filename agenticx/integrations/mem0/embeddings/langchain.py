@@ -4,7 +4,7 @@ from mem0.configs.embeddings.base import BaseEmbedderConfig
 from mem0.embeddings.base import EmbeddingBase
 
 try:
-    from langchain.embeddings.base import Embeddings
+    from langchain.embeddings.base import Embeddings  # type: ignore
 except ImportError:
     raise ImportError("langchain is not installed. Please install it using `pip install langchain`")
 

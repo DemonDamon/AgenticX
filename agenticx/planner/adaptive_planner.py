@@ -37,7 +37,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Protocol, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 
 # 延迟导入以避免循环依赖
 from agenticx.flow.execution_plan import (

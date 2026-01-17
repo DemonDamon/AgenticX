@@ -56,7 +56,7 @@ class PDFReader(BaseReader):
         
         # Try PyMuPDF (fitz) first - most comprehensive
         try:
-            import fitz
+            import fitz  # type: ignore
             logger.debug("Using PyMuPDF (fitz) for PDF reading")
             return 'fitz'
         except ImportError:
@@ -64,7 +64,7 @@ class PDFReader(BaseReader):
         
         # Try pypdf as fallback
         try:
-            import pypdf
+            import pypdf  # type: ignore
             logger.debug("Using pypdf for PDF reading")
             return 'pypdf'
         except ImportError:
@@ -72,7 +72,7 @@ class PDFReader(BaseReader):
         
         # Try PyPDF2 as last resort
         try:
-            import PyPDF2
+            import PyPDF2  # type: ignore
             logger.debug("Using PyPDF2 for PDF reading")
             return 'pypdf2'
         except ImportError:
@@ -87,8 +87,8 @@ class PDFReader(BaseReader):
             return False
             
         try:
-            import pytesseract
-            import pdf2image
+            import pytesseract  # type: ignore
+            import pdf2image  # type: ignore
             logger.debug("OCR libraries available: pytesseract, pdf2image")
             return True
         except ImportError as e:
@@ -194,7 +194,7 @@ class PDFReader(BaseReader):
         """Read PDF using PyMuPDF (fitz)"""
         
         def _extract():
-            import fitz
+            import fitz  # type: ignore
             
             doc = fitz.open(str(file_path))
             
@@ -247,8 +247,8 @@ class PDFReader(BaseReader):
         """Read PDF using OCR (for scanned documents)"""
         
         def _extract_ocr():
-            import pytesseract
-            import pdf2image
+            import pytesseract  # type: ignore
+            import pdf2image  # type: ignore
             from PIL import Image
             
             # Convert PDF to images with optimized settings
@@ -336,7 +336,7 @@ class PDFReader(BaseReader):
         """Read PDF using pypdf"""
         
         def _extract():
-            import pypdf
+            import pypdf  # type: ignore
             
             with open(file_path, 'rb') as file:
                 reader = pypdf.PdfReader(file)
@@ -391,7 +391,7 @@ class PDFReader(BaseReader):
         """Read PDF using PyPDF2"""
         
         def _extract():
-            import PyPDF2
+            import PyPDF2  # type: ignore
             
             with open(file_path, 'rb') as file:
                 reader = PyPDF2.PdfReader(file)

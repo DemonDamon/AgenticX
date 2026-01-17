@@ -20,8 +20,8 @@ from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from enum import Enum
 
-import httpx
-from pydantic import BaseModel, Field, validator
+import httpx  # type: ignore
+from pydantic import BaseModel, Field, validator  # type: ignore
 
 from .remote import RemoteTool, MCPServerConfig, MCPClient
 from .adapters.base import ParsedArtifacts, DocumentAdapter

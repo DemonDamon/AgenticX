@@ -1,7 +1,7 @@
 import os
 from typing import Any, ClassVar, Dict, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator  # type: ignore
 
 try:
     from upstash_vector import Index

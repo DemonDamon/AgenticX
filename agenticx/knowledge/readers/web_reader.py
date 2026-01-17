@@ -60,7 +60,7 @@ class WebReader(BaseReader):
         
         # Try aiohttp first - async and feature-rich
         try:
-            import aiohttp
+            import aiohttp  # type: ignore
             logger.debug("Using aiohttp for HTTP requests")
             return 'aiohttp'
         except ImportError:
@@ -68,7 +68,7 @@ class WebReader(BaseReader):
         
         # Try httpx as fallback - also async
         try:
-            import httpx
+            import httpx  # type: ignore
             logger.debug("Using httpx for HTTP requests")
             return 'httpx'
         except ImportError:
@@ -76,7 +76,7 @@ class WebReader(BaseReader):
         
         # Use requests as last resort - synchronous
         try:
-            import requests
+            import requests  # type: ignore
             logger.debug("Using requests for HTTP requests")
             return 'requests'
         except ImportError:
@@ -90,7 +90,7 @@ class WebReader(BaseReader):
         
         # Try BeautifulSoup first - most comprehensive
         try:
-            from bs4 import BeautifulSoup
+            from bs4 import BeautifulSoup  # type: ignore
             logger.debug("Using BeautifulSoup for HTML parsing")
             return 'beautifulsoup'
         except ImportError:
@@ -98,14 +98,14 @@ class WebReader(BaseReader):
         
         # Try lxml as fallback
         try:
-            import lxml.html
+            import lxml.html  # type: ignore
             logger.debug("Using lxml for HTML parsing")
             return 'lxml'
         except ImportError:
             pass
         
         # Use html.parser as last resort (built-in)
-        import html.parser
+        import html.parser  # type: ignore
         logger.debug("Using html.parser for HTML parsing")
         return 'html.parser'
     
@@ -179,7 +179,7 @@ class WebReader(BaseReader):
     async def _fetch_with_aiohttp(self, url: str) -> tuple[str, dict]:
         """Fetch content using aiohttp"""
         
-        import aiohttp
+        import aiohttp  # type: ignore
         
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         
@@ -208,7 +208,7 @@ class WebReader(BaseReader):
     async def _fetch_with_httpx(self, url: str) -> tuple[str, dict]:
         """Fetch content using httpx"""
         
-        import httpx
+        import httpx  # type: ignore
         
         for attempt in range(self.max_retries):
             try:
@@ -236,7 +236,7 @@ class WebReader(BaseReader):
         """Fetch content using requests (synchronous)"""
         
         def _fetch():
-            import requests
+            import requests  # type: ignore
             
             for attempt in range(self.max_retries):
                 try:
@@ -275,7 +275,7 @@ class WebReader(BaseReader):
             extracted_data = {}
             
             if self._html_parser == 'beautifulsoup':
-                from bs4 import BeautifulSoup
+                from bs4 import BeautifulSoup  # type: ignore
                 
                 soup = BeautifulSoup(html_content, 'html.parser')
                 
@@ -307,7 +307,7 @@ class WebReader(BaseReader):
                 text = soup.get_text()
                 
             elif self._html_parser == 'lxml':
-                import lxml.html
+                import lxml.html  # type: ignore
                 
                 doc = lxml.html.fromstring(html_content)
                 

@@ -1,6 +1,6 @@
 from typing import Any, Dict, Optional, Type, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator  # type: ignore
 
 
 class OpenSearchConfig(BaseModel):

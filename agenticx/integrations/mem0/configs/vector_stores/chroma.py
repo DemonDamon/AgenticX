@@ -1,11 +1,11 @@
 from typing import Any, ClassVar, Dict, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator  # type: ignore
 
 
 class ChromaDbConfig(BaseModel):
     try:
-        from chromadb.api.client import Client
+        from chromadb.api.client import Client  # type: ignore
     except ImportError:
         raise ImportError("The 'chromadb' library is required. Please install it using 'pip install chromadb'.")
     Client: ClassVar[type] = Client

@@ -18,8 +18,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Callable
 from urllib.parse import urlparse
-import requests
-import yaml
+import requests  # type: ignore[import-untyped]
+import yaml  # type: ignore[import-untyped]
 
 from .tool_v2 import BaseTool, ToolMetadata
 from .registry import ToolRegistry

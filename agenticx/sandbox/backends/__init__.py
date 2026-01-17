@@ -71,7 +71,7 @@ except ImportError as e:
     logger.debug(f"Microsandbox backend not available: {e}")
 
 try:
-    from .docker import DockerSandbox
+    from .docker import DockerSandbox  # type: ignore
     _BACKENDS["docker"] = DockerSandbox
 except ImportError as e:
     logger.debug(f"Docker backend not available: {e}")

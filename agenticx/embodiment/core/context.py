@@ -5,7 +5,7 @@ for GUI automation specific context information.
 """
 
 from typing import List, Optional, Dict, Any
-from pydantic import Field
+from pydantic import Field  # type: ignore
 from agenticx.core.agent import AgentContext
 from .models import ScreenState
 

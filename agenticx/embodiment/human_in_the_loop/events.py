@@ -2,7 +2,7 @@
 
 from typing import Dict, Any, Optional
 from datetime import datetime
-from pydantic import Field
+from pydantic import Field  # type: ignore
 
 from agenticx.core.event import Event
 from .models import HumanInterventionRequest, HumanFeedback

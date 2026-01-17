@@ -41,7 +41,7 @@ class PowerPointReader(BaseReader):
     def _get_ppt_library(self) -> Optional[str]:
         """Detect available PowerPoint processing library"""
         try:
-            from pptx import Presentation
+            from pptx import Presentation  # type: ignore
             return 'python-pptx'
         except ImportError:
             pass
@@ -120,7 +120,7 @@ class PowerPointReader(BaseReader):
         """Read PowerPoint document using python-pptx"""
         
         def _extract():
-            from pptx import Presentation
+            from pptx import Presentation  # type: ignore
             
             # Only works with .pptx files
             if file_path.suffix.lower() != '.pptx':

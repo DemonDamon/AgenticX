@@ -12,8 +12,8 @@ import time
 import json
 import uuid
 import asyncio
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-from pydantic.alias_generators import to_camel
+from pydantic import BaseModel, ConfigDict, Field, model_validator  # type: ignore
+from pydantic.alias_generators import to_camel  # type: ignore
 
 # --- Core Types (Internalization from ag-ui/core/types.py) ---
 

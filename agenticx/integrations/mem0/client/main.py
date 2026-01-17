@@ -5,8 +5,8 @@ import warnings
 from functools import wraps
 from typing import Any, Dict, List, Optional
 
-import httpx
-import requests
+import httpx  # type: ignore
+import requests  # type: ignore
 
 from mem0.memory.setup import get_user_id, setup_config
 from mem0.memory.telemetry import capture_client_event

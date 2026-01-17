@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict  # type: ignore
 from typing import List, Optional, Any, Dict
 import uuid
 

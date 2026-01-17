@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict  # type: ignore
 from typing import Callable, Any, Optional, Dict
 import inspect
 import asyncio

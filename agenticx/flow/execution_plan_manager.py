@@ -37,7 +37,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 from .execution_plan import (
     ExecutionPlan,

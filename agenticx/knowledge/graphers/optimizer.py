@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import networkx as nx
+import networkx as nx  # type: ignore
 
 from .models import Entity, Relationship, KnowledgeGraph, EntityType, RelationType
 

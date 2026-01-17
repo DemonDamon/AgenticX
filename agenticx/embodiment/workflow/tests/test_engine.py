@@ -1,10 +1,10 @@
 """Tests for WorkflowEngine class."""
 
-import pytest
+import pytest  # type: ignore
 import asyncio
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from pydantic import Field
+from pydantic import Field  # type: ignore
 from unittest.mock import Mock, AsyncMock, patch
 from agenticx.embodiment.workflow.engine import WorkflowEngine, NodeExecution, WorkflowExecution
 from agenticx.embodiment.workflow.workflow import GUIWorkflow

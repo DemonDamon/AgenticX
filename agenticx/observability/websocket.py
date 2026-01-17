@@ -9,10 +9,10 @@ import json
 import logging
 from typing import Dict, Any, List, Optional, Set, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from enum import Enum
 import uuid
-import websockets
+import websockets  # type: ignore
 import threading
 from collections import deque
 
@@ -103,7 +103,7 @@ class EventStream:
             "total_clients_connected": 0,
             "messages_sent": 0,
             "messages_failed": 0,
-            "start_time": datetime.now(UTC)
+            "start_time": datetime.now(timezone.utc)
         }
         
         # 心跳检查
@@ -230,7 +230,7 @@ class EventStream:
             **self.stats,
             "current_clients": len(self.clients),
             "message_queue_size": len(self.message_queue),
-            "uptime": (datetime.now(UTC) - self.stats["start_time"]).total_seconds()
+            "uptime": (datetime.now(timezone.utc) - self.stats["start_time"]).total_seconds()
         }
     
     async def start_heartbeat(self):
@@ -241,7 +241,7 @@ class EventStream:
     
     async def _check_clients_health(self):
         """检查客户端健康状态"""
-        current_time = datetime.now(UTC)
+        current_time = datetime.now(timezone.utc)
         disconnected_clients = []
         
         with self.client_lock:
@@ -256,7 +256,7 @@ class EventStream:
     
     def clear_old_messages(self, max_age_seconds: int = 3600):
         """清理过期消息"""
-        current_time = datetime.now(UTC)
+        current_time = datetime.now(timezone.utc)
         
         with self.message_lock:
             # 从队列中移除过期消息
@@ -550,7 +550,7 @@ class RealtimeMonitor:
     async def _collect_monitoring_data(self):
         """收集监控数据"""
         try:
-            import psutil
+            import psutil  # type: ignore
             
             # 系统指标
             self.monitoring_data["system_metrics"] = {
@@ -567,7 +567,7 @@ class RealtimeMonitor:
                 "stream_stats": self.websocket_handler.event_stream.get_stats()
             }
             
-            self.monitoring_data["last_update"] = datetime.now(UTC).isoformat()
+            self.monitoring_data["last_update"] = datetime.now(timezone.utc).isoformat()
             
         except Exception as e:
             logger.error(f"收集监控数据时发生错误: {e}")

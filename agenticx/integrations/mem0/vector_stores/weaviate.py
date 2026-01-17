@@ -2,7 +2,7 @@ import logging
 import uuid
 from typing import Dict, List, Mapping, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 try:
     import weaviate
@@ -11,10 +11,10 @@ except ImportError:
         "The 'weaviate' library is required. Please install it using 'pip install weaviate-client weaviate'."
     )
 
-import weaviate.classes.config as wvcc
-from weaviate.classes.init import Auth
-from weaviate.classes.query import Filter, MetadataQuery
-from weaviate.util import get_valid_uuid
+import weaviate.classes.config as wvcc  # type: ignore
+from weaviate.classes.init import Auth  # type: ignore
+from weaviate.classes.query import Filter, MetadataQuery  # type: ignore
+from weaviate.util import get_valid_uuid  # type: ignore
 
 from mem0.vector_stores.base import VectorStoreBase
 

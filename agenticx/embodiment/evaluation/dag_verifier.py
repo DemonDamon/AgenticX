@@ -12,7 +12,7 @@ DAGVerifier - 基于 DAG 的任务验证器
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 from collections import deque
 import logging
 

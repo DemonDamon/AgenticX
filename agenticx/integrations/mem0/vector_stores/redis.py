@@ -4,12 +4,12 @@ from datetime import datetime
 from functools import reduce
 
 import numpy as np
-import pytz
+import pytz  # type: ignore
 import redis
-from redis.commands.search.query import Query
-from redisvl.index import SearchIndex
-from redisvl.query import VectorQuery
-from redisvl.query.filter import Tag
+from redis.commands.search.query import Query  # type: ignore
+from redisvl.index import SearchIndex  # type: ignore
+from redisvl.query import VectorQuery  # type: ignore
+from redisvl.query.filter import Tag  # type: ignore
 
 from mem0.vector_stores.base import VectorStoreBase
 from mem0.memory.utils import extract_json

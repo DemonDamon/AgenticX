@@ -36,7 +36,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field  # type: ignore
 
 
 class FlowState(BaseModel):

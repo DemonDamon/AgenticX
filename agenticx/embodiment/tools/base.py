@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Optional, Dict
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict  # type: ignore
 
 from agenticx.core.tool import BaseTool
 from agenticx.embodiment.tools.adapters import BasePlatformAdapter

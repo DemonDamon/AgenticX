@@ -3,11 +3,11 @@ import time
 from typing import Any, Dict, List, Optional
 
 try:
-    from opensearchpy import OpenSearch, RequestsHttpConnection
+    from opensearchpy import OpenSearch, RequestsHttpConnection  # type: ignore
 except ImportError:
     raise ImportError("OpenSearch requires extra dependencies. Install with `pip install opensearch-py`") from None
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 from mem0.configs.vector_stores.opensearch import OpenSearchConfig
 from mem0.vector_stores.base import VectorStoreBase

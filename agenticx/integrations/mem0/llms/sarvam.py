@@ -1,5 +1,5 @@
 import os
-import requests
+import requests  # type: ignore
 from typing import Dict, List, Optional
 from mem0.configs.llms.base import BaseLlmConfig
 from mem0.llms.base import LLMBase

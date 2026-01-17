@@ -5,10 +5,10 @@ This module provides functionality to export knowledge graphs to Neo4j database.
 
 import json
 from typing import Any, Dict, List, Optional, Union
-from loguru import logger
+from loguru import logger  # type: ignore
 
 try:
-    from neo4j import GraphDatabase
+    from neo4j import GraphDatabase  # type: ignore
     NEO4J_AVAILABLE = True
 except ImportError:
     NEO4J_AVAILABLE = False

@@ -11,7 +11,7 @@ from datetime import datetime, timezone, UTC
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Union
 
-import networkx as nx
+import networkx as nx  # type: ignore
 
 
 class EntityType(Enum):

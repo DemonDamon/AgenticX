@@ -3,7 +3,7 @@
 from typing import Dict, List, Optional, Literal, Any
 from uuid import uuid4
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict  # type: ignore
 
 from agenticx.embodiment.core.models import GUIAction
 

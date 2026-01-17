@@ -5,7 +5,7 @@ and learns the structure of application interfaces.
 """
 
 from typing import List, Dict, Any, Optional, Tuple, Set
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 import asyncio
 from datetime import datetime
 

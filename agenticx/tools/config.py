@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, Union, List
 from dataclasses import dataclass, field
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator  # type: ignore
 
 logger = logging.getLogger(__name__)
 

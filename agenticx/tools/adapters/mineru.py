@@ -78,7 +78,7 @@ class MinerUAdapter(DocumentAdapter):
                     if self.config_path.endswith('.json'):
                         config = json.load(f)
                     elif self.config_path.endswith(('.yaml', '.yml')):
-                        import yaml
+                        import yaml  # type: ignore
                         config = yaml.safe_load(f)
             except Exception as e:
                 if self.debug:

@@ -13,7 +13,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 
 from .base import BaseTool, ToolError, ToolTimeoutError
 from ..tools.security import ApprovalRequiredError

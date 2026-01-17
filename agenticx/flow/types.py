@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, NewType, Sequence, Union
 
-from typing_extensions import Required, TypedDict
+from typing_extensions import Required, TypedDict  # type: ignore
 
 
 # ============================================================================

@@ -3,12 +3,12 @@ import logging
 from mem0.memory.utils import format_entities
 
 try:
-    from langchain_neo4j import Neo4jGraph
+    from langchain_neo4j import Neo4jGraph  # type: ignore
 except ImportError:
     raise ImportError("langchain_neo4j is not installed. Please install it using pip install langchain-neo4j")
 
 try:
-    from rank_bm25 import BM25Okapi
+    from rank_bm25 import BM25Okapi  # type: ignore
 except ImportError:
     raise ImportError("rank_bm25 is not installed. Please install it using pip install rank-bm25")
 

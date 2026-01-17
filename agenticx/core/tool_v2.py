@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import asyncio
 import logging
-from pydantic import BaseModel, Field, validator, ValidationError
+from pydantic import BaseModel, Field, validator, ValidationError  # type: ignore
 
 
 class ToolStatus(str, Enum):

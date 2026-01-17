@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator  # type: ignore
 
 
 class ElasticsearchConfig(BaseModel):

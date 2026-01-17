@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Type, get_type_hints
-import yaml
+import yaml  # type: ignore
 from .graphers.config import GrapherConfig
 
 logger = logging.getLogger(__name__)

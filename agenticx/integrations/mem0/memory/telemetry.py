@@ -3,7 +3,7 @@ import os
 import platform
 import sys
 
-from posthog import Posthog
+from posthog import Posthog  # type: ignore
 
 import mem0
 from mem0.memory.setup import get_or_create_user_id

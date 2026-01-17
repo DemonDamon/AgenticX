@@ -1,6 +1,6 @@
 from typing import Dict, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator  # type: ignore
 
 
 class VectorStoreConfig(BaseModel):

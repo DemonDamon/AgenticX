@@ -12,7 +12,7 @@ GUIAction Schema - 紧凑 GUI 动作 Schema
 
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator  # type: ignore
 import json
 
 from agenticx.embodiment.core.models import NormalizedCoordinate

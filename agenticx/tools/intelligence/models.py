@@ -6,7 +6,7 @@
 from enum import Enum
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 
 from ...core.task import Task
 

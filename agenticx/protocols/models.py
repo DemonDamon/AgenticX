@@ -8,7 +8,7 @@ data structures used in agent-to-agent communication.
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Type, Literal
 from uuid import UUID, uuid4
-from pydantic import BaseModel, Field, HttpUrl, ConfigDict
+from pydantic import BaseModel, Field, HttpUrl, ConfigDict  # type: ignore
 
 
 class Skill(BaseModel):
@@ -77,7 +77,7 @@ class CollaborationTask(BaseModel):
     def update_status(self, status: Literal['pending', 'in_progress', 'completed', 'failed']) -> None:
         """Update task status and timestamp."""
         self.status = status
-        self.updated_at = datetime.now(UTC)
+        self.updated_at = datetime.now(timezone.utc)
     
     def complete(self, result: Any) -> None:
         """Mark task as completed with result."""

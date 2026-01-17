@@ -10,7 +10,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Type, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 from ..core.message import Message
 

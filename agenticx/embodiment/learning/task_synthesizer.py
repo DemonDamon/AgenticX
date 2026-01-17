@@ -5,7 +5,7 @@ from observed user behaviors and interactions.
 """
 
 from typing import List, Dict, Any, Optional, Tuple
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 from datetime import datetime, timedelta, UTC
 import json
 from collections import defaultdict, Counter

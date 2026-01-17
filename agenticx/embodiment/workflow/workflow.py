@@ -5,8 +5,8 @@ with GUI-specific capabilities and state management.
 """
 
 from typing import Type, Dict, Any, Optional, List
-from pydantic import Field
-import networkx as nx
+from pydantic import Field  # type: ignore
+import networkx as nx  # type: ignore
 
 from agenticx.core.workflow import Workflow, WorkflowNode, WorkflowEdge
 from agenticx.embodiment.core.context import GUIAgentContext

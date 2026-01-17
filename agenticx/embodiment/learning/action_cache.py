@@ -128,7 +128,7 @@ class ActionCache(Component):
         """初始化嵌入器（延迟加载）"""
         try:
             # 尝试导入 sentence-transformers
-            from sentence_transformers import SentenceTransformer
+            from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
             
             logger.info(f"Loading embedder model: {self.embedder_model}")
             self._embedder = SentenceTransformer(self.embedder_model)

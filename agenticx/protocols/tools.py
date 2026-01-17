@@ -10,7 +10,7 @@ import logging
 from typing import Dict, Any, Optional, Type
 from uuid import uuid4
 
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel, create_model  # type: ignore
 
 from ..tools.base import BaseTool
 from .client import A2AClient, A2ATaskError, A2AConnectionError

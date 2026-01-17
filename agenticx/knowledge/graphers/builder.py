@@ -3,7 +3,8 @@
 import json
 import os
 from typing import Any, Dict, List, Optional, Union
-from loguru import logger
+from loguru import logger  # type: ignore
+import networkx as nx  # type: ignore
 
 from .config import GraphRagConfig, LLMConfig
 from .models import Entity, Relationship, KnowledgeGraph, EntityType, RelationType
@@ -53,7 +54,7 @@ class KnowledgeGraphBuilder:
         try:
             import sys
             sys.path.append(os.getcwd())
-            from prompt_manager import PromptManager
+            from prompt_manager import PromptManager  # type: ignore
             self.prompt_manager = PromptManager(prompts_dir)
         except ImportError as e:
             logger.warning(f"⚠️ 无法导入PromptManager: {e}")

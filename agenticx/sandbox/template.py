@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from pathlib import Path
 import json
-import yaml
+import yaml  # type: ignore
 
 from .types import SandboxType
 

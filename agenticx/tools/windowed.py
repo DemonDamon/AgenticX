@@ -15,7 +15,7 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator  # type: ignore
 
 from .base import BaseTool, ToolError, ToolValidationError
 

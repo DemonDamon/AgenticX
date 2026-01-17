@@ -1,17 +1,17 @@
 import logging
 from typing import Dict, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 from mem0.configs.vector_stores.milvus import MetricType
 from mem0.vector_stores.base import VectorStoreBase
 
 try:
-    import pymilvus  # noqa: F401
+    import pymilvus  # noqa: F401  # type: ignore
 except ImportError:
     raise ImportError("The 'pymilvus' library is required. Please install it using 'pip install pymilvus'.")
 
-from pymilvus import CollectionSchema, DataType, FieldSchema, MilvusClient
+from pymilvus import CollectionSchema, DataType, FieldSchema, MilvusClient  # type: ignore
 
 logger = logging.getLogger(__name__)
 

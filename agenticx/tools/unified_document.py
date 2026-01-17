@@ -19,7 +19,7 @@ import os
 import logging
 from typing import Tuple, Optional, Dict, Any
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 
 from .base import BaseTool
 from .document_routers import DocumentRouter, create_default_router

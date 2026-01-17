@@ -2,10 +2,10 @@ import logging
 import uuid
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 try:
-    import vecs
+    import vecs  # type: ignore
 except ImportError:
     raise ImportError("The 'vecs' library is required. Please install it using 'pip install vecs'.")
 

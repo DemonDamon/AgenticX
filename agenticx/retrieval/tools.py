@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass
 
 from ..core.tool import BaseTool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 from .base import BaseRetriever, RetrievalQuery, RetrievalResult
 from .agents import RetrievalAgent, RerankingAgent, IndexingAgent, QueryAnalysisAgent
 

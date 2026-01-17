@@ -1,7 +1,7 @@
 from abc import ABC
 from typing import Dict, Optional, Union
 
-import httpx
+import httpx  # type: ignore
 
 from mem0.configs.base import AzureConfig
 

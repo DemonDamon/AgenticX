@@ -1,6 +1,6 @@
 from typing import Any, Optional, Dict, List, AsyncGenerator, Generator, Union
-import openai
-from pydantic import Field
+import openai  # type: ignore
+from pydantic import Field  # type: ignore
 from .base import BaseLLMProvider
 from .response import LLMResponse, TokenUsage, LLMChoice
 

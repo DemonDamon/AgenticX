@@ -5,7 +5,7 @@ AgenticX M8.5: 协作框架配置模型
 """
 
 from typing import Dict, Any, Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 from .enums import CollaborationMode, ConflictResolutionStrategy, RepairStrategy
 
 # 延迟导入以避免循环依赖

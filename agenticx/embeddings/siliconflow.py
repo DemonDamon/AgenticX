@@ -1,4 +1,4 @@
-import requests
+import requests  # type: ignore[import-untyped]
 import asyncio
 from typing import List, Optional
 from .base import BaseEmbeddingProvider, EmbeddingError

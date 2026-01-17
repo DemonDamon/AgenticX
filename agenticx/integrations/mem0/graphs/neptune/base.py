@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from mem0.memory.utils import format_entities
 
 try:
-    from rank_bm25 import BM25Okapi
+    from rank_bm25 import BM25Okapi  # type: ignore
 except ImportError:
     raise ImportError("rank_bm25 is not installed. Please install it using pip install rank-bm25")
 

@@ -38,19 +38,19 @@ class WordReader(BaseReader):
     def _get_word_library(self) -> Optional[str]:
         """Detect available Word processing library"""
         try:
-            import python_docx2txt
+            import python_docx2txt  # type: ignore
             return 'docx2txt'
         except ImportError:
             pass
         
         try:
-            from docx import Document as DocxDocument
+            from docx import Document as DocxDocument  # type: ignore
             return 'python-docx'
         except ImportError:
             pass
         
         try:
-            import mammoth
+            import mammoth  # type: ignore
             return 'mammoth'
         except ImportError:
             pass
@@ -60,7 +60,7 @@ class WordReader(BaseReader):
     def _has_docx2txt(self) -> bool:
         """Check if docx2txt is available"""
         try:
-            import docx2txt
+            import docx2txt  # type: ignore
             return True
         except ImportError:
             return False
@@ -166,7 +166,7 @@ class WordReader(BaseReader):
         """Read Word document using docx2txt"""
         
         def _extract():
-            import docx2txt
+            import docx2txt  # type: ignore
             
             # Extract text
             text = docx2txt.process(str(file_path))
@@ -187,7 +187,7 @@ class WordReader(BaseReader):
         """Read Word document using python-docx"""
         
         def _extract():
-            from docx import Document as DocxDocument
+            from docx import Document as DocxDocument  # type: ignore
             
             # Only works with .docx files
             if file_path.suffix.lower() != '.docx':
@@ -237,7 +237,7 @@ class WordReader(BaseReader):
         """Read Word document using mammoth"""
         
         def _extract():
-            import mammoth
+            import mammoth  # type: ignore
             
             # Only works with .docx files
             if file_path.suffix.lower() != '.docx':

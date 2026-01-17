@@ -1,10 +1,10 @@
 from typing import Any, Optional, Dict, List, AsyncGenerator, Generator, Union
-import openai
+import openai  # type: ignore
 import json
-import requests
-import aiohttp
-from pydantic import Field
-from loguru import logger
+import requests  # type: ignore
+import aiohttp  # type: ignore
+from pydantic import Field  # type: ignore
+from loguru import logger  # type: ignore
 from .base import BaseLLMProvider
 from .response import LLMResponse, TokenUsage, LLMChoice
 

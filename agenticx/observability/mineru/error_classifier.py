@@ -5,7 +5,7 @@
 import re
 import traceback
 from typing import Dict, List, Optional, Any, Tuple, Pattern
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 from enum import Enum
 import logging
 from datetime import datetime

@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any, Optional, Dict, List, AsyncGenerator, Generator, Union, cast
-import litellm
-from pydantic import Field
+import litellm  # type: ignore
+from pydantic import Field  # type: ignore
 from .base import BaseLLMProvider
 from .response import LLMResponse, TokenUsage, LLMChoice
 

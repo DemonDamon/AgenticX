@@ -22,7 +22,7 @@ import logging
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 
 logger = logging.getLogger(__name__)
 

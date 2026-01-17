@@ -138,7 +138,7 @@ def process_python_file(path: str) -> Tuple[bool, str]:
 def process_xml_file(path: str) -> Tuple[bool, str]:
     """处理 XML 文件"""
     try:
-        import xmltodict
+        import xmltodict  # type: ignore
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
         try:

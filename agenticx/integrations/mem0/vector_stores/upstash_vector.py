@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 from mem0.vector_stores.base import VectorStoreBase
 

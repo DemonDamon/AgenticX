@@ -438,7 +438,7 @@ class Sandbox:
             if shutil.which("docker") is None:
                 return False
             # 检查后端模块是否存在
-            from .backends.docker import DockerSandbox
+            from .backends.docker import DockerSandbox  # type: ignore
             return True
         except ImportError:
             return False
@@ -471,7 +471,7 @@ class Sandbox:
         
         elif backend == "docker":
             try:
-                from .backends.docker import DockerSandbox
+                from .backends.docker import DockerSandbox  # type: ignore
                 return DockerSandbox(template=template, **kwargs)
             except ImportError:
                 raise SandboxBackendError(

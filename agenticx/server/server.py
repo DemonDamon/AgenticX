@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 
 # 尝试导入 FastAPI
 try:
-    from fastapi import FastAPI, Request, HTTPException
-    from fastapi.responses import StreamingResponse, JSONResponse
-    from fastapi.middleware.cors import CORSMiddleware
-    import uvicorn
+    from fastapi import FastAPI, Request, HTTPException  # type: ignore
+    from fastapi.responses import StreamingResponse, JSONResponse  # type: ignore
+    from fastapi.middleware.cors import CORSMiddleware  # type: ignore
+    import uvicorn  # type: ignore
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False

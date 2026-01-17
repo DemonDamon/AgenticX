@@ -4,7 +4,7 @@ from mem0.configs.llms.base import BaseLlmConfig
 from mem0.llms.base import LLMBase
 
 try:
-    from langchain.chat_models.base import BaseChatModel
+    from langchain.chat_models.base import BaseChatModel  # type: ignore
 except ImportError:
     raise ImportError("langchain is not installed. Please install it using `pip install langchain`")
 

@@ -42,7 +42,7 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field  # type: ignore
 
 logger = logging.getLogger(__name__)
 

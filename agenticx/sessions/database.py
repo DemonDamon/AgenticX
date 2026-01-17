@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 
 # 延迟导入 SQLAlchemy（可选依赖）
 try:
-    from sqlalchemy import (
+    from sqlalchemy import (  # type: ignore
         Column, String, Text, DateTime, JSON, Integer,
         create_engine, Index, ForeignKey, select, delete, update
     )
-    from sqlalchemy.orm import declarative_base, sessionmaker, relationship
-    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+    from sqlalchemy.orm import declarative_base, sessionmaker, relationship  # type: ignore
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker  # type: ignore
     SQLALCHEMY_AVAILABLE = True
 except ImportError:
     SQLALCHEMY_AVAILABLE = False

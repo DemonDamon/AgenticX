@@ -11,9 +11,9 @@ import logging
 from typing import Dict, Any, Optional
 from uuid import UUID
 
-import httpx
-from fastapi import FastAPI, HTTPException, BackgroundTasks, status
-from fastapi.responses import JSONResponse
+import httpx  # type: ignore
+from fastapi import FastAPI, HTTPException, BackgroundTasks, status  # type: ignore
+from fastapi.responses import JSONResponse  # type: ignore
 
 from ..core.agent_executor import AgentExecutor
 from ..core.task import Task
@@ -235,7 +235,7 @@ class A2AWebServiceWrapper:
             host: Host address to bind to
             port: Port number to listen on
         """
-        import uvicorn
+        import uvicorn  # type: ignore
         
         logger.info(f"Starting A2A service for agent '{self.agent_name}' on {host}:{port}")
         

@@ -11,7 +11,7 @@ import re
 import xml.etree.ElementTree as ET
 from typing import List, Optional, Dict, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 
 from ...core.agent import Agent
 from ...core.task import Task
@@ -114,7 +114,7 @@ class TaskDecomposer:
             output = str(output.get("content", output))
         
         # 解析 XML 格式的子任务
-        subtasks = self._parse_subtasks_xml(output, parent_task_id=task.id)
+        subtasks = self._parse_subtasks_xml(output, parent_task_id=task.id, fallback_description=task.description)
         
         # 如果使用 AdaptivePlanner，可以进行优化
         if self.planner and subtasks:
@@ -127,6 +127,7 @@ class TaskDecomposer:
         self,
         xml_content: str,
         parent_task_id: str,
+        fallback_description: Optional[str] = None,
     ) -> List[Task]:
         """解析 XML 格式的子任务"""
         subtasks = []
@@ -181,7 +182,7 @@ class TaskDecomposer:
             logger.warning("[TaskDecomposer] No subtasks parsed, creating single subtask")
             subtasks.append(Task(
                 id=f"{parent_task_id}_subtask_1",
-                description=task.description,
+                description=fallback_description or "Task execution",
                 expected_output="Task execution result",
                 dependencies=[],
             ))

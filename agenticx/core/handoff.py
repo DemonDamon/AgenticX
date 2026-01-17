@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Literal
 import logging
 import uuid
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field  # type: ignore
 
 from .event import Event
 

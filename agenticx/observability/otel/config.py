@@ -119,8 +119,8 @@ def _check_otel_dependencies() -> bool:
         True 如果依赖已安装，False 否则
     """
     try:
-        import opentelemetry.sdk  # noqa: F401
-        import opentelemetry.trace  # noqa: F401
+        import opentelemetry.sdk  # noqa: F401  # type: ignore
+        import opentelemetry.trace  # noqa: F401  # type: ignore
         return True
     except ImportError:
         return False
@@ -203,10 +203,10 @@ def _setup_otel_provider(config: OTelConfig) -> None:
     
     内化自 loongsuite-python-agent 的 bootstrap 逻辑
     """
-    from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+    from opentelemetry import trace  # type: ignore
+    from opentelemetry.sdk.trace import TracerProvider  # type: ignore
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter  # type: ignore
+    from opentelemetry.sdk.resources import Resource, SERVICE_NAME  # type: ignore
     
     # 构建资源
     resource_attrs = {SERVICE_NAME: config.service_name}
@@ -216,7 +216,7 @@ def _setup_otel_provider(config: OTelConfig) -> None:
     # 创建 TracerProvider
     # 使用采样率（如果需要）
     if config.trace_sample_rate < 1.0:
-        from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+        from opentelemetry.sdk.trace.sampling import TraceIdRatioBased  # type: ignore
         sampler = TraceIdRatioBased(config.trace_sample_rate)
         provider = TracerProvider(resource=resource, sampler=sampler)
     else:
@@ -230,7 +230,7 @@ def _setup_otel_provider(config: OTelConfig) -> None:
     # 添加 OTLP 导出器
     if config.otlp_endpoint:
         try:
-            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter  # type: ignore
             otlp_exporter = OTLPSpanExporter(endpoint=config.otlp_endpoint)
             provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
             logger.info(f"OTLP 导出器已配置: {config.otlp_endpoint}")

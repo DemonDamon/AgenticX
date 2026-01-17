@@ -22,7 +22,7 @@ import asyncio
 import logging
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 
 logger = logging.getLogger(__name__)
 

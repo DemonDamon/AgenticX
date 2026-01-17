@@ -6,7 +6,7 @@ AgenticX M9: 监控系统 (Monitoring System)
 """
 
 import time
-import psutil
+import psutil  # type: ignore
 import threading
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field

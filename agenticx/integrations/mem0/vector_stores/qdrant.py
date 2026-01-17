@@ -2,8 +2,8 @@ import logging
 import os
 import shutil
 
-from qdrant_client import QdrantClient
-from qdrant_client.models import (
+from qdrant_client import QdrantClient  # type: ignore
+from qdrant_client.models import (  # type: ignore
     Distance,
     FieldCondition,
     Filter,

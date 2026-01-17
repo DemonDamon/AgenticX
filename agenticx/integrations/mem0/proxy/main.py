@@ -4,18 +4,18 @@ import sys
 import threading
 from typing import List, Optional, Union
 
-import httpx
+import httpx  # type: ignore
 
 import mem0
 
 try:
-    import litellm
+    import litellm  # type: ignore
 except ImportError:
     user_input = input("The 'litellm' library is required. Install it now? [y/N]: ")
     if user_input.lower() == "y":
         try:
             subprocess.check_call([sys.executable, "-m", "pip", "install", "litellm"])
-            import litellm
+            import litellm  # type: ignore
         except subprocess.CalledProcessError:
             print("Failed to install 'litellm'. Please install it manually using 'pip install litellm'.")
             sys.exit(1)
