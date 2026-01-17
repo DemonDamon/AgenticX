@@ -18,6 +18,7 @@ class CollaborationMode(Enum):
     NESTED = "nested"                  # 嵌套模式
     DYNAMIC = "dynamic"                # 动态添加模式
     ASYNC = "async"                    # 异步协作模式
+    ROLE_PLAYING = "role_playing"      # 角色扮演模式（OWL 增强机制）
 
 
 class ConflictResolutionStrategy(Enum):
