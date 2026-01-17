@@ -3,7 +3,7 @@ AgenticX Implementation of AG-UI (Agent User Interaction) Protocol.
 Standardizes communication between AI agents and user-facing applications.
 
 Partially based on: ag-ui-protocol/ag-ui
-License: MIT
+
 """
 
 from enum import Enum
