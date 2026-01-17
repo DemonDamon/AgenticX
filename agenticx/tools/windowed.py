@@ -6,7 +6,6 @@ WindowedFileTool
 - 支持 open/goto/scroll_up/scroll_down 操作
 - 自动维护当前文件与窗口起始行，便于多次调用
 
-版权声明：该实现参考了 SWE-agent 的 windowed 工具配置与行为（MIT License）。
 """
 
 from __future__ import annotations
