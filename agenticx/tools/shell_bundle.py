@@ -6,7 +6,6 @@ Shell bundle loader (SWE-agent inspired)
 - 将 bin/<tool_name> 封装为 BaseTool 派生类，执行本地 shell 脚本
 - 可选 state_command（如 bin/_state），用于提取状态（JSON 优先，否则原样字符串）
 
-版权声明：参考 SWE-agent/tools 的 bundle 机制（MIT License），做了最小适配以融入 AgenticX。
 """
 
 from __future__ import annotations
