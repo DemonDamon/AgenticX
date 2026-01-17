@@ -38,6 +38,8 @@ from .role_playing import RolePlayingPattern
 from .manager import CollaborationManager
 from .memory import CollaborationMemory, CollaborationEvent
 from .metrics import CollaborationMetrics, EfficiencyMetrics, ContributionMetrics
+# 新增：对话管理
+from .conversation import ConversationManager, ConversationEntry
 
 __all__ = [
     # 枚举和配置
@@ -65,7 +67,11 @@ __all__ = [
     'CollaborationEvent',
     'CollaborationMetrics',
     'EfficiencyMetrics',
-    'ContributionMetrics'
+    'ContributionMetrics',
+    
+    # 对话管理（新增）
+    'ConversationManager',
+    'ConversationEntry',
 ]
 
 __version__ = "0.2.0" 
