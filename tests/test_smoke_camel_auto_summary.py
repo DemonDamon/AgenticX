@@ -4,7 +4,7 @@ Smoke tests for ScoreBasedContextCreator and automatic summarization.
 Tests two-phase token management and automatic summarization trigger.
 """
 
-import pytest
+import pytest # type: ignore
 import sys
 from agenticx.memory.context_creators.score_based import (
     ScoreBasedContextCreator,
