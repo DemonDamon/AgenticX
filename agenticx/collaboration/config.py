@@ -8,6 +8,11 @@ from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
 from .enums import CollaborationMode, ConflictResolutionStrategy, RepairStrategy
 
+# 延迟导入以避免循环依赖
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..collaboration.workforce.utils import FailureHandlingConfig
+
 
 class CollaborationConfig(BaseModel):
     """协作配置模型"""
@@ -146,6 +151,23 @@ class RolePlayingConfig(CollaborationConfig):
     enable_task_done_detection: bool = Field(default=True, description="启用 TASK_DONE 标记检测")
 
 
+class WorkforceConfig(CollaborationConfig):
+    """Workforce 编排模式配置（CAMEL 内化）
+    
+    支持 coordinator-planner-worker 三层架构，智能任务分解和故障恢复。
+    参考：CAMEL-AI 的 Workforce 编排系统。
+    """
+    mode: CollaborationMode = Field(default=CollaborationMode.WORKFORCE, description="协作模式")
+    coordinator_agent_id: str = Field(description="Coordinator Agent ID（负责任务分配）")
+    task_agent_id: str = Field(description="Task Agent ID（负责任务分解）")
+    worker_agent_ids: List[str] = Field(default_factory=list, description="Worker Agent ID 列表")
+    execution_mode: str = Field(default="auto_decompose", description="执行模式：auto_decompose 或 pipeline")
+    failure_handling_config: Optional[Any] = Field(default=None, description="故障处理配置（FailureHandlingConfig 或 Dict）")
+    task_timeout_seconds: Optional[float] = Field(default=None, description="任务超时时间（秒）")
+    graceful_shutdown_timeout: float = Field(default=15.0, description="优雅关闭超时时间（秒）")
+    share_memory: bool = Field(default=False, description="是否共享内存")
+
+
 def create_pattern_config(
     mode: CollaborationMode,
     **kwargs
@@ -161,6 +183,7 @@ def create_pattern_config(
         CollaborationMode.DYNAMIC: DynamicConfig,
         CollaborationMode.ASYNC: AsyncConfig,
         CollaborationMode.ROLE_PLAYING: RolePlayingConfig,
+        CollaborationMode.WORKFORCE: WorkforceConfig,
     }
     
     config_class = config_classes.get(mode, CollaborationConfig)
