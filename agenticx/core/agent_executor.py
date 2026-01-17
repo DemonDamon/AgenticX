@@ -25,6 +25,7 @@ from .prompt import PromptManager, CompiledContextRenderer
 from .error_handler import ErrorHandler
 from .communication import CommunicationInterface
 from .context_compiler import ContextCompiler, create_context_compiler
+from .stream_accumulator import StreamContentAccumulator
 
 # Hooks 系统
 from ..hooks.llm_hooks import (
@@ -459,6 +460,12 @@ class AgentExecutor:
         # 使用可能被修改的响应
         final_response = modified_response if modified_response is not None else response.content
         
+        # StreamContentAccumulator integration: accumulate response content
+        # Even for non-streaming responses, we can use accumulator for consistency
+        accumulator = StreamContentAccumulator()
+        accumulator.set_base_content("")
+        accumulator.add_streaming_content(final_response)
+        
         llm_response_event = LLMResponseEvent(
             response=final_response,
             token_usage=token_usage,
@@ -468,8 +475,9 @@ class AgentExecutor:
         )
         event_log.append(llm_response_event)
 
-        # Parse action
-        action = self.action_parser.parse_action(final_response)
+        # Parse action using accumulated content
+        accumulated_content = accumulator.get_full_content()
+        action = self.action_parser.parse_action(accumulated_content)
         
         return action
     
@@ -570,7 +578,12 @@ class AgentExecutor:
 
         executor = ToolExecutor()
         try:
-            execution_result = executor.execute(tool, **tool_args)
+            execution_result = executor.execute(
+                tool,
+                agent_id=event_log.agent_id,
+                task_id=event_log.task_id,
+                **tool_args
+            )
             
             if execution_result.success:
                 # === After Tool Call Hooks ===
@@ -830,7 +843,12 @@ class AgentExecutor:
                 # 使用 ToolExecutor 执行工具
                 from ..tools.executor import ToolExecutor
                 executor = ToolExecutor()
-                execution_result = executor.execute(tool, **tool_args)
+                execution_result = executor.execute(
+                    tool,
+                    agent_id=event_log.agent_id,
+                    task_id=event_log.task_id,
+                    **tool_args
+                )
                 
                 execution_time_ms = (time.perf_counter() - tool_start) * 1000
                 
