@@ -35,6 +35,8 @@ except Exception:  # pragma: no cover - sandbox may block requests SSL
 from .security import human_in_the_loop, ApprovalRequiredError
 from .tool_context import ToolContext, LlmRequest
 from .openapi_toolset import OpenAPIToolset, RestApiTool
+from .unified_document import UnifiedDocumentTool
+from .document_routers import DocumentRouter, create_default_router
 
 __all__ = [
     # Base classes
@@ -84,4 +86,8 @@ __all__ = [
     "SkillBundleLoader",
     "SkillTool",
     "SkillMetadata",
+    # Unified Document Tool (OWL-inspired)
+    "UnifiedDocumentTool",
+    "DocumentRouter",
+    "create_default_router",
 ] 
