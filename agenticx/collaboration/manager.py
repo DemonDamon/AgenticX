@@ -19,19 +19,21 @@ from .patterns import (
     # DebatePattern, GroupChatPattern, ParallelPattern,
     # NestedPattern, DynamicPattern, AsyncPattern
 )
+from .role_playing import RolePlayingPattern
+from .config import RolePlayingConfig
 
 
 class CollaborationManager:
     """协作管理器"""
     
-    def __init__(self, config: CollaborationManagerConfig):
+    def __init__(self, config: Optional[CollaborationManagerConfig] = None):
         """
         初始化协作管理器
         
         Args:
-            config: 管理器配置
+            config: 管理器配置（可选，如果不提供则使用默认配置）
         """
-        self.config = config
+        self.config = config or CollaborationManagerConfig()
         self.active_collaborations: Dict[str, BaseCollaborationPattern] = {}
         self.collaboration_history: List[Dict[str, Any]] = []
         self.metrics_collector = None  # 可以集成指标收集器
@@ -90,6 +92,7 @@ class CollaborationManager:
             CollaborationMode.NESTED: NestedPattern,
             CollaborationMode.DYNAMIC: DynamicPattern,
             CollaborationMode.ASYNC: AsyncPattern,
+            CollaborationMode.ROLE_PLAYING: RolePlayingPattern,
         }
         
         pattern_class = pattern_classes.get(pattern)
@@ -110,6 +113,32 @@ class CollaborationManager:
             executor_agent = agents[0]
             reviewer_agent = agents[1]
             return pattern_class(executor_agent, reviewer_agent, **kwargs)
+        
+        elif pattern == CollaborationMode.ROLE_PLAYING:
+            if len(agents) != 2:
+                raise ValueError("角色扮演模式需要恰好2个智能体（1个 User + 1个 Assistant）")
+            
+            # 从 kwargs 中提取配置参数，或创建默认配置
+            user_agent_id = kwargs.pop('user_agent_id', agents[0].id)
+            assistant_agent_id = kwargs.pop('assistant_agent_id', agents[1].id)
+            round_limit = kwargs.pop('round_limit', 15)
+            enable_context_injection = kwargs.pop('enable_context_injection', True)
+            enable_task_done_detection = kwargs.pop('enable_task_done_detection', True)
+            
+            # 创建 RolePlayingConfig
+            config = RolePlayingConfig(
+                user_agent_id=user_agent_id,
+                assistant_agent_id=assistant_agent_id,
+                round_limit=round_limit,
+                enable_context_injection=enable_context_injection,
+                enable_task_done_detection=enable_task_done_detection
+            )
+            
+            # 如果 kwargs 中有 config，使用它
+            if 'config' in kwargs:
+                config = kwargs.pop('config')
+            
+            return pattern_class(agents=agents, config=config, **kwargs)
         
         else:
             # 对于其他模式，暂时抛出错误
