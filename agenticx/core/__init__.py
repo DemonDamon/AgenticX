@@ -197,6 +197,30 @@ from .memory_extraction import (
     create_memory_extractor, create_session_memory_manager,
 )
 
+# Hooks System (参考 crewAI，用于 Eigent 增强)
+from .hooks import (
+    LLMCallHookContext,
+    ToolCallHookContext,
+    LLMHookFunction,
+    ToolHookFunction,
+    register_before_llm_call_hook,
+    register_after_llm_call_hook,
+    unregister_before_llm_call_hook,
+    unregister_after_llm_call_hook,
+    execute_before_llm_call_hooks,
+    execute_after_llm_call_hooks,
+    clear_all_llm_hooks,
+    get_registered_llm_hooks,
+    register_before_tool_call_hook,
+    register_after_tool_call_hook,
+    unregister_before_tool_call_hook,
+    unregister_after_tool_call_hook,
+    execute_before_tool_call_hooks,
+    execute_after_tool_call_hooks,
+    clear_all_tool_hooks,
+    get_registered_tool_hooks,
+)
+
 # GuideRails (post-output validation)
 from .guiderails import (
     GuideRailsAction, GuideRailsResult, GuideRailsConfig, GuideRailsContext,
@@ -453,4 +477,25 @@ __all__ = [
     "parse_handoff_output",
     "create_handoff_event",
     "check_handoff_cycle",
+    # Hooks System (参考 crewAI，用于 Eigent 增强)
+    "LLMCallHookContext",
+    "ToolCallHookContext",
+    "LLMHookFunction",
+    "ToolHookFunction",
+    "register_before_llm_call_hook",
+    "register_after_llm_call_hook",
+    "unregister_before_llm_call_hook",
+    "unregister_after_llm_call_hook",
+    "execute_before_llm_call_hooks",
+    "execute_after_llm_call_hooks",
+    "clear_all_llm_hooks",
+    "get_registered_llm_hooks",
+    "register_before_tool_call_hook",
+    "register_after_tool_call_hook",
+    "unregister_before_tool_call_hook",
+    "unregister_after_tool_call_hook",
+    "execute_before_tool_call_hooks",
+    "execute_after_tool_call_hooks",
+    "clear_all_tool_hooks",
+    "get_registered_tool_hooks",
 ]
