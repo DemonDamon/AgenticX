@@ -19,6 +19,7 @@ class CollaborationMode(Enum):
     DYNAMIC = "dynamic"                # 动态添加模式
     ASYNC = "async"                    # 异步协作模式
     ROLE_PLAYING = "role_playing"      # 角色扮演模式（OWL 增强机制）
+    WORKFORCE = "workforce"            # Workforce 编排模式（CAMEL 内化）
 
 
 class ConflictResolutionStrategy(Enum):
