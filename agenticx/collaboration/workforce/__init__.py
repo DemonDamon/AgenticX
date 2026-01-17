@@ -6,6 +6,12 @@ AgenticX Workforce 模块
 参考：
 - CAMEL-AI: camel/societies/workforce/workforce.py
 - License: Apache 2.0 (CAMEL-AI.org)
+
+增强功能（参考 Eigent）：
+- 任务分解和执行分离
+- 事件通知系统
+- 上下文精细化管理
+- 工作流记忆传递
 """
 
 from .utils import (
@@ -27,6 +33,10 @@ from .task_assigner import TaskAssigner
 from .failure_analyzer import FailureAnalyzer
 from .recovery_strategies import RecoveryStrategyExecutor
 from .worker_factory import WorkerFactory
+# 新增：Eigent 增强功能
+from .events import WorkforceEventBus, WorkforceEvent, WorkforceAction
+from .context_manager import ContextManager
+from .hooks import create_workforce_event_hooks, remove_workforce_event_hooks
 
 __all__ = [
     "RecoveryStrategy",
@@ -45,4 +55,11 @@ __all__ = [
     "FailureAnalyzer",
     "RecoveryStrategyExecutor",
     "WorkerFactory",
+    # 新增导出
+    "WorkforceEventBus",
+    "WorkforceEvent",
+    "WorkforceAction",
+    "ContextManager",
+    "create_workforce_event_hooks",
+    "remove_workforce_event_hooks",
 ]
