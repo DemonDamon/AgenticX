@@ -10,7 +10,7 @@ AgenticX 工具系统
 
 from .base import BaseTool, ToolError, ToolTimeoutError, ToolValidationError
 from .function_tool import FunctionTool, tool
-from .executor import ToolExecutor, ExecutionResult
+from .executor import ToolExecutor, ExecutionResult, ToolCallingRecord
 from .credentials import CredentialStore
 from .remote import RemoteTool, MCPClient, MCPServerConfig, load_mcp_config, create_mcp_client
 from .remote_v2 import MCPClientV2, RemoteToolV2
@@ -56,6 +56,7 @@ __all__ = [
     # Executor
     "ToolExecutor",
     "ExecutionResult",
+    "ToolCallingRecord",
     # Credential management
     "CredentialStore",
     # Built-in tools
