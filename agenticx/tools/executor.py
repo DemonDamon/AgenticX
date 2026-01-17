@@ -12,6 +12,8 @@ import asyncio
 import logging
 import time
 from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
+from datetime import datetime
+from pydantic import BaseModel, Field
 
 from .base import BaseTool, ToolError, ToolTimeoutError
 from ..tools.security import ApprovalRequiredError
@@ -21,6 +23,23 @@ if TYPE_CHECKING:
     from ..sandbox.types import ExecutionResult as SandboxExecutionResult
 
 logger = logging.getLogger(__name__)
+
+
+class ToolCallingRecord(BaseModel):
+    """工具调用记录
+    
+    参考：camel/types/agents.py:ToolCallingRecord
+    """
+    tool_name: str = Field(description="工具名称")
+    tool_args: Dict[str, Any] = Field(description="工具参数")
+    agent_id: Optional[str] = Field(default=None, description="Agent ID")
+    task_id: Optional[str] = Field(default=None, description="Task ID")
+    timestamp: datetime = Field(default_factory=datetime.now, description="调用时间戳")
+    success: bool = Field(description="是否成功")
+    result: Optional[Any] = Field(default=None, description="执行结果")
+    error: Optional[str] = Field(default=None, description="错误信息")
+    execution_time: float = Field(default=0.0, description="执行时间（秒）")
+    retry_count: int = Field(default=0, description="重试次数")
 
 
 class ExecutionResult:
@@ -249,6 +268,9 @@ class ToolExecutor:
             "total_execution_time": 0.0,
             "sandbox_executions": 0,
         }
+        
+        # 工具调用历史记录
+        self._tool_calling_history: List[ToolCallingRecord] = []
     
     @property
     def execution_stats(self) -> Dict[str, Any]:
@@ -290,6 +312,8 @@ class ToolExecutor:
     def execute(
         self,
         tool: BaseTool,
+        agent_id: Optional[str] = None,
+        task_id: Optional[str] = None,
         **kwargs
     ) -> ExecutionResult:
         """
@@ -297,6 +321,8 @@ class ToolExecutor:
         
         Args:
             tool: 要执行的工具
+            agent_id: Agent ID（可选，用于记录）
+            task_id: Task ID（可选，用于记录）
             **kwargs: 工具参数
             
         Returns:
@@ -325,6 +351,18 @@ class ToolExecutor:
                 execution_time = time.time() - start_time
                 self._execution_stats["successful_executions"] += 1
                 self._execution_stats["total_execution_time"] += execution_time
+                
+                # 记录工具调用
+                self._record_tool_call(
+                    tool_name=tool.name,
+                    tool_args=kwargs,
+                    agent_id=agent_id,
+                    task_id=task_id,
+                    success=True,
+                    result=result,
+                    execution_time=execution_time,
+                    retry_count=retry_count,
+                )
                 
                 return ExecutionResult(
                     tool_name=tool.name,
@@ -357,6 +395,18 @@ class ToolExecutor:
         self._execution_stats["failed_executions"] += 1
         self._execution_stats["total_execution_time"] += execution_time
         
+        # 记录工具调用（失败）
+        self._record_tool_call(
+            tool_name=tool.name,
+            tool_args=kwargs,
+            agent_id=agent_id,
+            task_id=task_id,
+            success=False,
+            error=str(last_error) if last_error else None,
+            execution_time=execution_time,
+            retry_count=retry_count,
+        )
+        
         return ExecutionResult(
             tool_name=tool.name,
             success=False,
@@ -365,9 +415,74 @@ class ToolExecutor:
             retry_count=retry_count,
         )
     
+    def _record_tool_call(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        agent_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        success: bool = True,
+        result: Optional[Any] = None,
+        error: Optional[str] = None,
+        execution_time: float = 0.0,
+        retry_count: int = 0,
+    ):
+        """记录工具调用"""
+        record = ToolCallingRecord(
+            tool_name=tool_name,
+            tool_args=tool_args,
+            agent_id=agent_id,
+            task_id=task_id,
+            timestamp=datetime.now(),
+            success=success,
+            result=result,
+            error=error,
+            execution_time=execution_time,
+            retry_count=retry_count,
+        )
+        self._tool_calling_history.append(record)
+        
+        # 限制历史记录数量（保留最近 1000 条）
+        if len(self._tool_calling_history) > 1000:
+            self._tool_calling_history = self._tool_calling_history[-1000:]
+    
+    def get_tool_calling_history(
+        self,
+        agent_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[ToolCallingRecord]:
+        """
+        获取工具调用历史
+        
+        Args:
+            agent_id: 按 Agent ID 过滤（可选）
+            task_id: 按 Task ID 过滤（可选）
+            tool_name: 按工具名称过滤（可选）
+            limit: 返回数量限制
+            
+        Returns:
+            工具调用记录列表
+        """
+        records = self._tool_calling_history.copy()
+        
+        # 应用过滤
+        if agent_id:
+            records = [r for r in records if r.agent_id == agent_id]
+        if task_id:
+            records = [r for r in records if r.task_id == task_id]
+        if tool_name:
+            records = [r for r in records if r.tool_name == tool_name]
+        
+        # 返回最近的记录
+        return records[-limit:]
+    
     async def aexecute(
         self,
         tool: BaseTool,
+        agent_id: Optional[str] = None,
+        task_id: Optional[str] = None,
         **kwargs
     ) -> ExecutionResult:
         """
@@ -410,6 +525,18 @@ class ToolExecutor:
                 self._execution_stats["successful_executions"] += 1
                 self._execution_stats["total_execution_time"] += execution_time
                 
+                # 记录工具调用
+                self._record_tool_call(
+                    tool_name=tool.name,
+                    tool_args=kwargs,
+                    agent_id=agent_id,
+                    task_id=task_id,
+                    success=True,
+                    result=result,
+                    execution_time=execution_time,
+                    retry_count=retry_count,
+                )
+                
                 return ExecutionResult(
                     tool_name=tool.name,
                     success=True,
@@ -440,6 +567,18 @@ class ToolExecutor:
         execution_time = time.time() - start_time
         self._execution_stats["failed_executions"] += 1
         self._execution_stats["total_execution_time"] += execution_time
+        
+        # 记录工具调用（失败）
+        self._record_tool_call(
+            tool_name=tool.name,
+            tool_args=kwargs,
+            agent_id=agent_id,
+            task_id=task_id,
+            success=False,
+            error=str(last_error) if last_error else None,
+            execution_time=execution_time,
+            retry_count=retry_count,
+        )
         
         return ExecutionResult(
             tool_name=tool.name,
