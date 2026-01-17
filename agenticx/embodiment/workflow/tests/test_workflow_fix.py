@@ -1,6 +1,6 @@
 """Test to verify the fix for the None graph issue."""
 
-import pytest
+import pytest  # type: ignore
 from agenticx.embodiment.workflow.workflow import GUIWorkflow
 from agenticx.core.workflow import WorkflowNode, WorkflowEdge
 from agenticx.embodiment.core.context import GUIAgentContext
