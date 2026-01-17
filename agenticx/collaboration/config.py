@@ -132,6 +132,20 @@ class AsyncConfig(CollaborationConfig):
     enable_conflict_resolution: bool = Field(default=True, description="启用冲突解决")
 
 
+class RolePlayingConfig(CollaborationConfig):
+    """角色扮演模式配置（OWL 增强机制）
+    
+    支持 User Agent 和 Assistant Agent 的双向对话，显式任务分解。
+    参考：OWL (Optimized Workforce Learning) 的角色扮演机制。
+    """
+    mode: CollaborationMode = Field(default=CollaborationMode.ROLE_PLAYING, description="协作模式")
+    user_agent_id: str = Field(description="User Agent ID（负责任务分解）")
+    assistant_agent_id: str = Field(description="Assistant Agent ID（负责工具调用和执行）")
+    round_limit: int = Field(default=15, description="最大对话轮数")
+    enable_context_injection: bool = Field(default=True, description="启用任务上下文注入")
+    enable_task_done_detection: bool = Field(default=True, description="启用 TASK_DONE 标记检测")
+
+
 def create_pattern_config(
     mode: CollaborationMode,
     **kwargs
@@ -146,6 +160,7 @@ def create_pattern_config(
         CollaborationMode.NESTED: NestedConfig,
         CollaborationMode.DYNAMIC: DynamicConfig,
         CollaborationMode.ASYNC: AsyncConfig,
+        CollaborationMode.ROLE_PLAYING: RolePlayingConfig,
     }
     
     config_class = config_classes.get(mode, CollaborationConfig)
