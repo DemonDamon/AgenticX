@@ -1,7 +1,7 @@
 import os
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 
 from mem0.embeddings.configs import EmbedderConfig
 from mem0.graphs.configs import GraphStoreConfig

@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 from pathlib import Path
 
 try:
-    from cryptography.fernet import Fernet
+    from cryptography.fernet import Fernet  # type: ignore
     CRYPTO_AVAILABLE = True
 except ImportError:
     CRYPTO_AVAILABLE = False

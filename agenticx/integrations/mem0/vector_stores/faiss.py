@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 try:
     logging.getLogger("faiss").setLevel(logging.WARNING)

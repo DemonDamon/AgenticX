@@ -1,6 +1,6 @@
 from typing import Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator  # type: ignore
 
 from mem0.llms.configs import LlmConfig
 

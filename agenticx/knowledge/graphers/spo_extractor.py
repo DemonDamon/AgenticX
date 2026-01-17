@@ -7,7 +7,7 @@ extracting entities, relationships, and attributes in a single LLM call.
 import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
-from loguru import logger
+from loguru import logger  # type: ignore
 
 from .models import Entity, EntityType, Relationship, RelationType
 

@@ -7,7 +7,7 @@ import time
 import threading
 import os
 from typing import Dict, List, Optional, Any, Callable, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 from enum import Enum
 import logging
 from datetime import datetime, timedelta
@@ -15,12 +15,12 @@ from pathlib import Path
 import json
 
 try:
-    import psutil
+    import psutil  # type: ignore
 except ImportError:
     psutil = None
 
 try:
-    import requests
+    import requests  # type: ignore
 except ImportError:
     requests = None
 

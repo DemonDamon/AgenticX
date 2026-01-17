@@ -4,7 +4,7 @@ EvalSet: 标准化评测集格式
 借鉴 ADK 的 evalset.json 格式，提供统一的评测集定义。
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime, timezone
 from pathlib import Path

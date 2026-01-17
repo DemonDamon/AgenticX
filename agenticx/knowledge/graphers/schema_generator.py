@@ -6,7 +6,7 @@
 import json
 import os
 from typing import Any, Dict, List, Optional
-from loguru import logger
+from loguru import logger  # type: ignore
 
 
 class SchemaGenerator:

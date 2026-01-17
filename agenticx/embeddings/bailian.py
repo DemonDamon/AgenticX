@@ -1,12 +1,12 @@
 import asyncio
-import aiohttp
+import aiohttp  # type: ignore[import-untyped]
 import json
 import time
 from typing import List, Optional, Dict, Any
 from .base import BaseEmbeddingProvider, EmbeddingError
 
 try:
-    import dashscope
+    import dashscope  # type: ignore[import-untyped]
     from http import HTTPStatus
     DASHSCOPE_AVAILABLE = True
 except ImportError:

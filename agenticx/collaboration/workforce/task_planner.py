@@ -86,7 +86,7 @@ class TaskPlannerAgent:
             output = str(output.get("content", output))
         
         # 解析 XML 格式的子任务
-        subtasks = self._parse_subtasks_xml(output, parent_task_id=task.id)
+        subtasks = self._parse_subtasks_xml(output, parent_task_id=task.id, task=task)
         
         logger.info(f"[TaskPlanner] Decomposed into {len(subtasks)} subtasks")
         return subtasks
@@ -95,6 +95,7 @@ class TaskPlannerAgent:
         self,
         xml_content: str,
         parent_task_id: str,
+        task: Task,
     ) -> List[Task]:
         """解析 XML 格式的子任务"""
         subtasks = []

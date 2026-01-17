@@ -177,7 +177,7 @@ class ResourceMonitor:
     def _get_memory_usage(self) -> int:
         """Get current memory usage."""
         try:
-            import psutil
+            import psutil  # type: ignore[import-untyped]
             process = psutil.Process()
             return process.memory_info().rss
         except ImportError:

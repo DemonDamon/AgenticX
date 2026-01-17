@@ -2,7 +2,7 @@ import logging
 from typing import Literal, Optional
 
 from openai import OpenAI
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer  # type: ignore
 
 from mem0.configs.embeddings.base import BaseEmbedderConfig
 from mem0.embeddings.base import EmbeddingBase

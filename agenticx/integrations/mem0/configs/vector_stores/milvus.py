@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Any, Dict
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator  # type: ignore
 
 
 class MetricType(str, Enum):

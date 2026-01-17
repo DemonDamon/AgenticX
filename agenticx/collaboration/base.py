@@ -6,7 +6,7 @@ AgenticX M8.5: 协作框架基础抽象类
 
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 from datetime import datetime
 import uuid
 

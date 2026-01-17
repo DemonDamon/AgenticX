@@ -12,8 +12,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-import requests
-from pydantic import BaseModel, Field
+import requests  # type: ignore
+from pydantic import BaseModel, Field  # type: ignore
 
 from .base import BaseTool
 from .credentials import get_credential

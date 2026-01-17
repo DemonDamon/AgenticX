@@ -1,10 +1,10 @@
 from typing import Any, ClassVar, Dict, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator  # type: ignore
 
 
 class QdrantConfig(BaseModel):
-    from qdrant_client import QdrantClient
+    from qdrant_client import QdrantClient  # type: ignore
 
     QdrantClient: ClassVar[type] = QdrantClient
 

@@ -11,7 +11,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 try:
-    from pymilvus import connections, utility, Collection, CollectionSchema, FieldSchema, DataType
+    from pymilvus import connections, utility, Collection, CollectionSchema, FieldSchema, DataType  # type: ignore
     MILVUS_AVAILABLE = True
 except ImportError:
     MILVUS_AVAILABLE = False

@@ -7,7 +7,7 @@ import json
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-import aiohttp
+import aiohttp  # type: ignore
 import logging
 
 from .base import DocumentAdapter, ParsedArtifacts

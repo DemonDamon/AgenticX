@@ -5,7 +5,7 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 import logging
 
 logger = logging.getLogger(__name__)

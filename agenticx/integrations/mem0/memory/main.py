@@ -11,8 +11,8 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-import pytz
-from pydantic import ValidationError
+import pytz  # type: ignore
+from pydantic import ValidationError  # type: ignore
 
 from mem0.configs.base import MemoryConfig, MemoryItem
 from mem0.configs.enums import MemoryType
@@ -1699,9 +1699,7 @@ class AsyncMemory(MemoryBase):
             prompt (str, optional): Prompt to use for the procedural memory creation. Defaults to None.
         """
         try:
-            from langchain_core.messages.utils import (
-                convert_to_messages,  # type: ignore
-            )
+            from langchain_core.messages.utils import convert_to_messages  # type: ignore
         except Exception:
             logger.error(
                 "Import error while loading langchain-core. Please install 'langchain-core' to use procedural memory."

@@ -4,8 +4,8 @@ import json
 import uuid
 from typing import Any, Dict, List, Optional, Set
 
-import networkx as nx
-from cdlib import algorithms
+import networkx as nx  # type: ignore
+from cdlib import algorithms  # type: ignore
 
 from .models import Entity, Relationship, EntityType, RelationType, KnowledgeGraph
 

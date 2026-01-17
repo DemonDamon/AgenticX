@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 
 try:
     from google import genai
-    from google.genai import types
+    from google.genai import types  # type: ignore
 except ImportError:
     raise ImportError("The 'google-genai' library is required. Please install it using 'pip install google-genai'.")
 

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Literal
 from uuid import UUID, uuid4
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator  # type: ignore
 import logging
 
 logger = logging.getLogger(__name__)

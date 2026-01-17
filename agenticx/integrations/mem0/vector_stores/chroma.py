@@ -1,11 +1,11 @@
 import logging
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 try:
-    import chromadb
-    from chromadb.config import Settings
+    import chromadb  # type: ignore
+    from chromadb.config import Settings  # type: ignore
 except ImportError:
     raise ImportError("The 'chromadb' library is required. Please install it using 'pip install chromadb'.")
 

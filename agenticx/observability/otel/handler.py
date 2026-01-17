@@ -34,10 +34,10 @@ logger = logging.getLogger(__name__)
 # 尝试导入 OpenTelemetry（可选依赖）
 _OTEL_AVAILABLE = False
 try:
-    from opentelemetry import trace
-    from opentelemetry.trace import Span, SpanKind, Status, StatusCode
-    from opentelemetry.trace.propagation import set_span_in_context
-    from opentelemetry.context import Context
+    from opentelemetry import trace  # type: ignore
+    from opentelemetry.trace import Span, SpanKind, Status, StatusCode  # type: ignore
+    from opentelemetry.trace.propagation import set_span_in_context  # type: ignore
+    from opentelemetry.context import Context  # type: ignore
     _OTEL_AVAILABLE = True
 except ImportError:
     # 创建占位符类型

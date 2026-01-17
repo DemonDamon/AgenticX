@@ -14,7 +14,7 @@ import json
 import re
 from abc import ABC, abstractmethod
 from typing import Type, Dict, Any, List, Optional, Union, Callable
-from pydantic import BaseModel, ValidationError as PydanticValidationError
+from pydantic import BaseModel, ValidationError as PydanticValidationError  # type: ignore
 from dataclasses import dataclass
 from enum import Enum
 

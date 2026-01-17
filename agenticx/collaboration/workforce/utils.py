@@ -8,7 +8,7 @@ License: Apache 2.0 (CAMEL-AI.org)
 
 from enum import Enum
 from typing import List, Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator  # type: ignore
 
 
 class RecoveryStrategy(str, Enum):

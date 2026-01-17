@@ -1,7 +1,7 @@
 import os
 from typing import Literal, Optional
 
-from vertexai.language_models import TextEmbeddingInput, TextEmbeddingModel
+from vertexai.language_models import TextEmbeddingInput, TextEmbeddingModel  # type: ignore
 
 from mem0.configs.embeddings.base import BaseEmbedderConfig
 from mem0.embeddings.base import EmbeddingBase

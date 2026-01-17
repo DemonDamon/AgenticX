@@ -54,7 +54,7 @@ class BaseChunker(ABC):
         pass
     
     @abstractmethod
-    def chunk_document(self, document: "Document") -> List["Document"]:
+    def chunk_document(self, document: "Document") -> List["Document"]:  # type: ignore
         """Split document into chunk documents
         
         Args:
@@ -74,7 +74,7 @@ class BaseReader(ABC):
         self.chunker = chunker
     
     @abstractmethod
-    def read(self, source: Union[str, Path], **kwargs) -> List["Document"]:
+    def read(self, source: Union[str, Path], **kwargs) -> List["Document"]:  # type: ignore
         """Read documents from source
         
         Args:
@@ -87,7 +87,7 @@ class BaseReader(ABC):
         pass
     
     @abstractmethod
-    async def read_async(self, source: Union[str, Path], **kwargs) -> AsyncIterator["Document"]:
+    async def read_async(self, source: Union[str, Path], **kwargs) -> AsyncIterator["Document"]:  # type: ignore
         """Asynchronously read documents from source
         
         Args:
@@ -170,7 +170,7 @@ class BaseKnowledge(ABC):
         limit: int = 10,
         filters: Optional[Dict[str, Any]] = None,
         **kwargs
-    ) -> List["Document"]:
+    ) -> List["Document"]:  # type: ignore
         """Search knowledge base
         
         Args:
@@ -191,7 +191,7 @@ class BaseKnowledge(ABC):
         limit: int = 10,
         filters: Optional[Dict[str, Any]] = None,
         **kwargs
-    ) -> List["Document"]:
+    ) -> List["Document"]:  # type: ignore
         """Asynchronously search knowledge base"""
         pass
     

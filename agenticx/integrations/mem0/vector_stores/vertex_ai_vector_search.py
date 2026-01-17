@@ -3,14 +3,14 @@ import traceback
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-import google.api_core.exceptions
+import google.api_core.exceptions  # type: ignore
 from google.cloud import aiplatform, aiplatform_v1
-from google.cloud.aiplatform.matching_engine.matching_engine_index_endpoint import (
+from google.cloud.aiplatform.matching_engine.matching_engine_index_endpoint import (  # type: ignore
     Namespace,
 )
-from google.oauth2 import service_account
-from langchain.schema import Document
-from pydantic import BaseModel
+from google.oauth2 import service_account  # type: ignore
+from langchain.schema import Document  # type: ignore
+from pydantic import BaseModel  # type: ignore
 
 from mem0.configs.vector_stores.vertex_ai_vector_search import (
     GoogleMatchingEngineConfig,

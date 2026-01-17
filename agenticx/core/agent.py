@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict  # type: ignore
 from typing import Optional, Dict, Any, List, TypeVar, Type, Callable, TYPE_CHECKING
 import uuid
 from datetime import datetime, timezone

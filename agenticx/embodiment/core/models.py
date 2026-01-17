@@ -12,7 +12,7 @@ Enhanced with:
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Tuple
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator  # type: ignore
 from enum import Enum
 from agenticx.core.task import Task
 

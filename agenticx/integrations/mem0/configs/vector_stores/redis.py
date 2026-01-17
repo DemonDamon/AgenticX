@@ -1,6 +1,6 @@
 from typing import Any, Dict
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator  # type: ignore
 
 
 # TODO: Upgrade to latest pydantic version

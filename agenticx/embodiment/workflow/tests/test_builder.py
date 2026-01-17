@@ -1,6 +1,6 @@
 """Tests for WorkflowBuilder class."""
 
-import pytest
+import pytest  # type: ignore
 from unittest.mock import Mock
 from agenticx.embodiment.workflow.builder import (
     WorkflowBuilder, 

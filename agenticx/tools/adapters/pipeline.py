@@ -49,9 +49,9 @@ class PipelineAdapter(DocumentAdapter):
         if self._pipeline is None:
             try:
                 # 导入真正的 MinerU 核心函数
-                from magic_pdf.pdf_parse_union_core_v2 import pdf_parse_union
-                from magic_pdf.data.read_api import read_local_pdfs
-                import fitz  # PyMuPDF
+                from magic_pdf.pdf_parse_union_core_v2 import pdf_parse_union  # type: ignore
+                from magic_pdf.data.read_api import read_local_pdfs  # type: ignore
+                import fitz  # PyMuPDF  # type: ignore
                 
                 self.logger.info("初始化真正的 MinerU pipeline...")
                 

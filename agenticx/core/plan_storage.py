@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import json
 import logging
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -288,7 +288,7 @@ class SQLitePlanStorage(PlanStorageBase):
         if self._initialized:
             return
         
-        import aiosqlite
+        import aiosqlite  # type: ignore
         
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
@@ -305,7 +305,7 @@ class SQLitePlanStorage(PlanStorageBase):
     
     async def add_plan(self, plan: Plan, override: bool = True) -> None:
         """添加计划到存储"""
-        import aiosqlite
+        import aiosqlite  # type: ignore
         
         await self._ensure_initialized()
         
@@ -333,7 +333,7 @@ class SQLitePlanStorage(PlanStorageBase):
     
     async def delete_plan(self, plan_id: str) -> None:
         """从存储中删除计划"""
-        import aiosqlite
+        import aiosqlite  # type: ignore
         
         await self._ensure_initialized()
         
@@ -343,7 +343,7 @@ class SQLitePlanStorage(PlanStorageBase):
     
     async def get_plans(self) -> List[Plan]:
         """获取所有计划"""
-        import aiosqlite
+        import aiosqlite  # type: ignore
         
         await self._ensure_initialized()
         
@@ -358,7 +358,7 @@ class SQLitePlanStorage(PlanStorageBase):
     
     async def get_plan(self, plan_id: str) -> Optional[Plan]:
         """根据 ID 获取计划"""
-        import aiosqlite
+        import aiosqlite  # type: ignore
         
         await self._ensure_initialized()
         

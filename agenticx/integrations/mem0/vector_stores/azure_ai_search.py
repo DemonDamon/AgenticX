@@ -3,17 +3,17 @@ import logging
 import re
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 from mem0.vector_stores.base import VectorStoreBase
 from mem0.memory.utils import extract_json
 
 try:
-    from azure.core.credentials import AzureKeyCredential
-    from azure.core.exceptions import ResourceNotFoundError
-    from azure.search.documents import SearchClient
-    from azure.search.documents.indexes import SearchIndexClient
-    from azure.search.documents.indexes.models import (
+    from azure.core.credentials import AzureKeyCredential  # type: ignore
+    from azure.core.exceptions import ResourceNotFoundError  # type: ignore
+    from azure.search.documents import SearchClient  # type: ignore
+    from azure.search.documents.indexes import SearchIndexClient  # type: ignore
+    from azure.search.documents.indexes.models import ( # type: ignore
         BinaryQuantizationCompression,
         HnswAlgorithmConfiguration,
         ScalarQuantizationCompression,
@@ -24,7 +24,7 @@ try:
         VectorSearch,
         VectorSearchProfile,
     )
-    from azure.search.documents.models import VectorizedQuery
+    from azure.search.documents.models import VectorizedQuery  # type: ignore
 except ImportError:
     raise ImportError(
         "The 'azure-search-documents' library is required. Please install it using 'pip install azure-search-documents==11.5.2'."

@@ -4,7 +4,7 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import List, Optional, Union, Any
-import chardet
+import chardet  # type: ignore
 
 from ..base import BaseReader
 from ..document import Document, DocumentMetadata

@@ -1,6 +1,6 @@
 """Tests for GUIWorkflow class."""
 
-import pytest
+import pytest  # type: ignore
 from unittest.mock import Mock, patch
 from agenticx.embodiment.workflow.workflow import GUIWorkflow
 from agenticx.core.workflow import WorkflowNode, WorkflowEdge

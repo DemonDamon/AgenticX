@@ -2,7 +2,7 @@ import logging
 from .base import NeptuneBase
 
 try:
-    from langchain_aws import NeptuneAnalyticsGraph
+    from langchain_aws import NeptuneAnalyticsGraph  # type: ignore
 except ImportError:
     raise ImportError("langchain_aws is not installed. Please install it using 'make install_all'.")
 

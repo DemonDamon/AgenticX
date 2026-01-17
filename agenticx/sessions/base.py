@@ -5,7 +5,7 @@ BaseSessionService: 会话服务抽象基类
 """
 
 from abc import ABC, abstractmethod
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime, timezone
 from enum import Enum

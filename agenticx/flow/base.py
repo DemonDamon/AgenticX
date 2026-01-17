@@ -40,7 +40,7 @@ from abc import ABCMeta
 from typing import Any, ClassVar, Dict, Generic, List, Optional, Set, Type, TypeVar, Union
 from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 from .decorators import (
     FlowMethod,

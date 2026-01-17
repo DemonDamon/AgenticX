@@ -5,7 +5,7 @@ for GUI automation capabilities.
 """
 
 from typing import Optional, Dict, Any, List
-from pydantic import Field
+from pydantic import Field  # type: ignore
 from agenticx.core.agent import Agent
 from .context import GUIAgentContext
 from .task import GUITask

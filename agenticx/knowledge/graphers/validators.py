@@ -1,6 +1,6 @@
 """Graph Quality Validators for Knowledge Graph"""
 
-import networkx as nx
+import networkx as nx  # type: ignore
 from typing import Any, Dict, List, Optional
 
 from .models import KnowledgeGraph, GraphQualityMetrics, GraphQualityReport, EntityType

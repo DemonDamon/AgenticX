@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 try:
     from pinecone import Pinecone, PodSpec, ServerlessSpec, Vector
@@ -77,7 +77,7 @@ class PineconeDB(VectorStoreBase):
         self.sparse_encoder = None
         if self.hybrid_search:
             try:
-                from pinecone_text.sparse import BM25Encoder
+                from pinecone_text.sparse import BM25Encoder  # type: ignore
 
                 logger.info("Initializing BM25Encoder for sparse vectors...")
                 self.sparse_encoder = BM25Encoder.default()

@@ -1,11 +1,11 @@
 from typing import Any, ClassVar, Dict
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator  # type: ignore
 
 
 class LangchainConfig(BaseModel):
     try:
-        from langchain_community.vectorstores import VectorStore
+        from langchain_community.vectorstores import VectorStore  # type: ignore
     except ImportError:
         raise ImportError(
             "The 'langchain_community' library is required. Please install it using 'pip install langchain_community'."

@@ -17,8 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import yaml
-from pydantic import BaseModel, Field, model_validator
+import yaml  # type: ignore
+from pydantic import BaseModel, Field, model_validator  # type: ignore
 
 from .base import BaseTool, ToolError, ToolValidationError
 

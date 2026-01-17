@@ -5,7 +5,7 @@ high-level knowledge about specific applications from past experiences.
 """
 
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 
 from agenticx.core.component import Component
 from agenticx.memory.component import MemoryComponent

@@ -5,7 +5,7 @@ Markdown 渲染器 - 将解析结果渲染为不同格式的 Markdown
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union, Tuple
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 from enum import Enum
 import logging
 import re

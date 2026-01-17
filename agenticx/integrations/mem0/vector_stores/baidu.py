@@ -2,18 +2,18 @@ import logging
 import time
 from typing import Dict, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 from mem0.vector_stores.base import VectorStoreBase
 
 try:
-    import pymochow
-    from pymochow.configuration import Configuration
-    from pymochow.auth.bce_credentials import BceCredentials
-    from pymochow.model.enum import FieldType, MetricType, IndexType, TableState, ServerErrCode
-    from pymochow.model.schema import Field, Schema, VectorIndex, FilteringIndex, HNSWParams, AutoBuildRowCountIncrement
-    from pymochow.model.table import Partition, Row, VectorSearchConfig, VectorTopkSearchRequest, FloatVector
-    from pymochow.exception import ServerError
+    import pymochow  # type: ignore
+    from pymochow.configuration import Configuration  # type: ignore
+    from pymochow.auth.bce_credentials import BceCredentials  # type: ignore
+    from pymochow.model.enum import FieldType, MetricType, IndexType, TableState, ServerErrCode  # type: ignore
+    from pymochow.model.schema import Field, Schema, VectorIndex, FilteringIndex, HNSWParams, AutoBuildRowCountIncrement  # type: ignore
+    from pymochow.model.table import Partition, Row, VectorSearchConfig, VectorTopkSearchRequest, FloatVector  # type: ignore
+    from pymochow.exception import ServerError  # type: ignore
 except ImportError:
     raise ImportError("The 'pymochow' library is required. Please install it using 'pip install pymochow'.")
 

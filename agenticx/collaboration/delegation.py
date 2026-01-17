@@ -44,7 +44,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Type
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 
 from ..tools.base import BaseTool, ToolError
 

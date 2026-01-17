@@ -8,8 +8,8 @@ import inspect
 import logging
 from typing import Any, Callable, Dict, Optional, Type, get_type_hints
 
-from docstring_parser import parse
-from pydantic import BaseModel, create_model
+from docstring_parser import parse  # type: ignore
+from pydantic import BaseModel, create_model  # type: ignore
 
 from .base import BaseTool
 

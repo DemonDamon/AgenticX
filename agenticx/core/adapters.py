@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union, Callable, Type
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 
 from .tool_v2 import BaseTool, ToolMetadata, ToolParameter, ToolResult
 from .executor import ToolExecutor

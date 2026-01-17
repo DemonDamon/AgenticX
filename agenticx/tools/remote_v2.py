@@ -20,12 +20,12 @@ import os
 from contextlib import AsyncExitStack
 from typing import Any, Dict, List, Optional, Type, Union
 
-import anyio
-from pydantic import BaseModel, Field
+import anyio  # type: ignore
+from pydantic import BaseModel, Field  # type: ignore
 
-import mcp.types as mcp_types
-from mcp.client.session import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
+import mcp.types as mcp_types  # type: ignore
+from mcp.client.session import ClientSession  # type: ignore
+from mcp.client.stdio import StdioServerParameters, stdio_client  # type: ignore
 
 from .base import BaseTool, ToolError
 
@@ -249,7 +249,7 @@ class MCPClientV2:
         model_name: str
     ) -> Type[BaseModel]:
         """从 JSON Schema 创建 Pydantic 模型（复用旧版逻辑）"""
-        from pydantic import create_model
+        from pydantic import create_model  # type: ignore
         
         if not schema or schema.get('type') != 'object':
             return create_model(model_name)

@@ -38,8 +38,8 @@ logger = logging.getLogger(__name__)
 # 尝试导入 OpenTelemetry
 _OTEL_AVAILABLE = False
 try:
-    from opentelemetry.sdk.trace import ReadableSpan
-    from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+    from opentelemetry.sdk.trace import ReadableSpan  # type: ignore
+    from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult  # type: ignore
     _OTEL_AVAILABLE = True
 except ImportError:
     # 创建占位符
@@ -244,10 +244,10 @@ def create_span_tree_provider(
             "OpenTelemetry SDK 未安装。请运行: pip install agenticx[otel]"
         )
     
-    from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+    from opentelemetry import trace  # type: ignore
+    from opentelemetry.sdk.trace import TracerProvider  # type: ignore
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor  # type: ignore
+    from opentelemetry.sdk.resources import Resource, SERVICE_NAME  # type: ignore
     
     # 创建资源
     resource = Resource.create({SERVICE_NAME: service_name})

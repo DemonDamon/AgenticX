@@ -45,8 +45,8 @@ _active_spans: Dict[str, Any] = {}
 # 尝试导入 OpenTelemetry
 _OTEL_AVAILABLE = False
 try:
-    from opentelemetry import trace
-    from opentelemetry.trace import SpanKind, Status, StatusCode
+    from opentelemetry import trace  # type: ignore
+    from opentelemetry.trace import SpanKind, Status, StatusCode  # type: ignore
     _OTEL_AVAILABLE = True
 except ImportError:
     trace = None

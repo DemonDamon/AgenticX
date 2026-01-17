@@ -10,8 +10,8 @@ import logging
 from typing import Dict, Any, Optional
 from uuid import UUID
 
-import httpx
-from pydantic import ValidationError
+import httpx  # type: ignore
+from pydantic import ValidationError  # type: ignore
 
 from .models import AgentCard, CollaborationTask, TaskCreationRequest, TaskStatusResponse
 

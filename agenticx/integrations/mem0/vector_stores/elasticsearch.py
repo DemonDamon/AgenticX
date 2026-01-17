@@ -3,11 +3,11 @@ from typing import Any, Dict, List, Optional
 
 try:
     from elasticsearch import Elasticsearch
-    from elasticsearch.helpers import bulk
+    from elasticsearch.helpers import bulk  # type: ignore
 except ImportError:
     raise ImportError("Elasticsearch requires extra dependencies. Install with `pip install elasticsearch`") from None
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 from mem0.configs.vector_stores.elasticsearch import ElasticsearchConfig
 from mem0.vector_stores.base import VectorStoreBase

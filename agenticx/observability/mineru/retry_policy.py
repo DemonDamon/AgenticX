@@ -6,7 +6,7 @@ import asyncio
 import time
 import random
 from typing import Dict, List, Optional, Any, Callable, Union, Awaitable
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 from enum import Enum
 import logging
 from datetime import datetime, timedelta

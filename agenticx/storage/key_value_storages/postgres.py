@@ -6,7 +6,7 @@ PostgreSQL键值存储实现，支持JSONB和复杂查询。
 
 from typing import Any, Dict, List, Optional
 from .base import BaseKeyValueStorage
-import psycopg2
+import psycopg2  # type: ignore
 import logging
 
 logger = logging.getLogger(__name__)

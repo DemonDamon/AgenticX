@@ -10,7 +10,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 import logging
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from .types import DeploymentConfig, ResourceSpec
 

@@ -3,7 +3,7 @@ import os
 from typing import Literal, Optional
 
 try:
-    import boto3
+    import boto3  # type: ignore
 except ImportError:
     raise ImportError("The 'boto3' library is required. Please install it using 'pip install boto3'.")
 

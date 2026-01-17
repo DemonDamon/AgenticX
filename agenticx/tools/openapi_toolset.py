@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Type, Union
 from pathlib import Path
 from urllib.parse import urljoin
 
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, create_model  # type: ignore
 
 from .base import BaseTool, ToolError
 
@@ -19,13 +19,13 @@ logger = logging.getLogger(__name__)
 
 # 延迟导入可选依赖
 try:
-    import httpx
+    import httpx  # type: ignore
     HTTPX_AVAILABLE = True
 except ImportError:
     HTTPX_AVAILABLE = False
 
 try:
-    import yaml
+    import yaml  # type: ignore
     YAML_AVAILABLE = True
 except ImportError:
     YAML_AVAILABLE = False

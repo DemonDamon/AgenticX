@@ -626,7 +626,7 @@ class BenchmarkRunner:
     def export_results(self, filename: str):
         """导出结果到文件"""
         export_data = {
-            "export_time": datetime.now(UTC).isoformat(),
+            "export_time": datetime.now(timezone.utc).isoformat(),
             "total_benchmarks": len(self.benchmark_history),
             "benchmarks": [result.to_dict() for result in self.benchmark_history]
         }

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator, Generator, Union, Dict, List
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict  # type: ignore
 
 from .response import LLMResponse
 

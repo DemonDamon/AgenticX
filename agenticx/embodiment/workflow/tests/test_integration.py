@@ -1,9 +1,9 @@
 """Integration tests for GUI workflow system."""
 
-import pytest
+import pytest  # type: ignore
 import asyncio
 from typing import List, Dict, Any
-from pydantic import Field
+from pydantic import Field  # type: ignore
 from unittest.mock import Mock, AsyncMock, patch
 from agenticx.embodiment.workflow import GUIWorkflow, WorkflowEngine, WorkflowBuilder
 from agenticx.embodiment.core.context import GUIAgentContext

@@ -1,10 +1,10 @@
 import logging
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 try:
-    from langchain_community.vectorstores import VectorStore
+    from langchain_community.vectorstores import VectorStore  # type: ignore
 except ImportError:
     raise ImportError(
         "The 'langchain_community' library is required. Please install it using 'pip install langchain_community'."

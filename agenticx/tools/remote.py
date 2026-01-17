@@ -10,7 +10,7 @@ import os
 import subprocess
 from typing import Any, Dict, List, Optional, Type, Union
 
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, create_model  # type: ignore
 from .base import BaseTool, ToolError
 
 logger = logging.getLogger(__name__)
@@ -860,8 +860,8 @@ async def create_mcp_client(server_name: str, config_path: str = "~/.cursor/mcp.
 
 # ==================== MinerU 特定远程工具支持 ====================
 
-import aiohttp
-import aiofiles
+import aiohttp  # type: ignore
+import aiofiles  # type: ignore
 import zipfile
 import tempfile
 from pathlib import Path

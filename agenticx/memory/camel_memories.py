@@ -425,12 +425,9 @@ class VectorDBMemory(BaseMemory):
                 storage = None
         
         if embedding is None:
-            try:
-                from ..integrations.embeddings import get_default_embedding
-                embedding = get_default_embedding()
-            except (ImportError, AttributeError):
-                # Fallback: use simple text-based similarity
-                embedding = None
+            # No default embedding available
+            # Will fallback to text-based similarity search
+            embedding = None
         
         self.storage = storage
         self.embedding = embedding

@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator  # type: ignore
 
 
 class EmbedderConfig(BaseModel):

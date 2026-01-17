@@ -8,7 +8,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional, List, Callable, Union
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # type: ignore
 
 from agenticx.core.component import Component
 from .workflow import GUIWorkflow

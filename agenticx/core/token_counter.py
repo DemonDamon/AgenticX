@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # 尝试导入 tiktoken
 try:
-    import tiktoken
+    import tiktoken  # type: ignore[import-untyped]
     TIKTOKEN_AVAILABLE = True
 except ImportError:
     TIKTOKEN_AVAILABLE = False

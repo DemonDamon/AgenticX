@@ -2,11 +2,11 @@ import json
 import logging
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # type: ignore
 
 try:
-    import psycopg2
-    from psycopg2.extras import execute_values
+    import psycopg2  # type: ignore
+    from psycopg2.extras import execute_values  # type: ignore
 except ImportError:
     raise ImportError("The 'psycopg2' library is required. Please install it using 'pip install psycopg2'.")
 

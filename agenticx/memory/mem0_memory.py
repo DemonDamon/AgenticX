@@ -5,8 +5,8 @@ import uuid
 from agenticx.llms.base import BaseLLMProvider
 from agenticx.memory.base import BaseMemory, MemoryRecord, SearchResult
 from agenticx.integrations.mem0.memory.main import Memory
-from mem0.configs.base import MemoryConfig  # Use mem0's MemoryConfig instead
-from mem0.llms.configs import LlmConfig
+from mem0.configs.base import MemoryConfig  # type: ignore  # Use mem0's MemoryConfig instead
+from mem0.llms.configs import LlmConfig  # type: ignore
 from agenticx.integrations.mem0.llms.agenticx_llm import register_agenticx_llm, AgenticXLLM
 
 class Mem0(BaseMemory):
@@ -38,7 +38,7 @@ class Mem0(BaseMemory):
         
         # Register our custom LLM class with the factory using the 'openai' slot
         # This is a hack but simpler than patching validators
-        from mem0.utils.factory import LlmFactory
+        from mem0.utils.factory import LlmFactory  # type: ignore
         
         # Store the original openai class for restoration if needed
         original_openai_class = LlmFactory.provider_to_class.get("openai")
