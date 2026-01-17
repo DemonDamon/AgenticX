@@ -548,7 +548,10 @@ class TrajectoryCollector(BaseCallbackHandler):
         self.pending_steps[event.id] = step
     
     def _handle_tool_result_event(self, event: ToolResultEvent):
-        """处理工具结果事件"""
+        """处理工具结果事件
+        
+        同时集成 ToolCallingRecord（如果可用）。
+        """
         if not event.agent_id or not event.task_id:
             return
         
