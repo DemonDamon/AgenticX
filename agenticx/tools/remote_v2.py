@@ -11,7 +11,6 @@ MCP Client V2: 基于官方 SDK 的持久化会话实现
 - mcp/client/stdio/__init__.py: stdio_client transport
 - mcp/types.py: 协议类型定义
 
-License: 遵循上游 MIT License
 """
 from __future__ import annotations
 
