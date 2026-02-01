@@ -31,6 +31,9 @@ from .types import (
     SandboxResourceError,
     SandboxNotReadyError,
     SandboxBackendError,
+    ExecdConnectionError,
+    ExecdExecutionError,
+    ExecdTimeoutError,
 )
 
 from .template import (
@@ -51,11 +54,47 @@ from .code_interpreter import (
     execute_code,
 )
 
+from .execd import (
+    ExecdClient,
+    CodeExecutionResult,
+    CommandExecutionResult,
+    CodeContext,
+    FileEntry,
+    SupportedLanguage,
+    create_execd_client,
+    DEFAULT_EXECD_PORT,
+)
+
+from .jupyter_kernel import (
+    JupyterKernelManager,
+    StatefulCodeInterpreter,
+    KernelSession,
+    JupyterKernelError,
+    JupyterKernelNotAvailableError,
+    is_jupyter_available,
+)
+
 __all__ = [
     # 核心类
     "Sandbox",
     "SandboxBase",
     "SandboxTemplate",
+    # execd 客户端
+    "ExecdClient",
+    "CodeExecutionResult",
+    "CommandExecutionResult",
+    "CodeContext",
+    "FileEntry",
+    "SupportedLanguage",
+    "create_execd_client",
+    "DEFAULT_EXECD_PORT",
+    # Jupyter Kernel 状态化执行
+    "JupyterKernelManager",
+    "StatefulCodeInterpreter",
+    "KernelSession",
+    "JupyterKernelError",
+    "JupyterKernelNotAvailableError",
+    "is_jupyter_available",
     # 枚举
     "SandboxType",
     "SandboxStatus",
@@ -72,6 +111,9 @@ __all__ = [
     "SandboxResourceError",
     "SandboxNotReadyError",
     "SandboxBackendError",
+    "ExecdConnectionError",
+    "ExecdExecutionError",
+    "ExecdTimeoutError",
     # 预定义模板
     "DEFAULT_CODE_INTERPRETER_TEMPLATE",
     "LIGHTWEIGHT_TEMPLATE",
