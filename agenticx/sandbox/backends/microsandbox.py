@@ -27,6 +27,7 @@ from ..types import (
     ExecutionResult,
     HealthStatus,
     FileInfo,
+    ProcessInfo,
     SandboxTimeoutError,
     SandboxExecutionError,
     SandboxNotReadyError,
@@ -351,6 +352,61 @@ class MicrosandboxSandbox(SandboxBase):
     ) -> ExecutionResult:
         """运行 Shell 命令"""
         return await self.execute(command, language="shell", timeout=timeout)
+    
+    async def list_processes(self) -> List[ProcessInfo]:
+        """
+        列出沙箱中的进程
+        
+        Returns:
+            进程信息列表
+        """
+        if self._status != SandboxStatus.RUNNING:
+            raise SandboxNotReadyError("Sandbox is not running")
+        
+        # 使用 ps 命令获取进程列表
+        result = await self.execute(
+            "ps aux --no-headers 2>/dev/null || ps aux | tail -n +2",
+            language="shell",
+            timeout=10,
+        )
+        
+        processes = []
+        for line in result.stdout.strip().split("\n"):
+            if not line:
+                continue
+            parts = line.split(None, 10)
+            if len(parts) >= 11:
+                try:
+                    pid = int(parts[1])
+                    cpu_percent = float(parts[2])
+                    mem_percent = float(parts[3])
+                    command = parts[10]
+                    processes.append(ProcessInfo(
+                        pid=pid,
+                        command=command,
+                        status="running",
+                        cpu_percent=cpu_percent,
+                        memory_mb=mem_percent,
+                    ))
+                except (ValueError, IndexError):
+                    continue
+        
+        return processes
+    
+    async def kill_process(self, pid: int, signal: int = 15) -> None:
+        """
+        终止进程
+        
+        Args:
+            pid: 进程 ID
+            signal: 信号（默认 SIGTERM=15）
+        """
+        if self._status != SandboxStatus.RUNNING:
+            raise SandboxNotReadyError("Sandbox is not running")
+        
+        result = await self.execute(f"kill -{signal} {pid}", language="shell")
+        if not result.success:
+            logger.warning(f"Failed to kill process {pid}: {result.stderr}")
 
 
 def is_microsandbox_available() -> bool:
