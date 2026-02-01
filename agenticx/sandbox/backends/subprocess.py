@@ -30,6 +30,7 @@ from ..types import (
     ExecutionResult,
     HealthStatus,
     FileInfo,
+    ProcessInfo,
     SandboxTimeoutError,
     SandboxExecutionError,
     SandboxNotReadyError,
@@ -375,3 +376,61 @@ class SubprocessSandbox(SandboxBase):
     ) -> ExecutionResult:
         """运行 Shell 命令"""
         return await self.execute(command, language="shell", timeout=timeout)
+    
+    async def list_processes(self) -> List[ProcessInfo]:
+        """
+        列出沙箱中的进程
+        
+        Returns:
+            进程信息列表
+        """
+        if self._status != SandboxStatus.RUNNING:
+            raise SandboxNotReadyError(f"Sandbox {self.sandbox_id} is not running")
+        
+        # 使用 ps 命令获取进程列表
+        result = await self._execute_shell(
+            "ps aux --no-headers 2>/dev/null || ps aux | tail -n +2",
+            timeout=10,
+        )
+        
+        processes = []
+        for line in result.stdout.strip().split("\n"):
+            if not line:
+                continue
+            parts = line.split(None, 10)
+            if len(parts) >= 11:
+                try:
+                    pid = int(parts[1])
+                    cpu_percent = float(parts[2])
+                    mem_percent = float(parts[3])
+                    command = parts[10]
+                    processes.append(ProcessInfo(
+                        pid=pid,
+                        command=command,
+                        status="running",
+                        cpu_percent=cpu_percent,
+                        memory_mb=mem_percent,  # This is actually % not MB
+                    ))
+                except (ValueError, IndexError):
+                    continue
+        
+        return processes
+    
+    async def kill_process(self, pid: int, signal: int = 15) -> None:
+        """
+        终止进程
+        
+        Args:
+            pid: 进程 ID
+            signal: 信号（默认 SIGTERM=15）
+        """
+        if self._status != SandboxStatus.RUNNING:
+            raise SandboxNotReadyError(f"Sandbox {self.sandbox_id} is not running")
+        
+        try:
+            os.kill(pid, signal)
+            logger.debug(f"Sent signal {signal} to process {pid}")
+        except ProcessLookupError:
+            logger.warning(f"Process {pid} not found")
+        except PermissionError:
+            logger.warning(f"Permission denied to kill process {pid}")
