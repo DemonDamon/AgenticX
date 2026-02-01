@@ -234,3 +234,39 @@ class SandboxBackendError(SandboxError):
     def __init__(self, message: str, backend: str = "unknown"):
         super().__init__(message, {"backend": backend})
         self.backend = backend
+
+
+class ExecdConnectionError(SandboxError):
+    """execd 连接错误"""
+    
+    def __init__(self, message: str, endpoint: str = ""):
+        super().__init__(message, {"endpoint": endpoint})
+        self.endpoint = endpoint
+
+
+class ExecdExecutionError(SandboxError):
+    """execd 执行错误"""
+    
+    def __init__(
+        self,
+        message: str,
+        exit_code: int = 1,
+        stdout: str = "",
+        stderr: str = "",
+    ):
+        super().__init__(message, {
+            "exit_code": exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+        })
+        self.exit_code = exit_code
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+class ExecdTimeoutError(SandboxError):
+    """execd 超时错误"""
+    
+    def __init__(self, message: str = "Execution timed out", timeout: float = 0):
+        super().__init__(message, {"timeout": timeout})
+        self.timeout = timeout
