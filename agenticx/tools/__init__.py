@@ -38,6 +38,15 @@ from .openapi_toolset import OpenAPIToolset, RestApiTool
 from .unified_document import UnifiedDocumentTool
 from .document_routers import DocumentRouter, create_default_router
 
+# Sandbox tools (OpenSandbox-inspired)
+from .sandbox_tools import (
+    SandboxFileTool,
+    SandboxCommandTool,
+    SandboxCodeInterpreterTool,
+    create_sandbox_tools,
+    register_sandbox_tools,
+)
+
 __all__ = [
     # Base classes
     "BaseTool",
@@ -91,4 +100,10 @@ __all__ = [
     "UnifiedDocumentTool",
     "DocumentRouter",
     "create_default_router",
+    # Sandbox tools (OpenSandbox-inspired)
+    "SandboxFileTool",
+    "SandboxCommandTool",
+    "SandboxCodeInterpreterTool",
+    "create_sandbox_tools",
+    "register_sandbox_tools",
 ] 
