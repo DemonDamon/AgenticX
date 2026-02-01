@@ -43,3 +43,10 @@ scan_structure.py
 .DS_Store
 **/.DS_Store
 .pypirc
+
+# Cookies files (contain sensitive login credentials)
+cookies.txt
+**/cookies.txt
+*.pkl
+**/*.pkl
+.claude/
