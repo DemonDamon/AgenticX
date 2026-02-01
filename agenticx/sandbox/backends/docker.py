@@ -45,7 +45,7 @@ DOCKER_CLI_AVAILABLE = shutil.which("docker") is not None
 
 # 检查 docker Python SDK 是否可用
 try:
-    import docker
+    import docker # type: ignore
     DOCKER_SDK_AVAILABLE = True
 except ImportError:
     DOCKER_SDK_AVAILABLE = False
