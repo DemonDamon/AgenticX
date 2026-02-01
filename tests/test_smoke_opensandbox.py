@@ -1,15 +1,16 @@
-"""
-OpenSandbox 内化冒烟测试
+"""OpenSandbox integration smoke tests.
 
-测试以下功能点：
-1. ExecdClient 基础接口
-2. 文件操作（SubprocessSandbox）
-3. 命令执行（SubprocessSandbox）
-4. 状态化代码执行（JupyterKernelManager）
-5. 沙箱工具（SandboxFileTool, SandboxCommandTool, SandboxCodeInterpreterTool）
+Tests the following functionality:
+1. ExecdClient basic interface
+2. File operations (SubprocessSandbox)
+3. Command execution (SubprocessSandbox)
+4. Stateful code execution (JupyterKernelManager)
+5. Sandbox tools (SandboxFileTool, SandboxCommandTool, SandboxCodeInterpreterTool)
 
-运行方式：
+Run with:
     pytest tests/test_smoke_opensandbox.py -v
+
+Author: Damon Li
 """
 
 import asyncio

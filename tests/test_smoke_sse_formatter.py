@@ -1,10 +1,11 @@
-"""
-SSE 事件格式化器冒烟测试
+"""SSE event formatter smoke tests.
 
-测试 SSE 格式化器的核心功能：
-- 所有 24 种事件类型都能正确格式化
-- 事件格式符合 `data: {json}\n\n` 规范
-- 事件数据结构完整
+Tests core functionality of SSE formatter:
+- All 24 event types can be formatted correctly
+- Event format conforms to `data: {json}\n\n` specification
+- Complete event data structure
+
+Author: Damon Li
 """
 
 import pytest  # type: ignore

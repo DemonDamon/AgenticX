@@ -1,11 +1,12 @@
-"""
-TaskLock 冒烟测试
+"""TaskLock smoke tests.
 
-测试 TaskLock 状态管理器的核心功能：
-- Action Queue 管理
-- 对话历史管理
-- 多轮对话状态一致性
-- 任务暂停和恢复
+Tests core functionality of TaskLock state manager:
+- Action Queue management
+- Conversation history management
+- Multi-turn conversation state consistency
+- Task pause and resume
+
+Author: Damon Li
 """
 
 import pytest # type: ignore

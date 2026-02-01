@@ -1,12 +1,13 @@
-"""
-前端兼容 API 端点冒烟测试
+"""Frontend-compatible API endpoints smoke tests.
 
-测试前端兼容 API 端点的核心功能：
-- POST /chat 返回 SSE 流
-- POST /chat/{project_id} 返回 201
-- DELETE /chat/{project_id}/skip-task 返回 201
-- PUT /task/{project_id} 更新任务
-- POST /task/{project_id}/start 启动任务
+Tests core functionality of frontend-compatible API endpoints:
+- POST /chat returns SSE stream
+- POST /chat/{project_id} returns 201
+- DELETE /chat/{project_id}/skip-task returns 201
+- PUT /task/{project_id} updates task
+- POST /task/{project_id}/start starts task
+
+Author: Damon Li
 """
 
 import pytest  # type: ignore

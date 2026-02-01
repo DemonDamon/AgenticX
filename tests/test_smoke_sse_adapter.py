@@ -1,11 +1,12 @@
-"""
-SSE 流式响应适配器冒烟测试
+"""SSE streaming response adapter smoke tests.
 
-测试 SSE 适配器的核心功能：
-- 从事件总线订阅事件并转换为 SSE 流
-- SSE 格式正确
-- 连接断开时正确清理资源
-- 支持流式文本推送
+Tests core functionality of SSE adapter:
+- Subscribe to events from event bus and convert to SSE stream
+- Correct SSE format
+- Proper resource cleanup on connection disconnect
+- Support for streaming text push
+
+Author: Damon Li
 """
 
 import pytest  # type: ignore
