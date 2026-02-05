@@ -11,6 +11,258 @@ AgenticX Sandbox 模块是一个**统一抽象层（Adapter Layer）**，为不�
 3. **自动选择**：根据环境自动选择最佳可用后端
 4. **工具集成**：与 AgenticX 工具系统深度集成，为 Agent 提供安全的代码执行能力
 
+## 多后端支持
+
+AgenticX Sandbox 支持三种后端实现，每种后端提供不同级别的隔离：
+
+| 后端 | 隔离级别 | 使用场景 | 依赖要求 | 状态 |
+|------|---------|---------|---------|------|
+| **subprocess** | 进程级 | 开发/测试 | 无 | ✅ 已实现 |
+| **microsandbox** | 硬件级（VM） | 生产推荐 | microsandbox SDK + 服务器 | ✅ 已实现 |
+| **docker** | 容器级 | 降级方案 | Docker daemon | ✅ 已实现 |
+
+---
+
+## Microsandbox 后端
+
+Microsandbox 是一个基于 libkrun 的轻量级虚拟机沙箱，提供硬件级隔离（VM-level isolation），启动时间 <200ms。
+
+### 安装步骤
+
+按顺序执行以下步骤：
+
+#### 步骤 1: 安装 microsandbox CLI（三选一）
+
+以下三种方式**任选一种**即可：
+
+**方式 A: 一键安装脚本（推荐）**
+```bash
+curl -sSL https://get.microsandbox.dev | sh
+```
+
+**方式 B: 使用 Cargo 安装**（需要已安装 Rust 工具链）
+```bash
+cargo install microsandbox
+```
+
+**方式 C: 从源码构建**
+```bash
+git clone https://github.com/zerocore-ai/microsandbox.git
+cd microsandbox
+cargo build --release
+sudo cp target/release/msb /usr/local/bin/
+```
+
+安装完成后，验证 CLI 是否可用：
+```bash
+msb --version
+```
+
+#### 步骤 2: 安装 Python SDK
+
+```bash
+pip install microsandbox
+```
+
+#### 步骤 3: 拉取 Python 运行时镜像
+
+```bash
+msb pull microsandbox/python
+```
+
+> 注：此步骤会下载约 200MB 的镜像，需要几分钟。如果跳过此步骤，首次启动沙箱时会自动拉取。
+
+#### 步骤 4: 启动 microsandbox 服务器
+
+**打开一个新的终端窗口**，运行：
+
+```bash
+msb server start --dev
+```
+
+> 重要：保持此终端窗口运行，不要关闭！服务器需要一直运行。
+
+#### 步骤 5: 验证安装
+
+**打开另一个终端窗口**，进入 AgenticX 项目目录，运行验证：
+
+```bash
+cd /path/to/AgenticX
+python examples/agenticx-for-sandbox/sandbox_demo.py --backend microsandbox --verify
+```
+
+预期输出（成功时）:
+
+```
+========================================
+Microsandbox 安装验证
+========================================
+
+[1/4] 检查 SDK
+  ✅ SDK 已安装
+[2/4] 检查服务器连接
+  ✅ 服务器运行中 (http://127.0.0.1:5555)
+[3/4] 创建并启动沙箱
+  ✅ 沙箱启动成功
+[4/4] 执行测试代码
+  ✅ 代码执行成功，输出: Hello from Microsandbox!
+
+========================================
+✅ 验证通过！Microsandbox 已正确安装。
+========================================
+```
+
+### 快速开始
+
+验证安装通过后，运行演示脚本：
+
+```bash
+# 运行完整演示（基础 + 高级功能）
+python examples/agenticx-for-sandbox/sandbox_demo.py --backend microsandbox
+
+# 只运行基础演示
+python examples/agenticx-for-sandbox/sandbox_demo.py --backend microsandbox --basic
+
+# 只运行高级功能演示
+python examples/agenticx-for-sandbox/sandbox_demo.py --backend microsandbox --advanced
+```
+
+演示内容：
+- 基础：代码执行、数学计算、系统信息获取
+- 高级：状态化执行、文件操作、资源指标、错误处理
+
+> **注意**：在 macOS Apple Silicon 上，Shell 命令执行可能不可靠（见常见问题）。演示脚本已针对此限制进行适配，使用 Python 代码替代 Shell 命令。
+
+### 在代码中使用
+
+```python
+import asyncio
+from agenticx.sandbox.backends.microsandbox import MicrosandboxSandbox
+
+async def main():
+    # 使用 context manager 自动管理生命周期
+    async with MicrosandboxSandbox() as sandbox:
+        # 执行 Python 代码
+        result = await sandbox.execute("print('Hello!')")
+        print(result.stdout)
+        
+        # 状态化执行（变量在同一沙箱实例中持久化）
+        await sandbox.execute("x = 42")
+        result = await sandbox.execute("print(x)")  # 输出: 42
+        
+        # 获取系统信息（使用 Python 代码，兼容性更好）
+        result = await sandbox.execute("""
+import sys, platform
+print(f"Python: {sys.version}")
+print(f"Platform: {platform.system()} {platform.machine()}")
+        """)
+        print(result.stdout)
+
+asyncio.run(main())
+```
+
+> **macOS Apple Silicon 注意**：Shell 命令执行（`language="shell"`）在 Apple Silicon 上可能不可靠。建议使用 Python 代码完成相同功能。例如，用 `import os; print(os.listdir('.'))` 替代 `ls`。
+
+### 常见问题
+
+#### Q: 启动超时怎么办？
+
+首次启动需要拉取 Python 镜像（约 200MB），可能需要几分钟。解决方法：
+
+1. 提前拉取镜像：`msb pull microsandbox/python`
+2. 增加启动超时：`MicrosandboxSandbox(startup_timeout=600.0)`
+
+#### Q: 如何检查服务器状态？
+
+```bash
+curl http://127.0.0.1:5555/api/v1/health
+```
+
+#### Q: 如何设置 API 密钥？
+
+```bash
+# 启动服务器时设置
+msb server start --api-key your-secret-key
+
+# 在代码中使用
+sandbox = MicrosandboxSandbox(api_key="your-secret-key")
+
+# 或通过环境变量
+export MSB_API_KEY="your-secret-key"
+```
+
+#### Q: 支持哪些操作系统？
+
+- **Linux**: 需要 KVM 支持（`/dev/kvm` 可访问）✅ 推荐
+- **macOS Intel**: 需要 Hypervisor.framework 支持（macOS 10.10+）✅ 支持
+- **macOS Apple Silicon**: ⚠️ 已知问题（Portal 502 错误），详见 [GitHub issue #292](https://github.com/zerocore-ai/microsandbox/issues/292)
+- **Windows**: 目前不支持
+
+**macOS Apple Silicon 用户注意**：如果遇到 "502 Bad Gateway" 错误，这是 microsandbox 在 Apple Silicon 上的已知问题。建议：
+1. 使用 `subprocess` 后端进行开发测试（无需额外安装）
+2. 在生产环境使用 Linux 服务器
+3. 关注 [GitHub issue #292](https://github.com/zerocore-ai/microsandbox/issues/292) 等待官方修复
+
+### 更多信息
+
+- [microsandbox 官方文档](https://docs.microsandbox.dev/)
+- [microsandbox GitHub](https://github.com/zerocore-ai/microsandbox)
+
+---
+
+## 其他后端
+
+### Subprocess 后端（开发/测试）
+
+**特点：**
+- ✅ 无需额外安装，开箱即用
+- ✅ 适合开发和测试
+- ⚠️ 仅提供进程级隔离，不提供强安全隔离
+- ⚠️ 不适合执行不可信代码
+
+**快速开始：**
+
+运行示例脚本：
+```bash
+python examples/agenticx-for-sandbox/sandbox_demo.py --backend subprocess
+```
+
+在代码中使用：
+```python
+from agenticx.sandbox.backends.subprocess import SubprocessSandbox
+
+async with SubprocessSandbox() as sandbox:
+    result = await sandbox.execute("print('Hello!')")
+    print(result.stdout)
+```
+
+### Docker 后端（容器隔离）
+
+需要 Docker 运行中：
+
+```python
+from agenticx.sandbox.backends.docker import DockerSandbox
+
+async with DockerSandbox() as sandbox:
+    result = await sandbox.execute("print('Hello!')")
+```
+
+### 后端自动选择
+
+```python
+from agenticx.sandbox import Sandbox
+
+# 自动选择最佳可用后端（优先级：microsandbox > docker > subprocess）
+sb = Sandbox.create(backend="auto")
+
+# 手动指定后端
+sb = Sandbox.create(backend="subprocess")   # 开发环境
+sb = Sandbox.create(backend="microsandbox") # 生产环境
+sb = Sandbox.create(backend="docker")       # 降级方案
+```
+
+---
+
 ## 架构设计
 
 ```
@@ -51,102 +303,7 @@ AgenticX Sandbox 模块是一个**统一抽象层（Adapter Layer）**，为不�
 3. **同步/异步双接口**：提供 `execute()` 和 `execute_sync()`
 4. **厂商中立**：不依赖特定云服务，可以接入任何 sandbox SDK
 
-## 多后端支持
-
-AgenticX Sandbox 支持三种后端实现，每种后端提供不同级别的隔离：
-
-| 后端 | 隔离级别 | 使用场景 | 依赖要求 | 状态 |
-|------|---------|---------|---------|------|
-| **subprocess** | 进程级 | 开发/测试 | 无 | ✅ 已实现 |
-| **microsandbox** | 硬件级（VM） | 生产推荐 | `pip install microsandbox` | ⚠️ 需要更新 |
-| **docker** | 容器级 | 降级方案 | Docker daemon | ✅ 已实现 |
-
-### 后端选择策略
-
-系统会根据环境自动选择最佳后端，优先级为：**microsandbox > docker > subprocess**
-
-```python
-# 自动选择（推荐）
-sb = Sandbox.create(backend="auto")  # 或省略 backend 参数
-
-# 手动指定后端
-sb = Sandbox.create(backend="subprocess")  # 开发环境
-sb = Sandbox.create(backend="microsandbox")  # 生产环境
-sb = Sandbox.create(backend="docker")  # 降级方案
-```
-
-## 快速开始
-
-### 基本使用
-
-```python
-from agenticx.sandbox import Sandbox, SandboxType
-
-# 创建沙箱并执行代码
-async with Sandbox.create(type=SandboxType.CODE_INTERPRETER) as sb:
-    result = await sb.execute("print('Hello, AgenticX!')")
-    print(result.stdout)  # 输出: Hello, AgenticX!
-```
-
-### 使用 CodeInterpreterSandbox（状态化执行）
-
-```python
-from agenticx.sandbox import CodeInterpreterSandbox
-
-async with CodeInterpreterSandbox() as interpreter:
-    # 执行代码并保持状态
-    await interpreter.run("x = 1 + 1")
-    result = await interpreter.run("print(x)")  # 输出: 2
-    
-    # 执行 Shell 命令
-    result = await interpreter.run_shell("ls -la")
-```
-
-### 一次性执行
-
-```python
-from agenticx.sandbox import execute_code
-
-result = await execute_code("print(sum(range(10)))")
-print(result.stdout)  # 输出: 45
-```
-
-## 配置模板
-
-### 使用预定义模板
-
-```python
-from agenticx.sandbox import (
-    Sandbox,
-    DEFAULT_CODE_INTERPRETER_TEMPLATE,
-    LIGHTWEIGHT_TEMPLATE,
-    HIGH_PERFORMANCE_TEMPLATE,
-)
-
-# 轻量级模板（快速启动，低资源）
-sb = Sandbox.create(template=LIGHTWEIGHT_TEMPLATE)
-
-# 高性能模板（更多资源）
-sb = Sandbox.create(template=HIGH_PERFORMANCE_TEMPLATE)
-```
-
-### 自定义模板
-
-```python
-from agenticx.sandbox import SandboxTemplate, SandboxType
-
-template = SandboxTemplate(
-    name="my-template",
-    type=SandboxType.CODE_INTERPRETER,
-    cpu=2.0,
-    memory_mb=4096,
-    timeout_seconds=600,
-    network_enabled=True,
-    backend="microsandbox",  # 指定后端
-)
-
-sb = Sandbox.create(template=template)
-```
+---
 
 ## 核心 API
 
@@ -187,94 +344,61 @@ async def check_health(self) -> HealthStatus:
     """检查沙箱健康状态"""
 ```
 
-#### 可选方法（文件操作）
+#### 可选方法
 
 ```python
-async def read_file(self, path: str) -> str:
-    """读取文件内容"""
-    
-async def write_file(self, path: str, content: Union[str, bytes]) -> None:
-    """写入文件"""
-    
-async def list_directory(self, path: str = "/") -> List[FileInfo]:
-    """列出目录内容"""
-    
-async def delete_file(self, path: str) -> None:
-    """删除文件"""
+# 文件操作
+async def read_file(self, path: str) -> str
+async def write_file(self, path: str, content: Union[str, bytes]) -> None
+async def list_directory(self, path: str = "/") -> List[FileInfo]
+async def delete_file(self, path: str) -> None
+
+# 进程操作
+async def run_command(self, command: str, timeout: Optional[int] = None) -> ExecutionResult
+async def list_processes(self) -> List[ProcessInfo]
+async def kill_process(self, pid: int) -> None
 ```
 
-#### 可选方法（进程操作）
+---
+
+## 配置模板
+
+### 使用预定义模板
 
 ```python
-async def run_command(
-    self,
-    command: str,
-    timeout: Optional[int] = None,
-) -> ExecutionResult:
-    """运行 Shell 命令"""
-    
-async def list_processes(self) -> List[ProcessInfo]:
-    """列出所有进程"""
-    
-async def kill_process(self, pid: int) -> None:
-    """终止进程"""
-```
-
-### Sandbox（工厂类）
-
-```python
-@classmethod
-def create(
-    cls,
-    type: SandboxType = SandboxType.CODE_INTERPRETER,
-    template: Optional[SandboxTemplate] = None,
-    template_name: Optional[str] = None,
-    backend: str = "auto",
-    **kwargs,
-) -> SandboxBase:
-    """创建沙箱实例"""
-```
-
-## 与工具系统集成
-
-Sandbox 模块与 AgenticX 的工具系统深度集成：
-
-### 在 ToolExecutor 中使用
-
-```python
-from agenticx.tools.executor import ToolExecutor, SandboxConfig
-
-# 配置沙箱
-config = SandboxConfig(
-    backend="microsandbox",
-    timeout_seconds=60,
-    cpu=1.0,
-    memory_mb=1024,
+from agenticx.sandbox import (
+    Sandbox,
+    DEFAULT_CODE_INTERPRETER_TEMPLATE,
+    LIGHTWEIGHT_TEMPLATE,
+    HIGH_PERFORMANCE_TEMPLATE,
 )
 
-# 创建执行器
-executor = ToolExecutor(sandbox_config=config)
+# 轻量级模板
+sb = Sandbox.create(template=LIGHTWEIGHT_TEMPLATE)
 
-# 在沙箱中执行代码
-async with executor:
-    result = await executor.execute_code_in_sandbox(
-        code="print('Safe execution!')",
-        language="python",
-    )
-    print(result.stdout)
+# 高性能模板
+sb = Sandbox.create(template=HIGH_PERFORMANCE_TEMPLATE)
 ```
 
-### 使用 SandboxCodeInterpreterTool
+### 自定义模板
 
 ```python
-from agenticx.tools import SandboxCodeInterpreterTool
+from agenticx.sandbox import SandboxTemplate, SandboxType
 
-# 创建工具
-tool = SandboxCodeInterpreterTool(backend="microsandbox")
+template = SandboxTemplate(
+    name="my-template",
+    type=SandboxType.CODE_INTERPRETER,
+    cpu=2.0,
+    memory_mb=4096,
+    timeout_seconds=600,
+    network_enabled=True,
+    backend="microsandbox",
+)
 
-# 在 Agent 中使用
-result = await tool.execute(code="print('Hello')")
+sb = Sandbox.create(template=template)
 ```
+
+---
 
 ## 错误处理
 
@@ -302,38 +426,34 @@ except SandboxError as e:
     print(f"沙箱错误: {e}")
 ```
 
-## 扩展新后端
+---
 
-要添加新的后端实现，只需：
+## 示例脚本
 
-1. 继承 `SandboxBase` 抽象基类
-2. 实现必需的方法（`start`, `stop`, `execute`, `check_health`）
-3. 可选实现文件操作和进程操作方法
-4. 在 `Sandbox._create_sandbox()` 中注册新后端
+| 脚本 | 说明 | 运行命令 |
+|------|------|----------|
+| `sandbox_demo.py` | **统一演示脚本**：支持多后端、验证安装、基础/高级演示 | `python examples/agenticx-for-sandbox/sandbox_demo.py` |
+| `opensandbox_style_example.py` | OpenSandbox API 风格示例 | `python examples/agenticx-for-sandbox/opensandbox_style_example.py` |
 
-示例：
+### sandbox_demo.py 使用方式
 
-```python
-from agenticx.sandbox.base import SandboxBase
-from agenticx.sandbox.types import ExecutionResult, HealthStatus
+```bash
+# 自动检测后端，运行完整演示
+python examples/agenticx-for-sandbox/sandbox_demo.py
 
-class MyCustomSandbox(SandboxBase):
-    async def start(self) -> None:
-        # 实现启动逻辑
-        pass
-    
-    async def stop(self) -> None:
-        # 实现停止逻辑
-        pass
-    
-    async def execute(self, code: str, language: str = "python", **kwargs) -> ExecutionResult:
-        # 实现代码执行逻辑
-        pass
-    
-    async def check_health(self) -> HealthStatus:
-        # 实现健康检查逻辑
-        pass
+# 指定后端
+python examples/agenticx-for-sandbox/sandbox_demo.py --backend subprocess
+python examples/agenticx-for-sandbox/sandbox_demo.py --backend microsandbox
+
+# 验证 microsandbox 安装
+python examples/agenticx-for-sandbox/sandbox_demo.py --backend microsandbox --verify
+
+# 只运行基础/高级演示
+python examples/agenticx-for-sandbox/sandbox_demo.py --basic
+python examples/agenticx-for-sandbox/sandbox_demo.py --advanced
 ```
+
+---
 
 ## 安全考虑
 
@@ -342,12 +462,12 @@ class MyCustomSandbox(SandboxBase):
 3. **网络访问**：默认禁用，按需启用
 4. **资源限制**：合理配置 CPU、内存限制，防止资源耗尽
 
+---
+
 ## 相关文档
 
-- [Sandbox 模块详细文档](../../docs/sandbox_README.md)
 - [Sandbox 架构设计文档](../../docs/adr/ADR-001-sandbox-system.md)
-- [Sandbox 模块代码摘要](../../conclusions/sandbox_module_conclusion.md)
-- [使用示例](../../examples/agenticx-for-sandbox/README.md)
+- [使用示例目录](../../examples/agenticx-for-sandbox/)
 
 ## 许可证
 
