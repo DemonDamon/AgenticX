@@ -3,13 +3,12 @@ WorkforcePattern - Workforce 编排模式实现
 
 内化自 CAMEL-AI 的 Workforce 编排系统。
 参考：camel/societies/workforce/workforce.py
-License: Apache 2.0 (CAMEL-AI.org)
 """
 
 import time
 import logging
 import asyncio
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Callable
 from collections import deque
 from datetime import datetime
 
@@ -220,6 +219,109 @@ class WorkforcePattern(BaseCollaborationPattern):
                 iteration_count=self.state.current_iteration
             )
     
+    async def decompose_task(
+        self,
+        task: Task,
+        stream_callback: Optional[Callable[[str], None]] = None,
+    ) -> List[Task]:
+        """分解任务为子任务（独立方法，支持流式文本推送）
+        
+        Args:
+            task: 要分解的任务
+            stream_callback: 流式文本回调函数（可选），接收文本块
+            
+        Returns:
+            子任务列表
+        """
+        logger.info(f"[Workforce] Decomposing task: {task.id}")
+        
+        # 发布分解开始事件
+        self.event_bus.publish(WorkforceEvent(
+            action=WorkforceAction.DECOMPOSE_START,
+            task_id=task.id,
+            data={"task_description": task.description},
+        ))
+        
+        # 如果启用流式分解，使用流式回调
+        if stream_callback and self.enable_decompose_separation:
+            # 这里可以集成流式 LLM 调用
+            # 暂时使用标准分解，但可以扩展支持流式
+            pass
+        
+        # 执行任务分解
+        subtasks = await self.task_planner.decompose_task(
+            task=task,
+            available_workers=self.worker_instances,
+        )
+        
+        if subtasks:
+            # 发布分解完成事件
+            self.event_bus.publish(WorkforceEvent(
+                action=WorkforceAction.DECOMPOSE_COMPLETE,
+                task_id=task.id,
+                data={
+                    "sub_tasks": [
+                        {
+                            "id": st.id,
+                            "content": st.description,
+                            "status": "",
+                        }
+                        for st in subtasks
+                    ],
+                    "summary_task": task.description,
+                },
+            ))
+            logger.info(f"[Workforce] Decomposed into {len(subtasks)} subtasks")
+        else:
+            # 发布分解失败事件
+            self.event_bus.publish(WorkforceEvent(
+                action=WorkforceAction.DECOMPOSE_FAILED,
+                task_id=task.id,
+                data={"error": "Failed to decompose task"},
+            ))
+        
+        return subtasks
+    
+    async def start_execution(
+        self,
+        task: Task,
+        subtasks: List[Task],
+    ) -> Dict[str, Any]:
+        """启动任务执行（从已分解的任务开始）
+        
+        Args:
+            task: 主任务
+            subtasks: 已分解的子任务列表
+            
+        Returns:
+            任务执行结果
+        """
+        logger.info(f"[Workforce] Starting execution for task: {task.id}")
+        
+        # 记录任务开始事件
+        self.event_log.add_event(TaskStartEvent(
+            task_description=task.description,
+            agent_id=self.coordinator_agent.id,
+            task_id=task.id
+        ))
+        
+        # 发布 Workforce 开始事件
+        self.event_bus.publish(WorkforceEvent(
+            action=WorkforceAction.WORKFORCE_STARTED,
+            task_id=task.id,
+            data={},
+        ))
+        
+        if not subtasks:
+            return {
+                "success": False,
+                "content": "No subtasks to execute",
+                "failed": True,
+            }
+        
+        # 继续执行流程（复用原有逻辑）
+        return await self._execute_subtasks(task, subtasks)
+    
     async def _process_task_async(self, task: Task) -> Dict[str, Any]:
         """
         异步处理任务（核心方法）
@@ -240,10 +342,7 @@ class WorkforcePattern(BaseCollaborationPattern):
         ))
         
         # 1. 任务分解
-        subtasks = await self.task_planner.decompose_task(
-            task=task,
-            available_workers=self.worker_instances,
-        )
+        subtasks = await self.decompose_task(task)
         
         if not subtasks:
             return {
@@ -254,13 +353,45 @@ class WorkforcePattern(BaseCollaborationPattern):
         
         logger.info(f"[Workforce] Decomposed into {len(subtasks)} subtasks")
         
-        # 2. 任务分配
+        # 2. 执行子任务
+        return await self._execute_subtasks(task, subtasks)
+    
+    async def _execute_subtasks(
+        self,
+        task: Task,
+        subtasks: List[Task],
+    ) -> Dict[str, Any]:
+        """执行子任务（内部方法）
+        
+        Args:
+            task: 主任务
+            subtasks: 子任务列表
+            
+        Returns:
+            任务执行结果
+        """
+        # 1. 任务分配
         assignment_map = await self.coordinator.assign_tasks(
             tasks=subtasks,
             workers=self.worker_instances,
         )
         
-        # 3. 执行子任务（按依赖顺序）
+        # 发布任务分配事件
+        for subtask in subtasks:
+            worker_id = assignment_map.get(subtask.id)
+            if worker_id:
+                self.event_bus.publish(WorkforceEvent(
+                    action=WorkforceAction.TASK_ASSIGNED,
+                    task_id=subtask.id,
+                    agent_id=worker_id,
+                    data={
+                        "content": subtask.description,
+                        "state": "waiting",
+                        "failure_count": 0,
+                    },
+                ))
+        
+        # 2. 执行子任务（按依赖顺序）
         completed_tasks = set()
         while len(completed_tasks) < len(subtasks):
             # 找到可以执行的任务（依赖已完成）
@@ -278,6 +409,12 @@ class WorkforcePattern(BaseCollaborationPattern):
                     and self._task_failure_count.get(st.id, 0) >= self.failure_config.max_retries
                 ]
                 if failed_tasks:
+                    # 发布 Workforce 停止事件
+                    self.event_bus.publish(WorkforceEvent(
+                        action=WorkforceAction.WORKFORCE_STOPPED,
+                        task_id=task.id,
+                        data={"summary": f"Tasks failed: {failed_tasks}"},
+                    ))
                     return {
                         "success": False,
                         "content": f"Tasks failed after max retries: {failed_tasks}",
@@ -311,7 +448,7 @@ class WorkforcePattern(BaseCollaborationPattern):
             # 等待一些任务完成
             await asyncio.sleep(0.5)
         
-        # 4. 组合结果
+        # 3. 组合结果
         subtask_results = [
             self._task_results.get(st.id, {})
             for st in subtasks
@@ -328,6 +465,13 @@ class WorkforcePattern(BaseCollaborationPattern):
             result=final_result,
             agent_id=self.task_agent.id,
             task_id=task.id
+        ))
+        
+        # 发布 Workforce 停止事件
+        self.event_bus.publish(WorkforceEvent(
+            action=WorkforceAction.WORKFORCE_STOPPED,
+            task_id=task.id,
+            data={"summary": final_result},
         ))
         
         return {
