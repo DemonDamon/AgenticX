@@ -46,6 +46,16 @@ from .types import (
 from .protocol import ProtocolHandler
 from .openai_protocol import OpenAIProtocolHandler, AgentHandler, StreamAgentHandler
 from .server import AgentServer, create_server
+# 前端兼容路由
+from .api_routes import register_api_routes
+from .api_models import (
+    ChatRequest,
+    SupplementChatRequest,
+    UpdateTaskRequest,
+    TaskInfo,
+    HealthResponse,
+)
+from .event_hooks import setup_event_hooks, clear_event_hooks
 
 __all__ = [
     # 核心类
@@ -71,6 +81,15 @@ __all__ = [
     "ModelInfo",
     "ModelsResponse",
     "ErrorResponse",
+    # 前端兼容
+    "register_api_routes",
+    "ChatRequest",
+    "SupplementChatRequest",
+    "UpdateTaskRequest",
+    "TaskInfo",
+    "HealthResponse",
+    "setup_event_hooks",
+    "clear_event_hooks",
 ]
 
 __version__ = "0.1.0"
