@@ -40,6 +40,8 @@ from .memory import CollaborationMemory, CollaborationEvent
 from .metrics import CollaborationMetrics, EfficiencyMetrics, ContributionMetrics
 # 新增：对话管理
 from .conversation import ConversationManager, ConversationEntry
+# 新增：TaskLock（Eigent 兼容）
+from .task_lock import TaskLock, TaskStatus, Action, ActionData, get_or_create_task_lock, remove_task_lock
 
 __all__ = [
     # 枚举和配置
@@ -72,6 +74,14 @@ __all__ = [
     # 对话管理（新增）
     'ConversationManager',
     'ConversationEntry',
+    
+    # TaskLock（Eigent 兼容）
+    'TaskLock',
+    'TaskStatus',
+    'Action',
+    'ActionData',
+    'get_or_create_task_lock',
+    'remove_task_lock',
 ]
 
 __version__ = "0.2.0" 
