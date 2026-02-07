@@ -166,6 +166,8 @@ class CompactionConfig(BaseModel):
         time_window_seconds: 基于时间策略的窗口大小（秒）。
         summarizer_model: 用于生成摘要的 LLM 模型名称。
         summarizer_prompt: 自定义压缩提示词模板。
+        memory_flush_enabled: 是否在压缩前执行 Memory Flush（OpenClaw 风格）。
+        memory_flush_soft_threshold_tokens: flush 触发阈值（距上限的 token 数）。
     """
     enabled: bool = Field(default=True, description="Whether compaction is enabled.")
     compaction_interval: int = Field(default=10, description="Number of new events before triggering compaction.")
@@ -176,6 +178,15 @@ class CompactionConfig(BaseModel):
     summarizer_prompt: Optional[str] = Field(
         default=None,
         description="Custom prompt template for summarization. Use {events} placeholder."
+    )
+    # Memory Flush Before Compaction (inspired by OpenClaw)
+    memory_flush_enabled: bool = Field(
+        default=False,
+        description="Enable memory flush before compaction (OpenClaw-style)."
+    )
+    memory_flush_soft_threshold_tokens: int = Field(
+        default=1000,
+        description="Tokens before max_context_tokens to trigger flush."
     )
 
 
