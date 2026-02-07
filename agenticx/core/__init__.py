@@ -242,6 +242,16 @@ from .handoff import (
 # 为了向后兼容，添加 WorkflowContext 别名
 WorkflowContext = ExecutionContext
 
+# Reflector: Self-reflection and optimization
+from .reflector import (
+    ReflectionResult, BaseReflector, LLMReflector, ReflectionLoop
+)
+
+# Agent Builder: Declarative agent construction
+from .agent_builder import (
+    AgentBuilder, AgentBuilderConfig, create_agent_from_config
+)
+
 __all__ = [
     # Tool System v2 - Core Components
     "BaseTool",
@@ -382,6 +392,15 @@ __all__ = [
     "ErrorClassifier",
     "CircuitBreaker",
     "CircuitBreakerOpenError",
+    # Reflector (Self-Reflection & Optimization)
+    "ReflectionResult",
+    "BaseReflector",
+    "LLMReflector",
+    "ReflectionLoop",
+    # Agent Builder (Declarative Construction)
+    "AgentBuilder",
+    "AgentBuilderConfig",
+    "create_agent_from_config",
     # Communication
     "CommunicationInterface",
     "BroadcastCommunication", 
