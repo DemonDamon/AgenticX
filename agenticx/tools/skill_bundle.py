@@ -17,7 +17,10 @@ Skill Bundle Loader (Anthropic SKILL.md 规范兼容)
 from __future__ import annotations
 
 import logging
+import os
+import platform
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
@@ -34,7 +37,59 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# P0-1: SkillMetadata 数据结构
+# Skill Gate — eligibility check (inspired by OpenClaw metadata.openclaw)
+# =============================================================================
+
+@dataclass
+class SkillGate:
+    """Eligibility gate for a skill.
+
+    When specified in the SKILL.md frontmatter under
+    ``metadata.agenticx.gate``, the gate is evaluated at scan time to decide
+    whether the skill should be loaded.
+
+    Inspired by OpenClaw's ``metadata.openclaw`` gate fields.
+
+    Attributes:
+        os: Allowed operating systems (e.g. ``["linux", "darwin"]``).
+            Matched against ``platform.system().lower()``.  Empty = any OS.
+        requires_bins: All listed binaries must be on ``$PATH``.
+        requires_any_bins: At least one of the listed binaries must exist.
+        requires_env: All listed environment variables must be set (non-empty).
+        requires_config: Reserved for future config-key checks.
+        always: If ``True``, the skill always passes gating.
+    """
+
+    os: List[str] = field(default_factory=list)
+    requires_bins: List[str] = field(default_factory=list)
+    requires_any_bins: List[str] = field(default_factory=list)
+    requires_env: List[str] = field(default_factory=list)
+    requires_config: List[str] = field(default_factory=list)
+    always: bool = False
+
+
+def check_skill_gate(gate: SkillGate) -> bool:
+    """Evaluate a :class:`SkillGate` against the current environment.
+
+    Returns ``True`` if the skill is eligible (all conditions met or gate
+    is empty / ``always=True``).
+    """
+    if gate.always:
+        return True
+    if gate.os and platform.system().lower() not in [o.lower() for o in gate.os]:
+        return False
+    if gate.requires_bins and not all(shutil.which(b) for b in gate.requires_bins):
+        return False
+    if gate.requires_any_bins and not any(shutil.which(b) for b in gate.requires_any_bins):
+        return False
+    if gate.requires_env and not all(os.environ.get(e) for e in gate.requires_env):
+        return False
+    # requires_config: reserved — always passes for now
+    return True
+
+
+# =============================================================================
+# SkillMetadata 数据结构
 # =============================================================================
 
 @dataclass
@@ -50,12 +105,14 @@ class SkillMetadata:
         base_dir: 技能根目录（包含 SKILL.md 和资源文件）
         skill_md_path: SKILL.md 文件的完整路径
         location: 技能位置类型（'project' 或 'global'）
+        gate: 门控规则（OpenClaw 风格）。空 gate 表示无限制。
     """
     name: str
     description: str
     base_dir: Path
     skill_md_path: Path
     location: str = "project"  # 'project' | 'global'
+    gate: SkillGate = field(default_factory=SkillGate)
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式。"""
@@ -65,6 +122,14 @@ class SkillMetadata:
             "base_dir": str(self.base_dir),
             "skill_md_path": str(self.skill_md_path),
             "location": self.location,
+            "gate": {
+                "os": self.gate.os,
+                "requires_bins": self.gate.requires_bins,
+                "requires_any_bins": self.gate.requires_any_bins,
+                "requires_env": self.gate.requires_env,
+                "requires_config": self.gate.requires_config,
+                "always": self.gate.always,
+            },
         }
 
 
@@ -172,6 +237,14 @@ class SkillBundleLoader:
                         logger.debug(f"Skill '{meta.name}' already loaded, skipping: {skill_md}")
                         continue
                     
+                    # Gate check (OpenClaw-inspired): skip ineligible skills
+                    if not self._check_gate(meta.gate):
+                        logger.warning(
+                            "Skill '%s' failed gate check, skipping: %s",
+                            meta.name, skill_md,
+                        )
+                        continue
+                    
                     seen_names.add(meta.name)
                     self._skills[meta.name] = meta
                     
@@ -237,14 +310,66 @@ class SkillBundleLoader:
         name = name_match.group(1).strip()
         description = desc_match.group(1).strip() if desc_match else ""
         
+        # --- Parse gate from metadata.agenticx.gate (OpenClaw-inspired) ---
+        gate = self._parse_gate_from_frontmatter(content)
+        
         return SkillMetadata(
             name=name,
             description=description,
             base_dir=base_dir,
             skill_md_path=skill_md,
             location=location,
+            gate=gate,
         )
     
+    # -----------------------------------------------------------------
+    # Gate helpers (OpenClaw-inspired)
+    # -----------------------------------------------------------------
+
+    @staticmethod
+    def _parse_gate_from_frontmatter(content: str) -> SkillGate:
+        """Extract ``SkillGate`` fields from SKILL.md YAML frontmatter.
+
+        Looks for lines like ``requires_env: ["KEY"]`` inside the ``---``
+        delimited block.  Uses simple regex so we don't require a YAML
+        library.  Unrecognised fields are silently ignored.
+        """
+        gate = SkillGate()
+
+        # Extract the frontmatter block
+        fm_match = re.match(r"^---\s*\n(.*?)\n---", content, re.DOTALL)
+        if not fm_match:
+            return gate
+        fm_text = fm_match.group(1)
+
+        def _parse_list(key: str) -> List[str]:
+            """Parse ``key: ["a", "b"]`` or ``key: [a, b]`` from frontmatter."""
+            m = re.search(rf"^\s*{key}\s*:\s*\[(.+?)\]", fm_text, re.MULTILINE)
+            if not m:
+                return []
+            raw = m.group(1)
+            return [v.strip().strip("\"'") for v in raw.split(",") if v.strip()]
+
+        gate.os = _parse_list("os")
+        gate.requires_bins = _parse_list("requires_bins")
+        gate.requires_any_bins = _parse_list("requires_any_bins")
+        gate.requires_env = _parse_list("requires_env")
+        gate.requires_config = _parse_list("requires_config")
+
+        always_match = re.search(r"^\s*always\s*:\s*(true|false)", fm_text, re.MULTILINE | re.IGNORECASE)
+        if always_match:
+            gate.always = always_match.group(1).lower() == "true"
+
+        return gate
+
+    @staticmethod
+    def _check_gate(gate: SkillGate) -> bool:
+        """Evaluate a gate against the current environment.
+
+        Convenience wrapper around the module-level :func:`check_skill_gate`.
+        """
+        return check_skill_gate(gate)
+
     def _publish_discovery(self, meta: SkillMetadata) -> None:
         """
         向 DiscoveryBus 发布技能发现事件（P1-1）。

@@ -236,6 +236,8 @@ class ToolExecutor:
         default_timeout: Optional[float] = None,
         enable_sandbox: bool = False,
         sandbox_config: Optional[SandboxConfig] = None,
+        # Declarative tool policy (inspired by OpenClaw)
+        policy_stack: Optional[Any] = None,
     ):
         """
         初始化工具执行器
@@ -246,12 +248,18 @@ class ToolExecutor:
             default_timeout: 默认超时时间（秒）
             enable_sandbox: 是否启用简单沙箱环境
             sandbox_config: 高级沙箱配置（优先于 enable_sandbox）
+            policy_stack: Optional ToolPolicyStack for declarative access
+                control.  When set, ``execute()`` / ``aexecute()`` will
+                call ``policy_stack.check(tool.name)`` before running the
+                tool and raise ``ToolPolicyDeniedError`` on denial.
+                Inspired by OpenClaw's 6-layer tool policy.
         """
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.default_timeout = default_timeout
         self.enable_sandbox = enable_sandbox
         self.sandbox_config = sandbox_config
+        self.policy_stack = policy_stack
         
         # 简单沙箱环境
         self.sandbox = SandboxEnvironment() if enable_sandbox else None
@@ -333,6 +341,10 @@ class ToolExecutor:
         last_error = None
         
         self._execution_stats["total_executions"] += 1
+        
+        # --- Declarative policy check (OpenClaw-inspired) ---
+        if self.policy_stack is not None:
+            self.policy_stack.check(tool.name)
         
         while retry_count <= self.max_retries:
             try:
@@ -500,6 +512,10 @@ class ToolExecutor:
         last_error = None
         
         self._execution_stats["total_executions"] += 1
+        
+        # --- Declarative policy check (OpenClaw-inspired) ---
+        if self.policy_stack is not None:
+            self.policy_stack.check(tool.name)
         
         while retry_count <= self.max_retries:
             try:
