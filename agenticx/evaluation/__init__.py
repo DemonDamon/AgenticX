@@ -21,6 +21,7 @@ from .trajectory_matcher import (
     match_trajectory,
 )
 from .runner import EvalRunner
+from .trace_converter import TraceToEvalSetConverter
 
 __all__ = [
     # EvalSet 数据模型
@@ -36,5 +37,7 @@ __all__ = [
     "match_trajectory",
     # 运行器
     "EvalRunner",
+    # 轨迹转换
+    "TraceToEvalSetConverter",
 ]
 
