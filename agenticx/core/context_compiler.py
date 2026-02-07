@@ -656,7 +656,10 @@ class ContextCompiler:
         strategy: CompactionStrategy = CompactionStrategy.SLIDING_WINDOW,
         task_type: str = "default",
         model: Optional[str] = None,
-        enable_fast_fallback: bool = True
+        enable_fast_fallback: bool = True,
+        # Memory Flush Before Compaction (inspired by OpenClaw)
+        flush_handler: Optional[Any] = None,
+        flush_config: Optional[Any] = None,
     ):
         """
         Args:
@@ -666,6 +669,11 @@ class ContextCompiler:
             task_type: 任务类型（'default', 'mining', 'conversation', 'tool_sequence'）。
             model: 模型名称（用于精确 token 计数）。
             enable_fast_fallback: 是否启用快速压缩降级（DeerFlow 风格）。
+            flush_handler: Optional memory flush handler (MemoryFlushHandler protocol).
+                When provided, the handler is called *before* compaction to
+                persist important context.  Inspired by OpenClaw's
+                ``agents.defaults.compaction.memoryFlush``.
+            flush_config: Optional CompactionFlushConfig for the flush handler.
         """
         self.summarizer = summarizer or SimpleEventSummarizer()
         self.config = config or CompactionConfig()
@@ -673,6 +681,11 @@ class ContextCompiler:
         self.task_type = task_type
         self.token_counter = TokenCounter(model=model)
         self.enable_fast_fallback = enable_fast_fallback
+        
+        # Memory Flush Before Compaction
+        self.flush_handler = flush_handler
+        self.flush_config = flush_config
+        self.flush_count: int = 0
         
         # 快速压缩器（用于紧急情况）
         self.fast_compressor: Optional[FastHeuristicCompressor] = None
@@ -754,8 +767,13 @@ class ContextCompiler:
         reason: Optional[str] = None
     ) -> Optional[CompactedEvent]:
         """
-        执行压缩操作（增强版：支持紧急快速压缩）。
+        执行压缩操作（增强版：支持紧急快速压缩 + Memory Flush Before Compaction）。
         """
+        # === Memory Flush Before Compaction (OpenClaw) ===
+        # Must run *before* token counting / actual compaction so that
+        # important context is persisted before it is compressed away.
+        await self._maybe_flush_before_compact(event_log)
+        
         # 判断是否需要紧急压缩
         current_tokens = self._count_event_log_tokens(event_log)
         is_emergency = self._is_emergency(current_tokens)
@@ -848,6 +866,37 @@ class ContextCompiler:
         """
         threshold = self.config.max_context_tokens * 0.95
         return current_tokens >= threshold
+
+    async def _maybe_flush_before_compact(self, event_log: EventLog) -> None:
+        """Run the memory flush handler *before* compaction if configured.
+
+        Inspired by OpenClaw's ``agents.defaults.compaction.memoryFlush``:
+        a silent Agent turn persists critical information to long-term memory
+        so it is not lost during context compaction.
+        """
+        if self.flush_handler is None or self.flush_config is None:
+            return
+        if not getattr(self.flush_config, "enabled", True):
+            return
+
+        current_tokens = self._count_event_log_tokens(event_log)
+        max_tokens = self.config.max_context_tokens
+
+        try:
+            should = await self.flush_handler.should_flush(
+                current_tokens, max_tokens, self.flush_config
+            )
+            if should:
+                result = await self.flush_handler.execute_flush(self.flush_config)
+                self.flush_count += 1
+                logger.info(
+                    "Memory flush before compaction executed (#%d). Result: %s",
+                    self.flush_count,
+                    result,
+                )
+        except Exception:
+            # Flush is best-effort; must not block compaction.
+            logger.exception("Memory flush before compaction failed; proceeding with compaction.")
     
     def _fast_compress(self, event_log: EventLog, reason: str = "emergency") -> Optional[CompactedEvent]:
         """
