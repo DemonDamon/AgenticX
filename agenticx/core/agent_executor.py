@@ -25,6 +25,7 @@ from .prompt import PromptManager, CompiledContextRenderer
 from .error_handler import ErrorHandler
 from .communication import CommunicationInterface
 from .context_compiler import ContextCompiler, create_context_compiler
+from .execution_lane import ExecutionLane, ExecutionLaneGuard
 from .stream_accumulator import StreamContentAccumulator
 
 # Hooks 系统
@@ -184,7 +185,9 @@ class AgentExecutor:
         max_iterations: int = 50,
         # Context Compiler 配置
         compaction_config: Optional[CompactionConfig] = None,
-        enable_context_compilation: bool = True
+        enable_context_compilation: bool = True,
+        # Execution Lane (per-session serialization, inspired by OpenClaw)
+        execution_lane: Optional[ExecutionLane] = None,
     ):
         self.llm_provider = llm_provider
         self.error_handler = error_handler or ErrorHandler()
@@ -214,10 +217,18 @@ class AgentExecutor:
             for tool in tools:
                 self.tool_registry.register(tool)
         
+        # Execution Lane (per-session serialization)
+        self.execution_lane = execution_lane
+        
         # Initialize action parser
         self.action_parser = ActionParser()
     
-    def run(self, agent: Agent, task: Task) -> Dict[str, Any]:
+    def run(
+        self,
+        agent: Agent,
+        task: Task,
+        session_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Execute a task using the agent.
         This is the main entry point for agent execution.
@@ -225,10 +236,34 @@ class AgentExecutor:
         Args:
             agent: The agent to execute
             task: The task to perform
+            session_key: Optional session identifier for execution lane
+                serialization.  When an :class:`ExecutionLane` is configured,
+                concurrent calls with the **same** session_key are serialized
+                while different keys may run in parallel.  Falls back to
+                ``agent.id`` when not provided.
             
         Returns:
             Execution result with final output and metadata
         """
+        # Derive session key for lane serialization
+        _session_key = session_key or agent.id
+
+        # If an execution lane is configured, acquire it synchronously by
+        # driving the async acquire on the current event loop.
+        if self.execution_lane is not None:
+            loop = asyncio.get_event_loop()
+            guard = loop.run_until_complete(self.execution_lane.acquire(_session_key))
+        else:
+            guard = None
+
+        try:
+            return self._run_inner(agent, task)
+        finally:
+            if guard is not None:
+                self.execution_lane.release(_session_key)  # type: ignore[union-attr]
+
+    def _run_inner(self, agent: Agent, task: Task) -> Dict[str, Any]:
+        """Actual execution logic, extracted for lane wrapping."""
         # Initialize event log
         event_log = EventLog(agent_id=agent.id, task_id=task.id)
         result = None # 为 result 提供一个默认值
