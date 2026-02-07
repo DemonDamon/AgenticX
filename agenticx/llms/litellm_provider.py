@@ -17,6 +17,7 @@ class LiteLLMProvider(BaseLLMProvider):
     api_version: Optional[str] = Field(default=None, description="API version to use")
     timeout: Optional[float] = Field(default=None, description="Request timeout in seconds")
     max_retries: Optional[int] = Field(default=None, description="Maximum number of retries")
+    fallbacks: Optional[List[str]] = Field(default=None, description="List of fallback model names when primary model fails")
 
     def invoke(
         self, prompt: Union[str, List[Dict]], tools: Optional[List[Dict]] = None, **kwargs
@@ -39,6 +40,7 @@ class LiteLLMProvider(BaseLLMProvider):
                 api_version=self.api_version,
                 timeout=self.timeout,
                 max_retries=self.max_retries,
+                fallbacks=self.fallbacks,
                 **kwargs,
             )
             return self._parse_response(response)
@@ -66,6 +68,7 @@ class LiteLLMProvider(BaseLLMProvider):
                 api_version=self.api_version,
                 timeout=self.timeout,
                 max_retries=self.max_retries,
+                fallbacks=self.fallbacks,
                 **kwargs,
             )
             return self._parse_response(response)
@@ -91,6 +94,7 @@ class LiteLLMProvider(BaseLLMProvider):
             api_version=self.api_version,
             timeout=self.timeout,
             max_retries=self.max_retries,
+            fallbacks=self.fallbacks,
             **kwargs
         )
         try:
@@ -126,6 +130,7 @@ class LiteLLMProvider(BaseLLMProvider):
             api_version=self.api_version,
             timeout=self.timeout,
             max_retries=self.max_retries,
+            fallbacks=self.fallbacks,
             **kwargs
         )
         
@@ -237,4 +242,5 @@ class LiteLLMProvider(BaseLLMProvider):
             api_version=config.get("api_version"),
             timeout=config.get("timeout"),
             max_retries=config.get("max_retries"),
+            fallbacks=config.get("fallbacks"),
         )
