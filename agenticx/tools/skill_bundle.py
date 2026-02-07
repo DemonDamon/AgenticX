@@ -172,6 +172,7 @@ class SkillBundleLoader:
         self,
         search_paths: Optional[List[Path]] = None,
         discovery_bus: Optional["DiscoveryBus"] = None,
+        execution_backend: Optional[Any] = None,
     ):
         """
         初始化技能加载器。
@@ -179,9 +180,11 @@ class SkillBundleLoader:
         Args:
             search_paths: 自定义搜索路径列表（None 使用默认路径）
             discovery_bus: DiscoveryBus 实例（用于发布技能发现事件）
+            execution_backend: SkillExecutionBackend 实例（可选，用于控制技能执行方式）
         """
         self.search_paths = search_paths or self.DEFAULT_SEARCH_PATHS
         self.discovery_bus = discovery_bus
+        self.execution_backend = execution_backend
         self._skills: Dict[str, SkillMetadata] = {}
         self._scanned = False
     
