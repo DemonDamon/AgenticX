@@ -145,6 +145,9 @@ from .error_handler import ErrorHandler, ErrorClassifier, CircuitBreaker, Circui
 from .communication import CommunicationInterface, BroadcastCommunication, AsyncCommunicationInterface
 from .agent_executor import AgentExecutor, ToolRegistry as LegacyToolRegistry, ActionParser
 
+# Execution Lane (per-session serialization, inspired by OpenClaw)
+from .execution_lane import ExecutionLane, ExecutionLaneGuard
+
 # M6: Task Contract & Outcome Validation
 from .task_validator import (
     TaskOutputParser, TaskResultValidator, OutputRepairLoop,
