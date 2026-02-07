@@ -50,6 +50,9 @@ from .memory_decay import (
 # SOP Registry (JoyAgent-inspired, lightweight)
 from .sop_registry import SOPRegistry, SOPItem, SOPMode
 
+# Compaction Flush (inspired by OpenClaw)
+from .compaction_flush import CompactionFlushConfig, MemoryFlushHandler, DefaultMemoryFlushHandler
+
 # For backward compatibility
 Mem0Wrapper = Mem0
 
@@ -104,4 +107,9 @@ __all__ = [
     "SOPRegistry",
     "SOPItem",
     "SOPMode",
+
+    # Compaction Flush (inspired by OpenClaw)
+    "CompactionFlushConfig",
+    "MemoryFlushHandler",
+    "DefaultMemoryFlushHandler",
 ] 
