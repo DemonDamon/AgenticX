@@ -36,6 +36,12 @@ try:
 except ImportError as e:
     logger.debug(f"Local component not available: {e}")
 
+try:
+    from .volcengine.component import VolcEngineComponent
+    _COMPONENTS["volcengine"] = VolcEngineComponent
+except ImportError as e:
+    logger.debug(f"VolcEngine component not available: {e}")
+
 
 __all__ = [
     "get_component",
