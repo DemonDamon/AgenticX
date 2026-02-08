@@ -50,3 +50,5 @@ cookies.txt
 *.pkl
 **/*.pkl
 .claude/
+
+docs/.private/
