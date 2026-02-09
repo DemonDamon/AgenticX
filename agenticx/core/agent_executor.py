@@ -1,7 +1,7 @@
 import json
 import asyncio
 import time
-from typing import Dict, Any, List, Optional, Callable, Union, Tuple
+from typing import AsyncGenerator, Dict, Any, List, Optional, Callable, Union, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import logging
@@ -328,6 +328,157 @@ class AgentExecutor:
             "stats": self._get_execution_stats(event_log)
         }
     
+    async def run_stream(
+        self,
+        agent: Agent,
+        task: Task,
+        session_key: Optional[str] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Execute a task with streaming output.
+
+        Yields intermediate events and the final result as dictionaries
+        suitable for SSE formatting.  Each yielded dict contains a ``type``
+        key (``"step"``, ``"token"``, ``"error"``, or ``"final"``) and a
+        ``content`` key with the payload.
+
+        When the underlying LLM provider supports async streaming via
+        ``astream()``, individual tokens are yielded with ``type="token"``.
+        Otherwise the full response is yielded as a single ``type="step"``
+        event.
+
+        Args:
+            agent: The agent to execute.
+            task: The task to perform.
+            session_key: Optional session identifier for lane serialization.
+
+        Yields:
+            Dictionaries with streaming events.
+        """
+        event_log = EventLog(agent_id=agent.id, task_id=task.id)
+
+        start_event = TaskStartEvent(
+            task_description=task.description,
+            agent_id=agent.id,
+            task_id=task.id,
+        )
+        event_log.append(start_event)
+
+        yield {"type": "step", "content": f"Task started: {task.description[:100]}"}
+
+        iteration = 0
+        final_result = None
+
+        try:
+            while iteration < self.max_iterations:
+                iteration += 1
+
+                if event_log.is_complete():
+                    last_event = event_log.get_last_event()
+                    if isinstance(last_event, FinishTaskEvent):
+                        final_result = last_event.final_result
+                        break
+
+                if not event_log.can_continue():
+                    break
+
+                try:
+                    # Try streaming LLM response token-by-token
+                    if hasattr(self.llm_provider, "astream"):
+                        # Build prompt for this iteration
+                        messages = self.prompt_manager.compile(
+                            agent=agent,
+                            task=task,
+                            event_log=event_log,
+                        )
+
+                        yield {
+                            "type": "step",
+                            "content": f"Thinking (iteration {iteration})...",
+                        }
+
+                        accumulated = []
+                        async for token in self.llm_provider.astream(messages):
+                            if isinstance(token, str):
+                                accumulated.append(token)
+                                yield {"type": "token", "content": token}
+
+                        full_response = "".join(accumulated)
+
+                        # Parse the response into an action
+                        action = self.action_parser.parse(full_response)
+
+                        # Record LLM response event
+                        llm_event = LLMResponseEvent(
+                            content=full_response,
+                            agent_id=agent.id,
+                        )
+                        event_log.append(llm_event)
+
+                        # Execute the action
+                        self._execute_action(action, event_log, agent)
+
+                        # Yield action result
+                        last = event_log.get_last_event()
+                        if isinstance(last, ToolResultEvent):
+                            yield {
+                                "type": "step",
+                                "content": f"Tool result: {str(last.result)[:200]}",
+                            }
+                        elif isinstance(last, FinishTaskEvent):
+                            final_result = last.final_result
+                            break
+
+                    else:
+                        # Fallback: non-streaming execution for this iteration
+                        action = self._get_next_action(agent, task, event_log)
+                        self._execute_action(action, event_log, agent)
+
+                        last = event_log.get_last_event()
+                        if isinstance(last, FinishTaskEvent):
+                            final_result = last.final_result
+                            break
+                        elif isinstance(last, ToolResultEvent):
+                            yield {
+                                "type": "step",
+                                "content": f"Tool result: {str(last.result)[:200]}",
+                            }
+
+                except ApprovalRequiredError:
+                    yield {
+                        "type": "step",
+                        "content": "Paused: waiting for human approval",
+                    }
+                    return
+
+                except Exception as e:
+                    error_event = self.error_handler.handle(e)
+                    event_log.append(error_event)
+                    yield {"type": "error", "content": str(e)}
+                    if not error_event.recoverable:
+                        break
+
+            # Get final result if not captured during loop
+            if final_result is None:
+                final_result = self._get_best_result(event_log)
+
+        except Exception as e:
+            yield {"type": "error", "content": f"Execution failed: {str(e)}"}
+            return
+
+        # End event
+        end_event = TaskEndEvent(
+            success=True,
+            result=final_result,
+            agent_id=agent.id,
+            task_id=task.id,
+        )
+        event_log.append(end_event)
+
+        yield {
+            "type": "final",
+            "content": str(final_result) if final_result else "",
+        }
+
     def _execute_loop(self, agent: Agent, task: Task, event_log: EventLog) -> Any:
         """
         The main think-act loop.

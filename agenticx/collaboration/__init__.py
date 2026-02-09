@@ -84,4 +84,4 @@ __all__ = [
     'remove_task_lock',
 ]
 
-__version__ = "0.2.1" 
+__version__ = "0.2.2" 
