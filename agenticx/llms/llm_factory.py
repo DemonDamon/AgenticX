@@ -1,10 +1,14 @@
-"""LLM Factory - A factory for creating LLM clients."""
+"""LLM Factory - A factory for creating LLM clients.
+
+Author: Damon Li
+"""
 from typing import cast
 from agenticx.knowledge.graphers.config import LLMConfig
 from .base import BaseLLMProvider
 from .litellm_provider import LiteLLMProvider
 from .kimi_provider import KimiProvider
 from .bailian_provider import BailianProvider
+from .ark_provider import ArkLLMProvider
 
 
 class LlmFactory:
@@ -12,8 +16,7 @@ class LlmFactory:
 
     @staticmethod
     def create_llm(config: LLMConfig) -> BaseLLMProvider:
-        """
-        Create an LLM client based on the provided configuration.
+        """Create an LLM client based on the provided configuration.
 
         Args:
             config: The LLM configuration object.
@@ -47,6 +50,16 @@ class LlmFactory:
                 max_retries=config.max_retries,
                 temperature=config.temperature,
                 max_tokens=config.max_tokens
+            )
+        elif llm_type in ("ark", "volcengine"):
+            return ArkLLMProvider(
+                model=config.model,
+                api_key=config.api_key,
+                base_url=config.base_url or "https://ark.cn-beijing.volces.com/api/v3",
+                timeout=config.timeout,
+                max_retries=config.max_retries,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
             )
         else:
             raise ValueError(f"Unknown LLM type: {config.type}")
