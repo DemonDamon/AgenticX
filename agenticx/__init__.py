@@ -1,3 +1,6 @@
+import sys as _sys
+_SAVED_CLI_ARGV = _sys.argv[:]
+
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -25,7 +28,7 @@ AgenticX是一个完整的多智能体应用开发框架，提供从核心抽象
 """
 
 # 版本信息
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 __author__ = "Ziran Li"
 __email__ = "bingzhenli@hotmail.com"
 
@@ -72,7 +75,8 @@ from .core import (
 from .llms import (
     BaseLLMProvider, LLMResponse, LiteLLMProvider,
     OpenAIProvider, AnthropicProvider, OllamaProvider,
-    KimiProvider, MoonshotProvider
+    KimiProvider, MoonshotProvider,
+    ArkLLMProvider, ArkProvider, VolcEngineProvider
 )
 
 # 工具模块导出
@@ -214,6 +218,7 @@ __all__ = [
     "BaseLLMProvider", "LLMResponse", "LiteLLMProvider", "LLM",
     "OpenAIProvider", "AnthropicProvider", "OllamaProvider",
     "KimiProvider", "MoonshotProvider",
+    "ArkLLMProvider", "ArkProvider", "VolcEngineProvider",
     
     # 工具相关
     "BaseTool", "FunctionTool", "tool", "ToolExecutor", 
