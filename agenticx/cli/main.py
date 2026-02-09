@@ -265,6 +265,13 @@ except Exception:
     # 如果 tools 模块加载失败，不影响其他功能
     pass
 
+# 注册 volcengine 子命令 (延迟加载)
+try:
+    from agenticx.cli.volcengine_commands import volcengine_app
+    app.add_typer(volcengine_app)
+except Exception:
+    pass
+
 console = Console()
 
 
@@ -1116,6 +1123,12 @@ def _show_languages_help():
 
 def main():
     """主入口函数"""
+    # Restore the original sys.argv that was saved at the very top of
+    # agenticx/__init__.py, before third-party libraries (gi.repository /
+    # GTK, imported transitively via graph-tool / cdlib) could strip
+    # recognised flags like --name from sys.argv.
+    import agenticx
+    sys.argv = agenticx._SAVED_CLI_ARGV
     app()
 
 
