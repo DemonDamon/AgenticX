@@ -99,6 +99,9 @@ class VolcEngineComponent(DeploymentComponent):
             "extra_deps": [],
             "output_dir": "./deploy_output",
             "dependencies_file": "requirements.txt",
+            "app_mode": "simple",  # "simple", "mcp", or "a2a"
+            "platform_services": None,  # Optional platform services config
+            "auto_launch": False,  # Whether to call agentkit launch after generating
         }
 
     async def validate(self, config: DeploymentConfig) -> List[str]:
@@ -170,6 +173,9 @@ class VolcEngineComponent(DeploymentComponent):
         extra_deps = props.get("extra_deps", [])
         output_dir = props.get("output_dir", "./deploy_output")
         dependencies_file = props.get("dependencies_file", "requirements.txt")
+        app_mode = props.get("app_mode", "simple")
+        platform_services = props.get("platform_services")
+        auto_launch = props.get("auto_launch", False)
 
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -177,16 +183,31 @@ class VolcEngineComponent(DeploymentComponent):
         generated_files = []
 
         try:
-            # 1. Generate wrapper.py
-            from .wrapper import AgenticXAgentWrapper
-
-            # We need a dummy agent+llm to use generate_wrapper_file
-            # In deploy context, we generate the file from templates directly
-            wrapper_content = self._generate_wrapper_content(
-                agent_module=agent_module,
-                agent_var=agent_var,
-                streaming=streaming,
-            )
+            # 1. Generate wrapper.py based on app_mode
+            if app_mode == "mcp":
+                from agenticx.integrations.agentkit.mcp_app_adapter import (
+                    AgenticXMCPAppAdapter,
+                )
+                adapter = AgenticXMCPAppAdapter()
+                wrapper_content = adapter.generate_mcp_wrapper(
+                    agent_module=agent_module,
+                    agent_var=agent_var,
+                )
+            elif app_mode == "a2a":
+                from agenticx.integrations.agentkit.a2a_app_adapter import (
+                    AgenticXA2AAppAdapter,
+                )
+                adapter = AgenticXA2AAppAdapter(agent_name=agent_name)
+                wrapper_content = adapter.generate_a2a_wrapper(
+                    agent_module=agent_module,
+                    agent_var=agent_var,
+                )
+            else:
+                wrapper_content = self._generate_wrapper_content(
+                    agent_module=agent_module,
+                    agent_var=agent_var,
+                    streaming=streaming,
+                )
             wrapper_path = output_path / "wrapper.py"
             wrapper_path.write_text(wrapper_content, encoding="utf-8")
             generated_files.append(str(wrapper_path))
@@ -201,6 +222,8 @@ class VolcEngineComponent(DeploymentComponent):
                 runtime_envs=extra_envs,
                 python_version=python_version,
                 dependencies_file=dependencies_file,
+                platform_services=platform_services,
+                app_mode=app_mode,
             )
             yaml_path = save_agentkit_yaml(
                 yaml_config, str(output_path / "agentkit.yaml")
@@ -227,13 +250,36 @@ class VolcEngineComponent(DeploymentComponent):
             generated_files.append(str(requirements_path))
             logger.info(f"Generated requirements: {requirements_path}")
 
+            # 5. Auto-launch via agentkit CLI if requested
+            if auto_launch:
+                import shutil
+                import subprocess
+                if shutil.which("agentkit"):
+                    logger.info("Auto-launching via agentkit CLI...")
+                    launch_result = subprocess.run(
+                        ["agentkit", "launch"],
+                        cwd=str(output_path),
+                        capture_output=True,
+                        text=True,
+                    )
+                    if launch_result.returncode != 0:
+                        logger.warning(
+                            f"agentkit launch returned non-zero: "
+                            f"{launch_result.stderr}"
+                        )
+                else:
+                    logger.warning(
+                        "auto_launch requested but agentkit CLI not found"
+                    )
+
             result = DeploymentResult(
                 success=True,
                 deployment_id=f"volcengine-{agent_name}",
                 status=DeploymentStatus.PENDING,
                 message=(
                     f"Deployment artifacts generated in {output_dir}. "
-                    f"Use 'agentkit deploy' to publish to Volcengine."
+                    f"Use 'agentkit launch' or 'agx volcengine deploy' "
+                    f"to publish to Volcengine."
                 ),
                 started_at=datetime.now(),
                 metadata={
@@ -241,6 +287,7 @@ class VolcEngineComponent(DeploymentComponent):
                     "generated_files": generated_files,
                     "strategy": strategy,
                     "agent_name": agent_name,
+                    "app_mode": app_mode,
                 },
             )
 
@@ -257,40 +304,79 @@ class VolcEngineComponent(DeploymentComponent):
         return result
 
     async def remove(self, config: DeploymentConfig) -> RemoveResult:
-        """
-        Remove deployment.
+        """Remove deployment via agentkit CLI if available.
 
-        MVP stage: Returns NotImplemented hint. Future versions will
-        call Volcengine API to undeploy the agent.
+        Tries to call 'agentkit destroy' to undeploy the agent.
+        Falls back to a hint if the CLI is not installed.
 
         Args:
-            config: Deployment configuration
+            config: Deployment configuration.
 
         Returns:
-            RemoveResult indicating not implemented
+            RemoveResult with operation outcome.
         """
+        import shutil
+        import subprocess
+
+        if shutil.which("agentkit"):
+            output_dir = config.props.get("output_dir", "./deploy_output")
+            result = subprocess.run(
+                ["agentkit", "destroy"],
+                cwd=output_dir,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                return RemoveResult(
+                    success=True,
+                    message="Agent destroyed via agentkit CLI.",
+                )
+            else:
+                return RemoveResult(
+                    success=False,
+                    message=f"agentkit destroy failed: {result.stderr}",
+                )
+
         return RemoveResult(
             success=False,
             message=(
-                "VolcEngine remove is not implemented in MVP stage. "
-                "Use Volcengine console or 'agentkit remove' CLI to undeploy."
+                "agentkit CLI not installed. "
+                "Use Volcengine console or install agentkit-sdk-python."
             ),
         )
 
     async def status(self, config: DeploymentConfig) -> StatusResult:
-        """
-        Query deployment status.
+        """Query deployment status via agentkit CLI if available.
 
-        MVP stage: Returns UNKNOWN. Future versions will call Volcengine
-        API to check runtime status.
+        Tries to call 'agentkit status' to check runtime status.
+        Falls back to UNKNOWN if the CLI is not installed.
 
         Args:
-            config: Deployment configuration
+            config: Deployment configuration.
 
         Returns:
-            StatusResult with UNKNOWN status
+            StatusResult with deployment status.
         """
+        import shutil
+        import subprocess
+
         agent_name = config.props.get("agent_name", config.name)
+
+        if shutil.which("agentkit"):
+            output_dir = config.props.get("output_dir", "./deploy_output")
+            result = subprocess.run(
+                ["agentkit", "status"],
+                cwd=output_dir,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                return StatusResult(
+                    deployment_id=f"volcengine-{agent_name}",
+                    status=DeploymentStatus.RUNNING,
+                    message=result.stdout.strip(),
+                )
+
         return StatusResult(
             deployment_id=f"volcengine-{agent_name}",
             status=DeploymentStatus.UNKNOWN,

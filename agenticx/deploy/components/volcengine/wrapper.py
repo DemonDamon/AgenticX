@@ -43,19 +43,31 @@ class AgenticXAgentWrapper:
     """
     
     def __init__(self, agent, llm_provider=None):
-        """
-        Initialize the wrapper.
-        
+        """Initialize the wrapper.
+
         Args:
-            agent: AgenticX Agent instance
-            llm_provider: Optional BaseLLMProvider. If None, will try to use agent.llm
+            agent: AgenticX Agent instance.
+            llm_provider: Optional BaseLLMProvider. If None, will try to use
+                agent.llm, then auto-detect from environment variables.
         """
         self.agent = agent
         self.llm_provider = llm_provider or getattr(agent, 'llm', None)
-        
+
+        # Auto-detect from AgentKit environment as last resort
+        if not self.llm_provider:
+            import os
+            if os.getenv("MODEL_AGENT_NAME"):
+                try:
+                    from agenticx.llms import ArkLLMProvider
+                    self.llm_provider = ArkLLMProvider.from_agentkit_env()
+                    logger.info("Auto-detected ArkLLMProvider from environment")
+                except Exception as e:
+                    logger.warning(f"Failed to auto-detect LLM provider: {e}")
+
         if not self.llm_provider:
             raise ValueError(
-                "llm_provider must be provided or agent must have an llm attribute"
+                "llm_provider must be provided, agent must have an llm attribute, "
+                "or MODEL_AGENT_NAME environment variable must be set"
             )
         
         # Lazy import to avoid circular dependency
@@ -141,37 +153,63 @@ class AgenticXAgentWrapper:
     async def handle_invoke_stream(
         self,
         payload: Dict[str, Any],
-        headers: Dict[str, str]
+        headers: Dict[str, str],
     ) -> AsyncGenerator[str, None]:
-        """
-        Handle AgentKit /invoke request with streaming (async generator).
-        
-        P1 implementation: For MVP, yields the complete result as a single SSE event.
-        Future: Can be enhanced to stream intermediate steps from AgentExecutor.
-        
+        """Handle AgentKit /invoke request with streaming (async generator).
+
+        Streams token-level output and intermediate steps from the agent
+        execution pipeline. Falls back to single-event output when the
+        executor does not support ``run_stream``.
+
         Args:
-            payload: Request payload dict
-            headers: Request headers dict
-            
+            payload: Request payload dict, must contain "prompt".
+            headers: Request headers dict, may contain "user_id", "session_id".
+
         Yields:
-            SSE-formatted string events
+            SSE-formatted string events.
         """
         try:
-            # For now, execute synchronously and yield result
-            result = self.handle_invoke(payload, headers)
-            
-            # Convert to SSE format: data: {json}\n\n
-            sse_data = self._convert_to_sse({"content": result, "type": "final"})
-            yield sse_data
-            
+            prompt = payload.get("prompt")
+            if not prompt:
+                yield self._convert_to_sse({
+                    "type": "error",
+                    "content": "Missing 'prompt' field in payload",
+                })
+                return
+
+            user_id = headers.get("user_id", "anonymous")
+            session_id = headers.get("session_id", "default")
+
+            task = self.Task(
+                description=prompt,
+                expected_output="Response to user query",
+                context={
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "headers": headers,
+                },
+            )
+
+            executor = self._get_executor()
+
+            # Use run_stream if available for real streaming
+            if hasattr(executor, "run_stream"):
+                async for event in executor.run_stream(
+                    self.agent, task, session_key=session_id
+                ):
+                    yield self._convert_to_sse(event)
+            else:
+                # Fallback to sync execution wrapped as single SSE event
+                result = self.handle_invoke(payload, headers)
+                yield self._convert_to_sse({"content": result, "type": "final"})
+
         except Exception as e:
             logger.exception(f"Error in handle_invoke_stream: {e}")
-            error_data = self._convert_to_sse({
-                "error": str(e),
+            yield self._convert_to_sse({
+                "type": "error",
+                "content": str(e),
                 "error_type": type(e).__name__,
-                "message": "An error occurred during streaming"
             })
-            yield error_data
     
     def ping(self) -> str:
         """
@@ -274,6 +312,7 @@ Agent variable: $agent_var_name
 
 Author: Damon Li
 '''
+import os
 import logging
 
 # Import user's Agent definition
@@ -286,10 +325,27 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+# Auto-detect Volcengine Ark model from AgentKit platform environment
+_ark_llm = None
+if os.getenv("MODEL_AGENT_NAME"):
+    try:
+        from agenticx.llms import ArkLLMProvider
+        _ark_llm = ArkLLMProvider(
+            endpoint_id=os.getenv("MODEL_AGENT_NAME"),
+            api_key=os.getenv("MODEL_AGENT_API_KEY"),
+        )
+        # Inject into agent if it does not already have an LLM configured
+        if not getattr($agent_var_name, 'llm', None):
+            $agent_var_name.llm = _ark_llm
+            logger.info("Auto-injected ArkLLMProvider from AgentKit environment")
+    except Exception as e:
+        logger.warning(f"Failed to auto-inject ArkLLMProvider: {e}")
+
+
 app = AgentkitSimpleApp()
 
 # Create wrapper for AgenticX Agent
-wrapper = AgenticXAgentWrapper(agent=$agent_var_name)
+wrapper = AgenticXAgentWrapper(agent=$agent_var_name, llm_provider=_ark_llm)
 
 
 @app.entrypoint
@@ -324,6 +380,7 @@ Agent variable: $agent_var_name
 
 Author: Damon Li
 '''
+import os
 import logging
 
 # Import user's Agent definition
@@ -336,10 +393,27 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+# Auto-detect Volcengine Ark model from AgentKit platform environment
+_ark_llm = None
+if os.getenv("MODEL_AGENT_NAME"):
+    try:
+        from agenticx.llms import ArkLLMProvider
+        _ark_llm = ArkLLMProvider(
+            endpoint_id=os.getenv("MODEL_AGENT_NAME"),
+            api_key=os.getenv("MODEL_AGENT_API_KEY"),
+        )
+        # Inject into agent if it does not already have an LLM configured
+        if not getattr($agent_var_name, 'llm', None):
+            $agent_var_name.llm = _ark_llm
+            logger.info("Auto-injected ArkLLMProvider from AgentKit environment")
+    except Exception as e:
+        logger.warning(f"Failed to auto-inject ArkLLMProvider: {e}")
+
+
 app = AgentkitSimpleApp()
 
 # Create wrapper for AgenticX Agent
-wrapper = AgenticXAgentWrapper(agent=$agent_var_name)
+wrapper = AgenticXAgentWrapper(agent=$agent_var_name, llm_provider=_ark_llm)
 
 
 @app.entrypoint

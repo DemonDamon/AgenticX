@@ -24,41 +24,53 @@ def generate_agentkit_yaml(
     runtime_envs: Optional[Dict[str, str]] = None,
     python_version: str = "3.12",
     dependencies_file: str = "requirements.txt",
+    platform_services: Optional[Dict[str, Any]] = None,
+    app_mode: str = "simple",
 ) -> Dict[str, Any]:
-    """
-    Generate agentkit.yaml configuration dict.
-    
-    Aligns with upstream strategy_configs.py (LocalStrategyConfig, 
+    """Generate agentkit.yaml configuration dict.
+
+    Aligns with upstream strategy_configs.py (LocalStrategyConfig,
     HybridStrategyConfig, CloudStrategyConfig).
-    
+
     Args:
-        agent_name: Name of the agent/project
-        strategy: Deployment strategy - "local", "hybrid", or "cloud"
-        region: Volcengine region (e.g., "cn-beijing", "cn-shanghai")
-        entry_point: Python module path for entry point (e.g., "wrapper.py")
-        runtime_envs: Runtime environment variables dict
-        python_version: Python version (e.g., "3.12")
-        dependencies_file: Requirements file name
-        
+        agent_name: Name of the agent/project.
+        strategy: Deployment strategy - "local", "hybrid", or "cloud".
+        region: Volcengine region (e.g., "cn-beijing", "cn-shanghai").
+        entry_point: Python module path for entry point (e.g., "wrapper.py").
+        runtime_envs: Runtime environment variables dict.
+        python_version: Python version (e.g., "3.12").
+        dependencies_file: Requirements file name.
+        platform_services: Optional platform services configuration dict
+            for AgentKit managed services (memory, knowledge, mcp).
+        app_mode: Application mode - "simple", "mcp", or "a2a".
+
     Returns:
-        Configuration dict ready for YAML serialization
-        
+        Configuration dict ready for YAML serialization.
+
     Raises:
-        ValueError: If agent_name is empty or strategy is invalid
+        ValueError: If agent_name is empty or strategy is invalid.
     """
     if not agent_name or not agent_name.strip():
         raise ValueError("agent_name cannot be empty")
-    
+
     valid_strategies = ["local", "hybrid", "cloud"]
     if strategy not in valid_strategies:
         raise ValueError(
             f"Invalid strategy '{strategy}'. Must be one of: {valid_strategies}"
         )
-    
+
     runtime_envs = runtime_envs or {}
-    
+
+    # Auto-fill model credential env vars if not present
+    merged_envs: Dict[str, str] = {}
+    if "MODEL_AGENT_NAME" not in runtime_envs:
+        merged_envs["MODEL_AGENT_NAME"] = ""
+    if "MODEL_AGENT_API_KEY" not in runtime_envs:
+        merged_envs["MODEL_AGENT_API_KEY"] = ""
+    merged_envs.update(runtime_envs)
+
     # Common configuration
-    config = {
+    config: Dict[str, Any] = {
         "common": {
             "agent_name": agent_name,
             "entry_point": entry_point,
@@ -66,10 +78,15 @@ def generate_agentkit_yaml(
             "language_version": python_version,
             "dependencies_file": dependencies_file,
             "launch_type": strategy,
-            "runtime_envs": runtime_envs,
+            "runtime_envs": merged_envs,
+            "app_mode": app_mode,
         },
-        "launch_types": {}
+        "launch_types": {},
     }
+
+    # Platform services (memory, knowledge, mcp)
+    if platform_services:
+        config["platform_services"] = platform_services
     
     # Strategy-specific configuration
     if strategy == "local":
