@@ -10,11 +10,13 @@ try:  # sandbox may block SSL when importing litellm/requests
     from .litellm_provider import LiteLLMProvider
     from .kimi_provider import KimiProvider
     from .bailian_provider import BailianProvider
+    from .ark_provider import ArkLLMProvider
     from .llm_factory import LlmFactory
 except Exception:  # pragma: no cover
     LiteLLMProvider = None  # type: ignore
     KimiProvider = None  # type: ignore
     BailianProvider = None  # type: ignore
+    ArkLLMProvider = None  # type: ignore
     LlmFactory = None  # type: ignore
 
 # Convenience re-exports for specific models, all using LiteLLMProvider
@@ -46,6 +48,15 @@ class DashscopeProvider(BailianProvider if BailianProvider else object):  # type
     """Provider for Alibaba Cloud Bailian/Dashscope models, e.g., 'qwen-vl-plus'."""
     pass
 
+# Dedicated provider for Volcengine Ark
+class ArkProvider(ArkLLMProvider if ArkLLMProvider else object):  # type: ignore
+    """Provider for Volcengine Ark models, e.g., 'doubao-seed-1-6'."""
+    pass
+
+class VolcEngineProvider(ArkLLMProvider if ArkLLMProvider else object):  # type: ignore
+    """Alias for ArkProvider (Volcengine Ark platform)."""
+    pass
+
 
 __all__ = [
     # Base classes and data structures
@@ -53,13 +64,14 @@ __all__ = [
     "LLMResponse",
     "LLMChoice",
     "TokenUsage",
-    
+
     # Concrete provider implementations
     "LiteLLMProvider",
     "KimiProvider",
     "BailianProvider",
+    "ArkLLMProvider",
     "LlmFactory",
-    
+
     # Convenience classes
     "OpenAIProvider",
     "AnthropicProvider",
@@ -67,4 +79,6 @@ __all__ = [
     "GeminiProvider",
     "MoonshotProvider",
     "DashscopeProvider",
+    "ArkProvider",
+    "VolcEngineProvider",
 ]
