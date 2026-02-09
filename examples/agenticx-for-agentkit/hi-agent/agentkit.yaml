@@ -1,0 +1,42 @@
+common:
+  agent_name: hi-agent
+  entry_point: wrapper
+  language: Python
+  language_version: '3.12'
+  dependencies_file: requirements.txt
+  launch_type: cloud
+  runtime_envs:
+    MODEL_AGENT_NAME: ''
+    MODEL_AGENT_API_KEY: ''
+  app_mode: simple
+launch_types:
+  hybrid:
+    region: cn-beijing
+    image_tag: '{{timestamp}}'
+    cr_instance_name: Auto
+    cr_namespace_name: agenticx
+    cr_repo_name: hi-agent
+    runtime_name: hi-agent-runtime
+    runtime_auth_type: key_auth
+  cloud:
+    region: cn-beijing
+    tos_bucket: agentkit-platform-{{account_id}}
+    tos_prefix: agentkit-builds
+    image_tag: '{{timestamp}}'
+    cr_instance_name: agentkit-platform-{{account_id}}
+    cr_namespace_name: agentkit
+    cr_image_full_url: agentkit-platform-2101179232-cn-beijing.cr.volces.com/agentkit/hi-agent-sq8z:20260209230109
+    build_timeout: 3600
+    cp_workspace_name: agentkit-cli-workspace
+    cp_pipeline_name: hi-agent-4g75be02
+    cp_pipeline_id: b8a691418dce4b539d2c6a8d21aab0f3
+    runtime_id: r-yefe2wfeo0ntl8dniv6i
+    runtime_name: hi-agent-4g75be02
+    runtime_role_name: AgentKit-Runtime-Default-ServiceRole-lrima7d
+    runtime_auth_type: key_auth
+    runtime_apikey_name: API-KEY-93c2hw9f
+    runtime_apikey: 2MfCDbfhSf8Si48Fg-Bda8ZL-oCbDJFYYmqP
+    runtime_jwt_allowed_clients: []
+    runtime_endpoint: https://sd64sd4rtvotb9m1atsjg.apigateway-cn-beijing.volceapi.com
+docker_build:
+  platform: auto
