@@ -1,0 +1,2 @@
+# No extra dependencies needed.
+# veadk and agentkit are pre-installed in the AgentKit base image.
