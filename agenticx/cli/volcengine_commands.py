@@ -157,8 +157,43 @@ def volcengine_config(
         None, "--sk",
         help="Volcengine Secret Key"
     ),
+    show: bool = typer.Option(
+        False, "--show",
+        help="Show current configuration"
+    ),
 ) -> None:
     """Configure AgentKit deployment credentials."""
+    if show:
+        # Display current configuration
+        console.print(Panel(
+            "Current AgentKit Configuration",
+            title="AgenticX -> AgentKit Config",
+        ))
+        
+        table = Table()
+        table.add_column("Configuration", style="cyan")
+        table.add_column("Value", style="green")
+        
+        table.add_row(
+            "MODEL_AGENT_NAME",
+            os.getenv("MODEL_AGENT_NAME") or "[dim]Not set[/dim]"
+        )
+        table.add_row(
+            "MODEL_AGENT_API_KEY",
+            "Set" if os.getenv("MODEL_AGENT_API_KEY") else "[dim]Not set[/dim]"
+        )
+        table.add_row(
+            "VOLCENGINE_ACCESS_KEY",
+            "Set" if os.getenv("VOLCENGINE_ACCESS_KEY") else "[dim]Not set[/dim]"
+        )
+        table.add_row(
+            "VOLCENGINE_SECRET_KEY",
+            "Set" if os.getenv("VOLCENGINE_SECRET_KEY") else "[dim]Not set[/dim]"
+        )
+        
+        console.print(table)
+        return
+    
     console.print(Panel(
         "Configuring AgentKit deployment",
         title="AgenticX -> AgentKit Config",
@@ -309,7 +344,8 @@ def volcengine_info() -> None:
     # Check veadk
     try:
         import veadk
-        table.add_row("veadk", f"v{veadk.__version__}")
+        version = getattr(veadk, "__version__", None) or getattr(veadk, "VERSION", "installed")
+        table.add_row("veadk", f"v{version}" if version != "installed" else "Installed")
     except ImportError:
         table.add_row("veadk", "[yellow]Not installed[/yellow]")
 
