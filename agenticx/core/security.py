@@ -17,9 +17,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Union, Callable
-from cryptography.fernet import Fernet  # type: ignore
-from cryptography.hazmat.primitives import hashes  # type: ignore
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC  # type: ignore
+try:
+    from cryptography.fernet import Fernet  # type: ignore
+    from cryptography.hazmat.primitives import hashes  # type: ignore
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC  # type: ignore
+except ImportError:
+    Fernet = None  # type: ignore  # pip install "agenticx[database]"
+    hashes = None  # type: ignore
+    PBKDF2HMAC = None  # type: ignore
 import base64
 
 
