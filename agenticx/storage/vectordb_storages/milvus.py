@@ -15,7 +15,8 @@ try:
     MILVUS_AVAILABLE = True
 except ImportError:
     MILVUS_AVAILABLE = False
-    logger.warning("⚠️ Milvus SDK 未安装，请运行: pip install pymilvus")
+    # Milvus 是可选依赖，不在模块加载时发出警告
+    # 仅在用户尝试使用 MilvusStorage 时才提示: pip install "agenticx[memory]"
 
 
 class MilvusStorage(BaseVectorStorage):
