@@ -4,8 +4,15 @@ import json
 import uuid
 from typing import Any, Dict, List, Optional, Set
 
-import networkx as nx  # type: ignore
-from cdlib import algorithms  # type: ignore
+try:
+    import networkx as nx  # type: ignore
+except ImportError:
+    nx = None  # type: ignore  # pip install "agenticx[graph]"
+
+try:
+    from cdlib import algorithms  # type: ignore
+except ImportError:
+    algorithms = None  # type: ignore  # pip install "agenticx[graph]"
 
 from .models import Entity, Relationship, EntityType, RelationType, KnowledgeGraph
 

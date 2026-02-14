@@ -1,6 +1,9 @@
 """Graph Quality Validators for Knowledge Graph"""
 
-import networkx as nx  # type: ignore
+try:
+    import networkx as nx  # type: ignore
+except ImportError:
+    nx = None  # type: ignore  # pip install "agenticx[graph]"
 from typing import Any, Dict, List, Optional
 
 from .models import KnowledgeGraph, GraphQualityMetrics, GraphQualityReport, EntityType
