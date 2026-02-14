@@ -31,7 +31,8 @@ classifiers = [
 keywords = ["ai", "agents", "multi-agent", "framework", "automation", "llm", "workflow", "orchestration"]
 
 dependencies = [
-    # 核心依赖
+    # ── 核心依赖（轻量，无 torch，秒装）──
+    # 基础框架
     "pydantic>=2.0.0",
     "typing-extensions>=4.0.0",
     "loguru>=0.7.0",
@@ -40,58 +41,53 @@ dependencies = [
     "PyYAML>=6.0",
     "jinja2>=3.0.0",
     "python-dotenv>=1.0.0",
+    # 网络 / HTTP
     "httpx>=0.25.0",
     "requests>=2.31.0",
     "aiohttp>=3.9.0",
     "aiofiles>=23.0.0",
     "websockets>=12.0",
+    # Web 框架
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
     "typer>=0.9.0",
-    "cryptography>=41.0.0",
-    "psycopg2-binary>=2.9.0",
-    "chardet>=5.0.0",
-    "docstring-parser>=0.11,<0.12",  # 必须与 pydoc-markdown 兼容
-    "SQLAlchemy>=2.0.0",
-    "ujson>=5.8.0",
-    "tqdm>=4.65.0",
-    "joblib>=1.3.0",
-    # 核心LLM依赖 (固定最低版本，加速依赖解析)
+    # LLM 核心（固定最低版本，加速依赖解析）
     "openai>=1.50.0",
     "litellm>=1.50.0",
     "tiktoken>=0.7.0",
     "tokenizers>=0.19.0",
     "huggingface-hub>=0.24.0",
-    # 核心记忆系统依赖
-    "mem0ai>=0.1.0",
-    "redis>=5.0.0",
-    "pymilvus>=2.4.0",
-    # LLM提供者（全部）
+    # 核心工具库
+    "docstring-parser>=0.11,<0.12",  # FunctionTool 需要解析 docstring
+    # 通用工具
+    "ujson>=5.8.0",
+    "tqdm>=4.65.0",
+    "joblib>=1.3.0",
+    "chardet>=5.0.0",
+    "psutil>=5.9.0",
+    "structlog>=23.1.0",
+]
+
+[project.optional-dependencies]
+# ── 额外 LLM 提供者 ──
+llm = [
     "anthropic>=0.40.0",
     "ollama>=0.3.0",
-    # 记忆系统（全部）
+]
+# ── 记忆系统（向量存储 / 持久化）──
+memory = [
+    "mem0ai>=0.1.0",
     "chromadb>=0.5.0",
     "qdrant-client>=1.10.0",
-    # 监控和可观测性
-    "prometheus-client>=0.17.0",
-    "opentelemetry-api>=1.20.0",
-    "opentelemetry-sdk>=1.20.0",
-    # 数据处理
-    "pandas>=2.0.0",
+    "redis>=5.0.0",
+    "pymilvus>=2.4.0",
     "numpy>=1.24.0",
-    "scikit-learn>=1.3.0",
-    "scipy>=1.11.0",
-    "matplotlib>=3.7.0",
-    "seaborn>=0.12.0",
-    "plotly>=5.15.0",
-    # 通信协议
-    "asyncio-mqtt>=0.16.0",
-    "mcp>=1.0.0",
-    # 文档处理
-    # 注意：以下功能需要额外的系统依赖，请参考 INSTALL.md 安装指南
-    # - pytesseract 需要 tesseract (brew install tesseract)
-    # - pdf2image 需要 poppler (brew install poppler)  
-    # - docx2txt 处理旧版 .doc 文件需要 antiword (brew install antiword)
+]
+# ── 文档处理 ──
+# 注意：pytesseract 需要 tesseract (brew install tesseract)
+#        pdf2image 需要 poppler (brew install poppler)
+#        docx2txt 处理旧版 .doc 需要 antiword (brew install antiword)
+document = [
     "PyMuPDF>=1.23.0",
     "pypdf>=3.15.0",
     "PyPDF2>=3.0.0",
@@ -100,29 +96,72 @@ dependencies = [
     "docx2txt>=0.8",
     "pytesseract>=0.3.10",
     "pdf2image>=1.16.0",
+]
+# ── OCR（单独隔离，会拉入 torch ~2 GB）──
+ocr = [
     "easyocr>=1.7.0",
-    "python-Levenshtein>=0.21.0",
-    "RapidFuzz>=3.0.0",
-    # 图分析和网络分析
+]
+# ── 知识图谱 / 图分析 ──
+graph = [
     "networkx>=3.1",
+    "neo4j>=5.12.0",
     "cdlib>=0.3.0",
     "wurlitzer>=3.0.0",
     "bayanpy>=0.0.6",
     "infomap>=2.7.0",
-    "neo4j>=5.12.0",
     "pyclustering>=0.10.0",
     "ASLPAw>=2.1.0",
     "leidenalg>=0.10.0",
-    # 文档工具
+]
+# ── 数据分析 / 可视化 ──
+data = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "scikit-learn>=1.3.0",
+    "scipy>=1.11.0",
+    "matplotlib>=3.7.0",
+    "seaborn>=0.12.0",
+    "plotly>=5.15.0",
+]
+# ── 可观测性 / 监控 ──
+monitoring = [
+    "prometheus-client>=0.17.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+]
+# ── 数据库后端 ──
+database = [
+    "psycopg2-binary>=2.9.0",
+    "SQLAlchemy>=2.0.0",
+    "cryptography>=41.0.0",
+]
+# ── MCP 协议 ──
+mcp = [
+    "mcp>=1.0.0",
+]
+# ── MQTT 协议 ──
+mqtt = [
+    "asyncio-mqtt>=0.16.0",
+]
+# ── 文本相似度 ──
+text = [
+    "python-Levenshtein>=0.21.0",
+    "RapidFuzz>=3.0.0",
+]
+# ── 火山引擎 AgentKit ──
+volcengine = [
+    "agentkit-sdk-python>=0.1.0",
+]
+# ── 文档构建 ──
+docs = [
     "mkdocs>=1.5.0",
     "mkdocs-material>=9.0.0",
-    "pydoc-markdown>=4.8.0",  # 4.8+ 版本不再限制 docstring-parser 版本
-    # 运行时依赖
-    "psutil>=5.9.0",
-    "structlog>=23.1.0",
+    "mkdocstrings>=0.22.0",
+    "mkdocs-autorefs>=0.4.0",
+    "pydoc-markdown>=4.8.0",
+    "docstring-parser>=0.11,<0.12",
 ]
-
-[project.optional-dependencies]
+# ── 开发工具 ──
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
@@ -133,15 +172,9 @@ dev = [
     "mypy>=1.0.0",
     "pre-commit>=3.0.0",
 ]
-docs = [
-    "mkdocs>=1.5.0",
-    "mkdocs-material>=9.0.0",
-    "mkdocstrings>=0.22.0",
-    "mkdocs-autorefs>=0.4.0",
-    "pydoc-markdown>=4.8.0",  # 4.8+ 版本不再限制 docstring-parser 版本
-]
+# ── 全部功能（不含 dev/docs）──
 all = [
-    "agenticx[dev,docs]",
+    "agenticx[llm,memory,document,ocr,graph,data,monitoring,database,mcp,mqtt,text,volcengine]",
 ]
 
 [project.urls]
