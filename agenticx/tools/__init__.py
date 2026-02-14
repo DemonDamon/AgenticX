@@ -13,7 +13,11 @@ from .function_tool import FunctionTool, tool
 from .executor import ToolExecutor, ExecutionResult, ToolCallingRecord
 from .credentials import CredentialStore
 from .remote import RemoteTool, MCPClient, MCPServerConfig, load_mcp_config, create_mcp_client
-from .remote_v2 import MCPClientV2, RemoteToolV2
+try:
+    from .remote_v2 import MCPClientV2, RemoteToolV2
+except ImportError:  # mcp package not installed
+    MCPClientV2 = None  # type: ignore
+    RemoteToolV2 = None  # type: ignore
 from .mineru import create_mineru_parse_tool, create_mineru_ocr_languages_tool
 from .windowed import WindowedFileTool
 from .shell_bundle import ShellBundleLoader, ShellScriptTool
