@@ -22,9 +22,15 @@ from typing import Any, Dict, List, Optional, Type, Union
 import anyio  # type: ignore
 from pydantic import BaseModel, Field  # type: ignore
 
-import mcp.types as mcp_types  # type: ignore
-from mcp.client.session import ClientSession  # type: ignore
-from mcp.client.stdio import StdioServerParameters, stdio_client  # type: ignore
+try:
+    import mcp.types as mcp_types  # type: ignore
+    from mcp.client.session import ClientSession  # type: ignore
+    from mcp.client.stdio import StdioServerParameters, stdio_client  # type: ignore
+except ImportError:
+    mcp_types = None  # type: ignore  # pip install "agenticx[mcp]"
+    ClientSession = None  # type: ignore
+    StdioServerParameters = None  # type: ignore
+    stdio_client = None  # type: ignore
 
 from .base import BaseTool, ToolError
 
