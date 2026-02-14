@@ -4,7 +4,10 @@ import json
 import os
 from typing import Any, Dict, List, Optional, Union
 from loguru import logger  # type: ignore
-import networkx as nx  # type: ignore
+try:
+    import networkx as nx  # type: ignore
+except ImportError:
+    nx = None  # type: ignore  # pip install "agenticx[graph]"
 
 from .config import GraphRagConfig, LLMConfig
 from .models import Entity, Relationship, KnowledgeGraph, EntityType, RelationType

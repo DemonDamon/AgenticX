@@ -11,7 +11,10 @@ from datetime import datetime, timezone, UTC
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Union
 
-import networkx as nx  # type: ignore
+try:
+    import networkx as nx  # type: ignore
+except ImportError:
+    nx = None  # type: ignore  # pip install "agenticx[graph]"
 
 
 class EntityType(Enum):
