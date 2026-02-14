@@ -56,47 +56,45 @@
 
 ### Installation
 
-#### Option 1: Using `uv` (Recommended - Faster)
+#### Option 1: Install from PyPI (Recommended)
 
 ```bash
-# Clone repository
-git clone https://github.com/DemonDamon/AgenticX.git
-cd AgenticX
+# Core install (lightweight, no torch, installs in seconds)
+pip install agenticx
 
-# Install uv (if not already installed)
-pip install uv
-
-# Install in editable mode with all dependencies
-uv pip install -e .
-
-# Or install with locked dependencies (for reproducible builds)
-uv pip install -r requirements.lock
-uv pip install -e . --no-deps
-
-# Install with optional dependencies
-uv pip install -e ".[dev]"      # Include development tools
-uv pip install -e ".[docs]"     # Include documentation tools
-uv pip install -e ".[all]"      # Include all optional dependencies
+# Install optional features as needed
+pip install "agenticx[memory]"      # Memory: mem0, chromadb, qdrant, redis, milvus
+pip install "agenticx[document]"    # Document processing: PDF, Word, PPT parsing
+pip install "agenticx[graph]"       # Knowledge graph: networkx, neo4j, community detection
+pip install "agenticx[llm]"         # Extra LLMs: anthropic, ollama
+pip install "agenticx[monitoring]"  # Observability: prometheus, opentelemetry
+pip install "agenticx[mcp]"         # MCP protocol
+pip install "agenticx[database]"    # Database backends: postgres, SQLAlchemy
+pip install "agenticx[data]"        # Data analysis: pandas, scikit-learn, matplotlib
+pip install "agenticx[ocr]"         # OCR (pulls in torch ~2GB): easyocr
+pip install "agenticx[volcengine]"  # Volcengine AgentKit
+pip install "agenticx[all]"         # Everything
 ```
 
-#### Option 2: Using `pip` (Traditional)
+> **Tip**: The core package includes only ~27 lightweight dependencies and installs in seconds. Heavy dependencies (torch, pandas, etc.) are optional extras - install only what you need.
+
+#### Option 2: Install from Source (Development)
 
 ```bash
 # Clone repository
 git clone https://github.com/DemonDamon/AgenticX.git
 cd AgenticX
 
-# Install in editable mode
+# Using uv (recommended, 10-100x faster than pip)
+pip install uv
+uv pip install -e .                  # Core install
+uv pip install -e ".[memory,graph]"  # Add optional features
+uv pip install -e ".[all]"           # Everything
+uv pip install -e ".[dev]"           # Development tools
+
+# Or using pip
 pip install -e .
-
-# Or install from requirements.txt
-pip install -r requirements.txt
-pip install -e . --no-deps
-
-# Install with optional dependencies
-pip install -e ".[dev]"      # Include development tools
-pip install -e ".[docs]"     # Include documentation tools
-pip install -e ".[all]"      # Include all optional dependencies
+pip install -e ".[all]"
 ```
 
 #### Environment Setup
@@ -108,8 +106,6 @@ export ANTHROPIC_API_KEY="your-api-key"  # Optional
 ```
 
 > **Complete Installation Guide**: For system dependencies (antiword, tesseract) and advanced document processing features, see [INSTALL.md](INSTALL.md)
-> 
-> **Tip**: Using `uv` is 10-100x faster than `pip` for dependency resolution. The `requirements.lock` file ensures reproducible builds across different environments.
 
 ### Create Your First Agent
 
@@ -394,7 +390,8 @@ graph TD
 - **Python**: 3.10+
 - **Memory**: 4GB+ RAM recommended
 - **System**: Windows / Linux / macOS
-- **Dependencies**: See `requirements.txt`
+- **Core Dependencies**: ~27 lightweight packages, installs in seconds (see `pyproject.toml`)
+- **Optional Dependencies**: 15 feature groups available via `pip install "agenticx[xxx]"`
 
 ## Contributing
 

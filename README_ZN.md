@@ -63,47 +63,45 @@ AgenticX 旨在打造一个统一、可扩展、生产就绪的多智能体应�
 
 ### 安装
 
-#### 方式一：使用 `uv`（推荐 - 更快）
+#### 方式一：从 PyPI 安装（推荐）
 
 ```bash
-# 克隆仓库
-git clone https://github.com/DemonDamon/AgenticX.git
-cd AgenticX
+# 核心安装（轻量，无 torch，秒装）
+pip install agenticx
 
-# 安装 uv（如果尚未安装）
-pip install uv
-
-# 以可编辑模式安装（包含所有依赖）
-uv pip install -e .
-
-# 或使用锁定文件安装（确保可重现构建）
-uv pip install -r requirements.lock
-uv pip install -e . --no-deps
-
-# 安装可选依赖
-uv pip install -e ".[dev]"      # 包含开发工具
-uv pip install -e ".[docs]"     # 包含文档工具
-uv pip install -e ".[all]"     # 包含所有可选依赖
+# 按需安装可选功能
+pip install "agenticx[memory]"      # 记忆系统: mem0, chromadb, qdrant, redis, milvus
+pip install "agenticx[document]"    # 文档处理: PDF, Word, PPT 解析
+pip install "agenticx[graph]"       # 知识图谱: networkx, neo4j, 社区检测
+pip install "agenticx[llm]"         # 额外 LLM: anthropic, ollama
+pip install "agenticx[monitoring]"  # 可观测性: prometheus, opentelemetry
+pip install "agenticx[mcp]"         # MCP 协议
+pip install "agenticx[database]"    # 数据库后端: postgres, SQLAlchemy
+pip install "agenticx[data]"        # 数据分析: pandas, scikit-learn, matplotlib
+pip install "agenticx[ocr]"         # OCR（会拉入 torch ~2GB）: easyocr
+pip install "agenticx[volcengine]"  # 火山引擎 AgentKit
+pip install "agenticx[all]"         # 全部功能
 ```
 
-#### 方式二：使用 `pip`（传统方式）
+> **提示**: 核心包仅包含 ~27 个轻量依赖，安装速度极快。重量级依赖（如 torch、pandas 等）均已移至可选分组，按需安装即可。
+
+#### 方式二：从源码安装（开发）
 
 ```bash
 # 克隆仓库
 git clone https://github.com/DemonDamon/AgenticX.git
 cd AgenticX
 
-# 以可编辑模式安装
+# 使用 uv（推荐，比 pip 快 10-100 倍）
+pip install uv
+uv pip install -e .                  # 核心安装
+uv pip install -e ".[memory,graph]"  # 按需加载可选功能
+uv pip install -e ".[all]"           # 全部功能
+uv pip install -e ".[dev]"           # 开发工具
+
+# 或使用 pip
 pip install -e .
-
-# 或从 requirements.txt 安装
-pip install -r requirements.txt
-pip install -e . --no-deps
-
-# 安装可选依赖
-pip install -e ".[dev]"      # 包含开发工具
-pip install -e ".[docs]"     # 包含文档工具
-pip install -e ".[all]"      # 包含所有可选依赖
+pip install -e ".[all]"
 ```
 
 #### 环境配置
@@ -115,8 +113,6 @@ export ANTHROPIC_API_KEY="your-api-key"  # 可选
 ```
 
 > **完整安装指南**: 关于系统依赖（antiword、tesseract）和高级文档处理功能的详细信息，请参阅 [INSTALL.md](INSTALL.md)
-> 
-> **提示**: 使用 `uv` 比 `pip` 快 10-100 倍。`requirements.lock` 文件确保在不同环境中构建的可重现性。
 
 ### 创建第一个智能体
 
@@ -355,7 +351,8 @@ python examples/agenticx-for-guiagent/AgenticX-GUIAgent/main.py
 - **Python**: 3.10+
 - **内存**: 4GB+ RAM 推荐
 - **系统**: Windows / Linux / macOS
-- **依赖**: 详见 `requirements.txt`
+- **核心依赖**: ~27 个轻量包，秒级安装（详见 `pyproject.toml`）
+- **可选依赖**: 按功能分为 15 个可选组，通过 `pip install "agenticx[xxx]"` 按需安装
 
 ## 贡献指南
 
