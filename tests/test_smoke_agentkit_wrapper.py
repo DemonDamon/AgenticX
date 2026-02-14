@@ -210,9 +210,13 @@ async def test_wrapper_stream_sse_format_contains_json():
     mock_llm = Mock()
     wrapper = AgenticXAgentWrapper(agent, mock_llm)
     
-    # Mock executor
-    wrapper.executor = Mock()
-    wrapper.executor.run = Mock(return_value={"result": "JSON test"})
+    # Mock executor without run_stream to trigger fallback path
+    mock_executor = Mock()
+    mock_executor.run = Mock(return_value={"result": "JSON test"})
+    # Remove run_stream so the wrapper falls back to sync execution
+    if hasattr(mock_executor, "run_stream"):
+        del mock_executor.run_stream
+    wrapper.executor = mock_executor
     
     payload = {"prompt": "Hello"}
     headers = {"user_id": "user1"}

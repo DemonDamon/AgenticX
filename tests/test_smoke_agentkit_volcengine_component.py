@@ -236,7 +236,8 @@ async def test_component_remove_not_implemented(tmp_path):
 
     result = await component.remove(config)
     assert result.success is False
-    assert "not implemented" in result.message.lower()
+    # Message changed from "not implemented" to "not installed" when agentkit CLI absent
+    assert "not installed" in result.message.lower() or "not implemented" in result.message.lower()
 
 
 @pytest.mark.asyncio

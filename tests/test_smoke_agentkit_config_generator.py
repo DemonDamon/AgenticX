@@ -87,7 +87,12 @@ def test_generate_agentkit_yaml_with_runtime_envs():
         runtime_envs=runtime_envs
     )
     
-    assert config["common"]["runtime_envs"] == runtime_envs
+    # User-provided envs should be present
+    assert config["common"]["runtime_envs"]["API_KEY"] == "test-key"
+    assert config["common"]["runtime_envs"]["DEBUG"] == "true"
+    # Auto-filled model credential placeholders should also be present
+    assert "MODEL_AGENT_NAME" in config["common"]["runtime_envs"]
+    assert "MODEL_AGENT_API_KEY" in config["common"]["runtime_envs"]
 
 
 def test_generate_agentkit_yaml_empty_agent_name():
