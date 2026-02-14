@@ -4,6 +4,7 @@ Hybrid Search Engine
 Implements a hybrid search engine that combines BM25 full-text search
 with vector-based semantic search for optimal retrieval performance.
 """
+from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple, Union
 from datetime import datetime, UTC
@@ -12,7 +13,10 @@ from abc import ABC, abstractmethod
 from collections import defaultdict, Counter
 import math
 import json
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None  # type: ignore  # pip install "agenticx[memory]"
 
 from .hierarchical import HierarchicalMemoryRecord, SearchResult, MemoryType
 from .base import MemoryError

@@ -32,14 +32,22 @@ from .hierarchical import (
 from .core_memory import CoreMemory
 from .episodic_memory import EpisodicMemory, Episode, EpisodeEvent
 from .semantic_memory import SemanticMemory, Concept, KnowledgeTriple
-from .hybrid_search import (
-    HybridSearchEngine,
-    BM25SearchBackend,
-    VectorSearchBackend,
-    HybridRanker,
-    SearchQuery,
-    SearchCandidate
-)
+try:
+    from .hybrid_search import (
+        HybridSearchEngine,
+        BM25SearchBackend,
+        VectorSearchBackend,
+        HybridRanker,
+        SearchQuery,
+        SearchCandidate
+    )
+except ImportError:  # numpy not installed
+    HybridSearchEngine = None  # type: ignore
+    BM25SearchBackend = None  # type: ignore
+    VectorSearchBackend = None  # type: ignore
+    HybridRanker = None  # type: ignore
+    SearchQuery = None  # type: ignore
+    SearchCandidate = None  # type: ignore
 from .memory_decay import (
     MemoryDecayService,
     DecayStrategy,
