@@ -6,7 +6,10 @@ PostgreSQL键值存储实现，支持JSONB和复杂查询。
 
 from typing import Any, Dict, List, Optional
 from .base import BaseKeyValueStorage
-import psycopg2  # type: ignore
+try:
+    import psycopg2  # type: ignore
+except ImportError:
+    psycopg2 = None  # type: ignore  # pip install "agenticx[database]"
 import logging
 
 logger = logging.getLogger(__name__)

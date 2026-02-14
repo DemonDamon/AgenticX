@@ -5,7 +5,10 @@ Redis键值存储实现，支持高性能缓存和会话存储。
 """
 
 from typing import Any, Dict, List, Optional
-import redis
+try:
+    import redis
+except ImportError:
+    redis = None  # type: ignore  # pip install "agenticx[memory]"
 from .base import BaseKeyValueStorage
 import logging
 from agenticx.storage.manager import StorageConfig
