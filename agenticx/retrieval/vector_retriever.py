@@ -3,9 +3,13 @@ Vector Retriever Implementation
 
 Implements vector-based semantic search using embeddings.
 """
+from __future__ import annotations
 
 from typing import List, Dict, Any, Optional, Union
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None  # type: ignore  # pip install "agenticx[memory]"
 from dataclasses import dataclass
 
 from .base import BaseRetriever, RetrievalQuery, RetrievalResult, RetrievalError
