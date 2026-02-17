@@ -12,8 +12,9 @@ import sys
 import shutil
 import subprocess
 import asyncio
+import yaml
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 import typer # type: ignore
 from rich.console import Console # type: ignore
@@ -21,6 +22,15 @@ from rich.panel import Panel # type: ignore
 from rich.table import Table # type: ignore
 
 console = Console()
+TEMPLATE_ROOT = Path(__file__).resolve().parent / "templates" / "volcengine"
+COMMON_TEMPLATE_DIR = TEMPLATE_ROOT / "common"
+TEMPLATE_APP_MODE = {
+    "basic": "simple",
+    "basic_stream": "simple",
+    "a2a": "a2a",
+    "mcp": "mcp",
+    "knowledge": "simple",
+}
 
 volcengine_app = typer.Typer(
     name="volcengine",
@@ -78,13 +88,92 @@ def _run_agentkit_command(
     )
 
 
+def _render_template(content: str, values: Dict[str, str]) -> str:
+    """Render a simple {{key}} template."""
+    rendered = content
+    for key, value in values.items():
+        rendered = rendered.replace(f"{{{{{key}}}}}", value)
+    return rendered
+
+
+def _write_template(
+    template_path: Path,
+    output_path: Path,
+    values: Dict[str, str],
+    overwrite: bool = True,
+) -> None:
+    """Write one rendered template file."""
+    if not template_path.exists():
+        raise FileNotFoundError(f"Template not found: {template_path}")
+    if output_path.exists() and not overwrite:
+        return
+    content = template_path.read_text(encoding="utf-8")
+    output_path.write_text(_render_template(content, values), encoding="utf-8")
+
+
+def _scaffold_from_template(
+    project_dir: Path,
+    template: str,
+    project_name: str,
+    streaming: bool,
+    launch_type: str = "hybrid",
+) -> None:
+    """Scaffold project files from volcengine templates."""
+    template_dir = TEMPLATE_ROOT / template
+    if not template_dir.exists():
+        raise ValueError(f"Template '{template}' not found in {TEMPLATE_ROOT}")
+
+    values = {
+        "agent_name": project_name,
+        "agent_module": "agent",
+        "agent_var": "agent",
+        "app_mode": TEMPLATE_APP_MODE.get(template, "simple"),
+        "launch_type": launch_type,
+        "python_version": "3.12",
+        "dependencies_file": "requirements.txt",
+        "model_agent_name": "",
+        "model_agent_api_key": "",
+    }
+
+    for name in ["agent.py", "README.md", "requirements.txt"]:
+        src = template_dir / name
+        if src.exists():
+            dst = project_dir / name
+            if not dst.exists():
+                dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+
+    wrapper_template = (
+        COMMON_TEMPLATE_DIR / "wrapper_stream.py.tmpl"
+        if streaming else
+        COMMON_TEMPLATE_DIR / "wrapper_basic.py.tmpl"
+    )
+    _write_template(wrapper_template, project_dir / "wrapper.py", values, overwrite=False)
+    _write_template(
+        COMMON_TEMPLATE_DIR / "agentkit.yaml.tmpl",
+        project_dir / "agentkit.yaml",
+        values,
+        overwrite=False,
+    )
+    _write_template(
+        COMMON_TEMPLATE_DIR / "Dockerfile.tmpl",
+        project_dir / "Dockerfile",
+        values,
+        overwrite=False,
+    )
+
+
 @volcengine_app.command("init")
 def volcengine_init(
     project_name: str = typer.Option(..., "--name", "-n", help="Project name"),
-    template: str = typer.Option("basic", "--template", "-t", help="Template: basic, basic_stream, a2a"),
+    template: str = typer.Option(
+        "basic",
+        "--template",
+        "-t",
+        help="Template: basic, basic_stream, a2a, mcp, knowledge",
+    ),
     directory: str = typer.Option(".", "--dir", "-d", help="Project directory"),
 ) -> None:
-    """Initialize a new AgentKit project from AgenticX agent."""
+    """Initialize a new AgentKit project from templates."""
     console.print(Panel(
         f"Initializing AgentKit project: [bold]{project_name}[/bold]",
         title="AgenticX -> AgentKit",
@@ -93,50 +182,18 @@ def volcengine_init(
     project_dir = Path(directory) / project_name
     project_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate deployment artifacts using AgenticX deploy component
     try:
-        from agenticx.deploy.components.volcengine.component import VolcEngineComponent
-        from agenticx.deploy.types import DeploymentConfig
-
-        config = DeploymentConfig(
-            name=project_name,
-            component="volcengine",
-            props={
-                "agent_name": project_name,
-                "agent_module": project_name.replace("-", "_"),
-                "agent_var": "agent",
-                "streaming": template == "basic_stream",
-                "output_dir": str(project_dir),
-            },
+        _scaffold_from_template(
+            project_dir=project_dir,
+            template=template,
+            project_name=project_name,
+            streaming=template == "basic_stream",
+            launch_type="hybrid",
         )
-
-        component = VolcEngineComponent()
-        result = asyncio.run(component.deploy(config))
-
-        if result.success:
-            console.print(
-                f"[green]Project initialized at:[/green] {project_dir}"
-            )
-            console.print(
-                f"[dim]Generated files: "
-                f"{', '.join(result.metadata.get('generated_files', []))}[/dim]"
-            )
-        else:
-            console.print(
-                f"[red]Initialization failed:[/red] {result.message}"
-            )
-            raise typer.Exit(1)
-
-    except ImportError as e:
-        console.print(f"[red]Import error:[/red] {e}")
+        console.print(f"[green]Project initialized at:[/green] {project_dir}")
+    except Exception as e:
+        console.print(f"[red]Initialization failed:[/red] {e}")
         raise typer.Exit(1)
-
-    # Also run agentkit init if available
-    if _check_agentkit_installed():
-        _run_agentkit_command(
-            ["init", project_name, "--template", template],
-            cwd=str(project_dir),
-        )
 
 
 @volcengine_app.command("config")
@@ -245,53 +302,71 @@ def volcengine_deploy(
     """Deploy AgenticX agent to Volcengine AgentKit."""
     agent_name = agent_module.replace("_", "-").replace(".", "-")
 
+    # Prefer launch_type from agentkit.yaml in cwd if present (cloud = no local Docker)
+    agentkit_yaml = Path.cwd() / "agentkit.yaml"
+    if agentkit_yaml.exists():
+        try:
+            with open(agentkit_yaml, encoding="utf-8") as f:
+                cfg = yaml.safe_load(f)
+            if cfg and isinstance(cfg.get("common"), dict):
+                configured_agent_name = cfg["common"].get("agent_name")
+                if isinstance(configured_agent_name, str) and configured_agent_name.strip():
+                    agent_name = configured_agent_name.strip()
+
+                launch_type = cfg["common"].get("launch_type")
+                if launch_type in ("local", "hybrid", "cloud"):
+                    strategy = launch_type
+        except Exception:
+            pass
+
     console.print(Panel(
         f"Deploying [bold]{agent_name}[/bold] to AgentKit\n"
         f"Module: {agent_module}, Strategy: {strategy}, Mode: {app_mode}",
         title="AgenticX -> AgentKit Deploy",
     ))
 
-    # Step 1: Generate artifacts
+    # Step 1: Prepare project files in-place (no deploy_output)
     try:
-        from agenticx.deploy.components.volcengine.component import VolcEngineComponent
-        from agenticx.deploy.types import DeploymentConfig
+        project_dir = Path.cwd()
+        if app_mode == "a2a":
+            template_key = "a2a"
+        elif app_mode == "mcp":
+            template_key = "mcp"
+        elif app_mode == "knowledge":
+            template_key = "knowledge"
+        else:
+            template_key = "basic_stream" if streaming else "basic"
 
-        config = DeploymentConfig(
-            name=agent_name,
-            component="volcengine",
-            props={
-                "agent_name": agent_name,
-                "agent_module": agent_module,
-                "agent_var": agent_var,
-                "strategy": strategy,
-                "streaming": streaming,
-                "output_dir": "./deploy_output",
-            },
+        _scaffold_from_template(
+            project_dir=project_dir,
+            template=template_key,
+            project_name=agent_name,
+            streaming=streaming,
+            launch_type=strategy,
         )
 
-        component = VolcEngineComponent()
-        result = asyncio.run(component.deploy(config))
-
-        if result.success:
+        # Ensure module file exists in current directory.
+        module_file = project_dir / f"{agent_module}.py"
+        if not module_file.exists():
             console.print(
-                "[green]Artifacts generated successfully[/green]"
+                f"[red]Missing module file:[/red] {module_file}\n"
+                "Please run deploy from your agent project directory."
             )
-        else:
-            console.print(f"[red]Failed:[/red] {result.message}")
             raise typer.Exit(1)
 
+        console.print("[green]Project files are ready for launch[/green]")
+
     except Exception as e:
-        console.print(f"[red]Artifact generation failed:[/red] {e}")
+        console.print(f"[red]Project preparation failed:[/red] {e}")
         raise typer.Exit(1)
 
     # Step 2: Launch via agentkit CLI if available
     if _check_agentkit_installed():
         console.print("[cyan]Launching via agentkit...[/cyan]")
-        _run_agentkit_command(["launch"], cwd="./deploy_output")
+        _run_agentkit_command(["launch"], cwd=".")
     else:
         console.print(
             "[yellow]agentkit CLI not installed.[/yellow]\n"
-            "Artifacts are in ./deploy_output/\n"
             "Install agentkit-sdk-python and run 'agentkit launch' manually."
         )
 
