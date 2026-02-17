@@ -81,9 +81,11 @@ class AgenticXAgentWrapper:
     def _get_executor(self):
         """Lazy initialization of executor."""
         if self.executor is None:
+            tools = list(getattr(self.agent, "tools", []) or [])
             self.executor = self.AgentExecutor(
                 llm_provider=self.llm_provider,
-                tools=[]  # Tools will be resolved from agent
+                tools=tools,
+                enable_context_compilation=False,
             )
         return self.executor
     
@@ -166,15 +168,15 @@ class AgenticXAgentWrapper:
             headers: Request headers dict, may contain "user_id", "session_id".
 
         Yields:
-            SSE-formatted string events.
+            JSON string events (AgentKit layer will wrap as SSE).
         """
         try:
             prompt = payload.get("prompt")
             if not prompt:
-                yield self._convert_to_sse({
+                yield json.dumps({
                     "type": "error",
                     "content": "Missing 'prompt' field in payload",
-                })
+                }, ensure_ascii=False)
                 return
 
             user_id = headers.get("user_id", "anonymous")
@@ -197,19 +199,22 @@ class AgenticXAgentWrapper:
                 async for event in executor.run_stream(
                     self.agent, task, session_key=session_id
                 ):
-                    yield self._convert_to_sse(event)
+                    if isinstance(event, str):
+                        yield event
+                    else:
+                        yield json.dumps(event, ensure_ascii=False)
             else:
                 # Fallback to sync execution wrapped as single SSE event
                 result = self.handle_invoke(payload, headers)
-                yield self._convert_to_sse({"content": result, "type": "final"})
+                yield json.dumps({"content": result, "type": "final"}, ensure_ascii=False)
 
         except Exception as e:
             logger.exception(f"Error in handle_invoke_stream: {e}")
-            yield self._convert_to_sse({
+            yield json.dumps({
                 "type": "error",
                 "content": str(e),
                 "error_type": type(e).__name__,
-            })
+            }, ensure_ascii=False)
     
     def ping(self) -> str:
         """
@@ -237,7 +242,7 @@ class AgenticXAgentWrapper:
                 "type": error_type
             }
         }
-        return json.dumps(error_obj)
+        return json.dumps(error_obj, ensure_ascii=False)
     
     def _convert_to_sse(self, obj: Any) -> str:
         """
@@ -252,7 +257,7 @@ class AgenticXAgentWrapper:
         if isinstance(obj, str):
             json_str = obj
         else:
-            json_str = json.dumps(obj)
+            json_str = json.dumps(obj, ensure_ascii=False)
         return f"data: {json_str}\n\n"
     
     def generate_wrapper_file(
