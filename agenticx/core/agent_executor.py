@@ -384,12 +384,14 @@ class AgentExecutor:
                 try:
                     # Try streaming LLM response token-by-token
                     if hasattr(self.llm_provider, "astream"):
-                        # Build prompt for this iteration
-                        messages = self.prompt_manager.compile(
-                            agent=agent,
-                            task=task,
-                            event_log=event_log,
+                        # Build prompt/messages for this iteration
+                        prompt = self.prompt_manager.build_prompt(
+                            "react",
+                            event_log,
+                            agent,
+                            task,
                         )
+                        messages = [{"role": "user", "content": prompt}]
 
                         yield {
                             "type": "step",
@@ -405,12 +407,13 @@ class AgentExecutor:
                         full_response = "".join(accumulated)
 
                         # Parse the response into an action
-                        action = self.action_parser.parse(full_response)
+                        action = self.action_parser.parse_action(full_response)
 
                         # Record LLM response event
                         llm_event = LLMResponseEvent(
-                            content=full_response,
+                            response=full_response,
                             agent_id=agent.id,
+                            task_id=task.id,
                         )
                         event_log.append(llm_event)
 
