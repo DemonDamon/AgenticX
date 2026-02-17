@@ -1,0 +1,14 @@
+FROM agentkit-prod-public-cn-beijing.cr.volces.com/base/py-simple:python{{python_version}}-bookworm-slim-latest
+
+ENV UV_SYSTEM_PYTHON=1 UV_COMPILE_BYTECODE=1 PYTHONUNBUFFERED=1 DOCKER_CONTAINER=1
+
+WORKDIR /app
+
+COPY requirements.txt requirements.txt
+RUN uv pip install -r requirements.txt -i https://pypi.org/simple
+
+COPY . .
+
+EXPOSE 8000
+
+CMD ["python", "-m", "wrapper"]

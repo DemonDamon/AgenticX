@@ -1,0 +1,33 @@
+common:
+  agent_name: {{agent_name}}
+  entry_point: wrapper
+  language: Python
+  language_version: '{{python_version}}'
+  dependencies_file: {{dependencies_file}}
+  launch_type: {{launch_type}}
+  runtime_envs:
+    MODEL_AGENT_NAME: '{{model_agent_name}}'
+    MODEL_AGENT_API_KEY: '{{model_agent_api_key}}'
+  app_mode: {{app_mode}}
+launch_types:
+  hybrid:
+    region: cn-beijing
+    image_tag: '{{timestamp}}'
+    cr_instance_name: Auto
+    cr_namespace_name: agenticx
+    cr_repo_name: {{agent_name}}
+    runtime_name: {{agent_name}}-runtime
+    runtime_auth_type: key_auth
+  cloud:
+    region: cn-beijing
+    image_tag: '{{timestamp}}'
+    tos_bucket: Auto
+    tos_prefix: agentkit-builds
+    cr_instance_name: Auto
+    cr_namespace_name: agenticx
+    cr_repo_name: {{agent_name}}
+    runtime_name: {{agent_name}}-runtime
+    runtime_auth_type: key_auth
+    build_timeout: 3600
+docker_build:
+  platform: auto
