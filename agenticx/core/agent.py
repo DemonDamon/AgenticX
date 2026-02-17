@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from ..hooks.llm_hooks import LLMCallHookContext
     from ..hooks.tool_hooks import ToolCallHookContext
     from .guiderails import GuideRails, GuideRailsConfig
+    from ..tools.base import BaseTool
 
 # 类型变量，用于 fast_construct 返回正确的类型
 _T = TypeVar("_T", bound="Agent")
@@ -32,7 +33,14 @@ class Agent(BaseModel):
     llm_config_name: Optional[str] = Field(description="Name of the LLM configuration to use (reference to M13 ModelHub).", default=None)
     memory_config: Optional[Dict[str, Any]] = Field(description="Configuration for the memory system.", default_factory=dict)
     tool_names: List[str] = Field(description="List of tool names available to the agent (reference to M13 Hub).", default_factory=list)
-    organization_id: str = Field(description="Organization ID for multi-tenant isolation.")
+    tools: List[Any] = Field(
+        description="Tool instances bound to the agent for runtime execution.",
+        default_factory=list,
+    )
+    organization_id: str = Field(
+        default="default-org",
+        description="Organization ID for multi-tenant isolation."
+    )
     llm: Optional[Any] = Field(description="LLM instance for the agent.", default=None)
     retrievers: Optional[Dict[str, Any]] = Field(description="Retrievers available to the agent.", default=None)
     query_patterns: Optional[Dict[str, Any]] = Field(description="Query patterns for the agent.", default=None)
@@ -101,6 +109,7 @@ class Agent(BaseModel):
         llm_config_name: Optional[str] = None,
         memory_config: Optional[Dict[str, Any]] = None,
         tool_names: Optional[List[str]] = None,
+        tools: Optional[List[Any]] = None,
         llm: Optional[Any] = None,
         retrievers: Optional[Dict[str, Any]] = None,
         query_patterns: Optional[Dict[str, Any]] = None,
@@ -168,6 +177,7 @@ class Agent(BaseModel):
                 llm_config_name=llm_config_name,
                 memory_config=memory_config or {},
                 tool_names=tool_names or [],
+                tools=tools or [],
                 organization_id=organization_id,
                 llm=llm,
                 retrievers=retrievers,
@@ -196,6 +206,7 @@ class Agent(BaseModel):
             llm_config_name=llm_config_name,
             memory_config=memory_config or {},
             tool_names=tool_names or [],
+            tools=tools or [],
             organization_id=organization_id,
             llm=llm,
             retrievers=retrievers,
@@ -211,6 +222,15 @@ class Agent(BaseModel):
             max_iterations=max_iterations,
             max_retry_limit=max_retry_limit,
         )
+
+    def add_tool(self, tool: "BaseTool") -> None:
+        """Register a tool instance and keep tool names synchronized."""
+        if tool is None:
+            return
+        self.tools.append(tool)
+        tool_name = getattr(tool, "name", None)
+        if isinstance(tool_name, str) and tool_name and tool_name not in self.tool_names:
+            self.tool_names.append(tool_name)
     
     @classmethod
     def measure_instantiation_time(cls, iterations: int = 1000) -> Dict[str, float]:
@@ -294,3 +314,18 @@ class AgentResult(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Result creation time")
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+# Resolve forward references for GuideRails types at import time.
+try:
+    from .guiderails import GuideRails, GuideRailsConfig
+
+    Agent.model_rebuild(
+        _types_namespace={
+            "GuideRails": GuideRails,
+            "GuideRailsConfig": GuideRailsConfig,
+        }
+    )
+except Exception:
+    # Keep import resilient if guiderails module is unavailable.
+    pass
