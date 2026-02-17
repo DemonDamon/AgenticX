@@ -13,6 +13,7 @@ Author: Damon Li
 
 import logging
 import os
+import shutil
 from typing import Dict, Any, List
 from datetime import datetime
 from pathlib import Path
@@ -56,7 +57,7 @@ class VolcEngineComponent(DeploymentComponent):
         streaming: Enable SSE streaming mode (default: False)
         extra_envs: Additional environment variables dict (default: {})
         extra_deps: Additional pip dependencies list (default: [])
-        output_dir: Output directory for artifacts (default: "./deploy_output")
+        output_dir: Output directory for artifacts (default: ".")
         dependencies_file: Requirements file name (default: "requirements.txt")
 
     Example:
@@ -97,7 +98,7 @@ class VolcEngineComponent(DeploymentComponent):
             "streaming": False,
             "extra_envs": {},
             "extra_deps": [],
-            "output_dir": "./deploy_output",
+            "output_dir": ".",
             "dependencies_file": "requirements.txt",
             "app_mode": "simple",  # "simple", "mcp", or "a2a"
             "platform_services": None,  # Optional platform services config
@@ -171,7 +172,7 @@ class VolcEngineComponent(DeploymentComponent):
         streaming = props.get("streaming", False)
         extra_envs = props.get("extra_envs", {})
         extra_deps = props.get("extra_deps", [])
-        output_dir = props.get("output_dir", "./deploy_output")
+        output_dir = props.get("output_dir", ".")
         dependencies_file = props.get("dependencies_file", "requirements.txt")
         app_mode = props.get("app_mode", "simple")
         platform_services = props.get("platform_services")
@@ -243,16 +244,60 @@ class VolcEngineComponent(DeploymentComponent):
             )
             generated_files.append(str(dockerfile_path))
 
-            # 4. Generate requirements.txt
-            requirements_content = generate_requirements(extra_deps=extra_deps)
+            # 4. Generate requirements.txt (prefer project requirements file)
+            project_requirements_path = Path.cwd() / dependencies_file
+            if project_requirements_path.exists() and project_requirements_path.is_file():
+                requirements_content = project_requirements_path.read_text(
+                    encoding="utf-8"
+                )
+                if extra_deps:
+                    existing_lines = {
+                        line.strip()
+                        for line in requirements_content.splitlines()
+                        if line.strip()
+                    }
+                    for dep in extra_deps:
+                        dep = dep.strip()
+                        if dep and dep not in existing_lines:
+                            requirements_content += (
+                                ("" if requirements_content.endswith("\n") else "\n")
+                                + dep
+                                + "\n"
+                            )
+                logger.info(
+                    f"Using project requirements: {project_requirements_path}"
+                )
+            else:
+                requirements_content = generate_requirements(extra_deps=extra_deps)
             requirements_path = output_path / dependencies_file
             requirements_path.write_text(requirements_content, encoding="utf-8")
             generated_files.append(str(requirements_path))
             logger.info(f"Generated requirements: {requirements_path}")
 
-            # 5. Auto-launch via agentkit CLI if requested
+            # 5. Copy agent module file(s) to output_dir (required for Docker build)
+            project_root = Path.cwd()
+            agent_file = project_root / f"{agent_module}.py"
+            if agent_file.exists():
+                target_agent_file = output_path / agent_file.name
+                if agent_file.resolve() != target_agent_file.resolve():
+                    shutil.copy2(agent_file, target_agent_file)
+                    generated_files.append(str(target_agent_file))
+                    logger.info(f"Copied agent module: {agent_file.name}")
+                else:
+                    logger.info("Agent module already in project directory")
+            else:
+                parts = agent_module.split(".")
+                pkg_dir = project_root / parts[0]
+                if pkg_dir.is_dir():
+                    dest_pkg = output_path / parts[0]
+                    shutil.copytree(pkg_dir, dest_pkg, dirs_exist_ok=True)
+                    generated_files.append(str(dest_pkg))
+                    logger.info(f"Copied agent package: {parts[0]}/")
+                else:
+                    logger.warning(f"Agent module not found: {agent_file}")
+
+            # 6. Auto-launch via agentkit CLI if requested
             if auto_launch:
-                import shutil
                 import subprocess
                 if shutil.which("agentkit"):
                     logger.info("Auto-launching via agentkit CLI...")
@@ -319,7 +364,7 @@ class VolcEngineComponent(DeploymentComponent):
         import subprocess
 
         if shutil.which("agentkit"):
-            output_dir = config.props.get("output_dir", "./deploy_output")
+            output_dir = config.props.get("output_dir", ".")
             result = subprocess.run(
                 ["agentkit", "destroy"],
                 cwd=output_dir,
@@ -363,7 +408,7 @@ class VolcEngineComponent(DeploymentComponent):
         agent_name = config.props.get("agent_name", config.name)
 
         if shutil.which("agentkit"):
-            output_dir = config.props.get("output_dir", "./deploy_output")
+            output_dir = config.props.get("output_dir", ".")
             result = subprocess.run(
                 ["agentkit", "status"],
                 cwd=output_dir,
