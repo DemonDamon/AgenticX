@@ -1,5 +1,10 @@
 # ============================================================================
-# AgenticX Core Dependencies (lightweight, no torch, installs in seconds)
+# AgenticX Core Dependencies (与 pyproject.toml 保持同步，仅供参考)
+# 实际安装请用: pip install agenticx 或 pip install "agenticx[volcengine]"
+#
+# requirements.lock: 由 uv 生成的可复现锁文件，含精确版本号
+# 生成: uv pip compile pyproject.toml -o requirements.lock
+# 安装: uv pip install -r requirements.lock
 # ============================================================================
 # 基础框架
 pydantic>=2.0.0
@@ -31,7 +36,7 @@ tokenizers>=0.19.0
 huggingface-hub>=0.24.0
 
 # 核心工具库
-docstring-parser>=0.11,<0.12
+docstring-parser>=0.11,<0.16
 
 # 通用工具
 ujson>=5.8.0
