@@ -32,7 +32,7 @@ keywords = ["ai", "agents", "multi-agent", "framework", "automation", "llm", "wo
 dependencies = [
     # ── 核心依赖（轻量，无 torch，秒装）──
     # 基础框架
-    "pydantic>=2.0.0,<3",
+    "pydantic>=2.0.0",
     "typing-extensions>=4.0.0,<5",
     "loguru>=0.7.0,<1",
     "rich>=13.0.0,<14",
@@ -45,10 +45,10 @@ dependencies = [
     "requests>=2.31.0,<3",
     "aiohttp>=3.9.0,<4",
     "aiofiles>=23.0.0,<25",
-    "websockets>=12.0,<14",
+    "websockets>=12.0",
     # Web 框架
-    "fastapi>=0.100.0,<0.130.0",
-    "uvicorn>=0.23.0,<1",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
     "typer>=0.9.0,<1",
     # LLM 核心（固定版本范围，加速依赖解析）
     "openai>=1.50.0,<3",
@@ -57,7 +57,7 @@ dependencies = [
     "tokenizers>=0.19.0,<1",
     "huggingface-hub>=0.24.0,<1",
     # 核心工具库
-    "docstring-parser>=0.11,<0.12",  # FunctionTool 需要解析 docstring
+    "docstring-parser>=0.11,<0.16",  # FunctionTool 需要解析 docstring；0.15+ 为 agentkit-sdk-python 所需
     # 通用工具
     "ujson>=5.8.0,<6",
     "tqdm>=4.65.0,<5",
@@ -149,7 +149,7 @@ text = [
 ]
 # ── 火山引擎 AgentKit ──
 volcengine = [
-    "agentkit-sdk-python>=0.1.0,<1",
+    "agentkit-sdk-python>=0.2.0,<0.6",
 ]
 # ── 文档构建 ──
 docs = [
@@ -158,7 +158,7 @@ docs = [
     "mkdocstrings>=0.22.0,<1",
     "mkdocs-autorefs>=0.4.0,<2",
     "pydoc-markdown>=4.8.0,<5",
-    "docstring-parser>=0.11,<0.12",
+    "docstring-parser>=0.11,<0.16",
 ]
 # ── 开发工具 ──
 dev = [
