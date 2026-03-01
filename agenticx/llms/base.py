@@ -59,3 +59,16 @@ class BaseLLMProvider(ABC, BaseModel):
             Chunks of the response, typically strings.
         """
         pass 
+
+    def supports_auth_profile_rotation(self) -> bool:
+        """Whether this provider can receive per-call rotated credentials."""
+        return True
+
+    def invoke_with_profile(
+        self,
+        prompt: Union[str, List[Dict]],
+        api_key: str,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Invoke with a rotated API key."""
+        return self.invoke(prompt, api_key=api_key, **kwargs)
