@@ -16,6 +16,7 @@ import uuid
 from pydantic import BaseModel, ConfigDict, Field  # type: ignore
 
 from .event import Event
+from .prompt import PromptMode
 
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,13 @@ class HandoffOutput(BaseModel):
     def get_target_identifier(self) -> str:
         """Get the best available target identifier."""
         return self.target_agent_id or self.target_agent_name or "unknown"
+
+    def get_prompt_mode(self) -> PromptMode:
+        """Resolve target prompt mode from metadata."""
+        mode = self.metadata.get("prompt_mode")
+        if mode in (PromptMode.FULL.value, PromptMode.MINIMAL.value, PromptMode.NONE.value):
+            return PromptMode(mode)
+        return PromptMode.MINIMAL
 
 
 class AgentHandoffEvent(Event[Literal["agent_handoff"]]):
@@ -148,6 +156,10 @@ class HandoffTargetNotFoundError(AgentHandoffError):
         self.target_identifier = target_identifier
         message = f"Handoff target agent not found: {target_identifier}"
         super().__init__(message, target_agent_id=target_identifier)
+
+
+class HandoffLimitError(AgentHandoffError):
+    """Exception raised when handoff depth or child limits are exceeded."""
 
 
 def is_handoff_output(value: Any) -> bool:
@@ -229,6 +241,7 @@ def create_handoff_event(
         handoff_chain=chain,
         data={
             "metadata": handoff.metadata,
+            "prompt_mode": handoff.get_prompt_mode().value,
         }
     )
 
@@ -236,7 +249,10 @@ def create_handoff_event(
 def check_handoff_cycle(
     target_agent_id: str,
     handoff_chain: List[str],
-    max_chain_length: int = 10
+    max_chain_length: int = 10,
+    max_spawn_depth: Optional[int] = None,
+    max_children_per_agent: Optional[int] = None,
+    current_children_count: Optional[int] = None,
 ) -> None:
     """
     Check for handoff cycles and excessive chain length.
@@ -257,4 +273,20 @@ def check_handoff_cycle(
     if len(handoff_chain) >= max_chain_length:
         raise HandoffCycleError(
             handoff_chain + [target_agent_id]
+        )
+
+    if max_spawn_depth is not None and len(handoff_chain) >= max_spawn_depth:
+        raise HandoffLimitError(
+            f"Max spawn depth exceeded: depth={len(handoff_chain)}, limit={max_spawn_depth}",
+            target_agent_id=target_agent_id,
+        )
+
+    if (
+        max_children_per_agent is not None
+        and current_children_count is not None
+        and current_children_count >= max_children_per_agent
+    ):
+        raise HandoffLimitError(
+            f"Max children exceeded: children={current_children_count}, limit={max_children_per_agent}",
+            target_agent_id=target_agent_id,
         )

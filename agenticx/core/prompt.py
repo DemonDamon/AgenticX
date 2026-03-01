@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional, Any, Callable
 from abc import ABC, abstractmethod
 from datetime import datetime
+from enum import Enum
 from .event import (
     EventLog, AnyEvent, ToolCallEvent, ToolResultEvent, ErrorEvent, 
     LLMCallEvent, LLMResponseEvent, HumanRequestEvent, HumanResponseEvent,
@@ -360,6 +361,12 @@ class PromptTemplate:
         return self.template.format(**kwargs)
 
 
+class PromptMode(str, Enum):
+    FULL = "full"
+    MINIMAL = "minimal"
+    NONE = "none"
+
+
 class PromptManager:
     """
     Core component for context engineering and prompt management.
@@ -431,6 +438,7 @@ Analyze the error carefully and choose the best recovery strategy."""
         event_log: EventLog, 
         agent: Agent, 
         task: Task,
+        prompt_mode: PromptMode = PromptMode.FULL,
         **extra_vars
     ) -> str:
         """
@@ -451,7 +459,7 @@ Analyze the error carefully and choose the best recovery strategy."""
             raise ValueError(f"Template '{template_name}' not found")
         
         # Build context
-        context = self.build_context(event_log, agent, task)
+        context = self._build_context_by_mode(event_log, agent, task, prompt_mode)
         
         # Prepare template variables
         template_vars = {
@@ -463,6 +471,31 @@ Analyze the error carefully and choose the best recovery strategy."""
         }
         
         return template.format(**template_vars)
+
+    def _build_context_by_mode(
+        self,
+        event_log: EventLog,
+        agent: Agent,
+        task: Task,
+        prompt_mode: PromptMode,
+    ) -> str:
+        if prompt_mode == PromptMode.NONE:
+            return ""
+        if prompt_mode == PromptMode.MINIMAL:
+            current_state = event_log.get_current_state()
+            return "\n".join(
+                [
+                    "<minimal_context>",
+                    f"<task>{task.description}</task>",
+                    f"<goal>{agent.goal}</goal>",
+                    f"<status>{current_state.get('status', 'running')}</status>",
+                    f"<step_count>{current_state.get('step_count', 0)}</step_count>",
+                    "</minimal_context>",
+                ]
+            )
+        if prompt_mode == PromptMode.FULL:
+            return self.build_context(event_log, agent, task)
+        raise ValueError(f"Unsupported prompt mode: {prompt_mode}")
     
     def build_error_recovery_prompt(
         self,
