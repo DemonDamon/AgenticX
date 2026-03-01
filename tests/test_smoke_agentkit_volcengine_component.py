@@ -19,7 +19,7 @@ def _make_config(tmp_path, **overrides):
         "agent_name": "test-agent",
         "agent_module": "my_agent",
         "agent_var": "agent",
-        "output_dir": str(tmp_path / "deploy_output"),
+        "output_dir": str(tmp_path / "artifacts"),
     }
     props.update(overrides)
     return DeploymentConfig(
