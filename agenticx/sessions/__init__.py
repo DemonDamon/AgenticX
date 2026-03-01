@@ -17,6 +17,7 @@ from .base import (
 )
 from .in_memory import InMemorySessionService
 from .database import DatabaseSessionService
+from .write_lock import SessionWriteLock, SessionWriteLockError, SessionWriteLockTimeout
 
 __all__ = [
     # 基类和模型
@@ -30,5 +31,8 @@ __all__ = [
     # 实现
     "InMemorySessionService",
     "DatabaseSessionService",
+    "SessionWriteLock",
+    "SessionWriteLockError",
+    "SessionWriteLockTimeout",
 ]
 
