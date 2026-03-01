@@ -38,6 +38,8 @@ class StreamContentAccumulator:
         self.tool_status_messages: List[str] = []  # Accumulated tool status messages
         self.reasoning_content: List[str] = []  # Accumulated reasoning content
         self.is_reasoning_phase = True  # Track if we're in reasoning phase
+        self._pending_buffer = ""
+        self._in_thinking_block = False
     
     def set_base_content(self, content: str) -> None:
         """
@@ -55,8 +57,10 @@ class StreamContentAccumulator:
         Args:
             new_content: New content chunk to add
         """
-        self.current_content.append(new_content)
-        self.is_reasoning_phase = False  # Once we get content, we're past reasoning
+        self._pending_buffer += new_content
+        self._consume_pending_buffer()
+        if self.current_content:
+            self.is_reasoning_phase = False  # Once visible content appears, reasoning phase ends
     
     def add_reasoning_content(self, new_reasoning: str) -> None:
         """
@@ -120,6 +124,8 @@ class StreamContentAccumulator:
         self.current_content = []
         self.reasoning_content = []
         self.is_reasoning_phase = True
+        self._pending_buffer = ""
+        self._in_thinking_block = False
     
     def reset_all(self) -> None:
         """
@@ -133,3 +139,43 @@ class StreamContentAccumulator:
         self.tool_status_messages = []
         self.reasoning_content = []
         self.is_reasoning_phase = True
+        self._pending_buffer = ""
+        self._in_thinking_block = False
+
+    def _consume_pending_buffer(self) -> None:
+        open_tag = "<thinking>"
+        close_tag = "</thinking>"
+        while self._pending_buffer:
+            if self._in_thinking_block:
+                idx = self._pending_buffer.find(close_tag)
+                if idx == -1:
+                    text, tail = self._split_for_partial_tag(self._pending_buffer, close_tag)
+                    if text:
+                        self.reasoning_content.append(text)
+                    self._pending_buffer = tail
+                    break
+                if idx > 0:
+                    self.reasoning_content.append(self._pending_buffer[:idx])
+                self._pending_buffer = self._pending_buffer[idx + len(close_tag):]
+                self._in_thinking_block = False
+            else:
+                idx = self._pending_buffer.find(open_tag)
+                if idx == -1:
+                    text, tail = self._split_for_partial_tag(self._pending_buffer, open_tag)
+                    if text:
+                        self.current_content.append(text)
+                    self._pending_buffer = tail
+                    break
+                if idx > 0:
+                    self.current_content.append(self._pending_buffer[:idx])
+                self._pending_buffer = self._pending_buffer[idx + len(open_tag):]
+                self._in_thinking_block = True
+
+    def _split_for_partial_tag(self, content: str, tag: str) -> tuple[str, str]:
+        """Split content into safe-text and possible tag tail."""
+        keep = min(len(tag) - 1, len(content))
+        for n in range(keep, 0, -1):
+            suffix = content[-n:]
+            if tag.startswith(suffix):
+                return content[:-n], suffix
+        return content, ""
