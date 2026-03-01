@@ -28,15 +28,16 @@ class ExecutionLaneGuard:
             ...
     """
 
-    def __init__(self, lane: "ExecutionLane", session_key: str) -> None:
+    def __init__(self, lane: "ExecutionLane", session_key: str, generation: int) -> None:
         self._lane = lane
         self._session_key = session_key
+        self._generation = generation
 
     async def __aenter__(self) -> "ExecutionLaneGuard":
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore[override]
-        self._lane.release(self._session_key)
+        self._lane.release(self._session_key, generation=self._generation)
 
     @property
     def session_key(self) -> str:
@@ -70,6 +71,7 @@ class ExecutionLane:
             asyncio.Semaphore(max_concurrent) if max_concurrent else None
         )
         self._max_concurrent = max_concurrent
+        self._generation = 0
 
     async def acquire(self, session_key: str) -> ExecutionLaneGuard:
         """Acquire the lane for *session_key*.
@@ -86,10 +88,21 @@ class ExecutionLane:
             await self._global_semaphore.acquire()
             logger.debug("ExecutionLane: acquired global slot for %s", session_key)
 
-        return ExecutionLaneGuard(self, session_key)
+        return ExecutionLaneGuard(self, session_key, generation=self._generation)
 
-    def release(self, session_key: str) -> None:
+    def release(self, session_key: str, generation: Optional[int] = None) -> None:
         """Release the lane for *session_key*."""
+        if generation is not None and generation != self._generation:
+            if self._global_semaphore is not None:
+                self._global_semaphore.release()
+            logger.debug(
+                "ExecutionLane: ignored stale release for %s (stale=%s, current=%s)",
+                session_key,
+                generation,
+                self._generation,
+            )
+            return
+
         if self._global_semaphore is not None:
             self._global_semaphore.release()
             logger.debug("ExecutionLane: released global slot for %s", session_key)
@@ -114,3 +127,13 @@ class ExecutionLane:
     @property
     def max_concurrent(self) -> Optional[int]:
         return self._max_concurrent
+
+    @property
+    def generation(self) -> int:
+        return self._generation
+
+    def reset(self) -> int:
+        """Reset lane state and invalidate in-flight guards from older generations."""
+        self._generation += 1
+        self._session_locks = defaultdict(asyncio.Lock)
+        return self._generation
