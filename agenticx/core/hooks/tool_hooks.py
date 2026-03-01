@@ -6,9 +6,15 @@ Tool Hooks 系统
 
 """
 
+from pathlib import Path
 from typing import Callable, List, Optional
 import logging
 
+import yaml  # type: ignore[import-untyped]
+
+from agenticx.core.config_watcher import ConfigWatcher
+from agenticx.tools.policy import ToolPolicyLayer
+from agenticx.tools.policy import ToolPolicyStack
 from .types import ToolCallHookContext
 
 logger = logging.getLogger(__name__)
@@ -161,3 +167,79 @@ def get_registered_tool_hooks() -> dict:
         "before": [hook.__name__ for hook in _before_tool_call_hooks],
         "after": [hook.__name__ for hook in _after_tool_call_hooks],
     }
+
+
+def load_policy_from_yaml(path: Path, default_allow: bool = False) -> ToolPolicyStack:
+    """Load a ToolPolicyStack from a YAML file."""
+    if not path.exists():
+        return ToolPolicyStack(default_allow=default_allow)
+    with open(path, "r", encoding="utf-8") as handle:
+        raw = yaml.safe_load(handle) or {}
+
+    if isinstance(raw, dict):
+        layers_data = raw.get("layers", [])
+    elif isinstance(raw, list):
+        layers_data = raw
+    else:
+        raise ValueError("Policy YAML must be a mapping or list")
+
+    layers: List[ToolPolicyLayer] = []
+
+    def _coerce_patterns(value: object, field_name: str, layer_name: str) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item) for item in value]
+        if isinstance(value, str):
+            raise ValueError(
+                f"Layer '{layer_name}' field '{field_name}' must be a list, not string"
+            )
+        raise ValueError(
+            f"Layer '{layer_name}' field '{field_name}' must be list[str], got {type(value).__name__}"
+        )
+
+    if isinstance(layers_data, list):
+        for layer in layers_data:
+            if not isinstance(layer, dict):
+                continue
+            layer_name = str(layer.get("name", "unnamed"))
+            layers.append(
+                ToolPolicyLayer(
+                    name=layer_name,
+                    allow=_coerce_patterns(layer.get("allow"), "allow", layer_name),
+                    deny=_coerce_patterns(layer.get("deny"), "deny", layer_name),
+                )
+            )
+
+    if isinstance(raw, dict) and "default_allow" in raw:
+        raw_default_allow = raw.get("default_allow")
+        if isinstance(raw_default_allow, bool):
+            default_allow = raw_default_allow
+        else:
+            raise ValueError("Field 'default_allow' must be a boolean")
+    return ToolPolicyStack(layers=layers, default_allow=default_allow)
+
+
+def enable_policy_hot_reload(
+    policy_stack: ToolPolicyStack,
+    policy_yaml_path: Path,
+    watcher: ConfigWatcher,
+) -> None:
+    """Enable hot reload for tool policy YAML."""
+
+    def _on_change(changed_path: Path) -> None:
+        try:
+            if changed_path.resolve() != policy_yaml_path.resolve():
+                return
+        except Exception:
+            return
+
+        try:
+            refreshed = load_policy_from_yaml(policy_yaml_path)
+            policy_stack._layers = refreshed.layers  # pylint: disable=protected-access
+            policy_stack._default_allow = refreshed._default_allow  # pylint: disable=protected-access
+            logger.info("Reloaded tool policy from %s", policy_yaml_path)
+        except Exception as exc:
+            logger.warning("Failed to reload tool policy from %s: %s", policy_yaml_path, exc)
+
+    watcher.on_change(_on_change)

@@ -65,6 +65,7 @@ dependencies = [
     "chardet>=5.0.0,<6",
     "psutil>=5.9.0,<6",
     "structlog>=23.1.0,<25",
+    "watchdog>=3.0.0,<5",
 ]
 
 [project.optional-dependencies]

@@ -5,7 +5,7 @@ YAML 配置管理，支持 agenticx.yaml 配置文件。
 """
 
 import os
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 from pathlib import Path
 from dataclasses import dataclass, field
 import logging
@@ -13,6 +13,7 @@ import logging
 import yaml  # type: ignore[import-untyped]
 
 from .types import DeploymentConfig, ResourceSpec
+from agenticx.core.config_watcher import ConfigWatcher
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,8 @@ class ProjectConfig:
     
     _config_path: Optional[Path] = None
     """配置文件路径"""
+    _watcher: Optional[ConfigWatcher] = None
+    """Runtime config watcher (not serialized)."""
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -90,6 +93,46 @@ class ProjectConfig:
             "hooks": self.hooks,
             "metadata": self.metadata,
         }
+
+    def watch(self, on_reload: Optional[Callable[[Path], None]] = None) -> None:
+        """Enable config hot reload watcher for current project config."""
+        if self._watcher is not None:
+            return
+        config_path = self._config_path or (Path.cwd() / CONFIG_FILENAME)
+        root_dir = config_path.parent
+        watch_paths = [
+            config_path,
+            root_dir / "tool-policy.yaml",
+            root_dir / "skills",
+        ]
+        watcher = ConfigWatcher(watch_paths=watch_paths, debounce_ms=500)
+
+        def _default_reload(changed_path: Path) -> None:
+            if self._config_path and changed_path.resolve() == self._config_path.resolve():
+                try:
+                    latest = _load_config_file(self._config_path)
+                    self.version = latest.version
+                    self.name = latest.name
+                    self.description = latest.description
+                    self.environments = latest.environments
+                    self.deployments = latest.deployments
+                    self.variables = latest.variables
+                    self.hooks = latest.hooks
+                    self.metadata = latest.metadata
+                    logger.info("ProjectConfig hot-reloaded from %s", self._config_path)
+                except Exception as exc:
+                    logger.warning("Failed to hot-reload config from %s: %s", self._config_path, exc)
+
+        watcher.on_change(on_reload or _default_reload)
+        watcher.start()
+        self._watcher = watcher
+
+    def unwatch(self) -> None:
+        """Disable config hot reload watcher."""
+        if self._watcher is None:
+            return
+        self._watcher.stop()
+        self._watcher = None
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ProjectConfig":
@@ -192,6 +235,7 @@ class ProjectConfig:
 def load_config(
     path: Optional[Path] = None,
     search_parents: bool = True,
+    auto_watch: bool = False,
 ) -> Optional[ProjectConfig]:
     """
     加载配置文件
@@ -206,7 +250,10 @@ def load_config(
     if path is not None:
         config_path = Path(path)
         if config_path.exists():
-            return _load_config_file(config_path)
+            loaded = _load_config_file(config_path)
+            if auto_watch:
+                loaded.watch()
+            return loaded
         return None
     
     # 自动搜索
@@ -216,7 +263,10 @@ def load_config(
         for filename in CONFIG_FILENAMES:
             config_path = current_dir / filename
             if config_path.exists():
-                return _load_config_file(config_path)
+                loaded = _load_config_file(config_path)
+                if auto_watch:
+                    loaded.watch()
+                return loaded
         
         if not search_parents:
             break
