@@ -9,6 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 import traceback
 
 from ..llms.base import BaseLLMProvider
+from ..llms.auth_profile import AuthProfileManager
+from ..llms.transcript_sanitizer import TranscriptSanitizer
 from ..llms.response import LLMResponse
 from ..tools.base import BaseTool
 from agenticx.tools.security import ApprovalRequiredError
@@ -188,6 +190,8 @@ class AgentExecutor:
         enable_context_compilation: bool = True,
         # Execution Lane (per-session serialization, inspired by OpenClaw)
         execution_lane: Optional[ExecutionLane] = None,
+        auth_profile_manager: Optional[AuthProfileManager] = None,
+        transcript_sanitizer: Optional[TranscriptSanitizer] = None,
     ):
         self.llm_provider = llm_provider
         self.error_handler = error_handler or ErrorHandler()
@@ -219,6 +223,8 @@ class AgentExecutor:
         
         # Execution Lane (per-session serialization)
         self.execution_lane = execution_lane
+        self.auth_profile_manager = auth_profile_manager
+        self.transcript_sanitizer = transcript_sanitizer or TranscriptSanitizer()
         
         # Initialize action parser
         self.action_parser = ActionParser()
@@ -574,6 +580,10 @@ class AgentExecutor:
         
         # 准备消息列表
         messages = [{"role": "user", "content": prompt}]
+        messages = self.transcript_sanitizer.sanitize(
+            messages,
+            provider=getattr(self.llm_provider, "model", "unknown"),
+        )
         
         # === Before LLM Call Hooks ===
         iteration_count = len(event_log.get_events_by_type("llm_call"))
@@ -619,7 +629,7 @@ class AgentExecutor:
         event_log.append(llm_call_event)
 
         # 使用可能被 hooks 修改的 messages
-        response = self.llm_provider.invoke(hook_context.messages)
+        response = self._invoke_llm_with_auth_rotation(hook_context.messages)
 
         # Handle token usage safely
         token_usage = None
@@ -669,6 +679,36 @@ class AgentExecutor:
         action = self.action_parser.parse_action(accumulated_content)
         
         return action
+
+    def _invoke_llm_with_auth_rotation(self, messages: List[Dict[str, Any]]) -> LLMResponse:
+        """Invoke LLM and rotate auth profiles on recoverable failures."""
+        if self.auth_profile_manager is None:
+            return self.llm_provider.invoke(messages)
+
+        profile_count = len(self.auth_profile_manager.profiles)
+        last_error: Optional[Exception] = None
+        tried_profiles = set()
+
+        for _ in range(max(1, profile_count)):
+            profile = self.auth_profile_manager.get_current()
+            if profile is None:
+                break
+            if profile.name in tried_profiles and len(tried_profiles) >= profile_count:
+                break
+            tried_profiles.add(profile.name)
+            try:
+                response = self.llm_provider.invoke_with_profile(messages, api_key=profile.api_key)
+                self.auth_profile_manager.mark_success(profile.name)
+                return response
+            except Exception as exc:
+                last_error = exc
+                failure_type = self.auth_profile_manager.classify_failure(exc)
+                self.auth_profile_manager.mark_failure(profile.name, failure_type)
+                self.auth_profile_manager.advance(exclude_name=profile.name)
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("No available auth profiles for LLM invocation.")
     
     def _execute_action(self, action: Dict[str, Any], event_log: EventLog, agent: Optional[Agent] = None):
         """
