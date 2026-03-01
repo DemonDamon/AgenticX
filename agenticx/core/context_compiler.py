@@ -26,6 +26,7 @@ from .event import (
     TaskStartEvent, TaskEndEvent, FinishTaskEvent, HumanRequestEvent, HumanResponseEvent
 )
 from .token_counter import TokenCounter, TokenStats, count_tokens
+from .overflow_recovery import OverflowRecoveryConfig, OverflowRecoveryPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -657,6 +658,7 @@ class ContextCompiler:
         task_type: str = "default",
         model: Optional[str] = None,
         enable_fast_fallback: bool = True,
+        overflow_recovery_config: Optional[OverflowRecoveryConfig] = None,
         # Memory Flush Before Compaction (inspired by OpenClaw)
         flush_handler: Optional[Any] = None,
         flush_config: Optional[Any] = None,
@@ -681,6 +683,10 @@ class ContextCompiler:
         self.task_type = task_type
         self.token_counter = TokenCounter(model=model)
         self.enable_fast_fallback = enable_fast_fallback
+        self.overflow_recovery_pipeline = OverflowRecoveryPipeline(
+            compiler=self,
+            config=overflow_recovery_config or OverflowRecoveryConfig(),
+        )
         
         # Memory Flush Before Compaction
         self.flush_handler = flush_handler
@@ -709,6 +715,17 @@ class ContextCompiler:
         if not should_compact:
             return None
         
+        if reason and str(reason).startswith("token_overflow"):
+            self.overflow_recovery_pipeline.reset()
+            recovered = await self.overflow_recovery_pipeline.recover(event_log)
+            if recovered:
+                should_compact, post_reason = self._should_compact(event_log)
+                if not should_compact:
+                    logger.info("Overflow recovered without additional compaction.")
+                    return None
+                logger.info(f"Overflow recovered, performing post-recovery compaction. Reason: {post_reason}")
+                return await self.compact(event_log, reason=post_reason)
+
         logger.info(f"Triggering compaction. Reason: {reason}")
         return await self.compact(event_log, reason=reason)
     
