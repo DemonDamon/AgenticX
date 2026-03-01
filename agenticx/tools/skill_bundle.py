@@ -32,6 +32,7 @@ from .base import BaseTool
 if TYPE_CHECKING:
     from .tool_context import ToolContext, LlmRequest
     from ..core.discovery import DiscoveryBus
+    from agenticx.core.config_watcher import ConfigWatcher
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +174,8 @@ class SkillBundleLoader:
         search_paths: Optional[List[Path]] = None,
         discovery_bus: Optional["DiscoveryBus"] = None,
         execution_backend: Optional[Any] = None,
+        registry_url: Optional[str] = None,
+        config_watcher: Optional["ConfigWatcher"] = None,
     ):
         """
         初始化技能加载器。
@@ -185,8 +188,14 @@ class SkillBundleLoader:
         self.search_paths = search_paths or self.DEFAULT_SEARCH_PATHS
         self.discovery_bus = discovery_bus
         self.execution_backend = execution_backend
+        self.registry_url = registry_url
+        self.config_watcher = config_watcher
         self._skills: Dict[str, SkillMetadata] = {}
         self._scanned = False
+        self._watcher_hook_registered = False
+
+        if self.config_watcher:
+            self._register_config_watcher()
     
     def scan(self) -> List[SkillMetadata]:
         """
@@ -261,6 +270,7 @@ class SkillBundleLoader:
                 continue
         
         self._scanned = True
+        self._merge_remote_skills()
         return list(self._skills.values())
     
     def _parse_skill_md(
@@ -405,6 +415,68 @@ class SkillBundleLoader:
             
         except Exception as e:
             logger.warning(f"Failed to publish discovery for skill {meta.name}: {e}")
+
+    def _register_config_watcher(self) -> None:
+        """Register watcher callback once for auto-refresh on skill changes."""
+        if self._watcher_hook_registered or not self.config_watcher:
+            return
+
+        def _on_change(path: Path) -> None:
+            if self._is_skill_related_path(path):
+                logger.info("Skill path changed (%s), refreshing skill bundle", path)
+                self.refresh()
+
+        self.config_watcher.on_change(_on_change)
+        self._watcher_hook_registered = True
+
+    def _is_skill_related_path(self, path: Path) -> bool:
+        """Return True when a changed path is under any skill search path."""
+        try:
+            abs_path = path.resolve()
+        except Exception:
+            return False
+        for search_path in self.search_paths:
+            try:
+                root = search_path.resolve() if not search_path.is_absolute() else search_path
+                abs_path.relative_to(root)
+                return True
+            except ValueError:
+                continue
+            except Exception:
+                continue
+        return False
+
+    def _merge_remote_skills(self) -> None:
+        """Merge remote registry index into in-memory skills.
+
+        Local skills always win for duplicate names.
+        """
+        if not self.registry_url:
+            return
+        try:
+            from agenticx.skills.registry import SkillRegistryClient
+
+            client = SkillRegistryClient(registry_url=self.registry_url)
+            remote_entries = client.search()
+            for entry in remote_entries:
+                if entry.name in self._skills:
+                    continue
+                remote_base = Path.home() / ".agenticx" / "skills" / "registry" / entry.name
+                remote_md = remote_base / "SKILL.md"
+                self._skills[entry.name] = SkillMetadata(
+                    name=entry.name,
+                    description=entry.description,
+                    base_dir=remote_base,
+                    skill_md_path=remote_md,
+                    location="global",
+                    gate=SkillGate(),
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to fetch remote skills from registry '%s': %s",
+                self.registry_url,
+                exc,
+            )
     
     def get_skill(self, name: str) -> Optional[SkillMetadata]:
         """

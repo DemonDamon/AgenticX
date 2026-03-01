@@ -45,6 +45,15 @@ def _get_deploy_manager():
     from .deploy import DeployManager
     return DeployManager
 
+def _get_skills_app():
+    """延迟导入 skills 子应用"""
+    try:
+        from agenticx.cli.skills_commands import skills_app
+        return skills_app
+    except ImportError:
+        console.print("[bold red]错误:[/bold red] 无法导入 skills 模块")
+        raise typer.Exit(1)
+
 # 创建主应用
 app = typer.Typer(
     name="agenticx",
@@ -263,6 +272,13 @@ try:
     app.add_typer(tools_app)
 except Exception:
     # 如果 tools 模块加载失败，不影响其他功能
+    pass
+
+# 注册 skills 子命令 (延迟加载)
+try:
+    skills_app = _get_skills_app()
+    app.add_typer(skills_app)
+except Exception:
     pass
 
 # 注册 volcengine 子命令 (延迟加载)
