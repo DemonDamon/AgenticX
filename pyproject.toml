@@ -148,6 +148,10 @@ text = [
     "python-Levenshtein>=0.21.0,<1",
     "RapidFuzz>=3.0.0,<4",
 ]
+# ── Server 生产级认证 ──
+server = [
+    "PyJWT>=2.8.0",
+]
 # ── 火山引擎 AgentKit ──
 volcengine = [
     "agentkit-sdk-python>=0.2.0,<0.6",
