@@ -9,6 +9,7 @@
 - Eigent 前端架构设计
 """
 
+import asyncio
 import logging
 from typing import Optional
 from fastapi import Request, HTTPException  # type: ignore
@@ -34,6 +35,8 @@ from ..collaboration.task_lock import (
 )
 from ..collaboration.workforce.events import WorkforceEventBus
 from .sse_formatter import SSEFormatter, SSEEvent
+from .task_queue import get_task_queue, AsyncTaskStatus
+from .health import get_health_probe
 
 logger = logging.getLogger(__name__)
 
@@ -216,14 +219,77 @@ def register_api_routes(app, event_bus: Optional[WorkforceEventBus] = None):
             logger.error(f"[APIRoutes] Error starting task: {e}")
             raise HTTPException(status_code=500, detail=str(e))
     
+    health_probe = get_health_probe()
+
     @app.get("/health")
     async def health():
-        """健康检查
-        
-        参考：backend/app/controller/health_controller.py:15-21
-        """
+        """Aggregate health check (backward compat)."""
         return HealthResponse().dict()
-    
+
+    @app.get("/health/live")
+    async def health_live():
+        """Liveness probe: process is alive."""
+        return await health_probe.liveness()
+
+    @app.get("/health/ready")
+    async def health_ready():
+        """Readiness probe: dependencies ready to serve traffic."""
+        return await health_probe.readiness()
+
+    @app.get("/health/startup")
+    async def health_startup():
+        """Startup probe: initialization complete."""
+        return await health_probe.startup()
+
+    # Task queue endpoints
+    task_queue = get_task_queue()
+
+    @app.post("/tasks/submit")
+    async def submit_task(request: Request):
+        """Submit a background task. Returns task_id for status/cancel."""
+        try:
+            body = await request.json() if request.headers.get("content-length") else {}
+        except Exception:
+            body = {}
+        name = body.get("name", "background_task")
+        payload = body.get("payload", {})
+
+        async def _run_task() -> dict:
+            await asyncio.sleep(0.1)
+            return {"submitted": True, "payload": payload}
+
+        task_id = await task_queue.submit(_run_task, name=name)
+        return JSONResponse(status_code=202, content={"task_id": task_id})
+
+    @app.get("/tasks/{task_id}/status")
+    async def get_task_status(task_id: str):
+        """Get task status by id."""
+        info = await task_queue.get_status(task_id)
+        if info is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return JSONResponse(
+            content={
+                "task_id": info.task_id,
+                "name": info.name,
+                "status": info.status.value,
+                "result": info.result,
+                "error": info.error,
+                "progress": info.progress,
+                "created_at": info.created_at,
+                "started_at": info.started_at,
+                "completed_at": info.completed_at,
+                "execution_time_ms": info.execution_time_ms,
+            }
+        )
+
+    @app.post("/tasks/{task_id}/cancel")
+    async def cancel_task(task_id: str):
+        """Request task cancellation."""
+        ok = await task_queue.cancel(task_id)
+        if not ok:
+            raise HTTPException(status_code=400, detail="Task not found or already finished")
+        return JSONResponse(status_code=200, content={"task_id": task_id, "cancelled": True})
+
     # 获取用户管理器实例
     user_manager = get_user_manager()
     
@@ -243,9 +309,16 @@ def register_api_routes(app, event_bus: Optional[WorkforceEventBus] = None):
                 username=register_request.username,
             )
             
-            # 生成 token（简化实现，生产环境应使用 JWT）
-            token = secrets.token_urlsafe(32)
-            
+            # Generate JWT (or fallback to random token if PyJWT not installed)
+            token = user_manager.generate_jwt(
+                user_id=user["id"],
+                email=user["email"],
+                username=user["username"],
+                roles=user.get("roles", ["user"]),
+            )
+            if not token:
+                token = secrets.token_urlsafe(32)
+
             return JSONResponse(
                 status_code=200,
                 content={
@@ -296,9 +369,16 @@ def register_api_routes(app, event_bus: Optional[WorkforceEventBus] = None):
                     },
                 )
             
-            # 生成 token（简化实现，生产环境应使用 JWT）
-            token = secrets.token_urlsafe(32)
-            
+            # Generate JWT (or fallback to random token if PyJWT not installed)
+            token = user_manager.generate_jwt(
+                user_id=user["id"],
+                email=user["email"],
+                username=user["username"],
+                roles=user.get("roles", ["user"]),
+            )
+            if not token:
+                token = secrets.token_urlsafe(32)
+
             return JSONResponse(
                 status_code=200,
                 content={

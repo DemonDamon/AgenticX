@@ -436,6 +436,82 @@ class BackgroundTaskPool:
         self.shutdown(wait=True)
 
 
+class AsyncBackgroundPool:
+    """
+    Pure-async background task pool.
+
+    Uses asyncio only (no ThreadPoolExecutor). For async-only workloads.
+    """
+
+    _default_instance: Optional["AsyncBackgroundPool"] = None
+    _instance_lock = threading.Lock()
+
+    def __init__(self, max_concurrent: int = 10) -> None:
+        self._max_concurrent = max_concurrent
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._tasks: Dict[str, BackgroundTask] = {}
+        self._task_counter = 0
+        self._shutdown = False
+
+    @classmethod
+    def get_default(cls, max_concurrent: int = 10) -> "AsyncBackgroundPool":
+        if cls._default_instance is None:
+            with cls._instance_lock:
+                if cls._default_instance is None:
+                    cls._default_instance = cls(max_concurrent=max_concurrent)
+        return cls._default_instance
+
+    def _generate_task_id(self) -> str:
+        self._task_counter += 1
+        return f"async-bg-{self._task_counter}-{int(time.time() * 1000)}"
+
+    async def submit(
+        self,
+        coro_func: Callable[..., Any],
+        args: tuple = (),
+        kwargs: Optional[Dict[str, Any]] = None,
+        name: Optional[str] = None,
+    ) -> str:
+        if self._shutdown:
+            raise RuntimeError("AsyncBackgroundPool has been shut down")
+        task_id = self._generate_task_id()
+        task_name = name or getattr(coro_func, "__name__", "unknown")
+        task = BackgroundTask(
+            id=task_id,
+            name=task_name,
+            func=coro_func,
+            args=args,
+            kwargs=kwargs or {},
+        )
+        self._tasks[task_id] = task
+
+        async def _run() -> None:
+            async with self._semaphore:
+                task.status = TaskStatus.RUNNING
+                task.started_at = time.time()
+                try:
+                    task.result = await coro_func(*args, **(kwargs or {}))
+                    task.status = TaskStatus.COMPLETED
+                except asyncio.CancelledError:
+                    task.status = TaskStatus.CANCELLED
+                except Exception as e:
+                    task.status = TaskStatus.FAILED
+                    task.error = f"{type(e).__name__}: {str(e)}"
+                    logger.warning("AsyncBackgroundPool task %s failed: %s", task_id, e)
+                finally:
+                    task.completed_at = time.time()
+
+        asyncio.create_task(_run())
+        return task_id
+
+    def get_task(self, task_id: str) -> Optional[BackgroundTask]:
+        return self._tasks.get(task_id)
+
+    def get_task_status(self, task_id: str) -> Optional[TaskStatus]:
+        t = self.get_task(task_id)
+        return t.status if t else None
+
+
 # =========================================================================
 # 便捷函数
 # =========================================================================
