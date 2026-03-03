@@ -86,6 +86,14 @@ class ErrorClassifier:
         return True
 
 
+def is_retryable(error: Exception) -> bool:
+    """Determine if an error is retryable (for server-level retry policies).
+
+    Uses ErrorClassifier.is_recoverable. Use for RetryableEndpoint and resilience.
+    """
+    return ErrorClassifier().is_recoverable(error)
+
+
 class CircuitBreaker:
     """
     Implements the circuit breaker pattern to prevent infinite error loops.
