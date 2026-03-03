@@ -40,10 +40,11 @@ if SQLALCHEMY_AVAILABLE:
     class SessionModel(Base):
         """会话表模型"""
         __tablename__ = "agenticx_sessions"
-        
+
         id = Column(String(64), primary_key=True)
         app_name = Column(String(128), nullable=False, index=True)
         user_id = Column(String(128), nullable=False, index=True)
+        tenant_id = Column(String(128), nullable=True, index=True)
         
         # 状态（JSON 存储）
         app_state = Column(JSON, default=dict)
@@ -66,6 +67,7 @@ if SQLALCHEMY_AVAILABLE:
         # 复合索引
         __table_args__ = (
             Index('ix_session_app_user', 'app_name', 'user_id'),
+            Index('ix_session_tenant', 'tenant_id'),
         )
     
     class SessionEventModel(Base):
@@ -185,6 +187,7 @@ class DatabaseSessionService(BaseSessionService):
             id=model.id,
             app_name=model.app_name,
             user_id=model.user_id,
+            tenant_id=getattr(model, "tenant_id", None),
             state=state,
             events=events,
             created_at=model.created_at,
@@ -197,17 +200,20 @@ class DatabaseSessionService(BaseSessionService):
         self,
         app_name: str,
         user_id: str,
-        session_id: str
+        session_id: str,
+        tenant_id: Optional[str] = None
     ) -> Optional[Session]:
         """获取会话"""
         await self.initialize()
-        
+
         async with self.async_session() as db:
             stmt = select(SessionModel).where(
                 SessionModel.id == session_id,
                 SessionModel.app_name == app_name,
                 SessionModel.user_id == user_id
             )
+            if tenant_id is not None:
+                stmt = stmt.where(SessionModel.tenant_id == tenant_id)
             result = await db.execute(stmt)
             model = result.scalar_one_or_none()
             
@@ -222,26 +228,30 @@ class DatabaseSessionService(BaseSessionService):
         user_id: str,
         session_id: Optional[str] = None,
         state: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        tenant_id: Optional[str] = None
     ) -> Session:
         """创建会话"""
         await self.initialize()
-        
+
         if session_id is None:
             session_id = str(uuid.uuid4())
-        
+
         async with self.async_session() as db:
-            # 检查是否已存在
+            # 检查是否已存在（同一 tenant 下）
             stmt = select(SessionModel).where(SessionModel.id == session_id)
+            if tenant_id is not None:
+                stmt = stmt.where(SessionModel.tenant_id == tenant_id)
             result = await db.execute(stmt)
             if result.scalar_one_or_none():
                 raise SessionAlreadyExistsError(session_id)
-            
+
             # 创建模型
             model = SessionModel(
                 id=session_id,
                 app_name=app_name,
                 user_id=user_id,
+                tenant_id=tenant_id,
                 app_state={},
                 user_state={},
                 session_state=state or {},
@@ -260,9 +270,11 @@ class DatabaseSessionService(BaseSessionService):
     ) -> Session:
         """更新会话"""
         await self.initialize()
-        
+
         async with self.async_session() as db:
             stmt = select(SessionModel).where(SessionModel.id == session.id)
+            if session.tenant_id is not None:
+                stmt = stmt.where(SessionModel.tenant_id == session.tenant_id)
             result = await db.execute(stmt)
             model = result.scalar_one_or_none()
             
@@ -286,17 +298,20 @@ class DatabaseSessionService(BaseSessionService):
         self,
         app_name: str,
         user_id: str,
-        session_id: str
+        session_id: str,
+        tenant_id: Optional[str] = None
     ) -> bool:
         """删除会话"""
         await self.initialize()
-        
+
         async with self.async_session() as db:
             stmt = delete(SessionModel).where(
                 SessionModel.id == session_id,
                 SessionModel.app_name == app_name,
                 SessionModel.user_id == user_id
             )
+            if tenant_id is not None:
+                stmt = stmt.where(SessionModel.tenant_id == tenant_id)
             result = await db.execute(stmt)
             await db.commit()
             
@@ -307,14 +322,16 @@ class DatabaseSessionService(BaseSessionService):
         app_name: str,
         user_id: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
+        tenant_id: Optional[str] = None
     ) -> List[Session]:
         """列出会话"""
         await self.initialize()
-        
+
         async with self.async_session() as db:
             stmt = select(SessionModel).where(SessionModel.app_name == app_name)
-            
+            if tenant_id is not None:
+                stmt = stmt.where(SessionModel.tenant_id == tenant_id)
             if user_id:
                 stmt = stmt.where(SessionModel.user_id == user_id)
             
@@ -333,10 +350,12 @@ class DatabaseSessionService(BaseSessionService):
     ) -> SessionEvent:
         """追加事件到会话"""
         await self.initialize()
-        
+
         async with self.async_session() as db:
             # 检查会话是否存在
             stmt = select(SessionModel).where(SessionModel.id == session.id)
+            if session.tenant_id is not None:
+                stmt = stmt.where(SessionModel.tenant_id == session.tenant_id)
             result = await db.execute(stmt)
             model = result.scalar_one_or_none()
             

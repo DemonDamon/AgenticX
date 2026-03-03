@@ -129,12 +129,13 @@ class SessionEvent(BaseModel):
 class Session(BaseModel):
     """
     会话
-    
+
     表示一个用户与应用的交互会话。
     """
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="会话 ID")
     app_name: str = Field(description="应用名称")
     user_id: str = Field(description="用户 ID")
+    tenant_id: Optional[str] = Field(default=None, description="租户 ID（多租户隔离）")
     
     # 状态
     state: SessionState = Field(default_factory=SessionState, description="会话状态")
@@ -175,6 +176,7 @@ class Session(BaseModel):
             "id": self.id,
             "app_name": self.app_name,
             "user_id": self.user_id,
+            "tenant_id": self.tenant_id,
             "state": self.state.to_dict(),
             "events": [e.to_dict() for e in self.events],
             "created_at": self.created_at.isoformat(),
@@ -197,7 +199,8 @@ class BaseSessionService(ABC):
         self,
         app_name: str,
         user_id: str,
-        session_id: str
+        session_id: str,
+        tenant_id: Optional[str] = None
     ) -> Optional[Session]:
         """
         获取会话
@@ -206,12 +209,13 @@ class BaseSessionService(ABC):
             app_name: 应用名称
             user_id: 用户 ID
             session_id: 会话 ID
+            tenant_id: 租户 ID（可选，多租户隔离）
             
         Returns:
             会话对象，如果不存在返回 None
         """
         pass
-    
+
     @abstractmethod
     async def create_session(
         self,
@@ -219,7 +223,8 @@ class BaseSessionService(ABC):
         user_id: str,
         session_id: Optional[str] = None,
         state: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        tenant_id: Optional[str] = None
     ) -> Session:
         """
         创建会话
@@ -230,12 +235,13 @@ class BaseSessionService(ABC):
             session_id: 会话 ID（可选，自动生成）
             state: 初始状态
             metadata: 元数据
+            tenant_id: 租户 ID（可选，多租户隔离）
             
         Returns:
             创建的会话对象
         """
         pass
-    
+
     @abstractmethod
     async def update_session(
         self,
@@ -257,7 +263,8 @@ class BaseSessionService(ABC):
         self,
         app_name: str,
         user_id: str,
-        session_id: str
+        session_id: str,
+        tenant_id: Optional[str] = None
     ) -> bool:
         """
         删除会话
@@ -266,19 +273,21 @@ class BaseSessionService(ABC):
             app_name: 应用名称
             user_id: 用户 ID
             session_id: 会话 ID
+            tenant_id: 租户 ID（可选，多租户隔离）
             
         Returns:
             是否删除成功
         """
         pass
-    
+
     @abstractmethod
     async def list_sessions(
         self,
         app_name: str,
         user_id: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
+        tenant_id: Optional[str] = None
     ) -> List[Session]:
         """
         列出会话
@@ -288,6 +297,7 @@ class BaseSessionService(ABC):
             user_id: 用户 ID（可选，不指定则列出应用下所有会话）
             limit: 返回数量限制
             offset: 偏移量
+            tenant_id: 租户 ID（可选，多租户隔离）
             
         Returns:
             会话列表
@@ -318,7 +328,8 @@ class BaseSessionService(ABC):
         user_id: str,
         session_id: Optional[str] = None,
         state: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        tenant_id: Optional[str] = None
     ) -> Session:
         """
         获取或创建会话
@@ -329,21 +340,23 @@ class BaseSessionService(ABC):
             session_id: 会话 ID
             state: 初始状态（仅创建时使用）
             metadata: 元数据（仅创建时使用）
+            tenant_id: 租户 ID（可选，多租户隔离）
             
         Returns:
             会话对象
         """
         if session_id:
-            session = await self.get_session(app_name, user_id, session_id)
+            session = await self.get_session(app_name, user_id, session_id, tenant_id)
             if session:
                 return session
-        
+
         return await self.create_session(
             app_name=app_name,
             user_id=user_id,
             session_id=session_id,
             state=state,
-            metadata=metadata
+            metadata=metadata,
+            tenant_id=tenant_id
         )
     
     async def update_state(
