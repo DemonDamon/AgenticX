@@ -24,6 +24,18 @@ from .shell_bundle import ShellBundleLoader, ShellScriptTool
 from .skill_bundle import SkillBundleLoader, SkillTool, SkillMetadata, SkillGate, check_skill_gate
 from .policy import ToolPolicyStack, ToolPolicyLayer, PolicyAction, ToolPolicyDeniedError
 try:
+    from .mcp_hub import MCPHub, MCPHubConfig
+except ImportError:  # pragma: no cover - optional dependency chain
+    MCPHub = None  # type: ignore
+    MCPHubConfig = None  # type: ignore
+try:
+    from .skill_sync import sync_skills, check_skills_sync, SyncResult, CheckResult
+except ImportError:  # pragma: no cover - optional in early imports
+    sync_skills = None  # type: ignore
+    check_skills_sync = None  # type: ignore
+    SyncResult = None  # type: ignore
+    CheckResult = None  # type: ignore
+try:
     from .builtin import (
         WebSearchTool,
         FileTool,
@@ -88,6 +100,8 @@ __all__ = [
     # Remote/MCP tools V2 (基于官方 SDK，持久化会话)
     "MCPClientV2",
     "RemoteToolV2",
+    "MCPHub",
+    "MCPHubConfig",
     # OpenAPI tools (ADK-inspired)
     "OpenAPIToolset",
     "RestApiTool",
@@ -101,6 +115,10 @@ __all__ = [
     "SkillBundleLoader",
     "SkillTool",
     "SkillMetadata",
+    "sync_skills",
+    "check_skills_sync",
+    "SyncResult",
+    "CheckResult",
     # Unified Document Tool (OWL-inspired)
     "UnifiedDocumentTool",
     "DocumentRouter",
