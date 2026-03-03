@@ -298,6 +298,33 @@ def version():
 
 
 @app.command()
+def serve(
+    port: int = typer.Option(8000, "--port", "-p", help="监听端口"),
+    host: str = typer.Option("0.0.0.0", "--host", help="监听地址"),
+    reload: bool = typer.Option(False, "--reload", help="开发模式热重载"),
+):
+    """启动 AgenticX API 服务器（含生产级中间件与健康探针）"""
+    try:
+        from agenticx.server import AgentServer, register_api_routes
+        from agenticx.server.middleware import register_production_middlewares, MiddlewareConfig
+        import uvicorn
+    except ImportError as e:
+        console.print(f"[bold red]错误:[/bold red] 缺少依赖，请安装: pip install agenticx[server]\n{e}")
+        raise typer.Exit(1)
+
+    app = AgentServer(
+        agent_handler=lambda req: "Hello from AgenticX",
+        model_name="agenticx",
+    ).app
+    register_production_middlewares(app, MiddlewareConfig())
+    register_api_routes(app)
+
+    console.print(f"[bold green]AgenticX API Server[/bold green] http://{host}:{port}")
+    console.print("  /health, /health/live, /health/ready, /tasks/submit, /api/login, ...")
+    uvicorn.run(app, host=host, port=port, reload=reload)
+
+
+@app.command()
 def run(
     file: str = typer.Argument(..., help="要执行的工作流文件"),
     config: Optional[str] = typer.Option(None, "--config", "-c", help="配置文件路径"),
