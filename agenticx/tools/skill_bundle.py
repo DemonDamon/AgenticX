@@ -2,7 +2,7 @@
 Skill Bundle Loader (Anthropic SKILL.md 规范兼容)
 
 提供兼容 Anthropic Agent Skills 规范的技能包加载能力：
-- 扫描 .agent/skills 和 .claude/skills 目录
+- 扫描 .agents/.agent/.claude 体系的 skills 目录
 - 解析 SKILL.md 文件的 YAML Frontmatter
 - 将技能封装为 BaseTool，支持 list/read 操作
 - 支持渐进式披露（Progressive Disclosure）
@@ -149,10 +149,12 @@ class SkillBundleLoader:
     - DiscoveryBus 集成（可选）
     
     搜索路径优先级（从高到低）：
-    1. ./.agent/skills (项目级 universal)
-    2. ~/.agent/skills (全局 universal)
-    3. ./.claude/skills (项目级)
-    4. ~/.claude/skills (全局)
+    1. ./.agents/skills (项目级，Cherry Studio 兼容)
+    2. ./.agent/skills (项目级 universal，兼容旧路径)
+    3. ~/.agents/skills (全局，Cherry Studio 兼容)
+    4. ~/.agent/skills (全局 universal，兼容旧路径)
+    5. ./.claude/skills (项目级)
+    6. ~/.claude/skills (全局)
     
     Example:
         >>> loader = SkillBundleLoader()
@@ -163,7 +165,9 @@ class SkillBundleLoader:
     
     # 默认搜索路径（按优先级排序）
     DEFAULT_SEARCH_PATHS = [
+        Path("./.agents/skills"),
         Path("./.agent/skills"),
+        Path.home() / ".agents" / "skills",
         Path.home() / ".agent" / "skills",
         Path("./.claude/skills"),
         Path.home() / ".claude" / "skills",
@@ -644,7 +648,9 @@ class SkillTool(BaseTool):
             return (
                 "No skills installed.\n"
                 "Skills can be installed to:\n"
+                "  ./.agents/skills/ (project)\n"
                 "  ./.agent/skills/ (project)\n"
+                "  ~/.agents/skills/ (global)\n"
                 "  ~/.agent/skills/ (global)\n"
                 "  ./.claude/skills/ (project)\n"
                 "  ~/.claude/skills/ (global)"
