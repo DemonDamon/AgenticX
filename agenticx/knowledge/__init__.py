@@ -92,6 +92,11 @@ from .graphers.builder import KnowledgeGraphBuilder
 from .graphers.validators import GraphQualityValidator
 from .graphers.community import CommunityDetector
 from .graphers.optimizer import GraphOptimizer
+from .search_orchestration import (
+    KnowledgeRecognitionMode,
+    KnowledgeSearchResult,
+    KnowledgeSearchOrchestrator,
+)
 
 __all__ = [
     # Base classes
@@ -172,6 +177,10 @@ __all__ = [
     "GraphQualityValidator",
     "CommunityDetector",
     "GraphOptimizer",
+    # Knowledge Search Orchestration
+    "KnowledgeRecognitionMode",
+    "KnowledgeSearchResult",
+    "KnowledgeSearchOrchestrator",
     
     # Exceptions
     "KnowledgeError",
