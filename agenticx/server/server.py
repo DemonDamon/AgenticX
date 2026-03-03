@@ -32,6 +32,7 @@ from .types import (
     ChatCompletionResponse,
     ErrorResponse,
 )
+from .middleware import MiddlewareConfig, register_production_middlewares
 
 
 class AgentServer:
@@ -67,6 +68,8 @@ class AgentServer:
         title: str = "AgenticX Agent Server",
         version: str = "1.0.0",
         cors_origins: Optional[list] = None,
+        middleware_config: Optional[MiddlewareConfig] = None,
+        enable_production_middlewares: bool = True,
     ):
         """
         初始化 Agent Server
@@ -78,6 +81,8 @@ class AgentServer:
             title: API 标题
             version: API 版本
             cors_origins: 允许的 CORS 来源
+            middleware_config: 生产中间件配置
+            enable_production_middlewares: 是否启用生产中间件链
         """
         if not FASTAPI_AVAILABLE:
             raise ImportError(
@@ -89,6 +94,8 @@ class AgentServer:
         self._title = title
         self._version = version
         self._cors_origins = cors_origins or ["*"]
+        self._middleware_config = middleware_config
+        self._enable_production_middlewares = enable_production_middlewares
         
         # 协议处理器
         self._protocol = OpenAIProtocolHandler(
@@ -134,6 +141,8 @@ class AgentServer:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+        if self._enable_production_middlewares:
+            register_production_middlewares(app, self._middleware_config)
         
         # 注册路由
         self._register_routes(app)
@@ -151,11 +160,6 @@ class AgentServer:
                 "version": self._version,
                 "status": "running",
             }
-        
-        @app.get("/health")
-        async def health():
-            """健康检查"""
-            return {"status": "healthy"}
         
         @app.get("/openai/v1/models")
         @app.get("/v1/models")
@@ -237,13 +241,13 @@ class AgentServer:
         """
         try:
             async for chunk in self._protocol.handle_chat_completion_stream(request):
-                data = json.dumps(chunk.to_dict())
+                data = json.dumps(chunk.to_dict(), ensure_ascii=False)
                 yield f"data: {data}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as e:
             logger.error(f"Stream error: {e}")
             error_data = {"error": str(e)}
-            yield f"data: {json.dumps(error_data)}\n\n"
+            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
     
     def run(
         self,

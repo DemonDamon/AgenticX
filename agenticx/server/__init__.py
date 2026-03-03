@@ -56,6 +56,39 @@ from .api_models import (
     HealthResponse,
 )
 from .event_hooks import setup_event_hooks, clear_event_hooks
+from .middleware import (
+    MiddlewareConfig,
+    RequestIdMiddleware,
+    TimeoutMiddleware,
+    RateLimitMiddleware,
+    CircuitBreakerMiddleware,
+    register_production_middlewares,
+)
+from .tenant import TenantContext, TenantIsolationMiddleware
+from .health import (
+    HealthProbe,
+    DependencyChecker,
+    SelfHealingManager,
+    get_health_probe,
+    HealthStatus,
+    CheckResult,
+)
+from .resilience import (
+    IdempotencyStore,
+    GracefulDegradation,
+    RetryableEndpoint,
+    retryable_endpoint,
+    get_idempotency_store,
+    get_graceful_degradation,
+)
+from .auth import (
+    AuthState,
+    JWTAuthMiddleware,
+    get_current_user,
+    get_current_user_optional,
+    require_role,
+    require_permission,
+)
 
 __all__ = [
     # 核心类
@@ -90,6 +123,32 @@ __all__ = [
     "HealthResponse",
     "setup_event_hooks",
     "clear_event_hooks",
+    "MiddlewareConfig",
+    "RequestIdMiddleware",
+    "TimeoutMiddleware",
+    "RateLimitMiddleware",
+    "CircuitBreakerMiddleware",
+    "register_production_middlewares",
+    "TenantContext",
+    "TenantIsolationMiddleware",
+    "AuthState",
+    "JWTAuthMiddleware",
+    "get_current_user",
+    "get_current_user_optional",
+    "require_role",
+    "require_permission",
+    "HealthProbe",
+    "DependencyChecker",
+    "SelfHealingManager",
+    "get_health_probe",
+    "HealthStatus",
+    "CheckResult",
+    "IdempotencyStore",
+    "GracefulDegradation",
+    "RetryableEndpoint",
+    "retryable_endpoint",
+    "get_idempotency_store",
+    "get_graceful_degradation",
 ]
 
 __version__ = "0.1.0"
