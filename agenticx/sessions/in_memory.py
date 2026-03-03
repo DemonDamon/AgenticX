@@ -40,23 +40,29 @@ class InMemorySessionService(BaseSessionService):
         """
         self.max_sessions_per_user = max_sessions_per_user
         
-        # 存储结构: {app_name: {user_id: {session_id: Session}}}
-        self._sessions: Dict[str, Dict[str, Dict[str, Session]]] = defaultdict(
-            lambda: defaultdict(dict)
+        # 存储结构: {app_name: {tenant_key: {user_id: {session_id: Session}}}}
+        # tenant_key = tenant_id or "_default_" for backward compat
+        self._sessions: Dict[str, Dict[str, Dict[str, Dict[str, Session]]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(dict))
         )
         
         # 线程安全锁
         self._lock = asyncio.Lock()
     
+    def _tenant_key(self, tenant_id: Optional[str]) -> str:
+        return tenant_id if tenant_id else "_default_"
+
     async def get_session(
         self,
         app_name: str,
         user_id: str,
-        session_id: str
+        session_id: str,
+        tenant_id: Optional[str] = None
     ) -> Optional[Session]:
         """获取会话"""
         async with self._lock:
-            return self._sessions[app_name][user_id].get(session_id)
+            tk = self._tenant_key(tenant_id)
+            return self._sessions[app_name][tk][user_id].get(session_id)
     
     async def create_session(
         self,
@@ -64,43 +70,46 @@ class InMemorySessionService(BaseSessionService):
         user_id: str,
         session_id: Optional[str] = None,
         state: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        tenant_id: Optional[str] = None
     ) -> Session:
         """创建会话"""
         async with self._lock:
+            tk = self._tenant_key(tenant_id)
             # 生成会话 ID
             if session_id is None:
                 session_id = str(uuid.uuid4())
-            
+
             # 检查是否已存在
-            if session_id in self._sessions[app_name][user_id]:
+            if session_id in self._sessions[app_name][tk][user_id]:
                 raise SessionAlreadyExistsError(session_id)
-            
+
             # 检查会话数量限制
-            if len(self._sessions[app_name][user_id]) >= self.max_sessions_per_user:
+            if len(self._sessions[app_name][tk][user_id]) >= self.max_sessions_per_user:
                 # 删除最旧的会话
                 oldest_session_id = min(
-                    self._sessions[app_name][user_id].keys(),
-                    key=lambda sid: self._sessions[app_name][user_id][sid].created_at
+                    self._sessions[app_name][tk][user_id].keys(),
+                    key=lambda sid: self._sessions[app_name][tk][user_id][sid].created_at
                 )
-                del self._sessions[app_name][user_id][oldest_session_id]
-            
+                del self._sessions[app_name][tk][user_id][oldest_session_id]
+
             # 创建会话状态
             session_state = SessionState()
             if state:
                 session_state.update(state, level="session")
-            
+
             # 创建会话
             session = Session(
                 id=session_id,
                 app_name=app_name,
                 user_id=user_id,
+                tenant_id=tenant_id,
                 state=session_state,
                 metadata=metadata or {}
             )
-            
-            self._sessions[app_name][user_id][session_id] = session
-            
+
+            self._sessions[app_name][tk][user_id][session_id] = session
+
             return session
     
     async def update_session(
@@ -109,24 +118,27 @@ class InMemorySessionService(BaseSessionService):
     ) -> Session:
         """更新会话"""
         async with self._lock:
-            if session.id not in self._sessions[session.app_name][session.user_id]:
+            tk = self._tenant_key(session.tenant_id)
+            if session.id not in self._sessions[session.app_name][tk][session.user_id]:
                 raise SessionNotFoundError(session.id, session.app_name, session.user_id)
-            
+
             session.updated_at = datetime.now(timezone.utc)
-            self._sessions[session.app_name][session.user_id][session.id] = session
-            
+            self._sessions[session.app_name][tk][session.user_id][session.id] = session
+
             return session
     
     async def delete_session(
         self,
         app_name: str,
         user_id: str,
-        session_id: str
+        session_id: str,
+        tenant_id: Optional[str] = None
     ) -> bool:
         """删除会话"""
         async with self._lock:
-            if session_id in self._sessions[app_name][user_id]:
-                del self._sessions[app_name][user_id][session_id]
+            tk = self._tenant_key(tenant_id)
+            if session_id in self._sessions[app_name][tk][user_id]:
+                del self._sessions[app_name][tk][user_id][session_id]
                 return True
             return False
     
@@ -135,23 +147,25 @@ class InMemorySessionService(BaseSessionService):
         app_name: str,
         user_id: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
+        tenant_id: Optional[str] = None
     ) -> List[Session]:
         """列出会话"""
         async with self._lock:
+            tk = self._tenant_key(tenant_id)
             sessions = []
-            
+
             if user_id:
                 # 列出特定用户的会话
-                sessions = list(self._sessions[app_name][user_id].values())
+                sessions = list(self._sessions[app_name][tk][user_id].values())
             else:
-                # 列出应用下所有会话
-                for user_sessions in self._sessions[app_name].values():
+                # 列出应用下所有会话（当前 tenant）
+                for user_sessions in self._sessions[app_name][tk].values():
                     sessions.extend(user_sessions.values())
-            
+
             # 按更新时间排序
             sessions.sort(key=lambda s: s.updated_at, reverse=True)
-            
+
             # 分页
             return sessions[offset:offset + limit]
     
@@ -162,15 +176,16 @@ class InMemorySessionService(BaseSessionService):
     ) -> SessionEvent:
         """追加事件到会话"""
         async with self._lock:
-            if session.id not in self._sessions[session.app_name][session.user_id]:
+            tk = self._tenant_key(session.tenant_id)
+            if session.id not in self._sessions[session.app_name][tk][session.user_id]:
                 raise SessionNotFoundError(session.id, session.app_name, session.user_id)
-            
+
             # 追加事件
             session.append_event(event)
-            
+
             # 更新存储
-            self._sessions[session.app_name][session.user_id][session.id] = session
-            
+            self._sessions[session.app_name][tk][session.user_id][session.id] = session
+
             return event
     
     async def clear_all(self) -> None:
@@ -184,18 +199,19 @@ class InMemorySessionService(BaseSessionService):
             total_sessions = 0
             total_events = 0
             apps = []
-            
-            for app_name, users in self._sessions.items():
+
+            for app_name, tenants in self._sessions.items():
                 app_sessions = 0
-                for user_id, sessions in users.items():
-                    app_sessions += len(sessions)
-                    for session in sessions.values():
-                        total_events += len(session.events)
-                
+                for _tk, users in tenants.items():
+                    for user_id, sessions in users.items():
+                        app_sessions += len(sessions)
+                        for session in sessions.values():
+                            total_events += len(session.events)
+
                 total_sessions += app_sessions
                 apps.append({
                     "name": app_name,
-                    "users": len(users),
+                    "tenants": len(tenants),
                     "sessions": app_sessions
                 })
             

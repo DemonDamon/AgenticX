@@ -48,14 +48,29 @@ class SearchResult:
         self.score = max(0.0, min(1.0, self.score))
 
 
+def resolve_tenant_id(tenant_id: Optional[str] = None) -> str:
+    """Resolve tenant_id from param or TenantContext. Defaults to '_default_'.
+
+    Use when creating Memory instances to support request-scoped tenant context.
+    """
+    if tenant_id:
+        return tenant_id
+    try:
+        from agenticx.server.tenant import TenantContext
+        tid = TenantContext.get_tenant_id()
+        return tid if tid else "_default_"
+    except ImportError:
+        return "_default_"
+
+
 class BaseMemory(ABC):
     """
     Abstract base class for all memory implementations.
-    
+
     Enforces tenant isolation and provides a consistent interface
     for memory operations across different backends.
     """
-    
+
     def __init__(self, tenant_id: str, **kwargs):
         """
         Initialize memory with tenant isolation.
