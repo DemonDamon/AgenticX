@@ -3,18 +3,26 @@
 
 提供用户注册、登录验证和权限管理功能。
 使用 SQLite 存储用户数据。
+支持 JWT 生成与验证（需 PyJWT）。
 """
 
 import logging
+import os
 import sqlite3
 import hashlib
 import secrets
 import json
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+try:
+    import jwt  # type: ignore
+    JWT_AVAILABLE = True
+except ImportError:
+    JWT_AVAILABLE = False
 
 
 class UserManager:
@@ -24,13 +32,15 @@ class UserManager:
     使用 SQLite 数据库存储用户信息。
     """
     
-    def __init__(self, db_path: str = "users.db"):
+    def __init__(self, db_path: str = "users.db", jwt_secret: Optional[str] = None):
         """初始化用户管理器
-        
+
         Args:
             db_path: SQLite 数据库文件路径
+            jwt_secret: JWT 签名密钥（默认从 AGENTICX_JWT_SECRET 环境变量读取）
         """
         self.db_path = db_path
+        self._jwt_secret = jwt_secret or os.environ.get("AGENTICX_JWT_SECRET", "agenticx-dev-secret-change-in-production")
         self._init_database()
     
     def _init_database(self) -> None:
@@ -433,6 +443,60 @@ class UserManager:
             return False
         finally:
             conn.close()
+
+    def generate_jwt(
+        self,
+        user_id: int,
+        email: str,
+        username: str,
+        roles: Optional[List[str]] = None,
+        tenant_id: Optional[str] = None,
+        expires_hours: float = 24.0,
+    ) -> Optional[str]:
+        """Generate JWT for authenticated user.
+
+        Args:
+            user_id: User ID
+            email: User email
+            username: Username
+            roles: User roles
+            tenant_id: Optional tenant ID for multi-tenant
+            expires_hours: Token expiry in hours
+
+        Returns:
+            JWT string, or None if PyJWT not installed
+        """
+        if not JWT_AVAILABLE:
+            logger.warning("PyJWT not installed. Install with: pip install agenticx[server]")
+            return None
+        payload = {
+            "user_id": user_id,
+            "sub": str(user_id),
+            "email": email,
+            "username": username,
+            "roles": roles or ["user"],
+            "tenant_id": tenant_id,
+            "iat": datetime.now(timezone.utc),
+            "exp": datetime.now(timezone.utc) + timedelta(hours=expires_hours),
+        }
+        return jwt.encode(payload, self._jwt_secret, algorithm="HS256")
+
+    def verify_jwt(self, token: str) -> Optional[Dict[str, Any]]:
+        """Verify JWT and return payload.
+
+        Args:
+            token: JWT string
+
+        Returns:
+            Decoded payload dict, or None if invalid/expired
+        """
+        if not JWT_AVAILABLE:
+            return None
+        try:
+            return jwt.decode(token, self._jwt_secret, algorithms=["HS256"])
+        except Exception as e:
+            logger.debug("JWT verify failed: %s", e)
+            return None
 
 
 # 全局用户管理器实例
