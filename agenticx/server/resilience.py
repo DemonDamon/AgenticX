@@ -7,6 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from functools import wraps
@@ -18,12 +19,13 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 _PENDING = object()
+_PENDING_SENTINEL = "__PENDING__"
 
 
 class IdempotencyStore:
     """In-memory idempotency store to prevent duplicate submissions.
 
-    TTL-based expiry. For production, use Redis backend.
+    TTL-based expiry. For production, use RedisIdempotencyStore.
     """
 
     def __init__(self, ttl_seconds: float = 300.0, max_entries: int = 10000) -> None:
@@ -74,6 +76,64 @@ class IdempotencyStore:
         self._store[key] = (value, time.time())
 
 
+class RedisIdempotencyStore:
+    """Redis-backed idempotency store for multi-instance deployments.
+
+    Uses SET NX EX for atomic check-and-set with automatic TTL expiry.
+    Falls back to in-memory IdempotencyStore on Redis failure.
+    """
+
+    def __init__(self, ttl_seconds: float = 300.0) -> None:
+        self._ttl = ttl_seconds
+        self._fallback = IdempotencyStore(ttl_seconds=ttl_seconds)
+        self._prefix = "idem:"
+
+    def _get_backend(self):
+        from agenticx.server.redis_backend import get_redis_backend
+        return get_redis_backend()
+
+    async def set_if_absent(self, key: str, value: Any = True) -> bool:
+        """Atomic set-if-not-exists. Returns True if set."""
+        backend = self._get_backend()
+        if backend and backend.connected:
+            serialized = _PENDING_SENTINEL if value is _PENDING else json.dumps(value)
+            return await backend.set(
+                f"{self._prefix}{key}", serialized, ex=int(self._ttl), nx=True
+            )
+        return self._fallback.set_if_absent(key, value)
+
+    async def get(self, key: str) -> Optional[Any]:
+        """Get value. Returns None if not found or expired."""
+        backend = self._get_backend()
+        if backend and backend.connected:
+            raw = await backend.get(f"{self._prefix}{key}")
+            if raw is None:
+                return None
+            if raw == _PENDING_SENTINEL:
+                return _PENDING
+            try:
+                return json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                return raw
+        return self._fallback.get(key)
+
+    async def delete(self, key: str) -> bool:
+        """Delete key."""
+        backend = self._get_backend()
+        if backend and backend.connected:
+            return (await backend.delete(f"{self._prefix}{key}")) > 0
+        return self._fallback.delete(key)
+
+    async def set(self, key: str, value: Any) -> None:
+        """Set or overwrite."""
+        backend = self._get_backend()
+        if backend and backend.connected:
+            serialized = json.dumps(value)
+            await backend.set(f"{self._prefix}{key}", serialized, ex=int(self._ttl))
+            return
+        self._fallback.set(key, value)
+
+
 class GracefulDegradation:
     """Manage degradation state. Expose via /health/ready."""
 
@@ -105,14 +165,20 @@ class GracefulDegradation:
         return self._llm_available and len(self._degraded) == 0
 
 
-_default_idempotency: Optional[IdempotencyStore] = None
+_default_idempotency: Optional[Any] = None
 _default_degradation: Optional[GracefulDegradation] = None
 
 
-def get_idempotency_store() -> IdempotencyStore:
+def get_idempotency_store() -> Any:
+    """Get the idempotency store (Redis-backed if available, else in-memory)."""
     global _default_idempotency
     if _default_idempotency is None:
-        _default_idempotency = IdempotencyStore()
+        from agenticx.server.redis_backend import get_redis_backend
+        backend = get_redis_backend()
+        if backend and backend.connected:
+            _default_idempotency = RedisIdempotencyStore()
+        else:
+            _default_idempotency = IdempotencyStore()
     return _default_idempotency
 
 
@@ -121,6 +187,34 @@ def get_graceful_degradation() -> GracefulDegradation:
     if _default_degradation is None:
         _default_degradation = GracefulDegradation()
     return _default_degradation
+
+
+async def _store_get(store: Any, key: str) -> Optional[Any]:
+    """Unified get: handles both sync IdempotencyStore and async RedisIdempotencyStore."""
+    result = store.get(key)
+    if asyncio.iscoroutine(result):
+        return await result
+    return result
+
+
+async def _store_set_if_absent(store: Any, key: str, value: Any) -> bool:
+    result = store.set_if_absent(key, value)
+    if asyncio.iscoroutine(result):
+        return await result
+    return result
+
+
+async def _store_delete(store: Any, key: str) -> bool:
+    result = store.delete(key)
+    if asyncio.iscoroutine(result):
+        return await result
+    return result
+
+
+async def _store_set(store: Any, key: str, value: Any) -> None:
+    result = store.set(key, value)
+    if asyncio.iscoroutine(result):
+        await result
 
 
 def retryable_endpoint(
@@ -142,12 +236,12 @@ def retryable_endpoint(
                 idem_key = request.headers.get(idempotency_header)
             if idem_key:
                 store = get_idempotency_store()
-                cached = store.get(idem_key)
+                cached = await _store_get(store, idem_key)
                 if cached is not None and cached is not _PENDING:
                     return cached
-                if not store.set_if_absent(idem_key, _PENDING):
+                if not await _store_set_if_absent(store, idem_key, _PENDING):
                     await asyncio.sleep(0.1)
-                    cached = store.get(idem_key)
+                    cached = await _store_get(store, idem_key)
                     if cached is not None and cached is not _PENDING:
                         return cached
             last_error = None
@@ -158,8 +252,8 @@ def retryable_endpoint(
                         result = await result
                     if idem_key:
                         store = get_idempotency_store()
-                        store.delete(idem_key)
-                        store.set(idem_key, result)
+                        await _store_delete(store, idem_key)
+                        await _store_set(store, idem_key, result)
                     return result
                 except Exception as e:
                     last_error = e
