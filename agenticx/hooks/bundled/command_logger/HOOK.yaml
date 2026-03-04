@@ -1,0 +1,6 @@
+name: command-logger
+description: Append command events to a JSONL audit log.
+events:
+  - command
+export: handle
+enabled: true

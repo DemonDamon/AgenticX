@@ -34,6 +34,8 @@ from typing import Any, Dict, List, Optional
 import logging
 
 from .types import BeforeLLMCallHookType, AfterLLMCallHookType
+from .registry import get_global_hook_registry
+from .types import HookEvent, HookHandler
 
 
 logger = logging.getLogger(__name__)
@@ -82,6 +84,8 @@ class LLMCallHookContext:
 # 全局钩子注册表
 _before_llm_call_hooks: List[BeforeLLMCallHookType] = []
 _after_llm_call_hooks: List[AfterLLMCallHookType] = []
+_before_wrapper_map: Dict[int, HookHandler] = {}
+_after_wrapper_map: Dict[int, HookHandler] = {}
 
 
 def register_before_llm_call_hook(hook: BeforeLLMCallHookType) -> None:
@@ -113,6 +117,9 @@ def register_before_llm_call_hook(hook: BeforeLLMCallHookType) -> None:
     """
     if hook not in _before_llm_call_hooks:
         _before_llm_call_hooks.append(hook)
+        wrapper = _to_before_llm_hook_handler(hook)
+        _before_wrapper_map[id(hook)] = wrapper
+        get_global_hook_registry().register("llm:before_call", wrapper)
 
 
 def register_after_llm_call_hook(hook: AfterLLMCallHookType) -> None:
@@ -137,6 +144,9 @@ def register_after_llm_call_hook(hook: AfterLLMCallHookType) -> None:
     """
     if hook not in _after_llm_call_hooks:
         _after_llm_call_hooks.append(hook)
+        wrapper = _to_after_llm_hook_handler(hook)
+        _after_wrapper_map[id(hook)] = wrapper
+        get_global_hook_registry().register("llm:after_call", wrapper)
 
 
 def get_before_llm_call_hooks() -> List[BeforeLLMCallHookType]:
@@ -176,6 +186,9 @@ def unregister_before_llm_call_hook(hook: BeforeLLMCallHookType) -> bool:
     """
     try:
         _before_llm_call_hooks.remove(hook)
+        wrapper = _before_wrapper_map.pop(id(hook), None)
+        if wrapper is not None:
+            get_global_hook_registry().unregister("llm:before_call", wrapper)
         return True
     except ValueError:
         return False
@@ -200,6 +213,9 @@ def unregister_after_llm_call_hook(hook: AfterLLMCallHookType) -> bool:
     """
     try:
         _after_llm_call_hooks.remove(hook)
+        wrapper = _after_wrapper_map.pop(id(hook), None)
+        if wrapper is not None:
+            get_global_hook_registry().unregister("llm:after_call", wrapper)
         return True
     except ValueError:
         return False
@@ -218,6 +234,10 @@ def clear_before_llm_call_hooks() -> int:
         2
     """
     count = len(_before_llm_call_hooks)
+    for hook in _before_llm_call_hooks:
+        wrapper = _before_wrapper_map.pop(id(hook), None)
+        if wrapper is not None:
+            get_global_hook_registry().unregister("llm:before_call", wrapper)
     _before_llm_call_hooks.clear()
     return count
 
@@ -235,6 +255,10 @@ def clear_after_llm_call_hooks() -> int:
         2
     """
     count = len(_after_llm_call_hooks)
+    for hook in _after_llm_call_hooks:
+        wrapper = _after_wrapper_map.pop(id(hook), None)
+        if wrapper is not None:
+            get_global_hook_registry().unregister("llm:after_call", wrapper)
     _after_llm_call_hooks.clear()
     return count
 
@@ -265,15 +289,16 @@ def execute_before_llm_call_hooks(context: LLMCallHookContext) -> bool:
     Returns:
         True 如果所有钩子允许执行，False 如果任何钩子阻止执行
     """
-    for hook in _before_llm_call_hooks:
-        try:
-            result = hook(context)
-            if result is False:
-                logger.debug(f"LLM call blocked by hook: {hook.__name__ if hasattr(hook, '__name__') else hook}")
-                return False
-        except Exception as e:
-            logger.warning(f"Error in before_llm_call hook: {e}")
-            # 钩子错误不应阻止执行
+    event = HookEvent(
+        type="llm",
+        action="before_call",
+        agent_id=context.agent_id or "",
+        task_id=context.task_id,
+        context={"llm_context": context},
+    )
+    if not get_global_hook_registry().trigger_sync(event):
+        return False
+
     return True
 
 
@@ -286,18 +311,47 @@ def execute_after_llm_call_hooks(context: LLMCallHookContext) -> str | None:
     Returns:
         修改后的响应，如果任何钩子修改了响应；否则返回 None
     """
-    modified_response = None
-    for hook in _after_llm_call_hooks:
-        try:
-            result = hook(context)
-            if result is not None:
-                modified_response = result
-                # 更新上下文中的响应，以便后续钩子可以看到修改
-                context.response = result
-        except Exception as e:
-            logger.warning(f"Error in after_llm_call hook: {e}")
-            # 钩子错误不应影响响应
+    event = HookEvent(
+        type="llm",
+        action="after_call",
+        agent_id=context.agent_id or "",
+        task_id=context.task_id,
+        context={"llm_context": context, "response": context.response},
+    )
+    get_global_hook_registry().trigger_sync(event)
+    event_response = event.context.get("response")
+    if isinstance(event_response, str):
+        context.response = event_response
+        modified_response = event_response
+    else:
+        modified_response = None
     return modified_response
+
+
+def _to_before_llm_hook_handler(hook: BeforeLLMCallHookType) -> HookHandler:
+    async def _handler(event: HookEvent) -> Optional[bool]:
+        ctx = event.context.get("llm_context")
+        if not isinstance(ctx, LLMCallHookContext):
+            return True
+        result = hook(ctx)
+        if result is False:
+            return False
+        return True
+
+    return _handler
+
+
+def _to_after_llm_hook_handler(hook: AfterLLMCallHookType) -> HookHandler:
+    async def _handler(event: HookEvent) -> Optional[bool]:
+        ctx = event.context.get("llm_context")
+        if not isinstance(ctx, LLMCallHookContext):
+            return True
+        result = hook(ctx)
+        if isinstance(result, str):
+            event.context["response"] = result
+        return True
+
+    return _handler
 
 
 __all__ = [

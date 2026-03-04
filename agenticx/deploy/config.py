@@ -70,8 +70,10 @@ class ProjectConfig:
     variables: Dict[str, str] = field(default_factory=dict)
     """全局变量"""
     
-    hooks: Dict[str, List[str]] = field(default_factory=dict)
-    """生命周期钩子"""
+    hooks: Dict[str, Any] = field(
+        default_factory=lambda: {"internal": {"enabled": True, "entries": {}}}
+    )
+    """Hooks runtime configuration."""
     
     metadata: Dict[str, Any] = field(default_factory=dict)
     """元数据"""
@@ -151,7 +153,7 @@ class ProjectConfig:
             environments=data.get("environments", {}),
             deployments=deployments,
             variables=data.get("variables", {}),
-            hooks=data.get("hooks", {}),
+            hooks=_normalize_hooks_config(data.get("hooks", {})),
             metadata=data.get("metadata", {}),
         )
     
@@ -322,7 +324,25 @@ def create_default_config(
                 props=kwargs.get("props", {}),
             )
         ],
+        hooks={"internal": {"enabled": True, "entries": {}}},
     )
+
+
+def _normalize_hooks_config(raw: Any) -> Dict[str, Any]:
+    """Normalize hooks config while preserving legacy mapping format."""
+    if isinstance(raw, dict):
+        # Legacy format: {"on_start": ["..."]} -> map into metadata.legacy.
+        if "internal" in raw:
+            internal = raw.get("internal", {})
+            if not isinstance(internal, dict):
+                internal = {"enabled": True, "entries": {}}
+            internal.setdefault("enabled", True)
+            internal.setdefault("entries", {})
+            normalized = dict(raw)
+            normalized["internal"] = internal
+            return normalized
+        return {"internal": {"enabled": True, "entries": {}}, "legacy": raw}
+    return {"internal": {"enabled": True, "entries": {}}}
 
 
 def init_config(

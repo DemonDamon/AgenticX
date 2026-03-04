@@ -1,8 +1,6 @@
-"""
-AgenticX Hooks 系统
+"""AgenticX hooks package.
 
-提供 LLM 和 Tool 调用的可定制钩子机制。
-参考自 crewAI hooks 模块。
+Author: Damon Li
 
 Usage:
     from agenticx.hooks import (
@@ -25,7 +23,12 @@ from .types import (
     AfterLLMCallHookType,
     BeforeToolCallHookType,
     AfterToolCallHookType,
+    HookEvent,
+    HookHandler,
 )
+from .registry import HookRegistry, get_global_hook_registry
+from .loader import discover_hooks, load_hooks
+from .status import build_hook_status
 
 from .llm_hooks import (
     LLMCallHookContext,
@@ -53,12 +56,56 @@ from .tool_hooks import (
     clear_all_tool_call_hooks,
 )
 
+
+def register_hook(event_key: str, handler: HookHandler) -> None:
+    """Register a unified event hook handler."""
+    get_global_hook_registry().register(event_key, handler)
+
+
+def unregister_hook(event_key: str, handler: HookHandler) -> bool:
+    """Unregister a unified event hook handler."""
+    return get_global_hook_registry().unregister(event_key, handler)
+
+
+def clear_hooks() -> None:
+    """Clear all unified event hooks."""
+    get_global_hook_registry().clear()
+
+
+async def trigger_hook_event(event: HookEvent) -> bool:
+    """Trigger a unified event asynchronously."""
+    return await get_global_hook_registry().trigger(event)
+
+
+def trigger_hook_event_sync(event: HookEvent) -> bool:
+    """Trigger a unified event synchronously."""
+    return get_global_hook_registry().trigger_sync(event)
+
+
+def load_discovered_hooks(workspace_dir: str | None = None) -> int:
+    """Discover and load hooks from bundled, managed, and workspace directories."""
+    from pathlib import Path
+
+    root = Path(workspace_dir).resolve() if workspace_dir else Path.cwd()
+    return load_hooks(root)
+
 __all__ = [
     # Types
     "BeforeLLMCallHookType",
     "AfterLLMCallHookType",
     "BeforeToolCallHookType",
     "AfterToolCallHookType",
+    "HookEvent",
+    "HookHandler",
+    "HookRegistry",
+    "discover_hooks",
+    "build_hook_status",
+    "load_discovered_hooks",
+    "register_hook",
+    "unregister_hook",
+    "clear_hooks",
+    "trigger_hook_event",
+    "trigger_hook_event_sync",
     # LLM Hooks
     "LLMCallHookContext",
     "register_before_llm_call_hook",

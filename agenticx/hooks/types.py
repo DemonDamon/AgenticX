@@ -1,16 +1,34 @@
-"""
-Hook 类型定义
+"""Hook type definitions and shared event model.
 
-参考自 crewAI hooks/types.py
+Author: Damon Li
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Protocol, TypeVar, runtime_checkable
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from .llm_hooks import LLMCallHookContext
     from .tool_hooks import ToolCallHookContext
+
+
+@dataclass
+class HookEvent:
+    """Unified hook event passed through the internal hook bus."""
+
+    type: str
+    action: str
+    agent_id: str
+    session_key: str = ""
+    task_id: Optional[str] = None
+    context: Dict[str, Any] = field(default_factory=dict)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    messages: List[str] = field(default_factory=list)
+
+
+HookHandler = Callable[[HookEvent], Awaitable[Optional[bool]]]
 
 
 @runtime_checkable
@@ -72,7 +90,7 @@ class AfterToolCallHook(Protocol):
         ...
 
 
-# Type aliases for hook functions
+# Type aliases for legacy hook functions
 BeforeLLMCallHookType = Callable[["LLMCallHookContext"], bool | None]
 AfterLLMCallHookType = Callable[["LLMCallHookContext"], str | None]
 BeforeToolCallHookType = Callable[["ToolCallHookContext"], bool | None]
@@ -83,6 +101,8 @@ __all__ = [
     "AfterLLMCallHook",
     "BeforeToolCallHook",
     "AfterToolCallHook",
+    "HookEvent",
+    "HookHandler",
     "BeforeLLMCallHookType",
     "AfterLLMCallHookType",
     "BeforeToolCallHookType",

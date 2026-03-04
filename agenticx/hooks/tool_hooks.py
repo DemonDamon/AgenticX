@@ -34,6 +34,8 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 import logging
 
 from .types import BeforeToolCallHookType, AfterToolCallHookType
+from .registry import get_global_hook_registry
+from .types import HookEvent, HookHandler
 
 if TYPE_CHECKING:
     from ..tools.base import BaseTool
@@ -86,6 +88,8 @@ class ToolCallHookContext:
 # 全局钩子注册表
 _before_tool_call_hooks: List[BeforeToolCallHookType] = []
 _after_tool_call_hooks: List[AfterToolCallHookType] = []
+_before_wrapper_map: Dict[int, HookHandler] = {}
+_after_wrapper_map: Dict[int, HookHandler] = {}
 
 
 def register_before_tool_call_hook(hook: BeforeToolCallHookType) -> None:
@@ -117,6 +121,9 @@ def register_before_tool_call_hook(hook: BeforeToolCallHookType) -> None:
     """
     if hook not in _before_tool_call_hooks:
         _before_tool_call_hooks.append(hook)
+        wrapper = _to_before_tool_hook_handler(hook)
+        _before_wrapper_map[id(hook)] = wrapper
+        get_global_hook_registry().register("tool:before_call", wrapper)
 
 
 def register_after_tool_call_hook(hook: AfterToolCallHookType) -> None:
@@ -145,6 +152,9 @@ def register_after_tool_call_hook(hook: AfterToolCallHookType) -> None:
     """
     if hook not in _after_tool_call_hooks:
         _after_tool_call_hooks.append(hook)
+        wrapper = _to_after_tool_hook_handler(hook)
+        _after_wrapper_map[id(hook)] = wrapper
+        get_global_hook_registry().register("tool:after_call", wrapper)
 
 
 def get_before_tool_call_hooks() -> List[BeforeToolCallHookType]:
@@ -184,6 +194,9 @@ def unregister_before_tool_call_hook(hook: BeforeToolCallHookType) -> bool:
     """
     try:
         _before_tool_call_hooks.remove(hook)
+        wrapper = _before_wrapper_map.pop(id(hook), None)
+        if wrapper is not None:
+            get_global_hook_registry().unregister("tool:before_call", wrapper)
         return True
     except ValueError:
         return False
@@ -208,6 +221,9 @@ def unregister_after_tool_call_hook(hook: AfterToolCallHookType) -> bool:
     """
     try:
         _after_tool_call_hooks.remove(hook)
+        wrapper = _after_wrapper_map.pop(id(hook), None)
+        if wrapper is not None:
+            get_global_hook_registry().unregister("tool:after_call", wrapper)
         return True
     except ValueError:
         return False
@@ -226,6 +242,10 @@ def clear_before_tool_call_hooks() -> int:
         2
     """
     count = len(_before_tool_call_hooks)
+    for hook in _before_tool_call_hooks:
+        wrapper = _before_wrapper_map.pop(id(hook), None)
+        if wrapper is not None:
+            get_global_hook_registry().unregister("tool:before_call", wrapper)
     _before_tool_call_hooks.clear()
     return count
 
@@ -243,6 +263,10 @@ def clear_after_tool_call_hooks() -> int:
         2
     """
     count = len(_after_tool_call_hooks)
+    for hook in _after_tool_call_hooks:
+        wrapper = _after_wrapper_map.pop(id(hook), None)
+        if wrapper is not None:
+            get_global_hook_registry().unregister("tool:after_call", wrapper)
     _after_tool_call_hooks.clear()
     return count
 
@@ -273,16 +297,14 @@ def execute_before_tool_call_hooks(context: ToolCallHookContext) -> bool:
     Returns:
         True 如果所有钩子允许执行，False 如果任何钩子阻止执行
     """
-    for hook in _before_tool_call_hooks:
-        try:
-            result = hook(context)
-            if result is False:
-                logger.debug(f"Tool call blocked by hook: {hook.__name__ if hasattr(hook, '__name__') else hook}")
-                return False
-        except Exception as e:
-            logger.warning(f"Error in before_tool_call hook: {e}")
-            # 钩子错误不应阻止执行
-    return True
+    event = HookEvent(
+        type="tool",
+        action="before_call",
+        agent_id=context.agent_id or "",
+        task_id=context.task_id,
+        context={"tool_context": context},
+    )
+    return get_global_hook_registry().trigger_sync(event)
 
 
 def execute_after_tool_call_hooks(context: ToolCallHookContext) -> str | None:
@@ -294,18 +316,46 @@ def execute_after_tool_call_hooks(context: ToolCallHookContext) -> str | None:
     Returns:
         修改后的结果，如果任何钩子修改了结果；否则返回 None
     """
+    event = HookEvent(
+        type="tool",
+        action="after_call",
+        agent_id=context.agent_id or "",
+        task_id=context.task_id,
+        context={"tool_context": context, "tool_result": context.tool_result},
+    )
+    get_global_hook_registry().trigger_sync(event)
     modified_result = None
-    for hook in _after_tool_call_hooks:
-        try:
-            result = hook(context)
-            if result is not None:
-                modified_result = result
-                # 更新上下文中的结果，以便后续钩子可以看到修改
-                context.tool_result = result
-        except Exception as e:
-            logger.warning(f"Error in after_tool_call hook: {e}")
-            # 钩子错误不应影响结果
+    event_result = event.context.get("tool_result")
+    if isinstance(event_result, str):
+        modified_result = event_result
+        context.tool_result = event_result
     return modified_result
+
+
+def _to_before_tool_hook_handler(hook: BeforeToolCallHookType) -> HookHandler:
+    async def _handler(event: HookEvent) -> Optional[bool]:
+        ctx = event.context.get("tool_context")
+        if not isinstance(ctx, ToolCallHookContext):
+            return True
+        result = hook(ctx)
+        if result is False:
+            return False
+        return True
+
+    return _handler
+
+
+def _to_after_tool_hook_handler(hook: AfterToolCallHookType) -> HookHandler:
+    async def _handler(event: HookEvent) -> Optional[bool]:
+        ctx = event.context.get("tool_context")
+        if not isinstance(ctx, ToolCallHookContext):
+            return True
+        result = hook(ctx)
+        if isinstance(result, str):
+            event.context["tool_result"] = result
+        return True
+
+    return _handler
 
 
 __all__ = [
