@@ -1,0 +1,9 @@
+name: agent-metrics
+description: Track simple execution metrics for agent lifecycle and calls.
+events:
+  - agent:start
+  - agent:stop
+  - llm:after_call
+  - tool:after_call
+export: handle
+enabled: true

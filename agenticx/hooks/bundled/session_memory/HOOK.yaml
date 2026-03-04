@@ -1,0 +1,7 @@
+name: session-memory
+description: Save a compact session snapshot on command resets.
+events:
+  - command:new
+  - command:reset
+export: handle
+enabled: true
