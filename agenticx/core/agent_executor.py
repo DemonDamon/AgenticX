@@ -1,6 +1,7 @@
 import json
 import asyncio
 import time
+from pathlib import Path
 from typing import AsyncGenerator, Dict, Any, List, Optional, Callable, Union, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -41,6 +42,8 @@ from ..hooks.tool_hooks import (
     execute_before_tool_call_hooks,
     execute_after_tool_call_hooks,
 )
+from ..hooks import HookEvent, trigger_hook_event_sync
+from ..hooks import load_discovered_hooks
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +195,7 @@ class AgentExecutor:
         execution_lane: Optional[ExecutionLane] = None,
         auth_profile_manager: Optional[AuthProfileManager] = None,
         transcript_sanitizer: Optional[TranscriptSanitizer] = None,
+        auto_load_hooks: bool = True,
     ):
         self.llm_provider = llm_provider
         self.error_handler = error_handler or ErrorHandler()
@@ -228,6 +232,12 @@ class AgentExecutor:
         
         # Initialize action parser
         self.action_parser = ActionParser()
+
+        if auto_load_hooks:
+            try:
+                load_discovered_hooks()
+            except Exception as exc:
+                logger.debug("Skipping discovered hooks loading: %s", exc)
     
     def run(
         self,
@@ -253,6 +263,22 @@ class AgentExecutor:
         """
         # Derive session key for lane serialization
         _session_key = session_key or agent.id
+        self._emit_hook_event(
+            event_type="command",
+            action="new",
+            agent_id=agent.id,
+            task_id=task.id,
+            session_key=_session_key,
+            context={"workspace_dir": str(Path.cwd())},
+        )
+        self._emit_hook_event(
+            event_type="session",
+            action="start",
+            agent_id=agent.id,
+            task_id=task.id,
+            session_key=_session_key,
+            context={"task_description": task.description},
+        )
 
         # If an execution lane is configured, acquire it synchronously by
         # driving the async acquire on the current event loop.
@@ -267,6 +293,20 @@ class AgentExecutor:
         finally:
             if guard is not None:
                 self.execution_lane.release(_session_key)  # type: ignore[union-attr]
+            self._emit_hook_event(
+                event_type="command",
+                action="stop",
+                agent_id=agent.id,
+                task_id=task.id,
+                session_key=_session_key,
+            )
+            self._emit_hook_event(
+                event_type="session",
+                action="end",
+                agent_id=agent.id,
+                task_id=task.id,
+                session_key=_session_key,
+            )
 
     def _run_inner(self, agent: Agent, task: Task) -> Dict[str, Any]:
         """Actual execution logic, extracted for lane wrapping."""
@@ -281,6 +321,13 @@ class AgentExecutor:
             task_id=task.id
         )
         event_log.append(start_event)
+        self._emit_hook_event(
+            event_type="agent",
+            action="start",
+            agent_id=agent.id,
+            task_id=task.id,
+            context={"task_description": task.description},
+        )
         
         try:
             # Main execution loop
@@ -288,6 +335,13 @@ class AgentExecutor:
             
         except ApprovalRequiredError as e:
             # 人工审批请求，直接返回暂停状态
+            self._emit_hook_event(
+                event_type="agent",
+                action="stop",
+                agent_id=agent.id,
+                task_id=task.id,
+                context={"status": "paused_for_approval"},
+            )
             return {
                 "success": True,
                 "result": "Paused for human approval",
@@ -296,12 +350,26 @@ class AgentExecutor:
             }
 
         except Exception as e:
+            self._emit_hook_event(
+                event_type="agent",
+                action="error",
+                agent_id=agent.id,
+                task_id=task.id,
+                context={"error": str(e)},
+            )
             # Handle execution failure
             error_event = self.error_handler.handle(e, {"agent_id": agent.id, "task_id": task.id})
             event_log.append(error_event)
             
             # 如果是不可恢复的错误，直接返回失败
             if not error_event.recoverable:
+                self._emit_hook_event(
+                    event_type="agent",
+                    action="stop",
+                    agent_id=agent.id,
+                    task_id=task.id,
+                    context={"status": "failed", "error": error_event.error_message},
+                )
                 return {
                     "success": False,
                     "error": error_event.error_message,
@@ -311,6 +379,13 @@ class AgentExecutor:
 
         # 如果工作流暂停，则返回成功（不添加 TaskEndEvent）
         if event_log.needs_human_input():
+            self._emit_hook_event(
+                event_type="agent",
+                action="stop",
+                agent_id=agent.id,
+                task_id=task.id,
+                context={"status": "waiting_human_input"},
+            )
             return {
                 "success": True,
                 "result": "Paused for human approval",
@@ -326,6 +401,13 @@ class AgentExecutor:
             task_id=task.id
         )
         event_log.append(end_event)
+        self._emit_hook_event(
+            event_type="agent",
+            action="stop",
+            agent_id=agent.id,
+            task_id=task.id,
+            context={"status": "completed"},
+        )
         
         return {
             "success": True,
@@ -333,6 +415,29 @@ class AgentExecutor:
             "event_log": event_log,
             "stats": self._get_execution_stats(event_log)
         }
+
+    def _emit_hook_event(
+        self,
+        event_type: str,
+        action: str,
+        agent_id: str,
+        task_id: Optional[str] = None,
+        session_key: str = "",
+        context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Emit unified hooks event without interrupting execution."""
+        try:
+            event = HookEvent(
+                type=event_type,
+                action=action,
+                agent_id=agent_id,
+                task_id=task_id,
+                session_key=session_key,
+                context=context or {},
+            )
+            trigger_hook_event_sync(event)
+        except Exception as exc:
+            logger.debug("Failed to emit hook event %s:%s: %s", event_type, action, exc)
     
     async def run_stream(
         self,

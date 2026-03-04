@@ -33,6 +33,8 @@ from .types import (
     ErrorResponse,
 )
 from .middleware import MiddlewareConfig, register_production_middlewares
+from .webhook import register_webhook_routes
+from ..hooks import HookEvent, trigger_hook_event, load_discovered_hooks
 
 
 class AgentServer:
@@ -72,6 +74,9 @@ class AgentServer:
         middleware_config: Optional[MiddlewareConfig] = None,
         enable_production_middlewares: bool = True,
         redis_url: Optional[str] = None,
+        webhook_enabled: bool = False,
+        webhook_token: Optional[str] = None,
+        webhook_path: str = "/hooks",
     ):
         """
         初始化 Agent Server
@@ -100,6 +105,9 @@ class AgentServer:
         self._middleware_config = middleware_config
         self._enable_production_middlewares = enable_production_middlewares
         self._redis_url = redis_url
+        self._webhook_enabled = webhook_enabled
+        self._webhook_token = webhook_token
+        self._webhook_path = webhook_path
         
         # 协议处理器
         self._protocol = OpenAIProtocolHandler(
@@ -159,6 +167,18 @@ class AgentServer:
                 logger.info("Redis shared-state backend ready — horizontal scaling enabled")
             else:
                 logger.info("Running without Redis — single-instance memory mode")
+            try:
+                load_discovered_hooks()
+            except Exception as exc:
+                logger.debug("Failed to load discovered hooks on startup: %s", exc)
+            await trigger_hook_event(
+                HookEvent(
+                    type="server",
+                    action="startup",
+                    agent_id=self._model_name,
+                    context={"redis_connected": backend.connected},
+                )
+            )
 
         @app.on_event("shutdown")
         async def _shutdown_redis():
@@ -166,6 +186,13 @@ class AgentServer:
             backend = get_redis_backend()
             if backend:
                 await backend.close()
+            await trigger_hook_event(
+                HookEvent(
+                    type="server",
+                    action="shutdown",
+                    agent_id=self._model_name,
+                )
+            )
 
         # 注册路由
         self._register_routes(app)
@@ -227,6 +254,35 @@ class AgentServer:
                         type="invalid_request_error",
                     ).to_dict(),
                 )
+
+            # Message received hook event
+            user_content = ""
+            if chat_request.messages:
+                user_content = chat_request.messages[-1].content or ""
+            await trigger_hook_event(
+                HookEvent(
+                    type="message",
+                    action="received",
+                    agent_id=self._model_name,
+                    context={
+                        "channel": "http",
+                        "path": "/v1/chat/completions",
+                        "content": user_content,
+                    },
+                )
+            )
+            await trigger_hook_event(
+                HookEvent(
+                    type="message",
+                    action="preprocessed",
+                    agent_id=self._model_name,
+                    context={
+                        "channel": "http",
+                        "path": "/v1/chat/completions",
+                        "message_count": len(chat_request.messages),
+                    },
+                )
+            )
             
             # 处理流式请求
             if chat_request.stream:
@@ -238,9 +294,39 @@ class AgentServer:
             # 处理非流式请求
             try:
                 response = await self._protocol.handle_chat_completion(chat_request)
+                first_choice = ""
+                if response.choices:
+                    first_choice = response.choices[0].message.content or ""
+                await trigger_hook_event(
+                    HookEvent(
+                        type="message",
+                        action="sent",
+                        agent_id=self._model_name,
+                        context={
+                            "channel": "http",
+                            "path": "/v1/chat/completions",
+                            "content": first_choice,
+                            "success": True,
+                        },
+                    )
+                )
                 return JSONResponse(content=response.to_dict())
             except Exception as e:
                 logger.error(f"Chat completion error: {e}")
+                await trigger_hook_event(
+                    HookEvent(
+                        type="message",
+                        action="sent",
+                        agent_id=self._model_name,
+                        context={
+                            "channel": "http",
+                            "path": "/v1/chat/completions",
+                            "content": "",
+                            "success": False,
+                            "error": str(e),
+                        },
+                    )
+                )
                 return JSONResponse(
                     status_code=500,
                     content=ErrorResponse.create(
@@ -248,6 +334,38 @@ class AgentServer:
                         type="server_error",
                     ).to_dict(),
                 )
+
+        if self._webhook_enabled:
+            if not self._webhook_token:
+                raise ValueError("webhook_token is required when webhook_enabled=True")
+
+            async def _wake_handler(payload: Dict[str, Any]) -> None:
+                await trigger_hook_event(
+                    HookEvent(
+                        type="command",
+                        action="wake",
+                        agent_id=self._model_name,
+                        context=payload,
+                    )
+                )
+
+            async def _agent_handler(payload: Dict[str, Any]) -> None:
+                request = ChatCompletionRequest.from_dict(
+                    {
+                        "model": payload.get("model", self._model_name),
+                        "messages": [{"role": "user", "content": payload.get("message", "")}],
+                        "stream": False,
+                    }
+                )
+                await self._protocol.handle_chat_completion(request)
+
+            register_webhook_routes(
+                app,
+                token=self._webhook_token,
+                path_prefix=self._webhook_path,
+                wake_handler=_wake_handler,
+                agent_handler=_agent_handler,
+            )
     
     async def _stream_response(
         self,
