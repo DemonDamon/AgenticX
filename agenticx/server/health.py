@@ -37,17 +37,19 @@ class CheckResult:
 
 
 class DependencyChecker:
-    """Check health of database, LLM provider, memory backend."""
+    """Check health of database, LLM provider, memory backend, and Redis."""
 
     def __init__(
         self,
         check_database: Optional[Callable[[], Any]] = None,
         check_llm: Optional[Callable[[], Any]] = None,
         check_memory: Optional[Callable[[], Any]] = None,
+        check_redis: bool = True,
     ) -> None:
         self._check_db = check_database
         self._check_llm = check_llm
         self._check_memory = check_memory
+        self._check_redis = check_redis
 
     async def check_database(self) -> CheckResult:
         """Check database connectivity."""
@@ -112,6 +114,31 @@ class DependencyChecker:
                 details={"error": str(e)},
             )
 
+    async def check_redis_backend(self) -> CheckResult:
+        """Check Redis connectivity via the global RedisBackend."""
+        from agenticx.server.redis_backend import get_redis_backend
+        backend = get_redis_backend()
+        if not backend:
+            return CheckResult(
+                "redis", HealthStatus.UNKNOWN, "Redis backend not configured",
+                details={"mode": "memory-only"},
+            )
+        start = time.perf_counter()
+        try:
+            ok = await backend.ping()
+            latency = (time.perf_counter() - start) * 1000
+            if ok:
+                return CheckResult("redis", HealthStatus.HEALTHY, "OK", latency_ms=latency)
+            return CheckResult(
+                "redis", HealthStatus.UNHEALTHY, "PING returned False", latency_ms=latency,
+            )
+        except Exception as e:
+            latency = (time.perf_counter() - start) * 1000
+            return CheckResult(
+                "redis", HealthStatus.UNHEALTHY, str(e),
+                latency_ms=latency, details={"error": str(e)},
+            )
+
     async def check_all(self) -> List[CheckResult]:
         """Run all configured checks."""
         results = []
@@ -121,6 +148,8 @@ class DependencyChecker:
             results.append(await self.check_llm_provider())
         if self._check_memory:
             results.append(await self.check_memory_backend())
+        if self._check_redis:
+            results.append(await self.check_redis_backend())
         return results
 
 

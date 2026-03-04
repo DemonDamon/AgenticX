@@ -75,11 +75,18 @@ from .health import (
 )
 from .resilience import (
     IdempotencyStore,
+    RedisIdempotencyStore,
     GracefulDegradation,
     RetryableEndpoint,
     retryable_endpoint,
     get_idempotency_store,
     get_graceful_degradation,
+)
+from .redis_backend import (
+    RedisBackend,
+    init_redis_backend,
+    get_redis_backend,
+    set_redis_backend,
 )
 from .auth import (
     AuthState,
@@ -144,11 +151,16 @@ __all__ = [
     "HealthStatus",
     "CheckResult",
     "IdempotencyStore",
+    "RedisIdempotencyStore",
     "GracefulDegradation",
     "RetryableEndpoint",
     "retryable_endpoint",
     "get_idempotency_store",
     "get_graceful_degradation",
+    "RedisBackend",
+    "init_redis_backend",
+    "get_redis_backend",
+    "set_redis_backend",
 ]
 
 __version__ = "0.1.0"
