@@ -46,6 +46,7 @@ class AgentServer:
     - 流式响应（SSE）
     - CORS 跨域支持
     - 健康检查端点
+    - Redis 共享状态后端（可选，用于多实例水平扩展）
     
     Example:
         >>> from agenticx.server import AgentServer
@@ -70,6 +71,7 @@ class AgentServer:
         cors_origins: Optional[list] = None,
         middleware_config: Optional[MiddlewareConfig] = None,
         enable_production_middlewares: bool = True,
+        redis_url: Optional[str] = None,
     ):
         """
         初始化 Agent Server
@@ -83,6 +85,7 @@ class AgentServer:
             cors_origins: 允许的 CORS 来源
             middleware_config: 生产中间件配置
             enable_production_middlewares: 是否启用生产中间件链
+            redis_url: Redis 连接 URL（如 redis://:password@host:6379/0）
         """
         if not FASTAPI_AVAILABLE:
             raise ImportError(
@@ -96,6 +99,7 @@ class AgentServer:
         self._cors_origins = cors_origins or ["*"]
         self._middleware_config = middleware_config
         self._enable_production_middlewares = enable_production_middlewares
+        self._redis_url = redis_url
         
         # 协议处理器
         self._protocol = OpenAIProtocolHandler(
@@ -144,6 +148,25 @@ class AgentServer:
         if self._enable_production_middlewares:
             register_production_middlewares(app, self._middleware_config)
         
+        # Redis lifecycle
+        redis_url = self._redis_url
+
+        @app.on_event("startup")
+        async def _startup_redis():
+            from .redis_backend import init_redis_backend, get_redis_backend
+            backend = await init_redis_backend(url=redis_url)
+            if backend.connected:
+                logger.info("Redis shared-state backend ready — horizontal scaling enabled")
+            else:
+                logger.info("Running without Redis — single-instance memory mode")
+
+        @app.on_event("shutdown")
+        async def _shutdown_redis():
+            from .redis_backend import get_redis_backend
+            backend = get_redis_backend()
+            if backend:
+                await backend.close()
+
         # 注册路由
         self._register_routes(app)
         
@@ -302,6 +325,7 @@ def create_server(
     agent_handler: Optional[AgentHandler] = None,
     stream_handler: Optional[StreamAgentHandler] = None,
     model_name: str = "agenticx",
+    redis_url: Optional[str] = None,
     **kwargs,
 ) -> AgentServer:
     """
@@ -311,6 +335,7 @@ def create_server(
         agent_handler: Agent 处理函数
         stream_handler: 流式 Agent 处理函数
         model_name: 模型名称
+        redis_url: Redis 连接 URL（可选）
         **kwargs: 传递给 AgentServer 的其他参数
         
     Returns:
@@ -320,5 +345,6 @@ def create_server(
         agent_handler=agent_handler,
         stream_handler=stream_handler,
         model_name=model_name,
+        redis_url=redis_url,
         **kwargs,
     )
