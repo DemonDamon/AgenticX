@@ -54,6 +54,16 @@ def _get_skills_app():
         console.print("[bold red]错误:[/bold red] 无法导入 skills 模块")
         raise typer.Exit(1)
 
+
+def _get_hooks_app():
+    """Lazy import hooks sub-application."""
+    try:
+        from agenticx.cli.hooks_commands import hooks_app
+        return hooks_app
+    except ImportError:
+        console.print("[bold red]错误:[/bold red] 无法导入 hooks 模块")
+        raise typer.Exit(1)
+
 # 创建主应用
 app = typer.Typer(
     name="agenticx",
@@ -278,6 +288,13 @@ except Exception:
 try:
     skills_app = _get_skills_app()
     app.add_typer(skills_app)
+except Exception:
+    pass
+
+# 注册 hooks 子命令 (延迟加载)
+try:
+    hooks_app = _get_hooks_app()
+    app.add_typer(hooks_app)
 except Exception:
     pass
 
