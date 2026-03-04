@@ -80,7 +80,11 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Rate limiting middleware built on AgenticX RateLimiter."""
+    """Rate limiting middleware with Redis support for multi-instance deployments.
+
+    When a RedisBackend is connected, uses atomic Redis sliding-window
+    (ZADD + ZREMRANGEBYSCORE + ZCARD). Falls back to in-memory RateLimiter.
+    """
 
     def __init__(self, app, config: Optional[RateLimitConfig] = None) -> None:
         super().__init__(app)
@@ -92,7 +96,52 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         )
         self.rate_limiter = RateLimiter(self.config)
 
+    def _scope_key(self, request: Request) -> str:
+        user_id = str(getattr(request.state, "user_id", "anonymous"))
+        tenant_id = str(getattr(request.state, "tenant_id", "default"))
+        client_ip = request.client.host if request.client else "unknown"
+        scope = self.config.scope
+        if scope == RateLimitScope.PER_USER:
+            return f"rl:user:{user_id}"
+        if scope == RateLimitScope.PER_API_KEY:
+            return f"rl:key:{request.headers.get('x-api-key', 'none')}"
+        if scope == RateLimitScope.PER_ENDPOINT:
+            return f"rl:ep:{request.url.path}"
+        if scope == RateLimitScope.PER_RESOURCE:
+            return f"rl:tenant:{tenant_id}"
+        return f"rl:ip:{client_ip}"
+
     async def dispatch(self, request: Request, call_next) -> Response:
+        from agenticx.server.redis_backend import get_redis_backend
+        backend = get_redis_backend()
+
+        if backend and backend.connected:
+            scope_key = self._scope_key(request)
+            allowed, remaining, reset_time = await backend.rate_limit_sliding_window(
+                scope_key,
+                self.config.max_requests,
+                self.config.time_window,
+            )
+            if not allowed:
+                retry_after = max(1.0, reset_time - time.time())
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error": "rate_limit_exceeded",
+                        "message": "Too many requests",
+                        "retry_after": retry_after,
+                    },
+                    headers={
+                        "X-RateLimit-Remaining": "0",
+                        "X-RateLimit-Reset": str(int(reset_time)),
+                        "Retry-After": str(max(1, int(retry_after))),
+                    },
+                )
+            response = await call_next(request)
+            response.headers["X-RateLimit-Remaining"] = str(remaining)
+            response.headers["X-RateLimit-Reset"] = str(int(reset_time))
+            return response
+
         user_id = str(getattr(request.state, "user_id", "anonymous"))
         tenant_id = str(getattr(request.state, "tenant_id", "default"))
         api_key = request.headers.get("x-api-key", "")
@@ -129,7 +178,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 
 class CircuitBreakerMiddleware(BaseHTTPMiddleware):
-    """Per-endpoint circuit breaker middleware."""
+    """Per-endpoint circuit breaker with optional Redis shared state.
+
+    When Redis is connected, circuit breaker state is shared across instances
+    so that one instance's failures propagate protection to all instances.
+    Falls back to in-memory per-instance CircuitBreaker.
+    """
 
     def __init__(
         self,
@@ -151,20 +205,48 @@ class CircuitBreakerMiddleware(BaseHTTPMiddleware):
         return self._breakers[key]
 
     async def dispatch(self, request: Request, call_next) -> Response:
+        from agenticx.server.redis_backend import get_redis_backend
+        backend = get_redis_backend()
         key = f"{request.method}:{request.url.path}"
+
+        if backend and backend.connected:
+            return await self._dispatch_redis(request, call_next, backend, key)
+        return await self._dispatch_memory(request, call_next, key)
+
+    async def _dispatch_redis(self, request, call_next, backend, key) -> Response:
+        state = await backend.circuit_breaker_state(key)
+        now = time.time()
+        if state["state"] == "open":
+            if now - state["last_failure_time"] <= self.recovery_timeout_seconds:
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": "circuit_open", "message": "Service temporarily unavailable"},
+                )
+        try:
+            response = await call_next(request)
+            if response.status_code < 500:
+                await backend.circuit_breaker_record_success(key)
+            else:
+                await backend.circuit_breaker_record_failure(
+                    key, self.failure_threshold, self.recovery_timeout_seconds
+                )
+            return response
+        except Exception:
+            await backend.circuit_breaker_record_failure(
+                key, self.failure_threshold, self.recovery_timeout_seconds
+            )
+            raise
+
+    async def _dispatch_memory(self, request, call_next, key) -> Response:
         breaker = self._get_breaker(key)
         now = time.time()
         if breaker.state == "open" and now - breaker.last_failure_time <= breaker.recovery_timeout:
             return JSONResponse(
                 status_code=503,
-                content={
-                    "error": "circuit_open",
-                    "message": "Service temporarily unavailable",
-                },
+                content={"error": "circuit_open", "message": "Service temporarily unavailable"},
             )
         if breaker.state == "open":
             breaker.state = "half_open"
-
         try:
             response = await call_next(request)
             if response.status_code < 500:
