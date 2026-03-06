@@ -13,22 +13,14 @@ Author: Damon Li
 """
 
 import logging
-import re
 from dataclasses import dataclass
 from typing import Optional
 
 from agenticx.safety.leak_detector import LeakDetector
-from agenticx.safety.sanitizer import Sanitizer, InjectionSeverity
+from agenticx.safety.sanitizer import Sanitizer
 from agenticx.safety.policy import Policy, PolicyAction
 
 logger = logging.getLogger(__name__)
-
-# Patterns that indicate prompt injection attempts
-_INJECTION_PATTERNS = [
-    re.compile(r"(?i)ignore\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions|prompts|rules)"),
-    re.compile(r"(?i)disregard\s+(?:all\s+)?(?:previous|prior|above|your)\s+(?:instructions|prompts|rules)"),
-    re.compile(r"(?i)forget\s+(?:all\s+)?(?:previous|prior|above|your)\s+(?:instructions|training)"),
-]
 
 
 @dataclass
@@ -98,29 +90,8 @@ class SafetyLayer:
                     len(sanitized.warnings),
                 )
                 content = sanitized.content
-            elif sanitized.warnings:
-                # Sanitizer detected injection patterns but did not escape the text itself.
-                # Apply additional escaping for high-severity injection phrases.
-                has_critical = any(
-                    w.severity == InjectionSeverity.CRITICAL for w in sanitized.warnings
-                )
-                if has_critical:
-                    content = self._escape_injection_phrases(content)
-                    logger.warning(
-                        "Injection phrases escaped in %s output: %d warnings",
-                        tool_name,
-                        len(sanitized.warnings),
-                    )
 
         return content
-
-    @staticmethod
-    def _escape_injection_phrases(content: str) -> str:
-        """Escape known injection phrases by wrapping matches in [ESCAPED:...] markers."""
-        result = content
-        for pattern in _INJECTION_PATTERNS:
-            result = pattern.sub(lambda m: f"[ESCAPED:{m.group(0)}]", result)
-        return result
 
     def wrap_for_llm(self, content: str, source: str) -> str:
         """Wrap tool output with XML tags for LLM context isolation."""
