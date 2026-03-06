@@ -19,6 +19,9 @@ except Exception:  # pragma: no cover
     ArkLLMProvider = None  # type: ignore
     LlmFactory = None  # type: ignore
 
+from agenticx.llms.failover import FailoverProvider
+from agenticx.llms.response_cache import ResponseCache
+
 # Convenience re-exports for specific models, all using LiteLLMProvider
 # This makes it easy to instantiate a specific provider type.
 
@@ -72,6 +75,8 @@ __all__ = [
     "ArkLLMProvider",
     "LlmFactory",
 
+    "FailoverProvider",
+    "ResponseCache",
     # Convenience classes
     "OpenAIProvider",
     "AnthropicProvider",
