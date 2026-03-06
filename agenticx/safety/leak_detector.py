@@ -38,7 +38,7 @@ class LeakPattern:
     pattern: str
     severity: LeakSeverity
     action: LeakAction
-    _compiled: Optional[re.Pattern] = field(default=None, repr=False, compare=False)
+    _compiled: Optional[re.Pattern] = field(default=None, repr=False, compare=False, init=False)
 
     @property
     def regex(self) -> re.Pattern:
@@ -132,6 +132,8 @@ class LeakDetector:
             if literal and len(literal) >= 3:
                 prefixes.setdefault(literal.lower(), []).append(i)
         self._prefix_map = prefixes
+        indexed = {i for idxs in self._prefix_map.values() for i in idxs}
+        self._no_prefix_patterns: set[int] = {i for i in range(len(self._patterns)) if i not in indexed}
 
         try:
             import ahocorasick  # type: ignore[import-untyped]
@@ -143,7 +145,7 @@ class LeakDetector:
         except ImportError:
             self._automaton = None
 
-    def scan(self, content: str) -> LeakScanResult:
+    def scan(self, content: Optional[str]) -> LeakScanResult:
         """Scan content for secret leaks."""
         if not content:
             return LeakScanResult()
@@ -174,6 +176,7 @@ class LeakDetector:
 
         Unlike scan_and_block, this method never raises; it always
         returns a sanitized string with matched secrets replaced.
+        Note: WARN-action matches are preserved in the output; only BLOCK and REDACT matches are replaced.
         """
         result = self.scan(content)
         return result.redacted_content if result.redacted_content else content
@@ -193,9 +196,7 @@ class LeakDetector:
             content_lower = content.lower()
             for _, (_, indices) in self._automaton.iter(content_lower):
                 candidates.update(indices)
-            no_prefix = {i for i in range(len(self._patterns))
-                         if not any(i in idxs for idxs in self._prefix_map.values())}
-            candidates.update(no_prefix)
+            candidates.update(self._no_prefix_patterns)
             return candidates
 
         return set(range(len(self._patterns)))
