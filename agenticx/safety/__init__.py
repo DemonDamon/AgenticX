@@ -16,6 +16,12 @@ from agenticx.safety.leak_detector import (
     LeakScanResult,
     SecretLeakError,
 )
+from agenticx.safety.sanitizer import (
+    Sanitizer,
+    SanitizedOutput,
+    InjectionWarning,
+    InjectionSeverity,
+)
 
 __all__ = [
     "LeakDetector",
@@ -25,4 +31,8 @@ __all__ = [
     "LeakMatch",
     "LeakScanResult",
     "SecretLeakError",
+    "Sanitizer",
+    "SanitizedOutput",
+    "InjectionWarning",
+    "InjectionSeverity",
 ]
