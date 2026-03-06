@@ -21,6 +21,7 @@ from ..tools.security import ApprovalRequiredError
 if TYPE_CHECKING:
     from ..sandbox import SandboxBase, SandboxTemplate
     from ..sandbox.types import ExecutionResult as SandboxExecutionResult
+    from agenticx.safety.layer import SafetyLayer
 
 logger = logging.getLogger(__name__)
 
@@ -238,6 +239,8 @@ class ToolExecutor:
         sandbox_config: Optional[SandboxConfig] = None,
         # Declarative tool policy (inspired by OpenClaw)
         policy_stack: Optional[Any] = None,
+        # Optional SafetyLayer for sanitizing tool outputs
+        safety_layer: Optional["SafetyLayer"] = None,
     ):
         """
         初始化工具执行器
@@ -260,6 +263,7 @@ class ToolExecutor:
         self.enable_sandbox = enable_sandbox
         self.sandbox_config = sandbox_config
         self.policy_stack = policy_stack
+        self.safety_layer = safety_layer
         
         # 简单沙箱环境
         self.sandbox = SandboxEnvironment() if enable_sandbox else None
@@ -355,6 +359,9 @@ class ToolExecutor:
                 
                 # 执行工具
                 result = tool.run(**kwargs)
+                # Apply safety sanitization if SafetyLayer is configured
+                if self.safety_layer is not None and isinstance(result, str):
+                    result = self.safety_layer.sanitize_tool_output(result, tool_name=tool.name)
                 state_out = None
                 if hasattr(tool, "post_state_hook") and callable(getattr(tool, "post_state_hook")):
                     state_out = getattr(tool, "post_state_hook")()
@@ -526,6 +533,9 @@ class ToolExecutor:
                 
                 # 执行工具
                 result = await tool.arun(**kwargs)
+                # Apply safety sanitization if SafetyLayer is configured
+                if self.safety_layer is not None and isinstance(result, str):
+                    result = self.safety_layer.sanitize_tool_output(result, tool_name=tool.name)
                 state_out = None
                 if hasattr(tool, "post_state_hook") and callable(getattr(tool, "post_state_hook")):
                     # 允许 post_state_hook 是协程或同步函数
