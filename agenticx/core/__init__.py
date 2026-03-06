@@ -252,6 +252,16 @@ from .agent_builder import (
     AgentBuilder, AgentBuilderConfig, create_agent_from_config
 )
 
+# Self-Repair System (internalized from IronClaw)
+from .self_repair import (
+    SelfRepair,
+    DefaultSelfRepair,
+    SelfRepairConfig,
+    RepairResult,
+    StuckTask,
+    BrokenTool,
+)
+
 __all__ = [
     # Tool System v2 - Core Components
     "BaseTool",
@@ -520,4 +530,12 @@ __all__ = [
     "execute_after_tool_call_hooks",
     "clear_all_tool_hooks",
     "get_registered_tool_hooks",
+    # Self-Repair System (internalized from IronClaw)
+    "SelfRepair",
+    "DefaultSelfRepair",
+    "SelfRepairConfig",
+    "RepairResult",
+    "StuckTask",
+    "BrokenTool",
+
 ]
