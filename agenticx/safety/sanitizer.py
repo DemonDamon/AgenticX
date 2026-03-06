@@ -115,6 +115,8 @@ class Sanitizer:
 
         if has_critical or has_dangerous_token:
             modified = self._escape_content(modified)
+            if has_critical:
+                modified = self._escape_injection_phrases(modified)
             was_modified = (modified != content)
 
         if warnings:
@@ -138,6 +140,15 @@ class Sanitizer:
             f"{escaped}\n"
             "</external_content>"
         )
+
+    @staticmethod
+    def _escape_injection_phrases(content: str) -> str:
+        """Escape CRITICAL-level injection phrases by wrapping matches in [ESCAPED:...] markers."""
+        result = content
+        for pattern_str, severity, _desc in _INJECTION_PATTERNS:
+            if severity == InjectionSeverity.CRITICAL:
+                result = re.sub(pattern_str, lambda m: f"[ESCAPED:{m.group(0)}]", result)
+        return result
 
     @staticmethod
     def _escape_content(content: str) -> str:
