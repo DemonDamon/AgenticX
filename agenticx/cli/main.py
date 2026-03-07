@@ -6,18 +6,23 @@ AgenticX CLI 主程序
 基于 Typer 的命令行工具套件
 """
 
-import typer
-from typing import Optional, List
 import sys
+_SAVED_CLI_ARGV = sys.argv[:]
+
+import difflib
 import os
 import asyncio
+import click
+import typer
+from typing import Optional, List
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich.panel import Panel
+from typer.core import TyperGroup
 
-from agenticx import __version__
+from agenticx._version import __version__
 
 # 延迟导入函数
 def _get_client():
@@ -64,11 +69,39 @@ def _get_hooks_app():
         console.print("[bold red]错误:[/bold red] 无法导入 hooks 模块")
         raise typer.Exit(1)
 
+class AgenticXGroup(TyperGroup):
+    """Custom group to provide typo suggestions for unknown commands."""
+
+    def resolve_command(self, ctx: click.Context, args: list[str]):
+        try:
+            return super().resolve_command(ctx, args)
+        except click.UsageError as exc:
+            if not args or "No such command" not in str(exc):
+                raise
+
+            cmd_name = args[0]
+            matches = difflib.get_close_matches(
+                cmd_name,
+                self.list_commands(ctx),
+                n=3,
+                cutoff=0.5,
+            )
+            message = f"未知命令: '{cmd_name}'"
+            if matches:
+                suggestions = ", ".join(f"'{m}'" for m in matches)
+                message += f"\n\n你是不是想输入: {suggestions}"
+            message += "\n\n输入 agx --help 查看全部命令"
+            raise click.UsageError(message, ctx=ctx)
+
+
 # 创建主应用
 app = typer.Typer(
     name="agenticx",
     help="AgenticX: 统一的多智能体框架 - 开发者工具套件",
-    add_completion=False
+    add_completion=False,
+    invoke_without_command=True,
+    no_args_is_help=False,
+    cls=AgenticXGroup,
 )
 
 # 添加版本回调函数
@@ -147,8 +180,26 @@ def test_help_callback(value: bool):
         console.print(Panel(options_table, title="Options", title_align="left"))
         raise typer.Exit()
 
-@app.callback()
+def _print_welcome() -> None:
+    """Print a concise welcome page with usage hints."""
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column("Command", style="cyan")
+    table.add_column("Description")
+    table.add_row("agx run <file>", "执行工作流文件")
+    table.add_row("agx project create <name>", "创建新项目")
+    table.add_row("agx agent list", "列出所有智能体")
+    table.add_row("agx skills list", "查看已安装技能")
+    table.add_row("agx serve", "启动 API 服务器")
+
+    console.print(f"\n[bold blue]AgenticX[/bold blue] v{__version__}")
+    console.print("[dim]统一的多智能体框架 - 开发者工具套件[/dim]\n")
+    console.print(Panel(table, title="常用命令", title_align="left", expand=False))
+    console.print("\n[dim]输入 agx --help 查看全部命令[/dim]\n")
+
+
+@app.callback(invoke_without_command=True)
 def main_callback(
+    ctx: typer.Context,
     version: Optional[bool] = typer.Option(
         None, "--version", "-v", 
         callback=version_callback,
@@ -163,7 +214,8 @@ def main_callback(
     )
 ):
     """AgenticX: 统一的多智能体框架 - 开发者工具套件"""
-    pass
+    if ctx.invoked_subcommand is None:
+        _print_welcome()
 
 # 创建子命令组
 project_app = typer.Typer(name="project", help="项目管理命令", no_args_is_help=True)
@@ -1183,12 +1235,8 @@ def _show_languages_help():
 
 def main():
     """主入口函数"""
-    # Restore the original sys.argv that was saved at the very top of
-    # agenticx/__init__.py, before third-party libraries (gi.repository /
-    # GTK, imported transitively via graph-tool / cdlib) could strip
-    # recognised flags like --name from sys.argv.
-    import agenticx
-    sys.argv = agenticx._SAVED_CLI_ARGV
+    # Restore the original argv captured before CLI framework imports.
+    sys.argv = _SAVED_CLI_ARGV
     app()
 
 
