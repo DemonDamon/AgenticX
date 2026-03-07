@@ -414,10 +414,13 @@ def version():
 def studio(
     provider: Optional[str] = typer.Option(None, "--provider", "-p", help="使用的 LLM 厂商"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="覆盖模型名称"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="调试模式，显示内部日志"),
 ):
     """启动交互式 AGX Studio."""
+    from agenticx.cli.log_config import configure_cli_logging
     from agenticx.cli.studio import run_studio
 
+    configure_cli_logging(debug=debug)
     run_studio(provider=provider, model=model)
 
 
