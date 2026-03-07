@@ -11,12 +11,20 @@ try:  # sandbox may block SSL when importing litellm/requests
     from .kimi_provider import KimiProvider
     from .bailian_provider import BailianProvider
     from .ark_provider import ArkLLMProvider
+    from .zhipu_provider import ZhipuProvider
+    from .qianfan_provider import QianfanProvider
+    from .minimax_provider import MiniMaxProvider
+    from .provider_resolver import ProviderResolver
     from .llm_factory import LlmFactory
 except Exception:  # pragma: no cover
     LiteLLMProvider = None  # type: ignore
     KimiProvider = None  # type: ignore
     BailianProvider = None  # type: ignore
     ArkLLMProvider = None  # type: ignore
+    ZhipuProvider = None  # type: ignore
+    QianfanProvider = None  # type: ignore
+    MiniMaxProvider = None  # type: ignore
+    ProviderResolver = None  # type: ignore
     LlmFactory = None  # type: ignore
 
 from agenticx.llms.failover import FailoverProvider
@@ -60,6 +68,18 @@ class VolcEngineProvider(ArkLLMProvider if ArkLLMProvider else object):  # type:
     """Alias for ArkProvider (Volcengine Ark platform)."""
     pass
 
+class ZhiPuProvider(ZhipuProvider if ZhipuProvider else object):  # type: ignore
+    """Provider for Zhipu GLM models."""
+    pass
+
+class QianFanProvider(QianfanProvider if QianfanProvider else object):  # type: ignore
+    """Provider for Baidu Qianfan models."""
+    pass
+
+class MinimaxProvider(MiniMaxProvider if MiniMaxProvider else object):  # type: ignore
+    """Provider for MiniMax models."""
+    pass
+
 
 __all__ = [
     # Base classes and data structures
@@ -73,6 +93,10 @@ __all__ = [
     "KimiProvider",
     "BailianProvider",
     "ArkLLMProvider",
+    "ZhipuProvider",
+    "QianfanProvider",
+    "MiniMaxProvider",
+    "ProviderResolver",
     "LlmFactory",
 
     "FailoverProvider",
@@ -86,4 +110,7 @@ __all__ = [
     "DashscopeProvider",
     "ArkProvider",
     "VolcEngineProvider",
+    "ZhiPuProvider",
+    "QianFanProvider",
+    "MinimaxProvider",
 ]
