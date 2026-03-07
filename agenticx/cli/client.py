@@ -20,6 +20,7 @@ from agenticx.core.agent_executor import AgentExecutor
 from agenticx.core.workflow_engine import WorkflowEngine
 from agenticx.observability.callbacks import CallbackManager
 from agenticx.llms.litellm_provider import LiteLLMProvider
+from agenticx.llms.provider_resolver import ProviderResolver
 
 
 class ValidationResult(BaseModel):
@@ -111,7 +112,17 @@ class AgenticXClient:
         # 初始化LLM提供者
         llm_config = self.config.get('llm', {})
         if llm_config:
-            self.llm_provider = LiteLLMProvider(**llm_config)
+            provider_name = llm_config.get("provider")
+            model = llm_config.get("model")
+            try:
+                self.llm_provider = ProviderResolver.resolve(provider_name=provider_name, model=model)
+            except Exception:
+                self.llm_provider = LiteLLMProvider(**llm_config)
+        else:
+            try:
+                self.llm_provider = ProviderResolver.resolve()
+            except Exception:
+                self.llm_provider = None
         
         # 初始化工作流引擎
         self.workflow_engine = WorkflowEngine()
