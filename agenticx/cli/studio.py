@@ -172,7 +172,7 @@ def _restore_last_snapshot(session: StudioSession) -> bool:
 
 
 def _chat_reply(session: StudioSession, llm, user_input: str) -> str:
-    """Generate a chat-mode response with optional quickstart context."""
+    """Generate a chat-mode response with streaming output."""
     quickstart_context = ""
     try:
         loader = SkillBundleLoader()
@@ -188,8 +188,17 @@ def _chat_reply(session: StudioSession, llm, user_input: str) -> str:
     messages: List[Dict[str, str]] = [{"role": "system", "content": "".join(system_parts)}]
     messages.extend(session.chat_history[-6:])
     messages.append({"role": "user", "content": user_input})
-    response = llm.invoke(messages, temperature=0.3, max_tokens=1024)
-    return response.content.strip()
+    full_reply = ""
+    try:
+        for chunk in llm.stream(messages, temperature=0.3, max_tokens=1024):
+            print(chunk, end="", flush=True)
+            full_reply += chunk
+        print()
+    except Exception:
+        response = llm.invoke(messages, temperature=0.3, max_tokens=1024)
+        full_reply = response.content.strip()
+        print(full_reply)
+    return full_reply.strip()
 
 
 def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> None:
@@ -291,7 +300,6 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
                 continue
             session.chat_history.append({"role": "user", "content": user_input})
             session.chat_history.append({"role": "assistant", "content": reply})
-            console.print(reply)
             continue
         if intent == IntentType.UNCLEAR:
             console.print("你是想让我生成代码，还是有问题要问？输入需求描述开始生成，或直接提问。")
@@ -316,7 +324,8 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
         if session.image_b64:
             context["image_b64"] = [dict(image) for image in session.image_b64]
         try:
-            generated = engine.generate(target=target, description=user_input, context=context)
+            with console.status("[cyan]正在生成代码...[/cyan]", spinner="dots"):
+                generated = engine.generate(target=target, description=user_input, context=context)
         except Exception as exc:
             console.print(f"[red]生成失败:[/red] {exc}")
             continue
