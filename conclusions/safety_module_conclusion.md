@@ -8,7 +8,7 @@
 
 ```
 agenticx/safety/
-├── __init__.py              # 统一导出 34 个公共符号
+├── __init__.py              # 统一导出 32 个公共符号
 ├── leak_detector.py         # 密钥泄漏检测引擎（支持动态模式管理）
 ├── sanitizer.py             # Prompt 注入防御与内容清洗（含 Level 2 高级检测集成）
 ├── policy.py                # 规则化安全策略引擎（支持动态规则管理）
@@ -85,8 +85,10 @@ tool input (args)                          tool output (string)
 
 **Sanitizer 实现要点**：
 - 9 条注入检测正则（构造时编译）：CRITICAL 级（ignore/forget/disregard previous instructions）、HIGH 级（role manipulation: "you are now / act as"、system prompt injection）、MEDIUM 级（prompt extraction、code injection、encoded payload）
-- 检测到 CRITICAL 注入或危险 token 时调用 `_escape_content()`，`was_modified` 反映实际内容是否改变
+- 检测到 CRITICAL 注入或危险 token 时调用 `_escape_content()`，随后若有 CRITICAL 级注入短语则继续调用 `_escape_injection_phrases()` 对自然语言注入短语转义为 `[ESCAPED:...]`；`was_modified` 反映实际内容是否改变
 - `_escape_content()` 转义 11 种危险 token（`<|endoftext|>`、`[INST]`、`[/INST]`、`<<SYS>>` 等），使用 HTML 实体编码确保原始 token 字面量不出现在输出中；同时用正则将 `^system:/assistant:/user:` 行首标记转义
+- `_escape_injection_phrases()` (static) 仅处理 CRITICAL 级注入短语（原来在 SafetyLayer 中，hardening 后统一到 Sanitizer）
+- 构造参数 `advanced_detector: Optional[AdvancedInjectionDetector] = None`：启用后在正则扫描后执行 Level 2 检测，`risk_score > 0.5` 时调用 `normalize()` 后再转义
 - `wrap_for_llm(content, source)` → 输出 `<tool_output source="...">...</tool_output>` 格式，`</tool_output>` 转义防止闭合攻击
 - `wrap_external_content(content)` → 输出 `<external_content type="UNTRUSTED">` 格式，提示 LLM 将内容视为不可信数据
 
@@ -117,13 +119,13 @@ tool input (args)                          tool output (string)
 
 **关键类型**：
 - `SafetyConfig` (dataclass)：`max_output_length=50000`、`injection_check_enabled=True`、`leak_detection_enabled=True`、`policy_check_enabled=True`
-- `SafetyLayer`：核心编排器，构造参数允许注入自定义的 `leak_detector`、`sanitizer`、`policy` 实例
+- `SafetyLayer`：核心编排器，构造参数允许注入自定义的 `leak_detector`、`sanitizer`、`policy`、`input_validator`、`audit_log` 实例
 
 **执行流程**（`sanitize_tool_output(output, tool_name)`）：
 1. 长度截断：超过 `max_output_length` 时截断并追加 `...[truncated]`
 2. 泄漏检测：`LeakDetector.scan()` → 有命中则用 `redacted_content` 替换内容
 3. 策略检查：`Policy.check()` → BLOCK 命中时将内容替换为 `[BLOCKED by policy: <rule_ids>] Tool output suppressed.`
-4. 注入清洗：`Sanitizer.sanitize()` → `was_modified=True` 时取 `sanitized.content`；若 `was_modified=False` 但有 CRITICAL 级警告，调用 `_escape_injection_phrases()` 对注入短语额外转义
+4. 注入清洗：`Sanitizer.sanitize()` → `was_modified=True` 时取 `sanitized.content`（`Sanitizer` 内部已在 CRITICAL 注入时自动调用 `_escape_injection_phrases()`，Layer 层无需额外转义）
 
 **辅助方法**：
 - `wrap_for_llm(content, source)` → 委托 `Sanitizer.wrap_for_llm()`
@@ -206,7 +208,7 @@ tool input (args)                          tool output (string)
 `Policy` 和 `LeakDetector` 均支持运行时规则增删，无需重启进程：
 
 - `Policy.add_rule(rule)` / `Policy.remove_rule(rule_id)` — 动态添加/移除策略规则
-- `LeakDetector.add_pattern(pattern)` / `LeakDetector.remove_pattern(name)` — 动态添加/移除检测模式，自动重建前缀索引
+- `LeakDetector.add_pattern(pattern)` / `LeakDetector.remove_pattern(name)` — 动态添加/移除检测模式，变更后自动调用 `_build_prefix_index()` 重建前缀索引
 - `Policy.rules` / `LeakDetector.patterns` 属性返回副本，外部修改不影响内部状态
 
 ## 集成方式
@@ -255,7 +257,7 @@ SafetyAuditLog, SafetyEvent, SafetyStage,
 SandboxPolicy, SandboxRecommendation, ToolRiskProfile, RiskLevel,
 ```
 
-Total: 34 public symbols.
+Total: 32 public symbols.
 
 ## Source Reference
 
