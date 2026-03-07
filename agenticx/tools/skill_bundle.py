@@ -163,6 +163,9 @@ class SkillBundleLoader:
         ...     print(f"{skill.name}: {skill.description}")
     """
     
+    # Built-in skills shipped with the agenticx package (lowest priority)
+    _BUILTIN_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
+
     # 默认搜索路径（按优先级排序）
     DEFAULT_SEARCH_PATHS = [
         Path("./.agents/skills"),
@@ -171,6 +174,7 @@ class SkillBundleLoader:
         Path.home() / ".agent" / "skills",
         Path("./.claude/skills"),
         Path.home() / ".claude" / "skills",
+        _BUILTIN_SKILLS_DIR,
     ]
     
     def __init__(
