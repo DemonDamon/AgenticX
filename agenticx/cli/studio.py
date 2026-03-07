@@ -20,7 +20,9 @@ from rich.syntax import Syntax
 from rich.table import Table
 
 from agenticx.cli.codegen_engine import CodeGenEngine, infer_output_path, write_generated_file
+from agenticx.cli.intent_classifier import IntentClassifier, IntentType
 from agenticx.llms.provider_resolver import ProviderResolver
+from agenticx.tools.skill_bundle import SkillBundleLoader
 
 
 console = Console()
@@ -36,6 +38,7 @@ class StudioSession:
     history: List["HistoryRecord"] = field(default_factory=list)
     snapshots: List["StudioSnapshot"] = field(default_factory=list)
     image_b64: List[Dict[str, str]] = field(default_factory=list)
+    chat_history: List[Dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -95,6 +98,7 @@ def _print_header(session: StudioSession) -> None:
         )
     )
     console.print(command_table)
+    console.print("[cyan]直接描述需求生成代码，或提问了解 AgenticX 用法。[/cyan]")
     console.print("")
 
 
@@ -165,6 +169,27 @@ def _restore_last_snapshot(session: StudioSession) -> bool:
     session.history = list(snapshot.history)
     session.image_b64 = [dict(image) for image in snapshot.image_b64]
     return True
+
+
+def _chat_reply(session: StudioSession, llm, user_input: str) -> str:
+    """Generate a chat-mode response with optional quickstart context."""
+    quickstart_context = ""
+    try:
+        loader = SkillBundleLoader()
+        quickstart_context = loader.get_skill_content("agenticx-quickstart") or ""
+    except Exception:
+        quickstart_context = ""
+
+    system_parts = [
+        "你是 AgenticX 助手，用中文回答用户关于 AgenticX 的问题。不要生成代码，除非用户明确要求。",
+    ]
+    if quickstart_context:
+        system_parts.append("\n以下是 AgenticX 参考资料：\n" + quickstart_context)
+    messages: List[Dict[str, str]] = [{"role": "system", "content": "".join(system_parts)}]
+    messages.extend(session.chat_history[-6:])
+    messages.append({"role": "user", "content": user_input})
+    response = llm.invoke(messages, temperature=0.3, max_tokens=1024)
+    return response.content.strip()
 
 
 def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> None:
@@ -248,8 +273,6 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
                 console.print("[green]Config updated.[/green]")
             continue
 
-        target = _detect_target(user_input)
-        _take_snapshot(session)
         try:
             llm = ProviderResolver.resolve(
                 provider_name=session.provider_name,
@@ -258,11 +281,35 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
         except Exception as exc:
             console.print(f"[red]模型配置错误:[/red] {exc}")
             continue
+        classifier = IntentClassifier(provider=llm)
+        intent = classifier.classify_intent(user_input)
+        if intent in {IntentType.CHAT, IntentType.QUESTION}:
+            try:
+                reply = _chat_reply(session, llm, user_input)
+            except Exception as exc:
+                console.print(f"[red]对话失败:[/red] {exc}")
+                continue
+            session.chat_history.append({"role": "user", "content": user_input})
+            session.chat_history.append({"role": "assistant", "content": reply})
+            console.print(reply)
+            continue
+        if intent == IntentType.UNCLEAR:
+            console.print("你是想让我生成代码，还是有问题要问？输入需求描述开始生成，或直接提问。")
+            continue
+
+        target = _detect_target(user_input)
+        _take_snapshot(session)
         engine = CodeGenEngine(llm)
         latest_record = session.history[-1] if session.history else None
         latest_path = latest_record.file_path if latest_record is not None else _latest_artifact_path(session)
         context: Dict[str, object] = {}
-        if latest_record is not None and latest_record.target == target and latest_path is not None:
+        can_incremental_edit = (
+            latest_record is not None
+            and latest_record.target == target
+            and latest_path is not None
+            and latest_path in session.artifacts
+        )
+        if can_incremental_edit:
             previous_code = session.artifacts.get(latest_path)
             if previous_code:
                 context["previous_code"] = previous_code
@@ -273,7 +320,7 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
         except Exception as exc:
             console.print(f"[red]生成失败:[/red] {exc}")
             continue
-        if latest_record is not None and latest_record.target == target and latest_path is not None:
+        if can_incremental_edit:
             out_path = latest_path
         else:
             out_path = infer_output_path(target=target, description=user_input)
