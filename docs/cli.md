@@ -1574,6 +1574,11 @@ agx generate agent "一个能回答问题的助手" --interactive
 
 每轮修改都基于上一版代码做**增量改写**，不会重新生成，保留已有逻辑。
 
+#### `generate --interactive` 与 `studio` 的职责边界
+
+- `agx generate --interactive`：目标锁定在单个产物，专注代码迭代，不处理闲聊问答。
+- `agx studio`：开放式助手模式，支持问题解答、代码生成与增量修改的混合对话。
+
 ---
 
 ### agx studio — 交互式多轮对话
