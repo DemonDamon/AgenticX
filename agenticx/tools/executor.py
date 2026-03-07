@@ -357,9 +357,14 @@ class ToolExecutor:
                 if timeout:
                     tool.timeout = timeout
                 
-                # 执行工具
+                # Pre-execution input validation
+                if self.safety_layer is not None:
+                    input_result = self.safety_layer.validate_tool_input(tool.name, kwargs)
+                    if input_result.is_blocked:
+                        blocked_rules = [v.rule_id for v in input_result.violations if v.is_blocking]
+                        raise ToolError(f"Input blocked by safety policy: {', '.join(blocked_rules)}")
+
                 result = tool.run(**kwargs)
-                # Apply safety sanitization if SafetyLayer is configured
                 if self.safety_layer is not None and isinstance(result, str):
                     result = self.safety_layer.sanitize_tool_output(result, tool_name=tool.name)
                 state_out = None
@@ -531,9 +536,14 @@ class ToolExecutor:
                 if timeout:
                     tool.timeout = timeout
                 
-                # 执行工具
+                # Pre-execution input validation
+                if self.safety_layer is not None:
+                    input_result = self.safety_layer.validate_tool_input(tool.name, kwargs)
+                    if input_result.is_blocked:
+                        blocked_rules = [v.rule_id for v in input_result.violations if v.is_blocking]
+                        raise ToolError(f"Input blocked by safety policy: {', '.join(blocked_rules)}")
+
                 result = await tool.arun(**kwargs)
-                # Apply safety sanitization if SafetyLayer is configured
                 if self.safety_layer is not None and isinstance(result, str):
                     result = self.safety_layer.sanitize_tool_output(result, tool_name=tool.name)
                 state_out = None

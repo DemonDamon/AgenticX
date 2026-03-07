@@ -16,6 +16,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+from agenticx.safety.input_validator import InputValidator, InputValidationResult
 from agenticx.safety.leak_detector import LeakDetector
 from agenticx.safety.sanitizer import Sanitizer
 from agenticx.safety.policy import Policy, PolicyAction
@@ -44,11 +45,13 @@ class SafetyLayer:
         leak_detector: Optional[LeakDetector] = None,
         sanitizer: Optional[Sanitizer] = None,
         policy: Optional[Policy] = None,
+        input_validator: Optional[InputValidator] = None,
     ):
         self.config = config or SafetyConfig()
         self._leak_detector = leak_detector or LeakDetector()
         self._sanitizer = sanitizer or Sanitizer()
         self._policy = policy or Policy()
+        self._input_validator = input_validator or InputValidator()
 
     def sanitize_tool_output(self, output: str, tool_name: str) -> str:
         """Run the full safety pipeline on tool output."""
@@ -92,6 +95,10 @@ class SafetyLayer:
                 content = sanitized.content
 
         return content
+
+    def validate_tool_input(self, tool_name: str, args: dict) -> InputValidationResult:
+        """Pre-execution validation of tool arguments."""
+        return self._input_validator.validate(tool_name, args)
 
     def wrap_for_llm(self, content: str, source: str) -> str:
         """Wrap tool output with XML tags for LLM context isolation."""
