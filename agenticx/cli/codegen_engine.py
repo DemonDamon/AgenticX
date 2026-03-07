@@ -8,10 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import ast
-import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from agenticx.llms.base import BaseLLMProvider
 from agenticx.tools.skill_bundle import SkillBundleLoader
@@ -63,14 +62,117 @@ class CodeGenEngine:
         )
 
     def _build_user_prompt(self, description: str, context: Optional[Dict[str, Any]]) -> str:
-        context_text = ""
+        prompt_parts: List[str] = [
+            "Generate code from this requirement:",
+            description,
+        ]
         if context:
-            context_text = f"\n\n## Context\n{context}"
-        return (
-            "Generate code from this requirement:\n"
-            f"{description}"
-            f"{context_text}"
-        )
+            previous_code = context.get("previous_code")
+            if isinstance(previous_code, str) and previous_code.strip():
+                prompt_parts.extend(
+                    [
+                        "",
+                        "以下是已有代码，请根据新需求修改：",
+                        "```",
+                        previous_code,
+                        "```",
+                    ]
+                )
+            extra_context = {
+                key: value for key, value in context.items() if key not in {"previous_code", "image_b64"}
+            }
+            if extra_context:
+                prompt_parts.extend(["", "## Context", str(extra_context)])
+        return "\n".join(prompt_parts)
+
+    def supports_vision(self) -> bool:
+        """Return whether current provider/model likely supports vision input."""
+        model_name = (self.provider.model or "").lower()
+        if "gpt-4o" in model_name:
+            return True
+        if model_name.startswith("anthropic/claude-") or "claude" in model_name:
+            return True
+        if "doubao-vision" in model_name:
+            return True
+        if "doubao" in model_name and "vision" in model_name:
+            return True
+        return False
+
+    def _normalize_image_b64(self, value: Any) -> List[Dict[str, str]]:
+        def normalize_entry(entry: Any) -> Optional[Dict[str, str]]:
+            if isinstance(entry, str):
+                text = entry.strip()
+                if text:
+                    return {"data": text, "mime": "image/png"}
+                return None
+            if isinstance(entry, dict):
+                data_value = entry.get("data")
+                if not isinstance(data_value, str):
+                    return None
+                data = data_value.strip()
+                if not data:
+                    return None
+                mime_value = entry.get("mime")
+                mime = mime_value if isinstance(mime_value, str) and mime_value.startswith("image/") else "image/png"
+                return {"data": data, "mime": mime}
+            return None
+
+        if isinstance(value, str):
+            normalized = normalize_entry(value)
+            return [normalized] if normalized else []
+        if isinstance(value, dict):
+            normalized = normalize_entry(value)
+            return [normalized] if normalized else []
+        if isinstance(value, list):
+            images: List[Dict[str, str]] = []
+            for item in value:
+                normalized = normalize_entry(item)
+                if normalized:
+                    images.append(normalized)
+            return images
+        return []
+
+    def _to_data_url(self, image: Union[str, Dict[str, str]]) -> str:
+        if isinstance(image, dict):
+            image_b64 = image.get("data", "").strip()
+            if not image_b64:
+                return ""
+            mime_value = image.get("mime", "")
+            mime = mime_value if mime_value.startswith("image/") else "image/png"
+            if image_b64.startswith("data:"):
+                return image_b64
+            return f"data:{mime};base64,{image_b64}"
+
+        image_b64 = image.strip()
+        if not image_b64:
+            return ""
+        if image_b64.startswith("data:"):
+            return image_b64
+        return f"data:image/png;base64,{image_b64}"
+
+    def _build_user_message(self, description: str, context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        prompt = self._build_user_prompt(description, context)
+        if not context:
+            return {"role": "user", "content": prompt}
+
+        image_values = self._normalize_image_b64(context.get("image_b64"))
+        if not image_values:
+            return {"role": "user", "content": prompt}
+        if not self.supports_vision():
+            raise ValueError("当前模型不支持图片输入，请切换到支持视觉的模型（如 gpt-4o、Claude、doubao-vision）。")
+
+        content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for image in image_values:
+            image_url = self._to_data_url(image)
+            if not image_url:
+                continue
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": image_url},
+                }
+            )
+        return {"role": "user", "content": content}
 
     def _extract_code(self, content: str) -> str:
         if not content:
@@ -130,11 +232,10 @@ class CodeGenEngine:
 
         provider_info = f"provider_class={self.provider.__class__.__name__}, model={self.provider.model}"
         system_prompt = self._build_system_prompt(skill_content, target, provider_info)
-        user_prompt = self._build_user_prompt(description, context)
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            self._build_user_message(description, context),
         ]
         response = self.provider.invoke(messages, temperature=0.2, max_tokens=4096)
         code = self._extract_code(response.content)
