@@ -11,6 +11,7 @@ _SAVED_CLI_ARGV = sys.argv[:]
 
 import difflib
 import os
+import re
 import asyncio
 import click
 import typer
@@ -67,6 +68,26 @@ def _get_hooks_app():
         return hooks_app
     except ImportError:
         console.print("[bold red]错误:[/bold red] 无法导入 hooks 模块")
+        raise typer.Exit(1)
+
+
+def _get_config_app():
+    """Lazy import config sub-application."""
+    try:
+        from agenticx.cli.config_commands import config_app
+        return config_app
+    except ImportError:
+        console.print("[bold red]错误:[/bold red] 无法导入 config 模块")
+        raise typer.Exit(1)
+
+
+def _get_generate_app():
+    """Lazy import generate sub-application."""
+    try:
+        from agenticx.cli.generate_commands import generate_app
+        return generate_app
+    except ImportError:
+        console.print("[bold red]错误:[/bold red] 无法导入 generate 模块")
         raise typer.Exit(1)
 
 class AgenticXGroup(TyperGroup):
@@ -236,6 +257,15 @@ def _get_tools_app():
         console.print("[bold red]错误:[/bold red] 无法导入 tools 模块")
         raise typer.Exit(1)
 
+
+def _safe_python_filename(name: str) -> str:
+    """Convert user-provided name into a safe Python filename stem."""
+    normalized = re.sub(r"[^a-zA-Z0-9_-]+", "_", name.strip().lower())
+    normalized = normalized.strip("._-")
+    if not normalized:
+        raise ValueError("名称不能为空")
+    return normalized.replace("-", "_")
+
 @project_app.callback(invoke_without_command=True)
 def project_callback(
     ctx: typer.Context,
@@ -350,6 +380,20 @@ try:
 except Exception:
     pass
 
+# 注册 config 子命令 (延迟加载)
+try:
+    config_app = _get_config_app()
+    app.add_typer(config_app)
+except Exception:
+    pass
+
+# 注册 generate 子命令 (延迟加载)
+try:
+    generate_app = _get_generate_app()
+    app.add_typer(generate_app)
+except Exception:
+    pass
+
 # 注册 volcengine 子命令 (延迟加载)
 try:
     from agenticx.cli.volcengine_commands import volcengine_app
@@ -364,6 +408,17 @@ console = Console()
 def version():
     """显示版本信息"""
     console.print(f"[bold blue]AgenticX[/bold blue] {__version__}")
+
+
+@app.command()
+def studio(
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="使用的 LLM 厂商"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="覆盖模型名称"),
+):
+    """启动交互式 AGX Studio."""
+    from agenticx.cli.studio import run_studio
+
+    run_studio(provider=provider, model=model)
 
 
 @app.command()
@@ -484,7 +539,10 @@ def test(
 def create_project(
     name: str = typer.Argument(..., help="项目名称"),
     template: str = typer.Option("basic", "--template", "-t", help="项目模板"),
-    directory: Optional[str] = typer.Option(None, "--dir", "-d", help="项目目录")
+    directory: Optional[str] = typer.Option(None, "--dir", "-d", help="项目目录"),
+    ai: Optional[str] = typer.Option(None, "--ai", help="使用 AI 描述自动生成核心代码"),
+    provider: Optional[str] = typer.Option(None, "--provider", help="AI 生成使用的 LLM 厂商"),
+    model: Optional[str] = typer.Option(None, "--model", help="AI 生成覆盖模型"),
 ):
     """创建新项目"""
     console.print(f"[bold blue]创建项目:[/bold blue] {name}")
@@ -495,6 +553,25 @@ def create_project(
         project_path = scaffolder.create_project(name, template, directory)
         console.print(f"[bold green]✓ 项目创建成功![/bold green]")
         console.print(f"项目路径: {project_path}")
+        if ai:
+            from agenticx.cli.codegen_engine import CodeGenEngine
+            from agenticx.llms.provider_resolver import ProviderResolver
+
+            llm = ProviderResolver.resolve(provider_name=provider, model=model)
+            engine = CodeGenEngine(llm)
+            agent_artifact = engine.generate("agent", ai, {"project_name": name})
+            workflow_artifact = engine.generate("workflow", ai, {"project_name": name})
+
+            root = Path(project_path)
+            (root / "agents").mkdir(exist_ok=True)
+            (root / "workflows").mkdir(exist_ok=True)
+            (root / "agents" / "ai_generated_agent.py").write_text(
+                agent_artifact.code, encoding="utf-8"
+            )
+            (root / "workflows" / "ai_generated_workflow.py").write_text(
+                workflow_artifact.code, encoding="utf-8"
+            )
+            console.print("[bold green]✓ AI 增强内容已生成[/bold green]")
     except Exception as e:
         console.print(f"[bold red]项目创建失败:[/bold red] {e}")
         raise typer.Exit(1)
@@ -520,7 +597,10 @@ def create_agent(
     name: str = typer.Argument(..., help="智能体名称"),
     role: str = typer.Option("Assistant", "--role", "-r", help="智能体角色"),
     template: str = typer.Option("basic", "--template", "-t", help="智能体模板"),
-    interactive: bool = typer.Option(False, "--interactive", "-i", help="交互式创建")
+    interactive: bool = typer.Option(False, "--interactive", "-i", help="交互式创建"),
+    ai: Optional[str] = typer.Option(None, "--ai", help="使用 AI 描述自动生成智能体"),
+    provider: Optional[str] = typer.Option(None, "--provider", help="AI 生成使用的 LLM 厂商"),
+    model: Optional[str] = typer.Option(None, "--model", help="AI 生成覆盖模型"),
 ):
     """创建新的智能体"""
     console.print(f"[bold blue]创建智能体:[/bold blue] {name}")
@@ -528,7 +608,29 @@ def create_agent(
     ProjectScaffolder = _get_scaffolder()
     scaffolder = ProjectScaffolder()
     try:
-        agent_path = scaffolder.create_agent(name, role, template, interactive)
+        if ai:
+            from agenticx.cli.codegen_engine import CodeGenEngine
+            from agenticx.llms.provider_resolver import ProviderResolver
+
+            llm = ProviderResolver.resolve(provider_name=provider, model=model)
+            engine = CodeGenEngine(llm)
+            generated = engine.generate(
+                "agent",
+                ai,
+                {"agent_name": name, "role": role, "template": template},
+            )
+            agents_dir = Path("agents")
+            agents_dir.mkdir(exist_ok=True)
+            safe_stem = _safe_python_filename(name)
+            agent_file = agents_dir / f"{safe_stem}.py"
+            agents_root = agents_dir.resolve()
+            file_resolved = agent_file.resolve()
+            if agents_root not in file_resolved.parents and file_resolved != agents_root:
+                raise ValueError("非法文件路径")
+            agent_file.write_text(generated.code, encoding="utf-8")
+            agent_path = str(agent_file)
+        else:
+            agent_path = scaffolder.create_agent(name, role, template, interactive)
         console.print(f"[bold green]✓ 智能体创建成功![/bold green]")
         console.print(f"智能体文件: {agent_path}")
     except Exception as e:
