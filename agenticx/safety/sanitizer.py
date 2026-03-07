@@ -14,7 +14,10 @@ import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from agenticx.safety.advanced_detector import AdvancedInjectionDetector
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +89,13 @@ class Sanitizer:
     def __init__(
         self,
         extra_patterns: Optional[list[tuple[str, InjectionSeverity, str]]] = None,
+        advanced_detector: Optional["AdvancedInjectionDetector"] = None,
     ):
         self._patterns = list(_INJECTION_PATTERNS)
         if extra_patterns:
             self._patterns.extend(extra_patterns)
         self._compiled = [(re.compile(p), sev, desc) for p, sev, desc in self._patterns]
+        self._advanced_detector = advanced_detector
 
     def sanitize(self, content: Optional[str]) -> SanitizedOutput:
         """Scan content for injection attempts and sanitize if needed."""
@@ -118,6 +123,21 @@ class Sanitizer:
             if has_critical:
                 modified = self._escape_injection_phrases(modified)
             was_modified = (modified != content)
+
+        # Level 2: advanced detection (optional)
+        if self._advanced_detector:
+            adv_result = self._advanced_detector.analyze(content)
+            if adv_result.risk_score > 0.5:
+                modified = self._advanced_detector.normalize(modified)
+                modified = self._escape_content(modified)
+                was_modified = True
+                for detail in adv_result.details:
+                    warnings.append(InjectionWarning(
+                        pattern="advanced_detection",
+                        severity=InjectionSeverity.HIGH,
+                        location=0,
+                        description=detail,
+                    ))
 
         if warnings:
             for w in warnings:

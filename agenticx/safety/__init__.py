@@ -42,6 +42,10 @@ from agenticx.safety.sandbox_policy import (
     ToolRiskProfile,
     RiskLevel,
 )
+from agenticx.safety.advanced_detector import (
+    AdvancedInjectionDetector,
+    AdvancedDetectionResult,
+)
 from agenticx.safety.audit import SafetyAuditLog, SafetyEvent, SafetyStage
 from agenticx.safety.layer import SafetyLayer, SafetyConfig
 
@@ -74,6 +78,8 @@ __all__ = [
     "SafetyAuditLog",
     "SafetyEvent",
     "SafetyStage",
+    "AdvancedInjectionDetector",
+    "AdvancedDetectionResult",
     "SafetyLayer",
     "SafetyConfig",
 ]
