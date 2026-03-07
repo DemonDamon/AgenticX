@@ -242,7 +242,7 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
                 continue
             for path, code in session.artifacts.items():
                 write_generated_file(path, code)
-                console.print(f"[green]Saved[/green] {path}")
+                console.print(f"[green]Saved[/green] {path.resolve()}")
             continue
         if user_input == "/undo":
             if not _restore_last_snapshot(session):
@@ -335,6 +335,12 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
             out_path = infer_output_path(target=target, description=user_input)
         session.artifacts[out_path] = generated.code
         session.history.append(HistoryRecord(description=user_input, file_path=out_path, target=target))
-        console.print(f"[green]Generated[/green] {out_path}")
+        # Write to disk immediately (relative to current working directory)
+        try:
+            write_generated_file(out_path, generated.code)
+            abs_path = out_path.resolve()
+            console.print(f"[green]Generated & Saved[/green] {abs_path}")
+        except Exception as write_exc:
+            console.print(f"[green]Generated[/green] {out_path} [yellow](写入失败: {write_exc}，使用 /save 手动保存)[/yellow]")
         _print_artifact(out_path, generated.code)
         console.print("[cyan]继续输入需求即可迭代，或使用 /history 查看记录。[/cyan]")
