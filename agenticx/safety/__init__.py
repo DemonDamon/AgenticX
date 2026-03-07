@@ -36,6 +36,7 @@ from agenticx.safety.input_validator import (
     InputRiskLevel,
     ToolInputPolicy,
 )
+from agenticx.safety.audit import SafetyAuditLog, SafetyEvent, SafetyStage
 from agenticx.safety.layer import SafetyLayer, SafetyConfig
 
 __all__ = [
@@ -60,6 +61,9 @@ __all__ = [
     "InputViolation",
     "InputRiskLevel",
     "ToolInputPolicy",
+    "SafetyAuditLog",
+    "SafetyEvent",
+    "SafetyStage",
     "SafetyLayer",
     "SafetyConfig",
 ]
