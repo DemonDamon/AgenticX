@@ -1,4 +1,5 @@
 import sys as _sys
+from pathlib import Path as _Path
 _SAVED_CLI_ARGV = _sys.argv[:]
 
 import warnings
@@ -28,150 +29,153 @@ AgenticX是一个完整的多智能体应用开发框架，提供从核心抽象
 """
 
 # 版本信息
-__version__ = "0.3.0"
+from ._version import __version__
 __author__ = "Ziran Li"
 __email__ = "bingzhenli@hotmail.com"
 
-# 核心模块导出
-from .core import (
-    # 基础抽象
-    Agent, Task, BaseTool, tool, Workflow, WorkflowNode, WorkflowEdge,
-    Message, ProtocolMessage, User, Organization, Component,
-    
-    # M5: Agent Core Components
-    Event, EventLog, AnyEvent,
-    TaskStartEvent, TaskEndEvent, ToolCallEvent, ToolResultEvent,
-    ErrorEvent, LLMCallEvent, LLMResponseEvent, HumanRequestEvent,
-    HumanResponseEvent, FinishTaskEvent,
-    
-    PromptManager, ContextRenderer, XMLContextRenderer, PromptTemplate,
-    ErrorHandler, ErrorClassifier, CircuitBreaker, CircuitBreakerOpenError,
-    CommunicationInterface, BroadcastCommunication, AsyncCommunicationInterface,
-    AgentExecutor, ToolRegistry, ActionParser,
-    
-    # M6: Task Contract & Outcome Validation
-    TaskOutputParser, TaskResultValidator, OutputRepairLoop,
-    ParseResult, ValidationResult, RepairStrategy,
-    ParseError, ValidationError, RepairError,
+_IS_CLI_BOOTSTRAP = _Path(_sys.argv[0]).name in {"agx", "agenticx"}
 
-    # GuideRails
-    GuideRailsAction, GuideRailsResult, GuideRailsConfig, GuideRailsContext,
-    GuideRailsAbortError, GuideRailsRunResult, GuideRailsValidator,
-    BaseGuideRailsValidator, GuideRails,
-    
-    # Handoff Mechanism (参考自 AIGNE)
-    HandoffOutput, AgentHandoffEvent, AgentHandoffError,
-    HandoffCycleError, HandoffTargetNotFoundError,
-    is_handoff_output, parse_handoff_output,
-    create_handoff_event, check_handoff_cycle,
-    
-    # M7: Orchestration & Routing Engine
-    WorkflowEngine, WorkflowGraph, TriggerService,
-    ScheduledTrigger, EventDrivenTrigger,
-    ExecutionContext, NodeExecution, WorkflowStatus, NodeStatus
-)
+if not _IS_CLI_BOOTSTRAP:
+    # 核心模块导出
+    from .core import (
+        # 基础抽象
+        Agent, Task, BaseTool, tool, Workflow, WorkflowNode, WorkflowEdge,
+        Message, ProtocolMessage, User, Organization, Component,
+        
+        # M5: Agent Core Components
+        Event, EventLog, AnyEvent,
+        TaskStartEvent, TaskEndEvent, ToolCallEvent, ToolResultEvent,
+        ErrorEvent, LLMCallEvent, LLMResponseEvent, HumanRequestEvent,
+        HumanResponseEvent, FinishTaskEvent,
+        
+        PromptManager, ContextRenderer, XMLContextRenderer, PromptTemplate,
+        ErrorHandler, ErrorClassifier, CircuitBreaker, CircuitBreakerOpenError,
+        CommunicationInterface, BroadcastCommunication, AsyncCommunicationInterface,
+        AgentExecutor, ToolRegistry, ActionParser,
+        
+        # M6: Task Contract & Outcome Validation
+        TaskOutputParser, TaskResultValidator, OutputRepairLoop,
+        ParseResult, ValidationResult, RepairStrategy,
+        ParseError, ValidationError, RepairError,
 
-# LLM模块导出
-from .llms import (
-    BaseLLMProvider, LLMResponse, LiteLLMProvider,
-    OpenAIProvider, AnthropicProvider, OllamaProvider,
-    KimiProvider, MoonshotProvider,
-    ArkLLMProvider, ArkProvider, VolcEngineProvider
-)
+        # GuideRails
+        GuideRailsAction, GuideRailsResult, GuideRailsConfig, GuideRailsContext,
+        GuideRailsAbortError, GuideRailsRunResult, GuideRailsValidator,
+        BaseGuideRailsValidator, GuideRails,
+        
+        # Handoff Mechanism (参考自 AIGNE)
+        HandoffOutput, AgentHandoffEvent, AgentHandoffError,
+        HandoffCycleError, HandoffTargetNotFoundError,
+        is_handoff_output, parse_handoff_output,
+        create_handoff_event, check_handoff_cycle,
+        
+        # M7: Orchestration & Routing Engine
+        WorkflowEngine, WorkflowGraph, TriggerService,
+        ScheduledTrigger, EventDrivenTrigger,
+        ExecutionContext, NodeExecution, WorkflowStatus, NodeStatus
+    )
 
-# 工具模块导出
-from .tools import (
-    BaseTool, FunctionTool, tool, ToolExecutor, ToolError,
-    ToolTimeoutError, ToolValidationError, CredentialStore,
-    RemoteTool, MCPClient, MCPServerConfig,
-    load_mcp_config, create_mcp_client
-)
+    # LLM模块导出
+    from .llms import (
+        BaseLLMProvider, LLMResponse, LiteLLMProvider,
+        OpenAIProvider, AnthropicProvider, OllamaProvider,
+        KimiProvider, MoonshotProvider,
+        ArkLLMProvider, ArkProvider, VolcEngineProvider
+    )
 
-# 记忆模块导出
-from .memory import (
-    BaseMemory, ShortTermMemory, Mem0, KnowledgeBase,
-    MemoryComponent, MCPMemory, Mem0Wrapper
-)
+    # 工具模块导出
+    from .tools import (
+        BaseTool, FunctionTool, tool, ToolExecutor, ToolError,
+        ToolTimeoutError, ToolValidationError, CredentialStore,
+        RemoteTool, MCPClient, MCPServerConfig,
+        load_mcp_config, create_mcp_client
+    )
 
-# 协议模块导出
-from .protocols import (
-    # 接口和模型
-    AgentCard, Skill, CollaborationTask,
-    TaskCreationRequest, TaskStatusResponse,
-    
-    # 服务端和客户端
-    A2AWebServiceWrapper, A2AClient, A2ASkillTool,
-    A2ASkillToolFactory, InMemoryTaskStore,
-    
-    # 异常
-    TaskError, TaskNotFoundError, TaskAlreadyExistsError,
-    A2AClientError, A2AConnectionError, A2ATaskError
-)
+    # 记忆模块导出
+    from .memory import (
+        BaseMemory, ShortTermMemory, Mem0, KnowledgeBase,
+        MemoryComponent, MCPMemory, Mem0Wrapper
+    )
 
-# crewAI 参考: Hooks 系统
-from .hooks import (
-    # LLM Hooks
-    LLMCallHookContext,
-    register_before_llm_call_hook,
-    register_after_llm_call_hook,
-    clear_all_llm_call_hooks,
-    
-    # Tool Hooks
-    ToolCallHookContext,
-    register_before_tool_call_hook,
-    register_after_tool_call_hook,
-    clear_all_tool_call_hooks,
-)
+    # 协议模块导出
+    from .protocols import (
+        # 接口和模型
+        AgentCard, Skill, CollaborationTask,
+        TaskCreationRequest, TaskStatusResponse,
+        
+        # 服务端和客户端
+        A2AWebServiceWrapper, A2AClient, A2ASkillTool,
+        A2ASkillToolFactory, InMemoryTaskStore,
+        
+        # 异常
+        TaskError, TaskNotFoundError, TaskAlreadyExistsError,
+        A2AClientError, A2AConnectionError, A2ATaskError
+    )
 
-# crewAI 参考: Flow 系统
-from .flow import (
-    Flow, FlowState, FlowMeta,
-    start, listen, router,
-    or_, and_,
-    StartMethod, ListenMethod, RouterMethod,
-)
+    # crewAI 参考: Hooks 系统
+    from .hooks import (
+        # LLM Hooks
+        LLMCallHookContext,
+        register_before_llm_call_hook,
+        register_after_llm_call_hook,
+        clear_all_llm_call_hooks,
+        
+        # Tool Hooks
+        ToolCallHookContext,
+        register_before_tool_call_hook,
+        register_after_tool_call_hook,
+        clear_all_tool_call_hooks,
+    )
 
-# crewAI 参考: Delegation 工具
-from .collaboration.delegation import (
-    DelegateWorkTool,
-    AskQuestionTool,
-    DelegationContext,
-    create_delegation_tools,
-)
+    # crewAI 参考: Flow 系统
+    from .flow import (
+        Flow, FlowState, FlowMeta,
+        start, listen, router,
+        or_, and_,
+        StartMethod, ListenMethod, RouterMethod,
+    )
 
-# M9: 可观测性模块导出
-from .observability import (
-    # 核心回调系统
-    BaseCallbackHandler, CallbackManager, CallbackRegistry,
-    CallbackError, CallbackHandlerConfig,
-    
-    # 日志和监控
-    LoggingCallbackHandler, LogLevel, LogFormat, StructuredLogger,
-    MonitoringCallbackHandler, MetricsCollector, PerformanceMetrics,
-    SystemMetrics, PrometheusExporter,
-    
-    # 轨迹分析
-    TrajectoryCollector, ExecutionTrajectory, TrajectoryStep,
-    TrajectoryMetadata, TrajectorySummarizer, FailureAnalyzer,
-    BottleneckDetector, PerformanceAnalyzer, ExecutionInsights,
-    FailureReport, PerformanceReport,
-    
-    # 评估和基准测试
-    MetricsCalculator, BenchmarkRunner, AutoEvaluator,
-    EvaluationResult, BenchmarkResult, EvaluationMetrics,
-    
-    # 实时通信
-    WebSocketCallbackHandler, EventStream, RealtimeMonitor,
-    
-    # 辅助工具
-    EventProcessor, TimeSeriesData, StatisticsCalculator,
-    DataExporter
-)
+    # crewAI 参考: Delegation 工具
+    from .collaboration.delegation import (
+        DelegateWorkTool,
+        AskQuestionTool,
+        DelegationContext,
+        create_delegation_tools,
+    )
 
-# 便捷导入
-from .core import Agent, Task, BaseTool, tool, Workflow
-from .llms import LiteLLMProvider as LLM
-from .observability import CallbackManager, LoggingCallbackHandler, TrajectoryCollector
+    # M9: 可观测性模块导出
+    from .observability import (
+        # 核心回调系统
+        BaseCallbackHandler, CallbackManager, CallbackRegistry,
+        CallbackError, CallbackHandlerConfig,
+        
+        # 日志和监控
+        LoggingCallbackHandler, LogLevel, LogFormat, StructuredLogger,
+        MonitoringCallbackHandler, MetricsCollector, PerformanceMetrics,
+        SystemMetrics, PrometheusExporter,
+        
+        # 轨迹分析
+        TrajectoryCollector, ExecutionTrajectory, TrajectoryStep,
+        TrajectoryMetadata, TrajectorySummarizer, FailureAnalyzer,
+        BottleneckDetector, PerformanceAnalyzer, ExecutionInsights,
+        FailureReport, PerformanceReport,
+        
+        # 评估和基准测试
+        MetricsCalculator, BenchmarkRunner, AutoEvaluator,
+        EvaluationResult, BenchmarkResult, EvaluationMetrics,
+        
+        # 实时通信
+        WebSocketCallbackHandler, EventStream, RealtimeMonitor,
+        
+        # 辅助工具
+        EventProcessor, TimeSeriesData, StatisticsCalculator,
+        DataExporter
+    )
+
+    # 便捷导入
+    from .core import Agent, Task, BaseTool, tool, Workflow
+    from .llms import LiteLLMProvider as LLM
+    from .observability import CallbackManager, LoggingCallbackHandler, TrajectoryCollector
 
 # 主要类列表
 __all__ = [

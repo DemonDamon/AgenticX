@@ -7,15 +7,15 @@ Author: Damon Li
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from agenticx.skills.registry import SkillRegistryClient
-from agenticx.skills.registry import SkillRegistryServer
-from agenticx.tools.skill_bundle import SkillBundleLoader
+if TYPE_CHECKING:
+    from agenticx.skills.registry import SkillRegistryClient
+    from agenticx.skills.registry import SkillRegistryServer
 
 skills_app = typer.Typer(
     name="skills",
@@ -26,7 +26,9 @@ skills_app = typer.Typer(
 console = Console()
 
 
-def _get_registry_client(registry_url: str) -> SkillRegistryClient:
+def _get_registry_client(registry_url: str) -> "SkillRegistryClient":
+    from agenticx.skills.registry import SkillRegistryClient
+
     return SkillRegistryClient(registry_url=registry_url)
 
 
@@ -39,6 +41,8 @@ def list_skills(
     ),
 ) -> None:
     """List local skills and merge remote index if available."""
+    from agenticx.tools.skill_bundle import SkillBundleLoader
+
     loader = SkillBundleLoader(registry_url=registry_url)
     skills = loader.scan()
 
@@ -113,6 +117,8 @@ def publish_skill(
     ),
 ) -> None:
     """Publish a skill to remote registry."""
+    from agenticx.skills.registry import SkillRegistryClient
+
     client = SkillRegistryClient(registry_url=registry_url, write_token=write_token)
     entry = client.publish(path)
     console.print(
@@ -136,6 +142,8 @@ def serve_registry(
     ),
 ) -> None:
     """Run local registry HTTP server."""
+    from agenticx.skills.registry import SkillRegistryServer
+
     server = SkillRegistryServer(
         storage_path=storage_path,
         host=host,
@@ -156,6 +164,8 @@ def uninstall_skill(
     ),
 ) -> None:
     """Uninstall a locally installed registry skill."""
+    from agenticx.skills.registry import SkillRegistryClient
+
     client = SkillRegistryClient()
     removed = client.uninstall(name=name, target_dir=target_dir)
     if removed:

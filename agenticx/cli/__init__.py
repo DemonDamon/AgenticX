@@ -4,14 +4,29 @@ AgenticX CLI 工具模块
 提供命令行工具、项目脚手架、调试和部署等功能
 """
 
-from .main import main
-from .client import AgenticXClient, AsyncAgenticXClient
-from .scaffold import ProjectScaffolder
-from .debug import DebugServer
-from .docs import DocGenerator
-from .deploy import DeployManager
+from agenticx._version import __version__
 
-__version__ = "0.3.0"
+
+_LAZY_IMPORTS = {
+    "main": ".main",
+    "AgenticXClient": ".client",
+    "AsyncAgenticXClient": ".client",
+    "ProjectScaffolder": ".scaffold",
+    "DebugServer": ".debug",
+    "DocGenerator": ".docs",
+    "DeployManager": ".deploy",
+}
+
+
+def __getattr__(name: str):
+    module_name = _LAZY_IMPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    import importlib
+
+    module = importlib.import_module(module_name, __package__)
+    return getattr(module, name)
 
 __all__ = [
     "main",
