@@ -29,6 +29,13 @@ from agenticx.safety.policy import (
     PolicySeverity,
     PolicyCheckResult,
 )
+from agenticx.safety.input_validator import (
+    InputValidator,
+    InputValidationResult,
+    InputViolation,
+    InputRiskLevel,
+    ToolInputPolicy,
+)
 from agenticx.safety.layer import SafetyLayer, SafetyConfig
 
 __all__ = [
@@ -48,6 +55,11 @@ __all__ = [
     "PolicyAction",
     "PolicySeverity",
     "PolicyCheckResult",
+    "InputValidator",
+    "InputValidationResult",
+    "InputViolation",
+    "InputRiskLevel",
+    "ToolInputPolicy",
     "SafetyLayer",
     "SafetyConfig",
 ]
