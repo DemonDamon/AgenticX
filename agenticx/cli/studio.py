@@ -10,6 +10,7 @@ import base64
 from dataclasses import dataclass, field
 import mimetypes
 from pathlib import Path
+import re as _re
 import subprocess
 import sys
 from typing import Dict, List, Optional
@@ -39,6 +40,7 @@ class StudioSession:
     snapshots: List["StudioSnapshot"] = field(default_factory=list)
     image_b64: List[Dict[str, str]] = field(default_factory=list)
     chat_history: List[Dict[str, str]] = field(default_factory=list)
+    context_files: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -57,6 +59,7 @@ class StudioSnapshot:
     artifacts: Dict[Path, str]
     history: List[HistoryRecord]
     image_b64: List[Dict[str, str]]
+    context_files: Dict[str, str] = field(default_factory=dict)
 
 
 def _detect_target(text: str) -> str:
@@ -86,6 +89,10 @@ def _print_header(session: StudioSession) -> None:
     command_table.add_row("/image <path>", "添加图片上下文（base64）")
     command_table.add_row("/image clear", "清空已添加的图片上下文")
     command_table.add_row("/undo", "回退到上一次快照")
+    command_table.add_row("/ctx add <path>", "添加文件到上下文（类似 Cursor 的 @）")
+    command_table.add_row("/ctx list", "查看当前上下文文件")
+    command_table.add_row("/ctx remove <path>", "移除指定上下文文件")
+    command_table.add_row("/ctx clear", "清空所有上下文文件")
     command_table.add_row("/config [provider] [model]", "查看或修改模型配置")
     command_table.add_row("/exit", "退出 Studio")
 
@@ -99,6 +106,7 @@ def _print_header(session: StudioSession) -> None:
     )
     console.print(command_table)
     console.print("[cyan]直接描述需求生成代码，或提问了解 AgenticX 用法。[/cyan]")
+    console.print("[dim]Tip: use @filepath to reference code files, or /ctx add <path> to add context.[/dim]")
     console.print("")
 
 
@@ -156,6 +164,7 @@ def _take_snapshot(session: StudioSession) -> None:
             artifacts=dict(session.artifacts),
             history=list(session.history),
             image_b64=[dict(image) for image in session.image_b64],
+            context_files=dict(session.context_files),
         )
     )
 
@@ -168,7 +177,82 @@ def _restore_last_snapshot(session: StudioSession) -> bool:
     session.artifacts = dict(snapshot.artifacts)
     session.history = list(snapshot.history)
     session.image_b64 = [dict(image) for image in snapshot.image_b64]
+    session.context_files = dict(snapshot.context_files)
     return True
+
+
+def _build_context_block(session: StudioSession) -> str:
+    """Build a context block from artifacts and context files for LLM."""
+    parts: List[str] = []
+
+    if session.artifacts:
+        parts.append("=== Generated code in current session ===")
+        for path, code in session.artifacts.items():
+            parts.append(f"\n--- {path} ---\n{code}")
+
+    if session.context_files:
+        parts.append("\n=== User-referenced context files ===")
+        for fpath, content in session.context_files.items():
+            parts.append(f"\n--- {fpath} ---\n{content}")
+
+    return "\n".join(parts)
+
+
+def _resolve_at_references(session: StudioSession, user_input: str) -> str:
+    """Resolve @path references in user input, loading file contents into context.
+
+    Supports:
+      @path/to/file.py       - single file
+      @path/to/file.py:10-20 - line range (1-indexed, inclusive)
+
+    Returns the original user_input unchanged (keeps @path visible to LLM).
+    """
+    pattern = r'@([\w./\-_]+(?:\.\w+)?)(?::(\d+)-(\d+))?'
+
+    for match in _re.finditer(pattern, user_input):
+        file_path_str = match.group(1)
+        line_start = int(match.group(2)) if match.group(2) else None
+        line_end = int(match.group(3)) if match.group(3) else None
+
+        ref_key = match.group(0)
+        if ref_key in session.context_files:
+            continue
+
+        file_path = Path(file_path_str).expanduser()
+        if not file_path.exists():
+            console.print(f"[yellow]@ref file not found: {file_path}[/yellow]")
+            continue
+        if not file_path.is_file():
+            console.print(f"[yellow]@ref is not a file: {file_path}[/yellow]")
+            continue
+
+        try:
+            full_content = file_path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            console.print(f"[yellow]@ref read failed: {file_path} ({exc})[/yellow]")
+            continue
+
+        if line_start is not None and line_end is not None:
+            lines = full_content.splitlines()
+            selected = lines[max(0, line_start - 1):line_end]
+            content = "\n".join(selected)
+            display_key = f"{file_path}:{line_start}-{line_end}"
+        else:
+            max_chars = 10000
+            if len(full_content) > max_chars:
+                content = (
+                    full_content[:max_chars]
+                    + f"\n... (truncated, {len(full_content)} chars total"
+                    + f", use @{file_path_str}:start-end for a range)"
+                )
+            else:
+                content = full_content
+            display_key = str(file_path)
+
+        session.context_files[display_key] = content
+        console.print(f"[dim]+ context: {display_key} ({len(content)} chars)[/dim]")
+
+    return user_input
 
 
 def _chat_reply(session: StudioSession, llm, user_input: str) -> str:
@@ -185,6 +269,11 @@ def _chat_reply(session: StudioSession, llm, user_input: str) -> str:
     ]
     if quickstart_context:
         system_parts.append("\n以下是 AgenticX 参考资料：\n" + quickstart_context)
+
+    context_block = _build_context_block(session)
+    if context_block:
+        system_parts.append("\n\n" + context_block)
+
     messages: List[Dict[str, str]] = [{"role": "system", "content": "".join(system_parts)}]
     messages.extend(session.chat_history[-6:])
     messages.append({"role": "user", "content": user_input})
@@ -235,6 +324,54 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
             continue
         if user_input.startswith("/image"):
             _handle_image_command(session, user_input)
+            continue
+        if user_input.startswith("/ctx"):
+            parts = user_input.split(maxsplit=2)
+            subcmd = parts[1] if len(parts) > 1 else ""
+            if subcmd == "list":
+                if not session.context_files:
+                    console.print("[yellow]No context files.[/yellow]")
+                else:
+                    ctx_table = Table(title="Context Files")
+                    ctx_table.add_column("File", style="bold")
+                    ctx_table.add_column("Size")
+                    for fpath, content in session.context_files.items():
+                        ctx_table.add_row(fpath, f"{len(content)} chars")
+                    console.print(ctx_table)
+            elif subcmd == "clear":
+                cleared = len(session.context_files)
+                session.context_files.clear()
+                console.print(f"[green]Cleared {cleared} context file(s).[/green]")
+            elif subcmd == "add" and len(parts) > 2:
+                fpath_str = parts[2].strip()
+                fpath = Path(fpath_str).expanduser()
+                if not fpath.exists():
+                    console.print(f"[red]File not found: {fpath}[/red]")
+                elif not fpath.is_file():
+                    console.print(f"[red]Not a file: {fpath}[/red]")
+                else:
+                    try:
+                        content = fpath.read_text(encoding="utf-8", errors="replace")
+                        max_chars = 10000
+                        if len(content) > max_chars:
+                            content = content[:max_chars] + f"\n... (truncated, {len(content)} chars total)"
+                        session.context_files[str(fpath)] = content
+                        console.print(f"[green]Added context:[/green] {fpath} ({len(content)} chars)")
+                    except OSError as exc:
+                        console.print(f"[red]Read failed:[/red] {exc}")
+            elif subcmd == "remove" and len(parts) > 2:
+                fpath_str = parts[2].strip()
+                removed = False
+                for key in list(session.context_files.keys()):
+                    if fpath_str in key:
+                        del session.context_files[key]
+                        console.print(f"[green]Removed:[/green] {key}")
+                        removed = True
+                        break
+                if not removed:
+                    console.print(f"[yellow]No matching context file: {fpath_str}[/yellow]")
+            else:
+                console.print("[yellow]Usage: /ctx add <path> | /ctx list | /ctx remove <path> | /ctx clear[/yellow]")
             continue
         if user_input == "/save":
             if not session.artifacts:
@@ -290,6 +427,7 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
         except Exception as exc:
             console.print(f"[red]模型配置错误:[/red] {exc}")
             continue
+        user_input = _resolve_at_references(session, user_input)
         classifier = IntentClassifier(provider=llm)
         intent = classifier.classify_intent(user_input)
         if intent in {IntentType.CHAT, IntentType.QUESTION}:
@@ -323,6 +461,8 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
                 context["previous_code"] = previous_code
         if session.image_b64:
             context["image_b64"] = [dict(image) for image in session.image_b64]
+        if session.context_files:
+            context["reference_files"] = dict(session.context_files)
         try:
             with console.status("[cyan]正在生成代码...[/cyan]", spinner="dots"):
                 generated = engine.generate(target=target, description=user_input, context=context)

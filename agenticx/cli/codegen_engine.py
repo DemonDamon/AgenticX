@@ -78,8 +78,15 @@ class CodeGenEngine:
                         "```",
                     ]
                 )
+            reference_files = context.get("reference_files")
+            if isinstance(reference_files, dict) and reference_files:
+                prompt_parts.append("\nUser-referenced files:")
+                for fpath, content in reference_files.items():
+                    prompt_parts.append(f"\n--- {fpath} ---\n{content}")
             extra_context = {
-                key: value for key, value in context.items() if key not in {"previous_code", "image_b64"}
+                key: value
+                for key, value in context.items()
+                if key not in {"previous_code", "image_b64", "reference_files"}
             }
             if extra_context:
                 prompt_parts.extend(["", "## Context", str(extra_context)])
