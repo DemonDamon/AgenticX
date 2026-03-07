@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agenticx"
-dynamic = ["version"]
+version = "0.3.0"
 description = "A unified, scalable, production-ready multi-agent application development framework"
 authors = [
     {name = "Ziran Li", email = "bingzhenli@hotmail.com"},
@@ -192,9 +192,6 @@ Discussions = "https://github.com/DemonDamon/AgenticX/discussions"
 [project.scripts]
 agenticx = "agenticx.cli.main:main"
 agx = "agenticx.cli.main:main"
-
-[tool.setuptools.dynamic]
-version = {attr = "agenticx.__version__"}
 
 [tool.setuptools.packages.find]
 # 只包含 agenticx 包，排除所有其他目录
