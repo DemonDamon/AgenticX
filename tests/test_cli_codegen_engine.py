@@ -54,3 +54,18 @@ def test_codegen_engine_generates_agent_code():
     assert "from agenticx import Agent, Task" in generated.code
     assert generated.target == "agent"
     assert generated.skill_name == "agenticx-agent-builder"
+
+
+def test_supports_vision_detects_anthropic_claude_model_name():
+    engine = CodeGenEngine(provider=_FakeProvider(model="anthropic/claude-3-5-sonnet"))
+    assert engine.supports_vision() is True
+
+
+def test_build_user_message_uses_image_dict_mime_for_data_url():
+    engine = CodeGenEngine(provider=_FakeProvider(model="anthropic/claude-3-5-sonnet"))
+    message = engine._build_user_message(  # pylint: disable=protected-access
+        description="Generate from image",
+        context={"image_b64": {"data": "ZmFrZQ==", "mime": "image/jpeg"}},
+    )
+    assert isinstance(message["content"], list)
+    assert message["content"][1]["image_url"]["url"] == "data:image/jpeg;base64,ZmFrZQ=="
