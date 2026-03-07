@@ -90,16 +90,13 @@ class ProviderResolver:
         if not kwargs.get("model"):
             raise ValueError(f"Provider '{provider_key}' is missing model configuration")
         if hasattr(provider_cls, "from_config"):
-            cfg = {
-                "model": kwargs.get("model"),
-                "api_key": kwargs.get("api_key"),
-                "base_url": kwargs.get("base_url"),
-                "api_version": kwargs.get("api_version"),
-                "timeout": kwargs.get("timeout"),
-                "max_retries": kwargs.get("max_retries"),
-                "endpoint_id": kwargs.get("endpoint_id"),
-                "secret_key": kwargs.get("secret_key"),
-                "group_id": kwargs.get("group_id"),
-            }
+            cfg: Dict[str, Any] = {}
+            for key in (
+                "model", "api_key", "base_url", "api_version",
+                "timeout", "max_retries", "endpoint_id", "secret_key", "group_id",
+            ):
+                val = kwargs.get(key)
+                if val is not None:
+                    cfg[key] = val
             return provider_cls.from_config(cfg)  # type: ignore[attr-defined]
         return provider_cls(**kwargs)

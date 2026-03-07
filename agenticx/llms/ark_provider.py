@@ -511,7 +511,7 @@ class ArkLLMProvider(BaseLLMProvider):
             model=config.get("model", "doubao-seed-1-6"),
             api_key=config.get("api_key"),
             endpoint_id=config.get("endpoint_id"),
-            base_url=config.get("base_url", DEFAULT_ARK_BASE_URL),
+            base_url=config.get("base_url") or DEFAULT_ARK_BASE_URL,
             timeout=config.get("timeout", 120.0),
             max_retries=config.get("max_retries", 3),
             temperature=config.get("temperature", 0.7),
