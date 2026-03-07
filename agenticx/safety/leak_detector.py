@@ -145,6 +145,21 @@ class LeakDetector:
         except ImportError:
             self._automaton = None
 
+    @property
+    def patterns(self) -> list[LeakPattern]:
+        """Return a copy of current patterns."""
+        return list(self._patterns)
+
+    def add_pattern(self, pattern: LeakPattern) -> None:
+        """Add a pattern at runtime and rebuild prefix index."""
+        self._patterns.append(pattern)
+        self._build_prefix_index()
+
+    def remove_pattern(self, name: str) -> None:
+        """Remove a pattern by name at runtime and rebuild prefix index."""
+        self._patterns = [p for p in self._patterns if p.name != name]
+        self._build_prefix_index()
+
     def scan(self, content: Optional[str]) -> LeakScanResult:
         """Scan content for secret leaks."""
         if not content:

@@ -91,6 +91,19 @@ class Policy:
         if extra_rules:
             self._rules.extend(extra_rules)
 
+    @property
+    def rules(self) -> list[PolicyRule]:
+        """Return a copy of current rules."""
+        return list(self._rules)
+
+    def add_rule(self, rule: PolicyRule) -> None:
+        """Add a rule at runtime."""
+        self._rules.append(rule)
+
+    def remove_rule(self, rule_id: str) -> None:
+        """Remove a rule by ID at runtime."""
+        self._rules = [r for r in self._rules if r.id != rule_id]
+
     def check(self, content: Optional[str]) -> PolicyCheckResult:
         """Check content against all policy rules."""
         if not content:
