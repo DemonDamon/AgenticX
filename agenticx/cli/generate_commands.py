@@ -17,6 +17,7 @@ from rich.console import Console
 import typer
 
 from agenticx.cli.codegen_engine import CodeGenEngine, infer_output_path, write_generated_file
+from agenticx.cli.log_config import configure_cli_logging
 from agenticx.llms.provider_resolver import ProviderResolver
 
 
@@ -35,6 +36,7 @@ def _run_generation(
     interactive: bool = False,
     context: Optional[Dict[str, Any]] = None,
 ) -> None:
+    configure_cli_logging(debug=False)
     try:
         llm = ProviderResolver.resolve(provider_name=provider, model=model)
     except Exception as exc:
