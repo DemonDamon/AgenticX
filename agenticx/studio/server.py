@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from agenticx.llms.provider_resolver import ProviderResolver
@@ -17,15 +19,31 @@ from agenticx.studio.session_manager import SessionManager
 
 def create_studio_app() -> FastAPI:
     app = FastAPI(title="AgenticX Studio Service", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "null"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     manager = SessionManager()
     app.state.session_manager = manager
+    desktop_token = os.getenv("AGX_DESKTOP_TOKEN", "").strip()
+
+    def _check_token(x_agx_desktop_token: str | None) -> None:
+        if not desktop_token:
+            return
+        if x_agx_desktop_token != desktop_token:
+            raise HTTPException(status_code=401, detail="invalid desktop token")
 
     @app.get("/api/session", response_model=SessionState)
     async def get_or_create_session(
         session_id: str | None = Query(default=None),
         provider: str | None = Query(default=None),
         model: str | None = Query(default=None),
+        x_agx_desktop_token: str | None = Header(default=None),
     ) -> SessionState:
+        _check_token(x_agx_desktop_token)
         manager.cleanup_expired()
         managed = manager.get(session_id) if session_id else None
         if managed is None:
@@ -40,7 +58,11 @@ def create_studio_app() -> FastAPI:
         )
 
     @app.get("/api/artifacts")
-    async def list_artifacts(session_id: str = Query(...)) -> dict:
+    async def list_artifacts(
+        session_id: str = Query(...),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
         managed = manager.get(session_id)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
@@ -50,14 +72,22 @@ def create_studio_app() -> FastAPI:
         }
 
     @app.delete("/api/session")
-    async def delete_session(session_id: str = Query(...)) -> dict:
+    async def delete_session(
+        session_id: str = Query(...),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
         ok = manager.delete(session_id)
         if not ok:
             raise HTTPException(status_code=404, detail="session not found")
         return {"ok": True}
 
     @app.post("/api/confirm")
-    async def post_confirm(payload: ConfirmResponse) -> dict:
+    async def post_confirm(
+        payload: ConfirmResponse,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
         managed = manager.get(payload.session_id)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
@@ -67,7 +97,11 @@ def create_studio_app() -> FastAPI:
         return {"ok": True}
 
     @app.post("/api/chat")
-    async def chat(payload: ChatRequest) -> StreamingResponse:
+    async def chat(
+        payload: ChatRequest,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> StreamingResponse:
+        _check_token(x_agx_desktop_token)
         managed = manager.get(payload.session_id)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
