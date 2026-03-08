@@ -5,6 +5,7 @@
     "strict": true,
     "outDir": "../dist-electron",
     "esModuleInterop": true,
+    "skipLibCheck": true,
     "types": ["node", "electron"]
   },
   "include": ["*.ts"]

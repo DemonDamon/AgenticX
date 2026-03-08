@@ -7,21 +7,32 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"wait-on tcp:5173 && electron .\"",
     "build": "vite build && tsc -p electron/tsconfig.json",
-    "start": "electron ."
+    "start": "electron .",
+    "build:mac": "npm run build && electron-builder --mac",
+    "build:win": "npm run build && electron-builder --win",
+    "build:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
+    "whisper-wasm": "^0.0.1",
+    "prismjs": "^1.29.0",
     "react": "^18.3.1",
+    "react-markdown": "^9.0.1",
     "react-dom": "^18.3.1",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.51.1",
     "@types/node": "^22.13.14",
+    "@types/prismjs": "^1.26.5",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.2",
     "electron": "^34.0.2",
     "electron-builder": "^25.1.8",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
     "typescript": "^5.8.2",
     "vite": "^6.2.1",
     "wait-on": "^8.0.3"
