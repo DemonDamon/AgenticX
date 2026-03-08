@@ -24,6 +24,22 @@ from agenticx.cli.codegen_engine import CodeGenEngine, infer_output_path, write_
 from agenticx.cli.intent_classifier import IntentClassifier, IntentType
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.tools.skill_bundle import SkillBundleLoader
+from agenticx.cli.studio_mcp import (
+    load_available_servers,
+    mcp_list_servers,
+    mcp_connect,
+    mcp_disconnect,
+    mcp_show_tools,
+    mcp_call_tool,
+    build_mcp_tools_context,
+)
+from agenticx.cli.studio_skill import (
+    skill_list,
+    skill_search,
+    skill_use,
+    skill_info,
+    get_all_skill_summaries,
+)
 
 
 console = Console()
@@ -41,6 +57,10 @@ class StudioSession:
     image_b64: List[Dict[str, str]] = field(default_factory=list)
     chat_history: List[Dict[str, str]] = field(default_factory=list)
     context_files: Dict[str, str] = field(default_factory=dict)
+    # MCP state
+    mcp_hub: Optional[object] = None  # MCPHub instance (lazy init)
+    mcp_configs: Dict[str, object] = field(default_factory=dict)  # name -> MCPServerConfig
+    connected_servers: set = field(default_factory=set)
 
 
 @dataclass
@@ -93,6 +113,16 @@ def _print_header(session: StudioSession) -> None:
     command_table.add_row("/ctx list", "查看当前上下文文件")
     command_table.add_row("/ctx remove <path>", "移除指定上下文文件")
     command_table.add_row("/ctx clear", "清空所有上下文文件")
+    command_table.add_row("/mcp list", "查看可用的 MCP 服务器")
+    command_table.add_row("/mcp connect <name>", "连接 MCP 服务器并发现工具")
+    command_table.add_row("/mcp disconnect <name>", "断开 MCP 服务器")
+    command_table.add_row("/mcp tools", "查看所有已连接的 MCP 工具")
+    command_table.add_row("/mcp call <tool> <json>", "调用 MCP 工具")
+    command_table.add_row("/skill list", "查看可用的 Skills")
+    command_table.add_row("/skill search <query>", "搜索 Skill 注册中心")
+    command_table.add_row("/skill use <name>", "激活 Skill 到上下文")
+    command_table.add_row("/skill info <name>", "查看 Skill 详情")
+    command_table.add_row("/discover <描述>", "智能推荐 MCP + Skill")
     command_table.add_row("/config [provider] [model]", "查看或修改模型配置")
     command_table.add_row("/exit", "退出 Studio")
 
@@ -274,6 +304,12 @@ def _chat_reply(session: StudioSession, llm, user_input: str) -> str:
     if context_block:
         system_parts.append("\n\n" + context_block)
 
+    # Inject MCP tools info into chat context
+    if session.mcp_hub is not None:
+        mcp_context = build_mcp_tools_context(session.mcp_hub)
+        if mcp_context:
+            system_parts.append("\n\n" + mcp_context)
+
     messages: List[Dict[str, str]] = [{"role": "system", "content": "".join(system_parts)}]
     messages.extend(session.chat_history[-6:])
     messages.append({"role": "user", "content": user_input})
@@ -294,6 +330,12 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
     """Start interactive studio REPL."""
     session = StudioSession(provider_name=provider, model_name=model)
     _print_header(session)
+
+    # Load available MCP server configs
+    try:
+        session.mcp_configs = load_available_servers()
+    except Exception:
+        session.mcp_configs = {}
 
     while True:
         user_input = input("studio> ").strip()
@@ -372,6 +414,129 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
                     console.print(f"[yellow]No matching context file: {fpath_str}[/yellow]")
             else:
                 console.print("[yellow]Usage: /ctx add <path> | /ctx list | /ctx remove <path> | /ctx clear[/yellow]")
+            continue
+        if user_input.startswith("/mcp"):
+            parts = user_input.split(maxsplit=2)
+            subcmd = parts[1] if len(parts) > 1 else ""
+            if subcmd == "list":
+                mcp_list_servers(session.mcp_configs, session.connected_servers)
+            elif subcmd == "connect" and len(parts) > 2:
+                server_name = parts[2].strip()
+                if session.mcp_hub is None:
+                    from agenticx.tools.mcp_hub import MCPHub
+                    session.mcp_hub = MCPHub(clients=[], auto_mode=False)
+                mcp_connect(session.mcp_hub, session.mcp_configs, session.connected_servers, server_name)
+            elif subcmd == "disconnect" and len(parts) > 2:
+                server_name = parts[2].strip()
+                if session.mcp_hub is not None:
+                    mcp_disconnect(session.mcp_hub, session.mcp_configs, session.connected_servers, server_name)
+                else:
+                    console.print("[yellow]暂无 MCP 连接。[/yellow]")
+            elif subcmd == "tools":
+                if session.mcp_hub is not None:
+                    mcp_show_tools(session.mcp_hub)
+                else:
+                    console.print("[yellow]暂无 MCP 连接。使用 /mcp connect <name> 连接。[/yellow]")
+            elif subcmd == "call" and len(parts) > 2:
+                call_parts = parts[2].strip().split(maxsplit=1)
+                tool_name = call_parts[0]
+                args_json = call_parts[1] if len(call_parts) > 1 else "{}"
+                if session.mcp_hub is not None:
+                    result = mcp_call_tool(session.mcp_hub, tool_name, args_json)
+                    if result:
+                        session.chat_history.append({"role": "user", "content": f"/mcp call {tool_name}"})
+                        session.chat_history.append({"role": "assistant", "content": f"MCP 工具 {tool_name} 返回:\n{result[:500]}"})
+                else:
+                    console.print("[yellow]暂无 MCP 连接。[/yellow]")
+            else:
+                console.print("[yellow]用法: /mcp list | /mcp connect <name> | /mcp disconnect <name> | /mcp tools | /mcp call <tool> <json>[/yellow]")
+            continue
+        if user_input.startswith("/skill"):
+            parts = user_input.split(maxsplit=2)
+            subcmd = parts[1] if len(parts) > 1 else ""
+            if subcmd == "list":
+                skill_list()
+            elif subcmd == "search" and len(parts) > 2:
+                skill_search(parts[2].strip())
+            elif subcmd == "use" and len(parts) > 2:
+                skill_use(session.context_files, parts[2].strip())
+            elif subcmd == "info" and len(parts) > 2:
+                skill_info(parts[2].strip())
+            else:
+                console.print("[yellow]用法: /skill list | /skill search <query> | /skill use <name> | /skill info <name>[/yellow]")
+            continue
+        if user_input.startswith("/discover"):
+            discover_desc = user_input[len("/discover"):].strip()
+            if not discover_desc:
+                console.print("[yellow]用法: /discover <描述你想做什么>[/yellow]")
+                continue
+            try:
+                llm = ProviderResolver.resolve(
+                    provider_name=session.provider_name,
+                    model=session.model_name,
+                )
+            except Exception as exc:
+                console.print(f"[red]模型配置错误:[/red] {exc}")
+                continue
+            mcp_server_names = list(session.mcp_configs.keys()) if session.mcp_configs else []
+            skill_summaries = []
+            try:
+                skill_summaries = get_all_skill_summaries()
+            except Exception:
+                pass
+            discover_prompt = (
+                "你是一个智能推荐助手。根据用户描述，推荐合适的 MCP 服务器和 Skills。\n"
+                "只能从以下列表中推荐，不要编造不存在的。\n\n"
+                f"可用 MCP 服务器: {', '.join(mcp_server_names) or '(无)'}\n"
+                f"可用 Skills:\n"
+            )
+            for s in skill_summaries:
+                discover_prompt += f"  - {s['name']}: {s['description']}\n"
+            discover_prompt += (
+                f"\n用户需求: {discover_desc}\n\n"
+                "请返回 JSON 格式:\n"
+                '{"recommended_mcps": ["server_name1"], "recommended_skills": ["skill_name1"], "reason": "推荐理由"}\n'
+                "如果没有合适的推荐，对应数组留空。"
+            )
+            messages = [
+                {"role": "system", "content": "你是智能推荐助手，只输出 JSON。"},
+                {"role": "user", "content": discover_prompt},
+            ]
+            try:
+                response = llm.invoke(messages, temperature=0.2, max_tokens=512)
+                import json as _json
+                import re as _discover_re
+                text = response.content.strip()
+                json_match = _discover_re.search(r'\{.*\}', text, _discover_re.DOTALL)
+                if json_match:
+                    rec = _json.loads(json_match.group())
+                else:
+                    rec = _json.loads(text)
+                rec_mcps = rec.get("recommended_mcps", [])
+                rec_skills = rec.get("recommended_skills", [])
+                reason = rec.get("reason", "")
+                console.print(f"\n[bold cyan]推荐结果[/bold cyan]")
+                if reason:
+                    console.print(f"[dim]{reason}[/dim]")
+                if rec_mcps:
+                    console.print(f"  MCP: {', '.join(rec_mcps)}")
+                if rec_skills:
+                    console.print(f"  Skills: {', '.join(rec_skills)}")
+                if not rec_mcps and not rec_skills:
+                    console.print("[yellow]没有找到匹配的推荐。[/yellow]")
+                    continue
+                confirm = input("是否自动连接推荐的 MCP 并激活推荐的 Skill？[y/n] ").strip().lower()
+                if confirm in {"y", "yes", "是"}:
+                    for mcp_name in rec_mcps:
+                        if mcp_name in session.mcp_configs:
+                            if session.mcp_hub is None:
+                                from agenticx.tools.mcp_hub import MCPHub
+                                session.mcp_hub = MCPHub(clients=[], auto_mode=False)
+                            mcp_connect(session.mcp_hub, session.mcp_configs, session.connected_servers, mcp_name)
+                    for skill_name in rec_skills:
+                        skill_use(session.context_files, skill_name)
+            except Exception as exc:
+                console.print(f"[red]推荐失败:[/red] {exc}")
             continue
         if user_input == "/save":
             if not session.artifacts:
@@ -463,6 +628,10 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
             context["image_b64"] = [dict(image) for image in session.image_b64]
         if session.context_files:
             context["reference_files"] = dict(session.context_files)
+        if session.mcp_hub is not None:
+            mcp_context = build_mcp_tools_context(session.mcp_hub)
+            if mcp_context:
+                context["mcp_tools"] = mcp_context
         try:
             with console.status("[cyan]正在生成代码...[/cyan]", spinner="dots"):
                 generated = engine.generate(target=target, description=user_input, context=context)
