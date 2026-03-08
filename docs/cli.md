@@ -234,7 +234,7 @@ agx --version
 
 ### serve
 
-启动 AgenticX API 服务器，含生产级中间件与健康探针。
+启动 AgenticX Studio 服务（SSE 事件流），同时可被 Desktop 客户端复用。
 
 ```bash
 agx serve [OPTIONS]
@@ -261,13 +261,41 @@ agx serve --port 8000 --reload
 
 启动后可访问以下端点：
 
-- `GET /health` — 综合健康检查
-- `GET /health/live` — 存活探针
-- `GET /health/ready` — 就绪探针
-- `POST /tasks/submit` — 提交任务
-- `POST /api/login` — 登录
+- `GET /api/session` — 创建或获取会话
+- `POST /api/chat` — SSE 流式执行（token/tool/confirm/final）
+- `POST /api/confirm` — 确认高风险工具调用
+- `GET /api/artifacts` — 查询当前会话产物
+- `DELETE /api/session` — 重置会话
 
-> 需要依赖：`pip install "agenticx[server]"`
+---
+
+## 🖥️ 桌面版（Desktop）
+
+`desktop/` 使用 Electron + React，面向 macOS Alpha 阶段，默认由主进程自动拉起 `agx serve` 并通过 IPC 注入 API base URL。
+
+### 启动桌面端
+
+```bash
+cd desktop
+npm install
+npm run dev
+```
+
+### 打包桌面端
+
+```bash
+cd desktop
+npm run build:mac
+```
+
+### 桌面端能力
+
+- 悬浮球（拖拽、状态、右键菜单）
+- Sidebar 对话流（支持工具调用事件展示）
+- ConfirmDialog（替代 `window.confirm`）
+- CodePreview（语法高亮）
+- SettingsPanel（provider/model/api key）
+- 语音链路（STT/TTS/唤醒词/打断，含 fallback）
 
 ### run
 
@@ -1657,6 +1685,63 @@ studio> /save
 ✅ Saved agents/stock_analyst.py
 
 studio> /exit
+```
+
+#### Studio Agent Loop 架构
+
+从当前版本开始，`agx studio` 的自然语言输入通过 **Agent Loop** 执行，而不是直接走单次代码生成。执行链路如下：
+
+1. 组装系统提示词：注入会话 artifacts、`/ctx` 上下文、已连接 MCP 工具、可用 skills 摘要，以及安全规则。
+2. 调用模型：以 `tool_choice=auto` 方式让模型决定是直接回答，还是发起工具调用。
+3. 分发工具：每个 tool call 会路由到 `dispatch_tool`，执行后把结果作为 `tool` 消息回注给模型。
+4. 循环收敛：当模型不再返回 `tool_calls` 时结束；若持续调用工具，达到最大轮次后强制停止。
+
+#### Studio 内置工具（11 个）
+
+| 工具名 | 作用 |
+|---|---|
+| `bash_exec` | 在当前工作区执行 shell 命令 |
+| `file_read` | 读取文件内容（可指定行范围） |
+| `file_write` | 整文件写入（写前展示 diff 并确认） |
+| `file_edit` | 文本替换编辑（写前展示 diff 并确认） |
+| `codegen` | 调用 CodeGenEngine 生成代码 |
+| `mcp_connect` | 连接一个 MCP 服务器 |
+| `mcp_call` | 调用已连接 MCP 工具 |
+| `skill_use` | 激活一个 Skill 到上下文 |
+| `skill_list` | 列出可用 Skill 摘要 |
+| `ask_user` | 向用户提问以澄清需求 |
+| `list_files` | 列出目录/文件（支持递归和数量限制） |
+
+#### 安全机制
+
+- `bash_exec` 白名单：白名单命令可直接执行；非白名单命令会先弹确认（拒绝即取消执行）。
+- 文件写入保护：`file_write` / `file_edit` 必须先展示 unified diff，再请求确认后才落盘。
+- 最大轮次保护：Agent Loop 默认最多 10 轮工具调用，超过后自动停止，避免无限循环。
+
+#### 典型示例
+
+**1) 自然语言场景（无工具调用）**
+
+```text
+studio> 解释一下什么是 ReAct 模式，并给我一个最小例子
+...（模型直接回答，不触发工具）
+```
+
+**2) Shell 命令场景（bash_exec）**
+
+```text
+studio> 帮我看下当前目录结构，先执行 ls
+↳ 调用工具: bash_exec
+...（白名单命令直接执行并返回 stdout/stderr）
+```
+
+**3) 混合场景（读文件 + 改文件 + 命令验证）**
+
+```text
+studio> 先读 README.md，再把标题改成 AgenticX Studio Guide，最后运行 python -m pytest -q tests/test_cli_studio.py
+↳ 调用工具: file_read
+↳ 调用工具: file_edit   # 先展示 diff，再确认
+↳ 调用工具: bash_exec   # 执行验证命令
 ```
 
 #### Studio 特性说明
