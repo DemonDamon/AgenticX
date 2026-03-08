@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Menu, Tray } from "electron";
+import fs from "node:fs";
 import path from "node:path";
 
 let mainWindow: BrowserWindow | null = null;
@@ -18,7 +19,11 @@ function createWindow(): void {
 }
 
 function createTray(): void {
-  tray = new Tray(path.join(__dirname, "trayTemplate.png"));
+  const iconPath = path.join(__dirname, "trayTemplate.png");
+  if (!fs.existsSync(iconPath)) {
+    return;
+  }
+  tray = new Tray(iconPath);
   const menu = Menu.buildFromTemplate([
     { label: "打开侧边栏", click: () => mainWindow?.show() },
     { label: "设置", click: () => mainWindow?.webContents.send("open-settings") },

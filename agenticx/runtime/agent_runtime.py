@@ -7,6 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 import json
+import asyncio
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
 
 from agenticx.cli.agent_tools import STUDIO_TOOLS, dispatch_tool_async
@@ -192,23 +193,34 @@ class AgentRuntime:
                     type=EventType.TOOL_CALL.value,
                     data={"name": tool_name, "arguments": arguments, "tool_call_id": tool_call_id},
                 )
-                pending_events: List[Dict[str, Any]] = []
+                pending_events: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
 
                 async def _on_tool_event(event_payload: Dict[str, Any]) -> None:
-                    pending_events.append(event_payload)
+                    pending_events.put_nowait(event_payload)
 
-                result = await dispatch_tool_async(
-                    tool_name,
-                    arguments,
-                    session,
-                    confirm_gate=self.confirm_gate,
-                    event_callback=_on_tool_event,
-                )
-                for emitted in pending_events:
-                    yield RuntimeEvent(
-                        type=str(emitted.get("type", "")),
-                        data=dict(emitted.get("data", {})),
+                dispatch_task = asyncio.create_task(
+                    dispatch_tool_async(
+                        tool_name,
+                        arguments,
+                        session,
+                        confirm_gate=self.confirm_gate,
+                        event_callback=_on_tool_event,
                     )
+                )
+
+                while True:
+                    if dispatch_task.done() and pending_events.empty():
+                        break
+                    try:
+                        emitted = await asyncio.wait_for(pending_events.get(), timeout=0.05)
+                        yield RuntimeEvent(
+                            type=str(emitted.get("type", "")),
+                            data=dict(emitted.get("data", {})),
+                        )
+                    except asyncio.TimeoutError:
+                        continue
+
+                result = await dispatch_task
                 messages.append(
                     {
                         "role": "tool",
