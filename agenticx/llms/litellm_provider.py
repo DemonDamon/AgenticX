@@ -193,7 +193,25 @@ class LiteLLMProvider(BaseLLMProvider):
         
         main_content = choices[0].content if choices else ""
 
-        # 安全地获取成本信息
+        # Extract tool_calls from the first choice's message
+        raw_tool_calls = None
+        if response.choices:
+            msg = getattr(response.choices[0], "message", None)
+            if msg is not None:
+                tc_list = getattr(msg, "tool_calls", None)
+                if tc_list:
+                    raw_tool_calls = []
+                    for tc in tc_list:
+                        raw_tool_calls.append({
+                            "id": getattr(tc, "id", ""),
+                            "type": getattr(tc, "type", "function"),
+                            "function": {
+                                "name": getattr(getattr(tc, "function", None), "name", ""),
+                                "arguments": getattr(getattr(tc, "function", None), "arguments", "{}"),
+                            },
+                        })
+
+        # Safely retrieve cost information
         cost = 0.0
         if hasattr(response, 'completion_cost'):
             cost = float(response.completion_cost) if response.completion_cost else 0.0
@@ -214,7 +232,8 @@ class LiteLLMProvider(BaseLLMProvider):
             metadata={
                 "_response_ms": getattr(response, "_response_ms", None),
                 "custom_llm_provider": getattr(response, "custom_llm_provider", None),
-            }
+            },
+            tool_calls=raw_tool_calls,
         )
 
     def generate(self, prompt: Union[str, List[Dict]], **kwargs) -> str:

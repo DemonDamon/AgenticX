@@ -264,6 +264,24 @@ class ArkLLMProvider(BaseLLMProvider):
 
         main_content = choices[0].content if choices else ""
 
+        # Extract tool_calls from the first choice's message
+        raw_tool_calls = None
+        if response.choices:
+            msg = getattr(response.choices[0], "message", None)
+            if msg is not None:
+                tc_list = getattr(msg, "tool_calls", None)
+                if tc_list:
+                    raw_tool_calls = []
+                    for tc in tc_list:
+                        raw_tool_calls.append({
+                            "id": getattr(tc, "id", ""),
+                            "type": getattr(tc, "type", "function"),
+                            "function": {
+                                "name": getattr(getattr(tc, "function", None), "name", ""),
+                                "arguments": getattr(getattr(tc, "function", None), "arguments", "{}"),
+                            },
+                        })
+
         return LLMResponse(
             id=response.id,
             model_name=response.model,
@@ -277,6 +295,7 @@ class ArkLLMProvider(BaseLLMProvider):
                 "endpoint_id": self.endpoint_id,
                 "base_url": self.base_url,
             },
+            tool_calls=raw_tool_calls,
         )
 
     def invoke(
