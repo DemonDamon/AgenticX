@@ -16,6 +16,7 @@ from agenticx.cli.studio import (
     HistoryRecord,
     StudioSession,
     _handle_image_command,
+    _resolve_at_references,
     _restore_last_snapshot,
     _take_snapshot,
 )
@@ -91,11 +92,6 @@ def test_run_studio_chat_input_does_not_call_codegen(monkeypatch) -> None:
     monkeypatch.setattr("builtins.input", lambda _: next(inputs))
     monkeypatch.setattr(studio_module.ProviderResolver, "resolve", lambda **_: _FakeProvider(model="fake-model"))
 
-    def _raise_if_called(*args, **kwargs):
-        raise AssertionError("CodeGenEngine.generate should not be called for chat input")
-
-    monkeypatch.setattr(studio_module.CodeGenEngine, "generate", _raise_if_called)
-
     studio_module.run_studio()
 
 
@@ -106,30 +102,62 @@ def test_run_studio_question_input_does_not_call_codegen(monkeypatch) -> None:
     monkeypatch.setattr("builtins.input", lambda _: next(inputs))
     monkeypatch.setattr(studio_module.ProviderResolver, "resolve", lambda **_: _FakeProvider(model="fake-model"))
 
-    def _raise_if_called(*args, **kwargs):
-        raise AssertionError("CodeGenEngine.generate should not be called for question input")
-
-    monkeypatch.setattr(studio_module.CodeGenEngine, "generate", _raise_if_called)
-
     studio_module.run_studio()
 
 
-def test_run_studio_generate_input_calls_codegen(monkeypatch) -> None:
+def test_run_studio_generate_input_routes_to_agent_loop(monkeypatch) -> None:
     from agenticx.cli import studio as studio_module
-    from agenticx.cli.codegen_engine import GeneratedCode
+    from agenticx.cli import agent_loop as agent_loop_module
 
     inputs = iter(["帮我创建一个Agent", "/exit"])
     monkeypatch.setattr("builtins.input", lambda _: next(inputs))
-    monkeypatch.setattr(studio_module.ProviderResolver, "resolve", lambda **_: _FakeProvider(model="fake-model"))
-
+    monkeypatch.setattr(studio_module, "_print_header", lambda _session: None)
+    monkeypatch.setattr(studio_module.ProviderResolver, "resolve", lambda **_: object())
     called = {"count": 0}
 
-    def _fake_generate(self, target, description, context):
+    def _fake_run_agent_loop(_session, _llm, _user_input):
         called["count"] += 1
-        return GeneratedCode(code="print('ok')\n", target=target, description=description, skill_name="x")
+        return "ok"
 
-    monkeypatch.setattr(studio_module.CodeGenEngine, "generate", _fake_generate)
-    monkeypatch.setattr(studio_module, "_print_artifact", lambda *_: None)
+    monkeypatch.setattr(agent_loop_module, "run_agent_loop", _fake_run_agent_loop)
 
     studio_module.run_studio()
     assert called["count"] == 1
+
+
+def test_run_studio_takes_snapshot_before_agent_loop_for_undo(monkeypatch) -> None:
+    from agenticx.cli import studio as studio_module
+    from agenticx.cli import agent_loop as agent_loop_module
+
+    inputs = iter(["普通输入", "/undo", "/exit"])
+    monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+    monkeypatch.setattr(studio_module, "_print_header", lambda _session: None)
+    monkeypatch.setattr(studio_module.ProviderResolver, "resolve", lambda **_: object())
+    seen = {"snapshot_before_loop": False}
+    captured_session = {"value": None}
+
+    def _fake_run_agent_loop(session, _llm, _user_input):
+        captured_session["value"] = session
+        seen["snapshot_before_loop"] = len(session.snapshots) == 1
+        session.context_files["temp.txt"] = "temp-content"
+        return "loop-ok"
+
+    monkeypatch.setattr(agent_loop_module, "run_agent_loop", _fake_run_agent_loop)
+    studio_module.run_studio()
+
+    assert seen["snapshot_before_loop"] is True
+    assert captured_session["value"] is not None
+    assert captured_session["value"].context_files == {}
+
+
+def test_resolve_at_references_rejects_path_outside_workspace(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "secret.txt"
+    outside.write_text("top-secret", encoding="utf-8")
+    monkeypatch.chdir(workspace)
+
+    session = StudioSession()
+    _resolve_at_references(session, f"请查看 @{outside}")
+
+    assert session.context_files == {}
