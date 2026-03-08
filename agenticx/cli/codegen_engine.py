@@ -83,10 +83,13 @@ class CodeGenEngine:
                 prompt_parts.append("\nUser-referenced files:")
                 for fpath, content in reference_files.items():
                     prompt_parts.append(f"\n--- {fpath} ---\n{content}")
+            mcp_tools = context.get("mcp_tools")
+            if isinstance(mcp_tools, str) and mcp_tools:
+                prompt_parts.append("\n" + mcp_tools)
             extra_context = {
                 key: value
                 for key, value in context.items()
-                if key not in {"previous_code", "image_b64", "reference_files"}
+                if key not in {"previous_code", "image_b64", "reference_files", "mcp_tools"}
             }
             if extra_context:
                 prompt_parts.extend(["", "## Context", str(extra_context)])
