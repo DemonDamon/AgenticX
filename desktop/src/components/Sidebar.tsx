@@ -1,38 +1,59 @@
-import { useState } from "react";
-import { interruptTtsOnUserSpeech } from "../voice/interrupt";
-import { speak } from "../voice/tts";
+import { useMemo, useRef, useState, type KeyboardEventHandler } from "react";
+import ReactMarkdown from "react-markdown";
 
-type Message = { role: "user" | "assistant" | "tool"; content: string };
+import { CodePreview } from "./CodePreview";
+import { useAppStore } from "../store";
+import { interruptOnInterimResult, interruptTtsOnUserSpeech } from "../voice/interrupt";
+import { speak } from "../voice/tts";
+import { startRecording, stopRecording } from "../voice/stt";
 
 type Props = {
-  sessionId: string;
-  onStatusChange: (status: "idle" | "listening" | "processing") => void;
   onClose: () => void;
+  onOpenConfirm: (requestId: string, question: string, diff?: string) => Promise<boolean>;
 };
 
-export function Sidebar({ sessionId, onStatusChange, onClose }: Props) {
-  const [messages, setMessages] = useState<Message[]>([]);
+export function Sidebar({ onClose, onOpenConfirm }: Props) {
+  const apiBase = useAppStore((s) => s.apiBase);
+  const sessionId = useAppStore((s) => s.sessionId);
+  const apiToken = useAppStore((s) => s.apiToken);
+  const messages = useAppStore((s) => s.messages);
+  const addMessage = useAppStore((s) => s.addMessage);
+  const setStatus = useAppStore((s) => s.setStatus);
+  const codePreview = useAppStore((s) => s.codePreview);
+  const setCodePreview = useAppStore((s) => s.setCodePreview);
   const [input, setInput] = useState("");
-  const [preview, setPreview] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
 
-  const send = async () => {
-    if (!input.trim()) return;
-    const value = input.trim();
+  const canSend = useMemo(() => apiBase && sessionId, [apiBase, sessionId]);
+
+  const scrollToBottom = () => {
+    if (listRef.current) {
+      listRef.current.scrollTop = listRef.current.scrollHeight;
+    }
+  };
+
+  const send = async (manualInput?: string) => {
+    const value = (manualInput ?? input).trim();
+    if (!value || !canSend) return;
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: value }]);
-    onStatusChange("processing");
+    addMessage("user", value);
+    setStatus("processing");
 
-    const resp = await fetch("/api/chat", {
+    const resp = await fetch(`${apiBase}/api/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-agx-desktop-token": apiToken
+      },
       body: JSON.stringify({ session_id: sessionId, user_input: value })
     });
     const reader = resp.body?.getReader();
     const decoder = new TextDecoder();
     if (!reader) {
-      onStatusChange("idle");
+      setStatus("idle");
       return;
     }
+
     let full = "";
     let buffer = "";
     while (true) {
@@ -42,87 +63,120 @@ export function Sidebar({ sessionId, onStatusChange, onClose }: Props) {
       const frames = buffer.split("\n\n");
       buffer = frames.pop() ?? "";
       for (const frame of frames) {
-        const line = frame
-          .split("\n")
-          .find((item) => item.startsWith("data: "));
+        const line = frame.split("\n").find((item) => item.startsWith("data: "));
         if (!line) continue;
-        try {
-          const payload = JSON.parse(line.slice(6));
-          if (payload.type === "token") {
-            full += payload.data?.text ?? "";
-          }
-          if (payload.type === "confirm_required") {
-            const ok = window.confirm(payload.data?.question ?? "是否确认执行？");
-            await fetch("/api/confirm", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                session_id: sessionId,
-                request_id: payload.data?.id,
-                approved: ok
-              })
-            });
-          }
-          if (payload.type === "tool_call") {
-            setMessages((prev) => [
-              ...prev,
-              { role: "tool", content: `调用工具: ${payload.data?.name ?? ""}` }
-            ]);
-          }
-          if (payload.type === "final") {
-            full = payload.data?.text ?? full;
-            speak(full);
-          }
-        } catch {
-          // ignore parse errors from partial chunks
+        const payload = JSON.parse(line.slice(6));
+        if (payload.type === "token") {
+          full += payload.data?.text ?? "";
+        }
+        if (payload.type === "tool_call") {
+          addMessage("tool", `调用工具: ${payload.data?.name ?? ""}`);
+        }
+        if (payload.type === "confirm_required") {
+          const ok = await onOpenConfirm(
+            payload.data?.id ?? "",
+            payload.data?.question ?? "是否确认执行？",
+            payload.data?.context?.diff
+          );
+          await fetch(`${apiBase}/api/confirm`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-agx-desktop-token": apiToken
+            },
+            body: JSON.stringify({
+              session_id: sessionId,
+              request_id: payload.data?.id,
+              approved: ok
+            })
+          });
+        }
+        if (payload.type === "final") {
+          full = payload.data?.text ?? full;
         }
       }
+      scrollToBottom();
     }
-    setMessages((prev) => [...prev, { role: "assistant", content: full || "(empty)" }]);
-    setPreview(full);
-    onStatusChange("idle");
+
+    addMessage("assistant", full || "(empty)");
+    setCodePreview(full);
+    speak(full || "");
+    setStatus("idle");
+    scrollToBottom();
+  };
+
+  const onKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void send();
+    }
+  };
+
+  const onMicClick = () => {
+    setStatus("listening");
+    void startRecording(
+      async (text) => {
+        setStatus("processing");
+        await send(text);
+      },
+      (interim) => interruptOnInterimResult(interim)
+    );
+    window.setTimeout(() => {
+      stopRecording();
+    }, 3500);
   };
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        right: 0,
-        top: 0,
-        width: 380,
-        height: "100vh",
-        background: "#121a2d",
-        borderLeft: "1px solid #27304a",
-        display: "grid",
-        gridTemplateRows: "56px 1fr 160px 72px"
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
+    <div className="fixed right-0 top-0 z-20 grid h-screen w-[420px] grid-rows-[56px_1fr_180px_96px] border-l border-border bg-panel">
+      <div className="flex items-center justify-between px-4">
         <strong>AgenticX Sidebar</strong>
-        <button onClick={onClose}>关闭</button>
+        <button className="rounded-md border border-border px-2 py-1 text-xs" onClick={onClose}>
+          关闭
+        </button>
       </div>
-      <div style={{ padding: 12, overflow: "auto" }}>
-        {messages.map((m, idx) => (
-          <div key={idx} style={{ marginBottom: 8, opacity: m.role === "tool" ? 0.8 : 1 }}>
-            <strong>{m.role}:</strong> {m.content}
+
+      <div ref={listRef} className="space-y-3 overflow-auto px-3 py-2">
+        {messages.map((m) => (
+          <div
+            key={m.id}
+            className={
+              m.role === "user"
+                ? "ml-14 rounded-lg bg-cyan-500/25 p-2 text-right"
+                : m.role === "assistant"
+                  ? "mr-14 rounded-lg bg-slate-700/60 p-2"
+                  : "mx-8 rounded-lg border border-border bg-slate-800/60 p-2 text-xs"
+            }
+          >
+            <ReactMarkdown>{m.content}</ReactMarkdown>
           </div>
         ))}
       </div>
-      <div style={{ padding: 12, borderTop: "1px solid #27304a", overflow: "auto" }}>
-        <strong>代码预览</strong>
-        <pre style={{ whiteSpace: "pre-wrap" }}>{preview}</pre>
+
+      <div className="p-3">
+        <CodePreview code={codePreview} />
       </div>
-      <div style={{ display: "flex", gap: 8, padding: 12 }}>
-        <input
+
+      <div className="grid grid-cols-[1fr_auto_auto] gap-2 p-3">
+        <textarea
           value={input}
           onChange={(e) => {
             interruptTtsOnUserSpeech(true);
             setInput(e.target.value);
           }}
-          placeholder="输入需求..."
-          style={{ flex: 1 }}
+          onKeyDown={onKeyDown}
+          placeholder={canSend ? "输入需求，Enter发送，Shift+Enter换行" : "等待会话初始化..."}
+          className="h-20 resize-none rounded-md border border-border bg-slate-900 p-2 text-sm outline-none"
         />
-        <button onClick={send}>发送</button>
+        <button className="rounded-md border border-border px-2 text-xs" onClick={onMicClick}>
+          🎙
+        </button>
+        <button
+          className="rounded-md bg-cyan-400 px-3 text-sm text-black disabled:opacity-50"
+          disabled={!canSend}
+          onClick={() => void send()}
+        >
+          发送
+        </button>
       </div>
     </div>
   );
