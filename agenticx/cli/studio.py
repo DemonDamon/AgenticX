@@ -20,10 +20,8 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
-from agenticx.cli.codegen_engine import CodeGenEngine, infer_output_path, write_generated_file
-from agenticx.cli.intent_classifier import IntentClassifier, IntentType
+from agenticx.cli.codegen_engine import write_generated_file
 from agenticx.llms.provider_resolver import ProviderResolver
-from agenticx.tools.skill_bundle import SkillBundleLoader
 from agenticx.cli.studio_mcp import (
     load_available_servers,
     mcp_list_servers,
@@ -56,6 +54,7 @@ class StudioSession:
     snapshots: List["StudioSnapshot"] = field(default_factory=list)
     image_b64: List[Dict[str, str]] = field(default_factory=list)
     chat_history: List[Dict[str, str]] = field(default_factory=list)
+    agent_messages: List[Dict[str, object]] = field(default_factory=list)
     context_files: Dict[str, str] = field(default_factory=dict)
     # MCP state
     mcp_hub: Optional[object] = None  # MCPHub instance (lazy init)
@@ -91,6 +90,21 @@ def _detect_target(text: str) -> str:
     if "skill" in lowered or "技能" in lowered:
         return "skill"
     return "agent"
+
+
+def _workspace_root() -> Path:
+    return Path.cwd().resolve()
+
+
+def _resolve_workspace_path(path_arg: str) -> Path:
+    workspace = _workspace_root()
+    raw = Path(path_arg).expanduser()
+    resolved = raw.resolve(strict=False) if raw.is_absolute() else (workspace / raw).resolve(strict=False)
+    try:
+        resolved.relative_to(workspace)
+    except ValueError as exc:
+        raise ValueError(f"path escapes workspace: {resolved}") from exc
+    return resolved
 
 
 def _print_header(session: StudioSession) -> None:
@@ -135,7 +149,7 @@ def _print_header(session: StudioSession) -> None:
         )
     )
     console.print(command_table)
-    console.print("[cyan]直接描述需求生成代码，或提问了解 AgenticX 用法。[/cyan]")
+    console.print("[cyan]直接用自然语言描述你想做什么，或输入 shell 命令。[/cyan]")
     console.print("[dim]Tip: use @filepath to reference code files, or /ctx add <path> to add context.[/dim]")
     console.print("")
 
@@ -248,7 +262,11 @@ def _resolve_at_references(session: StudioSession, user_input: str) -> str:
         if ref_key in session.context_files:
             continue
 
-        file_path = Path(file_path_str).expanduser()
+        try:
+            file_path = _resolve_workspace_path(file_path_str)
+        except ValueError as exc:
+            console.print(f"[yellow]@ref rejected: {exc}[/yellow]")
+            continue
         if not file_path.exists():
             console.print(f"[yellow]@ref file not found: {file_path}[/yellow]")
             continue
@@ -283,47 +301,6 @@ def _resolve_at_references(session: StudioSession, user_input: str) -> str:
         console.print(f"[dim]+ context: {display_key} ({len(content)} chars)[/dim]")
 
     return user_input
-
-
-def _chat_reply(session: StudioSession, llm, user_input: str) -> str:
-    """Generate a chat-mode response with streaming output."""
-    quickstart_context = ""
-    try:
-        loader = SkillBundleLoader()
-        quickstart_context = loader.get_skill_content("agenticx-quickstart") or ""
-    except Exception:
-        quickstart_context = ""
-
-    system_parts = [
-        "你是 AgenticX 助手，用中文回答用户关于 AgenticX 的问题。不要生成代码，除非用户明确要求。",
-    ]
-    if quickstart_context:
-        system_parts.append("\n以下是 AgenticX 参考资料：\n" + quickstart_context)
-
-    context_block = _build_context_block(session)
-    if context_block:
-        system_parts.append("\n\n" + context_block)
-
-    # Inject MCP tools info into chat context
-    if session.mcp_hub is not None:
-        mcp_context = build_mcp_tools_context(session.mcp_hub)
-        if mcp_context:
-            system_parts.append("\n\n" + mcp_context)
-
-    messages: List[Dict[str, str]] = [{"role": "system", "content": "".join(system_parts)}]
-    messages.extend(session.chat_history[-6:])
-    messages.append({"role": "user", "content": user_input})
-    full_reply = ""
-    try:
-        for chunk in llm.stream(messages, temperature=0.3, max_tokens=1024):
-            print(chunk, end="", flush=True)
-            full_reply += chunk
-        print()
-    except Exception:
-        response = llm.invoke(messages, temperature=0.3, max_tokens=1024)
-        full_reply = response.content.strip()
-        print(full_reply)
-    return full_reply.strip()
 
 
 def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> None:
@@ -386,7 +363,11 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
                 console.print(f"[green]Cleared {cleared} context file(s).[/green]")
             elif subcmd == "add" and len(parts) > 2:
                 fpath_str = parts[2].strip()
-                fpath = Path(fpath_str).expanduser()
+                try:
+                    fpath = _resolve_workspace_path(fpath_str)
+                except ValueError as exc:
+                    console.print(f"[red]{exc}[/red]")
+                    continue
                 if not fpath.exists():
                     console.print(f"[red]File not found: {fpath}[/red]")
                 elif not fpath.is_file():
@@ -488,7 +469,7 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
                 "你是一个智能推荐助手。根据用户描述，推荐合适的 MCP 服务器和 Skills。\n"
                 "只能从以下列表中推荐，不要编造不存在的。\n\n"
                 f"可用 MCP 服务器: {', '.join(mcp_server_names) or '(无)'}\n"
-                f"可用 Skills:\n"
+                "可用 Skills:\n"
             )
             for s in skill_summaries:
                 discover_prompt += f"  - {s['name']}: {s['description']}\n"
@@ -515,7 +496,7 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
                 rec_mcps = rec.get("recommended_mcps", [])
                 rec_skills = rec.get("recommended_skills", [])
                 reason = rec.get("reason", "")
-                console.print(f"\n[bold cyan]推荐结果[/bold cyan]")
+                console.print("\n[bold cyan]推荐结果[/bold cyan]")
                 if reason:
                     console.print(f"[dim]{reason}[/dim]")
                 if rec_mcps:
@@ -592,64 +573,14 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
         except Exception as exc:
             console.print(f"[red]模型配置错误:[/red] {exc}")
             continue
-        user_input = _resolve_at_references(session, user_input)
-        classifier = IntentClassifier(provider=llm)
-        intent = classifier.classify_intent(user_input)
-        if intent in {IntentType.CHAT, IntentType.QUESTION}:
-            try:
-                reply = _chat_reply(session, llm, user_input)
-            except Exception as exc:
-                console.print(f"[red]对话失败:[/red] {exc}")
-                continue
-            session.chat_history.append({"role": "user", "content": user_input})
-            session.chat_history.append({"role": "assistant", "content": reply})
-            continue
-        if intent == IntentType.UNCLEAR:
-            console.print("你是想让我生成代码，还是有问题要问？输入需求描述开始生成，或直接提问。")
-            continue
-
-        target = _detect_target(user_input)
         _take_snapshot(session)
-        engine = CodeGenEngine(llm)
-        latest_record = session.history[-1] if session.history else None
-        latest_path = latest_record.file_path if latest_record is not None else _latest_artifact_path(session)
-        context: Dict[str, object] = {}
-        can_incremental_edit = (
-            latest_record is not None
-            and latest_record.target == target
-            and latest_path is not None
-            and latest_path in session.artifacts
-        )
-        if can_incremental_edit:
-            previous_code = session.artifacts.get(latest_path)
-            if previous_code:
-                context["previous_code"] = previous_code
-        if session.image_b64:
-            context["image_b64"] = [dict(image) for image in session.image_b64]
-        if session.context_files:
-            context["reference_files"] = dict(session.context_files)
-        if session.mcp_hub is not None:
-            mcp_context = build_mcp_tools_context(session.mcp_hub)
-            if mcp_context:
-                context["mcp_tools"] = mcp_context
+        user_input = _resolve_at_references(session, user_input)
+        from agenticx.cli.agent_loop import run_agent_loop
+
         try:
-            with console.status("[cyan]正在生成代码...[/cyan]", spinner="dots"):
-                generated = engine.generate(target=target, description=user_input, context=context)
+            with console.status("[cyan]正在执行 agent loop...[/cyan]", spinner="dots"):
+                reply = run_agent_loop(session, llm, user_input)
+            if reply:
+                console.print(reply)
         except Exception as exc:
-            console.print(f"[red]生成失败:[/red] {exc}")
-            continue
-        if can_incremental_edit:
-            out_path = latest_path
-        else:
-            out_path = infer_output_path(target=target, description=user_input)
-        session.artifacts[out_path] = generated.code
-        session.history.append(HistoryRecord(description=user_input, file_path=out_path, target=target))
-        # Write to disk immediately (relative to current working directory)
-        try:
-            write_generated_file(out_path, generated.code)
-            abs_path = out_path.resolve()
-            console.print(f"[green]Generated & Saved[/green] {abs_path}")
-        except Exception as write_exc:
-            console.print(f"[green]Generated[/green] {out_path} [yellow](写入失败: {write_exc}，使用 /save 手动保存)[/yellow]")
-        _print_artifact(out_path, generated.code)
-        console.print("[cyan]继续输入需求即可迭代，或使用 /history 查看记录。[/cyan]")
+            console.print(f"[red]执行失败:[/red] {exc}")
