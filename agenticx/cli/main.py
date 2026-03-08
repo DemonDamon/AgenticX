@@ -430,24 +430,17 @@ def serve(
     host: str = typer.Option("0.0.0.0", "--host", help="监听地址"),
     reload: bool = typer.Option(False, "--reload", help="开发模式热重载"),
 ):
-    """启动 AgenticX API 服务器（含生产级中间件与健康探针）"""
+    """启动 Studio FastAPI 服务（SSE 事件流）"""
     try:
-        from agenticx.server import AgentServer, register_api_routes
-        from agenticx.server.middleware import register_production_middlewares, MiddlewareConfig
+        from agenticx.studio.server import create_studio_app
         import uvicorn
     except ImportError as e:
-        console.print(f"[bold red]错误:[/bold red] 缺少依赖，请安装: pip install agenticx[server]\n{e}")
+        console.print(f"[bold red]错误:[/bold red] 缺少依赖，请安装: pip install agenticx\n{e}")
         raise typer.Exit(1)
 
-    app = AgentServer(
-        agent_handler=lambda req: "Hello from AgenticX",
-        model_name="agenticx",
-    ).app
-    register_production_middlewares(app, MiddlewareConfig())
-    register_api_routes(app)
-
-    console.print(f"[bold green]AgenticX API Server[/bold green] http://{host}:{port}")
-    console.print("  /health, /health/live, /health/ready, /tasks/submit, /api/login, ...")
+    app = create_studio_app()
+    console.print(f"[bold green]AgenticX Studio Server[/bold green] http://{host}:{port}")
+    console.print("  GET /api/session, POST /api/chat, POST /api/confirm, GET /api/artifacts")
     uvicorn.run(app, host=host, port=port, reload=reload)
 
 

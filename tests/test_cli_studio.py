@@ -161,3 +161,20 @@ def test_resolve_at_references_rejects_path_outside_workspace(monkeypatch, tmp_p
     _resolve_at_references(session, f"请查看 @{outside}")
 
     assert session.context_files == {}
+
+
+def test_run_studio_trace_command_prints_last_events(monkeypatch) -> None:
+    from agenticx.cli import studio as studio_module
+    from agenticx.cli import agent_loop as agent_loop_module
+
+    inputs = iter(["帮我创建一个Agent", "/trace", "/exit"])
+    monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+    monkeypatch.setattr(studio_module, "_print_header", lambda _session: None)
+    monkeypatch.setattr(studio_module.ProviderResolver, "resolve", lambda **_: object())
+
+    def _fake_run_agent_loop(session, _llm, _user_input):
+        session.last_agent_events = [{"type": "tool_call", "data": {"name": "list_files"}}]
+        return "ok"
+
+    monkeypatch.setattr(agent_loop_module, "run_agent_loop", _fake_run_agent_loop)
+    studio_module.run_studio()

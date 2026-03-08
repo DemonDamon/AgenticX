@@ -7,6 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 from agenticx.cli import agent_loop
+from agenticx.runtime import agent_runtime as runtime_module
 from agenticx.cli.studio import StudioSession
 
 
@@ -24,6 +25,10 @@ class _SingleResponseLLM:
     def invoke(self, *args, **kwargs):
         self.calls += 1
         return self._response
+
+    def stream(self, *args, **kwargs):
+        yield "final "
+        yield "answer"
 
 
 class _AlwaysToolCallLLM:
@@ -45,6 +50,9 @@ class _AlwaysToolCallLLM:
                 }
             ],
         )
+
+    def stream(self, *args, **kwargs):
+        yield ""
 
 
 class _ToolThenFinalLLM:
@@ -69,6 +77,10 @@ class _ToolThenFinalLLM:
             )
         return _FakeResponse(content="最终答复", tool_calls=[])
 
+    def stream(self, *args, **kwargs):
+        yield "最终"
+        yield "答复"
+
 
 def test_run_agent_loop_finishes_without_tool_calls() -> None:
     session = StudioSession()
@@ -89,7 +101,10 @@ def test_run_agent_loop_stops_at_max_rounds(monkeypatch) -> None:
     session = StudioSession()
     llm = _AlwaysToolCallLLM()
 
-    monkeypatch.setattr(agent_loop, "dispatch_tool", lambda *_args, **_kwargs: "tool-ok")
+    async def _fake_dispatch(*_args, **_kwargs):
+        return "tool-ok"
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
     result = agent_loop.run_agent_loop(session, llm, "keep going")
 
     assert "已达到最大工具调用轮数" in result
@@ -100,7 +115,10 @@ def test_run_agent_loop_syncs_tool_messages_to_chat_history(monkeypatch) -> None
     session = StudioSession()
     llm = _ToolThenFinalLLM()
 
-    monkeypatch.setattr(agent_loop, "dispatch_tool", lambda *_args, **_kwargs: "tool-ok")
+    async def _fake_dispatch(*_args, **_kwargs):
+        return "tool-ok"
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
     result = agent_loop.run_agent_loop(session, llm, "请处理")
 
     assert result == "最终答复"
@@ -108,3 +126,12 @@ def test_run_agent_loop_syncs_tool_messages_to_chat_history(monkeypatch) -> None
     assert any("工具调用" in item["content"] for item in session.chat_history if item["role"] == "assistant")
     assert any("tool-ok" in item["content"] for item in session.chat_history if item["role"] == "assistant")
     assert session.chat_history[-1] == {"role": "assistant", "content": "最终答复"}
+
+
+def test_run_agent_loop_streams_text_when_no_tool_call() -> None:
+    session = StudioSession()
+    llm = _SingleResponseLLM(_FakeResponse(content="fallback answer", tool_calls=[]))
+
+    result = agent_loop.run_agent_loop(session, llm, "hello")
+
+    assert result == "final answer"

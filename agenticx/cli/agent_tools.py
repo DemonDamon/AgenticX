@@ -6,29 +6,27 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import json
 import re
 import shlex
 import subprocess
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
-
-from rich.console import Console
-from rich.syntax import Syntax
 
 from agenticx.cli.codegen_engine import CodeGenEngine, infer_output_path, write_generated_file
 from agenticx.cli.studio_mcp import mcp_call_tool, mcp_connect
 from agenticx.cli.studio_skill import get_all_skill_summaries, skill_use as studio_skill_use
 from agenticx.llms.provider_resolver import ProviderResolver
+from agenticx.runtime.confirm import ConfirmGate, SyncConfirmGate
 
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
 else:
     StudioSession = Any
 
-
-console = Console()
 
 SAFE_COMMANDS = {
     "ls",
@@ -253,9 +251,39 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
 ]
 
 
-def _confirm(question: str) -> bool:
-    answer = input(f"{question} [y/N] ").strip().lower()
-    return answer in {"y", "yes", "是"}
+async def _confirm(
+    question: str,
+    *,
+    confirm_gate: ConfirmGate,
+    context: Optional[Dict[str, Any]] = None,
+    emit_event: Optional[Any] = None,
+) -> bool:
+    payload_context = dict(context or {})
+    request_id = str(payload_context.get("request_id") or uuid.uuid4())
+    payload_context["request_id"] = request_id
+    if emit_event is not None:
+        await emit_event(
+            {
+                "type": "confirm_required",
+                "data": {
+                    "id": request_id,
+                    "question": question,
+                    "context": payload_context,
+                },
+            }
+        )
+    approved = await confirm_gate.request_confirm(question, payload_context)
+    if emit_event is not None:
+        await emit_event(
+            {
+                "type": "confirm_response",
+                "data": {
+                    "id": request_id,
+                    "approved": approved,
+                },
+            }
+        )
+    return approved
 
 
 def _path_from_arg(path_arg: str) -> Path:
@@ -439,7 +467,12 @@ def _extract_python_script_arg(parts: List[str]) -> Optional[str]:
     return None
 
 
-def _tool_bash_exec(arguments: Dict[str, Any]) -> str:
+async def _tool_bash_exec(
+    arguments: Dict[str, Any],
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
     command = str(arguments.get("command", "")).strip()
     if not command:
         return "ERROR: missing command"
@@ -466,7 +499,12 @@ def _tool_bash_exec(arguments: Dict[str, Any]) -> str:
         confirm_question = (
             f"Command '{command_name}' is not in SAFE_COMMANDS. Execute anyway?"
         )
-        if not _confirm(confirm_question):
+        if not await _confirm(
+            confirm_question,
+            confirm_gate=confirm_gate,
+            context={"tool": "bash_exec", "command": command, "risk": "non_whitelisted"},
+            emit_event=emit_event,
+        ):
             return "CANCELLED: user denied non-whitelisted command"
 
     if command_name in PATH_GUARDED_READ_COMMANDS:
@@ -503,7 +541,17 @@ def _tool_bash_exec(arguments: Dict[str, Any]) -> str:
 
     if risk_reasons:
         joined_reasons = ", ".join(risk_reasons)
-        if not _confirm(f"High-risk command detected ({joined_reasons}). Execute anyway?"):
+        if not await _confirm(
+            f"High-risk command detected ({joined_reasons}). Execute anyway?",
+            confirm_gate=confirm_gate,
+            context={
+                "tool": "bash_exec",
+                "command": command,
+                "risk": "high",
+                "reasons": risk_reasons,
+            },
+            emit_event=emit_event,
+        ):
             return "CANCELLED: user denied high-risk command"
 
     try:
@@ -561,7 +609,12 @@ def _tool_file_read(arguments: Dict[str, Any]) -> str:
     return content
 
 
-def _tool_file_write(arguments: Dict[str, Any]) -> str:
+async def _tool_file_write(
+    arguments: Dict[str, Any],
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
     try:
         path = _resolve_workspace_path(str(arguments.get("path", "")))
     except ValueError as exc:
@@ -577,11 +630,12 @@ def _tool_file_write(arguments: Dict[str, Any]) -> str:
             return f"ERROR: read old file failed: {exc}"
 
     diff = _format_diff(path, old_text, new_text)
-    if diff:
-        console.print(Syntax(diff, "diff", word_wrap=True))
-    else:
-        console.print("[dim]No textual changes.[/dim]")
-    if not _confirm(f"Write changes to {path}?"):
+    if not await _confirm(
+        f"Write changes to {path}?",
+        confirm_gate=confirm_gate,
+        context={"tool": "file_write", "path": str(path), "diff": diff},
+        emit_event=emit_event,
+    ):
         return "CANCELLED: user denied file write"
 
     try:
@@ -592,7 +646,12 @@ def _tool_file_write(arguments: Dict[str, Any]) -> str:
     return f"OK: wrote {path}"
 
 
-def _tool_file_edit(arguments: Dict[str, Any]) -> str:
+async def _tool_file_edit(
+    arguments: Dict[str, Any],
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
     try:
         path = _resolve_workspace_path(str(arguments.get("path", "")))
     except ValueError as exc:
@@ -626,9 +685,12 @@ def _tool_file_edit(arguments: Dict[str, Any]) -> str:
     updated_text = old_text[:start_idx] + new_text_snippet + old_text[end_idx:]
 
     diff = _format_diff(path, old_text, updated_text)
-    if diff:
-        console.print(Syntax(diff, "diff", word_wrap=True))
-    if not _confirm(f"Apply edit to {path}?"):
+    if not await _confirm(
+        f"Apply edit to {path}?",
+        confirm_gate=confirm_gate,
+        context={"tool": "file_edit", "path": str(path), "diff": diff},
+        emit_event=emit_event,
+    ):
         return "CANCELLED: user denied file edit"
 
     try:
@@ -759,17 +821,25 @@ def _tool_list_files(arguments: Dict[str, Any]) -> str:
     return "\n".join(lines) if lines else "(empty directory)"
 
 
-def dispatch_tool(name: str, arguments: Dict[str, Any], session: StudioSession) -> str:
-    """Dispatch one tool call and return result text."""
+async def dispatch_tool_async(
+    name: str,
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    *,
+    confirm_gate: Optional[ConfirmGate] = None,
+    event_callback: Optional[Any] = None,
+) -> str:
+    """Dispatch one tool call asynchronously and return result text."""
+    gate = confirm_gate or SyncConfirmGate()
     try:
         if name == "bash_exec":
-            return _tool_bash_exec(arguments)
+            return await _tool_bash_exec(arguments, confirm_gate=gate, emit_event=event_callback)
         if name == "file_read":
             return _tool_file_read(arguments)
         if name == "file_write":
-            return _tool_file_write(arguments)
+            return await _tool_file_write(arguments, confirm_gate=gate, emit_event=event_callback)
         if name == "file_edit":
-            return _tool_file_edit(arguments)
+            return await _tool_file_edit(arguments, confirm_gate=gate, emit_event=event_callback)
         if name == "codegen":
             return _tool_codegen(arguments, session)
         if name == "mcp_connect":
@@ -787,3 +857,21 @@ def dispatch_tool(name: str, arguments: Dict[str, Any], session: StudioSession) 
     except Exception as exc:
         return f"ERROR: {name} crashed: {exc}"
     return f"ERROR: unknown tool '{name}'"
+
+
+def dispatch_tool(
+    name: str,
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    *,
+    confirm_gate: Optional[ConfirmGate] = None,
+) -> str:
+    """Backward-compatible sync dispatcher for tests/CLI."""
+    return asyncio.run(
+        dispatch_tool_async(
+            name,
+            arguments,
+            session,
+            confirm_gate=confirm_gate,
+        )
+    )
