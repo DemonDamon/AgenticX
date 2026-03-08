@@ -5,3 +5,9 @@ export function interruptTtsOnUserSpeech(userSpeaking: boolean): void {
     stopSpeak();
   }
 }
+
+export function interruptOnInterimResult(interimText: string): void {
+  if (interimText.trim().length > 0) {
+    stopSpeak();
+  }
+}
