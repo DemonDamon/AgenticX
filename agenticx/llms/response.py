@@ -31,4 +31,8 @@ class LLMResponse(BaseModel):
     token_usage: TokenUsage = Field(description="Token usage information for the request.")
     cost: Optional[float] = Field(description="Estimated cost of the API call.", default=None)
     
-    metadata: Dict[str, Any] = Field(description="Additional metadata from the provider.", default_factory=dict) 
+    metadata: Dict[str, Any] = Field(description="Additional metadata from the provider.", default_factory=dict)
+    tool_calls: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Tool calls requested by the model (OpenAI function calling format)."
+    )
