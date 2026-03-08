@@ -53,3 +53,12 @@ cookies.txt
 .claude/
 
 docs/.private/
+
+# Desktop app build artifacts
+desktop/node_modules/
+desktop/dist-electron/
+desktop/dist/
+desktop/release/
+desktop/test-results/
+desktop/.playwright-state/
+desktop/out/
