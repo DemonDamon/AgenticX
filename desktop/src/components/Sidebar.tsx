@@ -34,16 +34,34 @@ export function Sidebar({ sessionId, onStatusChange, onClose }: Props) {
       return;
     }
     let full = "";
+    let buffer = "";
     while (true) {
       const { value: chunk, done } = await reader.read();
       if (done) break;
-      const text = decoder.decode(chunk, { stream: true });
-      for (const line of text.split("\n")) {
-        if (!line.startsWith("data: ")) continue;
+      buffer += decoder.decode(chunk, { stream: true });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() ?? "";
+      for (const frame of frames) {
+        const line = frame
+          .split("\n")
+          .find((item) => item.startsWith("data: "));
+        if (!line) continue;
         try {
           const payload = JSON.parse(line.slice(6));
           if (payload.type === "token") {
             full += payload.data?.text ?? "";
+          }
+          if (payload.type === "confirm_required") {
+            const ok = window.confirm(payload.data?.question ?? "是否确认执行？");
+            await fetch("/api/confirm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                session_id: sessionId,
+                request_id: payload.data?.id,
+                approved: ok
+              })
+            });
           }
           if (payload.type === "tool_call") {
             setMessages((prev) => [

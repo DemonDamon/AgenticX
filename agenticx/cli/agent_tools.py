@@ -20,7 +20,7 @@ from agenticx.cli.codegen_engine import CodeGenEngine, infer_output_path, write_
 from agenticx.cli.studio_mcp import mcp_call_tool, mcp_connect
 from agenticx.cli.studio_skill import get_all_skill_summaries, skill_use as studio_skill_use
 from agenticx.llms.provider_resolver import ProviderResolver
-from agenticx.runtime.confirm import ConfirmGate, SyncConfirmGate
+from agenticx.runtime.confirm import AsyncConfirmGate, ConfirmGate, SyncConfirmGate
 
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
@@ -555,7 +555,8 @@ async def _tool_bash_exec(
             return "CANCELLED: user denied high-risk command"
 
     try:
-        proc = subprocess.run(
+        proc = await asyncio.to_thread(
+            subprocess.run,
             parts,
             shell=False,
             cwd=str(cwd) if cwd else None,
@@ -781,7 +782,9 @@ def _tool_skill_list() -> str:
     return "\n".join(lines)
 
 
-def _tool_ask_user(arguments: Dict[str, Any]) -> str:
+def _tool_ask_user(arguments: Dict[str, Any], *, service_mode: bool = False) -> str:
+    if service_mode:
+        return "ERROR: ask_user is not supported in service mode; use confirm_required flow."
     question = str(arguments.get("question", "")).strip()
     if not question:
         return "ERROR: missing question"
@@ -851,7 +854,7 @@ async def dispatch_tool_async(
         if name == "skill_list":
             return _tool_skill_list()
         if name == "ask_user":
-            return _tool_ask_user(arguments)
+            return _tool_ask_user(arguments, service_mode=isinstance(gate, AsyncConfirmGate))
         if name == "list_files":
             return _tool_list_files(arguments)
     except Exception as exc:
