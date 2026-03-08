@@ -1,0 +1,22 @@
+appId: com.agenticx.desktop
+productName: AgenticX Desktop
+directories:
+  output: release
+files:
+  - dist/**/*
+  - dist-electron/**/*
+extraResources:
+  - assets/**/*
+mac:
+  target:
+    - dmg
+    - zip
+  icon: assets/icon.icns
+  category: public.app-category.developer-tools
+win:
+  target:
+    - nsis
+  icon: assets/icon.ico
+linux:
+  target:
+    - AppImage
