@@ -1,0 +1,1 @@
+"""Studio service adapter package."""

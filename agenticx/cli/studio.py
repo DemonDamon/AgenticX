@@ -55,6 +55,7 @@ class StudioSession:
     image_b64: List[Dict[str, str]] = field(default_factory=list)
     chat_history: List[Dict[str, str]] = field(default_factory=list)
     agent_messages: List[Dict[str, object]] = field(default_factory=list)
+    last_agent_events: List[Dict[str, object]] = field(default_factory=list)
     context_files: Dict[str, str] = field(default_factory=dict)
     # MCP state
     mcp_hub: Optional[object] = None  # MCPHub instance (lazy init)
@@ -138,6 +139,7 @@ def _print_header(session: StudioSession) -> None:
     command_table.add_row("/skill info <name>", "查看 Skill 详情")
     command_table.add_row("/discover <描述>", "智能推荐 MCP + Skill")
     command_table.add_row("/config [provider] [model]", "查看或修改模型配置")
+    command_table.add_row("/trace", "查看最近一次 Agent Loop 事件流")
     command_table.add_row("/exit", "退出 Studio")
 
     console.print(
@@ -340,6 +342,19 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
             for idx, record in enumerate(session.history, start=1):
                 history_table.add_row(str(idx), record.target, record.description, str(record.file_path))
             console.print(history_table)
+            continue
+        if user_input == "/trace":
+            events = getattr(session, "last_agent_events", [])
+            if not events:
+                console.print("[yellow]暂无可用 trace。先执行一次自然语言请求。[/yellow]")
+                continue
+            trace_table = Table(title="Last Agent Loop Trace")
+            trace_table.add_column("#", style="bold cyan")
+            trace_table.add_column("type", style="bold")
+            trace_table.add_column("data")
+            for idx, item in enumerate(events, start=1):
+                trace_table.add_row(str(idx), str(item.get("type", "")), str(item.get("data", {}))[:300])
+            console.print(trace_table)
             continue
         if user_input.startswith("/image"):
             _handle_image_command(session, user_input)
