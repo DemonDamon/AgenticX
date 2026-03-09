@@ -114,6 +114,9 @@ export function ChatView({ onOpenConfirm }: Props) {
             if (payload.type === "final") {
               full = payload.data?.text ?? full;
             }
+            if (payload.type === "error") {
+              addMessage("tool", `❌ ${payload.data?.text ?? "未知错误"}`);
+            }
           } catch {
             // skip malformed SSE frames
           }
