@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useAppStore, type Message } from "../store";
 import { SubAgentPanel } from "./SubAgentPanel";
 import { interruptOnInterimResult, interruptTtsOnUserSpeech } from "../voice/interrupt";
@@ -20,6 +21,20 @@ const statusDot: Record<string, string> = {
   idle: "bg-emerald-400",
   listening: "bg-cyan-400 animate-pulse",
   processing: "bg-amber-400 animate-spin"
+};
+
+const markdownComponents: Components = {
+  table: ({ children }) => (
+    <div className="my-2 overflow-x-auto">
+      <table className="min-w-full border-collapse border border-slate-600 text-xs">{children}</table>
+    </div>
+  ),
+  th: ({ children }) => (
+    <th className="border border-slate-600 bg-slate-800 px-2 py-1 text-left text-slate-200">{children}</th>
+  ),
+  td: ({ children }) => (
+    <td className="border border-slate-700 px-2 py-1 align-top text-slate-300">{children}</td>
+  )
 };
 
 function ModelBadge({ provider, model }: { provider?: string; model?: string }) {
@@ -395,7 +410,13 @@ export function ChatView({ onOpenConfirm }: Props) {
             >
               {m.role === "assistant" && <ModelBadge provider={m.provider} model={m.model} />}
               <div className="msg-content break-words">
-                {m.role === "tool" ? <span>{m.content}</span> : <ReactMarkdown>{m.content}</ReactMarkdown>}
+                {m.role === "tool" ? (
+                  <span>{m.content}</span>
+                ) : (
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                    {m.content}
+                  </ReactMarkdown>
+                )}
               </div>
               <MessageActions
                 msg={m}
@@ -410,7 +431,9 @@ export function ChatView({ onOpenConfirm }: Props) {
               {streamingModel && <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />}
               <div className="msg-content break-words">
                 {streamedAssistantText ? (
-                  <ReactMarkdown>{streamedAssistantText}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                    {streamedAssistantText}
+                  </ReactMarkdown>
                 ) : (
                   <span className="inline-flex gap-1 text-slate-400">
                     <span className="animate-bounce">·</span>
