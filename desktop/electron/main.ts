@@ -219,12 +219,18 @@ function registerIpc(): void {
     const configDir = path.join(os.homedir(), ".agenticx");
     fs.mkdirSync(configDir, { recursive: true });
     const configPath = path.join(configDir, "config.yaml");
-    const lines = [
-      `provider: ${payload.provider ?? ""}`,
-      `model: ${payload.model ?? ""}`,
-      `api_key: ${payload.apiKey ?? ""}`
+
+    const providerName = payload.provider || "openai";
+    const yamlLines = [
+      `version: "1"`,
+      `default_provider: ${providerName}`,
+      `providers:`,
+      `  ${providerName}:`
     ];
-    fs.writeFileSync(configPath, `${lines.join("\n")}\n`, "utf-8");
+    if (payload.apiKey) yamlLines.push(`    api_key: "${payload.apiKey}"`);
+    if (payload.model) yamlLines.push(`    model: ${payload.model}`);
+
+    fs.writeFileSync(configPath, yamlLines.join("\n") + "\n", "utf-8");
     return { ok: true, path: configPath };
   });
   ipcMain.handle("native-say", async (_event, text: string) => {

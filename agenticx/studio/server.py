@@ -112,17 +112,29 @@ def create_studio_app() -> FastAPI:
         if payload.model:
             session.model_name = payload.model
 
-        llm = ProviderResolver.resolve(
-            provider_name=session.provider_name,
-            model=session.model_name,
-        )
+        try:
+            llm = ProviderResolver.resolve(
+                provider_name=session.provider_name,
+                model=session.model_name,
+            )
+        except Exception as exc:
+            async def _error_stream() -> AsyncGenerator[str, None]:
+                err = SseEvent(type="error", data={"text": f"LLM init failed: {exc}"})
+                yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                yield 'data: {"type":"done","data":{}}\n\n'
+            return StreamingResponse(_error_stream(), media_type="text/event-stream")
+
         runtime = AgentRuntime(llm, managed.confirm_gate)
 
         async def _event_stream() -> AsyncGenerator[str, None]:
-            async for event in runtime.run_turn(payload.user_input, session):
-                sse = SseEvent(type=event.type, data=event.data)
-                yield f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"
-            yield "data: {\"type\":\"done\",\"data\":{}}\n\n"
+            try:
+                async for event in runtime.run_turn(payload.user_input, session):
+                    sse = SseEvent(type=event.type, data=event.data)
+                    yield f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"
+            except Exception as exc:
+                err = SseEvent(type="error", data={"text": f"Runtime error: {exc}"})
+                yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+            yield 'data: {"type":"done","data":{}}\n\n'
 
         return StreamingResponse(_event_stream(), media_type="text/event-stream")
 
