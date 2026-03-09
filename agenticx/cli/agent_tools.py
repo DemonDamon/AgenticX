@@ -266,8 +266,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
 META_TOOL_NAMES = {
     "spawn_subagent",
     "cancel_subagent",
+    "retry_subagent",
     "query_subagent_status",
     "check_resources",
+    "list_skills",
+    "list_mcps",
 }
 
 
@@ -877,7 +880,12 @@ async def dispatch_tool_async(
                 return "ERROR: meta tool requires team manager in session"
             from agenticx.runtime.meta_tools import dispatch_meta_tool_async
 
-            return await dispatch_meta_tool_async(name, arguments, team_manager=team_manager)
+            return await dispatch_meta_tool_async(
+                name,
+                arguments,
+                team_manager=team_manager,
+                session=session,
+            )
         if name == "bash_exec":
             return await _tool_bash_exec(arguments, confirm_gate=gate, emit_event=event_callback)
         if name == "file_read":

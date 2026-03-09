@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass, field
 import mimetypes
+import os
 from pathlib import Path
 import re as _re
 import subprocess
@@ -57,6 +58,7 @@ class StudioSession:
     agent_messages: List[Dict[str, object]] = field(default_factory=list)
     last_agent_events: List[Dict[str, object]] = field(default_factory=list)
     context_files: Dict[str, str] = field(default_factory=dict)
+    workspace_dir: Optional[str] = None
     # MCP state
     mcp_hub: Optional[object] = None  # MCPHub instance (lazy init)
     mcp_configs: Dict[str, object] = field(default_factory=dict)  # name -> MCPServerConfig
@@ -94,6 +96,12 @@ def _detect_target(text: str) -> str:
 
 
 def _workspace_root() -> Path:
+    configured = os.getenv("AGX_WORKSPACE_ROOT", "").strip()
+    if configured:
+        try:
+            return Path(configured).expanduser().resolve(strict=False)
+        except Exception:
+            pass
     return Path.cwd().resolve()
 
 
@@ -307,7 +315,11 @@ def _resolve_at_references(session: StudioSession, user_input: str) -> str:
 
 def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> None:
     """Start interactive studio REPL."""
-    session = StudioSession(provider_name=provider, model_name=model)
+    session = StudioSession(
+        provider_name=provider,
+        model_name=model,
+        workspace_dir=str(_workspace_root()),
+    )
     _print_header(session)
 
     # Load available MCP server configs

@@ -127,6 +127,10 @@ export function ChatView({ onOpenConfirm }: Props) {
   const modelLabel = activeModel
     ? (activeProvider ? `${activeProvider} / ${activeModel}` : activeModel)
     : "未选择模型";
+  const selectedSubAgentName = useMemo(() => {
+    if (!selectedSubAgent) return "";
+    return subAgents.find((item) => item.id === selectedSubAgent)?.name ?? selectedSubAgent;
+  }, [selectedSubAgent, subAgents]);
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
@@ -278,9 +282,27 @@ export function ChatView({ onOpenConfirm }: Props) {
     }
   };
 
+  const onRetrySubAgent = async (agentId: string) => {
+    if (!apiBase || !sessionId) return;
+    updateSubAgent(agentId, { status: "pending", currentAction: "正在重试..." });
+    try {
+      const resp = await fetch(`${apiBase}/api/subagent/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ session_id: sessionId, agent_id: agentId })
+      });
+      if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
+      addSubAgentEvent(agentId, { type: "retry", content: "已发送重试请求" });
+      addMessage("tool", `🔁 已请求重试子智能体 ${agentId}`, "meta");
+    } catch (err) {
+      updateSubAgent(agentId, { status: "failed", currentAction: "重试失败" });
+      addSubAgentEvent(agentId, { type: "error", content: `重试失败: ${String(err)}` });
+    }
+  };
+
   const sendChat = async (
     userText: string,
-    opts?: { provider?: string; model?: string; insertAfterId?: string }
+    opts?: { provider?: string; model?: string; insertAfterId?: string; agentId?: string }
   ) => {
     if (!userText || !apiBase || !sessionId) return;
     if (streaming) {
@@ -300,13 +322,19 @@ export function ChatView({ onOpenConfirm }: Props) {
     }
     const reqProvider = opts?.provider ?? activeProvider;
     const reqModel = opts?.model ?? activeModel;
+    const targetAgentId = (opts?.agentId ?? "meta").trim() || "meta";
     const requestId = activeRequestIdRef.current + 1;
     activeRequestIdRef.current = requestId;
     const isCurrentRequest = () => activeRequestIdRef.current === requestId;
 
     if (!opts?.insertAfterId) {
       setInput("");
-      addMessage("user", userText, "meta");
+      if (targetAgentId === "meta") {
+        addMessage("user", userText, "meta");
+      } else {
+        addSubAgentEvent(targetAgentId, { type: "user", content: userText });
+        addMessage("tool", `🗣 发送给 ${selectedSubAgentName || targetAgentId}: ${userText}`, "meta");
+      }
     }
 
     setStatus("processing");
@@ -323,6 +351,7 @@ export function ChatView({ onOpenConfirm }: Props) {
       const body: Record<string, unknown> = { session_id: sessionId, user_input: userText };
       if (reqProvider) body.provider = reqProvider;
       if (reqModel) body.model = reqModel;
+      if (targetAgentId !== "meta") body.agent_id = targetAgentId;
       const resp = await fetch(`${apiBase}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
@@ -415,6 +444,20 @@ export function ChatView({ onOpenConfirm }: Props) {
             }
             if (payload.type === "subagent_started") { const subId = payload.data?.agent_id; if (subId) { addSubAgent({ id: subId, name: payload.data?.name ?? subId, role: payload.data?.role ?? "worker", task: payload.data?.task ?? "" }); addSubAgentEvent(subId, { type: "started", content: "已启动" }); } }
             if (payload.type === "subagent_progress") { const subId = payload.data?.agent_id; if (subId) { updateSubAgent(subId, { currentAction: payload.data?.text ?? "执行中" }); addSubAgentEvent(subId, { type: "progress", content: payload.data?.text ?? "执行中" }); } }
+            if (payload.type === "subagent_checkpoint") {
+              const subId = payload.data?.agent_id;
+              if (subId) {
+                updateSubAgent(subId, { status: "running", currentAction: payload.data?.text ?? "阶段检查点" });
+                addSubAgentEvent(subId, { type: "checkpoint", content: payload.data?.text ?? "阶段检查点" });
+              }
+            }
+            if (payload.type === "subagent_paused") {
+              const subId = payload.data?.agent_id;
+              if (subId) {
+                updateSubAgent(subId, { status: "failed", currentAction: payload.data?.text ?? "已暂停，等待指令" });
+                addSubAgentEvent(subId, { type: "paused", content: payload.data?.text ?? "已暂停，等待指令" });
+              }
+            }
             if (payload.type === "subagent_completed") { const subId = payload.data?.agent_id; if (subId) { updateSubAgent(subId, { status: "completed", currentAction: "已完成" }); addSubAgentEvent(subId, { type: "completed", content: payload.data?.summary ?? "完成" }); } }
             if (payload.type === "subagent_error") { const subId = payload.data?.agent_id; if (subId) { updateSubAgent(subId, { status: payload.data?.status === "cancelled" ? "cancelled" : "failed", currentAction: payload.data?.text ?? "执行异常" }); addSubAgentEvent(subId, { type: "error", content: payload.data?.text ?? "执行异常" }); } }
             if (payload.type === "error") {
@@ -459,7 +502,9 @@ export function ChatView({ onOpenConfirm }: Props) {
   };
 
   const send = async (manualInput?: string) => {
-    await sendChat((manualInput ?? input).trim());
+    await sendChat((manualInput ?? input).trim(), {
+      agentId: selectedSubAgent ?? undefined,
+    });
   };
 
   const stopStreaming = () => {
@@ -629,12 +674,27 @@ export function ChatView({ onOpenConfirm }: Props) {
       {/* Input area */}
       <div className="shrink-0 border-t border-border bg-panel/80 px-4 py-3">
         <div className="mx-auto flex max-w-2xl items-end gap-2">
+          {selectedSubAgent ? (
+            <div className="mb-2 w-full">
+              <div className="inline-flex items-center gap-2 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-xs text-cyan-200">
+                <span>当前对话目标: {selectedSubAgentName}</span>
+                <button
+                  className="rounded px-1 text-cyan-100 hover:bg-cyan-500/20"
+                  onClick={() => setSelectedSubAgent(null)}
+                >
+                  切回 Meta
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <div className="mx-auto flex max-w-2xl items-end gap-2">
           <textarea
             value={input}
             onChange={(e) => { interruptTtsOnUserSpeech(true); setInput(e.target.value); }}
             onKeyDown={onKeyDown}
             rows={input.split("\n").length > 3 ? 4 : input.includes("\n") ? 2 : 1}
-            placeholder={canSend ? "输入需求，Enter 发送（生成中可直接追问）" : "连接中..."}
+            placeholder={canSend ? (selectedSubAgent ? `对 ${selectedSubAgentName} 发送补充指令，Enter 发送` : "输入需求，Enter 发送（生成中可直接追问）") : "连接中..."}
             disabled={!canSend && !streaming}
             className="min-h-[40px] max-h-[120px] flex-1 resize-none rounded-xl border border-border bg-slate-900/80 px-3 py-2.5 text-sm outline-none transition placeholder:text-slate-500 focus:border-cyan-500/50"
           />
@@ -656,6 +716,8 @@ export function ChatView({ onOpenConfirm }: Props) {
         selectedSubAgent={selectedSubAgent}
         onToggle={() => setPanelOpen((v) => !v)}
         onCancel={onCancelSubAgent}
+        onRetry={onRetrySubAgent}
+        onChat={(id) => setSelectedSubAgent(id)}
         onSelect={(id) => setSelectedSubAgent(id)}
       />
       {/* Reanswer model picker */}
