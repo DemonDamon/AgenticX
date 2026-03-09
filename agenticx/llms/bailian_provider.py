@@ -87,7 +87,10 @@ class BailianProvider(BaseLLMProvider):
                         error_text = response.text[:500] if response.text else "No error details"
                         raise Exception(f"百炼API返回500错误，已达到最大重试次数: {error_text}")
                 else:
-                    # 其他错误直接抛出
+                    # 4xx 属于客户端请求问题，不做重试，直接返回详细错误
+                    error_text = response.text[:1000] if response.text else "No error details"
+                    if 400 <= response.status_code < 500:
+                        raise Exception(f"HTTP {response.status_code}: {error_text}")
                     response.raise_for_status()
                     return response.json()
                     
@@ -102,6 +105,15 @@ class BailianProvider(BaseLLMProvider):
                     raise Exception(f"Native Bailian API call timeout after {max_retries} retries: {str(e)}")
             except requests.exceptions.RequestException as e:
                 last_error = e
+                # 请求级 4xx 错误不重试
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                if status is not None and 400 <= int(status) < 500:
+                    detail = ""
+                    try:
+                        detail = str(getattr(e.response, "text", "")[:1000])  # type: ignore[attr-defined]
+                    except Exception:
+                        detail = str(e)
+                    raise Exception(f"HTTP {status}: {detail}")
                 if attempt < max_retries:
                     wait_time = (2 ** attempt) * 1.0
                     logger.warning(f"百炼API请求失败，{wait_time:.1f}秒后重试 ({attempt + 1}/{max_retries}): {str(e)}")

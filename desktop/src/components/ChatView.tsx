@@ -116,7 +116,7 @@ export function ChatView({ onOpenConfirm }: Props) {
   const modelBtnRef = useRef<HTMLButtonElement | null>(null);
   const polledEventSeenRef = useRef<Record<string, Set<string>>>({});
   const subAgentsRef = useRef(subAgents);
-  const lastHeartbeatAtRef = useRef(0);
+  const subAgentStatusRef = useRef<Record<string, string>>({});
 
   const canSend = useMemo(() => !!(apiBase && sessionId), [apiBase, sessionId]);
   const visibleMessages = useMemo(
@@ -148,6 +148,9 @@ export function ChatView({ onOpenConfirm }: Props) {
 
   useEffect(() => {
     subAgentsRef.current = subAgents;
+    const next: Record<string, string> = {};
+    for (const item of subAgents) next[item.id] = item.status;
+    subAgentStatusRef.current = next;
   }, [subAgents]);
 
   useEffect(() => {
@@ -190,6 +193,8 @@ export function ChatView({ onOpenConfirm }: Props) {
             });
           }
           const status = item.status ?? "running";
+          const prevStatus = subAgentStatusRef.current[id];
+          subAgentStatusRef.current[id] = status;
           const currentAction =
             status === "completed"
               ? (item.result_summary ? "已完成（见摘要）" : "已完成")
@@ -199,6 +204,18 @@ export function ChatView({ onOpenConfirm }: Props) {
                   ? "已中断"
                   : "执行中";
           updateSubAgent(id, { status, currentAction });
+
+          const transitionedToTerminal =
+            prevStatus !== status && (status === "completed" || status === "failed" || status === "cancelled");
+          if (transitionedToTerminal) {
+            const summaryText =
+              status === "completed"
+                ? (item.result_summary || "子智能体任务已完成")
+                : status === "cancelled"
+                  ? "子智能体已中断"
+                  : (item.error_text || "子智能体执行失败");
+            addMessage("tool", `📌 ${item.name ?? id} (${id}) ${status === "completed" ? "已完成" : status === "cancelled" ? "已中断" : "失败"}\n${summaryText}`, "meta");
+          }
 
           const seen = polledEventSeenRef.current[id] ?? new Set<string>();
           polledEventSeenRef.current[id] = seen;
@@ -243,24 +260,6 @@ export function ChatView({ onOpenConfirm }: Props) {
       window.clearInterval(timer);
     };
   }, [apiBase, sessionId, apiToken, subAgents, addSubAgent, updateSubAgent]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      const list = subAgentsRef.current;
-      const running = list.filter((s) => s.status === "running" || s.status === "pending");
-      if (running.length === 0) return;
-      const now = Date.now();
-      if (now - lastHeartbeatAtRef.current < 15000) return;
-      lastHeartbeatAtRef.current = now;
-
-      const summary = running
-        .slice(0, 6)
-        .map((s) => `- ${s.name} (${s.id})：${s.status === "pending" ? "等待确认" : (s.currentAction || "执行中")}`)
-        .join("\n");
-      addMessage("tool", `💓 子智能体心跳\n${summary}`, "meta");
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, [addMessage]);
 
   const onCancelSubAgent = async (agentId: string) => {
     if (!apiBase || !sessionId) return;
