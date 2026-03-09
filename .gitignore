@@ -54,11 +54,15 @@ cookies.txt
 
 docs/.private/
 
+# Temporary planning files
+task_plan.md
+**/task_plan.md
+
 # Desktop app build artifacts
-desktop/node_modules/
-desktop/dist-electron/
-desktop/dist/
-desktop/release/
-desktop/test-results/
-desktop/.playwright-state/
-desktop/out/
+**/node_modules/
+**/dist-electron/
+**/dist/
+**/release/
+**/test-results/
+**/.playwright-state/
+**/out/
