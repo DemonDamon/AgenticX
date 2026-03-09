@@ -250,6 +250,13 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     },
 ]
 
+META_TOOL_NAMES = {
+    "spawn_subagent",
+    "cancel_subagent",
+    "query_subagent_status",
+    "check_resources",
+}
+
 
 async def _confirm(
     question: str,
@@ -835,6 +842,13 @@ async def dispatch_tool_async(
     """Dispatch one tool call asynchronously and return result text."""
     gate = confirm_gate or SyncConfirmGate()
     try:
+        if name in META_TOOL_NAMES:
+            team_manager = getattr(session, "_team_manager", None)
+            if team_manager is None:
+                return "ERROR: meta tool requires team manager in session"
+            from agenticx.runtime.meta_tools import dispatch_meta_tool_async
+
+            return await dispatch_meta_tool_async(name, arguments, team_manager=team_manager)
         if name == "bash_exec":
             return await _tool_bash_exec(arguments, confirm_gate=gate, emit_event=event_callback)
         if name == "file_read":
