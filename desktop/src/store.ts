@@ -9,6 +9,8 @@ export type Message = {
   role: MsgRole;
   content: string;
   agentId?: string;
+  provider?: string;
+  model?: string;
 };
 
 export type SubAgentEvent = {
@@ -37,8 +39,18 @@ type ConfirmState = {
   diff?: string;
 };
 
+type ProviderEntry = {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  models: string[];
+};
+
 type SettingsState = {
   open: boolean;
+  defaultProvider: string;
+  providers: Record<string, ProviderEntry>;
+  /** legacy compat */
   provider: string;
   model: string;
   apiKey: string;
@@ -55,11 +67,15 @@ type AppState = {
   codePreview: string;
   confirm: ConfirmState;
   settings: SettingsState;
+  activeProvider: string;
+  activeModel: string;
   setApiBase: (base: string) => void;
   setApiToken: (token: string) => void;
   setSessionId: (id: string) => void;
   setStatus: (status: UiStatus) => void;
-  addMessage: (role: MsgRole, content: string, agentId?: string) => void;
+  setActiveModel: (provider: string, model: string) => void;
+  addMessage: (role: MsgRole, content: string, agentId?: string, provider?: string, model?: string) => void;
+  insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
   addSubAgent: (item: Pick<SubAgent, "id" | "name" | "role" | "task">) => void;
   updateSubAgent: (id: string, patch: Partial<SubAgent>) => void;
   addSubAgentEvent: (id: string, event: Omit<SubAgentEvent, "id" | "ts">) => void;
@@ -70,7 +86,7 @@ type AppState = {
   closeConfirm: () => void;
   openSettings: () => void;
   closeSettings: () => void;
-  updateSettings: (patch: Partial<Pick<SettingsState, "provider" | "model" | "apiKey">>) => void;
+  updateSettings: (patch: Partial<Pick<SettingsState, "provider" | "model" | "apiKey" | "defaultProvider" | "providers">>) => void;
 };
 
 function uid(): string {
@@ -83,19 +99,33 @@ export const useAppStore = create<AppState>((set) => ({
   sessionId: "",
   status: "idle",
   messages: [],
+  activeProvider: "",
+  activeModel: "",
   subAgents: [],
   selectedSubAgent: null,
   codePreview: "",
   confirm: { open: false, requestId: "", question: "", agentId: "meta" },
-  settings: { open: false, provider: "", model: "", apiKey: "" },
+  settings: { open: false, provider: "", model: "", apiKey: "", defaultProvider: "", providers: {} },
   setApiBase: (apiBase) => set({ apiBase }),
   setApiToken: (apiToken) => set({ apiToken }),
   setSessionId: (sessionId) => set({ sessionId }),
   setStatus: (status) => set({ status }),
-  addMessage: (role, content, agentId) =>
+  setActiveModel: (activeProvider, activeModel) => set({ activeProvider, activeModel }),
+  addMessage: (role, content, agentId, provider, model) =>
     set((state) => ({
-      messages: [...state.messages, { id: uid(), role, content, agentId }]
+      messages: [...state.messages, { id: uid(), role, content, agentId, provider, model }]
     })),
+  insertMessageAfter: (afterId, msg) => {
+    const newId = uid();
+    set((state) => {
+      const idx = state.messages.findIndex((m) => m.id === afterId);
+      const insertAt = idx >= 0 ? idx + 1 : state.messages.length;
+      const next = [...state.messages];
+      next.splice(insertAt, 0, { ...msg, id: newId });
+      return { messages: next };
+    });
+    return newId;
+  },
   addSubAgent: (item) =>
     set((state) => {
       const exists = state.subAgents.some((sub) => sub.id === item.id);
