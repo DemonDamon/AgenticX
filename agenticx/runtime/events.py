@@ -24,6 +24,8 @@ class EventType(str, Enum):
     ERROR = "error"
     SUBAGENT_STARTED = "subagent_started"
     SUBAGENT_PROGRESS = "subagent_progress"
+    SUBAGENT_CHECKPOINT = "subagent_checkpoint"
+    SUBAGENT_PAUSED = "subagent_paused"
     SUBAGENT_COMPLETED = "subagent_completed"
     SUBAGENT_ERROR = "subagent_error"
 

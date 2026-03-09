@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import AsyncGenerator
 
@@ -11,6 +12,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from agenticx.cli.studio_mcp import load_available_servers
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.runtime import AgentRuntime
 from agenticx.runtime.events import RuntimeEvent
@@ -18,6 +20,8 @@ from agenticx.runtime.meta_tools import META_AGENT_TOOLS
 from agenticx.runtime.prompts.meta_agent import build_meta_agent_system_prompt
 from agenticx.studio.protocols import ChatRequest, ConfirmResponse, SessionState, SseEvent
 from agenticx.studio.session_manager import SessionManager
+
+logger = logging.getLogger(__name__)
 
 
 def create_studio_app() -> FastAPI:
@@ -51,6 +55,12 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(session_id) if session_id else None
         if managed is None:
             managed = manager.create(provider=provider, model=model)
+            managed.studio_session.workspace_dir = os.getenv("AGX_WORKSPACE_ROOT", "").strip() or os.getcwd()
+            try:
+                managed.studio_session.mcp_configs = load_available_servers()
+            except Exception as exc:
+                logger.warning("Failed to load MCP server configs: %s", exc)
+                managed.studio_session.mcp_configs = {}
         sess = managed.studio_session
         return SessionState(
             session_id=managed.session_id,
@@ -120,6 +130,39 @@ def create_studio_app() -> FastAPI:
             session.provider_name = payload.provider
         if payload.model:
             session.model_name = payload.model
+        target_agent_id = (payload.agent_id or "meta").strip() or "meta"
+        if target_agent_id != "meta":
+            async def _subagent_message_stream() -> AsyncGenerator[str, None]:
+                team_manager = managed.team_manager
+                if team_manager is None:
+                    err = SseEvent(
+                        type="error",
+                        data={"agent_id": target_agent_id, "text": "子智能体团队尚未初始化"},
+                    )
+                    yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                    yield 'data: {"type":"done","data":{}}\n\n'
+                    return
+                result = await team_manager.send_message_to_subagent(target_agent_id, payload.user_input)
+                if not result.get("ok"):
+                    err = SseEvent(
+                        type="error",
+                        data={
+                            "agent_id": target_agent_id,
+                            "text": str(result.get("message") or "发送子智能体消息失败"),
+                        },
+                    )
+                    yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                else:
+                    ack = SseEvent(
+                        type="subagent_progress",
+                        data={
+                            "agent_id": target_agent_id,
+                            "text": "已将你的补充指令发送给子智能体",
+                        },
+                    )
+                    yield f"data: {json.dumps(ack.model_dump(), ensure_ascii=False)}\n\n"
+                yield 'data: {"type":"done","data":{}}\n\n'
+            return StreamingResponse(_subagent_message_stream(), media_type="text/event-stream")
 
         def _resolve_llm():
             return ProviderResolver.resolve(
@@ -244,5 +287,29 @@ def create_studio_app() -> FastAPI:
             return {"ok": True, "subagents": []}
         status_payload = managed.team_manager.get_status()
         return status_payload if isinstance(status_payload, dict) else {"ok": True, "subagents": []}
+
+    @app.post("/api/subagent/retry")
+    async def retry_subagent(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        session_id = str(payload.get("session_id", ""))
+        agent_id = str(payload.get("agent_id", ""))
+        refined_task = payload.get("task")
+        if not session_id or not agent_id:
+            raise HTTPException(status_code=400, detail="session_id and agent_id are required")
+        managed = manager.get(session_id)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        if managed.team_manager is None:
+            raise HTTPException(status_code=404, detail="agent team not initialized")
+        result = await managed.team_manager.retry_subagent(
+            agent_id,
+            str(refined_task) if isinstance(refined_task, str) and refined_task.strip() else None,
+        )
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("message", "retry failed"))
+        return result
 
     return app

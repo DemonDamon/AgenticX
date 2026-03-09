@@ -280,6 +280,20 @@ class AgentRuntime:
                 data={"round": round_idx, "max_rounds": self.max_tool_rounds},
                 agent_id=agent_id,
             )
+            if agent_id != "meta" and round_idx > 1 and (round_idx - 1) % 8 == 0:
+                checkpoint = {
+                    "agent_id": agent_id,
+                    "round": round_idx - 1,
+                    "max_rounds": self.max_tool_rounds,
+                    "executed_tools": list(dict.fromkeys(executed_tool_names))[-10:],
+                    "artifact_count": len(session.artifacts),
+                    "text": f"已执行至第 {round_idx - 1} 轮，准备继续。",
+                }
+                yield RuntimeEvent(
+                    type=EventType.SUBAGENT_CHECKPOINT.value,
+                    data=checkpoint,
+                    agent_id=agent_id,
+                )
             if len(session.agent_messages) > synced_session_message_count:
                 messages.extend(
                     _sanitize_context_messages(session.agent_messages[synced_session_message_count:])
@@ -559,7 +573,20 @@ class AgentRuntime:
                 )
 
         message = (
-            "已达到最大工具调用轮数，已停止自动执行。"
+            "已达到最大工具调用轮数，已暂停自动执行。"
             "请基于当前结果继续指示，或缩小任务范围。"
         )
-        yield RuntimeEvent(type=EventType.ERROR.value, data={"text": message}, agent_id=agent_id)
+        if agent_id == "meta":
+            yield RuntimeEvent(type=EventType.ERROR.value, data={"text": message}, agent_id=agent_id)
+            return
+        yield RuntimeEvent(
+            type=EventType.SUBAGENT_PAUSED.value,
+            data={
+                "agent_id": agent_id,
+                "round": self.max_tool_rounds,
+                "max_rounds": self.max_tool_rounds,
+                "text": message,
+                "executed_tools": list(dict.fromkeys(executed_tool_names))[-10:],
+            },
+            agent_id=agent_id,
+        )

@@ -4,6 +4,8 @@ import type { SubAgent } from "../store";
 type Props = {
   subAgent: SubAgent;
   onCancel: (agentId: string) => void;
+  onRetry: (agentId: string) => void;
+  onChat: (agentId: string) => void;
   onSelect: (agentId: string) => void;
   selected?: boolean;
 };
@@ -16,10 +18,18 @@ const statusMap: Record<string, { icon: string; label: string; tone: string }> =
   cancelled: { icon: "⏹", label: "已中断", tone: "text-slate-300" }
 };
 
-export function SubAgentCard({ subAgent, onCancel, onSelect, selected = false }: Props) {
+export function SubAgentCard({
+  subAgent,
+  onCancel,
+  onRetry,
+  onChat,
+  onSelect,
+  selected = false,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
   const status = useMemo(() => statusMap[subAgent.status] ?? statusMap.pending, [subAgent.status]);
   const canCancel = subAgent.status === "running" || subAgent.status === "pending";
+  const canRetry = subAgent.status === "failed" || subAgent.status === "completed" || subAgent.status === "cancelled";
 
   return (
     <div
@@ -52,6 +62,12 @@ export function SubAgentCard({ subAgent, onCancel, onSelect, selected = false }:
 
       <div className="flex items-center gap-2">
         <button
+          className="rounded-md border border-cyan-500/50 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-500/10"
+          onClick={() => onChat(subAgent.id)}
+        >
+          对话
+        </button>
+        <button
           className="rounded-md border border-border px-2 py-1 text-xs text-slate-300 hover:bg-slate-700"
           onClick={() => setExpanded((v) => !v)}
         >
@@ -63,6 +79,13 @@ export function SubAgentCard({ subAgent, onCancel, onSelect, selected = false }:
           disabled={!canCancel}
         >
           中断
+        </button>
+        <button
+          className="rounded-md border border-emerald-400/50 px-2 py-1 text-xs text-emerald-200 disabled:opacity-40"
+          onClick={() => onRetry(subAgent.id)}
+          disabled={!canRetry}
+        >
+          重试
         </button>
       </div>
 

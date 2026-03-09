@@ -4,9 +4,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.team_manager import AgentTeamManager
+
+if TYPE_CHECKING:
+    from agenticx.cli.studio import StudioSession
 
 
 META_AGENT_TOOLS: List[Dict[str, Any]] = [
@@ -50,6 +54,25 @@ META_AGENT_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "retry_subagent",
+            "description": "Retry a completed/failed sub-agent with optional refined task.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "Target sub-agent ID."},
+                    "task": {
+                        "type": "string",
+                        "description": "Optional refined task for retry.",
+                    },
+                },
+                "required": ["agent_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "query_subagent_status",
             "description": "Query status for one/all sub-agents.",
             "parameters": {
@@ -73,7 +96,72 @@ META_AGENT_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_skills",
+            "description": "List all available AgenticX skills with name and description.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_mcps",
+            "description": "List configured MCP servers and their connection status.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
+
+
+def _list_skills_payload() -> Dict[str, Any]:
+    try:
+        skills = get_all_skill_summaries()
+    except Exception as exc:
+        return {"ok": False, "error": f"failed to load skills: {exc}"}
+    return {
+        "ok": True,
+        "count": len(skills),
+        "skills": skills,
+    }
+
+
+def _list_mcps_payload(session: Optional["StudioSession"]) -> Dict[str, Any]:
+    if session is None:
+        return {"ok": True, "count": 0, "connected_count": 0, "servers": []}
+
+    configs = session.mcp_configs if isinstance(session.mcp_configs, dict) else {}
+    connected = (
+        session.connected_servers
+        if isinstance(session.connected_servers, set)
+        else set(session.connected_servers or [])
+    )
+    servers: List[Dict[str, Any]] = []
+    for name, cfg in sorted(configs.items()):
+        command = str(getattr(cfg, "command", "") or "")
+        servers.append(
+            {
+                "name": str(name),
+                "connected": name in connected,
+                "command": command,
+            }
+        )
+
+    return {
+        "ok": True,
+        "count": len(servers),
+        "connected_count": sum(1 for row in servers if row.get("connected")),
+        "servers": servers,
+    }
 
 
 async def dispatch_meta_tool_async(
@@ -81,6 +169,7 @@ async def dispatch_meta_tool_async(
     arguments: Dict[str, Any],
     *,
     team_manager: AgentTeamManager,
+    session: Optional["StudioSession"] = None,
 ) -> str:
     if name == "spawn_subagent":
         tools = arguments.get("tools")
@@ -100,6 +189,15 @@ async def dispatch_meta_tool_async(
         result = await team_manager.cancel_subagent(str(arguments.get("agent_id", "")).strip())
         return json.dumps(result, ensure_ascii=False)
 
+    if name == "retry_subagent":
+        task = arguments.get("task")
+        refined_task = str(task).strip() if isinstance(task, str) and str(task).strip() else None
+        result = await team_manager.retry_subagent(
+            str(arguments.get("agent_id", "")).strip(),
+            refined_task=refined_task,
+        )
+        return json.dumps(result, ensure_ascii=False)
+
     if name == "query_subagent_status":
         result = team_manager.get_status(str(arguments.get("agent_id", "")).strip() or None)
         return json.dumps(result, ensure_ascii=False)
@@ -115,5 +213,11 @@ async def dispatch_meta_tool_async(
         )
         payload = {"ok": True, "check": check, "suggestion": suggestion}
         return json.dumps(payload, ensure_ascii=False)
+
+    if name == "list_skills":
+        return json.dumps(_list_skills_payload(), ensure_ascii=False)
+
+    if name == "list_mcps":
+        return json.dumps(_list_mcps_payload(session), ensure_ascii=False)
 
     return json.dumps({"ok": False, "error": f"unknown meta tool: {name}"}, ensure_ascii=False)

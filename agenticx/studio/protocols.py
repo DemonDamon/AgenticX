@@ -13,6 +13,7 @@ class ChatRequest(BaseModel):
     user_input: str = Field(..., min_length=1)
     provider: Optional[str] = None
     model: Optional[str] = None
+    agent_id: Optional[str] = None
 
 
 class ConfirmResponse(BaseModel):

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -72,11 +73,13 @@ class AgentTeamManager:
         self._agents: Dict[str, SubAgentContext] = {}
         self._tasks: Dict[str, asyncio.Task[None]] = {}
         self._cancelled: set[str] = set()
+        self._agent_sessions: Dict[str, StudioSession] = {}
 
     def _build_isolated_session(self) -> StudioSession:
         session = StudioSession(
             provider_name=self.base_session.provider_name,
             model_name=self.base_session.model_name,
+            workspace_dir=self.base_session.workspace_dir,
         )
         # MCP clients are shared, while per-agent messages/artifacts remain isolated.
         session.mcp_hub = self.base_session.mcp_hub
@@ -84,6 +87,39 @@ class AgentTeamManager:
         session.connected_servers = self.base_session.connected_servers
         session.context_files = dict(self.base_session.context_files)
         return session
+
+    def _build_subagent_system_prompt(self, context: SubAgentContext, session: StudioSession) -> str:
+        workspace_dir = (
+            (session.workspace_dir or "").strip()
+            or os.getenv("AGX_WORKSPACE_ROOT", "").strip()
+            or os.getcwd()
+        )
+        context_file_keys = list(context.context_files.keys())
+        context_hint = (
+            "\n".join(f"- {item}" for item in context_file_keys[:20])
+            if context_file_keys
+            else "(empty)"
+        )
+        return (
+            "你是 AgenticX Studio 的子智能体。\n"
+            "你的核心目标：在指定工作目录中完成被委派任务，并持续汇报可验证进展。\n\n"
+            "## 你的身份\n"
+            f"- agent_id: {context.agent_id}\n"
+            f"- name: {context.name}\n"
+            f"- role: {context.role}\n"
+            f"- delegated_task: {context.task}\n\n"
+            "## 工作目录约束（必须遵守）\n"
+            f"- 工作目录: {workspace_dir}\n"
+            "- 所有文件读写和命令执行都必须限定在该目录或其子目录。\n"
+            "- 禁止把 `/Users`、`~`、`/` 等系统路径当作默认探索目标。\n"
+            "- 若路径不确定，先用最小范围的 list/read 确认后再操作。\n\n"
+            "## 已注入上下文文件\n"
+            f"{context_hint}\n\n"
+            "## 执行要求\n"
+            "- 先给出你即将执行的最小下一步，再调用工具。\n"
+            "- 遇到歧义或高风险操作时，先 ask_user 再继续。\n"
+            "- 优先完成用户指定目录中的目标，不做无关全盘扫描。"
+        )
 
     async def _emit(self, event: RuntimeEvent) -> None:
         if self.event_emitter is not None:
@@ -190,6 +226,62 @@ class AgentTeamManager:
         )
         return {"ok": True, "agent_id": agent_id, "status": context.status.value}
 
+    async def send_message_to_subagent(self, agent_id: str, message: str) -> Dict[str, Any]:
+        context = self._agents.get(agent_id)
+        if context is None:
+            return {"ok": False, "error": "not_found", "message": f"未找到子智能体: {agent_id}"}
+        if context.status != SubAgentStatus.RUNNING:
+            return {
+                "ok": False,
+                "error": "not_running",
+                "message": f"子智能体当前状态为 {context.status.value}，无法继续对话",
+            }
+        session = self._agent_sessions.get(agent_id)
+        if session is None:
+            return {"ok": False, "error": "session_unavailable", "message": "子智能体会话不可用"}
+        text = message.strip()
+        if not text:
+            return {"ok": False, "error": "empty_message", "message": "消息不能为空"}
+        session.agent_messages.append({"role": "user", "content": text})
+        session.chat_history.append({"role": "user", "content": text})
+        context.updated_at = time.time()
+        await self._emit(
+            RuntimeEvent(
+                type=EventType.SUBAGENT_PROGRESS.value,
+                data={"agent_id": agent_id, "text": f"收到用户追问: {text}"},
+                agent_id=agent_id,
+            )
+        )
+        return {"ok": True, "agent_id": agent_id, "status": context.status.value}
+
+    async def retry_subagent(self, agent_id: str, refined_task: Optional[str] = None) -> Dict[str, Any]:
+        previous = self._agents.get(agent_id)
+        if previous is None:
+            return {"ok": False, "error": "not_found", "message": f"未找到子智能体: {agent_id}"}
+        if previous.status == SubAgentStatus.RUNNING:
+            return {"ok": False, "error": "still_running", "message": "子智能体仍在运行，无法重试"}
+        new_task = (refined_task or "").strip() or previous.task
+        if previous.error_text:
+            new_task = (
+                f"{new_task}\n\n"
+                "请参考上次失败信息并避免重复问题：\n"
+                f"{previous.error_text}"
+            )
+        result = await self.spawn_subagent(
+            name=previous.name,
+            role=previous.role,
+            task=new_task,
+            source_tool_call_id=previous.source_tool_call_id,
+        )
+        if not result.get("ok"):
+            return result
+        new_agent_id = str(result.get("agent_id", "")).strip()
+        new_context = self._agents.get(new_agent_id)
+        if new_context is not None:
+            new_context.context_files.update(previous.context_files)
+            new_context.artifacts.update(previous.artifacts)
+        return result
+
     def get_status(self, agent_id: Optional[str] = None) -> Dict[str, Any]:
         if agent_id:
             context = self._agents.get(agent_id)
@@ -244,8 +336,12 @@ class AgentTeamManager:
         allowed_tools: Sequence[Dict[str, Any]],
     ) -> None:
         session = self._build_isolated_session()
+        session.context_files.update(context.context_files)
+        session.artifacts.update(context.artifacts)
+        self._agent_sessions[context.agent_id] = session
         llm = self.llm_factory()
-        runtime = AgentRuntime(llm, context.confirm_gate)
+        runtime = AgentRuntime(llm, context.confirm_gate, max_tool_rounds=25)
+        system_prompt = self._build_subagent_system_prompt(context, session)
 
         try:
             async for event in runtime.run_turn(
@@ -254,17 +350,22 @@ class AgentTeamManager:
                 should_stop=lambda: context.agent_id in self._cancelled,
                 agent_id=context.agent_id,
                 tools=allowed_tools,
+                system_prompt=system_prompt,
             ):
                 context.updated_at = time.time()
                 if event.type == EventType.FINAL.value:
                     context.final_text = str(event.data.get("text", ""))
                 if event.type == EventType.ERROR.value:
                     context.error_text = str(event.data.get("text", ""))
+                if event.type == EventType.SUBAGENT_PAUSED.value:
+                    context.error_text = str(event.data.get("text", ""))
                 if event.type in {
                     EventType.TOOL_CALL.value,
                     EventType.TOOL_RESULT.value,
                     EventType.CONFIRM_REQUIRED.value,
                     EventType.CONFIRM_RESPONSE.value,
+                    EventType.SUBAGENT_CHECKPOINT.value,
+                    EventType.SUBAGENT_PAUSED.value,
                     EventType.ERROR.value,
                 }:
                     context.recent_events.append({"type": event.type, "data": event.data})
@@ -312,6 +413,7 @@ class AgentTeamManager:
             context.context_files = dict(session.context_files)
             context.result_summary = self._build_result_summary(context)
             self._tasks.pop(context.agent_id, None)
+            self._agent_sessions.pop(context.agent_id, None)
             self._cancelled.discard(context.agent_id)
             if self.summary_sink is not None:
                 await self.summary_sink(context.result_summary, context)

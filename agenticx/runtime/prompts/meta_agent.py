@@ -4,9 +4,45 @@
 from __future__ import annotations
 
 from agenticx.cli.studio import StudioSession
+from agenticx.cli.studio_skill import get_all_skill_summaries
+
+
+def _build_skills_context() -> str:
+    try:
+        skills = get_all_skill_summaries()
+    except Exception:
+        skills = []
+    if not skills:
+        return "### Skills（共 0 个）\n- (未发现可用 skills)\n"
+    lines = [f"### Skills（共 {len(skills)} 个）"]
+    for skill in skills:
+        name = str(skill.get("name", "")).strip() or "(unknown)"
+        description = str(skill.get("description", "")).strip() or "(无描述)"
+        lines.append(f"- {name}: {description}")
+    return "\n".join(lines) + "\n"
+
+
+def _build_mcps_context(session: StudioSession) -> str:
+    configs = session.mcp_configs if isinstance(session.mcp_configs, dict) else {}
+    connected = (
+        session.connected_servers
+        if isinstance(session.connected_servers, set)
+        else set(session.connected_servers or [])
+    )
+    connected_count = sum(1 for name in configs if name in connected)
+    if not configs:
+        return "### MCP 服务器（共 0 个，已连接 0 个）\n- (未发现 MCP 配置)\n"
+
+    lines = [f"### MCP 服务器（共 {len(configs)} 个，已连接 {connected_count} 个）"]
+    for name in sorted(configs.keys()):
+        status = "已连接" if name in connected else "未连接"
+        lines.append(f"- {name} [{status}]")
+    return "\n".join(lines) + "\n"
 
 
 def build_meta_agent_system_prompt(session: StudioSession) -> str:
+    skills_context = _build_skills_context()
+    mcp_context = _build_mcps_context(session)
     return (
         "你是 AgenticX Desktop 的首席 Meta-Agent（CEO）。\n"
         "你不直接执行文件/命令类工具，而是负责任务拆解、资源评估、调度子智能体和对用户汇报。\n\n"
@@ -31,7 +67,12 @@ def build_meta_agent_system_prompt(session: StudioSession) -> str:
         "- 在拿到工具结果前，不要输出长段解释；优先输出工具事件与结果。\n"
         "- 若当前不需要启动子智能体，就直接给最终答复，不要进入无意义等待。\n"
         "- `query_subagent_status` 仅在用户明确问进度或已有子智能体运行时调用，禁止高频轮询。\n\n"
+        "- 当用户询问“你有什么能力 / skills / mcp / 工具”时：直接基于“已注册能力”章节作答，禁止调用 `check_resources` 或启动子智能体。\n"
+        "- 只有在“执行任务前的资源评估”场景才调用 `check_resources`，信息类问答不调用。\n\n"
         "- 工具调用语法必须是裸函数形式（如 `check_resources()`），禁止包裹在 `print(...)`、`<tool_code>...</tool_code>` 或其他文本模板中。\n\n"
+        "## 已注册能力\n"
+        f"{skills_context}\n"
+        f"{mcp_context}\n"
         "## 当前会话上下文\n"
         f"- provider: {session.provider_name or 'default'}\n"
         f"- model: {session.model_name or 'default'}\n"
