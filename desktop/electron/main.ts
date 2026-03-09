@@ -64,6 +64,8 @@ let apiPort = 8000;
 const apiToken = crypto.randomBytes(16).toString("hex");
 let serveProcess: ChildProcess | null = null;
 let isQuitting = false;
+let serveStdoutBuffer = "";
+let serveStderrBuffer = "";
 
 function pickFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -121,42 +123,95 @@ async function startStudioServe(): Promise<void> {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, AGX_DESKTOP_TOKEN: apiToken }
   });
+  serveStdoutBuffer = "";
+  serveStderrBuffer = "";
+  if (serveProcess.stdout) {
+    serveProcess.stdout.on("data", (chunk: Buffer) => {
+      serveStdoutBuffer = (serveStdoutBuffer + chunk.toString("utf-8")).slice(-4000);
+    });
+  }
+  if (serveProcess.stderr) {
+    serveProcess.stderr.on("data", (chunk: Buffer) => {
+      serveStderrBuffer = (serveStderrBuffer + chunk.toString("utf-8")).slice(-4000);
+    });
+  }
 }
 
-async function waitServeReady(timeoutMs = 15000): Promise<void> {
+async function waitServeReady(timeoutMs = 45000): Promise<void> {
   if (!serveProcess || !serveProcess.stdout || !serveProcess.stderr) {
     throw new Error("agx serve process not started");
   }
   const currentProcess = serveProcess;
   const currentStdout = currentProcess.stdout!;
   const currentStderr = currentProcess.stderr!;
+  const pingReady = async (): Promise<boolean> => {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/session`, {
+        headers: { "x-agx-desktop-token": apiToken },
+      });
+      return resp.ok;
+    } catch {
+      return false;
+    }
+  };
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("agx serve startup timeout")), timeoutMs);
+    let settled = false;
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const stderrTail = serveStderrBuffer.trim().slice(-1200);
+      const stdoutTail = serveStdoutBuffer.trim().slice(-1200);
+      const detail = [message, stderrTail && `stderr:\n${stderrTail}`, stdoutTail && `stdout:\n${stdoutTail}`]
+        .filter(Boolean)
+        .join("\n\n");
+      reject(new Error(detail));
+    };
+    const markReady = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cleanup();
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      void (async () => {
+        if (await pingReady()) {
+          markReady();
+          return;
+        }
+        fail("agx serve startup timeout");
+      })();
+    }, timeoutMs);
+    const probeTimer = setInterval(() => {
+      void (async () => {
+        if (settled) return;
+        if (await pingReady()) {
+          markReady();
+        }
+      })();
+    }, 500);
     const onData = (chunk: Buffer) => {
       const text = chunk.toString("utf-8");
       if (text.includes("Uvicorn running") || text.includes("AgenticX Studio Server")) {
-        clearTimeout(timer);
-        cleanup();
-        resolve();
+        markReady();
       }
     };
     const onErrData = (chunk: Buffer) => {
       const text = chunk.toString("utf-8");
-      if (text.toLowerCase().includes("error")) {
-        // keep listening; process may still start
+      if (text.includes("Uvicorn running") || text.includes("AgenticX Studio Server")) {
+        markReady();
       }
     };
-    const onExit = () => {
-      clearTimeout(timer);
-      cleanup();
-      reject(new Error("agx serve exited before ready"));
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      fail(`agx serve exited before ready (code=${String(code)}, signal=${String(signal)})`);
     };
     const onError = () => {
-      clearTimeout(timer);
-      cleanup();
-      reject(new Error("agx serve failed to start"));
+      fail("agx serve failed to start");
     };
     const cleanup = () => {
+      clearTimeout(timer);
+      clearInterval(probeTimer);
       currentStdout.off("data", onData);
       currentStderr.off("data", onErrData);
       currentProcess.off("exit", onExit);
@@ -179,6 +234,8 @@ function stopStudioServe(): void {
     // noop
   } finally {
     serveProcess = null;
+    serveStdoutBuffer = "";
+    serveStderrBuffer = "";
   }
 }
 

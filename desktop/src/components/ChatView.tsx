@@ -109,7 +109,7 @@ export function ChatView({ onOpenConfirm }: Props) {
   const activeRequestIdRef = useRef(0);
   const modelBtnRef = useRef<HTMLButtonElement | null>(null);
 
-  const canSend = useMemo(() => !!(apiBase && sessionId && !streaming), [apiBase, sessionId, streaming]);
+  const canSend = useMemo(() => !!(apiBase && sessionId), [apiBase, sessionId]);
   const visibleMessages = useMemo(
     () => messages.filter((item) => !item.agentId || item.agentId === "meta"),
     [messages]
@@ -158,7 +158,22 @@ export function ChatView({ onOpenConfirm }: Props) {
     userText: string,
     opts?: { provider?: string; model?: string; insertAfterId?: string }
   ) => {
-    if (!userText || !apiBase || !sessionId || streaming) return;
+    if (!userText || !apiBase || !sessionId) return;
+    if (streaming) {
+      abortedByUserRef.current = true;
+      abortRef.current?.abort();
+      const partial = streamTextRef.current.trim();
+      if (partial && !streamCommittedRef.current) {
+        addMessage("assistant", streamTextRef.current, "meta", activeProvider, activeModel);
+        streamCommittedRef.current = true;
+      }
+      addMessage("tool", "已中断上一轮生成，开始处理新消息", "meta");
+      streamTextRef.current = "";
+      setStreamedAssistantText("");
+      setStreamingModel(null);
+      setStatus("idle");
+      setStreaming(false);
+    }
     const reqProvider = opts?.provider ?? activeProvider;
     const reqModel = opts?.model ?? activeModel;
     const requestId = activeRequestIdRef.current + 1;
@@ -455,13 +470,16 @@ export function ChatView({ onOpenConfirm }: Props) {
             onChange={(e) => { interruptTtsOnUserSpeech(true); setInput(e.target.value); }}
             onKeyDown={onKeyDown}
             rows={input.split("\n").length > 3 ? 4 : input.includes("\n") ? 2 : 1}
-            placeholder={canSend ? "输入需求，Enter 发送，Shift+Enter 换行" : streaming ? "等待回复中..." : "连接中..."}
+            placeholder={canSend ? "输入需求，Enter 发送（生成中可直接追问）" : "连接中..."}
             disabled={!canSend && !streaming}
             className="min-h-[40px] max-h-[120px] flex-1 resize-none rounded-xl border border-border bg-slate-900/80 px-3 py-2.5 text-sm outline-none transition placeholder:text-slate-500 focus:border-cyan-500/50"
           />
           <button className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-lg transition hover:bg-slate-700" onClick={onMicClick} title="语音输入">🎙</button>
           {streaming ? (
-            <button className="flex h-10 shrink-0 items-center rounded-xl bg-rose-500 px-4 text-sm font-medium text-white transition hover:bg-rose-400" onClick={stopStreaming}>中断</button>
+            <div className="flex items-center gap-2">
+              <button className="flex h-10 shrink-0 items-center rounded-xl bg-rose-500 px-4 text-sm font-medium text-white transition hover:bg-rose-400" onClick={stopStreaming}>中断</button>
+              <button className="flex h-10 shrink-0 items-center rounded-xl bg-cyan-500 px-4 text-sm font-medium text-black transition hover:bg-cyan-400 disabled:opacity-40 disabled:hover:bg-cyan-500" disabled={!canSend || !input.trim()} onClick={() => void send()}>追问</button>
+            </div>
           ) : (
             <button className="flex h-10 shrink-0 items-center rounded-xl bg-cyan-500 px-4 text-sm font-medium text-black transition hover:bg-cyan-400 disabled:opacity-40 disabled:hover:bg-cyan-500" disabled={!canSend || !input.trim()} onClick={() => void send()}>发送</button>
           )}

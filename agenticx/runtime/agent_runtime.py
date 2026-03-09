@@ -155,6 +155,9 @@ class AgentRuntime:
         session.agent_messages.append({"role": "user", "content": user_input})
         synced_session_message_count = len(session.agent_messages)
         session.chat_history.append({"role": "user", "content": user_input})
+        status_query_total = 0
+        last_status_query_signature: Optional[str] = None
+        repeated_status_query_count = 0
 
         for round_idx in range(1, self.max_tool_rounds + 1):
             if await _check_should_stop():
@@ -272,6 +275,49 @@ class AgentRuntime:
                         agent_id=agent_id,
                     )
                     continue
+                if tool_name == "query_subagent_status":
+                    status_query_total += 1
+                    try:
+                        signature = json.dumps(arguments, ensure_ascii=False, sort_keys=True)
+                    except Exception:
+                        signature = str(arguments)
+                    if signature == last_status_query_signature:
+                        repeated_status_query_count += 1
+                    else:
+                        last_status_query_signature = signature
+                        repeated_status_query_count = 1
+                    if status_query_total > 3 or repeated_status_query_count > 2:
+                        throttled = (
+                            "已阻止高频 query_subagent_status 轮询。"
+                            "子智能体状态会通过 subagent_progress/subagent_completed 事件自动推送，"
+                            "无需重复查询；请继续给出总结或下一步动作。"
+                        )
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "content": throttled,
+                            }
+                        )
+                        session.agent_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "content": throttled,
+                            }
+                        )
+                        synced_session_message_count = len(session.agent_messages)
+                        session.chat_history.append(
+                            {"role": "assistant", "content": f"工具结果({tool_name}):\n{throttled}"}
+                        )
+                        yield RuntimeEvent(
+                            type=EventType.TOOL_RESULT.value,
+                            data={"name": tool_name, "result": throttled, "tool_call_id": tool_call_id},
+                            agent_id=agent_id,
+                        )
+                        continue
 
                 yield RuntimeEvent(
                     type=EventType.TOOL_CALL.value,
