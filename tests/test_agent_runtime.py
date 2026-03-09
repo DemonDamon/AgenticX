@@ -72,7 +72,7 @@ class _ApproveGate(ConfirmGate):
 async def _collect(runtime: AgentRuntime, session: StudioSession, text: str) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
     async for event in runtime.run_turn(text, session):
-        items.append({"type": event.type, "data": event.data})
+        items.append({"type": event.type, "data": event.data, "agent_id": event.agent_id})
     return items
 
 
@@ -87,6 +87,7 @@ def test_runtime_event_flow_tool_confirm_result_final(monkeypatch) -> None:
     events = __import__("asyncio").run(_collect(runtime, StudioSession(), "do it"))
 
     types = [e["type"] for e in events]
+    assert all(e["agent_id"] == "meta" for e in events)
     assert EventType.ROUND_START.value in types
     assert EventType.TOOL_CALL.value in types
     assert EventType.TOOL_RESULT.value in types
@@ -102,6 +103,7 @@ def test_runtime_max_rounds_emits_error(monkeypatch) -> None:
     monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
     runtime = AgentRuntime(_AlwaysToolLLM(), _ApproveGate(), max_tool_rounds=2)
     events = __import__("asyncio").run(_collect(runtime, StudioSession(), "loop"))
+    assert all(e["agent_id"] == "meta" for e in events)
     assert events[-1]["type"] == EventType.ERROR.value
 
 
@@ -109,6 +111,7 @@ def test_runtime_text_only_emits_tokens_then_final() -> None:
     runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
     events = __import__("asyncio").run(_collect(runtime, StudioSession(), "hello"))
     types = [e["type"] for e in events]
+    assert all(e["agent_id"] == "meta" for e in events)
     assert EventType.TOKEN.value in types
     assert events[-1]["type"] == EventType.FINAL.value
 
@@ -124,11 +127,59 @@ def test_runtime_should_stop_interrupts_generation() -> None:
     async def _collect_interrupt() -> List[Dict[str, Any]]:
         items: List[Dict[str, Any]] = []
         async for event in runtime.run_turn("hello", StudioSession(), should_stop=_should_stop):
-            items.append({"type": event.type, "data": event.data})
+            items.append({"type": event.type, "data": event.data, "agent_id": event.agent_id})
         return items
 
     events = __import__("asyncio").run(_collect_interrupt())
     assert any(e["type"] == EventType.ROUND_START.value for e in events)
     assert events[-1]["type"] == EventType.ERROR.value
+    assert events[-1]["agent_id"] == "meta"
     assert events[-1]["data"]["text"] == "已中断当前生成"
     assert not any(e["type"] == EventType.FINAL.value for e in events)
+
+
+def test_runtime_accepts_custom_agent_id() -> None:
+    runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
+
+    async def _collect_custom() -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        async for event in runtime.run_turn("hello", StudioSession(), agent_id="sa-1"):
+            items.append({"type": event.type, "data": event.data, "agent_id": event.agent_id})
+        return items
+
+    events = __import__("asyncio").run(_collect_custom())
+    assert events
+    assert all(e["agent_id"] == "sa-1" for e in events)
+
+
+def test_runtime_rejects_tool_outside_allowlist(monkeypatch) -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    called = {"n": 0}
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        called["n"] += 1
+        return "tool-ok"
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    runtime = AgentRuntime(_ToolThenFinalLLM(), _ApproveGate())
+    allow_only_list_files = [
+        {
+            "type": "function",
+            "function": {
+                "name": "list_files",
+                "description": "List files",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+    async def _collect_blocked() -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        async for event in runtime.run_turn("do it", StudioSession(), tools=allow_only_list_files):
+            items.append({"type": event.type, "data": event.data, "agent_id": event.agent_id})
+        return items
+
+    events = __import__("asyncio").run(_collect_blocked())
+    assert called["n"] == 0
+    assert any("不在当前允许列表" in str(e["data"].get("text", "")) for e in events if e["type"] == EventType.ERROR.value)

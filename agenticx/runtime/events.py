@@ -22,6 +22,10 @@ class EventType(str, Enum):
     TOKEN = "token"
     FINAL = "final"
     ERROR = "error"
+    SUBAGENT_STARTED = "subagent_started"
+    SUBAGENT_PROGRESS = "subagent_progress"
+    SUBAGENT_COMPLETED = "subagent_completed"
+    SUBAGENT_ERROR = "subagent_error"
 
 
 @dataclass
@@ -30,3 +34,4 @@ class RuntimeEvent:
 
     type: str
     data: Dict[str, Any]
+    agent_id: str = "meta"

@@ -9,6 +9,30 @@ def __getattr__(name: str):
         from agenticx.runtime.agent_runtime import AgentRuntime
 
         return AgentRuntime
+    if name == "AgentTeamManager":
+        from agenticx.runtime.team_manager import AgentTeamManager
+
+        return AgentTeamManager
+    if name == "SubAgentContext":
+        from agenticx.runtime.team_manager import SubAgentContext
+
+        return SubAgentContext
+    if name == "SubAgentStatus":
+        from agenticx.runtime.team_manager import SubAgentStatus
+
+        return SubAgentStatus
+    if name == "ResourceMonitor":
+        from agenticx.runtime.resource_monitor import ResourceMonitor
+
+        return ResourceMonitor
+    if name == "META_AGENT_TOOLS":
+        from agenticx.runtime.meta_tools import META_AGENT_TOOLS
+
+        return META_AGENT_TOOLS
+    if name == "dispatch_meta_tool_async":
+        from agenticx.runtime.meta_tools import dispatch_meta_tool_async
+
+        return dispatch_meta_tool_async
     raise AttributeError(name)
 
 __all__ = [
@@ -18,4 +42,10 @@ __all__ = [
     "AsyncConfirmGate",
     "EventType",
     "RuntimeEvent",
+    "AgentTeamManager",
+    "SubAgentContext",
+    "SubAgentStatus",
+    "ResourceMonitor",
+    "META_AGENT_TOOLS",
+    "dispatch_meta_tool_async",
 ]
