@@ -14,3 +14,57 @@ body {
 * {
   box-sizing: border-box;
 }
+
+/* macOS title bar drag region */
+.drag-region {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Markdown content styles */
+.msg-content p {
+  margin: 0.25em 0;
+}
+.msg-content pre {
+  @apply overflow-x-auto rounded bg-slate-900 p-2 text-xs;
+}
+.msg-content code {
+  @apply rounded bg-slate-800 px-1 py-0.5 text-xs;
+}
+.msg-content pre code {
+  @apply bg-transparent p-0;
+}
+.msg-content ul, .msg-content ol {
+  @apply ml-4 list-inside;
+}
+.msg-content ul {
+  @apply list-disc;
+}
+.msg-content ol {
+  @apply list-decimal;
+}
+.msg-content strong {
+  @apply font-semibold text-cyan-300;
+}
+.msg-content h1, .msg-content h2, .msg-content h3 {
+  @apply font-semibold mt-2 mb-1;
+}
+.msg-content h1 { @apply text-base; }
+.msg-content h2 { @apply text-sm; }
+.msg-content h3 { @apply text-xs; }
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-slate-600;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-500;
+}

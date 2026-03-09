@@ -30,8 +30,8 @@ export function SettingsPanel({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50">
-      <div className="w-[460px] rounded-xl border border-border bg-panel p-4">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-w-[90vw] w-[400px] rounded-xl border border-border bg-panel p-4">
         <h3 className="mb-3 text-lg font-semibold">设置</h3>
         <div className="space-y-3">
           <label className="block text-sm">
