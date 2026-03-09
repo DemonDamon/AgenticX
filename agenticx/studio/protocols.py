@@ -19,6 +19,7 @@ class ConfirmResponse(BaseModel):
     session_id: str
     request_id: str
     approved: bool
+    agent_id: str = "meta"
 
 
 class SessionState(BaseModel):

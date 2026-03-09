@@ -50,6 +50,44 @@ class _ConfirmLLM:
         yield "after confirm"
 
 
+class _MetaSpawnLLM:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, *_args, **_kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return _FakeResponse(
+                "准备启动子智能体",
+                [
+                    {
+                        "id": "meta-call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "spawn_subagent",
+                            "arguments": {
+                                "name": "执行者",
+                                "role": "coder",
+                                "task": "生成一个最小示例",
+                            },
+                        },
+                    }
+                ],
+            )
+        return _FakeResponse("主智能体汇总完成", [])
+
+    def stream(self, *_args, **_kwargs):
+        yield "主智能体汇总完成"
+
+
+class _SubTextLLM:
+    def invoke(self, *_args, **_kwargs):
+        return _FakeResponse("sub done", [])
+
+    def stream(self, *_args, **_kwargs):
+        yield "sub done"
+
+
 def _extract_events(lines: List[str]) -> List[Dict[str, Any]]:
     events: List[Dict[str, Any]] = []
     for line in lines:
@@ -96,6 +134,7 @@ def test_server_chat_sse_stream(monkeypatch) -> None:
 
     assert any(e.get("type") == "token" for e in events)
     assert any(e.get("type") == "final" for e in events)
+    assert all((e.get("data") or {}).get("agent_id") for e in events if e.get("type") != "done")
 
 
 def test_server_confirm_gate_flow(monkeypatch) -> None:
@@ -128,6 +167,39 @@ def test_server_confirm_gate_flow(monkeypatch) -> None:
     assert approved is False
 
 
+def test_server_confirm_route_supports_agent_id() -> None:
+    app = create_studio_app()
+    client = TestClient(app)
+    session_id = client.get("/api/session").json()["session_id"]
+    manager = app.state.session_manager
+    managed = manager.get(session_id)
+    assert managed is not None
+    sub_gate = managed.get_confirm_gate("sa-1")
+
+    import asyncio
+
+    async def _await_confirm() -> bool:
+        return await sub_gate.request_confirm("确认执行？", {"request_id": "sub-1"})
+
+    async def _run_flow() -> bool:
+        task = asyncio.create_task(_await_confirm())
+        await asyncio.sleep(0)
+        confirm_resp = client.post(
+            "/api/confirm",
+            json={
+                "session_id": session_id,
+                "request_id": "sub-1",
+                "approved": True,
+                "agent_id": "sa-1",
+            },
+        )
+        assert confirm_resp.status_code == 200
+        return await task
+
+    approved = asyncio.run(_run_flow())
+    assert approved is True
+
+
 def test_server_chat_passes_should_stop_callable(monkeypatch) -> None:
     from agenticx.studio import server as server_module
 
@@ -137,7 +209,7 @@ def test_server_chat_passes_should_stop_callable(monkeypatch) -> None:
         def __init__(self, _llm, _confirm_gate):
             pass
 
-        async def run_turn(self, _user_input, _session, should_stop=None):
+        async def run_turn(self, _user_input, _session, should_stop=None, **_kwargs):
             assert callable(should_stop)
             called["invoked"] = True
             called["value"] = await should_stop()
@@ -161,3 +233,66 @@ def test_server_chat_passes_should_stop_callable(monkeypatch) -> None:
     assert called["value"] is False
     assert any(e.get("type") == "final" for e in events)
     assert not any(e.get("type") == "error" for e in events)
+
+
+def test_server_chat_multiplexes_subagent_events(monkeypatch) -> None:
+    from agenticx.studio import server as server_module
+
+    calls = {"n": 0}
+
+    def _resolve(**_kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _MetaSpawnLLM()
+        return _SubTextLLM()
+
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", _resolve)
+    app = create_studio_app()
+    client = TestClient(app)
+    session_id = client.get("/api/session").json()["session_id"]
+
+    with client.stream(
+        "POST",
+        "/api/chat",
+        json={"session_id": session_id, "user_input": "请并行完成任务"},
+    ) as resp:
+        assert resp.status_code == 200
+        events = _extract_events(list(resp.iter_lines()))
+
+    event_types = [e.get("type") for e in events]
+    assert "subagent_started" in event_types
+    assert "subagent_completed" in event_types
+    assert "final" in event_types
+    assert all((e.get("data") or {}).get("agent_id") for e in events if e.get("type") != "done")
+
+
+def test_server_chat_rebinds_team_callbacks_each_turn(monkeypatch) -> None:
+    from agenticx.studio import server as server_module
+
+    calls = {"n": 0}
+
+    def _resolve(**_kwargs):
+        calls["n"] += 1
+        if calls["n"] % 2 == 1:
+            return _MetaSpawnLLM()
+        return _SubTextLLM()
+
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", _resolve)
+    app = create_studio_app()
+    client = TestClient(app)
+    session_id = client.get("/api/session").json()["session_id"]
+
+    def _run_chat() -> List[Dict[str, Any]]:
+        with client.stream(
+            "POST",
+            "/api/chat",
+            json={"session_id": session_id, "user_input": "执行一次并发任务"},
+        ) as resp:
+            assert resp.status_code == 200
+            return _extract_events(list(resp.iter_lines()))
+
+    first_events = _run_chat()
+    second_events = _run_chat()
+
+    assert "subagent_started" in [e.get("type") for e in first_events]
+    assert "subagent_started" in [e.get("type") for e in second_events]
