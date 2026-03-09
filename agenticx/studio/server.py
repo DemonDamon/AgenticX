@@ -145,20 +145,9 @@ def create_studio_app() -> FastAPI:
             await event_queue.put(event)
 
         async def _on_subagent_summary(summary: str, context) -> None:
-            # Inject summarized sub-agent result back to meta-agent context as tool result.
-            tool_call_id = str(getattr(context, "source_tool_call_id", "") or "")
-            if tool_call_id:
-                session.agent_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "name": "spawn_subagent",
-                        "content": summary,
-                    }
-                )
-            else:
-                # Fallback to assistant note when no valid tool_call_id is available.
-                session.agent_messages.append({"role": "assistant", "content": f"子智能体汇总:\n{summary}"})
+            # Use assistant note instead of raw tool role to avoid dangling tool messages
+            # in later turns (some providers strictly validate tool message ordering).
+            session.agent_messages.append({"role": "assistant", "content": f"子智能体汇总:\n{summary}"})
             session.chat_history.append({"role": "assistant", "content": f"子智能体汇总:\n{summary}"})
 
         team_manager = managed.get_or_create_team(
@@ -207,14 +196,10 @@ def create_studio_app() -> FastAPI:
                         yield f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"
                     if not meta_done:
                         continue
-                    status_payload = team_manager.get_status()
-                    subagents = status_payload.get("subagents", []) if isinstance(status_payload, dict) else []
-                    has_running = any(
-                        item.get("status") in {"pending", "running"}
-                        for item in subagents
-                        if isinstance(item, dict)
-                    )
-                    if not has_running and event_queue.empty():
+                    # Do not block the main chat stream on background sub-agent execution.
+                    # This keeps the main dialogue responsive; users can continue asking
+                    # new questions while sub-agents keep running asynchronously.
+                    if event_queue.empty():
                         break
             except Exception as exc:
                 err = SseEvent(type="error", data={"text": f"Runtime error: {exc}"})
@@ -245,5 +230,19 @@ def create_studio_app() -> FastAPI:
         if not result.get("ok"):
             raise HTTPException(status_code=404, detail=result.get("message", "subagent not found"))
         return result
+
+    @app.get("/api/subagents/status")
+    async def subagents_status(
+        session_id: str = Query(...),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        managed = manager.get(session_id)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        if managed.team_manager is None:
+            return {"ok": True, "subagents": []}
+        status_payload = managed.team_manager.get_status()
+        return status_payload if isinstance(status_payload, dict) else {"ok": True, "subagents": []}
 
     return app

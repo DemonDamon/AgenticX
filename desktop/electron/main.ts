@@ -118,10 +118,17 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
 async function startStudioServe(): Promise<void> {
   apiPort = await pickFreePort();
   const cmd = `agx serve --host 127.0.0.1 --port ${String(apiPort)}`;
+  const desktopHome = os.homedir();
   // Use login shell to inherit user's PATH (conda/pyenv/etc) in packaged app
   serveProcess = spawn("/bin/zsh", ["-l", "-c", cmd], {
+    cwd: desktopHome,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, AGX_DESKTOP_TOKEN: apiToken }
+    env: {
+      ...process.env,
+      AGX_DESKTOP_TOKEN: apiToken,
+      AGX_WORKSPACE_ROOT: desktopHome,
+      AGX_DESKTOP_UNRESTRICTED_FS: "1",
+    }
   });
   serveStdoutBuffer = "";
   serveStderrBuffer = "";
@@ -245,7 +252,7 @@ function createWindow(): void {
     height: 700,
     minWidth: 680,
     minHeight: 480,
-    alwaysOnTop: true,
+    alwaysOnTop: false,
     skipTaskbar: false,
     titleBarStyle: "hiddenInset",
     vibrancy: "under-window",
@@ -255,7 +262,6 @@ function createWindow(): void {
       preload: path.join(__dirname, "preload.js")
     }
   });
-  mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   if (app.isPackaged) {
     const indexPath = path.join(__dirname, "..", "dist", "index.html");
     void mainWindow.loadFile(indexPath).catch(() => {});

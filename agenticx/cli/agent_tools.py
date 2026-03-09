@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -29,6 +30,7 @@ else:
 
 
 SAFE_COMMANDS = {
+    "cd",
     "ls",
     "cat",
     "head",
@@ -50,7 +52,18 @@ PATH_GUARDED_READ_COMMANDS = {"cat", "head", "tail", "grep", "find", "wc", "ls",
 
 
 def _workspace_root() -> Path:
+    configured = os.getenv("AGX_WORKSPACE_ROOT", "").strip()
+    if configured:
+        try:
+            return Path(configured).expanduser().resolve(strict=False)
+        except Exception:
+            pass
     return Path.cwd().resolve()
+
+
+def _desktop_unrestricted_fs_enabled() -> bool:
+    value = os.getenv("AGX_DESKTOP_UNRESTRICTED_FS", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def _detect_target(text: str) -> str:
@@ -304,6 +317,8 @@ def _resolve_workspace_path(path_arg: str) -> Path:
         resolved = raw_path.resolve(strict=False)
     else:
         resolved = (workspace / raw_path).resolve(strict=False)
+    if _desktop_unrestricted_fs_enabled():
+        return resolved
     try:
         resolved.relative_to(workspace)
     except ValueError as exc:
@@ -502,6 +517,20 @@ async def _tool_bash_exec(
         return "ERROR: empty command"
 
     command_name = Path(parts[0]).name
+    if command_name == "cd":
+        target = str(parts[1]) if len(parts) > 1 else "~"
+        try:
+            resolved = _resolve_workspace_path(target)
+        except ValueError as exc:
+            return f"ERROR: {exc}"
+        if not resolved.exists() or not resolved.is_dir():
+            return f"ERROR: target directory not found: {resolved}"
+        return (
+            f"OK: cd {resolved}\n"
+            "说明：`cd` 是 shell 内建命令，不会在无 shell 的单次执行中持久化。\n"
+            "请在后续 bash_exec 调用里通过 `cwd` 参数指定工作目录。"
+        )
+
     if command_name not in SAFE_COMMANDS:
         confirm_question = (
             f"Command '{command_name}' is not in SAFE_COMMANDS. Execute anyway?"

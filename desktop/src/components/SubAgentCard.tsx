@@ -31,6 +31,7 @@ export function SubAgentCard({ subAgent, onCancel, onSelect, selected = false }:
         <button className="text-left" onClick={() => onSelect(subAgent.id)}>
           <div className="text-sm font-medium text-slate-200">{subAgent.name}</div>
           <div className="text-xs text-slate-400">{subAgent.role}</div>
+          <div className="text-[11px] text-slate-500">ID: {subAgent.id}</div>
         </button>
         <span className={`text-xs ${status.tone}`}>
           {status.icon} {status.label}

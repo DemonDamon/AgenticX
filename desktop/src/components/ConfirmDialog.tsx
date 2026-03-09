@@ -1,13 +1,21 @@
+import { useEffect, useState } from "react";
+
 type Props = {
   open: boolean;
   question: string;
   sourceLabel?: string;
   diff?: string;
-  onApprove: () => void;
+  onApprove: (allowSimilar: boolean) => void;
   onReject: () => void;
 };
 
 export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, onReject }: Props) {
+  const [allowSimilar, setAllowSimilar] = useState(false);
+
+  useEffect(() => {
+    if (open) setAllowSimilar(false);
+  }, [open, question]);
+
   if (!open) {
     return null;
   }
@@ -22,11 +30,23 @@ export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, on
             {diff}
           </pre>
         ) : null}
+        <label className="mb-3 flex cursor-pointer items-center gap-2 text-xs text-slate-300">
+          <input
+            type="checkbox"
+            checked={allowSimilar}
+            onChange={(e) => setAllowSimilar(e.target.checked)}
+            className="h-4 w-4 rounded border-border bg-slate-900 accent-emerald-500"
+          />
+          本次会话自动允许同类操作
+        </label>
         <div className="flex justify-end gap-2">
           <button className="rounded-lg border border-border px-3 py-1.5 text-sm transition hover:bg-slate-700" onClick={onReject}>
             取消
           </button>
-          <button className="rounded-lg bg-emerald-500 px-3 py-1.5 text-sm text-black transition hover:bg-emerald-400" onClick={onApprove}>
+          <button
+            className="rounded-lg bg-emerald-500 px-3 py-1.5 text-sm text-black transition hover:bg-emerald-400"
+            onClick={() => onApprove(allowSimilar)}
+          >
             确认执行
           </button>
         </div>

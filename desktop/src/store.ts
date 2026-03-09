@@ -37,6 +37,7 @@ type ConfirmState = {
   agentId: string;
   question: string;
   diff?: string;
+  context?: Record<string, unknown>;
 };
 
 type ProviderEntry = {
@@ -82,7 +83,13 @@ type AppState = {
   removeSubAgent: (id: string) => void;
   setSelectedSubAgent: (id: string | null) => void;
   setCodePreview: (code: string) => void;
-  openConfirm: (requestId: string, question: string, diff?: string, agentId?: string) => void;
+  openConfirm: (
+    requestId: string,
+    question: string,
+    diff?: string,
+    agentId?: string,
+    context?: Record<string, unknown>
+  ) => void;
   closeConfirm: () => void;
   openSettings: () => void;
   closeSettings: () => void;
@@ -164,8 +171,8 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   setSelectedSubAgent: (selectedSubAgent) => set({ selectedSubAgent }),
   setCodePreview: (codePreview) => set({ codePreview }),
-  openConfirm: (requestId, question, diff, agentId) =>
-    set({ confirm: { open: true, requestId, question, diff, agentId: agentId ?? "meta" } }),
+  openConfirm: (requestId, question, diff, agentId, context) =>
+    set({ confirm: { open: true, requestId, question, diff, agentId: agentId ?? "meta", context } }),
   closeConfirm: () =>
     set((state) => ({ confirm: { ...state.confirm, open: false, requestId: "" } })),
   openSettings: () =>

@@ -35,6 +35,28 @@ export function App() {
   const updateSettings = useAppStore((s) => s.updateSettings);
   const setActiveModel = useAppStore((s) => s.setActiveModel);
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
+  const confirmScopeRef = useRef<string | null>(null);
+  const autoApproveScopesRef = useRef<Set<string>>(new Set());
+
+  const buildConfirmScope = (
+    question: string,
+    context?: Record<string, unknown>
+  ): string => {
+    const tool = String(context?.tool ?? "");
+    if (tool === "bash_exec") {
+      const command = String(context?.command ?? "").trim();
+      const cmdName = command.split(/\s+/)[0] || "unknown";
+      return `bash_exec:${cmdName}`;
+    }
+    if (tool === "file_write" || tool === "file_edit") {
+      const path = String(context?.path ?? "");
+      const slash = path.lastIndexOf("/");
+      const folder = slash > 0 ? path.slice(0, slash) : path;
+      return `${tool}:${folder || "/"}`;
+    }
+    if (tool) return `tool:${tool}`;
+    return `question:${question}`;
+  };
 
   useEffect(() => {
     (async () => {
@@ -75,11 +97,18 @@ export function App() {
     requestId: string,
     question: string,
     diff?: string,
-    agentId: string = "meta"
+    agentId: string = "meta",
+    context?: Record<string, unknown>
   ): Promise<boolean> =>
     await new Promise<boolean>((resolve) => {
+      const scope = buildConfirmScope(question, context);
+      if (autoApproveScopesRef.current.has(scope)) {
+        resolve(true);
+        return;
+      }
+      confirmScopeRef.current = scope;
       confirmResolverRef.current = resolve;
-      openConfirm(requestId, question, diff, agentId);
+      openConfirm(requestId, question, diff, agentId, context);
     });
 
   const handleSettingsSave = async (result: {
@@ -133,12 +162,17 @@ export function App() {
         question={confirm.question}
         sourceLabel={confirm.agentId === "meta" ? "主智能体" : `子智能体 ${confirm.agentId}`}
         diff={confirm.diff}
-        onApprove={() => {
+        onApprove={(allowSimilar) => {
+          if (allowSimilar && confirmScopeRef.current) {
+            autoApproveScopesRef.current.add(confirmScopeRef.current);
+          }
+          confirmScopeRef.current = null;
           closeConfirm();
           confirmResolverRef.current?.(true);
           confirmResolverRef.current = null;
         }}
         onReject={() => {
+          confirmScopeRef.current = null;
           closeConfirm();
           confirmResolverRef.current?.(false);
           confirmResolverRef.current = null;
