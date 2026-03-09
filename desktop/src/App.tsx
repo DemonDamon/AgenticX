@@ -45,10 +45,15 @@ export function App() {
     })();
   }, [openSettings, setApiBase, setApiToken, setSessionId, setStatus]);
 
-  const onOpenConfirm = async (requestId: string, question: string, diff?: string): Promise<boolean> =>
+  const onOpenConfirm = async (
+    requestId: string,
+    question: string,
+    diff?: string,
+    agentId: string = "meta"
+  ): Promise<boolean> =>
     await new Promise<boolean>((resolve) => {
       confirmResolverRef.current = resolve;
-      openConfirm(requestId, question, diff);
+      openConfirm(requestId, question, diff, agentId);
     });
 
   return (
@@ -64,6 +69,7 @@ export function App() {
       <ConfirmDialog
         open={confirm.open}
         question={confirm.question}
+        sourceLabel={confirm.agentId === "meta" ? "主智能体" : `子智能体 ${confirm.agentId}`}
         diff={confirm.diff}
         onApprove={() => {
           closeConfirm();

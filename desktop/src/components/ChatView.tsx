@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
 import ReactMarkdown from "react-markdown";
 import { useAppStore } from "../store";
+import { SubAgentPanel } from "./SubAgentPanel";
 import { interruptOnInterimResult, interruptTtsOnUserSpeech } from "../voice/interrupt";
 import { speak } from "../voice/tts";
 import { startRecording, stopRecording } from "../voice/stt";
 
 type Props = {
-  onOpenConfirm: (requestId: string, question: string, diff?: string) => Promise<boolean>;
+  onOpenConfirm: (requestId: string, question: string, diff?: string, agentId?: string) => Promise<boolean>;
 };
 
 const statusLabel: Record<string, string> = {
@@ -30,9 +31,16 @@ export function ChatView({ onOpenConfirm }: Props) {
   const addMessage = useAppStore((s) => s.addMessage);
   const setStatus = useAppStore((s) => s.setStatus);
   const openSettings = useAppStore((s) => s.openSettings);
+  const subAgents = useAppStore((s) => s.subAgents);
+  const selectedSubAgent = useAppStore((s) => s.selectedSubAgent);
+  const addSubAgent = useAppStore((s) => s.addSubAgent);
+  const updateSubAgent = useAppStore((s) => s.updateSubAgent);
+  const addSubAgentEvent = useAppStore((s) => s.addSubAgentEvent);
+  const setSelectedSubAgent = useAppStore((s) => s.setSelectedSubAgent);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamedAssistantText, setStreamedAssistantText] = useState("");
+  const [panelOpen, setPanelOpen] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const streamTextRef = useRef("");
@@ -41,6 +49,10 @@ export function ChatView({ onOpenConfirm }: Props) {
   const activeRequestIdRef = useRef(0);
 
   const canSend = useMemo(() => !!(apiBase && sessionId && !streaming), [apiBase, sessionId, streaming]);
+  const visibleMessages = useMemo(
+    () => messages.filter((item) => !item.agentId || item.agentId === "meta"),
+    [messages]
+  );
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
@@ -52,7 +64,36 @@ export function ChatView({ onOpenConfirm }: Props) {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [visibleMessages]);
+
+  useEffect(() => {
+    if (subAgents.length > 0) {
+      setPanelOpen(true);
+    }
+  }, [subAgents.length]);
+
+  const onCancelSubAgent = async (agentId: string) => {
+    if (!apiBase || !sessionId) return;
+    updateSubAgent(agentId, { status: "cancelled", currentAction: "用户请求中断..." });
+    try {
+      const resp = await fetch(`${apiBase}/api/subagent/cancel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-agx-desktop-token": apiToken
+        },
+        body: JSON.stringify({ session_id: sessionId, agent_id: agentId })
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `HTTP ${resp.status}`);
+      }
+      addSubAgentEvent(agentId, { type: "cancel", content: "已发送中断请求" });
+    } catch (err) {
+      updateSubAgent(agentId, { status: "running", currentAction: "中断失败，继续执行" });
+      addSubAgentEvent(agentId, { type: "error", content: `中断失败: ${String(err)}` });
+    }
+  };
 
   const send = async (manualInput?: string) => {
     const value = (manualInput ?? input).trim();
@@ -62,7 +103,7 @@ export function ChatView({ onOpenConfirm }: Props) {
     const isCurrentRequest = () => activeRequestIdRef.current === requestId;
 
     setInput("");
-    addMessage("user", value);
+    addMessage("user", value, "meta");
     setStatus("processing");
     setStreaming(true);
     setStreamedAssistantText("");
@@ -111,7 +152,12 @@ export function ChatView({ onOpenConfirm }: Props) {
           if (!line) continue;
           try {
             const payload = JSON.parse(line.slice(6));
+            const eventAgentId = payload.data?.agent_id ?? "meta";
             if (payload.type === "token") {
+              if (eventAgentId !== "meta") {
+                addSubAgentEvent(eventAgentId, { type: "token", content: "生成中..." });
+                continue;
+              }
               const token = payload.data?.text ?? "";
               full += token;
               if (isCurrentRequest()) {
@@ -120,10 +166,16 @@ export function ChatView({ onOpenConfirm }: Props) {
               }
             }
             if (payload.type === "tool_call") {
-              addMessage(
-                "tool",
-                `🔧 ${payload.data?.name ?? "tool"}: ${JSON.stringify(payload.data?.arguments ?? payload.data?.args ?? {}).slice(0, 120)}`
-              );
+              const content = `🔧 ${payload.data?.name ?? "tool"}: ${JSON.stringify(payload.data?.arguments ?? payload.data?.args ?? {}).slice(0, 120)}`;
+              if (eventAgentId === "meta") {
+                addMessage("tool", content, "meta");
+              } else {
+                updateSubAgent(eventAgentId, {
+                  status: "running",
+                  currentAction: `调用工具 ${payload.data?.name ?? "tool"}`
+                });
+                addSubAgentEvent(eventAgentId, { type: "tool_call", content });
+              }
             }
             if (payload.type === "confirm_required") {
               if (!isCurrentRequest()) {
@@ -132,7 +184,8 @@ export function ChatView({ onOpenConfirm }: Props) {
               const ok = await onOpenConfirm(
                 payload.data?.id ?? "",
                 payload.data?.question ?? "是否确认执行？",
-                payload.data?.context?.diff
+                payload.data?.context?.diff,
+                eventAgentId
               );
               if (!isCurrentRequest()) {
                 continue;
@@ -146,19 +199,75 @@ export function ChatView({ onOpenConfirm }: Props) {
                 body: JSON.stringify({
                   session_id: sessionId,
                   request_id: payload.data?.id,
-                  approved: ok
+                  approved: ok,
+                  agent_id: eventAgentId
                 })
               });
             }
             if (payload.type === "final") {
+              if (eventAgentId !== "meta") {
+                updateSubAgent(eventAgentId, {
+                  status: "completed",
+                  currentAction: "已完成"
+                });
+                addSubAgentEvent(eventAgentId, { type: "final", content: payload.data?.text ?? "" });
+                continue;
+              }
               full = payload.data?.text ?? full;
               if (isCurrentRequest()) {
                 streamTextRef.current = full;
                 setStreamedAssistantText(full);
               }
             }
+            if (payload.type === "subagent_started") {
+              const subId = payload.data?.agent_id;
+              if (subId) {
+                addSubAgent({
+                  id: subId,
+                  name: payload.data?.name ?? subId,
+                  role: payload.data?.role ?? "worker",
+                  task: payload.data?.task ?? ""
+                });
+                addSubAgentEvent(subId, { type: "started", content: "已启动" });
+              }
+            }
+            if (payload.type === "subagent_progress") {
+              const subId = payload.data?.agent_id;
+              if (subId) {
+                updateSubAgent(subId, { currentAction: payload.data?.text ?? "执行中" });
+                addSubAgentEvent(subId, { type: "progress", content: payload.data?.text ?? "执行中" });
+              }
+            }
+            if (payload.type === "subagent_completed") {
+              const subId = payload.data?.agent_id;
+              if (subId) {
+                updateSubAgent(subId, {
+                  status: "completed",
+                  currentAction: "已完成"
+                });
+                addSubAgentEvent(subId, { type: "completed", content: payload.data?.summary ?? "完成" });
+              }
+            }
+            if (payload.type === "subagent_error") {
+              const subId = payload.data?.agent_id;
+              if (subId) {
+                updateSubAgent(subId, {
+                  status: payload.data?.status === "cancelled" ? "cancelled" : "failed",
+                  currentAction: payload.data?.text ?? "执行异常"
+                });
+                addSubAgentEvent(subId, { type: "error", content: payload.data?.text ?? "执行异常" });
+              }
+            }
             if (payload.type === "error") {
-              addMessage("tool", `❌ ${payload.data?.text ?? "未知错误"}`);
+              if (eventAgentId === "meta") {
+                addMessage("tool", `❌ ${payload.data?.text ?? "未知错误"}`, "meta");
+              } else {
+                updateSubAgent(eventAgentId, {
+                  status: "failed",
+                  currentAction: payload.data?.text ?? "执行异常"
+                });
+                addSubAgentEvent(eventAgentId, { type: "error", content: payload.data?.text ?? "未知错误" });
+              }
             }
           } catch {
             // skip malformed SSE frames
@@ -168,7 +277,7 @@ export function ChatView({ onOpenConfirm }: Props) {
       }
 
       if (isCurrentRequest() && full && !streamCommittedRef.current) {
-        addMessage("assistant", full);
+        addMessage("assistant", full, "meta");
         streamCommittedRef.current = true;
         void speak(full);
       }
@@ -180,13 +289,13 @@ export function ChatView({ onOpenConfirm }: Props) {
         if (!abortedByUserRef.current) {
           const partial = streamTextRef.current.trim();
           if (partial && !streamCommittedRef.current) {
-            addMessage("assistant", streamTextRef.current);
+            addMessage("assistant", streamTextRef.current, "meta");
             streamCommittedRef.current = true;
           }
-          addMessage("tool", "已中断当前生成");
+          addMessage("tool", "已中断当前生成", "meta");
         }
       } else {
-        addMessage("tool", `❌ 请求失败: ${String(err)}`);
+        addMessage("tool", `❌ 请求失败: ${String(err)}`, "meta");
       }
     } finally {
       if (!isCurrentRequest()) {
@@ -207,10 +316,10 @@ export function ChatView({ onOpenConfirm }: Props) {
     abortRef.current?.abort();
     const partial = streamTextRef.current.trim();
     if (partial && !streamCommittedRef.current) {
-      addMessage("assistant", streamTextRef.current);
+      addMessage("assistant", streamTextRef.current, "meta");
       streamCommittedRef.current = true;
     }
-    addMessage("tool", "已中断当前生成");
+    addMessage("tool", "已中断当前生成", "meta");
     streamTextRef.current = "";
     setStreamedAssistantText("");
     setStatus("idle");
@@ -240,7 +349,8 @@ export function ChatView({ onOpenConfirm }: Props) {
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-w-0">
+      <div className="flex h-full min-w-0 flex-1 flex-col">
       {/* Title bar - draggable */}
       <div className="drag-region flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
         <div className="flex w-20 items-center" />
@@ -254,6 +364,15 @@ export function ChatView({ onOpenConfirm }: Props) {
           )}
         </div>
         <div className="flex w-20 items-center justify-end">
+          {subAgents.length > 0 ? (
+            <button
+              className="no-drag mr-2 rounded-md px-2 py-1 text-xs text-slate-400 transition hover:bg-slate-700 hover:text-white"
+              onClick={() => setPanelOpen((v) => !v)}
+              title="子智能体面板"
+            >
+              团队
+            </button>
+          ) : null}
           <button
             className="no-drag rounded-md px-2 py-1 text-xs text-slate-400 transition hover:bg-slate-700 hover:text-white"
             onClick={() => openSettings()}
@@ -266,7 +385,7 @@ export function ChatView({ onOpenConfirm }: Props) {
 
       {/* Messages */}
       <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-3">
-        {messages.length === 0 && (
+        {visibleMessages.length === 0 && (
           <div className="flex h-full items-center justify-center">
             <div className="text-center text-slate-500">
               <div className="mb-2 text-3xl">🤖</div>
@@ -275,7 +394,7 @@ export function ChatView({ onOpenConfirm }: Props) {
           </div>
         )}
         <div className="mx-auto max-w-2xl space-y-3">
-          {messages.map((m) => (
+          {visibleMessages.map((m) => (
             <div
               key={m.id}
               className={
@@ -353,6 +472,15 @@ export function ChatView({ onOpenConfirm }: Props) {
           )}
         </div>
       </div>
+      </div>
+      <SubAgentPanel
+        open={panelOpen}
+        subAgents={subAgents}
+        selectedSubAgent={selectedSubAgent}
+        onToggle={() => setPanelOpen((v) => !v)}
+        onCancel={onCancelSubAgent}
+        onSelect={(id) => setSelectedSubAgent(id)}
+      />
     </div>
   );
 }

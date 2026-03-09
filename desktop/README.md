@@ -41,11 +41,21 @@ Electron Main
   └─ Tray + Native Menu
 
 Renderer (React + Zustand)
-  ├─ FloatingBall（拖拽/状态）
-  ├─ Sidebar（SSE消息流 + ConfirmDialog）
-  ├─ CodePreview（语法高亮）
+  ├─ ChatView（主智能体对话流，SSE token 流式）
+  ├─ SubAgentPanel（Agent Team 进度与事件）
+  ├─ ConfirmDialog（按 agent_id 路由确认）
   └─ SettingsPanel（provider/model/apiKey）
 ```
+
+## Meta-Agent + Agent Team
+
+当前 Desktop 已支持“主智能体 + 子智能体团队”协作模型：
+
+- 主聊天区只展示 `meta`（主智能体）消息，用户可持续对话，不被子任务阻塞。
+- 右侧 `SubAgentPanel` 展示子智能体列表、状态（running/completed/failed/cancelled）与最近事件。
+- SSE 事件带 `agent_id`，前端按来源路由到主对话或对应子智能体卡片。
+- 子智能体卡片支持“中断”，会调用 `POST /api/subagent/cancel`。
+- 确认弹窗会显示来源智能体，并在提交 `/api/confirm` 时携带 `agent_id`。
 
 ## 已知限制
 

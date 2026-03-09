@@ -141,9 +141,9 @@ function stopStudioServe(): void {
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 480,
+    width: 900,
     height: 700,
-    minWidth: 360,
+    minWidth: 680,
     minHeight: 480,
     alwaysOnTop: true,
     skipTaskbar: false,
