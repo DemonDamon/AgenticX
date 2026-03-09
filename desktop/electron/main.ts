@@ -141,8 +141,10 @@ function stopStudioServe(): void {
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 420,
-    height: 720,
+    width: 480,
+    height: 700,
+    minWidth: 360,
+    minHeight: 480,
     alwaysOnTop: true,
     skipTaskbar: false,
     titleBarStyle: "hiddenInset",
@@ -154,10 +156,13 @@ function createWindow(): void {
     }
   });
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  const devUrl = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
-  void mainWindow.loadURL(devUrl).catch(() => {
-    // ignore
-  });
+  if (app.isPackaged) {
+    const indexPath = path.join(__dirname, "..", "dist", "index.html");
+    void mainWindow.loadFile(indexPath).catch(() => {});
+  } else {
+    const devUrl = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
+    void mainWindow.loadURL(devUrl).catch(() => {});
+  }
   mainWindow.on("close", (event) => {
     if (!isQuitting) {
       event.preventDefault();
@@ -178,7 +183,7 @@ function createTray(): void {
   tray = new Tray(icon);
   const menu = Menu.buildFromTemplate([
     {
-      label: "打开/隐藏侧边栏",
+      label: "打开/隐藏窗口",
       click: () => {
         if (!mainWindow) return;
         if (mainWindow.isVisible()) {

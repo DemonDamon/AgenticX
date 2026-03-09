@@ -28,17 +28,14 @@ type AppState = {
   apiToken: string;
   sessionId: string;
   status: UiStatus;
-  sidebarOpen: boolean;
   messages: Message[];
   codePreview: string;
   confirm: ConfirmState;
   settings: SettingsState;
-  floatingPos: { x: number; y: number };
   setApiBase: (base: string) => void;
   setApiToken: (token: string) => void;
   setSessionId: (id: string) => void;
   setStatus: (status: UiStatus) => void;
-  setSidebarOpen: (open: boolean) => void;
   addMessage: (role: MsgRole, content: string) => void;
   setCodePreview: (code: string) => void;
   openConfirm: (requestId: string, question: string, diff?: string) => void;
@@ -46,7 +43,6 @@ type AppState = {
   openSettings: () => void;
   closeSettings: () => void;
   updateSettings: (patch: Partial<Pick<SettingsState, "provider" | "model" | "apiKey">>) => void;
-  setFloatingPos: (x: number, y: number) => void;
 };
 
 function uid(): string {
@@ -58,17 +54,14 @@ export const useAppStore = create<AppState>((set) => ({
   apiToken: "",
   sessionId: "",
   status: "idle",
-  sidebarOpen: true,
   messages: [],
   codePreview: "",
   confirm: { open: false, requestId: "", question: "" },
   settings: { open: false, provider: "", model: "", apiKey: "" },
-  floatingPos: { x: 24, y: 24 },
   setApiBase: (apiBase) => set({ apiBase }),
   setApiToken: (apiToken) => set({ apiToken }),
   setSessionId: (sessionId) => set({ sessionId }),
   setStatus: (status) => set({ status }),
-  setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
   addMessage: (role, content) =>
     set((state) => ({
       messages: [...state.messages, { id: uid(), role, content }]
@@ -83,6 +76,5 @@ export const useAppStore = create<AppState>((set) => ({
   closeSettings: () =>
     set((state) => ({ settings: { ...state.settings, open: false } })),
   updateSettings: (patch) =>
-    set((state) => ({ settings: { ...state.settings, ...patch } })),
-  setFloatingPos: (x, y) => set({ floatingPos: { x, y } })
+    set((state) => ({ settings: { ...state.settings, ...patch } }))
 }));
