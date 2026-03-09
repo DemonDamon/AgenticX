@@ -26,6 +26,7 @@ else:
 MAX_TOOL_ROUNDS = 10
 MAX_CONTEXT_CHARS = 16_000
 STOP_MESSAGE = "已中断当前生成"
+LLM_INVOKE_TIMEOUT_SECONDS = 45.0
 
 
 def _truncate(text: str, limit: int = MAX_CONTEXT_CHARS) -> str:
@@ -167,13 +168,32 @@ class AgentRuntime:
             if len(session.agent_messages) > synced_session_message_count:
                 messages.extend(session.agent_messages[synced_session_message_count:])
                 synced_session_message_count = len(session.agent_messages)
-            response = self.llm.invoke(
-                messages,
-                tools=active_tools,
-                tool_choice="auto",
-                temperature=0.2,
-                max_tokens=1200,
-            )
+            try:
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.llm.invoke,
+                        messages,
+                        tools=active_tools,
+                        tool_choice="auto",
+                        temperature=0.2,
+                        max_tokens=1200,
+                    ),
+                    timeout=LLM_INVOKE_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                yield RuntimeEvent(
+                    type=EventType.ERROR.value,
+                    data={"text": f"模型响应超时（>{int(LLM_INVOKE_TIMEOUT_SECONDS)}s），请检查当前 provider/model/api_key 是否匹配。"},
+                    agent_id=agent_id,
+                )
+                return
+            except Exception as exc:
+                yield RuntimeEvent(
+                    type=EventType.ERROR.value,
+                    data={"text": f"模型调用失败: {exc}"},
+                    agent_id=agent_id,
+                )
+                return
             response_text = (response.content or "").strip()
             tool_calls = response.tool_calls or []
             assistant_message: Dict[str, Any] = {"role": "assistant", "content": response_text}
@@ -185,26 +205,36 @@ class AgentRuntime:
             if not tool_calls:
                 streamed_text = ""
                 try:
-                    for chunk in self.llm.stream(
-                        messages,
-                        temperature=0.2,
-                        max_tokens=1200,
-                    ):
+                    token_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+                    def _run_sync_stream() -> None:
+                        try:
+                            for chunk in self.llm.stream(messages, temperature=0.2, max_tokens=1200):
+                                tok = chunk if isinstance(chunk, str) else str(chunk.get("content", ""))
+                                if tok:
+                                    token_queue.put_nowait(tok)
+                        finally:
+                            token_queue.put_nowait(None)
+
+                    stream_task = asyncio.get_running_loop().run_in_executor(None, _run_sync_stream)
+
+                    while True:
                         if await _check_should_stop():
-                            yield RuntimeEvent(
-                                type=EventType.ERROR.value,
-                                data={"text": STOP_MESSAGE},
-                                agent_id=agent_id,
-                            )
+                            stream_task.cancel()
+                            yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
                             return
-                        token = chunk if isinstance(chunk, str) else str(chunk.get("content", ""))
-                        if not token:
+                        try:
+                            tok = await asyncio.wait_for(token_queue.get(), timeout=0.05)
+                        except asyncio.TimeoutError:
                             continue
-                        streamed_text += token
-                        yield RuntimeEvent(type=EventType.TOKEN.value, data={"text": token}, agent_id=agent_id)
+                        if tok is None:
+                            break
+                        streamed_text += tok
+                        yield RuntimeEvent(type=EventType.TOKEN.value, data={"text": tok}, agent_id=agent_id)
+
+                    await stream_task
                 except Exception:
                     streamed_text = response_text
-
                 final_text = streamed_text.strip() if streamed_text.strip() else response_text
                 session.chat_history.append({"role": "assistant", "content": final_text})
                 yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)

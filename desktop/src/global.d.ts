@@ -1,5 +1,21 @@
 export {};
 
+type ProviderConfig = {
+  api_key?: string;
+  base_url?: string;
+  model?: string;
+  models?: string[];
+};
+
+type LoadConfigResult = {
+  defaultProvider: string;
+  providers: Record<string, ProviderConfig>;
+};
+
+type ValidateKeyResult = { ok: boolean; error?: string; status?: number };
+type FetchModelsResult = { ok: boolean; models: string[]; error?: string };
+type HealthCheckResult = { ok: boolean; error?: string; latencyHint?: string };
+
 declare global {
   interface Window {
     agenticxDesktop: {
@@ -8,7 +24,39 @@ declare global {
       getApiAuthToken: () => Promise<string>;
       platform: () => Promise<string>;
       onOpenSettings: (cb: () => void) => void;
-      saveConfig: (payload: { provider?: string; model?: string; apiKey?: string }) => Promise<{ ok: boolean; path: string }>;
+
+      loadConfig: () => Promise<LoadConfigResult>;
+      saveProvider: (payload: {
+        name: string;
+        apiKey?: string;
+        baseUrl?: string;
+        model?: string;
+        models?: string[];
+      }) => Promise<{ ok: boolean }>;
+      setDefaultProvider: (name: string) => Promise<{ ok: boolean }>;
+      deleteProvider: (name: string) => Promise<{ ok: boolean }>;
+      validateKey: (payload: {
+        provider: string;
+        apiKey: string;
+        baseUrl?: string;
+      }) => Promise<ValidateKeyResult>;
+      fetchModels: (payload: {
+        provider: string;
+        apiKey: string;
+        baseUrl?: string;
+      }) => Promise<FetchModelsResult>;
+      healthCheckModel: (payload: {
+        provider: string;
+        apiKey: string;
+        baseUrl?: string;
+        model: string;
+      }) => Promise<HealthCheckResult>;
+
+      saveConfig: (payload: {
+        provider?: string;
+        model?: string;
+        apiKey?: string;
+      }) => Promise<{ ok: boolean; path: string }>;
       nativeSay: (text: string) => Promise<{ ok: boolean; reason?: string }>;
     };
   }

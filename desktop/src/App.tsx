@@ -6,6 +6,19 @@ import { useAppStore } from "./store";
 import { stopSpeak } from "./voice/tts";
 import { watchWakewordLoop } from "./voice/wakeword";
 
+function toProviderEntries(raw: Record<string, { api_key?: string; base_url?: string; model?: string; models?: string[] }>) {
+  const result: Record<string, { apiKey: string; baseUrl: string; model: string; models: string[] }> = {};
+  for (const [name, cfg] of Object.entries(raw)) {
+    result[name] = {
+      apiKey: cfg.api_key ?? "",
+      baseUrl: cfg.base_url ?? "",
+      model: cfg.model ?? "",
+      models: cfg.models ?? [],
+    };
+  }
+  return result;
+}
+
 export function App() {
   const apiBase = useAppStore((s) => s.apiBase);
   const sessionId = useAppStore((s) => s.sessionId);
@@ -20,6 +33,7 @@ export function App() {
   const openSettings = useAppStore((s) => s.openSettings);
   const closeSettings = useAppStore((s) => s.closeSettings);
   const updateSettings = useAppStore((s) => s.updateSettings);
+  const setActiveModel = useAppStore((s) => s.setActiveModel);
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
 
   useEffect(() => {
@@ -33,6 +47,18 @@ export function App() {
       });
       const data = await resp.json();
       setSessionId(data.session_id);
+      const cfg = await window.agenticxDesktop.loadConfig();
+      const entries = toProviderEntries(cfg.providers ?? {});
+      const defP = cfg.defaultProvider ?? "";
+      const defEntry = entries[defP];
+      updateSettings({
+        defaultProvider: defP,
+        providers: entries,
+        provider: defP,
+        model: defEntry?.model ?? "",
+        apiKey: defEntry?.apiKey ?? "",
+      });
+      if (defP && defEntry?.model) setActiveModel(defP, defEntry.model);
       window.agenticxDesktop.onOpenSettings(() => openSettings());
       watchWakewordLoop(async (text) => {
         if (text.trim()) {
@@ -55,6 +81,42 @@ export function App() {
       confirmResolverRef.current = resolve;
       openConfirm(requestId, question, diff, agentId);
     });
+
+  const handleSettingsSave = async (result: {
+    defaultProvider: string;
+    providers: Record<string, { apiKey: string; baseUrl: string; model: string; models: string[] }>;
+  }) => {
+    for (const [name, entry] of Object.entries(result.providers)) {
+      if (!entry.apiKey && !entry.model && !entry.baseUrl && entry.models.length === 0) continue;
+      await window.agenticxDesktop.saveProvider({
+        name,
+        apiKey: entry.apiKey || undefined,
+        baseUrl: entry.baseUrl || undefined,
+        model: entry.model || undefined,
+        models: entry.models.length > 0 ? entry.models : undefined,
+      });
+    }
+    await window.agenticxDesktop.setDefaultProvider(result.defaultProvider);
+
+    const defEntry = result.providers[result.defaultProvider];
+    updateSettings({
+      defaultProvider: result.defaultProvider,
+      providers: result.providers,
+      provider: result.defaultProvider,
+      model: defEntry?.model ?? "",
+      apiKey: defEntry?.apiKey ?? "",
+    });
+
+    if (result.defaultProvider && defEntry?.model) {
+      setActiveModel(result.defaultProvider, defEntry.model);
+    }
+    await window.agenticxDesktop.saveConfig({
+      provider: result.defaultProvider,
+      model: defEntry?.model ?? "",
+      apiKey: defEntry?.apiKey ?? "",
+    });
+    stopSpeak();
+  };
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-base">
@@ -84,16 +146,10 @@ export function App() {
       />
       <SettingsPanel
         open={settings.open}
-        provider={settings.provider}
-        model={settings.model}
-        apiKey={settings.apiKey}
+        defaultProvider={settings.defaultProvider}
+        providers={settings.providers}
         onClose={() => closeSettings()}
-        onSave={async ({ provider, model, apiKey }) => {
-          updateSettings({ provider, model, apiKey });
-          await window.agenticxDesktop.saveConfig({ provider, model, apiKey });
-          closeSettings();
-          stopSpeak();
-        }}
+        onSave={handleSettingsSave}
       />
     </div>
   );
