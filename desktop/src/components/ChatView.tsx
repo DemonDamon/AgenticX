@@ -8,7 +8,13 @@ import { speak } from "../voice/tts";
 import { startRecording, stopRecording } from "../voice/stt";
 
 type Props = {
-  onOpenConfirm: (requestId: string, question: string, diff?: string, agentId?: string) => Promise<boolean>;
+  onOpenConfirm: (
+    requestId: string,
+    question: string,
+    diff?: string,
+    agentId?: string,
+    context?: Record<string, unknown>
+  ) => Promise<boolean>;
 };
 
 const statusLabel: Record<string, string> = {
@@ -108,6 +114,9 @@ export function ChatView({ onOpenConfirm }: Props) {
   const abortedByUserRef = useRef(false);
   const activeRequestIdRef = useRef(0);
   const modelBtnRef = useRef<HTMLButtonElement | null>(null);
+  const polledEventSeenRef = useRef<Record<string, Set<string>>>({});
+  const subAgentsRef = useRef(subAgents);
+  const lastHeartbeatAtRef = useRef(0);
 
   const canSend = useMemo(() => !!(apiBase && sessionId), [apiBase, sessionId]);
   const visibleMessages = useMemo(
@@ -136,6 +145,122 @@ export function ChatView({ onOpenConfirm }: Props) {
       setPanelOpen(true);
     }
   }, [subAgents.length]);
+
+  useEffect(() => {
+    subAgentsRef.current = subAgents;
+  }, [subAgents]);
+
+  useEffect(() => {
+    if (!apiBase || !sessionId) return;
+    const hasAnySubagent = subAgents.length > 0;
+    if (!hasAnySubagent) return;
+
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const resp = await fetch(
+          `${apiBase}/api/subagents/status?session_id=${encodeURIComponent(sessionId)}`,
+          { headers: { "x-agx-desktop-token": apiToken } }
+        );
+        if (!resp.ok) return;
+        const data = await resp.json() as {
+          ok?: boolean;
+          subagents?: Array<{
+            agent_id: string;
+            name?: string;
+            role?: string;
+            task?: string;
+            status?: "pending" | "running" | "completed" | "failed" | "cancelled";
+            result_summary?: string;
+            error_text?: string;
+            recent_events?: Array<{ type?: string; data?: Record<string, unknown> }>;
+          }>;
+        };
+        if (stopped || !Array.isArray(data.subagents)) return;
+        for (const item of data.subagents) {
+          const id = item.agent_id;
+          if (!id) continue;
+          const exists = subAgents.some((s) => s.id === id);
+          if (!exists) {
+            addSubAgent({
+              id,
+              name: item.name ?? id,
+              role: item.role ?? "worker",
+              task: item.task ?? "",
+            });
+          }
+          const status = item.status ?? "running";
+          const currentAction =
+            status === "completed"
+              ? (item.result_summary ? "已完成（见摘要）" : "已完成")
+              : status === "failed"
+                ? (item.error_text || "执行异常")
+                : status === "cancelled"
+                  ? "已中断"
+                  : "执行中";
+          updateSubAgent(id, { status, currentAction });
+
+          const seen = polledEventSeenRef.current[id] ?? new Set<string>();
+          polledEventSeenRef.current[id] = seen;
+          const recentEvents = Array.isArray(item.recent_events) ? item.recent_events : [];
+          for (const evt of recentEvents) {
+            const evtType = String(evt?.type ?? "");
+            const evtData = (evt?.data ?? {}) as Record<string, unknown>;
+            const signature = `${evtType}:${JSON.stringify(evtData)}`;
+            if (seen.has(signature)) continue;
+            seen.add(signature);
+            if (seen.size > 300) {
+              const first = seen.values().next().value as string | undefined;
+              if (first) seen.delete(first);
+            }
+            let content = "";
+            if (evtType === "tool_call") {
+              content = `🔧 ${String(evtData.name ?? "tool")}: ${JSON.stringify(evtData.arguments ?? {}).slice(0, 120)}`;
+            } else if (evtType === "tool_result") {
+              const result = typeof evtData.result === "string" ? evtData.result : JSON.stringify(evtData.result ?? {});
+              content = `✅ ${String(evtData.name ?? "tool")} 结果: ${result}`;
+            } else if (evtType === "error") {
+              content = `❌ ${String(evtData.text ?? "执行异常")}`;
+            } else if (evtType === "confirm_required") {
+              content = `⏸ 等待确认: ${String(evtData.question ?? "请确认执行")}`;
+            } else if (typeof evtData.text === "string" && evtData.text.trim()) {
+              content = evtData.text;
+            } else {
+              content = `${evtType || "event"}: ${JSON.stringify(evtData)}`;
+            }
+            addSubAgentEvent(id, { type: evtType || "event", content });
+          }
+        }
+      } catch {
+        // silent
+      }
+    };
+
+    void tick();
+    const timer = window.setInterval(() => void tick(), 2000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [apiBase, sessionId, apiToken, subAgents, addSubAgent, updateSubAgent]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const list = subAgentsRef.current;
+      const running = list.filter((s) => s.status === "running" || s.status === "pending");
+      if (running.length === 0) return;
+      const now = Date.now();
+      if (now - lastHeartbeatAtRef.current < 15000) return;
+      lastHeartbeatAtRef.current = now;
+
+      const summary = running
+        .slice(0, 6)
+        .map((s) => `- ${s.name} (${s.id})：${s.status === "pending" ? "等待确认" : (s.currentAction || "执行中")}`)
+        .join("\n");
+      addMessage("tool", `💓 子智能体心跳\n${summary}`, "meta");
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [addMessage]);
 
   const onCancelSubAgent = async (agentId: string) => {
     if (!apiBase || !sessionId) return;
@@ -235,15 +360,54 @@ export function ChatView({ onOpenConfirm }: Props) {
               if (eventAgentId === "meta") addMessage("tool", content, "meta");
               else { updateSubAgent(eventAgentId, { status: "running", currentAction: `调用工具 ${payload.data?.name ?? "tool"}` }); addSubAgentEvent(eventAgentId, { type: "tool_call", content }); }
             }
+            if (payload.type === "tool_result") {
+              const toolName = payload.data?.name ?? "tool";
+              let resultText = String(payload.data?.result ?? "");
+              try {
+                const parsed = JSON.parse(resultText);
+                resultText = JSON.stringify(parsed, null, 2);
+              } catch {
+                // Keep original plain text if not JSON.
+              }
+              const content = `✅ ${toolName} 结果:\n${resultText}`;
+              if (eventAgentId === "meta") addMessage("tool", content, "meta");
+              else { addSubAgentEvent(eventAgentId, { type: "tool_result", content }); }
+            }
             if (payload.type === "confirm_required") {
               if (!isCurrentRequest()) continue;
-              const ok = await onOpenConfirm(payload.data?.id ?? "", payload.data?.question ?? "是否确认执行？", payload.data?.context?.diff, eventAgentId);
+              if (eventAgentId !== "meta") {
+                updateSubAgent(eventAgentId, { status: "pending", currentAction: "等待你的确认" });
+                addSubAgentEvent(eventAgentId, {
+                  type: "confirm_required",
+                  content: payload.data?.question ?? "等待确认",
+                });
+              }
+              const ok = await onOpenConfirm(
+                payload.data?.id ?? "",
+                payload.data?.question ?? "是否确认执行？",
+                payload.data?.context?.diff,
+                eventAgentId,
+                payload.data?.context
+              );
               if (!isCurrentRequest()) continue;
               await fetch(`${apiBase}/api/confirm`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
                 body: JSON.stringify({ session_id: sessionId, request_id: payload.data?.id, approved: ok, agent_id: eventAgentId })
               });
+            }
+            if (payload.type === "confirm_response") {
+              if (eventAgentId !== "meta") {
+                const approved = !!payload.data?.approved;
+                updateSubAgent(eventAgentId, {
+                  status: approved ? "running" : "cancelled",
+                  currentAction: approved ? "确认通过，继续执行" : "确认拒绝，已取消",
+                });
+                addSubAgentEvent(eventAgentId, {
+                  type: "confirm_response",
+                  content: approved ? "确认通过" : "确认拒绝",
+                });
+              }
             }
             if (payload.type === "final") {
               if (eventAgentId !== "meta") { updateSubAgent(eventAgentId, { status: "completed", currentAction: "已完成" }); addSubAgentEvent(eventAgentId, { type: "final", content: payload.data?.text ?? "" }); continue; }
@@ -346,6 +510,7 @@ export function ChatView({ onOpenConfirm }: Props) {
   };
 
   const onKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
+    if (event.nativeEvent.isComposing) return;
     if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); }
   };
 

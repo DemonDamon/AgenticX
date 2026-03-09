@@ -20,6 +20,14 @@ class ResourceMonitor:
         self.max_memory_percent = max_memory_percent
 
     def _cpu_percent_estimate(self) -> float:
+        # Prefer psutil for a more realistic instantaneous CPU reading.
+        try:
+            import psutil  # type: ignore
+
+            return float(psutil.cpu_percent(interval=0.2))
+        except Exception:
+            pass
+
         cpu_count = max(os.cpu_count() or 1, 1)
         try:
             load_1m = os.getloadavg()[0]

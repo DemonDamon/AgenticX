@@ -169,6 +169,7 @@ class BailianProvider(BaseLLMProvider):
                      message = type('Message', (), {})()
                      message.content = message_data.get('content', '')
                      message.role = message_data.get('role', 'assistant')
+                     message.tool_calls = message_data.get('tool_calls')
                      choice.message = message
                      
                      self.choices.append(choice)
@@ -399,6 +400,34 @@ class BailianProvider(BaseLLMProvider):
         ]
         
         main_content = choices[0].content if choices else ""
+
+        raw_tool_calls = None
+        if getattr(response, "choices", None):
+            msg = getattr(response.choices[0], "message", None)
+            if msg is not None:
+                tc_list = getattr(msg, "tool_calls", None)
+                if tc_list:
+                    raw_tool_calls = []
+                    for tc in tc_list:
+                        if isinstance(tc, dict):
+                            raw_tool_calls.append({
+                                "id": str(tc.get("id", "")),
+                                "type": str(tc.get("type", "function")),
+                                "function": {
+                                    "name": str((tc.get("function") or {}).get("name", "")),
+                                    "arguments": str((tc.get("function") or {}).get("arguments", "{}")),
+                                },
+                            })
+                            continue
+                        fn = getattr(tc, "function", None)
+                        raw_tool_calls.append({
+                            "id": getattr(tc, "id", ""),
+                            "type": getattr(tc, "type", "function"),
+                            "function": {
+                                "name": getattr(fn, "name", ""),
+                                "arguments": getattr(fn, "arguments", "{}"),
+                            },
+                        })
         
         return LLMResponse(
             id=response.id,
@@ -408,6 +437,7 @@ class BailianProvider(BaseLLMProvider):
             choices=choices,
             token_usage=token_usage,
             cost=None,
+            tool_calls=raw_tool_calls,
             metadata={
                 "provider": "bailian",
                 "api_version": "v1"

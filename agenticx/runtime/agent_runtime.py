@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import asyncio
 import inspect
+import re
+import uuid
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Sequence
 
 from agenticx.cli.agent_tools import STUDIO_TOOLS, dispatch_tool_async
@@ -107,6 +109,115 @@ def _parse_tool_arguments(raw_args: Any) -> Dict[str, Any]:
     return {}
 
 
+def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Repair history to satisfy strict tool-call pairing providers.
+
+    Rules:
+    - Keep tool messages only when their tool_call_id is declared by some assistant tool_calls.
+    - Keep assistant tool_calls only when each call id has a corresponding tool response in history.
+      Unmatched calls are removed from that assistant message.
+    """
+    declared_tool_call_ids: set[str] = set()
+    responded_tool_call_ids: set[str] = set()
+
+    for msg in messages:
+        role = str(msg.get("role", ""))
+        if role == "assistant":
+            for call in (msg.get("tool_calls") or []):
+                if isinstance(call, dict):
+                    cid = str(call.get("id", "")).strip()
+                    if cid:
+                        declared_tool_call_ids.add(cid)
+        elif role == "tool":
+            cid = str(msg.get("tool_call_id", "")).strip()
+            if cid:
+                responded_tool_call_ids.add(cid)
+
+    valid_tool_call_ids = declared_tool_call_ids & responded_tool_call_ids
+
+    sanitized: List[Dict[str, Any]] = []
+    for msg in messages:
+        role = str(msg.get("role", ""))
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls") or []
+            if not tool_calls:
+                sanitized.append(msg)
+                continue
+            kept_calls: List[Dict[str, Any]] = []
+            for call in tool_calls:
+                if not isinstance(call, dict):
+                    continue
+                cid = str(call.get("id", "")).strip()
+                if cid and cid in valid_tool_call_ids:
+                    kept_calls.append(call)
+            if kept_calls:
+                msg_copy = dict(msg)
+                msg_copy["tool_calls"] = kept_calls
+                sanitized.append(msg_copy)
+            else:
+                # Remove dangling tool_calls but keep assistant content.
+                msg_copy = dict(msg)
+                msg_copy.pop("tool_calls", None)
+                sanitized.append(msg_copy)
+            continue
+
+        if role == "tool":
+            cid = str(msg.get("tool_call_id", "")).strip()
+            if not cid or cid not in valid_tool_call_ids:
+                continue
+            sanitized.append(msg)
+            continue
+
+        sanitized.append(msg)
+    return sanitized
+
+
+def _iter_text_chunks(text: str, chunk_size: int = 16) -> List[str]:
+    if chunk_size <= 0:
+        chunk_size = 16
+    return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
+
+
+def _extract_inline_tool_call(
+    text: str, allowed_tool_names: set[str]
+) -> Optional[Dict[str, Any]]:
+    """
+    Parse tool-like text (e.g. <tool_code>check_resources()</tool_code>)
+    and convert it to one synthetic tool call payload.
+    """
+    if not text:
+        return None
+    snippet = text
+    tag_block = re.search(r"<tool_code>\s*(.*?)\s*</tool_code>", text, re.S)
+    if tag_block:
+        snippet = tag_block.group(1).strip()
+
+    # Find the first allowed tool call anywhere in the snippet.
+    # This supports wrappers such as print(check_resources()).
+    tool_name: Optional[str] = None
+    raw_args = ""
+    for name in sorted(allowed_tool_names, key=len, reverse=True):
+        match = re.search(rf"\b{re.escape(name)}\s*\((.*?)\)", snippet, re.S)
+        if match:
+            tool_name = name
+            raw_args = (match.group(1) or "").strip()
+            break
+    if not tool_name:
+        return None
+
+    if not raw_args:
+        args_obj: Dict[str, Any] = {}
+    else:
+        # Allow JSON object in parentheses: foo({"a":1})
+        try:
+            parsed = json.loads(raw_args)
+            args_obj = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            args_obj = {}
+    return {"name": tool_name, "arguments": args_obj}
+
+
 class AgentRuntime:
     """LLM-driven runtime that emits structured events."""
 
@@ -150,7 +261,7 @@ class AgentRuntime:
             if isinstance(tool, dict)
         }
         messages: List[Dict[str, Any]] = [{"role": "system", "content": current_system_prompt}]
-        messages.extend(session.agent_messages[-16:])
+        messages.extend(_sanitize_context_messages(session.agent_messages[-16:]))
         messages.append({"role": "user", "content": user_input})
         session.agent_messages.append({"role": "user", "content": user_input})
         synced_session_message_count = len(session.agent_messages)
@@ -158,6 +269,7 @@ class AgentRuntime:
         status_query_total = 0
         last_status_query_signature: Optional[str] = None
         repeated_status_query_count = 0
+        executed_tool_names: List[str] = []
 
         for round_idx in range(1, self.max_tool_rounds + 1):
             if await _check_should_stop():
@@ -169,7 +281,9 @@ class AgentRuntime:
                 agent_id=agent_id,
             )
             if len(session.agent_messages) > synced_session_message_count:
-                messages.extend(session.agent_messages[synced_session_message_count:])
+                messages.extend(
+                    _sanitize_context_messages(session.agent_messages[synced_session_message_count:])
+                )
                 synced_session_message_count = len(session.agent_messages)
             try:
                 response = await asyncio.wait_for(
@@ -199,6 +313,19 @@ class AgentRuntime:
                 return
             response_text = (response.content or "").strip()
             tool_calls = response.tool_calls or []
+            if not tool_calls:
+                inline_tool = _extract_inline_tool_call(response_text, allowed_tool_names)
+                if inline_tool is not None:
+                    tool_calls = [
+                        {
+                            "id": f"inline-{uuid.uuid4().hex[:8]}",
+                            "type": "function",
+                            "function": {
+                                "name": inline_tool["name"],
+                                "arguments": json.dumps(inline_tool["arguments"], ensure_ascii=False),
+                            },
+                        }
+                    ]
             assistant_message: Dict[str, Any] = {"role": "assistant", "content": response_text}
             if tool_calls:
                 assistant_message["tool_calls"] = tool_calls
@@ -206,39 +333,54 @@ class AgentRuntime:
             synced_session_message_count = len(session.agent_messages)
 
             if not tool_calls:
-                streamed_text = ""
-                try:
-                    token_queue: asyncio.Queue[str | None] = asyncio.Queue()
-
-                    def _run_sync_stream() -> None:
-                        try:
-                            for chunk in self.llm.stream(messages, temperature=0.2, max_tokens=1200):
-                                tok = chunk if isinstance(chunk, str) else str(chunk.get("content", ""))
-                                if tok:
-                                    token_queue.put_nowait(tok)
-                        finally:
-                            token_queue.put_nowait(None)
-
-                    stream_task = asyncio.get_running_loop().run_in_executor(None, _run_sync_stream)
-
-                    while True:
+                if response_text.strip():
+                    final_text = response_text.strip()
+                    for tok in _iter_text_chunks(final_text):
                         if await _check_should_stop():
-                            stream_task.cancel()
                             yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
                             return
-                        try:
-                            tok = await asyncio.wait_for(token_queue.get(), timeout=0.05)
-                        except asyncio.TimeoutError:
-                            continue
-                        if tok is None:
-                            break
-                        streamed_text += tok
                         yield RuntimeEvent(type=EventType.TOKEN.value, data={"text": tok}, agent_id=agent_id)
+                else:
+                    streamed_text = ""
+                    try:
+                        token_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
-                    await stream_task
-                except Exception:
-                    streamed_text = response_text
-                final_text = streamed_text.strip() if streamed_text.strip() else response_text
+                        def _run_sync_stream() -> None:
+                            try:
+                                for chunk in self.llm.stream(messages, temperature=0.2, max_tokens=1200):
+                                    tok = chunk if isinstance(chunk, str) else str(chunk.get("content", ""))
+                                    if tok:
+                                        token_queue.put_nowait(tok)
+                            finally:
+                                token_queue.put_nowait(None)
+
+                        stream_task = asyncio.get_running_loop().run_in_executor(None, _run_sync_stream)
+
+                        while True:
+                            if await _check_should_stop():
+                                stream_task.cancel()
+                                yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
+                                return
+                            try:
+                                tok = await asyncio.wait_for(token_queue.get(), timeout=0.05)
+                            except asyncio.TimeoutError:
+                                continue
+                            if tok is None:
+                                break
+                            streamed_text += tok
+                            yield RuntimeEvent(type=EventType.TOKEN.value, data={"text": tok}, agent_id=agent_id)
+
+                        await stream_task
+                    except Exception:
+                        streamed_text = response_text
+                    final_text = streamed_text.strip() if streamed_text.strip() else response_text
+                if not str(final_text).strip() and executed_tool_names:
+                    unique_tools = ", ".join(dict.fromkeys(executed_tool_names))
+                    final_text = (
+                        "已完成工具调用（"
+                        f"{unique_tools}）。\n"
+                        "当前模型未返回进一步正文，请继续给我下一步指令。"
+                    )
                 session.chat_history.append({"role": "assistant", "content": final_text})
                 yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
                 return
@@ -269,9 +411,34 @@ class AgentRuntime:
                 dispatch_arguments["__agent_id"] = agent_id
                 if tool_name not in allowed_tool_names:
                     denied_message = f"工具 '{tool_name}' 不在当前允许列表中，已拒绝执行。"
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": denied_message,
+                        }
+                    )
+                    session.agent_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": denied_message,
+                        }
+                    )
+                    synced_session_message_count = len(session.agent_messages)
+                    session.chat_history.append(
+                        {"role": "assistant", "content": f"工具结果({tool_name}):\n{denied_message}"}
+                    )
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
                         data={"text": denied_message, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_RESULT.value,
+                        data={"name": tool_name, "result": denied_message, "tool_call_id": tool_call_id},
                         agent_id=agent_id,
                     )
                     continue
@@ -360,7 +527,11 @@ class AgentRuntime:
                     except asyncio.TimeoutError:
                         continue
 
-                result = await dispatch_task
+                try:
+                    result = await dispatch_task
+                except Exception as exc:
+                    result = f"ERROR: tool execution failed: {exc}"
+                executed_tool_names.append(tool_name)
                 messages.append(
                     {
                         "role": "tool",
