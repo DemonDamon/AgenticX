@@ -72,8 +72,9 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
 
 async function startStudioServe(): Promise<void> {
   apiPort = await pickFreePort();
-  const args = ["serve", "--host", "127.0.0.1", "--port", String(apiPort)];
-  serveProcess = spawn("agx", args, {
+  const cmd = `agx serve --host 127.0.0.1 --port ${String(apiPort)}`;
+  // Use login shell to inherit user's PATH (conda/pyenv/etc) in packaged app
+  serveProcess = spawn("/bin/zsh", ["-l", "-c", cmd], {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, AGX_DESKTOP_TOKEN: apiToken }
   });
@@ -236,7 +237,9 @@ app.whenReady().then(async () => {
   try {
     Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate()));
     if (process.platform === "darwin") {
-      const iconPath = path.resolve(process.cwd(), "assets", "icon.png");
+      const iconPath = app.isPackaged
+        ? path.join(process.resourcesPath, "assets", "icon.png")
+        : path.resolve(process.cwd(), "assets", "icon.png");
       if (fs.existsSync(iconPath)) {
         app.dock.setIcon(iconPath);
       }
