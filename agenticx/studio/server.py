@@ -7,7 +7,7 @@ import json
 import os
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -99,6 +99,7 @@ def create_studio_app() -> FastAPI:
     @app.post("/api/chat")
     async def chat(
         payload: ChatRequest,
+        request: Request,
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> StreamingResponse:
         _check_token(x_agx_desktop_token)
@@ -128,7 +129,9 @@ def create_studio_app() -> FastAPI:
 
         async def _event_stream() -> AsyncGenerator[str, None]:
             try:
-                async for event in runtime.run_turn(payload.user_input, session):
+                async for event in runtime.run_turn(payload.user_input, session, should_stop=request.is_disconnected):
+                    if await request.is_disconnected():
+                        break
                     sse = SseEvent(type=event.type, data=event.data)
                     yield f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"
             except Exception as exc:

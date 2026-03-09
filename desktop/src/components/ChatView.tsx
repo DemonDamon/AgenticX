@@ -32,7 +32,13 @@ export function ChatView({ onOpenConfirm }: Props) {
   const openSettings = useAppStore((s) => s.openSettings);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [streamedAssistantText, setStreamedAssistantText] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const streamTextRef = useRef("");
+  const streamCommittedRef = useRef(false);
+  const abortedByUserRef = useRef(false);
+  const activeRequestIdRef = useRef(0);
 
   const canSend = useMemo(() => !!(apiBase && sessionId && !streaming), [apiBase, sessionId, streaming]);
 
@@ -51,10 +57,20 @@ export function ChatView({ onOpenConfirm }: Props) {
   const send = async (manualInput?: string) => {
     const value = (manualInput ?? input).trim();
     if (!value || !apiBase || !sessionId || streaming) return;
+    const requestId = activeRequestIdRef.current + 1;
+    activeRequestIdRef.current = requestId;
+    const isCurrentRequest = () => activeRequestIdRef.current === requestId;
+
     setInput("");
     addMessage("user", value);
     setStatus("processing");
     setStreaming(true);
+    setStreamedAssistantText("");
+    streamTextRef.current = "";
+    streamCommittedRef.current = false;
+    abortedByUserRef.current = false;
+    const abortController = new AbortController();
+    abortRef.current = abortController;
 
     try {
       const resp = await fetch(`${apiBase}/api/chat`, {
@@ -63,19 +79,28 @@ export function ChatView({ onOpenConfirm }: Props) {
           "Content-Type": "application/json",
           "x-agx-desktop-token": apiToken
         },
-        body: JSON.stringify({ session_id: sessionId, user_input: value })
+        body: JSON.stringify({ session_id: sessionId, user_input: value }),
+        signal: abortController.signal
       });
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
       const reader = resp.body?.getReader();
       const decoder = new TextDecoder();
       if (!reader) {
-        setStatus("idle");
-        setStreaming(false);
+        if (isCurrentRequest()) {
+          setStatus("idle");
+          setStreaming(false);
+        }
         return;
       }
 
       let full = "";
       let buffer = "";
       while (true) {
+        if (!isCurrentRequest()) {
+          return;
+        }
         const { value: chunk, done } = await reader.read();
         if (done) break;
         buffer += decoder.decode(chunk, { stream: true });
@@ -87,17 +112,31 @@ export function ChatView({ onOpenConfirm }: Props) {
           try {
             const payload = JSON.parse(line.slice(6));
             if (payload.type === "token") {
-              full += payload.data?.text ?? "";
+              const token = payload.data?.text ?? "";
+              full += token;
+              if (isCurrentRequest()) {
+                streamTextRef.current = full;
+                setStreamedAssistantText(full);
+              }
             }
             if (payload.type === "tool_call") {
-              addMessage("tool", `🔧 ${payload.data?.name ?? "tool"}: ${JSON.stringify(payload.data?.args ?? {}).slice(0, 120)}`);
+              addMessage(
+                "tool",
+                `🔧 ${payload.data?.name ?? "tool"}: ${JSON.stringify(payload.data?.arguments ?? payload.data?.args ?? {}).slice(0, 120)}`
+              );
             }
             if (payload.type === "confirm_required") {
+              if (!isCurrentRequest()) {
+                continue;
+              }
               const ok = await onOpenConfirm(
                 payload.data?.id ?? "",
                 payload.data?.question ?? "是否确认执行？",
                 payload.data?.context?.diff
               );
+              if (!isCurrentRequest()) {
+                continue;
+              }
               await fetch(`${apiBase}/api/confirm`, {
                 method: "POST",
                 headers: {
@@ -113,6 +152,10 @@ export function ChatView({ onOpenConfirm }: Props) {
             }
             if (payload.type === "final") {
               full = payload.data?.text ?? full;
+              if (isCurrentRequest()) {
+                streamTextRef.current = full;
+                setStreamedAssistantText(full);
+              }
             }
             if (payload.type === "error") {
               addMessage("tool", `❌ ${payload.data?.text ?? "未知错误"}`);
@@ -124,17 +167,55 @@ export function ChatView({ onOpenConfirm }: Props) {
         scrollToBottom();
       }
 
-      if (full) {
+      if (isCurrentRequest() && full && !streamCommittedRef.current) {
         addMessage("assistant", full);
+        streamCommittedRef.current = true;
         void speak(full);
       }
     } catch (err) {
-      addMessage("tool", `❌ 请求失败: ${String(err)}`);
+      if (!isCurrentRequest()) {
+        return;
+      }
+      if (err instanceof DOMException && err.name === "AbortError") {
+        if (!abortedByUserRef.current) {
+          const partial = streamTextRef.current.trim();
+          if (partial && !streamCommittedRef.current) {
+            addMessage("assistant", streamTextRef.current);
+            streamCommittedRef.current = true;
+          }
+          addMessage("tool", "已中断当前生成");
+        }
+      } else {
+        addMessage("tool", `❌ 请求失败: ${String(err)}`);
+      }
     } finally {
+      if (!isCurrentRequest()) {
+        return;
+      }
+      abortRef.current = null;
+      streamTextRef.current = "";
+      setStreamedAssistantText("");
       setStatus("idle");
       setStreaming(false);
       scrollToBottom();
     }
+  };
+
+  const stopStreaming = () => {
+    if (!streaming) return;
+    abortedByUserRef.current = true;
+    abortRef.current?.abort();
+    const partial = streamTextRef.current.trim();
+    if (partial && !streamCommittedRef.current) {
+      addMessage("assistant", streamTextRef.current);
+      streamCommittedRef.current = true;
+    }
+    addMessage("tool", "已中断当前生成");
+    streamTextRef.current = "";
+    setStreamedAssistantText("");
+    setStatus("idle");
+    setStreaming(false);
+    scrollToBottom();
   };
 
   const onKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
@@ -216,11 +297,17 @@ export function ChatView({ onOpenConfirm }: Props) {
           ))}
           {streaming && (
             <div className="mr-8 rounded-xl rounded-tl-sm bg-slate-700/50 px-3 py-2 text-sm">
-              <span className="inline-flex gap-1 text-slate-400">
-                <span className="animate-bounce">·</span>
-                <span className="animate-bounce" style={{ animationDelay: "0.1s" }}>·</span>
-                <span className="animate-bounce" style={{ animationDelay: "0.2s" }}>·</span>
-              </span>
+              <div className="msg-content break-words">
+                {streamedAssistantText ? (
+                  <ReactMarkdown>{streamedAssistantText}</ReactMarkdown>
+                ) : (
+                  <span className="inline-flex gap-1 text-slate-400">
+                    <span className="animate-bounce">·</span>
+                    <span className="animate-bounce" style={{ animationDelay: "0.1s" }}>·</span>
+                    <span className="animate-bounce" style={{ animationDelay: "0.2s" }}>·</span>
+                  </span>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -248,13 +335,22 @@ export function ChatView({ onOpenConfirm }: Props) {
           >
             🎙
           </button>
-          <button
-            className="flex h-10 shrink-0 items-center rounded-xl bg-cyan-500 px-4 text-sm font-medium text-black transition hover:bg-cyan-400 disabled:opacity-40 disabled:hover:bg-cyan-500"
-            disabled={!canSend || !input.trim()}
-            onClick={() => void send()}
-          >
-            发送
-          </button>
+          {streaming ? (
+            <button
+              className="flex h-10 shrink-0 items-center rounded-xl bg-rose-500 px-4 text-sm font-medium text-white transition hover:bg-rose-400"
+              onClick={stopStreaming}
+            >
+              中断
+            </button>
+          ) : (
+            <button
+              className="flex h-10 shrink-0 items-center rounded-xl bg-cyan-500 px-4 text-sm font-medium text-black transition hover:bg-cyan-400 disabled:opacity-40 disabled:hover:bg-cyan-500"
+              disabled={!canSend || !input.trim()}
+              onClick={() => void send()}
+            >
+              发送
+            </button>
+          )}
         </div>
       </div>
     </div>

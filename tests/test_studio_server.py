@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 
 from fastapi.testclient import TestClient
 
+from agenticx.runtime.events import RuntimeEvent
 from agenticx.studio.server import create_studio_app
 
 
@@ -125,3 +126,38 @@ def test_server_confirm_gate_flow(monkeypatch) -> None:
 
     approved = asyncio.run(_run_flow())
     assert approved is False
+
+
+def test_server_chat_passes_should_stop_callable(monkeypatch) -> None:
+    from agenticx.studio import server as server_module
+
+    called: Dict[str, Any] = {"value": False, "invoked": False}
+
+    class _FakeRuntime:
+        def __init__(self, _llm, _confirm_gate):
+            pass
+
+        async def run_turn(self, _user_input, _session, should_stop=None):
+            assert callable(should_stop)
+            called["invoked"] = True
+            called["value"] = await should_stop()
+            yield RuntimeEvent(type="final", data={"text": "ok"})
+
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", lambda **_kwargs: _TextLLM())
+    monkeypatch.setattr(server_module, "AgentRuntime", _FakeRuntime)
+
+    app = create_studio_app()
+    client = TestClient(app)
+    session_id = client.get("/api/session").json()["session_id"]
+    with client.stream(
+        "POST",
+        "/api/chat",
+        json={"session_id": session_id, "user_input": "hello"},
+    ) as resp:
+        assert resp.status_code == 200
+        events = _extract_events(list(resp.iter_lines()))
+
+    assert called["invoked"] is True
+    assert called["value"] is False
+    assert any(e.get("type") == "final" for e in events)
+    assert not any(e.get("type") == "error" for e in events)

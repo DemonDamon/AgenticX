@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import json
 import asyncio
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
+import inspect
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional
 
 from agenticx.cli.agent_tools import STUDIO_TOOLS, dispatch_tool_async
 from agenticx.cli.studio_mcp import build_mcp_tools_context
@@ -24,6 +25,7 @@ else:
 
 MAX_TOOL_ROUNDS = 10
 MAX_CONTEXT_CHARS = 16_000
+STOP_MESSAGE = "已中断当前生成"
 
 
 def _truncate(text: str, limit: int = MAX_CONTEXT_CHARS) -> str:
@@ -122,7 +124,19 @@ class AgentRuntime:
         self,
         user_input: str,
         session: StudioSession,
+        should_stop: Optional[Callable[[], bool | Awaitable[bool]]] = None,
     ) -> AsyncGenerator[RuntimeEvent, None]:
+        async def _check_should_stop() -> bool:
+            if should_stop is None:
+                return False
+            try:
+                result = should_stop()
+                if inspect.isawaitable(result):
+                    return bool(await result)
+                return bool(result)
+            except Exception:
+                return False
+
         system_prompt = _build_agent_system_prompt(session)
         messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
         messages.extend(session.agent_messages[-16:])
@@ -131,6 +145,9 @@ class AgentRuntime:
         session.chat_history.append({"role": "user", "content": user_input})
 
         for round_idx in range(1, self.max_tool_rounds + 1):
+            if await _check_should_stop():
+                yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE})
+                return
             yield RuntimeEvent(
                 type=EventType.ROUND_START.value,
                 data={"round": round_idx, "max_rounds": self.max_tool_rounds},
@@ -157,6 +174,9 @@ class AgentRuntime:
                         temperature=0.2,
                         max_tokens=1200,
                     ):
+                        if await _check_should_stop():
+                            yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE})
+                            return
                         token = chunk if isinstance(chunk, str) else str(chunk.get("content", ""))
                         if not token:
                             continue
@@ -184,6 +204,9 @@ class AgentRuntime:
             session.chat_history.append({"role": "assistant", "content": tool_call_text})
 
             for call in tool_calls:
+                if await _check_should_stop():
+                    yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE})
+                    return
                 function_obj = call.get("function", {}) if isinstance(call, dict) else {}
                 tool_name = str(function_obj.get("name", "")).strip()
                 arguments = _parse_tool_arguments(function_obj.get("arguments"))
@@ -209,6 +232,14 @@ class AgentRuntime:
                 )
 
                 while True:
+                    if await _check_should_stop():
+                        dispatch_task.cancel()
+                        try:
+                            await dispatch_task
+                        except asyncio.CancelledError:
+                            pass
+                        yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE})
+                        return
                     if dispatch_task.done() and pending_events.empty():
                         break
                     try:
