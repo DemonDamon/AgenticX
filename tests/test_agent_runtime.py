@@ -111,3 +111,24 @@ def test_runtime_text_only_emits_tokens_then_final() -> None:
     types = [e["type"] for e in events]
     assert EventType.TOKEN.value in types
     assert events[-1]["type"] == EventType.FINAL.value
+
+
+def test_runtime_should_stop_interrupts_generation() -> None:
+    runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
+    calls = {"n": 0}
+
+    async def _should_stop() -> bool:
+        calls["n"] += 1
+        return calls["n"] >= 2
+
+    async def _collect_interrupt() -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        async for event in runtime.run_turn("hello", StudioSession(), should_stop=_should_stop):
+            items.append({"type": event.type, "data": event.data})
+        return items
+
+    events = __import__("asyncio").run(_collect_interrupt())
+    assert any(e["type"] == EventType.ROUND_START.value for e in events)
+    assert events[-1]["type"] == EventType.ERROR.value
+    assert events[-1]["data"]["text"] == "已中断当前生成"
+    assert not any(e["type"] == EventType.FINAL.value for e in events)
