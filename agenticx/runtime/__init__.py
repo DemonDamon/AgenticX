@@ -2,6 +2,8 @@
 
 from agenticx.runtime.confirm import AsyncConfirmGate, ConfirmGate, SyncConfirmGate
 from agenticx.runtime.events import EventType, RuntimeEvent
+from agenticx.runtime.scratchpad import Scratchpad
+from agenticx.runtime.todo_manager import TodoManager
 
 
 def __getattr__(name: str):
@@ -33,6 +35,18 @@ def __getattr__(name: str):
         from agenticx.runtime.meta_tools import dispatch_meta_tool_async
 
         return dispatch_meta_tool_async
+    if name == "LoopController":
+        from agenticx.runtime.loop_controller import LoopController
+
+        return LoopController
+    if name == "AutoSolveMode":
+        from agenticx.runtime.auto_solve import AutoSolveMode
+
+        return AutoSolveMode
+    if name == "SpawnConfig":
+        from agenticx.runtime.team_manager import SpawnConfig
+
+        return SpawnConfig
     raise AttributeError(name)
 
 __all__ = [
@@ -42,10 +56,15 @@ __all__ = [
     "AsyncConfirmGate",
     "EventType",
     "RuntimeEvent",
+    "TodoManager",
+    "Scratchpad",
     "AgentTeamManager",
     "SubAgentContext",
     "SubAgentStatus",
     "ResourceMonitor",
     "META_AGENT_TOOLS",
     "dispatch_meta_tool_async",
+    "LoopController",
+    "AutoSolveMode",
+    "SpawnConfig",
 ]

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import asyncio
+import hashlib
 import inspect
 import re
 import uuid
@@ -16,8 +17,11 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict
 from agenticx.cli.agent_tools import STUDIO_TOOLS, dispatch_tool_async
 from agenticx.cli.studio_mcp import build_mcp_tools_context
 from agenticx.cli.studio_skill import get_all_skill_summaries
+from agenticx.runtime.compactor import ContextCompactor
 from agenticx.runtime.confirm import ConfirmGate
 from agenticx.runtime.events import EventType, RuntimeEvent
+from agenticx.runtime.hooks import HookRegistry
+from agenticx.runtime.loop_detector import LoopDetector
 
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
@@ -65,6 +69,28 @@ def _serialize_skill_summaries() -> str:
     return "\n".join(f"- {item['name']}: {item['description']}" for item in summaries[:120])
 
 
+def _serialize_todos(session: StudioSession) -> str:
+    todo_manager = getattr(session, "todo_manager", None)
+    if todo_manager is None:
+        return "No todos."
+    try:
+        return str(todo_manager.render())
+    except Exception:
+        return "No todos."
+
+
+def _serialize_scratchpad(session: StudioSession) -> str:
+    scratchpad = getattr(session, "scratchpad", None)
+    if not isinstance(scratchpad, dict) or not scratchpad:
+        return "(empty)"
+    lines: List[str] = []
+    for key in sorted(scratchpad.keys()):
+        value = str(scratchpad.get(key, ""))
+        preview = value if len(value) <= 200 else value[:200] + "..."
+        lines.append(f"- {key}: {preview.replace(chr(10), ' ')}")
+    return "\n".join(lines)
+
+
 def _build_agent_system_prompt(session: StudioSession) -> str:
     mcp_context = ""
     if session.mcp_hub is not None:
@@ -82,6 +108,10 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         f"{_serialize_skill_summaries()}\n\n"
         "## 当前会话 artifacts\n"
         f"{_serialize_artifacts(session)}\n\n"
+        "## 当前 Todo 列表\n"
+        f"{_serialize_todos(session)}\n\n"
+        "## 当前 Scratchpad 摘要\n"
+        f"{_serialize_scratchpad(session)}\n\n"
         "## 当前 context_files\n"
         f"{_serialize_context_files(session)}\n\n"
         "## 当前 MCP 工具上下文\n"
@@ -90,6 +120,8 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         "- bash_exec 仅对白名单命令自动执行；非白名单命令必须先征得用户确认。\n"
         "- file_write 与 file_edit 必须先展示 unified diff，再征得用户确认。\n"
         "- 当信息不足、需求含糊、或操作有副作用时，优先使用 ask_user。\n"
+        "- 多步骤任务优先使用 todo_write 跟踪进度，保持只有一个 in_progress。\n"
+        "- 对中间结果优先写入 scratchpad_write，后续步骤先 scratchpad_read 复用。\n"
         "- 优先最小改动，避免无关重构。\n"
     )
 
@@ -218,6 +250,50 @@ def _extract_inline_tool_call(
     return {"name": tool_name, "arguments": args_obj}
 
 
+def _build_progress_signature(session: StudioSession) -> str:
+    artifacts = getattr(session, "artifacts", {}) or {}
+    artifact_entries = []
+    for key, value in artifacts.items():
+        sval = str(value)
+        digest = hashlib.sha1(sval.encode("utf-8")).hexdigest()[:12] if sval else ""
+        artifact_entries.append({"path": str(key), "len": len(sval), "hash": digest})
+    artifact_entries.sort(key=lambda item: item["path"])
+    scratchpad = getattr(session, "scratchpad", {}) or {}
+    scratch_entries = []
+    if isinstance(scratchpad, dict):
+        for key, value in scratchpad.items():
+            sval = str(value)
+            digest = hashlib.sha1(sval.encode("utf-8")).hexdigest()[:12] if sval else ""
+            scratch_entries.append({"key": str(key), "len": len(sval), "hash": digest})
+    scratch_entries.sort(key=lambda item: item["key"])
+    todo_payload: List[Dict[str, Any]] = []
+    todo_manager = getattr(session, "todo_manager", None)
+    if todo_manager is not None:
+        try:
+            todo_payload = list(todo_manager.to_payload())
+        except Exception:
+            todo_payload = []
+    context_entries = []
+    context_files = getattr(session, "context_files", {}) or {}
+    if isinstance(context_files, dict):
+        for key, value in context_files.items():
+            sval = str(value)
+            digest = hashlib.sha1(sval.encode("utf-8")).hexdigest()[:12] if sval else ""
+            context_entries.append({"path": str(key), "len": len(sval), "hash": digest})
+    context_entries.sort(key=lambda item: item["path"])
+    raw = json.dumps(
+        {
+            "artifacts": artifact_entries,
+            "scratchpad": scratch_entries,
+            "todos": todo_payload,
+            "context_files": context_entries,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 class AgentRuntime:
     """LLM-driven runtime that emits structured events."""
 
@@ -227,10 +303,14 @@ class AgentRuntime:
         confirm_gate: ConfirmGate,
         *,
         max_tool_rounds: int = MAX_TOOL_ROUNDS,
+        hooks: Optional[HookRegistry] = None,
     ) -> None:
         self.llm = llm
         self.confirm_gate = confirm_gate
         self.max_tool_rounds = max_tool_rounds
+        self.hooks = hooks or HookRegistry()
+        self.compactor = ContextCompactor(llm)
+        self.loop_detector = LoopDetector()
 
     async def run_turn(
         self,
@@ -260,8 +340,20 @@ class AgentRuntime:
             for tool in active_tools
             if isinstance(tool, dict)
         }
+        history = _sanitize_context_messages(session.agent_messages)
+        compacted_history, did_compact, compact_summary, compacted_count = await self.compactor.maybe_compact(history)
         messages: List[Dict[str, Any]] = [{"role": "system", "content": current_system_prompt}]
-        messages.extend(_sanitize_context_messages(session.agent_messages[-16:]))
+        messages.extend(compacted_history)
+        if did_compact:
+            yield RuntimeEvent(
+                type=EventType.COMPACTION.value,
+                data={
+                    "compacted_count": compacted_count,
+                    "summary": compact_summary,
+                },
+                agent_id=agent_id,
+            )
+            await self.hooks.run_on_compaction(compacted_count, compact_summary, session)
         messages.append({"role": "user", "content": user_input})
         session.agent_messages.append({"role": "user", "content": user_input})
         synced_session_message_count = len(session.agent_messages)
@@ -270,6 +362,7 @@ class AgentRuntime:
         last_status_query_signature: Optional[str] = None
         repeated_status_query_count = 0
         executed_tool_names: List[str] = []
+        rounds_without_todo = 0
 
         for round_idx in range(1, self.max_tool_rounds + 1):
             if await _check_should_stop():
@@ -299,7 +392,15 @@ class AgentRuntime:
                     _sanitize_context_messages(session.agent_messages[synced_session_message_count:])
                 )
                 synced_session_message_count = len(session.agent_messages)
+            if rounds_without_todo > 10:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "<reminder>10+ rounds without todo_write. Please update todo list.</reminder>",
+                    }
+                )
             try:
+                messages = await self.hooks.run_before_model(messages, session)
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
                         self.llm.invoke,
@@ -311,6 +412,7 @@ class AgentRuntime:
                     ),
                     timeout=LLM_INVOKE_TIMEOUT_SECONDS,
                 )
+                await self.hooks.run_after_model(response, session)
             except asyncio.TimeoutError:
                 yield RuntimeEvent(
                     type=EventType.ERROR.value,
@@ -396,6 +498,7 @@ class AgentRuntime:
                         "当前模型未返回进一步正文，请继续给我下一步指令。"
                     )
                 session.chat_history.append({"role": "assistant", "content": final_text})
+                await self.hooks.run_on_agent_end(final_text, session)
                 yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
                 return
 
@@ -423,6 +526,32 @@ class AgentRuntime:
                 dispatch_arguments = dict(arguments)
                 dispatch_arguments["__tool_call_id"] = tool_call_id
                 dispatch_arguments["__agent_id"] = agent_id
+                hook_outcome = await self.hooks.run_before_tool_call(tool_name, arguments, session)
+                if hook_outcome.blocked:
+                    blocked_message = hook_outcome.reason or f"工具 {tool_name} 被策略阻止。"
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": blocked_message,
+                        }
+                    )
+                    session.agent_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": blocked_message,
+                        }
+                    )
+                    synced_session_message_count = len(session.agent_messages)
+                    yield RuntimeEvent(
+                        type=EventType.ERROR.value,
+                        data={"text": blocked_message, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
+                    continue
                 if tool_name not in allowed_tool_names:
                     denied_message = f"工具 '{tool_name}' 不在当前允许列表中，已拒绝执行。"
                     messages.append(
@@ -510,6 +639,7 @@ class AgentRuntime:
                 async def _on_tool_event(event_payload: Dict[str, Any]) -> None:
                     pending_events.put_nowait(event_payload)
 
+                before_progress = _build_progress_signature(session)
                 dispatch_task = asyncio.create_task(
                     dispatch_tool_async(
                         tool_name,
@@ -545,7 +675,32 @@ class AgentRuntime:
                     result = await dispatch_task
                 except Exception as exc:
                     result = f"ERROR: tool execution failed: {exc}"
+                result = await self.hooks.run_after_tool_call(tool_name, result, session)
+                if tool_name == "todo_write":
+                    rounds_without_todo = 0
+                else:
+                    rounds_without_todo += 1
                 executed_tool_names.append(tool_name)
+                after_progress = _build_progress_signature(session)
+                self.loop_detector.record_call(
+                    tool_name,
+                    LoopDetector.args_signature(arguments),
+                    has_progress=(before_progress != after_progress),
+                )
+                loop_issue = self.loop_detector.check()
+                if loop_issue is not None:
+                    reminder = (
+                        f"[loop-{loop_issue.level}] {loop_issue.message} "
+                        "请调整策略：改用不同工具、读取更多上下文，或先总结当前结论。"
+                    )
+                    messages.append({"role": "user", "content": reminder})
+                    if loop_issue.level == "critical":
+                        yield RuntimeEvent(
+                            type=EventType.ERROR.value,
+                            data={"text": reminder, "detector": loop_issue.detector},
+                            agent_id=agent_id,
+                        )
+                        return
                 messages.append(
                     {
                         "role": "tool",
@@ -577,8 +732,10 @@ class AgentRuntime:
             "请基于当前结果继续指示，或缩小任务范围。"
         )
         if agent_id == "meta":
+            await self.hooks.run_on_agent_end(message, session)
             yield RuntimeEvent(type=EventType.ERROR.value, data={"text": message}, agent_id=agent_id)
             return
+        await self.hooks.run_on_agent_end(message, session)
         yield RuntimeEvent(
             type=EventType.SUBAGENT_PAUSED.value,
             data={
