@@ -107,6 +107,26 @@ export ANTHROPIC_API_KEY="your-api-key"  # Optional
 
 > **Complete Installation Guide**: For system dependencies (antiword, tesseract) and advanced document processing features, see [INSTALL.md](INSTALL.md)
 
+### CLI Quick Start
+
+After installation, the `agx` command-line tool is available:
+
+```bash
+# View version
+agx --version
+
+# Create a new project
+agx project create my-agent --template basic
+
+# Start the API server
+agx serve --port 8000
+
+# Parse documents (PDF/PPT/Word etc.)
+agx mineru parse report.pdf --output ./parsed
+```
+
+> **Full CLI Reference**: See [docs/cli.md](docs/cli.md) for complete command documentation.
+
 ### Create Your First Agent
 
 ```python
