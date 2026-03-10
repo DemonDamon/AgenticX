@@ -27,6 +27,9 @@ type AgxConfig = {
   version?: string;
   default_provider?: string;
   providers?: Record<string, ProviderConfig>;
+  user_mode?: "pro" | "lite";
+  onboarding_completed?: boolean;
+  confirm_strategy?: "manual" | "semi-auto" | "auto";
 };
 
 const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
@@ -327,7 +330,31 @@ function registerIpc(): void {
     return {
       defaultProvider: cfg.default_provider ?? "",
       providers: cfg.providers ?? {},
+      userMode: cfg.user_mode ?? "pro",
+      onboardingCompleted: cfg.onboarding_completed ?? false,
+      confirmStrategy: cfg.confirm_strategy ?? "semi-auto",
     };
+  });
+
+  ipcMain.handle("save-user-mode", async (_event, mode: "pro" | "lite") => {
+    const cfg = loadAgxConfig();
+    cfg.user_mode = mode;
+    saveAgxConfig(cfg);
+    return { ok: true };
+  });
+
+  ipcMain.handle("save-onboarding-completed", async (_event, completed: boolean) => {
+    const cfg = loadAgxConfig();
+    cfg.onboarding_completed = completed;
+    saveAgxConfig(cfg);
+    return { ok: true };
+  });
+
+  ipcMain.handle("save-confirm-strategy", async (_event, strategy: "manual" | "semi-auto" | "auto") => {
+    const cfg = loadAgxConfig();
+    cfg.confirm_strategy = strategy;
+    saveAgxConfig(cfg);
+    return { ok: true };
   });
 
   ipcMain.handle("save-provider", async (_event, payload: {

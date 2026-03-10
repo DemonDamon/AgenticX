@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   },
 
   loadConfig: async () => ipcRenderer.invoke("load-config"),
+  saveUserMode: async (mode: "pro" | "lite") => ipcRenderer.invoke("save-user-mode", mode),
+  saveOnboardingCompleted: async (completed: boolean) =>
+    ipcRenderer.invoke("save-onboarding-completed", completed),
+  saveConfirmStrategy: async (strategy: "manual" | "semi-auto" | "auto") =>
+    ipcRenderer.invoke("save-confirm-strategy", strategy),
   saveProvider: async (payload: {
     name: string;
     apiKey?: string;

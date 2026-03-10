@@ -10,6 +10,9 @@ type ProviderConfig = {
 type LoadConfigResult = {
   defaultProvider: string;
   providers: Record<string, ProviderConfig>;
+  userMode?: "pro" | "lite";
+  onboardingCompleted?: boolean;
+  confirmStrategy?: "manual" | "semi-auto" | "auto";
 };
 
 type ValidateKeyResult = { ok: boolean; error?: string; status?: number };
@@ -26,6 +29,9 @@ declare global {
       onOpenSettings: (cb: () => void) => void;
 
       loadConfig: () => Promise<LoadConfigResult>;
+      saveUserMode: (mode: "pro" | "lite") => Promise<{ ok: boolean }>;
+      saveOnboardingCompleted: (completed: boolean) => Promise<{ ok: boolean }>;
+      saveConfirmStrategy: (strategy: "manual" | "semi-auto" | "auto") => Promise<{ ok: boolean }>;
       saveProvider: (payload: {
         name: string;
         apiKey?: string;

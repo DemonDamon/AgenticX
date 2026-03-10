@@ -3,6 +3,7 @@ import { create } from "zustand";
 export type UiStatus = "idle" | "listening" | "processing";
 export type MsgRole = "user" | "assistant" | "tool";
 export type SubAgentStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type ConfirmStrategy = "manual" | "semi-auto" | "auto";
 
 export type Message = {
   id: string;
@@ -70,13 +71,26 @@ type AppState = {
   settings: SettingsState;
   activeProvider: string;
   activeModel: string;
+  userMode: "pro" | "lite";
+  onboardingCompleted: boolean;
+  commandPaletteOpen: boolean;
+  keybindingsPanelOpen: boolean;
+  planMode: boolean;
+  confirmStrategy: ConfirmStrategy;
   setApiBase: (base: string) => void;
   setApiToken: (token: string) => void;
   setSessionId: (id: string) => void;
   setStatus: (status: UiStatus) => void;
   setActiveModel: (provider: string, model: string) => void;
+  setUserMode: (mode: "pro" | "lite") => void;
+  setOnboardingCompleted: (v: boolean) => void;
+  setCommandPaletteOpen: (v: boolean) => void;
+  setKeybindingsPanelOpen: (v: boolean) => void;
+  setPlanMode: (v: boolean) => void;
+  setConfirmStrategy: (v: ConfirmStrategy) => void;
   addMessage: (role: MsgRole, content: string, agentId?: string, provider?: string, model?: string) => void;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
+  clearMessages: () => void;
   addSubAgent: (item: Pick<SubAgent, "id" | "name" | "role" | "task">) => void;
   updateSubAgent: (id: string, patch: Partial<SubAgent>) => void;
   addSubAgentEvent: (id: string, event: Omit<SubAgentEvent, "id" | "ts">) => void;
@@ -108,6 +122,12 @@ export const useAppStore = create<AppState>((set) => ({
   messages: [],
   activeProvider: "",
   activeModel: "",
+  userMode: "pro",
+  onboardingCompleted: false,
+  commandPaletteOpen: false,
+  keybindingsPanelOpen: false,
+  planMode: false,
+  confirmStrategy: "semi-auto",
   subAgents: [],
   selectedSubAgent: null,
   codePreview: "",
@@ -118,6 +138,12 @@ export const useAppStore = create<AppState>((set) => ({
   setSessionId: (sessionId) => set({ sessionId }),
   setStatus: (status) => set({ status }),
   setActiveModel: (activeProvider, activeModel) => set({ activeProvider, activeModel }),
+  setUserMode: (userMode) => set({ userMode }),
+  setOnboardingCompleted: (onboardingCompleted) => set({ onboardingCompleted }),
+  setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
+  setKeybindingsPanelOpen: (keybindingsPanelOpen) => set({ keybindingsPanelOpen }),
+  setPlanMode: (planMode) => set({ planMode }),
+  setConfirmStrategy: (confirmStrategy) => set({ confirmStrategy }),
   addMessage: (role, content, agentId, provider, model) =>
     set((state) => ({
       messages: [...state.messages, { id: uid(), role, content, agentId, provider, model }]
@@ -133,6 +159,7 @@ export const useAppStore = create<AppState>((set) => ({
     });
     return newId;
   },
+  clearMessages: () => set({ messages: [] }),
   addSubAgent: (item) =>
     set((state) => {
       const exists = state.subAgents.some((sub) => sub.id === item.id);
