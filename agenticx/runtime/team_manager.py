@@ -30,6 +30,16 @@ class SubAgentStatus(str, Enum):
 
 
 @dataclass
+class SpawnConfig:
+    max_spawn_depth: int = 2
+    max_children_per_agent: int = 5
+    max_concurrent: int = 8
+    run_timeout_seconds: int = 600
+    cleanup: str = "keep"  # keep | delete
+    mode: str = "run"  # run | session
+
+
+@dataclass
 class SubAgentContext:
     agent_id: str
     name: str
@@ -47,6 +57,13 @@ class SubAgentContext:
     final_text: str = ""
     error_text: str = ""
     recent_events: List[Dict[str, Any]] = field(default_factory=list)
+    parent_agent_id: str = "meta"
+    depth: int = 1
+    mode: str = "run"
+    cleanup: str = "keep"
+    run_timeout_seconds: int = 600
+    attachments: Dict[str, str] = field(default_factory=dict)
+    allowed_tool_names: List[str] = field(default_factory=list)
 
 
 class AgentTeamManager:
@@ -61,6 +78,7 @@ class AgentTeamManager:
         summary_sink: Optional[SummarySink] = None,
         max_concurrent_subagents: int = 4,
         resource_monitor: Optional[ResourceMonitor] = None,
+        spawn_config: Optional[SpawnConfig] = None,
     ) -> None:
         self.llm_factory = llm_factory
         self.base_session = base_session
@@ -68,6 +86,7 @@ class AgentTeamManager:
         self.summary_sink = summary_sink
         self.max_concurrent_subagents = max_concurrent_subagents
         self.resource_monitor = resource_monitor or ResourceMonitor()
+        self.spawn_config = spawn_config or SpawnConfig(max_concurrent=max_concurrent_subagents)
 
         self._lock = asyncio.Lock()
         self._agents: Dict[str, SubAgentContext] = {}
@@ -86,6 +105,11 @@ class AgentTeamManager:
         session.mcp_configs = self.base_session.mcp_configs
         session.connected_servers = self.base_session.connected_servers
         session.context_files = dict(self.base_session.context_files)
+        try:
+            session.todo_manager.load_payload(self.base_session.todo_manager.to_payload())
+        except Exception:
+            pass
+        session.scratchpad = dict(getattr(self.base_session, "scratchpad", {}) or {})
         return session
 
     def _build_subagent_system_prompt(self, context: SubAgentContext, session: StudioSession) -> str:
@@ -136,6 +160,21 @@ class AgentTeamManager:
             return []
         return [tool for tool in STUDIO_TOOLS if tool.get("function", {}).get("name") in allowed]
 
+    def _get_depth(self, agent_id: str) -> int:
+        if agent_id == "meta":
+            return 0
+        context = self._agents.get(agent_id)
+        if context is None:
+            return 0
+        return context.depth
+
+    def _active_children_count(self, parent_agent_id: str) -> int:
+        return sum(
+            1
+            for item in self._agents.values()
+            if item.parent_agent_id == parent_agent_id and item.status == SubAgentStatus.RUNNING
+        )
+
     def _active_running_count(self) -> int:
         return sum(1 for item in self._agents.values() if item.status == SubAgentStatus.RUNNING)
 
@@ -147,14 +186,34 @@ class AgentTeamManager:
         task: str,
         tools: Optional[Sequence[str]] = None,
         source_tool_call_id: str = "",
+        parent_agent_id: str = "meta",
+        mode: Optional[str] = None,
+        cleanup: Optional[str] = None,
+        run_timeout_seconds: Optional[int] = None,
+        attachments: Optional[Sequence[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         async with self._lock:
             active = self._active_running_count()
-            if active >= self.max_concurrent_subagents:
+            max_concurrent = self.spawn_config.max_concurrent
+            if active >= max_concurrent:
                 return {
                     "ok": False,
                     "error": "max_concurrency_reached",
-                    "message": f"当前并行子智能体已达上限({self.max_concurrent_subagents})",
+                    "message": f"当前并行子智能体已达上限({max_concurrent})",
+                }
+            parent_depth = self._get_depth(parent_agent_id)
+            if parent_depth + 1 > self.spawn_config.max_spawn_depth:
+                return {
+                    "ok": False,
+                    "error": "max_spawn_depth_reached",
+                    "message": "已达到子智能体嵌套深度上限",
+                }
+            parent_children = self._active_children_count(parent_agent_id)
+            if parent_children >= self.spawn_config.max_children_per_agent:
+                return {
+                    "ok": False,
+                    "error": "max_children_reached",
+                    "message": "当前父智能体的活跃子智能体数达到上限",
                 }
             if active > 0:
                 spawn_check = self.resource_monitor.can_spawn(active_subagents=active)
@@ -174,6 +233,23 @@ class AgentTeamManager:
                     "message": "请求了 tools 白名单，但没有匹配到有效工具",
                 }
             agent_id = f"sa-{uuid.uuid4().hex[:8]}"
+            resolved_mode = (mode or self.spawn_config.mode).strip().lower()
+            if resolved_mode not in {"run", "session"}:
+                resolved_mode = "run"
+            resolved_cleanup = (cleanup or self.spawn_config.cleanup).strip().lower()
+            if resolved_cleanup not in {"keep", "delete"}:
+                resolved_cleanup = "keep"
+            resolved_timeout = int(run_timeout_seconds or self.spawn_config.run_timeout_seconds or 0)
+            attached_payload: Dict[str, str] = {}
+            if attachments:
+                for item in attachments[:20]:
+                    if not isinstance(item, dict):
+                        continue
+                    name_key = str(item.get("name", "")).strip()
+                    content_val = str(item.get("content", ""))
+                    if not name_key:
+                        continue
+                    attached_payload[name_key] = content_val
             context = SubAgentContext(
                 agent_id=agent_id,
                 name=name.strip() or agent_id,
@@ -181,6 +257,17 @@ class AgentTeamManager:
                 task=task.strip(),
                 source_tool_call_id=source_tool_call_id,
                 context_files=dict(self.base_session.context_files),
+                parent_agent_id=parent_agent_id,
+                depth=parent_depth + 1,
+                mode=resolved_mode,
+                cleanup=resolved_cleanup,
+                run_timeout_seconds=resolved_timeout,
+                attachments=attached_payload,
+                allowed_tool_names=[
+                    str(item.get("function", {}).get("name", "")).strip()
+                    for item in allowed_tools
+                    if isinstance(item, dict)
+                ],
             )
             self._agents[agent_id] = context
             context.status = SubAgentStatus.RUNNING
@@ -198,6 +285,8 @@ class AgentTeamManager:
                     "role": context.role,
                     "task": context.task,
                     "status": context.status.value,
+                    "depth": context.depth,
+                    "mode": context.mode,
                 },
                 agent_id=context.agent_id,
             )
@@ -208,6 +297,8 @@ class AgentTeamManager:
             "name": context.name,
             "role": context.role,
             "task": context.task,
+            "depth": context.depth,
+            "mode": context.mode,
         }
 
     async def cancel_subagent(self, agent_id: str) -> Dict[str, Any]:
@@ -233,7 +324,7 @@ class AgentTeamManager:
         context = self._agents.get(agent_id)
         if context is None:
             return {"ok": False, "error": "not_found", "message": f"未找到子智能体: {agent_id}"}
-        if context.status != SubAgentStatus.RUNNING:
+        if context.status != SubAgentStatus.RUNNING and context.mode != "session":
             return {
                 "ok": False,
                 "error": "not_running",
@@ -245,8 +336,20 @@ class AgentTeamManager:
         text = message.strip()
         if not text:
             return {"ok": False, "error": "empty_message", "message": "消息不能为空"}
-        session.agent_messages.append({"role": "user", "content": text})
-        session.chat_history.append({"role": "user", "content": text})
+        if context.status != SubAgentStatus.RUNNING:
+            context.status = SubAgentStatus.RUNNING
+            allowed_tools = self._build_toolset(context.allowed_tool_names)
+            task = asyncio.create_task(
+                self._run_subagent(
+                    context,
+                    allowed_tools=allowed_tools,
+                    resume_input=text,
+                )
+            )
+            self._tasks[agent_id] = task
+        else:
+            session.agent_messages.append({"role": "user", "content": text})
+            session.chat_history.append({"role": "user", "content": text})
         context.updated_at = time.time()
         await self._emit(
             RuntimeEvent(
@@ -330,6 +433,10 @@ class AgentTeamManager:
             "result_summary": context.result_summary,
             "error_text": context.error_text,
             "recent_events": list(context.recent_events[-20:]),
+            "depth": context.depth,
+            "parent_agent_id": context.parent_agent_id,
+            "mode": context.mode,
+            "cleanup": context.cleanup,
         }
 
     async def _run_subagent(
@@ -337,20 +444,36 @@ class AgentTeamManager:
         context: SubAgentContext,
         *,
         allowed_tools: Sequence[Dict[str, Any]],
+        resume_input: Optional[str] = None,
     ) -> None:
-        session = self._build_isolated_session()
-        session.context_files.update(context.context_files)
-        session.artifacts.update(context.artifacts)
-        self._agent_sessions[context.agent_id] = session
+        existing_session = self._agent_sessions.get(context.agent_id)
+        if context.mode == "session" and existing_session is not None:
+            session = existing_session
+        else:
+            session = self._build_isolated_session()
+            session.context_files.update(context.context_files)
+            session.artifacts.update(context.artifacts)
+            setattr(session, "_team_manager", self)
+            if context.attachments:
+                session.scratchpad.update(
+                    {f"attachment::{k}": v for k, v in context.attachments.items()}
+                )
+            self._agent_sessions[context.agent_id] = session
+        setattr(session, "_team_manager", self)
         llm = self.llm_factory()
         runtime = AgentRuntime(llm, context.confirm_gate, max_tool_rounds=25)
         system_prompt = self._build_subagent_system_prompt(context, session)
+        started_at = time.time()
 
         try:
             async for event in runtime.run_turn(
-                context.task,
+                resume_input or context.task,
                 session,
-                should_stop=lambda: context.agent_id in self._cancelled,
+                should_stop=lambda: context.agent_id in self._cancelled
+                or (
+                    context.run_timeout_seconds > 0
+                    and (time.time() - started_at) > context.run_timeout_seconds
+                ),
                 agent_id=context.agent_id,
                 tools=allowed_tools,
                 system_prompt=system_prompt,
@@ -416,8 +539,11 @@ class AgentTeamManager:
             context.context_files = dict(session.context_files)
             context.result_summary = self._build_result_summary(context)
             self._tasks.pop(context.agent_id, None)
-            self._agent_sessions.pop(context.agent_id, None)
+            if context.mode != "session" or context.cleanup == "delete":
+                self._agent_sessions.pop(context.agent_id, None)
             self._cancelled.discard(context.agent_id)
+            if context.cleanup == "delete":
+                self._agents.pop(context.agent_id, None)
             if self.summary_sink is not None:
                 await self.summary_sink(context.result_summary, context)
             event_type = (

@@ -28,6 +28,7 @@ class EventType(str, Enum):
     SUBAGENT_PAUSED = "subagent_paused"
     SUBAGENT_COMPLETED = "subagent_completed"
     SUBAGENT_ERROR = "subagent_error"
+    COMPACTION = "compaction"
 
 
 @dataclass

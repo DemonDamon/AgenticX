@@ -48,6 +48,17 @@ def _build_mcps_context(session: StudioSession) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _build_todo_context(session: StudioSession) -> str:
+    todo_manager = getattr(session, "todo_manager", None)
+    if todo_manager is None:
+        return "### Todo（当前会话）\nNo todos.\n"
+    try:
+        rendered = str(todo_manager.render()).strip()
+    except Exception:
+        rendered = "No todos."
+    return f"### Todo（当前会话）\n{rendered}\n"
+
+
 def _build_workspace_context_block() -> str:
     workspace = load_workspace_context()
     parts = [
@@ -77,13 +88,20 @@ def _build_workspace_context_block() -> str:
     return "\n\n".join(parts) + "\n"
 
 
-def build_meta_agent_system_prompt(session: StudioSession) -> str:
+def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "interactive") -> str:
     workspace_context = _build_workspace_context_block()
     skills_context = _build_skills_context()
     mcp_context = _build_mcps_context(session)
+    todo_context = _build_todo_context(session)
+    mode_line = (
+        "## 当前工作模式\n- interactive：可与用户多轮澄清，强调可控执行。\n\n"
+        if mode != "auto"
+        else "## 当前工作模式\n- auto：面向非技术用户，优先自动求解并输出简洁结论，减少术语与实现细节。\n\n"
+    )
     return (
         f"{workspace_context}\n"
         "你是 AgenticX Desktop 的首席 Meta-Agent（CEO）。你的核心职责是调度与汇报，而非直接执行文件/命令类工具。\n\n"
+        f"{mode_line}"
         "## 身份应答策略\n"
         "- 当用户询问“你是谁/你的定位”时，优先基于“身份与长期上下文”简洁回答（身份、职责、边界）。\n"
         "- 回答身份问题时不要罗列完整 skills/MCP 清单，除非用户明确要求查看能力清单。\n\n"
@@ -94,6 +112,7 @@ def build_meta_agent_system_prompt(session: StudioSession) -> str:
         "4) 用户问“进度如何”时，调用 `query_subagent_status` 给出明确状态、阻塞点、预计耗时。\n"
         "5) 若某子智能体失控或偏航，调用 `cancel_subagent` 并重新规划。\n\n"
         "## 调度策略\n"
+        "- 拆解任务前优先通过 todo_write 记录任务清单，保持单个 in_progress。\n"
         "- 简单任务：优先单子智能体，避免过度调度。\n"
         "- 中等任务：建议 2 个子智能体（并行或流水线），并明确分工。\n"
         "- 复杂任务：先拆解里程碑，再分批启动，避免同时过多并行。\n"
@@ -102,6 +121,13 @@ def build_meta_agent_system_prompt(session: StudioSession) -> str:
         "- 必须中文。\n"
         "- 先给结论，再给依据。\n"
         "- 需要用户决策时，明确给出选项（A/B/C）。\n\n"
+        "## MCP 工具管理闭环\n"
+        "- 当任务需要 MCP 能力时，先调用 `list_mcps` 查看配置与连接状态。\n"
+        "- 若存在配置但未连接，先明确告知用户需在 MCP 管理接口完成连接。\n"
+        "- 若用户明确提供外部 mcp.json 路径，先调用 `mcp_import` 导入，再连接。\n"
+        "- MCP 连接失败时，要求子智能体进入闭环：读取错误 -> 诊断原因 -> 执行修复 -> 重试连接（最多 3 轮）。\n"
+        "- 修复优先级：依赖缺失、命令路径错误、环境变量缺失、配置字段错误。\n"
+        "- 向用户汇报时必须给出可验证结果：已连接服务器名、可用工具数量、失败原因与下一步建议。\n\n"
         "## 执行纪律（非常重要）\n"
         "- 禁止只说“我将/我先去调用某工具”而不执行。\n"
         "- 只要提到“资源评估/资源检查”，必须在同一轮立即调用 `check_resources`。\n"
@@ -116,6 +142,7 @@ def build_meta_agent_system_prompt(session: StudioSession) -> str:
         "## 已注册能力\n"
         f"{skills_context}"
         f"{mcp_context}\n"
+        f"{todo_context}\n"
         "## 当前会话上下文\n"
         f"- provider: {session.provider_name or 'default'}\n"
         f"- model: {session.model_name or 'default'}\n"

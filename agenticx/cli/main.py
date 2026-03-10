@@ -445,6 +445,54 @@ def serve(
 
 
 @app.command()
+def loop(
+    task: str = typer.Argument(..., help="循环执行的任务描述"),
+    max_iterations: int = typer.Option(8, "--max-iterations", help="最大迭代轮数"),
+    completion_promise: str = typer.Option("", "--completion-promise", help="完成标记文本"),
+    provider: Optional[str] = typer.Option(None, "--provider", help="LLM 厂商"),
+    model: Optional[str] = typer.Option(None, "--model", help="模型名称"),
+):
+    """以自引用循环模式执行任务（长程问题优化）"""
+    from agenticx.cli.studio import StudioSession
+    from agenticx.llms.provider_resolver import ProviderResolver
+    from agenticx.runtime import AgentRuntime, SyncConfirmGate
+    from agenticx.runtime.loop_controller import LoopController
+    from agenticx.runtime.meta_tools import META_AGENT_TOOLS
+    from agenticx.runtime.prompts.meta_agent import build_meta_agent_system_prompt
+
+    session = StudioSession(provider_name=provider, model_name=model)
+    llm = ProviderResolver.resolve(provider_name=provider, model=model)
+    runtime = AgentRuntime(llm, SyncConfirmGate())
+    controller = LoopController(
+        max_iterations=max_iterations,
+        completion_promise=completion_promise or None,
+    )
+
+    async def _run() -> str:
+        final = ""
+        async for event in controller.run_loop(
+            task=task,
+            runtime=runtime,
+            session=session,
+            agent_id="meta",
+            tools=META_AGENT_TOOLS,
+            system_prompt=build_meta_agent_system_prompt(session, mode="interactive"),
+        ):
+            if event.type == "token":
+                text = str(event.data.get("text", ""))
+                if text:
+                    console.print(text, end="")
+            if event.type == "final":
+                final = str(event.data.get("text", ""))
+            if event.type == "error":
+                final = str(event.data.get("text", ""))
+        return final
+
+    result = asyncio.run(_run())
+    console.print(f"\n[bold green]Loop 结果:[/bold green] {result}")
+
+
+@app.command()
 def run(
     file: str = typer.Argument(..., help="要执行的工作流文件"),
     config: Optional[str] = typer.Option(None, "--config", "-c", help="配置文件路径"),

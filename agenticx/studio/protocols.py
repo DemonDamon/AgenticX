@@ -14,6 +14,7 @@ class ChatRequest(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     agent_id: Optional[str] = None
+    mode: Optional[str] = "interactive"
 
 
 class ConfirmResponse(BaseModel):
