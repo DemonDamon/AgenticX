@@ -84,6 +84,7 @@ class AgxConfig:
     default_provider: str = "openai"
     providers: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     codegen: CodegenConfig = field(default_factory=CodegenConfig)
+    workspace_dir: str = "~/.agenticx/workspace"
 
     def get_provider(self, name: Optional[str] = None) -> ProviderConfig:
         """Get provider config by name or default provider."""
@@ -184,6 +185,10 @@ class ConfigManager:
         codegen_raw = merged.get("codegen", {}) or {}
         if not isinstance(codegen_raw, dict):
             codegen_raw = {}
+        workspace_raw = merged.get("workspace_dir")
+        workspace_dir = "~/.agenticx/workspace"
+        if isinstance(workspace_raw, str) and workspace_raw.strip():
+            workspace_dir = workspace_raw.strip()
 
         config = AgxConfig(
             version=str(merged.get("version", "1")),
@@ -194,6 +199,7 @@ class ConfigManager:
                 style=str(codegen_raw.get("style", "functional")),
                 include_tests=bool(codegen_raw.get("include_tests", True)),
             ),
+            workspace_dir=workspace_dir,
         )
         return cls._env_fallback(config)
 

@@ -39,6 +39,7 @@ from agenticx.cli.studio_skill import (
     skill_info,
     get_all_skill_summaries,
 )
+from agenticx.workspace.loader import ensure_workspace
 
 
 console = Console()
@@ -315,6 +316,10 @@ def _resolve_at_references(session: StudioSession, user_input: str) -> str:
 
 def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> None:
     """Start interactive studio REPL."""
+    try:
+        ensure_workspace()
+    except Exception as exc:
+        console.print(f"[yellow]workspace bootstrap skipped: {exc}[/yellow]")
     session = StudioSession(
         provider_name=provider,
         model_name=model,
