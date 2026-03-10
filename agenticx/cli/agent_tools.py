@@ -13,6 +13,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -162,6 +163,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                         "description": "Generation target: agent/workflow/tool/skill.",
                     },
                     "description": {"type": "string", "description": "Generation requirement text."},
+                    "output_path": {
+                        "type": "string",
+                        "description": "Optional explicit output file path. If omitted, the tool will propose a default path and ask user confirmation before writing.",
+                    },
                 },
                 "required": ["description"],
                 "additionalProperties": False,
@@ -740,7 +745,13 @@ async def _tool_file_edit(
     return f"OK: edited {path}"
 
 
-def _tool_codegen(arguments: Dict[str, Any], session: StudioSession) -> str:
+async def _tool_codegen(
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
     description = str(arguments.get("description", "")).strip()
     if not description:
         return "ERROR: description is required"
@@ -760,11 +771,41 @@ def _tool_codegen(arguments: Dict[str, Any], session: StudioSession) -> str:
     except Exception as exc:
         return f"ERROR: code generation failed: {exc}"
 
-    output_path = infer_output_path(target=target, description=description)
+    output_path_raw = str(arguments.get("output_path", "")).strip()
+    if output_path_raw:
+        try:
+            output_path = _resolve_workspace_path(output_path_raw)
+        except ValueError as exc:
+            return f"ERROR: invalid output_path: {exc}"
+    else:
+        # If user did not explicitly provide output directory/path, require confirmation
+        # on the inferred destination to prevent writing to unexpected locations.
+        inferred = infer_output_path(target=target, description=description)
+        try:
+            output_path = _resolve_workspace_path(str(inferred))
+        except ValueError as exc:
+            return f"ERROR: inferred output path invalid: {exc}"
+        should_confirm = isinstance(confirm_gate, AsyncConfirmGate) or sys.stdin.isatty()
+        if should_confirm and not await _confirm(
+            (
+                "未检测到你显式指定落盘目录。"
+                f"建议写入：{output_path}。是否确认按该路径生成？"
+            ),
+            confirm_gate=confirm_gate,
+            context={"tool": "codegen", "path": str(output_path), "target": target},
+            emit_event=emit_event,
+        ):
+            return (
+                "CANCELLED: user denied inferred codegen path. "
+                "Please provide output_path explicitly, e.g. "
+                '{"target":"agent","description":"...","output_path":"./docs/xxx.md"}'
+            )
     try:
         write_generated_file(output_path, generated.code)
     except Exception as exc:
         return f"ERROR: failed to write generated file: {exc}"
+    if not output_path.exists() or not output_path.is_file():
+        return f"ERROR: write returned but output missing on disk: {output_path}"
 
     session.artifacts[output_path] = generated.code
     try:
@@ -895,7 +936,7 @@ async def dispatch_tool_async(
         if name == "file_edit":
             return await _tool_file_edit(arguments, confirm_gate=gate, emit_event=event_callback)
         if name == "codegen":
-            return _tool_codegen(arguments, session)
+            return await _tool_codegen(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "mcp_connect":
             return _tool_mcp_connect(arguments, session)
         if name == "mcp_call":
