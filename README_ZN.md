@@ -114,6 +114,26 @@ export ANTHROPIC_API_KEY="your-api-key"  # 可选
 
 > **完整安装指南**: 关于系统依赖（antiword、tesseract）和高级文档处理功能的详细信息，请参阅 [INSTALL.md](INSTALL.md)
 
+### CLI 快速上手
+
+安装后，`agx` 命令行工具即可使用：
+
+```bash
+# 查看版本
+agx --version
+
+# 创建新项目
+agx project create my-agent --template basic
+
+# 启动 API 服务器
+agx serve --port 8000
+
+# 解析文档（PDF/PPT/Word 等）
+agx mineru parse report.pdf --output ./parsed
+```
+
+> **完整 CLI 文档**: 详见 [docs/cli.md](docs/cli.md)
+
 ### 创建第一个智能体
 
 ```python
