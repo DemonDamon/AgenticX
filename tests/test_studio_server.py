@@ -296,3 +296,126 @@ def test_server_chat_rebinds_team_callbacks_each_turn(monkeypatch) -> None:
 
     assert "subagent_started" in [e.get("type") for e in first_events]
     assert "subagent_started" in [e.get("type") for e in second_events]
+
+
+def test_server_subagent_chat_uses_session_team_fallback(monkeypatch) -> None:
+    from agenticx.studio import server as server_module
+
+    calls = {"n": 0}
+
+    def _resolve(**_kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _MetaSpawnLLM()
+        return _SubTextLLM()
+
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", _resolve)
+    app = create_studio_app()
+    client = TestClient(app)
+    session_id = client.get("/api/session").json()["session_id"]
+
+    with client.stream(
+        "POST",
+        "/api/chat",
+        json={"session_id": session_id, "user_input": "创建一个子智能体"},
+    ) as resp:
+        assert resp.status_code == 200
+        _ = _extract_events(list(resp.iter_lines()))
+
+    manager = app.state.session_manager
+    managed = manager.get(session_id)
+    assert managed is not None
+    fallback_team = managed.team_manager
+    assert fallback_team is not None
+
+    managed.team_manager = None
+    setattr(managed.studio_session, "_team_manager", fallback_team)
+    subagent_ids = [row.get("agent_id") for row in fallback_team.get_status().get("subagents", [])]
+    assert subagent_ids
+
+    with client.stream(
+        "POST",
+        "/api/chat",
+        json={
+            "session_id": session_id,
+            "user_input": "继续执行",
+            "agent_id": subagent_ids[0],
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        events = _extract_events(list(resp.iter_lines()))
+
+    texts = [str((item.get("data") or {}).get("text", "")) for item in events]
+    assert not any("子智能体团队尚未初始化" in text for text in texts)
+
+
+def test_server_subagent_resume_completed_run_mode(monkeypatch) -> None:
+    """Completed run-mode subagents can be resumed via direct chat."""
+    from agenticx.runtime.team_manager import AgentTeamManager, SubAgentContext, SubAgentStatus
+
+    from agenticx.studio import server as server_module
+
+    calls = {"n": 0}
+
+    def _resolve(**_kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _MetaSpawnLLM()
+        return _SubTextLLM()
+
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", _resolve)
+    app = create_studio_app()
+    client = TestClient(app)
+    session_id = client.get("/api/session").json()["session_id"]
+
+    with client.stream(
+        "POST",
+        "/api/chat",
+        json={"session_id": session_id, "user_input": "创建一个子智能体"},
+    ) as resp:
+        assert resp.status_code == 200
+        _ = _extract_events(list(resp.iter_lines()))
+
+    manager = app.state.session_manager
+    managed = manager.get(session_id)
+    assert managed is not None
+    team: AgentTeamManager = managed.team_manager
+    assert team is not None
+
+    import asyncio
+    import time
+
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        all_done = all(
+            ctx.status.value not in ("running", "pending")
+            for ctx in team._agents.values()
+        )
+        if all_done and team._agents:
+            break
+        time.sleep(0.05)
+
+    subagent_ids = list(team._agents.keys())
+    assert subagent_ids
+    sa_id = subagent_ids[0]
+    ctx = team._agents[sa_id]
+    assert ctx.status in (SubAgentStatus.COMPLETED, SubAgentStatus.FAILED)
+    assert ctx.mode == "run"
+    assert sa_id not in team._agent_sessions
+
+    with client.stream(
+        "POST",
+        "/api/chat",
+        json={
+            "session_id": session_id,
+            "user_input": "你好，继续",
+            "agent_id": sa_id,
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        events = _extract_events(list(resp.iter_lines()))
+
+    texts = [str((item.get("data") or {}).get("text", "")) for item in events]
+    assert not any("未找到" in text for text in texts), f"Got not_found errors: {texts}"
+    assert not any("不可用" in text for text in texts), f"Got unavailable errors: {texts}"
+    assert any("已将你的补充指令发送给子智能体" in text for text in texts)

@@ -187,45 +187,83 @@ def create_studio_app() -> FastAPI:
             session.provider_name = payload.provider
         if payload.model:
             session.model_name = payload.model
-        target_agent_id = (payload.agent_id or "meta").strip() or "meta"
-        if target_agent_id != "meta":
-            async def _subagent_message_stream() -> AsyncGenerator[str, None]:
-                team_manager = managed.team_manager
-                if team_manager is None:
-                    err = SseEvent(
-                        type="error",
-                        data={"agent_id": target_agent_id, "text": "子智能体团队尚未初始化"},
-                    )
-                    yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
-                    yield 'data: {"type":"done","data":{}}\n\n'
-                    return
-                result = await team_manager.send_message_to_subagent(target_agent_id, payload.user_input)
-                if not result.get("ok"):
-                    err = SseEvent(
-                        type="error",
-                        data={
-                            "agent_id": target_agent_id,
-                            "text": str(result.get("message") or "发送子智能体消息失败"),
-                        },
-                    )
-                    yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
-                else:
-                    ack = SseEvent(
-                        type="subagent_progress",
-                        data={
-                            "agent_id": target_agent_id,
-                            "text": "已将你的补充指令发送给子智能体",
-                        },
-                    )
-                    yield f"data: {json.dumps(ack.model_dump(), ensure_ascii=False)}\n\n"
-                yield 'data: {"type":"done","data":{}}\n\n'
-            return StreamingResponse(_subagent_message_stream(), media_type="text/event-stream")
 
         def _resolve_llm():
             return ProviderResolver.resolve(
                 provider_name=session.provider_name,
                 model=session.model_name,
             )
+
+        target_agent_id = (payload.agent_id or "meta").strip() or "meta"
+        if target_agent_id != "meta":
+            import asyncio as _asyncio
+
+            async def _subagent_message_stream() -> AsyncGenerator[str, None]:
+                team_manager = managed.team_manager or getattr(session, "_team_manager", None)
+                if team_manager is None:
+                    try:
+                        team_manager = managed.get_or_create_team(llm_factory=_resolve_llm)
+                        setattr(session, "_team_manager", team_manager)
+                    except Exception as exc:
+                        err = SseEvent(type="error", data={"agent_id": target_agent_id, "text": f"子智能体团队尚未初始化: {exc}"})
+                        yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                        yield 'data: {"type":"done","data":{}}\n\n'
+                        return
+
+                sub_queue: "_asyncio.Queue[RuntimeEvent | None]" = _asyncio.Queue()
+                prev_emitter = team_manager.event_emitter
+
+                async def _chained_emitter(event: RuntimeEvent) -> None:
+                    if prev_emitter is not None:
+                        try:
+                            await prev_emitter(event)
+                        except Exception:
+                            pass
+                    if getattr(event, "agent_id", None) == target_agent_id:
+                        await sub_queue.put(event)
+
+                team_manager.event_emitter = _chained_emitter
+
+                try:
+                    result = await team_manager.send_message_to_subagent(target_agent_id, payload.user_input)
+                    if not result.get("ok"):
+                        msg = str(result.get("message") or "发送子智能体消息失败")
+                        err = SseEvent(type="error", data={"agent_id": target_agent_id, "text": msg})
+                        yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                        yield 'data: {"type":"done","data":{}}\n\n'
+                        return
+
+                    ack = SseEvent(
+                        type="subagent_progress",
+                        data={"agent_id": target_agent_id, "text": "已将你的补充指令发送给子智能体"},
+                    )
+                    yield f"data: {json.dumps(ack.model_dump(), ensure_ascii=False)}\n\n"
+
+                    terminal_types = {"subagent_completed", "subagent_error"}
+                    while True:
+                        if await request.is_disconnected():
+                            break
+                        try:
+                            event = await _asyncio.wait_for(sub_queue.get(), timeout=0.2)
+                        except _asyncio.TimeoutError:
+                            ctx = team_manager._agents.get(target_agent_id)
+                            if ctx and ctx.status.value not in ("running", "pending"):
+                                break
+                            continue
+                        event_data = dict(event.data)
+                        event_data.setdefault("agent_id", event.agent_id)
+                        sse = SseEvent(type=event.type, data=event_data)
+                        yield f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"
+                        if event.type in terminal_types:
+                            break
+                except Exception as exc:
+                    err = SseEvent(type="error", data={"agent_id": target_agent_id, "text": f"子智能体通信异常: {exc}"})
+                    yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                finally:
+                    team_manager.event_emitter = prev_emitter
+
+                yield 'data: {"type":"done","data":{}}\n\n'
+            return StreamingResponse(_subagent_message_stream(), media_type="text/event-stream")
 
         try:
             llm = _resolve_llm()

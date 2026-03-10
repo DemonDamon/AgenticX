@@ -71,10 +71,66 @@ def test_spawn_session_mode_keeps_session_and_announces() -> None:
         assert created.get("ok") is True
         agent_id = str(created.get("agent_id"))
         await _wait_until_done(manager, agent_id)
-        assert agent_id in manager._agent_sessions  # session mode keeps context
+        assert agent_id in manager._agent_sessions
         sent = await manager.send_message_to_subagent(agent_id, "继续")
         assert sent.get("ok") is True
         await manager.shutdown()
         assert summaries
+
+    asyncio.run(_run())
+
+
+def test_run_mode_subagent_can_be_resumed_after_completion() -> None:
+    """Run-mode subagents should accept follow-up messages after completion."""
+    session = StudioSession()
+    manager = AgentTeamManager(
+        llm_factory=lambda: _LLM(),
+        base_session=session,
+        spawn_config=SpawnConfig(mode="run", max_concurrent=4),
+    )
+
+    async def _run():
+        created = await manager.spawn_subagent(name="t", role="worker", task="initial")
+        assert created.get("ok") is True
+        agent_id = str(created.get("agent_id"))
+        await _wait_until_done(manager, agent_id)
+
+        ctx = manager._agents[agent_id]
+        assert ctx.status.value in ("completed", "failed")
+        assert agent_id not in manager._agent_sessions
+
+        sent = await manager.send_message_to_subagent(agent_id, "follow up")
+        assert sent.get("ok") is True, f"Expected ok, got: {sent}"
+        assert ctx.status.value == "running"
+        assert agent_id in manager._agent_sessions
+
+        await _wait_until_done(manager, agent_id)
+        await manager.shutdown()
+
+    asyncio.run(_run())
+
+
+def test_rebuild_agent_session_restores_context() -> None:
+    """_rebuild_agent_session should carry over messages and artifacts from context."""
+    session = StudioSession()
+    manager = AgentTeamManager(
+        llm_factory=lambda: _LLM(),
+        base_session=session,
+        spawn_config=SpawnConfig(mode="run", max_concurrent=4),
+    )
+
+    async def _run():
+        created = await manager.spawn_subagent(name="r", role="worker", task="work")
+        assert created.get("ok") is True
+        agent_id = str(created.get("agent_id"))
+        await _wait_until_done(manager, agent_id)
+
+        ctx = manager._agents[agent_id]
+        assert agent_id not in manager._agent_sessions
+
+        rebuilt = manager._rebuild_agent_session(ctx)
+        assert agent_id in manager._agent_sessions
+        assert rebuilt.agent_messages == ctx.agent_messages
+        await manager.shutdown()
 
     asyncio.run(_run())
