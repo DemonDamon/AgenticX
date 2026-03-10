@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAppStore, type Message } from "../store";
@@ -6,6 +6,11 @@ import { SubAgentPanel } from "./SubAgentPanel";
 import { interruptOnInterimResult, interruptTtsOnUserSpeech } from "../voice/interrupt";
 import { speak } from "../voice/tts";
 import { startRecording, stopRecording } from "../voice/stt";
+import { CommandPalette } from "./CommandPalette";
+import { QuickActions } from "./QuickActions";
+import { ShortcutHints } from "./ShortcutHints";
+import { createPhase1Registry } from "../core/command-registry";
+import { KeybindingsPanel } from "./KeybindingsPanel";
 
 type Props = {
   onOpenConfirm: (
@@ -15,6 +20,7 @@ type Props = {
     agentId?: string,
     context?: Record<string, unknown>
   ) => Promise<boolean>;
+  mode?: "pro" | "lite";
 };
 
 const statusLabel: Record<string, string> = {
@@ -80,7 +86,7 @@ function MessageActions({
   );
 }
 
-export function ChatView({ onOpenConfirm }: Props) {
+export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const apiBase = useAppStore((s) => s.apiBase);
   const sessionId = useAppStore((s) => s.sessionId);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -93,6 +99,17 @@ export function ChatView({ onOpenConfirm }: Props) {
   const activeProvider = useAppStore((s) => s.activeProvider);
   const activeModel = useAppStore((s) => s.activeModel);
   const setActiveModel = useAppStore((s) => s.setActiveModel);
+  const userMode = useAppStore((s) => s.userMode);
+  const setUserMode = useAppStore((s) => s.setUserMode);
+  const planMode = useAppStore((s) => s.planMode);
+  const setPlanMode = useAppStore((s) => s.setPlanMode);
+  const commandPaletteOpen = useAppStore((s) => s.commandPaletteOpen);
+  const setCommandPaletteOpen = useAppStore((s) => s.setCommandPaletteOpen);
+  const keybindingsPanelOpen = useAppStore((s) => s.keybindingsPanelOpen);
+  const setKeybindingsPanelOpen = useAppStore((s) => s.setKeybindingsPanelOpen);
+  const confirmStrategy = useAppStore((s) => s.confirmStrategy);
+  const setConfirmStrategy = useAppStore((s) => s.setConfirmStrategy);
+  const clearMessages = useAppStore((s) => s.clearMessages);
   const subAgents = useAppStore((s) => s.subAgents);
   const selectedSubAgent = useAppStore((s) => s.selectedSubAgent);
   const addSubAgent = useAppStore((s) => s.addSubAgent);
@@ -107,6 +124,11 @@ export function ChatView({ onOpenConfirm }: Props) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [headerModelPickerOpen, setHeaderModelPickerOpen] = useState(false);
   const [reanswerTarget, setReanswerTarget] = useState<string | null>(null);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
+  const [keybindingsOpen, setKeybindingsOpen] = useState(false);
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const listRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const streamTextRef = useRef("");
@@ -117,6 +139,58 @@ export function ChatView({ onOpenConfirm }: Props) {
   const polledEventSeenRef = useRef<Record<string, Set<string>>>({});
   const subAgentsRef = useRef(subAgents);
   const subAgentStatusRef = useRef<Record<string, string>>({});
+  const isLite = mode === "lite";
+
+  const deferredCommandQuery = useDeferredValue(commandQuery);
+  const registry = useMemo(
+    () =>
+      createPhase1Registry({
+        openSettings,
+        openModelPicker: () => setHeaderModelPickerOpen(true),
+        openKeybindings: () => setKeybindingsOpen(true),
+        clearMessages,
+        togglePlanMode: () => {
+          const next = !planMode;
+          setPlanMode(next);
+          return next;
+        },
+        toggleUserMode: async () => {
+          const nextMode = userMode === "pro" ? "lite" : "pro";
+          setUserMode(nextMode);
+          const nextStrategy = nextMode === "lite" ? "manual" : "semi-auto";
+          setConfirmStrategy(nextStrategy);
+          if (nextMode === "lite") setPlanMode(false);
+          setCommandPaletteOpen(false);
+          setKeybindingsPanelOpen(false);
+          await window.agenticxDesktop.saveUserMode(nextMode);
+          await window.agenticxDesktop.saveConfirmStrategy(nextStrategy);
+        },
+        cycleConfirmStrategy: async () => {
+          const order: Array<"manual" | "semi-auto" | "auto"> = ["manual", "semi-auto", "auto"];
+          const idx = order.indexOf(confirmStrategy);
+          const next = order[(idx + 1) % order.length];
+          setConfirmStrategy(next);
+          await window.agenticxDesktop.saveConfirmStrategy(next);
+          return next;
+        },
+        addAssistantMessage: (content) => addMessage("assistant", content, "meta"),
+      }),
+    [
+      openSettings,
+      clearMessages,
+      userMode,
+      setUserMode,
+      addMessage,
+      planMode,
+      setPlanMode,
+      confirmStrategy,
+      setConfirmStrategy,
+    ]
+  );
+  const commandResults = useMemo(
+    () => registry.search(deferredCommandQuery, userMode),
+    [registry, deferredCommandQuery, userMode]
+  );
 
   const canSend = useMemo(() => !!(apiBase && sessionId), [apiBase, sessionId]);
   const visibleMessages = useMemo(
@@ -156,6 +230,49 @@ export function ChatView({ onOpenConfirm }: Props) {
     for (const item of subAgents) next[item.id] = item.status;
     subAgentStatusRef.current = next;
   }, [subAgents]);
+
+  useEffect(() => {
+    if (!commandPaletteOpen || isLite) return;
+    setCommandOpen(true);
+    setCommandQuery("");
+    setCommandPaletteOpen(false);
+  }, [commandPaletteOpen, setCommandPaletteOpen, isLite]);
+
+  useEffect(() => {
+    if (!keybindingsPanelOpen || isLite) return;
+    setKeybindingsOpen(true);
+    setKeybindingsPanelOpen(false);
+  }, [keybindingsPanelOpen, setKeybindingsPanelOpen, isLite]);
+
+  useEffect(() => {
+    if (isLite) return;
+    try {
+      const raw = localStorage.getItem("agx.desktop.inputHistory");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as string[];
+      if (Array.isArray(parsed)) setHistory(parsed.slice(0, 100));
+    } catch {
+      // ignore parse errors
+    }
+  }, [isLite]);
+
+  const pushHistory = (value: string) => {
+    if (!value.trim() || value.trim().startsWith("/")) {
+      setHistoryIndex(-1);
+      return;
+    }
+    setHistory((prev) => {
+      const dedup = prev.filter((item) => item !== value);
+      const next = [value, ...dedup].slice(0, 100);
+      try {
+        localStorage.setItem("agx.desktop.inputHistory", JSON.stringify(next));
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+    setHistoryIndex(-1);
+  };
 
   useEffect(() => {
     if (!apiBase || !sessionId) return;
@@ -323,6 +440,10 @@ export function ChatView({ onOpenConfirm }: Props) {
     const reqProvider = opts?.provider ?? activeProvider;
     const reqModel = opts?.model ?? activeModel;
     const targetAgentId = (opts?.agentId ?? "meta").trim() || "meta";
+    const effectiveUserText =
+      userMode === "pro" && planMode && targetAgentId === "meta"
+        ? `你现在处于计划模式。请只输出可执行计划与风险，不要调用工具，不要执行操作。\n\n用户需求：${userText}`
+        : userText;
     const requestId = activeRequestIdRef.current + 1;
     activeRequestIdRef.current = requestId;
     const isCurrentRequest = () => activeRequestIdRef.current === requestId;
@@ -348,7 +469,7 @@ export function ChatView({ onOpenConfirm }: Props) {
     abortRef.current = abortController;
 
     try {
-      const body: Record<string, unknown> = { session_id: sessionId, user_input: userText };
+      const body: Record<string, unknown> = { session_id: sessionId, user_input: effectiveUserText };
       if (reqProvider) body.provider = reqProvider;
       if (reqModel) body.model = reqModel;
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
@@ -502,9 +623,22 @@ export function ChatView({ onOpenConfirm }: Props) {
   };
 
   const send = async (manualInput?: string) => {
-    await sendChat((manualInput ?? input).trim(), {
-      agentId: selectedSubAgent ?? undefined,
+    const toSend = (manualInput ?? input).trim();
+    if (!isLite && (commandOpen || toSend.startsWith("/"))) {
+      return;
+    }
+    pushHistory(toSend);
+    await sendChat(toSend, {
+      agentId: isLite ? undefined : (selectedSubAgent ?? undefined),
     });
+  };
+
+  const executeCommand = async (id: string) => {
+    await registry.dispatch(id);
+    setInput("");
+    setCommandQuery("");
+    setCommandOpen(false);
+    setCommandPaletteOpen(false);
   };
 
   const stopStreaming = () => {
@@ -555,7 +689,78 @@ export function ChatView({ onOpenConfirm }: Props) {
 
   const onKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
     if (event.nativeEvent.isComposing) return;
-    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); }
+    if (!isLite && event.altKey && event.key === "ArrowUp") {
+      event.preventDefault();
+      if (history.length === 0) return;
+      const nextIdx = Math.min(historyIndex + 1, history.length - 1);
+      setHistoryIndex(nextIdx);
+      setInput(history[nextIdx] ?? "");
+      return;
+    }
+    if (!isLite && event.altKey && event.key === "ArrowDown") {
+      event.preventDefault();
+      if (history.length === 0) return;
+      const nextIdx = historyIndex - 1;
+      if (nextIdx < 0) {
+        setHistoryIndex(-1);
+        setInput("");
+        return;
+      }
+      setHistoryIndex(nextIdx);
+      setInput(history[nextIdx] ?? "");
+      return;
+    }
+    if (!isLite && (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "p") {
+      event.preventDefault();
+      setPlanMode(!planMode);
+      return;
+    }
+    if (!isLite && (event.ctrlKey || event.metaKey) && event.key === "/") {
+      event.preventDefault();
+      setKeybindingsOpen(true);
+      setKeybindingsPanelOpen(false);
+      return;
+    }
+    if (!isLite && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      setCommandOpen(true);
+      setCommandQuery("");
+      setCommandPaletteOpen(false);
+      return;
+    }
+    if (event.key === "Escape") {
+      if (commandOpen) {
+        event.preventDefault();
+        setCommandOpen(false);
+        setCommandQuery("");
+      } else if (streaming) {
+        event.preventDefault();
+        stopStreaming();
+      }
+      return;
+    }
+    if (commandOpen && event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (commandResults[0]) {
+        void executeCommand(commandResults[0].id);
+      }
+      return;
+    }
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (!isLite && input.trim().startsWith("/")) {
+        const query = input.trim().slice(1);
+        const list = registry.search(query, userMode);
+        if (list[0]) {
+          void executeCommand(list[0].id);
+        } else {
+          setCommandOpen(true);
+          setCommandQuery(query);
+        }
+        return;
+      }
+      void send();
+    }
   };
 
   const onMicClick = () => {
@@ -575,35 +780,45 @@ export function ChatView({ onOpenConfirm }: Props) {
         <div className="flex w-20 items-center" />
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-slate-300">AgenticX</span>
-          <span className="text-slate-600">·</span>
-          <div className="relative">
-            <button
-              ref={modelBtnRef}
-              className="no-drag flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-slate-400 transition hover:bg-slate-700 hover:text-cyan-400"
-              onClick={() => setHeaderModelPickerOpen((v) => !v)}
-              title="切换模型"
-            >
-              <span className="max-w-[200px] truncate">{modelLabel}</span>
-              <span className="text-[10px]">▾</span>
-            </button>
-            {headerModelPickerOpen && (
-              <div className="absolute left-0 top-full z-40 mt-1">
-                <ModelPickerDropdown
-                  onSelect={(p, m) => { setActiveModel(p, m); setHeaderModelPickerOpen(false); }}
-                  onClose={() => setHeaderModelPickerOpen(false)}
-                />
-              </div>
-            )}
-          </div>
+          {!isLite && <span className="text-slate-600">·</span>}
+          {!isLite && (
+            <div className="relative">
+              <button
+                ref={modelBtnRef}
+                className="no-drag flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-slate-400 transition hover:bg-slate-700 hover:text-cyan-400"
+                onClick={() => setHeaderModelPickerOpen((v) => !v)}
+                title="切换模型"
+              >
+                <span className="max-w-[200px] truncate">{modelLabel}</span>
+                <span className="text-[10px]">▾</span>
+              </button>
+              {headerModelPickerOpen && (
+                <div className="absolute left-0 top-full z-40 mt-1">
+                  <ModelPickerDropdown
+                    onSelect={(p, m) => { setActiveModel(p, m); setHeaderModelPickerOpen(false); }}
+                    onClose={() => setHeaderModelPickerOpen(false)}
+                  />
+                </div>
+              )}
+            </div>
+          )}
           {status !== "idle" && (
             <span className="flex items-center gap-1.5 text-xs text-slate-400">
               <span className={`inline-block h-2 w-2 rounded-full ${statusDot[status]}`} />
               {statusLabel[status]}
             </span>
           )}
+          {!isLite && planMode && (
+            <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[11px] text-amber-300">计划模式</span>
+          )}
+          {!isLite && (
+            <span className="rounded bg-slate-700/70 px-2 py-0.5 text-[11px] text-slate-300">
+              审批: {confirmStrategy}
+            </span>
+          )}
         </div>
         <div className="flex w-20 items-center justify-end">
-          {subAgents.length > 0 ? (
+          {!isLite && subAgents.length > 0 ? (
             <button className="no-drag mr-2 rounded-md px-2 py-1 text-xs text-slate-400 transition hover:bg-slate-700 hover:text-white" onClick={() => setPanelOpen((v) => !v)} title="子智能体面板">团队</button>
           ) : null}
           <button className="no-drag rounded-md px-2 py-1 text-xs text-slate-400 transition hover:bg-slate-700 hover:text-white" onClick={() => openSettings()} title="设置">⚙</button>
@@ -616,23 +831,23 @@ export function ChatView({ onOpenConfirm }: Props) {
           <div className="flex h-full items-center justify-center">
             <div className="text-center text-slate-500">
               <div className="mb-2 text-3xl">🤖</div>
-              <div className="text-sm">输入你的需求开始对话</div>
+              <div className="text-sm">{isLite ? "问我任何问题，或使用下方推荐操作" : "输入你的需求开始对话"}</div>
             </div>
           </div>
         )}
-        <div className="mx-auto max-w-2xl space-y-3">
+        <div className={`mx-auto max-w-2xl space-y-3 ${isLite ? "text-[15px]" : ""}`}>
           {visibleMessages.map((m) => (
             <div
               key={m.id}
               className={
                 m.role === "user"
-                  ? "ml-8 rounded-xl rounded-tr-sm bg-cyan-500/20 px-3 py-2 text-sm"
+                  ? `ml-8 rounded-xl rounded-tr-sm bg-cyan-500/20 px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`
                   : m.role === "assistant"
-                    ? "mr-8 rounded-xl rounded-tl-sm bg-slate-700/50 px-3 py-2 text-sm"
+                    ? `mr-8 rounded-xl rounded-tl-sm bg-slate-700/50 px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`
                     : "mx-4 rounded-lg border border-border/50 bg-slate-800/40 px-3 py-1.5 text-xs text-slate-400"
               }
             >
-              {m.role === "assistant" && <ModelBadge provider={m.provider} model={m.model} />}
+              {!isLite && m.role === "assistant" && <ModelBadge provider={m.provider} model={m.model} />}
               <div className="msg-content break-words">
                 {m.role === "tool" ? (
                   <span>{m.content}</span>
@@ -642,17 +857,19 @@ export function ChatView({ onOpenConfirm }: Props) {
                   </ReactMarkdown>
                 )}
               </div>
-              <MessageActions
-                msg={m}
-                onCopy={() => onCopyMessage(m)}
-                onRetry={() => onRetryMessage(m)}
-                onReanswer={() => onReanswerMessage(m.id)}
-              />
+              {!isLite && (
+                <MessageActions
+                  msg={m}
+                  onCopy={() => onCopyMessage(m)}
+                  onRetry={() => onRetryMessage(m)}
+                  onReanswer={() => onReanswerMessage(m.id)}
+                />
+              )}
             </div>
           ))}
           {streaming && (
-            <div className="mr-8 rounded-xl rounded-tl-sm bg-slate-700/50 px-3 py-2 text-sm">
-              {streamingModel && <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />}
+            <div className={`mr-8 rounded-xl rounded-tl-sm bg-slate-700/50 px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`}>
+              {!isLite && streamingModel && <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />}
               <div className="msg-content break-words">
                 {streamedAssistantText ? (
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
@@ -672,9 +889,23 @@ export function ChatView({ onOpenConfirm }: Props) {
       </div>
 
       {/* Input area */}
-      <div className="shrink-0 border-t border-border bg-panel/80 px-4 py-3">
+      <div className="relative shrink-0 border-t border-border bg-panel/80 px-4 py-3">
+        {!isLite && (
+          <CommandPalette
+            open={commandOpen}
+            query={commandQuery}
+            commands={commandResults}
+            onQueryChange={setCommandQuery}
+            onClose={() => {
+              setCommandOpen(false);
+              setCommandQuery("");
+              setCommandPaletteOpen(false);
+            }}
+            onExecute={(id) => void executeCommand(id)}
+          />
+        )}
         <div className="mx-auto flex max-w-2xl items-end gap-2">
-          {selectedSubAgent ? (
+          {!isLite && selectedSubAgent ? (
             <div className="mb-2 w-full">
               <div className="inline-flex items-center gap-2 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-xs text-cyan-200">
                 <span>当前对话目标: {selectedSubAgentName}</span>
@@ -688,13 +919,25 @@ export function ChatView({ onOpenConfirm }: Props) {
             </div>
           ) : null}
         </div>
+        {isLite && <QuickActions onSend={(text) => { void send(text); }} />}
         <div className="mx-auto flex max-w-2xl items-end gap-2">
           <textarea
             value={input}
-            onChange={(e) => { interruptTtsOnUserSpeech(true); setInput(e.target.value); }}
+            onChange={(e) => {
+              interruptTtsOnUserSpeech(true);
+              const value = e.target.value;
+              setInput(value);
+              if (!isLite && value.startsWith("/")) {
+                setCommandOpen(true);
+                setCommandQuery(value.slice(1));
+              } else {
+                setCommandOpen(false);
+                setCommandQuery("");
+              }
+            }}
             onKeyDown={onKeyDown}
             rows={input.split("\n").length > 3 ? 4 : input.includes("\n") ? 2 : 1}
-            placeholder={canSend ? (selectedSubAgent ? `对 ${selectedSubAgentName} 发送补充指令，Enter 发送` : "输入需求，Enter 发送（生成中可直接追问）") : "连接中..."}
+            placeholder={canSend ? (isLite ? "问我任何问题..." : (planMode ? "计划模式：描述目标，我只返回可执行计划" : (selectedSubAgent ? `对 ${selectedSubAgentName} 发送补充指令，Enter 发送` : "输入需求，Enter 发送（生成中可直接追问）"))) : "连接中..."}
             disabled={!canSend && !streaming}
             className="min-h-[40px] max-h-[120px] flex-1 resize-none rounded-xl border border-border bg-slate-900/80 px-3 py-2.5 text-sm outline-none transition placeholder:text-slate-500 focus:border-cyan-500/50"
           />
@@ -708,18 +951,21 @@ export function ChatView({ onOpenConfirm }: Props) {
             <button className="flex h-10 shrink-0 items-center rounded-xl bg-cyan-500 px-4 text-sm font-medium text-black transition hover:bg-cyan-400 disabled:opacity-40 disabled:hover:bg-cyan-500" disabled={!canSend || !input.trim()} onClick={() => void send()}>发送</button>
           )}
         </div>
+        {!isLite && <ShortcutHints />}
       </div>
       </div>
-      <SubAgentPanel
-        open={panelOpen}
-        subAgents={subAgents}
-        selectedSubAgent={selectedSubAgent}
-        onToggle={() => setPanelOpen((v) => !v)}
-        onCancel={onCancelSubAgent}
-        onRetry={onRetrySubAgent}
-        onChat={(id) => setSelectedSubAgent(id)}
-        onSelect={(id) => setSelectedSubAgent(id)}
-      />
+      {!isLite && (
+        <SubAgentPanel
+          open={panelOpen}
+          subAgents={subAgents}
+          selectedSubAgent={selectedSubAgent}
+          onToggle={() => setPanelOpen((v) => !v)}
+          onCancel={onCancelSubAgent}
+          onRetry={onRetrySubAgent}
+          onChat={(id) => setSelectedSubAgent(id)}
+          onSelect={(id) => setSelectedSubAgent(id)}
+        />
+      )}
       {/* Reanswer model picker */}
       {modelPickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -733,6 +979,7 @@ export function ChatView({ onOpenConfirm }: Props) {
           </div>
         </div>
       )}
+      <KeybindingsPanel open={keybindingsOpen} mode={userMode} onClose={() => setKeybindingsOpen(false)} />
     </div>
   );
 }
