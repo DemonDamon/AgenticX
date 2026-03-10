@@ -66,3 +66,5 @@ task_plan.md
 **/test-results/
 **/.playwright-state/
 **/out/
+
+AGENTS.md
