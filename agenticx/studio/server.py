@@ -20,6 +20,7 @@ from agenticx.runtime.meta_tools import META_AGENT_TOOLS
 from agenticx.runtime.prompts.meta_agent import build_meta_agent_system_prompt
 from agenticx.studio.protocols import ChatRequest, ConfirmResponse, SessionState, SseEvent
 from agenticx.studio.session_manager import SessionManager
+from agenticx.workspace.loader import ensure_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,10 @@ def create_studio_app() -> FastAPI:
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> SessionState:
         _check_token(x_agx_desktop_token)
+        try:
+            ensure_workspace()
+        except Exception as exc:
+            logger.warning("Workspace bootstrap skipped: %s", exc)
         manager.cleanup_expired()
         managed = manager.get(session_id) if session_id else None
         if managed is None:
