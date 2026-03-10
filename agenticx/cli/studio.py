@@ -22,8 +22,11 @@ from rich.syntax import Syntax
 from rich.table import Table
 
 from agenticx.cli.codegen_engine import write_generated_file
+from agenticx.cli.config_manager import ConfigManager
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.cli.studio_mcp import (
+    auto_connect_servers,
+    import_mcp_config,
     load_available_servers,
     mcp_list_servers,
     mcp_connect,
@@ -39,6 +42,7 @@ from agenticx.cli.studio_skill import (
     skill_info,
     get_all_skill_summaries,
 )
+from agenticx.runtime.todo_manager import TodoManager
 from agenticx.workspace.loader import ensure_workspace
 
 
@@ -64,6 +68,8 @@ class StudioSession:
     mcp_hub: Optional[object] = None  # MCPHub instance (lazy init)
     mcp_configs: Dict[str, object] = field(default_factory=dict)  # name -> MCPServerConfig
     connected_servers: set = field(default_factory=set)
+    todo_manager: TodoManager = field(default_factory=TodoManager)
+    scratchpad: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -83,6 +89,8 @@ class StudioSnapshot:
     history: List[HistoryRecord]
     image_b64: List[Dict[str, str]]
     context_files: Dict[str, str] = field(default_factory=dict)
+    scratchpad: Dict[str, str] = field(default_factory=dict)
+    todo_items: List[Dict[str, str]] = field(default_factory=list)
 
 
 def _detect_target(text: str) -> str:
@@ -104,6 +112,33 @@ def _workspace_root() -> Path:
         except Exception:
             pass
     return Path.cwd().resolve()
+
+
+def _resolve_mcp_auto_connect_setting() -> Optional[List[str]]:
+    """Resolve mcp.auto_connect from config.
+
+    Returns:
+      - None: connect all
+      - []: disable auto connect
+      - [names...]: connect listed servers
+    """
+    try:
+        value = ConfigManager.get_value("mcp.auto_connect")
+    except Exception:
+        value = None
+    if value is None:
+        return []
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"", "none", "off", "false", "0"}:
+            return []
+        if lowered == "all":
+            return None
+        return [value.strip()]
+    if isinstance(value, list):
+        names = [str(item).strip() for item in value if str(item).strip()]
+        return names
+    return []
 
 
 def _resolve_workspace_path(path_arg: str) -> Path:
@@ -138,6 +173,7 @@ def _print_header(session: StudioSession) -> None:
     command_table.add_row("/ctx remove <path>", "移除指定上下文文件")
     command_table.add_row("/ctx clear", "清空所有上下文文件")
     command_table.add_row("/mcp list", "查看可用的 MCP 服务器")
+    command_table.add_row("/mcp import <path>", "从外部 mcp.json 导入到 ~/.agenticx/mcp.json")
     command_table.add_row("/mcp connect <name>", "连接 MCP 服务器并发现工具")
     command_table.add_row("/mcp disconnect <name>", "断开 MCP 服务器")
     command_table.add_row("/mcp tools", "查看所有已连接的 MCP 工具")
@@ -220,6 +256,8 @@ def _take_snapshot(session: StudioSession) -> None:
             history=list(session.history),
             image_b64=[dict(image) for image in session.image_b64],
             context_files=dict(session.context_files),
+            scratchpad=dict(session.scratchpad),
+            todo_items=session.todo_manager.to_payload(),
         )
     )
 
@@ -233,6 +271,11 @@ def _restore_last_snapshot(session: StudioSession) -> bool:
     session.history = list(snapshot.history)
     session.image_b64 = [dict(image) for image in snapshot.image_b64]
     session.context_files = dict(snapshot.context_files)
+    session.scratchpad = dict(snapshot.scratchpad)
+    try:
+        session.todo_manager.load_payload(snapshot.todo_items)
+    except Exception:
+        pass
     return True
 
 
@@ -332,6 +375,17 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
         session.mcp_configs = load_available_servers()
     except Exception:
         session.mcp_configs = {}
+    auto_connect_names = _resolve_mcp_auto_connect_setting()
+    if session.mcp_configs and auto_connect_names != []:
+        from agenticx.tools.mcp_hub import MCPHub
+
+        session.mcp_hub = MCPHub(clients=[], auto_mode=False)
+        auto_connect_servers(
+            session.mcp_hub,
+            session.mcp_configs,
+            session.connected_servers,
+            auto_connect_names,
+        )
 
     while True:
         user_input = input("studio> ").strip()
@@ -439,6 +493,17 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
                     from agenticx.tools.mcp_hub import MCPHub
                     session.mcp_hub = MCPHub(clients=[], auto_mode=False)
                 mcp_connect(session.mcp_hub, session.mcp_configs, session.connected_servers, server_name)
+            elif subcmd == "import" and len(parts) > 2:
+                source_path = parts[2].strip()
+                result = import_mcp_config(source_path)
+                if result.get("ok"):
+                    session.mcp_configs = load_available_servers()
+                    console.print(
+                        f"[green]导入完成[/green] imported={result.get('total_imported', 0)}, "
+                        f"total={result.get('total_servers', 0)}"
+                    )
+                else:
+                    console.print(f"[red]导入失败:[/red] {result.get('error', 'unknown error')}")
             elif subcmd == "disconnect" and len(parts) > 2:
                 server_name = parts[2].strip()
                 if session.mcp_hub is not None:
@@ -462,7 +527,7 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
                 else:
                     console.print("[yellow]暂无 MCP 连接。[/yellow]")
             else:
-                console.print("[yellow]用法: /mcp list | /mcp connect <name> | /mcp disconnect <name> | /mcp tools | /mcp call <tool> <json>[/yellow]")
+                console.print("[yellow]用法: /mcp list | /mcp import <path> | /mcp connect <name> | /mcp disconnect <name> | /mcp tools | /mcp call <tool> <json>[/yellow]")
             continue
         if user_input.startswith("/skill"):
             parts = user_input.split(maxsplit=2)

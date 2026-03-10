@@ -325,3 +325,19 @@ def test_codegen_updates_session_artifacts_and_history(monkeypatch, tmp_path: Pa
     assert len(session.artifacts) == 1
     assert list(session.artifacts.values())[0] == "print('ok')\n"
     assert len(session.history) == 1
+
+
+def test_todo_write_updates_session_state() -> None:
+    session = StudioSession()
+    result = agent_tools.dispatch_tool(
+        "todo_write",
+        {
+            "items": [
+                {"content": "A", "status": "completed", "active_form": "done A"},
+                {"content": "B", "status": "in_progress", "active_form": "doing B"},
+            ]
+        },
+        session,
+    )
+    assert "[x] A" in result
+    assert "[>] B <- doing B" in result

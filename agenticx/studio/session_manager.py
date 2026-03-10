@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from agenticx.cli.studio import StudioSession
+from agenticx.memory.session_store import SessionStore
 from agenticx.runtime import AsyncConfirmGate
 from agenticx.runtime.team_manager import AgentTeamManager, SubAgentContext
 
@@ -56,14 +57,23 @@ class SessionManager:
     def __init__(self, *, ttl_seconds: int = 3600) -> None:
         self.ttl_seconds = ttl_seconds
         self._sessions: Dict[str, ManagedSession] = {}
+        self._session_store = SessionStore()
 
-    def create(self, provider: Optional[str] = None, model: Optional[str] = None) -> ManagedSession:
-        session_id = str(uuid.uuid4())
+    def create(
+        self,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        *,
+        session_id: Optional[str] = None,
+    ) -> ManagedSession:
+        sid = (session_id or "").strip() or str(uuid.uuid4())
+        studio_session = StudioSession(provider_name=provider, model_name=model)
+        self._restore_persisted_state(sid, studio_session)
         managed = ManagedSession(
-            session_id=session_id,
-            studio_session=StudioSession(provider_name=provider, model_name=model),
+            session_id=sid,
+            studio_session=studio_session,
         )
-        self._sessions[session_id] = managed
+        self._sessions[sid] = managed
         return managed
 
     def get(self, session_id: str) -> Optional[ManagedSession]:
@@ -77,6 +87,7 @@ class SessionManager:
         managed = self._sessions.pop(session_id, None)
         if managed is None:
             return False
+        self._persist_session_state(session_id, managed.studio_session)
         if managed.team_manager is not None:
             managed.team_manager.shutdown_now()
         return True
@@ -90,5 +101,54 @@ class SessionManager:
         ]
         for sid in expired:
             managed = self._sessions.pop(sid, None)
-            if managed is not None and managed.team_manager is not None:
+            if managed is None:
+                continue
+            self._persist_session_state(sid, managed.studio_session)
+            if managed.team_manager is not None:
                 managed.team_manager.shutdown_now()
+
+    def _restore_persisted_state(self, session_id: str, session: StudioSession) -> None:
+        try:
+            todos = self._session_store._load_todos_sync(session_id)
+            if todos:
+                session.todo_manager.load_payload(todos)
+            scratchpad = self._session_store._load_scratchpad_sync(session_id)
+            if scratchpad:
+                session.scratchpad = dict(scratchpad)
+        except Exception:
+            return
+
+    def _persist_session_state(self, session_id: str, session: StudioSession) -> None:
+        try:
+            todos = session.todo_manager.to_payload()
+            scratchpad = dict(getattr(session, "scratchpad", {}) or {})
+            self._session_store._save_todos_sync(session_id, todos)
+            self._session_store._save_scratchpad_sync(session_id, scratchpad)
+            summary = self._build_session_summary(session)
+            metadata = {
+                "provider": session.provider_name or "",
+                "model": session.model_name or "",
+                "chat_messages": len(session.chat_history),
+                "artifacts": len(session.artifacts),
+            }
+            self._session_store._save_session_summary_sync(session_id, summary, metadata)
+        except Exception:
+            return
+
+    def _build_session_summary(self, session: StudioSession) -> str:
+        last_user = ""
+        last_assistant = ""
+        for item in reversed(session.chat_history[-20:]):
+            role = str(item.get("role", ""))
+            content = str(item.get("content", ""))
+            if role == "assistant" and not last_assistant:
+                last_assistant = content
+            if role == "user" and not last_user:
+                last_user = content
+            if last_user and last_assistant:
+                break
+        return (
+            f"last_user={last_user[:300]}\n"
+            f"last_assistant={last_assistant[:300]}\n"
+            f"todos={session.todo_manager.render()[:600]}"
+        )

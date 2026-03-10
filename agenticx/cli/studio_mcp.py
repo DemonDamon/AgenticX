@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
 
 from rich.console import Console
@@ -20,28 +21,126 @@ if TYPE_CHECKING:
 console = Console()
 
 
-def load_available_servers() -> Dict[str, "MCPServerConfig"]:
-    """Load MCP server configs from default paths.
-
-    Searches: project .cursor/mcp.json → ~/.cursor/mcp.json
-    Returns empty dict if no config found.
-    """
-    from pathlib import Path
-
-    configs: Dict[str, "MCPServerConfig"] = {}
-    search_paths = [
+def _default_mcp_search_paths() -> List[Path]:
+    """Return default MCP config search paths by priority."""
+    return [
+        Path.home() / ".agenticx" / "mcp.json",
         Path(".cursor/mcp.json"),
         Path.home() / ".cursor" / "mcp.json",
     ]
-    for path in search_paths:
+
+
+def _serialize_server_config(cfg: "MCPServerConfig") -> Dict[str, Any]:
+    """Serialize MCPServerConfig to JSON-compatible dict."""
+    data: Dict[str, Any] = {
+        "command": cfg.command,
+    }
+    if getattr(cfg, "args", None):
+        data["args"] = list(cfg.args)
+    if getattr(cfg, "env", None):
+        data["env"] = dict(cfg.env)
+    if getattr(cfg, "timeout", None) is not None:
+        data["timeout"] = float(cfg.timeout)
+    if getattr(cfg, "cwd", None):
+        data["cwd"] = cfg.cwd
+    if getattr(cfg, "enabled_tools", None):
+        data["enabled_tools"] = list(cfg.enabled_tools)
+    if getattr(cfg, "assign_to_agents", None):
+        data["assign_to_agents"] = list(cfg.assign_to_agents)
+    return data
+
+
+def load_available_servers() -> Dict[str, "MCPServerConfig"]:
+    """Load MCP server configs from default paths.
+
+    Searches with priority:
+    1) ~/.agenticx/mcp.json
+    2) project .cursor/mcp.json
+    3) ~/.cursor/mcp.json
+
+    Merges all discovered files. Existing names keep higher-priority entry.
+    Returns empty dict if no config found.
+    """
+    from agenticx.tools.remote import load_mcp_config
+
+    configs: Dict[str, "MCPServerConfig"] = {}
+    for path in _default_mcp_search_paths():
         if path.exists():
             try:
-                from agenticx.tools.remote import load_mcp_config
-                configs = load_mcp_config(str(path))
-                break
+                loaded = load_mcp_config(str(path))
+                for name, cfg in loaded.items():
+                    if name not in configs:
+                        configs[name] = cfg
             except Exception:
                 continue
     return configs
+
+
+def import_mcp_config(source_path: str, target_path: Optional[str] = None) -> Dict[str, Any]:
+    """Import MCP servers from source config into AgenticX workspace config."""
+    from agenticx.tools.remote import load_mcp_config
+
+    source = Path(source_path).expanduser().resolve(strict=False)
+    target = (
+        Path(target_path).expanduser().resolve(strict=False)
+        if target_path
+        else (Path.home() / ".agenticx" / "mcp.json")
+    )
+    if not source.exists() or not source.is_file():
+        return {
+            "ok": False,
+            "error": f"source config not found: {source}",
+            "source_path": str(source),
+            "target_path": str(target),
+        }
+
+    try:
+        source_servers = load_mcp_config(str(source))
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"failed to parse source config: {exc}",
+            "source_path": str(source),
+            "target_path": str(target),
+        }
+
+    existing_servers: Dict[str, "MCPServerConfig"] = {}
+    if target.exists():
+        try:
+            existing_servers = load_mcp_config(str(target))
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": f"failed to parse target config: {exc}",
+                "source_path": str(source),
+                "target_path": str(target),
+            }
+
+    imported: List[str] = []
+    skipped: List[str] = []
+    merged: Dict[str, "MCPServerConfig"] = dict(existing_servers)
+    for name, cfg in source_servers.items():
+        if name in merged:
+            skipped.append(name)
+            continue
+        merged[name] = cfg
+        imported.append(name)
+
+    payload = {"mcpServers": {name: _serialize_server_config(cfg) for name, cfg in merged.items()}}
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "ok": True,
+        "source_path": str(source),
+        "target_path": str(target),
+        "imported": sorted(imported),
+        "skipped": sorted(skipped),
+        "total_imported": len(imported),
+        "total_servers": len(merged),
+    }
 
 
 def mcp_list_servers(
@@ -109,6 +208,25 @@ def mcp_connect(
         if route and route.client is client:
             console.print(f"  [cyan]{tool_info.name}[/cyan] — {tool_info.description[:60]}")
     return True
+
+
+def auto_connect_servers(
+    hub: "MCPHub",
+    configs: Dict[str, "MCPServerConfig"],
+    connected: Set[str],
+    auto_connect_list: Optional[List[str]] = None,
+) -> Dict[str, bool]:
+    """Auto-connect MCP servers and return per-server result."""
+    if not configs:
+        return {}
+    if auto_connect_list is None:
+        candidates = sorted(configs.keys())
+    else:
+        candidates = [name for name in auto_connect_list if name in configs]
+    results: Dict[str, bool] = {}
+    for name in candidates:
+        results[name] = mcp_connect(hub, configs, connected, name)
+    return results
 
 
 def mcp_disconnect(
