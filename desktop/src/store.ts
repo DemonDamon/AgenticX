@@ -4,6 +4,11 @@ export type UiStatus = "idle" | "listening" | "processing";
 export type MsgRole = "user" | "assistant" | "tool";
 export type SubAgentStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 export type ConfirmStrategy = "manual" | "semi-auto" | "auto";
+export type McpServer = {
+  name: string;
+  connected: boolean;
+  command?: string;
+};
 
 export type Message = {
   id: string;
@@ -77,6 +82,7 @@ type AppState = {
   keybindingsPanelOpen: boolean;
   planMode: boolean;
   confirmStrategy: ConfirmStrategy;
+  mcpServers: McpServer[];
   setApiBase: (base: string) => void;
   setApiToken: (token: string) => void;
   setSessionId: (id: string) => void;
@@ -88,6 +94,7 @@ type AppState = {
   setKeybindingsPanelOpen: (v: boolean) => void;
   setPlanMode: (v: boolean) => void;
   setConfirmStrategy: (v: ConfirmStrategy) => void;
+  setMcpServers: (servers: McpServer[]) => void;
   addMessage: (role: MsgRole, content: string, agentId?: string, provider?: string, model?: string) => void;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
   clearMessages: () => void;
@@ -128,6 +135,7 @@ export const useAppStore = create<AppState>((set) => ({
   keybindingsPanelOpen: false,
   planMode: false,
   confirmStrategy: "semi-auto",
+  mcpServers: [],
   subAgents: [],
   selectedSubAgent: null,
   codePreview: "",
@@ -144,6 +152,7 @@ export const useAppStore = create<AppState>((set) => ({
   setKeybindingsPanelOpen: (keybindingsPanelOpen) => set({ keybindingsPanelOpen }),
   setPlanMode: (planMode) => set({ planMode }),
   setConfirmStrategy: (confirmStrategy) => set({ confirmStrategy }),
+  setMcpServers: (mcpServers) => set({ mcpServers }),
   addMessage: (role, content, agentId, provider, model) =>
     set((state) => ({
       messages: [...state.messages, { id: uid(), role, content, agentId, provider, model }]

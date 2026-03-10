@@ -336,6 +336,72 @@ function registerIpc(): void {
     };
   });
 
+  ipcMain.handle("load-mcp-status", async (_event, sessionId: string) => {
+    const sid = String(sessionId || "").trim();
+    if (!sid) return { ok: false, error: "missing sessionId", servers: [] };
+    try {
+      const resp = await fetch(
+        `http://127.0.0.1:${String(apiPort)}/api/mcp/servers?session_id=${encodeURIComponent(sid)}`,
+        {
+          headers: { "x-agx-desktop-token": apiToken },
+        }
+      );
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}`, servers: [] };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err), servers: [] };
+    }
+  });
+
+  ipcMain.handle("import-mcp-config", async (_event, payload: { sessionId: string; sourcePath: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    const sourcePath = String(payload?.sourcePath || "").trim();
+    if (!sid || !sourcePath) return { ok: false, error: "sessionId and sourcePath are required" };
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/mcp/import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-agx-desktop-token": apiToken,
+        },
+        body: JSON.stringify({ session_id: sid, source_path: sourcePath }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("connect-mcp", async (_event, payload: { sessionId: string; name: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    const name = String(payload?.name || "").trim();
+    if (!sid || !name) return { ok: false, error: "sessionId and name are required" };
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/mcp/connect`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-agx-desktop-token": apiToken,
+        },
+        body: JSON.stringify({ session_id: sid, name }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("save-user-mode", async (_event, mode: "pro" | "lite") => {
     const cfg = loadAgxConfig();
     cfg.user_mode = mode;

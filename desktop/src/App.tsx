@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { ChatView } from "./components/ChatView";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -47,6 +47,8 @@ export function App() {
   const clearMessages = useAppStore((s) => s.clearMessages);
   const confirmStrategy = useAppStore((s) => s.confirmStrategy);
   const setConfirmStrategy = useAppStore((s) => s.setConfirmStrategy);
+  const mcpServers = useAppStore((s) => s.mcpServers);
+  const setMcpServers = useAppStore((s) => s.setMcpServers);
   const planMode = useAppStore((s) => s.planMode);
   const setPlanMode = useAppStore((s) => s.setPlanMode);
   const setStatus = useAppStore((s) => s.setStatus);
@@ -59,6 +61,20 @@ export function App() {
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
   const confirmScopeRef = useRef<string | null>(null);
   const autoApproveScopesRef = useRef<Set<string>>(new Set());
+
+  const refreshMcpStatus = useCallback(async (sid: string = sessionId) => {
+    if (!sid) return;
+    const status = await window.agenticxDesktop.loadMcpStatus(sid);
+    if (status.ok && Array.isArray(status.servers)) {
+      setMcpServers(
+        status.servers.map((item) => ({
+          name: item.name,
+          connected: Boolean(item.connected),
+          command: item.command,
+        }))
+      );
+    }
+  }, [sessionId, setMcpServers]);
 
   const buildConfirmScope = (
     question: string,
@@ -102,6 +118,7 @@ export function App() {
       });
       const data = await resp.json();
       setSessionId(data.session_id);
+      await refreshMcpStatus(data.session_id);
       const cfg = await window.agenticxDesktop.loadConfig();
       const loadedMode = cfg.userMode === "lite" ? "lite" : "pro";
       setUserMode(loadedMode);
@@ -130,7 +147,7 @@ export function App() {
         }
       });
     })();
-  }, [openSettings, setApiBase, setApiToken, setSessionId, setStatus, setUserMode, setOnboardingCompleted, setConfirmStrategy]);
+  }, [openSettings, setApiBase, setApiToken, setSessionId, setStatus, setUserMode, setOnboardingCompleted, setConfirmStrategy, refreshMcpStatus]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -271,6 +288,9 @@ export function App() {
         open={settings.open}
         defaultProvider={settings.defaultProvider}
         providers={settings.providers}
+        sessionId={sessionId}
+        mcpServers={mcpServers}
+        onRefreshMcp={refreshMcpStatus}
         onClose={() => closeSettings()}
         onSave={handleSettingsSave}
       />

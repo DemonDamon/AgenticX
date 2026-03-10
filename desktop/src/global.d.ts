@@ -18,6 +18,14 @@ type LoadConfigResult = {
 type ValidateKeyResult = { ok: boolean; error?: string; status?: number };
 type FetchModelsResult = { ok: boolean; models: string[]; error?: string };
 type HealthCheckResult = { ok: boolean; error?: string; latencyHint?: string };
+type McpServerItem = { name: string; connected: boolean; command?: string };
+type McpStatusResult = {
+  ok: boolean;
+  count?: number;
+  connected_count?: number;
+  servers: McpServerItem[];
+  error?: string;
+};
 
 declare global {
   interface Window {
@@ -29,6 +37,16 @@ declare global {
       onOpenSettings: (cb: () => void) => void;
 
       loadConfig: () => Promise<LoadConfigResult>;
+      loadMcpStatus: (sessionId: string) => Promise<McpStatusResult>;
+      importMcpConfig: (payload: { sessionId: string; sourcePath: string }) => Promise<{
+        ok: boolean;
+        imported?: string[];
+        skipped?: string[];
+        total_imported?: number;
+        total_servers?: number;
+        error?: string;
+      }>;
+      connectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       saveUserMode: (mode: "pro" | "lite") => Promise<{ ok: boolean }>;
       saveOnboardingCompleted: (completed: boolean) => Promise<{ ok: boolean }>;
       saveConfirmStrategy: (strategy: "manual" | "semi-auto" | "auto") => Promise<{ ok: boolean }>;

@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   },
 
   loadConfig: async () => ipcRenderer.invoke("load-config"),
+  loadMcpStatus: async (sessionId: string) => ipcRenderer.invoke("load-mcp-status", sessionId),
+  importMcpConfig: async (payload: { sessionId: string; sourcePath: string }) =>
+    ipcRenderer.invoke("import-mcp-config", payload),
+  connectMcp: async (payload: { sessionId: string; name: string }) =>
+    ipcRenderer.invoke("connect-mcp", payload),
   saveUserMode: async (mode: "pro" | "lite") => ipcRenderer.invoke("save-user-mode", mode),
   saveOnboardingCompleted: async (completed: boolean) =>
     ipcRenderer.invoke("save-onboarding-completed", completed),

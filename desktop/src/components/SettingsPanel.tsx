@@ -12,10 +12,19 @@ type ProviderEntry = {
   models: string[];
 };
 
+type McpServer = {
+  name: string;
+  connected: boolean;
+  command?: string;
+};
+
 type Props = {
   open: boolean;
   defaultProvider: string;
   providers: Record<string, ProviderEntry>;
+  sessionId: string;
+  mcpServers: McpServer[];
+  onRefreshMcp: (sessionId?: string) => Promise<void>;
   onClose: () => void;
   onSave: (result: {
     defaultProvider: string;
@@ -25,7 +34,16 @@ type Props = {
 
 type ModelHealth = "idle" | "checking" | "healthy" | "error";
 
-export function SettingsPanel({ open, defaultProvider, providers, onClose, onSave }: Props) {
+export function SettingsPanel({
+  open,
+  defaultProvider,
+  providers,
+  sessionId,
+  mcpServers,
+  onRefreshMcp,
+  onClose,
+  onSave,
+}: Props) {
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
   const [draft, setDraft] = useState<Record<string, ProviderEntry>>({});
   const [defProv, setDefProv] = useState(defaultProvider);
@@ -35,6 +53,9 @@ export function SettingsPanel({ open, defaultProvider, providers, onClose, onSav
   const [fetchingModels, setFetchingModels] = useState(false);
   const [showModelPanel, setShowModelPanel] = useState(false);
   const [newModelInput, setNewModelInput] = useState("");
+  const [mcpImportPath, setMcpImportPath] = useState("~/.cursor/mcp.json");
+  const [mcpBusy, setMcpBusy] = useState(false);
+  const [mcpMessage, setMcpMessage] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -65,7 +86,12 @@ export function SettingsPanel({ open, defaultProvider, providers, onClose, onSav
     setKeyError({});
     setModelHealthMap({});
     setShowModelPanel(false);
-  }, [open, providers, defaultProvider]);
+    setMcpImportPath("~/.cursor/mcp.json");
+    setMcpMessage("");
+    if (sessionId) {
+      void onRefreshMcp(sessionId);
+    }
+  }, [open, providers, defaultProvider, sessionId, onRefreshMcp]);
 
   const current = useMemo(() => draft[active] ?? { apiKey: "", baseUrl: "", model: "", models: [] }, [draft, active]);
 
@@ -140,6 +166,49 @@ export function SettingsPanel({ open, defaultProvider, providers, onClose, onSav
   const handleSave = async () => {
     await onSave({ defaultProvider: defProv, providers: draft });
     onClose();
+  };
+
+  const handleImportMcp = async () => {
+    if (!sessionId || !mcpImportPath.trim()) return;
+    setMcpBusy(true);
+    setMcpMessage("");
+    try {
+      const result = await window.agenticxDesktop.importMcpConfig({
+        sessionId,
+        sourcePath: mcpImportPath.trim(),
+      });
+      if (result.ok) {
+        await onRefreshMcp(sessionId);
+        setMcpMessage(
+          `导入成功: imported=${String(result.total_imported ?? 0)}, total=${String(result.total_servers ?? 0)}`
+        );
+      } else {
+        setMcpMessage(`导入失败: ${result.error ?? "未知错误"}`);
+      }
+    } catch (err) {
+      setMcpMessage(`导入失败: ${String(err)}`);
+    } finally {
+      setMcpBusy(false);
+    }
+  };
+
+  const handleConnectMcp = async (name: string) => {
+    if (!sessionId) return;
+    setMcpBusy(true);
+    setMcpMessage("");
+    try {
+      const result = await window.agenticxDesktop.connectMcp({ sessionId, name });
+      if (result.ok) {
+        await onRefreshMcp(sessionId);
+        setMcpMessage(`连接成功: ${name}`);
+      } else {
+        setMcpMessage(`连接失败: ${result.error ?? "未知错误"}`);
+      }
+    } catch (err) {
+      setMcpMessage(`连接失败: ${String(err)}`);
+    } finally {
+      setMcpBusy(false);
+    }
   };
 
   if (!open) return null;
@@ -274,6 +343,62 @@ export function SettingsPanel({ open, defaultProvider, providers, onClose, onSav
                   >
                     管理模型
                   </button>
+                </div>
+
+                <div className="mt-4 rounded-md border border-border/70 bg-slate-900/40 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="text-sm font-medium text-slate-200">MCP 配置与连接</div>
+                    <button
+                      className="rounded border border-border px-2 py-1 text-[11px] text-slate-400 transition hover:bg-slate-700 hover:text-slate-200"
+                      onClick={() => void onRefreshMcp(sessionId)}
+                      disabled={!sessionId || mcpBusy}
+                    >
+                      刷新
+                    </button>
+                  </div>
+                  <div className="mb-2 flex gap-2">
+                    <input
+                      className="flex-1 rounded-md border border-border bg-slate-900 px-2 py-1.5 text-xs"
+                      value={mcpImportPath}
+                      onChange={(e) => setMcpImportPath(e.target.value)}
+                      placeholder="外部 mcp.json 路径，例如 ~/.cursor/mcp.json"
+                    />
+                    <button
+                      className="rounded-md border border-cyan-500/30 px-2 py-1.5 text-xs text-cyan-400 transition hover:bg-cyan-500/10 disabled:opacity-40"
+                      onClick={handleImportMcp}
+                      disabled={mcpBusy || !sessionId || !mcpImportPath.trim()}
+                    >
+                      导入
+                    </button>
+                  </div>
+                  {mcpMessage && <div className="mb-2 text-xs text-slate-400">{mcpMessage}</div>}
+                  <div className="max-h-40 space-y-1 overflow-y-auto">
+                    {mcpServers.length === 0 ? (
+                      <div className="text-xs text-slate-500">暂无 MCP 服务器</div>
+                    ) : (
+                      mcpServers.map((server) => (
+                        <div
+                          key={server.name}
+                          className="flex items-center gap-2 rounded border border-border/60 bg-slate-900/40 px-2 py-1.5"
+                        >
+                          <span
+                            className={`h-2 w-2 rounded-full ${server.connected ? "bg-emerald-400" : "bg-slate-600"}`}
+                          />
+                          <span className="flex-1 truncate text-xs text-slate-300">{server.name}</span>
+                          <span className="max-w-[180px] truncate text-[10px] text-slate-500">{server.command ?? ""}</span>
+                          {!server.connected && (
+                            <button
+                              className="rounded border border-border px-1.5 py-0.5 text-[10px] text-slate-400 transition hover:bg-slate-700 hover:text-slate-200 disabled:opacity-40"
+                              onClick={() => void handleConnectMcp(server.name)}
+                              disabled={mcpBusy || !sessionId}
+                            >
+                              连接
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
