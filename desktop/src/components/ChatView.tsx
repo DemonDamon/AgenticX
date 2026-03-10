@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAppStore, type Message } from "../store";
@@ -140,6 +140,19 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const subAgentsRef = useRef(subAgents);
   const subAgentStatusRef = useRef<Record<string, string>>({});
   const isLite = mode === "lite";
+  const applyUserMode = useCallback(
+    async (nextMode: "pro" | "lite") => {
+      setUserMode(nextMode);
+      const nextStrategy = nextMode === "lite" ? "manual" : "semi-auto";
+      setConfirmStrategy(nextStrategy);
+      if (nextMode === "lite") setPlanMode(false);
+      setCommandPaletteOpen(false);
+      setKeybindingsPanelOpen(false);
+      await window.agenticxDesktop.saveUserMode(nextMode);
+      await window.agenticxDesktop.saveConfirmStrategy(nextStrategy);
+    },
+    [setUserMode, setConfirmStrategy, setPlanMode, setCommandPaletteOpen, setKeybindingsPanelOpen]
+  );
 
   const deferredCommandQuery = useDeferredValue(commandQuery);
   const registry = useMemo(
@@ -156,14 +169,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
         },
         toggleUserMode: async () => {
           const nextMode = userMode === "pro" ? "lite" : "pro";
-          setUserMode(nextMode);
-          const nextStrategy = nextMode === "lite" ? "manual" : "semi-auto";
-          setConfirmStrategy(nextStrategy);
-          if (nextMode === "lite") setPlanMode(false);
-          setCommandPaletteOpen(false);
-          setKeybindingsPanelOpen(false);
-          await window.agenticxDesktop.saveUserMode(nextMode);
-          await window.agenticxDesktop.saveConfirmStrategy(nextStrategy);
+          await applyUserMode(nextMode);
         },
         cycleConfirmStrategy: async () => {
           const order: Array<"manual" | "semi-auto" | "auto"> = ["manual", "semi-auto", "auto"];
@@ -179,12 +185,12 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       openSettings,
       clearMessages,
       userMode,
-      setUserMode,
       addMessage,
       planMode,
       setPlanMode,
       confirmStrategy,
       setConfirmStrategy,
+      applyUserMode,
     ]
   );
   const commandResults = useMemo(
@@ -274,113 +280,110 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     setHistoryIndex(-1);
   };
 
+  const syncSubAgents = useCallback(async () => {
+    if (!apiBase || !sessionId) return;
+    try {
+      const resp = await fetch(
+        `${apiBase}/api/subagents/status?session_id=${encodeURIComponent(sessionId)}`,
+        { headers: { "x-agx-desktop-token": apiToken } }
+      );
+      if (!resp.ok) return;
+      const data = await resp.json() as {
+        ok?: boolean;
+        subagents?: Array<{
+          agent_id: string;
+          name?: string;
+          role?: string;
+          task?: string;
+          status?: "pending" | "running" | "completed" | "failed" | "cancelled";
+          result_summary?: string;
+          error_text?: string;
+          recent_events?: Array<{ type?: string; data?: Record<string, unknown> }>;
+        }>;
+      };
+      if (!Array.isArray(data.subagents)) return;
+      for (const item of data.subagents) {
+        const id = item.agent_id;
+        if (!id) continue;
+        const currentSubs = subAgentsRef.current;
+        const exists = currentSubs.some((s) => s.id === id);
+        if (!exists) {
+          addSubAgent({
+            id,
+            name: item.name ?? id,
+            role: item.role ?? "worker",
+            task: item.task ?? "",
+          });
+        }
+        const status = item.status ?? "running";
+        const prevStatus = subAgentStatusRef.current[id];
+        subAgentStatusRef.current[id] = status;
+        const currentAction =
+          status === "completed"
+            ? (item.result_summary ? "已完成（见摘要）" : "已完成")
+            : status === "failed"
+              ? (item.error_text || "执行异常")
+              : status === "cancelled"
+                ? "已中断"
+                : "执行中";
+        updateSubAgent(id, { status, currentAction });
+
+        const transitionedToTerminal =
+          prevStatus !== status && (status === "completed" || status === "failed" || status === "cancelled");
+        if (transitionedToTerminal) {
+          const summaryText =
+            status === "completed"
+              ? (item.result_summary || "子智能体任务已完成")
+              : status === "cancelled"
+                ? "子智能体已中断"
+                : (item.error_text || "子智能体执行失败");
+          addMessage("tool", `📌 ${item.name ?? id} (${id}) ${status === "completed" ? "已完成" : status === "cancelled" ? "已中断" : "失败"}\n${summaryText}`, "meta");
+        }
+
+        const seen = polledEventSeenRef.current[id] ?? new Set<string>();
+        polledEventSeenRef.current[id] = seen;
+        const recentEvents = Array.isArray(item.recent_events) ? item.recent_events : [];
+        for (const evt of recentEvents) {
+          const evtType = String(evt?.type ?? "");
+          const evtData = (evt?.data ?? {}) as Record<string, unknown>;
+          const signature = `${evtType}:${JSON.stringify(evtData)}`;
+          if (seen.has(signature)) continue;
+          seen.add(signature);
+          if (seen.size > 300) {
+            const first = seen.values().next().value as string | undefined;
+            if (first) seen.delete(first);
+          }
+          let content = "";
+          if (evtType === "tool_call") {
+            content = `🔧 ${String(evtData.name ?? "tool")}: ${JSON.stringify(evtData.arguments ?? {}).slice(0, 120)}`;
+          } else if (evtType === "tool_result") {
+            const result = typeof evtData.result === "string" ? evtData.result : JSON.stringify(evtData.result ?? {});
+            content = `✅ ${String(evtData.name ?? "tool")} 结果: ${result}`;
+          } else if (evtType === "error") {
+            content = `❌ ${String(evtData.text ?? "执行异常")}`;
+          } else if (evtType === "confirm_required") {
+            content = `⏸ 等待确认: ${String(evtData.question ?? "请确认执行")}`;
+          } else if (typeof evtData.text === "string" && evtData.text.trim()) {
+            content = evtData.text;
+          } else {
+            content = `${evtType || "event"}: ${JSON.stringify(evtData)}`;
+          }
+          addSubAgentEvent(id, { type: evtType || "event", content });
+        }
+      }
+    } catch {
+      // silent
+    }
+  }, [apiBase, sessionId, apiToken, addSubAgent, updateSubAgent, addMessage, addSubAgentEvent]);
+
   useEffect(() => {
     if (!apiBase || !sessionId) return;
-    const hasAnySubagent = subAgents.length > 0;
-    if (!hasAnySubagent) return;
-
-    let stopped = false;
-    const tick = async () => {
-      try {
-        const resp = await fetch(
-          `${apiBase}/api/subagents/status?session_id=${encodeURIComponent(sessionId)}`,
-          { headers: { "x-agx-desktop-token": apiToken } }
-        );
-        if (!resp.ok) return;
-        const data = await resp.json() as {
-          ok?: boolean;
-          subagents?: Array<{
-            agent_id: string;
-            name?: string;
-            role?: string;
-            task?: string;
-            status?: "pending" | "running" | "completed" | "failed" | "cancelled";
-            result_summary?: string;
-            error_text?: string;
-            recent_events?: Array<{ type?: string; data?: Record<string, unknown> }>;
-          }>;
-        };
-        if (stopped || !Array.isArray(data.subagents)) return;
-        for (const item of data.subagents) {
-          const id = item.agent_id;
-          if (!id) continue;
-          const exists = subAgents.some((s) => s.id === id);
-          if (!exists) {
-            addSubAgent({
-              id,
-              name: item.name ?? id,
-              role: item.role ?? "worker",
-              task: item.task ?? "",
-            });
-          }
-          const status = item.status ?? "running";
-          const prevStatus = subAgentStatusRef.current[id];
-          subAgentStatusRef.current[id] = status;
-          const currentAction =
-            status === "completed"
-              ? (item.result_summary ? "已完成（见摘要）" : "已完成")
-              : status === "failed"
-                ? (item.error_text || "执行异常")
-                : status === "cancelled"
-                  ? "已中断"
-                  : "执行中";
-          updateSubAgent(id, { status, currentAction });
-
-          const transitionedToTerminal =
-            prevStatus !== status && (status === "completed" || status === "failed" || status === "cancelled");
-          if (transitionedToTerminal) {
-            const summaryText =
-              status === "completed"
-                ? (item.result_summary || "子智能体任务已完成")
-                : status === "cancelled"
-                  ? "子智能体已中断"
-                  : (item.error_text || "子智能体执行失败");
-            addMessage("tool", `📌 ${item.name ?? id} (${id}) ${status === "completed" ? "已完成" : status === "cancelled" ? "已中断" : "失败"}\n${summaryText}`, "meta");
-          }
-
-          const seen = polledEventSeenRef.current[id] ?? new Set<string>();
-          polledEventSeenRef.current[id] = seen;
-          const recentEvents = Array.isArray(item.recent_events) ? item.recent_events : [];
-          for (const evt of recentEvents) {
-            const evtType = String(evt?.type ?? "");
-            const evtData = (evt?.data ?? {}) as Record<string, unknown>;
-            const signature = `${evtType}:${JSON.stringify(evtData)}`;
-            if (seen.has(signature)) continue;
-            seen.add(signature);
-            if (seen.size > 300) {
-              const first = seen.values().next().value as string | undefined;
-              if (first) seen.delete(first);
-            }
-            let content = "";
-            if (evtType === "tool_call") {
-              content = `🔧 ${String(evtData.name ?? "tool")}: ${JSON.stringify(evtData.arguments ?? {}).slice(0, 120)}`;
-            } else if (evtType === "tool_result") {
-              const result = typeof evtData.result === "string" ? evtData.result : JSON.stringify(evtData.result ?? {});
-              content = `✅ ${String(evtData.name ?? "tool")} 结果: ${result}`;
-            } else if (evtType === "error") {
-              content = `❌ ${String(evtData.text ?? "执行异常")}`;
-            } else if (evtType === "confirm_required") {
-              content = `⏸ 等待确认: ${String(evtData.question ?? "请确认执行")}`;
-            } else if (typeof evtData.text === "string" && evtData.text.trim()) {
-              content = evtData.text;
-            } else {
-              content = `${evtType || "event"}: ${JSON.stringify(evtData)}`;
-            }
-            addSubAgentEvent(id, { type: evtType || "event", content });
-          }
-        }
-      } catch {
-        // silent
-      }
-    };
-
-    void tick();
-    const timer = window.setInterval(() => void tick(), 2000);
-    return () => {
-      stopped = true;
-      window.clearInterval(timer);
-    };
-  }, [apiBase, sessionId, apiToken, subAgents, addSubAgent, updateSubAgent]);
+    const hasAnySubagent = subAgentsRef.current.length > 0;
+    void syncSubAgents();
+    const interval = hasAnySubagent ? 2000 : 5000;
+    const timer = window.setInterval(() => void syncSubAgents(), interval);
+    return () => window.clearInterval(timer);
+  }, [apiBase, sessionId, syncSubAgents, subAgents.length]);
 
   const onCancelSubAgent = async (agentId: string) => {
     if (!apiBase || !sessionId) return;
@@ -619,6 +622,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       setStatus("idle");
       setStreaming(false);
       scrollToBottom();
+      void syncSubAgents();
     }
   };
 
@@ -817,9 +821,39 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             </span>
           )}
         </div>
-        <div className="flex w-20 items-center justify-end">
-          {!isLite && subAgents.length > 0 ? (
-            <button className="no-drag mr-2 rounded-md px-2 py-1 text-xs text-slate-400 transition hover:bg-slate-700 hover:text-white" onClick={() => setPanelOpen((v) => !v)} title="子智能体面板">团队</button>
+        <div className="flex w-auto items-center justify-end gap-2">
+          <div className="no-drag inline-flex rounded-md border border-border/80 bg-slate-800/60 p-0.5">
+            <button
+              className={`rounded px-2 py-1 text-[11px] transition ${
+                userMode === "pro" ? "bg-cyan-500/20 text-cyan-200" : "text-slate-400 hover:text-slate-200"
+              }`}
+              onClick={() => {
+                if (userMode !== "pro") void applyUserMode("pro");
+              }}
+              title="切换到 Pro 模式"
+            >
+              Pro
+            </button>
+            <button
+              className={`rounded px-2 py-1 text-[11px] transition ${
+                userMode === "lite" ? "bg-cyan-500/20 text-cyan-200" : "text-slate-400 hover:text-slate-200"
+              }`}
+              onClick={() => {
+                if (userMode !== "lite") void applyUserMode("lite");
+              }}
+              title="切换到 Lite 模式"
+            >
+              Lite
+            </button>
+          </div>
+          {(subAgents.length > 0 || isLite) ? (
+            <button
+              className="no-drag rounded-md px-2 py-1 text-xs text-slate-400 transition hover:bg-slate-700 hover:text-white"
+              onClick={() => setPanelOpen((v) => !v)}
+              title="子智能体面板"
+            >
+              团队{subAgents.length > 0 ? `(${subAgents.length})` : ""}
+            </button>
           ) : null}
           <button className="no-drag rounded-md px-2 py-1 text-xs text-slate-400 transition hover:bg-slate-700 hover:text-white" onClick={() => openSettings()} title="设置">⚙</button>
         </div>
@@ -905,7 +939,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           />
         )}
         <div className="mx-auto flex max-w-2xl items-end gap-2">
-          {!isLite && selectedSubAgent ? (
+          {selectedSubAgent ? (
             <div className="mb-2 w-full">
               <div className="inline-flex items-center gap-2 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-xs text-cyan-200">
                 <span>当前对话目标: {selectedSubAgentName}</span>
@@ -937,7 +971,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             }}
             onKeyDown={onKeyDown}
             rows={input.split("\n").length > 3 ? 4 : input.includes("\n") ? 2 : 1}
-            placeholder={canSend ? (isLite ? "问我任何问题..." : (planMode ? "计划模式：描述目标，我只返回可执行计划" : (selectedSubAgent ? `对 ${selectedSubAgentName} 发送补充指令，Enter 发送` : "输入需求，Enter 发送（生成中可直接追问）"))) : "连接中..."}
+            placeholder={canSend ? (isLite ? (selectedSubAgent ? `对 ${selectedSubAgentName} 发送消息...` : "问我任何问题...") : (planMode ? "计划模式：描述目标，我只返回可执行计划" : (selectedSubAgent ? `对 ${selectedSubAgentName} 发送补充指令，Enter 发送` : "输入需求，Enter 发送（生成中可直接追问）"))) : "连接中..."}
             disabled={!canSend && !streaming}
             className="min-h-[40px] max-h-[120px] flex-1 resize-none rounded-xl border border-border bg-slate-900/80 px-3 py-2.5 text-sm outline-none transition placeholder:text-slate-500 focus:border-cyan-500/50"
           />
@@ -954,18 +988,16 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
         {!isLite && <ShortcutHints />}
       </div>
       </div>
-      {!isLite && (
-        <SubAgentPanel
-          open={panelOpen}
-          subAgents={subAgents}
-          selectedSubAgent={selectedSubAgent}
-          onToggle={() => setPanelOpen((v) => !v)}
-          onCancel={onCancelSubAgent}
-          onRetry={onRetrySubAgent}
-          onChat={(id) => setSelectedSubAgent(id)}
-          onSelect={(id) => setSelectedSubAgent(id)}
-        />
-      )}
+      <SubAgentPanel
+        open={panelOpen}
+        subAgents={subAgents}
+        selectedSubAgent={selectedSubAgent}
+        onToggle={() => setPanelOpen((v) => !v)}
+        onCancel={onCancelSubAgent}
+        onRetry={onRetrySubAgent}
+        onChat={(id) => setSelectedSubAgent(id)}
+        onSelect={(id) => setSelectedSubAgent(id)}
+      />
       {/* Reanswer model picker */}
       {modelPickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
