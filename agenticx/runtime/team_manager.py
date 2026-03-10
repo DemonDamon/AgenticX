@@ -321,23 +321,29 @@ class AgentTeamManager:
         return {"ok": True, "agent_id": agent_id, "status": context.status.value}
 
     async def send_message_to_subagent(self, agent_id: str, message: str) -> Dict[str, Any]:
+        import logging
+        _log = logging.getLogger(__name__)
+
         context = self._agents.get(agent_id)
         if context is None:
+            _log.warning("send_message_to_subagent: agent_id=%s not in _agents (keys=%s)", agent_id, list(self._agents.keys()))
             return {"ok": False, "error": "not_found", "message": f"未找到子智能体: {agent_id}"}
-        if context.status != SubAgentStatus.RUNNING and context.mode != "session":
-            return {
-                "ok": False,
-                "error": "not_running",
-                "message": f"子智能体当前状态为 {context.status.value}，无法继续对话",
-            }
-        session = self._agent_sessions.get(agent_id)
-        if session is None:
-            return {"ok": False, "error": "session_unavailable", "message": "子智能体会话不可用"}
         text = message.strip()
         if not text:
             return {"ok": False, "error": "empty_message", "message": "消息不能为空"}
-        if context.status != SubAgentStatus.RUNNING:
+
+        if context.status == SubAgentStatus.RUNNING:
+            session = self._agent_sessions.get(agent_id)
+            if session is None:
+                _log.warning("send_message: agent %s is RUNNING but session missing, rebuilding", agent_id)
+                session = self._rebuild_agent_session(context)
+            session.agent_messages.append({"role": "user", "content": text})
+            session.chat_history.append({"role": "user", "content": text})
+        else:
+            _log.info("send_message: resuming agent %s (was %s, mode=%s)", agent_id, context.status.value, context.mode)
+            self._ensure_agent_session(context)
             context.status = SubAgentStatus.RUNNING
+            context.error_text = ""
             allowed_tools = self._build_toolset(context.allowed_tool_names)
             task = asyncio.create_task(
                 self._run_subagent(
@@ -347,9 +353,7 @@ class AgentTeamManager:
                 )
             )
             self._tasks[agent_id] = task
-        else:
-            session.agent_messages.append({"role": "user", "content": text})
-            session.chat_history.append({"role": "user", "content": text})
+
         context.updated_at = time.time()
         await self._emit(
             RuntimeEvent(
@@ -359,6 +363,28 @@ class AgentTeamManager:
             )
         )
         return {"ok": True, "agent_id": agent_id, "status": context.status.value}
+
+    def _ensure_agent_session(self, context: SubAgentContext) -> StudioSession:
+        """Ensure an active session exists for the agent, rebuilding if necessary."""
+        session = self._agent_sessions.get(context.agent_id)
+        if session is not None:
+            return session
+        return self._rebuild_agent_session(context)
+
+    def _rebuild_agent_session(self, context: SubAgentContext) -> StudioSession:
+        """Rebuild a session from saved context (used when resuming completed/failed agents)."""
+        session = self._build_isolated_session()
+        session.context_files.update(context.context_files)
+        session.artifacts.update(context.artifacts)
+        if context.agent_messages:
+            session.agent_messages = list(context.agent_messages)
+        if context.attachments:
+            session.scratchpad.update(
+                {f"attachment::{k}": v for k, v in context.attachments.items()}
+            )
+        setattr(session, "_team_manager", self)
+        self._agent_sessions[context.agent_id] = session
+        return session
 
     async def retry_subagent(self, agent_id: str, refined_task: Optional[str] = None) -> Dict[str, Any]:
         previous = self._agents.get(agent_id)
