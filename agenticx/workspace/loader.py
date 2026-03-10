@@ -7,6 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 from datetime import date
+import json
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -14,7 +15,10 @@ from agenticx.cli.config_manager import ConfigManager
 
 
 DEFAULT_WORKSPACE_DIR = Path.home() / ".agenticx" / "workspace"
+DEFAULT_AGENTICX_HOME = Path.home() / ".agenticx"
 MEMORY_DIR_NAME = "memory"
+SKILLS_DIR_NAME = "skills"
+MCP_FILE_NAME = "mcp.json"
 ALLOWED_WORKSPACE_FILES = {"IDENTITY.md", "USER.md", "SOUL.md", "MEMORY.md"}
 
 IDENTITY_TEMPLATE = """# IDENTITY.md - Who You Are
@@ -69,7 +73,31 @@ DAILY_MEMORY_TEMPLATE = """# Daily Memory
 """
 
 
-def _resolve_workspace_dir() -> Path:
+def append_daily_memory(workspace_dir: Path, note: str) -> None:
+    """Append one note to today's daily memory file."""
+    memory_path = workspace_dir / MEMORY_DIR_NAME / f"{date.today().isoformat()}.md"
+    if not memory_path.exists() or not memory_path.is_file():
+        return
+    try:
+        with memory_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n  - {note}\n")
+    except OSError:
+        return
+
+
+def append_long_term_memory(workspace_dir: Path, note: str) -> None:
+    """Append one note to long-term MEMORY.md."""
+    memory_path = workspace_dir / "MEMORY.md"
+    if not memory_path.exists() or not memory_path.is_file():
+        return
+    try:
+        with memory_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n- {note}\n")
+    except OSError:
+        return
+
+
+def resolve_workspace_dir() -> Path:
     """Resolve workspace path from config with safe fallback."""
     try:
         cfg = ConfigManager.load()
@@ -92,10 +120,13 @@ def _workspace_files() -> Dict[str, str]:
     }
 
 
-def ensure_workspace() -> Path:
+def ensure_workspace(*, index_memory: bool = True) -> Path:
     """Create workspace and default files if they do not exist."""
-    workspace_dir = _resolve_workspace_dir()
+    workspace_dir = resolve_workspace_dir()
     workspace_dir.mkdir(parents=True, exist_ok=True)
+    agenticx_home = DEFAULT_AGENTICX_HOME
+    agenticx_home.mkdir(parents=True, exist_ok=True)
+    (agenticx_home / SKILLS_DIR_NAME).mkdir(parents=True, exist_ok=True)
     memory_dir = workspace_dir / MEMORY_DIR_NAME
     memory_dir.mkdir(parents=True, exist_ok=True)
 
@@ -110,6 +141,37 @@ def ensure_workspace() -> Path:
             DAILY_MEMORY_TEMPLATE.format(today=date.today().isoformat()),
             encoding="utf-8",
         )
+
+    mcp_path = agenticx_home / MCP_FILE_NAME
+    if not mcp_path.exists():
+        cursor_mcp = Path.home() / ".cursor" / MCP_FILE_NAME
+        imported_ok = False
+        if cursor_mcp.exists():
+            try:
+                from agenticx.cli.studio_mcp import import_mcp_config
+
+                result = import_mcp_config(str(cursor_mcp), str(mcp_path))
+                imported_ok = bool(result.get("ok"))
+                if imported_ok:
+                    append_daily_memory(
+                        workspace_dir,
+                        f"Imported MCP config from {cursor_mcp} to {mcp_path}.",
+                    )
+            except Exception:
+                imported_ok = False
+        if not imported_ok:
+            mcp_path.write_text(
+                json.dumps({"mcpServers": {}}, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+    if index_memory:
+        try:
+            from agenticx.memory.workspace_memory import WorkspaceMemoryStore
+
+            store = WorkspaceMemoryStore()
+            store.index_workspace_sync(workspace_dir)
+        except Exception:
+            pass
     return workspace_dir
 
 
@@ -117,7 +179,7 @@ def load_workspace_file(name: str) -> Optional[str]:
     """Load a workspace markdown file and return None when absent."""
     if name not in ALLOWED_WORKSPACE_FILES:
         return None
-    workspace_dir = _resolve_workspace_dir()
+    workspace_dir = resolve_workspace_dir()
     try:
         workspace_real = workspace_dir.resolve(strict=False)
         file_path = (workspace_dir / name).resolve(strict=True)
@@ -148,7 +210,7 @@ def _load_today_memory(workspace_dir: Path) -> str:
 
 def load_workspace_context() -> Dict[str, str]:
     """Load identity, user, soul, long-term memory and today's memory."""
-    workspace_dir = ensure_workspace()
+    workspace_dir = ensure_workspace(index_memory=False)
     return {
         "identity": load_workspace_file("IDENTITY.md") or "",
         "user": load_workspace_file("USER.md") or "",
