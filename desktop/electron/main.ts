@@ -325,6 +325,186 @@ function registerIpc(): void {
   ipcMain.handle("get-api-auth-token", async () => apiToken);
   ipcMain.handle("get-platform", async () => process.platform);
 
+  ipcMain.handle("list-avatars", async () => {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/avatars`, {
+        headers: { "x-agx-desktop-token": apiToken },
+      });
+      if (!resp.ok) return { ok: false, avatars: [] };
+      return await resp.json();
+    } catch {
+      return { ok: false, avatars: [] };
+    }
+  });
+
+  ipcMain.handle("create-avatar", async (_event, payload: { name: string; role?: string; avatar_url?: string; system_prompt?: string; created_by?: string }) => {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/avatars`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("update-avatar", async (_event, payload: { id: string; name?: string; role?: string; avatar_url?: string; pinned?: boolean; system_prompt?: string }) => {
+    const { id, ...body } = payload;
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/avatars/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${text.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("delete-avatar", async (_event, id: string) => {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/avatars/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { "x-agx-desktop-token": apiToken },
+      });
+      if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}` };
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("list-sessions", async (_event, avatarId?: string) => {
+    try {
+      const params = avatarId ? `?avatar_id=${encodeURIComponent(avatarId)}` : "";
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions${params}`, {
+        headers: { "x-agx-desktop-token": apiToken },
+      });
+      if (!resp.ok) return { ok: false, sessions: [] };
+      return await resp.json();
+    } catch {
+      return { ok: false, sessions: [] };
+    }
+  });
+
+  ipcMain.handle("create-session", async (_event, payload: { avatar_id?: string; name?: string }) => {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const b = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${b.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("rename-session", async (_event, payload: { sessionId: string; name: string }) => {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions/${encodeURIComponent(payload.sessionId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ name: payload.name }),
+      });
+      if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}` };
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("fork-avatar", async (_event, payload: { sessionId: string; name: string; role?: string }) => {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/avatars/fork`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ session_id: payload.sessionId, name: payload.name, role: payload.role }),
+      });
+      if (!resp.ok) {
+        const b = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${b.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("generate-avatar", async (_event, payload: { description: string }) => {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/avatars/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const b = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${b.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("list-groups", async () => {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/groups`, {
+        headers: { "x-agx-desktop-token": apiToken },
+      });
+      if (!resp.ok) return { ok: false, groups: [] };
+      return await resp.json();
+    } catch {
+      return { ok: false, groups: [] };
+    }
+  });
+
+  ipcMain.handle("create-group", async (_event, payload: { name: string; avatar_ids: string[]; routing?: string }) => {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/groups`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const b = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${b.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("delete-group", async (_event, id: string) => {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/groups/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { "x-agx-desktop-token": apiToken },
+      });
+      if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}` };
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("load-config", async () => {
     const cfg = loadAgxConfig();
     return {

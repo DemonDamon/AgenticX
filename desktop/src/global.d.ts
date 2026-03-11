@@ -18,6 +18,22 @@ type LoadConfigResult = {
 type ValidateKeyResult = { ok: boolean; error?: string; status?: number };
 type FetchModelsResult = { ok: boolean; models: string[]; error?: string };
 type HealthCheckResult = { ok: boolean; error?: string; latencyHint?: string };
+type AvatarItem = {
+  id: string;
+  name: string;
+  role?: string;
+  avatar_url?: string;
+  pinned?: boolean;
+  created_by?: string;
+};
+
+type GroupItem = {
+  id: string;
+  name: string;
+  avatar_ids: string[];
+  routing?: string;
+};
+
 type McpServerItem = { name: string; connected: boolean; command?: string };
 type McpStatusResult = {
   ok: boolean;
@@ -35,6 +51,21 @@ declare global {
       getApiAuthToken: () => Promise<string>;
       platform: () => Promise<string>;
       onOpenSettings: (cb: () => void) => void;
+
+      listAvatars: () => Promise<{ ok: boolean; avatars: AvatarItem[] }>;
+      createAvatar: (payload: { name: string; role?: string; avatar_url?: string; system_prompt?: string; created_by?: string }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
+      updateAvatar: (payload: { id: string; name?: string; role?: string; avatar_url?: string; pinned?: boolean; system_prompt?: string }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
+      deleteAvatar: (id: string) => Promise<{ ok: boolean; error?: string }>;
+
+      listSessions: (avatarId?: string) => Promise<{ ok: boolean; sessions: Array<{ session_id: string; avatar_id: string | null; session_name: string | null; updated_at: number }> }>;
+      createSession: (payload: { avatar_id?: string; name?: string }) => Promise<{ ok: boolean; session_id?: string; error?: string }>;
+      renameSession: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
+      forkAvatar: (payload: { sessionId: string; name: string; role?: string }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
+      generateAvatar: (payload: { description: string }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
+
+      listGroups: () => Promise<{ ok: boolean; groups: GroupItem[] }>;
+      createGroup: (payload: { name: string; avatar_ids: string[]; routing?: string }) => Promise<{ ok: boolean; group?: GroupItem; error?: string }>;
+      deleteGroup: (id: string) => Promise<{ ok: boolean; error?: string }>;
 
       loadConfig: () => Promise<LoadConfigResult>;
       loadMcpStatus: (sessionId: string) => Promise<McpStatusResult>;

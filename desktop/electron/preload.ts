@@ -9,6 +9,28 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.on("open-settings", () => cb());
   },
 
+  listAvatars: async () => ipcRenderer.invoke("list-avatars"),
+  createAvatar: async (payload: { name: string; role?: string; avatar_url?: string; system_prompt?: string; created_by?: string }) =>
+    ipcRenderer.invoke("create-avatar", payload),
+  updateAvatar: async (payload: { id: string; name?: string; role?: string; avatar_url?: string; pinned?: boolean; system_prompt?: string }) =>
+    ipcRenderer.invoke("update-avatar", payload),
+  deleteAvatar: async (id: string) => ipcRenderer.invoke("delete-avatar", id),
+
+  listSessions: async (avatarId?: string) => ipcRenderer.invoke("list-sessions", avatarId),
+  createSession: async (payload: { avatar_id?: string; name?: string }) =>
+    ipcRenderer.invoke("create-session", payload),
+  renameSession: async (payload: { sessionId: string; name: string }) =>
+    ipcRenderer.invoke("rename-session", payload),
+  forkAvatar: async (payload: { sessionId: string; name: string; role?: string }) =>
+    ipcRenderer.invoke("fork-avatar", payload),
+  generateAvatar: async (payload: { description: string }) =>
+    ipcRenderer.invoke("generate-avatar", payload),
+
+  listGroups: async () => ipcRenderer.invoke("list-groups"),
+  createGroup: async (payload: { name: string; avatar_ids: string[]; routing?: string }) =>
+    ipcRenderer.invoke("create-group", payload),
+  deleteGroup: async (id: string) => ipcRenderer.invoke("delete-group", id),
+
   loadConfig: async () => ipcRenderer.invoke("load-config"),
   loadMcpStatus: async (sessionId: string) => ipcRenderer.invoke("load-mcp-status", sessionId),
   importMcpConfig: async (payload: { sessionId: string; sourcePath: string }) =>
