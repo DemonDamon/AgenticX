@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { AvatarSidebar } from "./components/AvatarSidebar";
 import { ChatView } from "./components/ChatView";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -252,11 +253,20 @@ export function App() {
   };
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-base">
+    <div className="flex h-screen overflow-hidden bg-base">
       {!onboardingCompleted ? (
         <OnboardingView onSelectMode={(mode) => void handleSelectMode(mode)} />
       ) : sessionId && apiBase ? (
-        userMode === "lite" ? <LiteChatView onOpenConfirm={onOpenConfirm} /> : <ChatView onOpenConfirm={onOpenConfirm} />
+        <>
+          {userMode === "pro" && <AvatarSidebar />}
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {userMode === "lite" ? (
+              <LiteChatView onOpenConfirm={onOpenConfirm} />
+            ) : (
+              <ChatView onOpenConfirm={onOpenConfirm} />
+            )}
+          </div>
+        </>
       ) : (
         <div className="flex flex-1 items-center justify-center text-slate-500">
           正在连接 AgenticX 服务...
