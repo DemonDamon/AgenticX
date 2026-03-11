@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Agent Team manager for sub-agent lifecycle and scheduling."""
+"""Agent Team manager for sub-agent lifecycle and scheduling.
+
+Author: Damon Li
+"""
 
 from __future__ import annotations
 
@@ -64,6 +67,7 @@ class SubAgentContext:
     run_timeout_seconds: int = 600
     attachments: Dict[str, str] = field(default_factory=dict)
     allowed_tool_names: List[str] = field(default_factory=list)
+    spawn_tree_path: str = ""
 
 
 class AgentTeamManager:
@@ -250,9 +254,13 @@ class AgentTeamManager:
                     if not name_key:
                         continue
                     attached_payload[name_key] = content_val
+            parent_ctx = self._agents.get(parent_agent_id)
+            parent_path = parent_ctx.spawn_tree_path if parent_ctx and parent_ctx.spawn_tree_path else "meta"
+            display_name = (name.strip() or agent_id)
+            spawn_tree_path = f"{parent_path}/{display_name}-{agent_id[:6]}"
             context = SubAgentContext(
                 agent_id=agent_id,
-                name=name.strip() or agent_id,
+                name=display_name,
                 role=role.strip() or "worker",
                 task=task.strip(),
                 source_tool_call_id=source_tool_call_id,
@@ -268,6 +276,7 @@ class AgentTeamManager:
                     for item in allowed_tools
                     if isinstance(item, dict)
                 ],
+                spawn_tree_path=spawn_tree_path,
             )
             self._agents[agent_id] = context
             context.status = SubAgentStatus.RUNNING
@@ -463,6 +472,7 @@ class AgentTeamManager:
             "parent_agent_id": context.parent_agent_id,
             "mode": context.mode,
             "cleanup": context.cleanup,
+            "spawn_tree_path": context.spawn_tree_path,
         }
 
     async def _run_subagent(
