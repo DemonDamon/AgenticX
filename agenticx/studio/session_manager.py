@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Session manager for Studio service mode."""
+"""Session manager for Studio service mode.
+
+Author: Damon Li
+"""
 
 from __future__ import annotations
 
@@ -25,6 +28,9 @@ class ManagedSession:
     sub_confirm_gates: Dict[str, AsyncConfirmGate] = field(default_factory=dict)
     team_manager: Optional[AgentTeamManager] = None
     updated_at: float = field(default_factory=time.time)
+    avatar_id: Optional[str] = None
+    avatar_name: Optional[str] = None
+    session_name: Optional[str] = None
 
     def get_confirm_gate(self, agent_id: str = "meta") -> AsyncConfirmGate:
         if not agent_id or agent_id == "meta":
@@ -90,6 +96,31 @@ class SessionManager:
         self._persist_session_state(session_id, managed.studio_session)
         if managed.team_manager is not None:
             managed.team_manager.shutdown_now()
+        return True
+
+    def list_sessions(self, avatar_id: str | None = None) -> list[dict]:
+        """List sessions, optionally filtered by avatar_id."""
+        result = []
+        for sid, managed in self._sessions.items():
+            if avatar_id and getattr(managed, "avatar_id", None) != avatar_id:
+                continue
+            result.append({
+                "session_id": sid,
+                "avatar_id": getattr(managed, "avatar_id", None),
+                "avatar_name": getattr(managed, "avatar_name", None),
+                "session_name": getattr(managed, "session_name", None),
+                "updated_at": managed.updated_at,
+            })
+        result.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
+        return result
+
+    def rename_session(self, session_id: str, name: str) -> bool:
+        """Rename an existing session. Returns True if found and renamed."""
+        managed = self._sessions.get(session_id)
+        if managed is None:
+            return False
+        managed.session_name = name
+        managed.updated_at = time.time()
         return True
 
     def cleanup_expired(self) -> None:
