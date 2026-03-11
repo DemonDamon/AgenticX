@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""FastAPI server adapter for AgentRuntime."""
+"""FastAPI server adapter for AgentRuntime.
+
+Author: Damon Li
+"""
 
 from __future__ import annotations
 
 import json
 import logging
 import os
+import re
+from pathlib import Path
 from typing import Any
 from typing import AsyncGenerator
 
@@ -13,6 +18,8 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from agenticx.avatar.group_chat import GroupChatRegistry
+from agenticx.avatar.registry import AvatarRegistry
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.cli.studio_mcp import auto_connect_servers, import_mcp_config, load_available_servers, mcp_connect
 from agenticx.llms.provider_resolver import ProviderResolver
@@ -40,7 +47,11 @@ def create_studio_app() -> FastAPI:
         allow_headers=["*"],
     )
     manager = SessionManager()
+    avatar_registry = AvatarRegistry()
+    group_registry = GroupChatRegistry()
     app.state.session_manager = manager
+    app.state.avatar_registry = avatar_registry
+    app.state.group_registry = group_registry
     desktop_token = os.getenv("AGX_DESKTOP_TOKEN", "").strip()
 
     def _resolve_mcp_auto_connect_setting() -> list[str] | None:
@@ -86,6 +97,7 @@ def create_studio_app() -> FastAPI:
         session_id: str | None = Query(default=None),
         provider: str | None = Query(default=None),
         model: str | None = Query(default=None),
+        avatar_id: str | None = Query(default=None),
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> SessionState:
         _check_token(x_agx_desktop_token)
@@ -96,8 +108,16 @@ def create_studio_app() -> FastAPI:
         manager.cleanup_expired()
         managed = manager.get(session_id) if session_id else None
         if managed is None:
-            managed = manager.create(provider=provider, model=model, session_id=session_id)
-            managed.studio_session.workspace_dir = os.getenv("AGX_WORKSPACE_ROOT", "").strip() or os.getcwd()
+            avatar_cfg = avatar_registry.get_avatar(avatar_id) if avatar_id else None
+            effective_provider = (avatar_cfg.default_provider if avatar_cfg and avatar_cfg.default_provider else provider)
+            effective_model = (avatar_cfg.default_model if avatar_cfg and avatar_cfg.default_model else model)
+            managed = manager.create(provider=effective_provider, model=effective_model, session_id=session_id)
+            if avatar_cfg and avatar_cfg.workspace_dir:
+                managed.studio_session.workspace_dir = avatar_cfg.workspace_dir
+            else:
+                managed.studio_session.workspace_dir = os.getenv("AGX_WORKSPACE_ROOT", "").strip() or os.getcwd()
+            managed.avatar_id = avatar_id or None
+            managed.avatar_name = avatar_cfg.name if avatar_cfg else None
             try:
                 managed.studio_session.mcp_configs = load_available_servers()
             except Exception as exc:
@@ -122,6 +142,8 @@ def create_studio_app() -> FastAPI:
             model=sess.model_name,
             artifact_paths=[str(p) for p in sess.artifacts.keys()],
             context_files=list(sess.context_files.keys()),
+            avatar_id=getattr(managed, "avatar_id", None),
+            avatar_name=getattr(managed, "avatar_name", None),
         )
 
     @app.get("/api/artifacts")
@@ -544,5 +566,226 @@ def create_studio_app() -> FastAPI:
         if not ok:
             raise HTTPException(status_code=400, detail=f"failed to connect MCP server: {name}")
         return {"ok": True, "name": name}
+
+    # --- Avatar CRUD ---
+
+    @app.get("/api/avatars")
+    async def list_avatars(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        avatars = avatar_registry.list_avatars()
+        return {
+            "ok": True,
+            "avatars": [a.to_dict() for a in avatars],
+        }
+
+    @app.post("/api/avatars")
+    async def create_avatar(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name is required")
+        config = avatar_registry.create_avatar(
+            name=name,
+            role=str(payload.get("role", "")).strip(),
+            avatar_url=str(payload.get("avatar_url", "")).strip(),
+            system_prompt=str(payload.get("system_prompt", "")).strip(),
+            created_by=str(payload.get("created_by", "manual")).strip(),
+            default_provider=str(payload.get("default_provider", "")).strip(),
+            default_model=str(payload.get("default_model", "")).strip(),
+        )
+        return {"ok": True, "avatar": config.to_dict()}
+
+    @app.put("/api/avatars/{avatar_id}")
+    async def update_avatar(
+        avatar_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        updated = avatar_registry.update_avatar(avatar_id, payload)
+        if updated is None:
+            raise HTTPException(status_code=404, detail="avatar not found")
+        return {"ok": True, "avatar": updated.to_dict()}
+
+    @app.delete("/api/avatars/{avatar_id}")
+    async def delete_avatar(
+        avatar_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        ok = avatar_registry.delete_avatar(avatar_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="avatar not found")
+        return {"ok": True}
+
+    # --- Multi-session management ---
+
+    @app.get("/api/sessions")
+    async def list_sessions(
+        avatar_id: str | None = Query(default=None),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        sessions = manager.list_sessions(avatar_id=avatar_id)
+        return {"ok": True, "sessions": sessions}
+
+    @app.post("/api/sessions")
+    async def create_session(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        avatar_id = str(payload.get("avatar_id", "")).strip() or None
+        session_name = str(payload.get("name", "")).strip() or None
+        avatar_cfg = avatar_registry.get_avatar(avatar_id) if avatar_id else None
+        provider = avatar_cfg.default_provider if avatar_cfg and avatar_cfg.default_provider else None
+        model = avatar_cfg.default_model if avatar_cfg and avatar_cfg.default_model else None
+        managed = manager.create(provider=provider, model=model)
+        if avatar_cfg and avatar_cfg.workspace_dir:
+            managed.studio_session.workspace_dir = avatar_cfg.workspace_dir
+        else:
+            managed.studio_session.workspace_dir = os.getenv("AGX_WORKSPACE_ROOT", "").strip() or os.getcwd()
+        managed.avatar_id = avatar_id
+        managed.avatar_name = avatar_cfg.name if avatar_cfg else None
+        managed.session_name = session_name
+        try:
+            managed.studio_session.mcp_configs = load_available_servers()
+        except Exception:
+            managed.studio_session.mcp_configs = {}
+        return {
+            "ok": True,
+            "session_id": managed.session_id,
+            "avatar_id": avatar_id,
+            "session_name": session_name,
+        }
+
+    @app.put("/api/sessions/{session_id}")
+    async def rename_session(
+        session_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name is required")
+        ok = manager.rename_session(session_id, name)
+        if not ok:
+            raise HTTPException(status_code=404, detail="session not found")
+        return {"ok": True}
+
+    # --- Avatar fork & AI generate ---
+
+    @app.post("/api/avatars/fork")
+    async def fork_avatar(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        session_id = str(payload.get("session_id", "")).strip()
+        name = str(payload.get("name", "")).strip()
+        role = str(payload.get("role", "")).strip()
+        if not session_id or not name:
+            raise HTTPException(status_code=400, detail="session_id and name are required")
+        managed = manager.get(session_id)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        config = avatar_registry.create_avatar(
+            name=name,
+            role=role,
+            created_by="session_fork",
+        )
+        sess = managed.studio_session
+        ws = Path(config.workspace_dir)
+        memory_content = "# MEMORY.md - Forked from session\n\n"
+        for msg in (sess.chat_history or [])[-20:]:
+            r = msg.get("role", "")
+            c = str(msg.get("content", ""))[:200]
+            memory_content += f"- [{r}] {c}\n"
+        (ws / "MEMORY.md").write_text(memory_content, encoding="utf-8")
+        return {"ok": True, "avatar": config.to_dict()}
+
+    @app.post("/api/avatars/generate")
+    async def generate_avatar(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        description = str(payload.get("description", "")).strip()
+        if not description:
+            raise HTTPException(status_code=400, detail="description is required")
+        try:
+            llm = ProviderResolver.resolve()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"LLM init failed: {exc}")
+        prompt = (
+            "Based on the following user description, generate a digital avatar configuration.\n"
+            "Return ONLY valid JSON with these fields: name, role, system_prompt.\n"
+            f"Description: {description}\n"
+            "JSON:"
+        )
+        try:
+            response = llm.invoke(
+                [{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=512,
+            )
+            text = response.content.strip()
+            json_match = re.search(r"\{.*\}", text, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group())
+            else:
+                parsed = json.loads(text)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"LLM generation failed: {exc}")
+        config = avatar_registry.create_avatar(
+            name=str(parsed.get("name", "Avatar")).strip(),
+            role=str(parsed.get("role", "")).strip(),
+            system_prompt=str(parsed.get("system_prompt", "")).strip(),
+            created_by="ai",
+        )
+        return {"ok": True, "avatar": config.to_dict()}
+
+    # --- Group Chat CRUD ---
+
+    @app.get("/api/groups")
+    async def list_groups(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        groups = group_registry.list_groups()
+        return {"ok": True, "groups": [g.to_dict() for g in groups]}
+
+    @app.post("/api/groups")
+    async def create_group(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        name = str(payload.get("name", "")).strip()
+        avatar_ids = payload.get("avatar_ids", [])
+        routing = str(payload.get("routing", "user-directed")).strip()
+        if not name or not avatar_ids:
+            raise HTTPException(status_code=400, detail="name and avatar_ids are required")
+        if not isinstance(avatar_ids, list):
+            raise HTTPException(status_code=400, detail="avatar_ids must be a list")
+        config = group_registry.create_group(name=name, avatar_ids=[str(a) for a in avatar_ids], routing=routing)
+        return {"ok": True, "group": config.to_dict()}
+
+    @app.delete("/api/groups/{group_id}")
+    async def delete_group(
+        group_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        ok = group_registry.delete_group(group_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="group not found")
+        return {"ok": True}
 
     return app
