@@ -10,6 +10,29 @@ export type McpServer = {
   command?: string;
 };
 
+export type Avatar = {
+  id: string;
+  name: string;
+  role: string;
+  avatarUrl: string;
+  pinned: boolean;
+  createdBy: string;
+};
+
+export type SessionItem = {
+  sessionId: string;
+  avatarId: string | null;
+  sessionName: string | null;
+  updatedAt: number;
+};
+
+export type GroupChat = {
+  id: string;
+  name: string;
+  avatarIds: string[];
+  routing: string;
+};
+
 export type Message = {
   id: string;
   role: MsgRole;
@@ -83,6 +106,10 @@ type AppState = {
   planMode: boolean;
   confirmStrategy: ConfirmStrategy;
   mcpServers: McpServer[];
+  avatars: Avatar[];
+  activeAvatarId: string | null;
+  avatarSessions: SessionItem[];
+  groups: GroupChat[];
   setApiBase: (base: string) => void;
   setApiToken: (token: string) => void;
   setSessionId: (id: string) => void;
@@ -95,6 +122,10 @@ type AppState = {
   setPlanMode: (v: boolean) => void;
   setConfirmStrategy: (v: ConfirmStrategy) => void;
   setMcpServers: (servers: McpServer[]) => void;
+  setAvatars: (avatars: Avatar[]) => void;
+  setActiveAvatarId: (id: string | null) => void;
+  setAvatarSessions: (sessions: SessionItem[]) => void;
+  setGroups: (groups: GroupChat[]) => void;
   addMessage: (role: MsgRole, content: string, agentId?: string, provider?: string, model?: string) => void;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
   clearMessages: () => void;
@@ -136,6 +167,10 @@ export const useAppStore = create<AppState>((set) => ({
   planMode: false,
   confirmStrategy: "semi-auto",
   mcpServers: [],
+  avatars: [],
+  activeAvatarId: null,
+  avatarSessions: [],
+  groups: [],
   subAgents: [],
   selectedSubAgent: null,
   codePreview: "",
@@ -153,6 +188,10 @@ export const useAppStore = create<AppState>((set) => ({
   setPlanMode: (planMode) => set({ planMode }),
   setConfirmStrategy: (confirmStrategy) => set({ confirmStrategy }),
   setMcpServers: (mcpServers) => set({ mcpServers }),
+  setAvatars: (avatars) => set({ avatars }),
+  setActiveAvatarId: (activeAvatarId) => set({ activeAvatarId }),
+  setAvatarSessions: (avatarSessions) => set({ avatarSessions }),
+  setGroups: (groups) => set({ groups }),
   addMessage: (role, content, agentId, provider, model) =>
     set((state) => ({
       messages: [...state.messages, { id: uid(), role, content, agentId, provider, model }]
