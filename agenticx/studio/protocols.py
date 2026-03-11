@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""HTTP/SSE protocol models for Studio service adapter."""
+"""HTTP/SSE protocol models for Studio service adapter.
+
+Author: Damon Li
+"""
 
 from __future__ import annotations
 
@@ -30,6 +33,8 @@ class SessionState(BaseModel):
     model: Optional[str] = None
     artifact_paths: List[str] = Field(default_factory=list)
     context_files: List[str] = Field(default_factory=list)
+    avatar_id: Optional[str] = None
+    avatar_name: Optional[str] = None
 
 
 class SseEvent(BaseModel):
