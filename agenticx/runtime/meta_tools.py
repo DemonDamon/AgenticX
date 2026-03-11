@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Meta-Agent tools for orchestrating sub-agent teams."""
+"""Meta-Agent tools for orchestrating sub-agent teams.
+
+Author: Damon Li
+"""
 
 from __future__ import annotations
 
@@ -244,6 +247,22 @@ META_AGENT_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "delegate_to_avatar",
+            "description": "Delegate a task to a specific avatar. The avatar will execute in its own workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "avatar_id": {"type": "string", "description": "Target avatar ID."},
+                    "task": {"type": "string", "description": "Task description for the avatar."},
+                },
+                "required": ["avatar_id", "task"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 
@@ -383,5 +402,23 @@ async def dispatch_meta_tool_async(
         except Exception as exc:
             return json.dumps({"ok": False, "error": f"memory search failed: {exc}"}, ensure_ascii=False)
         return json.dumps({"ok": True, "matches": rows}, ensure_ascii=False)
+
+    if name == "delegate_to_avatar":
+        avatar_id = str(arguments.get("avatar_id", "")).strip()
+        task = str(arguments.get("task", "")).strip()
+        if not avatar_id or not task:
+            return json.dumps({"ok": False, "error": "avatar_id and task are required"}, ensure_ascii=False)
+        from agenticx.avatar.registry import AvatarRegistry
+        registry = AvatarRegistry()
+        avatar = registry.get_avatar(avatar_id)
+        if avatar is None:
+            return json.dumps({"ok": False, "error": f"avatar not found: {avatar_id}"}, ensure_ascii=False)
+        result = await team_manager.spawn_subagent(
+            name=avatar.name,
+            role=avatar.role or "delegated avatar",
+            task=task,
+            source_tool_call_id=str(arguments.get("__tool_call_id", "")).strip(),
+        )
+        return json.dumps(result, ensure_ascii=False)
 
     return json.dumps({"ok": False, "error": f"unknown meta tool: {name}"}, ensure_ascii=False)

@@ -59,6 +59,21 @@ def _build_todo_context(session: StudioSession) -> str:
     return f"### Todo（当前会话）\n{rendered}\n"
 
 
+def _build_avatars_context() -> str:
+    try:
+        from agenticx.avatar.registry import AvatarRegistry
+        registry = AvatarRegistry()
+        avatars = registry.list_avatars()
+    except Exception:
+        avatars = []
+    if not avatars:
+        return "### Avatars (0)\n- (no avatars configured)\n"
+    lines = [f"### Avatars ({len(avatars)})"]
+    for avatar in avatars:
+        lines.append(f"- {avatar.name} (id={avatar.id}): {avatar.role or 'general'}")
+    return "\n".join(lines) + "\n"
+
+
 def _build_workspace_context_block() -> str:
     workspace = load_workspace_context()
     parts = [
@@ -92,6 +107,7 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
     workspace_context = _build_workspace_context_block()
     skills_context = _build_skills_context()
     mcp_context = _build_mcps_context(session)
+    avatars_context = _build_avatars_context()
     todo_context = _build_todo_context(session)
     mode_line = (
         "## 当前工作模式\n- interactive：可与用户多轮澄清，强调可控执行。\n\n"
@@ -142,6 +158,11 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "## 已注册能力\n"
         f"{skills_context}"
         f"{mcp_context}\n"
+        f"{avatars_context}\n"
+        "## 分身协作\n"
+        "- 使用 `delegate_to_avatar` 将任务委派给特定分身，分身在自己的 workspace 中执行。\n"
+        "- 委派前先查看 Avatars 列表确认目标分身存在。\n"
+        "- 委派结果会通过子智能体事件流返回。\n\n"
         f"{todo_context}\n"
         "## 当前会话上下文\n"
         f"- provider: {session.provider_name or 'default'}\n"
