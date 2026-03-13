@@ -50,12 +50,14 @@ class ManagedSession:
             self.team_manager = AgentTeamManager(
                 llm_factory=llm_factory,
                 base_session=self.studio_session,
+                owner_session_id=self.session_id,
                 event_emitter=event_emitter,
                 summary_sink=summary_sink,
             )
         else:
             self.team_manager.llm_factory = llm_factory
             self.team_manager.base_session = self.studio_session
+            self.team_manager.owner_session_id = self.session_id
             self.team_manager.event_emitter = event_emitter
             self.team_manager.summary_sink = summary_sink
         return self.team_manager
