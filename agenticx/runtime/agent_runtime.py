@@ -311,6 +311,11 @@ class AgentRuntime:
         self.hooks = hooks or HookRegistry()
         self.compactor = ContextCompactor(llm)
         self.loop_detector = LoopDetector()
+        try:
+            from agenticx.runtime.hooks.memory_hook import MemoryHook
+            self.hooks.register(MemoryHook(), priority=-10)
+        except Exception:
+            pass
 
     async def run_turn(
         self,
