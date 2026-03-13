@@ -75,18 +75,23 @@ class SubAgentContext:
 
 class AgentTeamManager:
     """Manage a pool of sub-agents with isolated context and bounded concurrency."""
+    _registry: Dict[str, "AgentTeamManager"] = {}
 
     def __init__(
         self,
         *,
         llm_factory: Callable[[], Any],
         base_session: StudioSession,
+        owner_session_id: Optional[str] = None,
         event_emitter: Optional[EventEmitter] = None,
         summary_sink: Optional[SummarySink] = None,
         max_concurrent_subagents: int = 4,
         resource_monitor: Optional[ResourceMonitor] = None,
         spawn_config: Optional[SpawnConfig] = None,
     ) -> None:
+        self._manager_id = uuid.uuid4().hex
+        AgentTeamManager._registry[self._manager_id] = self
+        self.owner_session_id = (owner_session_id or "").strip() or None
         self.llm_factory = llm_factory
         self.base_session = base_session
         self.event_emitter = event_emitter
@@ -102,6 +107,85 @@ class AgentTeamManager:
         self._agent_sessions: Dict[str, StudioSession] = {}
         self._archived_agents: Dict[str, SubAgentContext] = {}
         self._archive_limit = 200
+
+    @classmethod
+    def collect_global_statuses(cls, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Collect merged statuses across all managers as a fallback."""
+        merged: Dict[str, Dict[str, Any]] = {}
+        stale_ids: List[str] = []
+        sid = (session_id or "").strip() or None
+        for manager_id, manager in cls._registry.items():
+            if manager is None:
+                stale_ids.append(manager_id)
+                continue
+            if sid is not None and manager.owner_session_id != sid:
+                continue
+            payload = manager.get_status()
+            if not payload.get("ok"):
+                continue
+            for item in payload.get("subagents", []) or []:
+                aid = str(item.get("agent_id", "")).strip()
+                if not aid:
+                    continue
+                prev = merged.get(aid)
+                if prev is None:
+                    merged[aid] = item
+                    continue
+                prev_status = str(prev.get("status", ""))
+                curr_status = str(item.get("status", ""))
+                active = {"running", "pending"}
+                if curr_status in active and prev_status not in active:
+                    merged[aid] = item
+                elif curr_status in active and prev_status in active:
+                    prev_updated = float(prev.get("updated_at", 0) or 0)
+                    curr_updated = float(item.get("updated_at", 0) or 0)
+                    if curr_updated >= prev_updated:
+                        merged[aid] = item
+        for manager_id in stale_ids:
+            cls._registry.pop(manager_id, None)
+        return list(merged.values())
+
+    @classmethod
+    def lookup_global_status(cls, agent_id: str, session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        aid = (agent_id or "").strip()
+        if not aid:
+            return None
+        sid = (session_id or "").strip() or None
+        for manager in cls._registry.values():
+            if manager is None:
+                continue
+            if sid is not None and manager.owner_session_id != sid:
+                continue
+            payload = manager.get_status(aid)
+            if payload.get("ok"):
+                return payload.get("subagent")
+        return None
+
+    @classmethod
+    def find_manager_for_agent(
+        cls,
+        agent_id: str,
+        *,
+        include_archived: bool = True,
+        session_id: Optional[str] = None,
+    ) -> Optional["AgentTeamManager"]:
+        aid = (agent_id or "").strip()
+        if not aid:
+            return None
+        sid = (session_id or "").strip() or None
+        for manager in cls._registry.values():
+            if manager is None:
+                continue
+            if sid is not None and manager.owner_session_id != sid:
+                continue
+            if aid in manager._agents:
+                return manager
+            if include_archived and aid in manager._archived_agents:
+                return manager
+        return None
+
+    def _unregister(self) -> None:
+        AgentTeamManager._registry.pop(self._manager_id, None)
 
     def _build_isolated_session(self) -> StudioSession:
         session = StudioSession(
@@ -176,7 +260,8 @@ class AgentTeamManager:
             f"{parent_section}"
             "## 执行要求\n"
             "- 先给出你即将执行的最小下一步，再调用工具。\n"
-            "- 遇到歧义或高风险操作时，先 ask_user 再继续。\n"
+            "- 在 Desktop 服务模式下，不要要求用户输入 A/B，也不要调用不存在的 `confirm_*` 工具。\n"
+            "- 需要确认高风险命令时，直接发起真实工具调用（如 bash_exec）；系统会自动弹出 confirm_required。\n"
             "- 若用户没有明确给出落盘目录/路径：必须先提出建议路径并征求用户同意，再写文件。\n"
             "- 只有在收到工具返回 `OK: wrote ...` / `OK: edited ...` / `OK: generated ...` 后，才能宣称“已生成/已落盘”。\n"
             "- 对外汇报文件产出时，优先引用工具返回的绝对路径；若未拿到成功返回，必须明确说明“尚未写入磁盘”。\n"
@@ -454,6 +539,13 @@ class AgentTeamManager:
         return result
 
     def get_status(self, agent_id: Optional[str] = None) -> Dict[str, Any]:
+        _log.debug(
+            "[get_status] tm_id=%s, _agents=%s, _archived=%s, query_agent_id=%s",
+            id(self),
+            list(self._agents.keys()),
+            list(self._archived_agents.keys()),
+            agent_id,
+        )
         if agent_id:
             context = self._agents.get(agent_id)
             if context is None:
@@ -484,6 +576,7 @@ class AgentTeamManager:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
         self._cancelled.clear()
+        self._unregister()
 
     def shutdown_now(self) -> None:
         for task in list(self._tasks.values()):
@@ -491,8 +584,18 @@ class AgentTeamManager:
                 task.cancel()
         self._tasks.clear()
         self._cancelled.clear()
+        self._unregister()
 
     def _serialize_status(self, context: SubAgentContext) -> Dict[str, Any]:
+        pending_confirm = None
+        if context.confirm_gate and context.confirm_gate.last_request:
+            req = context.confirm_gate.last_request
+            if context.confirm_gate._pending.get(str(req.get("id", ""))):
+                pending_confirm = {
+                    "request_id": req.get("id", ""),
+                    "question": req.get("question", ""),
+                    "context": req.get("context"),
+                }
         return {
             "agent_id": context.agent_id,
             "name": context.name,
@@ -508,6 +611,7 @@ class AgentTeamManager:
             "mode": context.mode,
             "cleanup": context.cleanup,
             "spawn_tree_path": context.spawn_tree_path,
+            "pending_confirm": pending_confirm,
         }
 
     def _archive_context(self, context: SubAgentContext) -> None:
@@ -556,7 +660,7 @@ class AgentTeamManager:
             self._agent_sessions[context.agent_id] = session
         setattr(session, "_team_manager", self)
         llm = self.llm_factory()
-        runtime = AgentRuntime(llm, context.confirm_gate, max_tool_rounds=25)
+        runtime = AgentRuntime(llm, context.confirm_gate, max_tool_rounds=25, team_manager=self)
         system_prompt = self._build_subagent_system_prompt(context, session)
         started_at = time.time()
 
@@ -634,11 +738,11 @@ class AgentTeamManager:
             context.context_files = dict(session.context_files)
             context.result_summary = self._build_result_summary(context)
             artifact_keys = [str(k) for k in context.artifacts.keys()]
-            if artifact_keys:
-                self.base_session.scratchpad[f"subagent_result::{context.agent_id}"] = (
-                    f"[{context.name}] 状态={context.status.value}, "
-                    f"产出文件: {', '.join(artifact_keys[:20])}"
-                )
+            self.base_session.scratchpad[f"subagent_result::{context.agent_id}"] = (
+                f"[{context.name}] 状态={context.status.value}, "
+                f"摘要: {(context.result_summary or '(无)')[:500]}, "
+                f"产出文件: {', '.join(artifact_keys[:20]) if artifact_keys else '(无)'}"
+            )
             self._tasks.pop(context.agent_id, None)
             if context.mode != "session" or context.cleanup == "delete":
                 self._agent_sessions.pop(context.agent_id, None)

@@ -29,6 +29,7 @@ from agenticx.runtime.events import RuntimeEvent
 from agenticx.runtime.loop_controller import LoopController
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS
 from agenticx.runtime.prompts.meta_agent import build_meta_agent_system_prompt
+from agenticx.runtime.team_manager import AgentTeamManager
 from agenticx.studio.protocols import ChatRequest, ConfirmResponse, SessionState, SseEvent
 from agenticx.studio.session_manager import SessionManager
 from agenticx.tools.mcp_hub import MCPHub
@@ -331,10 +332,19 @@ def create_studio_app() -> FastAPI:
             await event_queue.put(event)
 
         async def _on_subagent_summary(summary: str, context) -> None:
-            # Use assistant note instead of raw tool role to avoid dangling tool messages
-            # in later turns (some providers strictly validate tool message ordering).
-            session.agent_messages.append({"role": "assistant", "content": f"子智能体汇总:\n{summary}"})
-            session.chat_history.append({"role": "assistant", "content": f"子智能体汇总:\n{summary}"})
+            # IMPORTANT: do NOT append async summary into agent_messages.
+            # It can interleave with assistant(tool_calls)->tool blocks and break
+            # strict providers that require contiguous tool responses.
+            agent_id = getattr(context, "agent_id", "unknown")
+            agent_name = getattr(context, "name", agent_id)
+            status_val = getattr(getattr(context, "status", None), "value", "unknown")
+            session.chat_history.append({
+                "role": "assistant",
+                "content": f"子智能体汇总:\n[{agent_name}] (ID: {agent_id}) 状态={status_val}\n{summary}",
+            })
+            session.scratchpad[f"subagent_result::{agent_id}"] = (
+                f"[{agent_name}] 状态={status_val}, 摘要: {(summary or '(无)')[:500]}"
+            )
 
         team_manager = managed.get_or_create_team(
             llm_factory=_resolve_llm,
@@ -342,7 +352,14 @@ def create_studio_app() -> FastAPI:
             summary_sink=_on_subagent_summary,
         )
         setattr(session, "_team_manager", team_manager)
-        runtime = AgentRuntime(llm, managed.get_confirm_gate("meta"))
+        logger.debug(
+            "[chat] sid=%s managed.tm=%s session._tm=%s tm._agents=%s",
+            payload.session_id,
+            id(managed.team_manager),
+            id(getattr(session, "_team_manager", None)),
+            list(team_manager._agents.keys()) if team_manager else [],
+        )
+        runtime = AgentRuntime(llm, managed.get_confirm_gate("meta"), team_manager=team_manager)
 
         async def _event_stream() -> AsyncGenerator[str, None]:
             runtime_task: "asyncio.Task[None] | None" = None
@@ -428,7 +445,8 @@ def create_studio_app() -> FastAPI:
 
         session = managed.studio_session
         llm = ProviderResolver.resolve(provider_name=session.provider_name, model=session.model_name)
-        runtime = AgentRuntime(llm, managed.get_confirm_gate("meta"))
+        loop_tm = managed.team_manager
+        runtime = AgentRuntime(llm, managed.get_confirm_gate("meta"), team_manager=loop_tm)
         controller = LoopController(max_iterations=max_iterations, completion_promise=completion_promise)
 
         async def _loop_stream() -> AsyncGenerator[str, None]:
@@ -467,11 +485,26 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(session_id)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
-        if managed.team_manager is None:
-            raise HTTPException(status_code=404, detail="agent team not initialized")
-        result = await managed.team_manager.cancel_subagent(agent_id)
+        team_manager = managed.team_manager
+        if team_manager is None:
+            team_manager = AgentTeamManager.find_manager_for_agent(
+                agent_id,
+                include_archived=False,
+                session_id=session_id,
+            )
+            if team_manager is None:
+                raise HTTPException(status_code=404, detail="agent team not initialized")
+        result = await team_manager.cancel_subagent(agent_id)
         if not result.get("ok"):
-            raise HTTPException(status_code=404, detail=result.get("message", "subagent not found"))
+            fallback_manager = AgentTeamManager.find_manager_for_agent(
+                agent_id,
+                include_archived=False,
+                session_id=session_id,
+            )
+            if fallback_manager is not None and fallback_manager is not team_manager:
+                result = await fallback_manager.cancel_subagent(agent_id)
+            if not result.get("ok"):
+                raise HTTPException(status_code=404, detail=result.get("message", "subagent not found"))
         return result
 
     @app.get("/api/subagents/status")
@@ -484,8 +517,36 @@ def create_studio_app() -> FastAPI:
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
         if managed.team_manager is None:
+            logger.debug("[subagents/status] sid=%s tm=None", session_id)
+            global_rows = AgentTeamManager.collect_global_statuses(session_id=session_id)
+            if global_rows:
+                logger.warning(
+                    "[subagents/status] sid=%s tm=None fallback global=%d",
+                    session_id,
+                    len(global_rows),
+                )
+                return {"ok": True, "subagents": global_rows}
             return {"ok": True, "subagents": []}
+        logger.debug(
+            "[subagents/status] sid=%s tm=%s agents=%s",
+            session_id,
+            id(managed.team_manager),
+            list(managed.team_manager._agents.keys()),
+        )
         status_payload = managed.team_manager.get_status()
+        if (
+            isinstance(status_payload, dict)
+            and status_payload.get("ok")
+            and not (status_payload.get("subagents") or [])
+        ):
+            global_rows = AgentTeamManager.collect_global_statuses(session_id=session_id)
+            if global_rows:
+                logger.warning(
+                    "[subagents/status] sid=%s local empty, fallback global=%d",
+                    session_id,
+                    len(global_rows),
+                )
+                status_payload = {"ok": True, "subagents": global_rows}
         return status_payload if isinstance(status_payload, dict) else {"ok": True, "subagents": []}
 
     @app.post("/api/subagent/retry")
@@ -502,14 +563,32 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(session_id)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
-        if managed.team_manager is None:
-            raise HTTPException(status_code=404, detail="agent team not initialized")
-        result = await managed.team_manager.retry_subagent(
+        team_manager = managed.team_manager
+        if team_manager is None:
+            team_manager = AgentTeamManager.find_manager_for_agent(
+                agent_id,
+                include_archived=True,
+                session_id=session_id,
+            )
+            if team_manager is None:
+                raise HTTPException(status_code=404, detail="agent team not initialized")
+        result = await team_manager.retry_subagent(
             agent_id,
             str(refined_task) if isinstance(refined_task, str) and refined_task.strip() else None,
         )
         if not result.get("ok"):
-            raise HTTPException(status_code=400, detail=result.get("message", "retry failed"))
+            fallback_manager = AgentTeamManager.find_manager_for_agent(
+                agent_id,
+                include_archived=True,
+                session_id=session_id,
+            )
+            if fallback_manager is not None and fallback_manager is not team_manager:
+                result = await fallback_manager.retry_subagent(
+                    agent_id,
+                    str(refined_task) if isinstance(refined_task, str) and refined_task.strip() else None,
+                )
+            if not result.get("ok"):
+                raise HTTPException(status_code=400, detail=result.get("message", "retry failed"))
         return result
 
     @app.get("/api/mcp/servers")
