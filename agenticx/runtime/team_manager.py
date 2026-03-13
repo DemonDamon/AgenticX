@@ -116,6 +116,25 @@ class AgentTeamManager:
         session.scratchpad = dict(getattr(self.base_session, "scratchpad", {}) or {})
         return session
 
+    def _build_parent_context_summary(self) -> str:
+        """Build a truncated summary of the parent session's recent chat history."""
+        chat_history = getattr(self.base_session, "chat_history", None) or []
+        recent = chat_history[-10:]
+        lines: List[str] = []
+        for msg in recent:
+            role = msg.get("role", "")
+            if role not in ("user", "assistant"):
+                continue
+            content = str(msg.get("content", ""))[:200]
+            lines.append(f"- {role}: {content}")
+        if not lines:
+            return ""
+        block = "\n".join(lines)
+        while len(block) > 800 and lines:
+            lines.pop(0)
+            block = "\n".join(lines)
+        return block
+
     def _build_subagent_system_prompt(self, context: SubAgentContext, session: StudioSession) -> str:
         workspace_dir = (
             (session.workspace_dir or "").strip()
@@ -127,6 +146,12 @@ class AgentTeamManager:
             "\n".join(f"- {item}" for item in context_file_keys[:20])
             if context_file_keys
             else "(empty)"
+        )
+        parent_summary = self._build_parent_context_summary()
+        parent_section = (
+            f"## 父智能体对话上下文（最近摘要）\n{parent_summary}\n\n"
+            if parent_summary
+            else ""
         )
         return (
             "你是 AgenticX Studio 的子智能体。\n"
@@ -143,6 +168,7 @@ class AgentTeamManager:
             "- 若路径不确定，先用最小范围的 list/read 确认后再操作。\n\n"
             "## 已注入上下文文件\n"
             f"{context_hint}\n\n"
+            f"{parent_section}"
             "## 执行要求\n"
             "- 先给出你即将执行的最小下一步，再调用工具。\n"
             "- 遇到歧义或高风险操作时，先 ask_user 再继续。\n"
@@ -574,6 +600,12 @@ class AgentTeamManager:
             context.artifacts = dict(session.artifacts)
             context.context_files = dict(session.context_files)
             context.result_summary = self._build_result_summary(context)
+            artifact_keys = [str(k) for k in context.artifacts.keys()]
+            if artifact_keys:
+                self.base_session.scratchpad[f"subagent_result::{context.agent_id}"] = (
+                    f"[{context.name}] 状态={context.status.value}, "
+                    f"产出文件: {', '.join(artifact_keys[:20])}"
+                )
             self._tasks.pop(context.agent_id, None)
             if context.mode != "session" or context.cleanup == "delete":
                 self._agent_sessions.pop(context.agent_id, None)
