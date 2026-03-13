@@ -398,7 +398,7 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("create-session", async (_event, payload: { avatar_id?: string; name?: string }) => {
+  ipcMain.handle("create-session", async (_event, payload: { avatar_id?: string; name?: string; inherit_from_session_id?: string }) => {
     try {
       const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions`, {
         method: "POST",
@@ -426,6 +426,26 @@ function registerIpc(): void {
       return await resp.json();
     } catch (err) {
       return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("load-session-messages", async (_event, sessionId: string) => {
+    const sid = String(sessionId || "").trim();
+    if (!sid) return { ok: false, messages: [], error: "sessionId is required" };
+    try {
+      const resp = await fetch(
+        `http://127.0.0.1:${String(apiPort)}/api/session/messages?session_id=${encodeURIComponent(sid)}`,
+        {
+          headers: { "x-agx-desktop-token": apiToken },
+        }
+      );
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, messages: [], error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, messages: [], error: String(err) };
     }
   });
 
@@ -481,6 +501,24 @@ function registerIpc(): void {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
         body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const b = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${b.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("update-group", async (_event, payload: { id: string; name?: string; avatar_ids?: string[]; routing?: string }) => {
+    const { id, ...body } = payload;
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/groups/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify(body),
       });
       if (!resp.ok) {
         const b = await resp.text().catch(() => "");
