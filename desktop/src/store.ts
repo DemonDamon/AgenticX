@@ -33,6 +33,16 @@ export type GroupChat = {
   routing: string;
 };
 
+export type ChatPane = {
+  id: string;
+  avatarId: string | null;
+  avatarName: string;
+  sessionId: string;
+  messages: Message[];
+  historyOpen: boolean;
+  contextInherited: boolean;
+};
+
 export type Message = {
   id: string;
   role: MsgRole;
@@ -110,6 +120,8 @@ type AppState = {
   activeAvatarId: string | null;
   avatarSessions: SessionItem[];
   groups: GroupChat[];
+  panes: ChatPane[];
+  activePaneId: string;
   setApiBase: (base: string) => void;
   setApiToken: (token: string) => void;
   setSessionId: (id: string) => void;
@@ -126,6 +138,15 @@ type AppState = {
   setActiveAvatarId: (id: string | null) => void;
   setAvatarSessions: (sessions: SessionItem[]) => void;
   setGroups: (groups: GroupChat[]) => void;
+  setActivePaneId: (id: string) => void;
+  addPane: (avatarId: string | null, avatarName: string, sessionId: string) => string;
+  removePane: (paneId: string) => void;
+  addPaneMessage: (paneId: string, role: MsgRole, content: string, agentId?: string, provider?: string, model?: string) => void;
+  clearPaneMessages: (paneId: string) => void;
+  setPaneSessionId: (paneId: string, sessionId: string) => void;
+  setPaneMessages: (paneId: string, messages: Message[]) => void;
+  togglePaneHistory: (paneId: string) => void;
+  setPaneContextInherited: (paneId: string, inherited: boolean) => void;
   addMessage: (role: MsgRole, content: string, agentId?: string, provider?: string, model?: string) => void;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
   clearMessages: () => void;
@@ -152,6 +173,18 @@ function uid(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function makeDefaultPane(): ChatPane {
+  return {
+    id: "pane-meta",
+    avatarId: null,
+    avatarName: "Meta-Agent",
+    sessionId: "",
+    messages: [],
+    historyOpen: false,
+    contextInherited: false,
+  };
+}
+
 export const useAppStore = create<AppState>((set) => ({
   apiBase: "",
   apiToken: "",
@@ -171,6 +204,8 @@ export const useAppStore = create<AppState>((set) => ({
   activeAvatarId: null,
   avatarSessions: [],
   groups: [],
+  panes: [makeDefaultPane()],
+  activePaneId: "pane-meta",
   subAgents: [],
   selectedSubAgent: null,
   codePreview: "",
@@ -192,10 +227,80 @@ export const useAppStore = create<AppState>((set) => ({
   setActiveAvatarId: (activeAvatarId) => set({ activeAvatarId }),
   setAvatarSessions: (avatarSessions) => set({ avatarSessions }),
   setGroups: (groups) => set({ groups }),
-  addMessage: (role, content, agentId, provider, model) =>
+  setActivePaneId: (activePaneId) => set({ activePaneId }),
+  addPane: (avatarId, avatarName, sessionId) => {
+    const paneId = uid();
     set((state) => ({
-      messages: [...state.messages, { id: uid(), role, content, agentId, provider, model }]
+      panes: [
+        ...state.panes,
+        {
+          id: paneId,
+          avatarId,
+          avatarName,
+          sessionId,
+          messages: [],
+          historyOpen: false,
+          contextInherited: false,
+        },
+      ],
+      activePaneId: paneId,
+    }));
+    return paneId;
+  },
+  removePane: (paneId) =>
+    set((state) => {
+      if (state.panes.length <= 1) return state;
+      const nextPanes = state.panes.filter((pane) => pane.id !== paneId);
+      if (nextPanes.length === state.panes.length) return state;
+      const nextActive =
+        state.activePaneId === paneId
+          ? nextPanes[Math.max(0, nextPanes.length - 1)]?.id ?? nextPanes[0].id
+          : state.activePaneId;
+      return { panes: nextPanes, activePaneId: nextActive };
+    }),
+  addPaneMessage: (paneId, role, content, agentId, provider, model) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              messages: [...pane.messages, { id: uid(), role, content, agentId, provider, model }],
+            }
+          : pane
+      ),
     })),
+  clearPaneMessages: (paneId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, messages: [] } : pane)),
+    })),
+  setPaneSessionId: (paneId, sessionId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, sessionId } : pane)),
+    })),
+  setPaneMessages: (paneId, messages) =>
+    set((state) => ({
+      panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, messages } : pane)),
+    })),
+  togglePaneHistory: (paneId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, historyOpen: !pane.historyOpen } : pane
+      ),
+    })),
+  setPaneContextInherited: (paneId, inherited) =>
+    set((state) => ({
+      panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, contextInherited: inherited } : pane)),
+    })),
+  addMessage: (role, content, agentId, provider, model) =>
+    set((state) => {
+      const nextMessage: Message = { id: uid(), role, content, agentId, provider, model };
+      return {
+        messages: [...state.messages, nextMessage],
+        panes: state.panes.map((pane) =>
+          pane.id === state.activePaneId ? { ...pane, messages: [...pane.messages, nextMessage] } : pane
+        ),
+      };
+    }),
   insertMessageAfter: (afterId, msg) => {
     const newId = uid();
     set((state) => {
@@ -203,11 +308,28 @@ export const useAppStore = create<AppState>((set) => ({
       const insertAt = idx >= 0 ? idx + 1 : state.messages.length;
       const next = [...state.messages];
       next.splice(insertAt, 0, { ...msg, id: newId });
-      return { messages: next };
+      const activePane = state.panes.find((pane) => pane.id === state.activePaneId);
+      const paneMessages = activePane?.messages ?? [];
+      const paneIdx = paneMessages.findIndex((m) => m.id === afterId);
+      const paneInsertAt = paneIdx >= 0 ? paneIdx + 1 : paneMessages.length;
+      const nextPaneMessages = [...paneMessages];
+      nextPaneMessages.splice(paneInsertAt, 0, { ...msg, id: newId });
+      return {
+        messages: next,
+        panes: state.panes.map((pane) =>
+          pane.id === state.activePaneId ? { ...pane, messages: nextPaneMessages } : pane
+        ),
+      };
     });
     return newId;
   },
-  clearMessages: () => set({ messages: [] }),
+  clearMessages: () =>
+    set((state) => ({
+      messages: [],
+      panes: state.panes.map((pane) =>
+        pane.id === state.activePaneId ? { ...pane, messages: [] } : pane
+      ),
+    })),
   addSubAgent: (item) =>
     set((state) => {
       const exists = state.subAgents.some((sub) => sub.id === item.id);

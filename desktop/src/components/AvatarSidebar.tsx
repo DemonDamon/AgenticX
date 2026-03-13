@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAppStore, type Avatar, type SessionItem, type GroupChat } from "../store";
+import { useAppStore, type Avatar, type GroupChat } from "../store";
 import { AvatarCreateDialog } from "./AvatarCreateDialog";
 
 function avatarInitials(name: string): string {
@@ -20,73 +20,30 @@ function avatarColor(id: string): string {
 }
 
 type ContextMenuState = { x: number; y: number; avatarId: string } | null;
+type GroupContextMenuState = { x: number; y: number; groupId: string } | null;
 
 export function AvatarSidebar() {
   const avatars = useAppStore((s) => s.avatars);
   const activeAvatarId = useAppStore((s) => s.activeAvatarId);
   const setAvatars = useAppStore((s) => s.setAvatars);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
-  const sessionId = useAppStore((s) => s.sessionId);
-  const apiBase = useAppStore((s) => s.apiBase);
-  const apiToken = useAppStore((s) => s.apiToken);
-  const setSessionId = useAppStore((s) => s.setSessionId);
-  const clearMessages = useAppStore((s) => s.clearMessages);
-  const avatarSessions = useAppStore((s) => s.avatarSessions);
-  const setAvatarSessions = useAppStore((s) => s.setAvatarSessions);
+  const panes = useAppStore((s) => s.panes);
+  const activePaneId = useAppStore((s) => s.activePaneId);
+  const addPane = useAppStore((s) => s.addPane);
+  const removePane = useAppStore((s) => s.removePane);
+  const setActivePaneId = useAppStore((s) => s.setActivePaneId);
+  const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const groups = useAppStore((s) => s.groups);
   const setGroups = useAppStore((s) => s.setGroups);
   const [createOpen, setCreateOpen] = useState(false);
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
+  const [groupEditTarget, setGroupEditTarget] = useState<GroupChat | null>(null);
+  const [groupEditReadOnly, setGroupEditReadOnly] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+  const [groupContextMenu, setGroupContextMenu] = useState<GroupContextMenuState>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  const refreshSessions = useCallback(async (avatarId: string | null) => {
-    if (!avatarId) {
-      setAvatarSessions([]);
-      return;
-    }
-    try {
-      const result = await window.agenticxDesktop.listSessions(avatarId);
-      if (result.ok && Array.isArray(result.sessions)) {
-        setAvatarSessions(
-          result.sessions.map((s) => ({
-            sessionId: s.session_id,
-            avatarId: s.avatar_id,
-            sessionName: s.session_name,
-            updatedAt: s.updated_at,
-          }))
-        );
-      }
-    } catch {
-      setAvatarSessions([]);
-    }
-  }, [setAvatarSessions]);
-
-  useEffect(() => {
-    void refreshSessions(activeAvatarId);
-  }, [activeAvatarId, refreshSessions]);
-
-  const handleCreateSession = async (avatarId: string) => {
-    const result = await window.agenticxDesktop.createSession({ avatar_id: avatarId });
-    if (result.ok && result.session_id) {
-      await refreshSessions(avatarId);
-      clearMessages();
-      setSessionId(result.session_id);
-    }
-  };
-
-  const handleSwitchSession = async (sid: string, avatarId: string) => {
-    clearMessages();
-    try {
-      const resp = await fetch(`${apiBase}/api/session?avatar_id=${encodeURIComponent(avatarId)}&session_id=${encodeURIComponent(sid)}`, {
-        headers: { "x-agx-desktop-token": apiToken },
-      });
-      const data = await resp.json();
-      setSessionId(data.session_id);
-    } catch {
-      // keep previous session on failure
-    }
-  };
+  const groupMenuRef = useRef<HTMLDivElement>(null);
+  const openingRef = useRef(false);
 
   const refreshAvatars = useCallback(async () => {
     const result = await window.agenticxDesktop.listAvatars();
@@ -130,9 +87,34 @@ export function AvatarSidebar() {
         setContextMenu(null);
       }
     };
+    const dismissByEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
     window.addEventListener("mousedown", dismiss);
-    return () => window.removeEventListener("mousedown", dismiss);
+    window.addEventListener("keydown", dismissByEsc);
+    return () => {
+      window.removeEventListener("mousedown", dismiss);
+      window.removeEventListener("keydown", dismissByEsc);
+    };
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!groupContextMenu) return;
+    const dismiss = (e: MouseEvent) => {
+      if (groupMenuRef.current && !groupMenuRef.current.contains(e.target as Node)) {
+        setGroupContextMenu(null);
+      }
+    };
+    const dismissByEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setGroupContextMenu(null);
+    };
+    window.addEventListener("mousedown", dismiss);
+    window.addEventListener("keydown", dismissByEsc);
+    return () => {
+      window.removeEventListener("mousedown", dismiss);
+      window.removeEventListener("keydown", dismissByEsc);
+    };
+  }, [groupContextMenu]);
 
   const handleCreate = async (data: { name: string; role: string; systemPrompt: string }) => {
     await window.agenticxDesktop.createAvatar({
@@ -143,21 +125,64 @@ export function AvatarSidebar() {
     await refreshAvatars();
   };
 
-  const switchToAvatar = async (avatarId: string | null) => {
-    if (avatarId === activeAvatarId) return;
-    clearMessages();
-    setActiveAvatarId(avatarId);
-    const params = new URLSearchParams();
-    if (avatarId) params.set("avatar_id", avatarId);
-    try {
-      const resp = await fetch(`${apiBase}/api/session?${params.toString()}`, {
-        headers: { "x-agx-desktop-token": apiToken },
-      });
-      const data = await resp.json();
-      setSessionId(data.session_id);
-    } catch {
-      // keep previous session on failure
+  const openOrFocusPane = (avatarId: string | null, avatarName: string) => {
+    const existing = panes.find((item) => item.avatarId === avatarId);
+    if (existing) {
+      setActivePaneId(existing.id);
+      setActiveAvatarId(avatarId);
+      return;
     }
+
+    if (openingRef.current) return;
+    openingRef.current = true;
+
+    const paneId = addPane(avatarId, avatarName, "");
+    setActivePaneId(paneId);
+    setActiveAvatarId(avatarId);
+
+    void (async () => {
+      try {
+        const created = await window.agenticxDesktop.createSession({
+          avatar_id: avatarId ?? undefined,
+        });
+        if (created.ok && created.session_id) {
+          setPaneSessionId(paneId, created.session_id);
+        }
+      } finally {
+        openingRef.current = false;
+      }
+    })();
+  };
+
+  const openOrFocusGroupPane = (group: { id: string; name: string }) => {
+    const groupAvatarId = `group:${group.id}`;
+    const existing = panes.find((item) => item.avatarId === groupAvatarId);
+    if (existing) {
+      setActivePaneId(existing.id);
+      setActiveAvatarId(null);
+      return;
+    }
+
+    if (openingRef.current) return;
+    openingRef.current = true;
+
+    const paneId = addPane(groupAvatarId, `群聊 · ${group.name}`, "");
+    setActivePaneId(paneId);
+    setActiveAvatarId(null);
+
+    void (async () => {
+      try {
+        const created = await window.agenticxDesktop.createSession({
+          avatar_id: groupAvatarId,
+          name: group.name,
+        });
+        if (created.ok && created.session_id) {
+          setPaneSessionId(paneId, created.session_id);
+        }
+      } finally {
+        openingRef.current = false;
+      }
+    })();
   };
 
   const handleContextAction = async (action: string) => {
@@ -171,12 +196,33 @@ export function AvatarSidebar() {
         await refreshAvatars();
       }
     } else if (action === "delete") {
-      await window.agenticxDesktop.deleteAvatar(id);
-      if (activeAvatarId === id) {
-        await switchToAvatar(null);
-      }
-      await refreshAvatars();
+      panes.filter((item) => item.avatarId === id).forEach((item) => removePane(item.id));
+      if (activeAvatarId === id) setActiveAvatarId(null);
+      setAvatars(avatars.filter((a) => a.id !== id));
+      void (async () => {
+        await window.agenticxDesktop.deleteAvatar(id);
+        await refreshAvatars();
+      })();
     }
+  };
+
+  const handleGroupContextAction = async (action: "view" | "edit" | "delete") => {
+    if (!groupContextMenu) return;
+    const group = groups.find((item) => item.id === groupContextMenu.groupId);
+    setGroupContextMenu(null);
+    if (!group) return;
+    if (action === "delete") {
+      const groupPaneId = `group:${group.id}`;
+      panes.filter((item) => item.avatarId === groupPaneId).forEach((item) => removePane(item.id));
+      setGroups(groups.filter((g) => g.id !== group.id));
+      void (async () => {
+        await window.agenticxDesktop.deleteGroup(group.id);
+        await refreshGroups();
+      })();
+      return;
+    }
+    setGroupEditReadOnly(action === "view");
+    setGroupEditTarget(group);
   };
 
   const sortedAvatars = useMemo(() => {
@@ -189,6 +235,8 @@ export function AvatarSidebar() {
   return (
     <>
       <aside className="flex h-full w-[220px] min-w-[200px] max-w-[260px] flex-col border-r border-border/60 bg-slate-900/70">
+        {/* macOS traffic-light safe zone */}
+        <div className="drag-region h-[38px] shrink-0" />
         {/* Meta-Agent entry */}
         <button
           className={`flex items-center gap-2.5 border-b border-border/40 px-3 py-2.5 text-left transition ${
@@ -196,7 +244,7 @@ export function AvatarSidebar() {
               ? "bg-cyan-500/10 text-cyan-400"
               : "text-slate-300 hover:bg-slate-800"
           }`}
-          onClick={() => void switchToAvatar(null)}
+          onClick={() => void openOrFocusPane(null, "Meta-Agent")}
         >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 text-xs font-bold text-white">
             M
@@ -226,9 +274,7 @@ export function AvatarSidebar() {
           )}
           {sortedAvatars.map((avatar) => {
             const isActive = activeAvatarId === avatar.id;
-            const sessions = isActive
-              ? avatarSessions.filter((s) => s.avatarId === avatar.id)
-              : [];
+            const hasPane = panes.some((item) => item.avatarId === avatar.id);
             return (
               <div key={avatar.id}>
                 <button
@@ -237,9 +283,10 @@ export function AvatarSidebar() {
                       ? "bg-cyan-500/10 text-cyan-400"
                       : "text-slate-300 hover:bg-slate-800"
                   }`}
-                  onClick={() => void switchToAvatar(avatar.id)}
+                  onClick={() => void openOrFocusPane(avatar.id, avatar.name)}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    setGroupContextMenu(null);
                     setContextMenu({ x: e.clientX, y: e.clientY, avatarId: avatar.id });
                   }}
                 >
@@ -259,6 +306,7 @@ export function AvatarSidebar() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1">
                       <span className="truncate text-sm">{avatar.name}</span>
+                      {hasPane && <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />}
                       {avatar.pinned && <span className="text-[10px] text-amber-400">*</span>}
                     </div>
                     {avatar.role && (
@@ -266,29 +314,6 @@ export function AvatarSidebar() {
                     )}
                   </div>
                 </button>
-                {isActive && (
-                  <div className="border-l-2 border-cyan-500/30 ml-6 py-0.5">
-                    {sessions.map((sess, idx) => (
-                      <button
-                        key={sess.sessionId}
-                        className={`flex w-full items-center gap-1.5 px-3 py-1 text-left text-[11px] transition ${
-                          sessionId === sess.sessionId
-                            ? "text-cyan-300 bg-cyan-500/5"
-                            : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                        }`}
-                        onClick={() => void handleSwitchSession(sess.sessionId, avatar.id)}
-                      >
-                        <span className="truncate">{sess.sessionName || `Session ${idx + 1}`}</span>
-                      </button>
-                    ))}
-                    <button
-                      className="flex w-full items-center gap-1.5 px-3 py-1 text-left text-[11px] text-slate-500 transition hover:text-cyan-400 hover:bg-slate-800/50"
-                      onClick={() => void handleCreateSession(avatar.id)}
-                    >
-                      + 新会话
-                    </button>
-                  </div>
-                )}
               </div>
             );
           })}
@@ -306,21 +331,45 @@ export function AvatarSidebar() {
             </button>
           </div>
           <div className="overflow-y-auto pb-2">
-            {groups.map((group) => (
-              <button
-                key={group.id}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-slate-300 transition hover:bg-slate-800"
-                onClick={() => {/* TODO: switch to group session */}}
-              >
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-600/60 text-[10px] font-bold text-white">
-                  G
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-xs">{group.name}</div>
-                  <div className="truncate text-[10px] text-slate-500">{group.avatarIds.length} avatars</div>
-                </div>
-              </button>
-            ))}
+            {groups.map((group) => {
+              const groupAvatarId = `group:${group.id}`;
+              const hasPane = panes.some((item) => item.avatarId === groupAvatarId);
+              const isActive = panes.some(
+                (item) => item.avatarId === groupAvatarId && item.id === activePaneId
+              );
+              return (
+                <button
+                  key={group.id}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left transition ${
+                    isActive
+                      ? "bg-violet-500/10 text-violet-300"
+                      : "text-slate-300 hover:bg-slate-800"
+                  }`}
+                  onClick={() => void openOrFocusGroupPane(group)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenu(null);
+                    setGroupContextMenu({ x: e.clientX, y: e.clientY, groupId: group.id });
+                  }}
+                >
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-600/60 text-[10px] font-bold text-white">
+                    G
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1">
+                      <div className="truncate text-xs">{group.name}</div>
+                      {hasPane && <span className="h-1.5 w-1.5 rounded-full bg-violet-300" />}
+                    </div>
+                    <div className="truncate text-[10px] text-slate-500">
+                      {group.avatarIds.length} avatars ·{" "}
+                      {group.avatarIds
+                        .map((id) => avatars.find((a) => a.id === id)?.name || id.slice(0, 4))
+                        .join(", ")}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       </aside>
@@ -351,6 +400,33 @@ export function AvatarSidebar() {
         </div>
       )}
 
+      {groupContextMenu && (
+        <div
+          ref={groupMenuRef}
+          className="fixed z-50 min-w-[180px] rounded-lg border border-border bg-panel py-1 shadow-xl"
+          style={{ left: groupContextMenu.x, top: groupContextMenu.y }}
+        >
+          <button
+            className="w-full px-3 py-1.5 text-left text-xs text-slate-300 transition hover:bg-slate-700"
+            onClick={() => void handleGroupContextAction("view")}
+          >
+            查看成员
+          </button>
+          <button
+            className="w-full px-3 py-1.5 text-left text-xs text-slate-300 transition hover:bg-slate-700"
+            onClick={() => void handleGroupContextAction("edit")}
+          >
+            编辑群聊
+          </button>
+          <button
+            className="w-full px-3 py-1.5 text-left text-xs text-rose-400 transition hover:bg-rose-500/10"
+            onClick={() => void handleGroupContextAction("delete")}
+          >
+            删除群聊
+          </button>
+        </div>
+      )}
+
       <AvatarCreateDialog
         open={createOpen}
         onClose={() => {
@@ -361,11 +437,28 @@ export function AvatarSidebar() {
       />
 
       {groupCreateOpen && (
-        <GroupCreateInline
+        <GroupEditorInline
           avatars={avatars}
           onClose={() => setGroupCreateOpen(false)}
-          onCreated={() => {
+          onSaved={() => {
             setGroupCreateOpen(false);
+            void refreshGroups();
+          }}
+        />
+      )}
+
+      {groupEditTarget && (
+        <GroupEditorInline
+          avatars={avatars}
+          initialGroup={groupEditTarget}
+          readOnly={groupEditReadOnly}
+          onClose={() => {
+            setGroupEditTarget(null);
+            setGroupEditReadOnly(false);
+          }}
+          onSaved={() => {
+            setGroupEditTarget(null);
+            setGroupEditReadOnly(false);
             void refreshGroups();
           }}
         />
@@ -374,18 +467,22 @@ export function AvatarSidebar() {
   );
 }
 
-function GroupCreateInline({
+function GroupEditorInline({
   avatars,
+  initialGroup,
+  readOnly,
   onClose,
-  onCreated,
+  onSaved,
 }: {
   avatars: Avatar[];
+  initialGroup?: GroupChat;
+  readOnly?: boolean;
   onClose: () => void;
-  onCreated: () => void;
+  onSaved: () => void;
 }) {
-  const [name, setName] = useState("");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [routing, setRouting] = useState("user-directed");
+  const [name, setName] = useState(initialGroup?.name ?? "");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(initialGroup?.avatarIds ?? []));
+  const [routing, setRouting] = useState(initialGroup?.routing ?? "user-directed");
   const [loading, setLoading] = useState(false);
 
   const toggle = (id: string) => {
@@ -397,16 +494,26 @@ function GroupCreateInline({
     });
   };
 
-  const handleCreate = async () => {
+  const handleSave = async () => {
     if (!name.trim() || selectedIds.size === 0) return;
     setLoading(true);
     try {
-      const result = await window.agenticxDesktop.createGroup({
-        name: name.trim(),
-        avatar_ids: Array.from(selectedIds),
-        routing,
-      });
-      if (result.ok) onCreated();
+      if (initialGroup) {
+        const result = await window.agenticxDesktop.updateGroup({
+          id: initialGroup.id,
+          name: name.trim(),
+          avatar_ids: Array.from(selectedIds),
+          routing,
+        });
+        if (result.ok) onSaved();
+      } else {
+        const result = await window.agenticxDesktop.createGroup({
+          name: name.trim(),
+          avatar_ids: Array.from(selectedIds),
+          routing,
+        });
+        if (result.ok) onSaved();
+      }
     } finally {
       setLoading(false);
     }
@@ -418,13 +525,14 @@ function GroupCreateInline({
         className="w-80 rounded-xl border border-border bg-slate-900 p-4 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-3 text-sm font-semibold text-white">新建群聊</h3>
+        <h3 className="mb-3 text-sm font-semibold text-white">{initialGroup ? "编辑群聊" : "新建群聊"}</h3>
 
         <label className="mb-1 block text-[11px] text-slate-400">群名称</label>
         <input
           className="mb-3 w-full rounded-md border border-border bg-slate-800 px-2.5 py-1.5 text-xs text-white outline-none focus:border-cyan-500"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          disabled={Boolean(readOnly)}
           placeholder="输入群聊名称"
           autoFocus
         />
@@ -443,6 +551,7 @@ function GroupCreateInline({
                 type="checkbox"
                 checked={selectedIds.has(a.id)}
                 onChange={() => toggle(a.id)}
+                disabled={Boolean(readOnly)}
                 className="accent-cyan-500"
               />
               <span className="truncate">{a.name}</span>
@@ -456,6 +565,7 @@ function GroupCreateInline({
           className="mb-4 w-full rounded-md border border-border bg-slate-800 px-2.5 py-1.5 text-xs text-white outline-none focus:border-cyan-500"
           value={routing}
           onChange={(e) => setRouting(e.target.value)}
+          disabled={Boolean(readOnly)}
         >
           <option value="user-directed">User Directed</option>
           <option value="meta-routed">Meta Routed</option>
@@ -469,13 +579,15 @@ function GroupCreateInline({
           >
             取消
           </button>
-          <button
-            className="rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-cyan-500 disabled:opacity-40"
-            disabled={!name.trim() || selectedIds.size === 0 || loading}
-            onClick={() => void handleCreate()}
-          >
-            {loading ? "创建中..." : "创建"}
-          </button>
+          {!readOnly && (
+            <button
+              className="rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-cyan-500 disabled:opacity-40"
+              disabled={!name.trim() || selectedIds.size === 0 || loading}
+              onClick={() => void handleSave()}
+            >
+              {loading ? "保存中..." : initialGroup ? "保存" : "创建"}
+            </button>
+          )}
         </div>
       </div>
     </div>

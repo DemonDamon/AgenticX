@@ -58,13 +58,26 @@ declare global {
       deleteAvatar: (id: string) => Promise<{ ok: boolean; error?: string }>;
 
       listSessions: (avatarId?: string) => Promise<{ ok: boolean; sessions: Array<{ session_id: string; avatar_id: string | null; session_name: string | null; updated_at: number }> }>;
-      createSession: (payload: { avatar_id?: string; name?: string }) => Promise<{ ok: boolean; session_id?: string; error?: string }>;
+      createSession: (payload: { avatar_id?: string; name?: string; inherit_from_session_id?: string }) => Promise<{ ok: boolean; session_id?: string; inherited?: boolean; error?: string }>;
       renameSession: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
+      loadSessionMessages: (sessionId: string) => Promise<{
+        ok: boolean;
+        messages: Array<{
+          id?: string;
+          role: "user" | "assistant" | "tool";
+          content: string;
+          agent_id?: string;
+          provider?: string;
+          model?: string;
+        }>;
+        error?: string;
+      }>;
       forkAvatar: (payload: { sessionId: string; name: string; role?: string }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       generateAvatar: (payload: { description: string }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
 
       listGroups: () => Promise<{ ok: boolean; groups: GroupItem[] }>;
       createGroup: (payload: { name: string; avatar_ids: string[]; routing?: string }) => Promise<{ ok: boolean; group?: GroupItem; error?: string }>;
+      updateGroup: (payload: { id: string; name?: string; avatar_ids?: string[]; routing?: string }) => Promise<{ ok: boolean; group?: GroupItem; error?: string }>;
       deleteGroup: (id: string) => Promise<{ ok: boolean; error?: string }>;
 
       loadConfig: () => Promise<LoadConfigResult>;
