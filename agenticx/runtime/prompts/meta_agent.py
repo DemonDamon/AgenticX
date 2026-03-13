@@ -105,31 +105,88 @@ def _build_workspace_context_block() -> str:
 
 def _build_active_subagents_context(session: StudioSession) -> str:
     """Inject a live snapshot of active/recent sub-agents so the LLM never hallucinates empty status."""
+    import logging
+    _ctx_log = logging.getLogger(__name__)
     try:
         team_manager = getattr(session, "_team_manager", None)
-        if team_manager is None:
+        rows: list = []
+        if team_manager is not None:
+            status = team_manager.get_status()
+            rows = status.get("subagents", [])
+            if not rows:
+                _ctx_log.debug(
+                    "[active_subagents_context] tm=%s _agents=%s _archived=%s → no rows from get_status",
+                    id(team_manager),
+                    list(team_manager._agents.keys()),
+                    list(team_manager._archived_agents.keys()),
+                )
+
+        scratchpad = getattr(session, "scratchpad", None) or {}
+        scratchpad_results: list[str] = []
+        known_ids = {str(r.get("agent_id", "")) for r in rows}
+        for key, value in scratchpad.items():
+            if not key.startswith("subagent_result::"):
+                continue
+            agent_id = key.split("::", 1)[1]
+            if agent_id in known_ids:
+                continue
+            scratchpad_results.append(str(value)[:200])
+
+        chat_summary_entries: list[str] = []
+        if not rows and not scratchpad_results:
+            chat_history = getattr(session, "chat_history", None) or []
+            for msg in reversed(chat_history):
+                content = str(msg.get("content", ""))
+                if content.startswith("子智能体汇总:"):
+                    entry = content[len("子智能体汇总:"):].strip()[:300]
+                    chat_summary_entries.append(entry)
+                    if len(chat_summary_entries) >= 10:
+                        break
+
+        if not rows and not scratchpad_results and not chat_summary_entries:
             return ""
-        status = team_manager.get_status()
-        rows = status.get("subagents", [])
-        if not rows:
-            return ""
+
         lines = ["## 当前子智能体状态（实时快照，禁止凭记忆回答）"]
         running = 0
+        completed = 0
+        failed = 0
         for item in rows:
             agent_id = item.get("agent_id", "")
             name = item.get("name", agent_id)
             s = item.get("status", "unknown")
             task = (item.get("task", "") or "")[:80]
-            summary = (item.get("result_summary", "") or "")[:120]
+            summary = (item.get("result_summary", "") or "")[:200]
             lines.append(f"- [{s}] {name} (ID: {agent_id}): {task}")
             if summary and s in ("completed", "failed"):
                 lines.append(f"  摘要: {summary}")
             if s in ("running", "pending"):
                 running += 1
+            elif s == "completed":
+                completed += 1
+            elif s == "failed":
+                failed += 1
+
+        if scratchpad_results:
+            lines.append("\n### 历史子智能体结果（来自 scratchpad 备份）")
+            for entry in scratchpad_results[:10]:
+                lines.append(f"- {entry}")
+
+        if chat_summary_entries:
+            lines.append("\n### 历史子智能体结果（来自 chat_history 备份）")
+            for entry in chat_summary_entries:
+                lines.append(f"- {entry}")
+
+        has_finished = completed > 0 or failed > 0 or scratchpad_results or chat_summary_entries
         if running > 0:
             lines.append(f"\n⚠ 有 {running} 个子智能体正在运行。用户问进度时**必须调用 query_subagent_status**，禁止凭记忆回答。")
+        if has_finished:
+            lines.append(
+                f"\n📋 已有子智能体完成或失败。"
+                "你必须主动向用户汇报这些结果：简述每个子智能体做了什么、产出了什么、是否成功。不要等用户追问。"
+            )
         return "\n".join(lines) + "\n"
-    except Exception:
+    except Exception as exc:
+        _ctx_log.error("[active_subagents_context] failed: %s", exc, exc_info=True)
         return ""
 
 
@@ -201,7 +258,7 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "## 输出要求\n"
         "- 必须中文。\n"
         "- 先给结论，再给依据。\n"
-        "- 需要用户决策时，明确给出选项（A/B/C）。\n\n"
+        "- 需要用户决策时，明确给出选项（A/B/C），但仅限业务方案选择。\n\n"
         "## MCP 工具管理闭环\n"
         "- 当任务需要 MCP 能力时，先调用 `list_mcps` 查看配置与连接状态。\n"
         "- 若存在配置但未连接，先明确告知用户需在 MCP 管理接口完成连接。\n"
@@ -220,6 +277,16 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "- 当用户询问“你有什么能力 / skills / mcp / 工具”时：直接基于“已注册能力”章节作答，禁止调用 `check_resources` 或启动子智能体。\n"
         "- 只有在“执行任务前的资源评估”场景才调用 `check_resources`，信息类问答不调用。\n\n"
         "- 工具调用语法必须是裸函数形式（如 `check_resources()`），禁止包裹在 `print(...)`、`<tool_code>...</tool_code>` 或其他文本模板中。\n\n"
+        "- 工具执行授权禁止使用 A/B/C 文本确认；必须直接调用目标工具，由系统发出 `confirm_required` 事件。\n"
+        "- Desktop 服务模式下禁止调用不存在的 `confirm_*` 工具；`A/B/C` 不得替代工具授权确认。\n\n"
+        "## 子智能体完成后的主动汇报（关键）\n"
+        "- 当「当前子智能体状态」或「历史子智能体结果」中出现 completed 或 failed 的子智能体，你 **必须在本轮回复中主动汇报**，包括：\n"
+        "  1) 子智能体名称和任务概述。\n"
+        "  2) 最终结果摘要（成功/失败原因）。\n"
+        "  3) 产出文件路径列表（如有）。\n"
+        "  4) 下一步建议（用户是否需要验收/继续/重试）。\n"
+        "- 绝不能启动子智能体后只说「已启动，请等待」就不管了。子智能体完成后你必须主动总结汇报，不能等用户追问。\n"
+        "- 如果本轮看到已完成的子智能体但还未向用户汇报过，先调用 `query_subagent_status` 获取最新状态，再给出结构化汇报。\n\n"
         "## 已注册能力\n"
         f"{skills_context}"
         f"{mcp_context}\n"

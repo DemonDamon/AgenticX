@@ -7,7 +7,10 @@ Author: Damon Li
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+_meta_log = logging.getLogger(__name__)
 
 from agenticx.cli.studio_mcp import import_mcp_config, load_available_servers
 from agenticx.cli.studio_skill import get_all_skill_summaries
@@ -355,10 +358,108 @@ async def dispatch_meta_tool_async(
 
     if name == "query_subagent_status":
         requested_id = str(arguments.get("agent_id", "")).strip() or None
+        owner_session_id = getattr(team_manager, "owner_session_id", None)
+        active_tasks = {
+            tid: (not t.done())
+            for tid, t in team_manager._tasks.items()
+        }
+        agent_keys = list(team_manager._agents.keys())
+        archived_keys = list(team_manager._archived_agents.keys())
+
+        # --- Fallback 1: session._team_manager might be a different instance ---
+        session_tm = getattr(session, "_team_manager", None) if session else None
+        if session_tm is not None and session_tm is not team_manager:
+            _meta_log.warning(
+                "[dispatch] MISMATCH: tool tm=%s (agents=%s) vs session._tm=%s (agents=%s archived=%s)",
+                id(team_manager), agent_keys,
+                id(session_tm),
+                list(session_tm._agents.keys()),
+                list(session_tm._archived_agents.keys()),
+            )
+            stm_status = session_tm.get_status()
+            stm_rows = stm_status.get("subagents", [])
+            if stm_rows and not agent_keys and not archived_keys:
+                _meta_log.warning("[dispatch] using session._team_manager as primary (has %d agents)", len(stm_rows))
+                team_manager = session_tm
+
+        _meta_log.info(
+            "[dispatch] query_subagent_status: tm=%s agents=%s archived=%s tasks=%s sid=%s",
+            id(team_manager),
+            list(team_manager._agents.keys()),
+            list(team_manager._archived_agents.keys()),
+            active_tasks,
+            owner_session_id,
+        )
         result = team_manager.get_status(requested_id)
+        if requested_id and not result.get("ok"):
+            global_hit = AgentTeamManager.lookup_global_status(
+                requested_id,
+                session_id=owner_session_id,
+            )
+            if global_hit is not None:
+                _meta_log.warning("[dispatch] fallback global hit for agent_id=%s", requested_id)
+                result = {"ok": True, "subagent": global_hit}
         if result.get("ok") and requested_id is None:
             rows = result.get("subagents", [])
             if isinstance(rows, list):
+                # --- Fallback 2: global registry ---
+                if not rows:
+                    global_rows = AgentTeamManager.collect_global_statuses(
+                        session_id=owner_session_id,
+                    )
+                    if global_rows:
+                        _meta_log.warning("[dispatch] fallback to global statuses, count=%d", len(global_rows))
+                        result["subagents"] = global_rows
+                        rows = global_rows
+
+                # --- Fallback 3: scratchpad subagent_result:: entries ---
+                if not rows and session is not None:
+                    scratchpad = getattr(session, "scratchpad", None) or {}
+                    synth_rows: List[Dict[str, Any]] = []
+                    for key, value in scratchpad.items():
+                        if not key.startswith("subagent_result::"):
+                            continue
+                        agent_id_from_key = key.split("::", 1)[1]
+                        synth_rows.append({
+                            "agent_id": agent_id_from_key,
+                            "name": agent_id_from_key,
+                            "status": "completed",
+                            "result_summary": str(value)[:500],
+                            "source": "scratchpad_fallback",
+                        })
+                    if synth_rows:
+                        _meta_log.warning("[dispatch] fallback to scratchpad, count=%d", len(synth_rows))
+                        result["subagents"] = synth_rows
+                        rows = synth_rows
+
+                # --- Fallback 4: chat_history summary entries ---
+                if not rows and session is not None:
+                    chat_history = getattr(session, "chat_history", None) or []
+                    summary_rows: List[Dict[str, Any]] = []
+                    for msg in reversed(chat_history):
+                        content = str(msg.get("content", ""))
+                        if not content.startswith("子智能体汇总:"):
+                            continue
+                        summary_rows.append({
+                            "agent_id": "unknown",
+                            "name": "子智能体",
+                            "status": "completed",
+                            "result_summary": content[len("子智能体汇总:"):].strip()[:500],
+                            "source": "chat_history_fallback",
+                        })
+                        if len(summary_rows) >= 10:
+                            break
+                    if summary_rows:
+                        _meta_log.warning("[dispatch] fallback to chat_history summaries, count=%d", len(summary_rows))
+                        result["subagents"] = summary_rows
+                        rows = summary_rows
+
+                running_tasks = sum(1 for running in active_tasks.values() if running)
+                if not rows and running_tasks > 0:
+                    _meta_log.warning(
+                        "[dispatch] BUG: no agents in status but %d tasks still running! tasks=%s",
+                        running_tasks, active_tasks,
+                    )
                 result["summary"] = {
                     "total": len(rows),
                     "running": sum(1 for item in rows if item.get("status") == "running"),
