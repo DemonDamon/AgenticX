@@ -160,6 +160,32 @@ def create_studio_app() -> FastAPI:
             "artifacts": {str(path): code for path, code in managed.studio_session.artifacts.items()},
         }
 
+    @app.get("/api/session/messages")
+    async def get_session_messages(
+        session_id: str = Query(...),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        messages = manager.get_messages(session_id)
+        return {"ok": True, "messages": messages}
+
+    @app.post("/api/session/summary")
+    async def get_session_summary(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        session_id = str(payload.get("session_id", "")).strip()
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        managed = manager.get(session_id)
+        if managed is None:
+            return {"ok": True, "summary": ""}
+        summary = manager._build_session_summary(managed.studio_session)
+        return {"ok": True, "summary": summary}
+
     @app.delete("/api/session")
     async def delete_session(
         session_id: str = Query(...),
@@ -642,9 +668,24 @@ def create_studio_app() -> FastAPI:
         _check_token(x_agx_desktop_token)
         avatar_id = str(payload.get("avatar_id", "")).strip() or None
         session_name = str(payload.get("name", "")).strip() or None
+        inherit_from = str(payload.get("inherit_from_session_id", "")).strip() or None
         avatar_cfg = avatar_registry.get_avatar(avatar_id) if avatar_id else None
         provider = avatar_cfg.default_provider if avatar_cfg and avatar_cfg.default_provider else None
         model = avatar_cfg.default_model if avatar_cfg and avatar_cfg.default_model else None
+
+        inherited_summary = ""
+        inherited_context_files: dict = {}
+        inherited_scratchpad: dict = {}
+        if inherit_from:
+            old_managed = manager.get(inherit_from)
+            if old_managed is not None:
+                inherited_summary = manager._build_session_summary(old_managed.studio_session)
+                inherited_context_files = dict(old_managed.studio_session.context_files)
+                inherited_scratchpad = {
+                    k: v for k, v in (old_managed.studio_session.scratchpad or {}).items()
+                    if k.startswith("subagent_result::")
+                }
+
         managed = manager.create(provider=provider, model=model)
         if avatar_cfg and avatar_cfg.workspace_dir:
             managed.studio_session.workspace_dir = avatar_cfg.workspace_dir
@@ -653,6 +694,17 @@ def create_studio_app() -> FastAPI:
         managed.avatar_id = avatar_id
         managed.avatar_name = avatar_cfg.name if avatar_cfg else None
         managed.session_name = session_name
+
+        if inherited_summary:
+            managed.studio_session.agent_messages.append({
+                "role": "system",
+                "content": f"[context_inherited] 以下是前一话题的上下文摘要，用于保持连续性：\n{inherited_summary}"
+            })
+        if inherited_context_files:
+            managed.studio_session.context_files.update(inherited_context_files)
+        if inherited_scratchpad:
+            managed.studio_session.scratchpad.update(inherited_scratchpad)
+
         try:
             managed.studio_session.mcp_configs = load_available_servers()
         except Exception:
@@ -662,6 +714,7 @@ def create_studio_app() -> FastAPI:
             "session_id": managed.session_id,
             "avatar_id": avatar_id,
             "session_name": session_name,
+            "inherited": bool(inherited_summary),
         }
 
     @app.put("/api/sessions/{session_id}")
@@ -770,11 +823,67 @@ def create_studio_app() -> FastAPI:
         name = str(payload.get("name", "")).strip()
         avatar_ids = payload.get("avatar_ids", [])
         routing = str(payload.get("routing", "user-directed")).strip()
+        allowed_routing = {"user-directed", "meta-routed", "round-robin"}
         if not name or not avatar_ids:
             raise HTTPException(status_code=400, detail="name and avatar_ids are required")
         if not isinstance(avatar_ids, list):
             raise HTTPException(status_code=400, detail="avatar_ids must be a list")
-        config = group_registry.create_group(name=name, avatar_ids=[str(a) for a in avatar_ids], routing=routing)
+        if routing not in allowed_routing:
+            raise HTTPException(status_code=400, detail="invalid routing strategy")
+        normalized_avatar_ids: list[str] = []
+        for item in avatar_ids:
+            avatar_id = str(item).strip()
+            if not avatar_id:
+                continue
+            if avatar_registry.get_avatar(avatar_id) is None:
+                raise HTTPException(status_code=400, detail=f"unknown avatar_id: {avatar_id}")
+            if avatar_id not in normalized_avatar_ids:
+                normalized_avatar_ids.append(avatar_id)
+        if not normalized_avatar_ids:
+            raise HTTPException(status_code=400, detail="avatar_ids must contain at least one valid avatar")
+        config = group_registry.create_group(name=name, avatar_ids=normalized_avatar_ids, routing=routing)
+        return {"ok": True, "group": config.to_dict()}
+
+    @app.put("/api/groups/{group_id}")
+    async def update_group(
+        group_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        patch: dict[str, Any] = {}
+        allowed_routing = {"user-directed", "meta-routed", "round-robin"}
+        if "name" in payload:
+            name = str(payload.get("name", "")).strip()
+            if not name:
+                raise HTTPException(status_code=400, detail="name cannot be empty")
+            patch["name"] = name
+        if "avatar_ids" in payload:
+            avatar_ids = payload.get("avatar_ids", [])
+            if not isinstance(avatar_ids, list) or not avatar_ids:
+                raise HTTPException(status_code=400, detail="avatar_ids must be a non-empty list")
+            normalized_avatar_ids: list[str] = []
+            for item in avatar_ids:
+                avatar_id = str(item).strip()
+                if not avatar_id:
+                    continue
+                if avatar_registry.get_avatar(avatar_id) is None:
+                    raise HTTPException(status_code=400, detail=f"unknown avatar_id: {avatar_id}")
+                if avatar_id not in normalized_avatar_ids:
+                    normalized_avatar_ids.append(avatar_id)
+            if not normalized_avatar_ids:
+                raise HTTPException(status_code=400, detail="avatar_ids must contain at least one valid avatar")
+            patch["avatar_ids"] = normalized_avatar_ids
+        if "routing" in payload:
+            routing = str(payload.get("routing", "user-directed")).strip()
+            if routing not in allowed_routing:
+                raise HTTPException(status_code=400, detail="invalid routing strategy")
+            patch["routing"] = routing
+        if not patch:
+            raise HTTPException(status_code=400, detail="no valid fields to update")
+        config = group_registry.update_group(group_id, patch)
+        if config is None:
+            raise HTTPException(status_code=404, detail="group not found")
         return {"ok": True, "group": config.to_dict()}
 
     @app.delete("/api/groups/{group_id}")

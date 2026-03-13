@@ -6,6 +6,8 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import json
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -64,6 +66,7 @@ class SessionManager:
         self.ttl_seconds = ttl_seconds
         self._sessions: Dict[str, ManagedSession] = {}
         self._session_store = SessionStore()
+        self._sessions_root = os.path.join(os.path.expanduser("~"), ".agenticx", "sessions")
 
     def create(
         self,
@@ -123,6 +126,14 @@ class SessionManager:
         managed.updated_at = time.time()
         return True
 
+    def get_messages(self, session_id: str) -> list[dict]:
+        """Return normalized chat messages for session."""
+        managed = self._sessions.get(session_id)
+        if managed is not None:
+            return self._normalize_messages(getattr(managed.studio_session, "chat_history", []) or [])
+        payload = self._load_messages_snapshot(session_id)
+        return self._normalize_messages(payload)
+
     def cleanup_expired(self) -> None:
         now = time.time()
         expired = [
@@ -146,8 +157,24 @@ class SessionManager:
             scratchpad = self._session_store._load_scratchpad_sync(session_id)
             if scratchpad:
                 session.scratchpad = dict(scratchpad)
+            messages = self._load_messages_snapshot(session_id)
+            if messages:
+                session.chat_history = self._normalize_messages(messages)
         except Exception:
-            return
+            pass
+
+        try:
+            raw = self._load_agent_messages_snapshot(session_id)
+            if raw:
+                from agenticx.runtime.agent_runtime import _sanitize_context_messages
+                session.agent_messages = _sanitize_context_messages(raw)
+        except Exception:
+            pass
+
+        try:
+            self._load_context_refs(session_id, session)
+        except Exception:
+            pass
 
     def _persist_session_state(self, session_id: str, session: StudioSession) -> None:
         try:
@@ -163,8 +190,97 @@ class SessionManager:
                 "artifacts": len(session.artifacts),
             }
             self._session_store._save_session_summary_sync(session_id, summary, metadata)
+            self._save_messages_snapshot(session_id, session.chat_history or [])
+            self._save_agent_messages_snapshot(session_id, getattr(session, "agent_messages", None) or [])
+            self._save_context_refs(session_id, session)
         except Exception:
             return
+
+    def _messages_path(self, session_id: str) -> str:
+        return os.path.join(self._sessions_root, session_id, "messages.json")
+
+    def _save_messages_snapshot(self, session_id: str, messages: list[dict]) -> None:
+        path = self._messages_path(session_id)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(messages, fh, ensure_ascii=False, indent=2)
+
+    def _load_messages_snapshot(self, session_id: str) -> list[dict]:
+        path = self._messages_path(session_id)
+        if not os.path.exists(path):
+            return []
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
+    def _agent_messages_path(self, session_id: str) -> str:
+        return os.path.join(self._sessions_root, session_id, "agent_messages.json")
+
+    def _save_agent_messages_snapshot(self, session_id: str, messages: list[dict]) -> None:
+        if not messages:
+            return
+        tail = messages[-40:]
+        path = self._agent_messages_path(session_id)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(tail, fh, ensure_ascii=False, indent=2)
+
+    def _load_agent_messages_snapshot(self, session_id: str) -> list[dict]:
+        path = self._agent_messages_path(session_id)
+        if not os.path.exists(path):
+            return []
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
+    def _context_refs_path(self, session_id: str) -> str:
+        return os.path.join(self._sessions_root, session_id, "context_files_refs.json")
+
+    def _save_context_refs(self, session_id: str, session: StudioSession) -> None:
+        ctx = getattr(session, "context_files", None)
+        if not ctx:
+            return
+        paths = list(ctx.keys())
+        path = self._context_refs_path(session_id)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(paths, fh, ensure_ascii=False, indent=2)
+
+    def _load_context_refs(self, session_id: str, session: StudioSession) -> None:
+        path = self._context_refs_path(session_id)
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as fh:
+            paths = json.load(fh)
+        if not isinstance(paths, list):
+            return
+        for fpath in paths:
+            if not isinstance(fpath, str) or not os.path.isfile(fpath):
+                continue
+            with open(fpath, "r", encoding="utf-8") as fh:
+                session.context_files[fpath] = fh.read()
+
+    def _normalize_messages(self, messages: list[dict]) -> list[dict]:
+        normalized: list[dict] = []
+        for item in messages:
+            role = str(item.get("role", "assistant"))
+            if role not in {"user", "assistant", "tool"}:
+                role = "assistant"
+            normalized.append(
+                {
+                    "id": str(item.get("id", "")),
+                    "role": role,
+                    "content": str(item.get("content", "")),
+                    "agent_id": str(item.get("agent_id", "meta") or "meta"),
+                    "provider": str(item.get("provider", "") or ""),
+                    "model": str(item.get("model", "") or ""),
+                }
+            )
+        return normalized
 
     def _build_session_summary(self, session: StudioSession) -> str:
         last_user = ""
