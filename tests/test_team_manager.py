@@ -113,7 +113,7 @@ def test_team_manager_concurrency_and_cancel(monkeypatch) -> None:
     asyncio.run(_run())
 
 
-def test_team_manager_rejects_invalid_tool_allowlist() -> None:
+def test_team_manager_falls_back_on_invalid_tool_allowlist() -> None:
     async def _run() -> None:
         manager = AgentTeamManager(
             llm_factory=lambda: _QuickTextLLM(),
@@ -125,8 +125,7 @@ def test_team_manager_rejects_invalid_tool_allowlist() -> None:
             task="task-a",
             tools=["not-exists-tool"],
         )
-        assert result["ok"] is False
-        assert result["error"] == "invalid_tools"
+        assert result["ok"] is True, "should fall back to full toolset, not reject"
 
     asyncio.run(_run())
 
