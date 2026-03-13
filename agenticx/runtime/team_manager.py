@@ -7,6 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 import uuid
@@ -19,6 +20,8 @@ from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio import StudioSession
 from agenticx.runtime import AgentRuntime, AsyncConfirmGate, EventType, RuntimeEvent
 from agenticx.runtime.resource_monitor import ResourceMonitor
+
+_log = logging.getLogger(__name__)
 
 EventEmitter = Callable[[RuntimeEvent], Awaitable[None]]
 SummarySink = Callable[[str, "SubAgentContext"], Awaitable[None]]
@@ -189,8 +192,15 @@ class AgentTeamManager:
             return STUDIO_TOOLS
         allowed = {name.strip() for name in allowed_names if name and name.strip()}
         if not allowed:
-            return []
-        return [tool for tool in STUDIO_TOOLS if tool.get("function", {}).get("name") in allowed]
+            return STUDIO_TOOLS
+        filtered = [tool for tool in STUDIO_TOOLS if tool.get("function", {}).get("name") in allowed]
+        if not filtered:
+            _log.warning(
+                "tools whitelist %s matched nothing in STUDIO_TOOLS; falling back to full toolset",
+                allowed,
+            )
+            return STUDIO_TOOLS
+        return filtered
 
     def _get_depth(self, agent_id: str) -> int:
         if agent_id == "meta":
@@ -258,12 +268,6 @@ class AgentTeamManager:
                     }
 
             allowed_tools = self._build_toolset(tools)
-            if tools is not None and not allowed_tools:
-                return {
-                    "ok": False,
-                    "error": "invalid_tools",
-                    "message": "请求了 tools 白名单，但没有匹配到有效工具",
-                }
             agent_id = f"sa-{uuid.uuid4().hex[:8]}"
             resolved_mode = (mode or self.spawn_config.mode).strip().lower()
             if resolved_mode not in {"run", "session"}:
@@ -358,8 +362,6 @@ class AgentTeamManager:
         return {"ok": True, "agent_id": agent_id, "status": context.status.value}
 
     async def send_message_to_subagent(self, agent_id: str, message: str) -> Dict[str, Any]:
-        import logging
-        _log = logging.getLogger(__name__)
 
         context = self._agents.get(agent_id)
         if context is None:
