@@ -52,6 +52,26 @@ export function SubAgentCard({
       {subAgent.currentAction ? (
         <div className="mb-2 text-xs text-slate-300">{subAgent.currentAction}</div>
       ) : null}
+      {subAgent.resultSummary ? (
+        <div className="mb-2 rounded-md border border-emerald-500/20 bg-emerald-500/5 p-2">
+          <div className="mb-1 text-[11px] text-emerald-300">最终摘要</div>
+          <div className="max-h-24 overflow-y-auto whitespace-pre-wrap text-xs text-slate-200">
+            {subAgent.resultSummary}
+          </div>
+          {subAgent.outputFiles && subAgent.outputFiles.length > 0 ? (
+            <div className="mt-2">
+              <div className="text-[11px] text-slate-400">产出文件</div>
+              <div className="max-h-20 overflow-y-auto text-[11px] text-cyan-200">
+                {subAgent.outputFiles.map((path) => (
+                  <div key={path} className="truncate">
+                    {path}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {typeof subAgent.progress === "number" ? (
         <div className="mb-2">
           <div className="h-1.5 overflow-hidden rounded bg-slate-700">

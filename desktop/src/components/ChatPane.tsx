@@ -197,6 +197,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   name: payload.data?.name ?? subId,
                   role: payload.data?.role ?? "worker",
                   task: payload.data?.task ?? "",
+                  sessionId: pane.sessionId || undefined,
                 });
               }
             }
@@ -214,7 +215,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             }
             if (payload.type === "subagent_completed") {
               const subId = payload.data?.agent_id;
-              if (subId) updateSubAgent(subId, { status: "completed", currentAction: "已完成" });
+              if (subId) {
+                updateSubAgent(subId, {
+                  status: "completed",
+                  currentAction: "已完成（查看摘要）",
+                  resultSummary:
+                    typeof payload.data?.summary === "string" ? payload.data.summary : undefined,
+                });
+              }
             }
             if (payload.type === "subagent_error") {
               const subId = payload.data?.agent_id;

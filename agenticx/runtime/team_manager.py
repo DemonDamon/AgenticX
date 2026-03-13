@@ -10,7 +10,7 @@ import asyncio
 import os
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
@@ -97,6 +97,8 @@ class AgentTeamManager:
         self._tasks: Dict[str, asyncio.Task[None]] = {}
         self._cancelled: set[str] = set()
         self._agent_sessions: Dict[str, StudioSession] = {}
+        self._archived_agents: Dict[str, SubAgentContext] = {}
+        self._archive_limit = 200
 
     def _build_isolated_session(self) -> StudioSession:
         session = StudioSession(
@@ -453,11 +455,16 @@ class AgentTeamManager:
         if agent_id:
             context = self._agents.get(agent_id)
             if context is None:
+                context = self._archived_agents.get(agent_id)
+            if context is None:
                 return {"ok": False, "error": "not_found"}
             return {"ok": True, "subagent": self._serialize_status(context)}
+        merged: Dict[str, SubAgentContext] = {}
+        merged.update(self._archived_agents)
+        merged.update(self._agents)
         return {
             "ok": True,
-            "subagents": [self._serialize_status(item) for item in self._agents.values()],
+            "subagents": [self._serialize_status(item) for item in merged.values()],
         }
 
     def get_confirm_gate(self, agent_id: str) -> Optional[AsyncConfirmGate]:
@@ -500,6 +507,30 @@ class AgentTeamManager:
             "cleanup": context.cleanup,
             "spawn_tree_path": context.spawn_tree_path,
         }
+
+    def _archive_context(self, context: SubAgentContext) -> None:
+        """Keep a lightweight finished snapshot for status queries."""
+        snapshot = replace(
+            context,
+            # Avoid retaining heavy runtime payloads after completion.
+            agent_messages=[],
+            artifacts={},
+            context_files={},
+            attachments={},
+        )
+        self._archived_agents[context.agent_id] = snapshot
+        if len(self._archived_agents) <= self._archive_limit:
+            return
+        # Drop oldest snapshots first to avoid unbounded growth.
+        overflow = len(self._archived_agents) - self._archive_limit
+        if overflow <= 0:
+            return
+        old_ids = sorted(
+            self._archived_agents.keys(),
+            key=lambda item: self._archived_agents[item].updated_at,
+        )[:overflow]
+        for agent_id in old_ids:
+            self._archived_agents.pop(agent_id, None)
 
     async def _run_subagent(
         self,
@@ -610,6 +641,7 @@ class AgentTeamManager:
             if context.mode != "session" or context.cleanup == "delete":
                 self._agent_sessions.pop(context.agent_id, None)
             self._cancelled.discard(context.agent_id)
+            self._archive_context(context)
             if context.cleanup == "delete":
                 self._agents.pop(context.agent_id, None)
             if self.summary_sink is not None:

@@ -354,7 +354,19 @@ async def dispatch_meta_tool_async(
         return json.dumps(result, ensure_ascii=False)
 
     if name == "query_subagent_status":
-        result = team_manager.get_status(str(arguments.get("agent_id", "")).strip() or None)
+        requested_id = str(arguments.get("agent_id", "")).strip() or None
+        result = team_manager.get_status(requested_id)
+        if result.get("ok") and requested_id is None:
+            rows = result.get("subagents", [])
+            if isinstance(rows, list):
+                result["summary"] = {
+                    "total": len(rows),
+                    "running": sum(1 for item in rows if item.get("status") == "running"),
+                    "pending": sum(1 for item in rows if item.get("status") == "pending"),
+                    "completed": sum(1 for item in rows if item.get("status") == "completed"),
+                    "failed": sum(1 for item in rows if item.get("status") == "failed"),
+                    "cancelled": sum(1 for item in rows if item.get("status") == "cancelled"),
+                }
         return json.dumps(result, ensure_ascii=False)
 
     if name == "check_resources":
