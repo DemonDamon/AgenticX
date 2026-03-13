@@ -32,6 +32,19 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return false;
 }
 
+function extractOutputFiles(summary?: string): string[] {
+  if (!summary) return [];
+  const marker = "产出文件:";
+  const idx = summary.lastIndexOf(marker);
+  if (idx < 0) return [];
+  const raw = summary.slice(idx + marker.length).trim();
+  if (!raw || raw === "(无)") return [];
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 export function App() {
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -172,9 +185,12 @@ export function App() {
 
   const syncSubAgents = useCallback(async () => {
     if (!apiBase || !apiToken) return;
+    const subAgentSids = subAgentsRef.current
+      .map((s) => s.sessionId ?? "")
+      .filter((s) => s.length > 0);
     const sessionIds = Array.from(
       new Set(
-        [sessionId, ...panes.map((pane) => pane.sessionId)]
+        [sessionId, ...panes.map((pane) => pane.sessionId), ...subAgentSids]
           .map((item) => item.trim())
           .filter((item) => item.length > 0)
       )
@@ -215,6 +231,7 @@ export function App() {
               name: item.name ?? id,
               role: item.role ?? "worker",
               task: item.task ?? "",
+              sessionId: sid,
             });
           }
 
@@ -223,17 +240,24 @@ export function App() {
             seenRunningOrPending.add(id);
             staleMissCountRef.current[id] = 0;
           }
+          const summaryText = (item.result_summary ?? "").trim();
+          const outputFiles = extractOutputFiles(summaryText);
           const currentAction =
             status === "completed"
-              ? item.result_summary
-                ? "已完成（见摘要）"
+              ? summaryText
+                ? "已完成（查看摘要）"
                 : "已完成"
               : status === "failed"
                 ? item.error_text || "执行异常"
                 : status === "cancelled"
                   ? "已中断"
                   : "执行中";
-          updateSubAgent(id, { status, currentAction });
+          updateSubAgent(id, {
+            status,
+            currentAction,
+            resultSummary: summaryText || undefined,
+            outputFiles,
+          });
 
           const seen = polledEventSeenRef.current[id] ?? new Set<string>();
           polledEventSeenRef.current[id] = seen;
@@ -260,14 +284,25 @@ export function App() {
     }
 
     // Guard against stale "running" badges when SSE stream closed early.
+    // Do NOT auto-mark as completed when backend has no record; that's misleading.
     for (const item of subAgentsRef.current) {
       if (item.status !== "running" && item.status !== "pending") continue;
       if (seenRunningOrPending.has(item.id)) continue;
       const miss = (staleMissCountRef.current[item.id] ?? 0) + 1;
       staleMissCountRef.current[item.id] = miss;
-      if (miss >= 2) {
-        updateSubAgent(item.id, { status: "completed", currentAction: "状态已同步：后台任务已结束" });
-        addSubAgentEvent(item.id, { type: "sync", content: "轮询未发现运行中任务，已同步为结束状态" });
+      if (miss === 2) {
+        addSubAgentEvent(item.id, {
+          type: "sync",
+          content: "轮询暂未发现该任务，可能会话已切换或任务已归档，继续同步中",
+        });
+      } else if (miss >= 4) {
+        updateSubAgent(item.id, {
+          currentAction: "状态失联：后台暂未返回该任务，建议展开详情并重试同步",
+        });
+        addSubAgentEvent(item.id, {
+          type: "sync",
+          content: "连续轮询未找到后台记录，已标记为状态失联提示（不自动改写为完成/失败）",
+        });
       }
     }
   }, [apiBase, apiToken, sessionId, panes, addSubAgent, updateSubAgent, addSubAgentEvent]);

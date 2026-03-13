@@ -65,8 +65,11 @@ export type SubAgent = {
   role: string;
   status: SubAgentStatus;
   task: string;
+  sessionId?: string;
   progress?: number;
   currentAction?: string;
+  resultSummary?: string;
+  outputFiles?: string[];
   events: SubAgentEvent[];
 };
 
@@ -150,7 +153,7 @@ type AppState = {
   addMessage: (role: MsgRole, content: string, agentId?: string, provider?: string, model?: string) => void;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
   clearMessages: () => void;
-  addSubAgent: (item: Pick<SubAgent, "id" | "name" | "role" | "task">) => void;
+  addSubAgent: (item: Pick<SubAgent, "id" | "name" | "role" | "task"> & { sessionId?: string }) => void;
   updateSubAgent: (id: string, patch: Partial<SubAgent>) => void;
   addSubAgentEvent: (id: string, event: Omit<SubAgentEvent, "id" | "ts">) => void;
   removeSubAgent: (id: string) => void;
@@ -339,6 +342,8 @@ export const useAppStore = create<AppState>((set) => ({
       const next: SubAgent = {
         ...item,
         status: "running",
+        resultSummary: "",
+        outputFiles: [],
         events: []
       };
       return { subAgents: [...state.subAgents, next] };

@@ -103,6 +103,36 @@ def _build_workspace_context_block() -> str:
     return "\n\n".join(parts) + "\n"
 
 
+def _build_active_subagents_context(session: StudioSession) -> str:
+    """Inject a live snapshot of active/recent sub-agents so the LLM never hallucinates empty status."""
+    try:
+        team_manager = getattr(session, "_team_manager", None)
+        if team_manager is None:
+            return ""
+        status = team_manager.get_status()
+        rows = status.get("subagents", [])
+        if not rows:
+            return ""
+        lines = ["## 当前子智能体状态（实时快照，禁止凭记忆回答）"]
+        running = 0
+        for item in rows:
+            agent_id = item.get("agent_id", "")
+            name = item.get("name", agent_id)
+            s = item.get("status", "unknown")
+            task = (item.get("task", "") or "")[:80]
+            summary = (item.get("result_summary", "") or "")[:120]
+            lines.append(f"- [{s}] {name} (ID: {agent_id}): {task}")
+            if summary and s in ("completed", "failed"):
+                lines.append(f"  摘要: {summary}")
+            if s in ("running", "pending"):
+                running += 1
+        if running > 0:
+            lines.append(f"\n⚠ 有 {running} 个子智能体正在运行。用户问进度时**必须调用 query_subagent_status**，禁止凭记忆回答。")
+        return "\n".join(lines) + "\n"
+    except Exception:
+        return ""
+
+
 def _build_memory_recall_context(session: StudioSession) -> str:
     """Query WorkspaceMemoryStore for relevant memories based on recent conversation."""
     try:
@@ -139,6 +169,7 @@ def _build_memory_recall_context(session: StudioSession) -> str:
 def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "interactive") -> str:
     workspace_context = _build_workspace_context_block()
     memory_recall = _build_memory_recall_context(session)
+    active_subagents = _build_active_subagents_context(session)
     skills_context = _build_skills_context()
     mcp_context = _build_mcps_context(session)
     avatars_context = _build_avatars_context()
@@ -159,7 +190,7 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "1) 与用户保持持续对话，随时回答进度、风险和下一步建议。\n"
         "2) 在复杂任务时拆分子任务，并调用 `spawn_subagent` 启动子智能体。\n"
         "3) 在启动前优先调用 `check_resources`，根据资源情况控制并行度。\n"
-        "4) 用户问“进度如何”时，调用 `query_subagent_status` 给出明确状态、阻塞点、预计耗时。\n"
+        "4) 用户问“进度如何”/“状态”/“子智能体在干什么”时，**必须先调用 `query_subagent_status` 再回答**。即使你认为没有子智能体，也必须调用工具确认，禁止凭记忆或推测回答。\n"
         "5) 若某子智能体失控或偏航，调用 `cancel_subagent` 并重新规划。\n\n"
         "## 调度策略\n"
         "- 拆解任务前优先通过 todo_write 记录任务清单，保持单个 in_progress。\n"
@@ -183,7 +214,7 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "- 只要提到“资源评估/资源检查”，必须在同一轮立即调用 `check_resources`。\n"
         "- 在拿到工具结果前，不要输出长段解释；优先输出工具事件与结果。\n"
         "- 若当前不需要启动子智能体，就直接给最终答复，不要进入无意义等待。\n"
-        "- `query_subagent_status` 仅在用户明确问进度或已有子智能体运行时调用，禁止高频轮询。\n\n"
+        "- 当「当前子智能体状态」章节列出了 running/pending 的子智能体时，用户任何关于进度、状态、子智能体的提问都 **必须** 调用 `query_subagent_status`，绝不能跳过。同一轮最多调用 1 次。\n\n"
         "- 若涉及文件产出，必须要求子智能体给出可验证路径与工具成功证据；不要接受“口头已生成”。\n"
         "- 用户未明确指定落盘目录时，先建议路径并征求同意，再安排写入动作。\n\n"
         "- 当用户询问“你有什么能力 / skills / mcp / 工具”时：直接基于“已注册能力”章节作答，禁止调用 `check_resources` 或启动子智能体。\n"
@@ -198,6 +229,7 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "- 委派前先查看 Avatars 列表确认目标分身存在。\n"
         "- 委派结果会通过子智能体事件流返回。\n\n"
         f"{todo_context}\n"
+        f"{active_subagents}"
         f"{memory_recall}"
         "## 当前会话上下文\n"
         f"- provider: {session.provider_name or 'default'}\n"
