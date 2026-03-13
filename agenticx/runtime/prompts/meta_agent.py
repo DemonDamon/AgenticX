@@ -103,8 +103,42 @@ def _build_workspace_context_block() -> str:
     return "\n\n".join(parts) + "\n"
 
 
+def _build_memory_recall_context(session: StudioSession) -> str:
+    """Query WorkspaceMemoryStore for relevant memories based on recent conversation."""
+    try:
+        from agenticx.memory.workspace_memory import WorkspaceMemoryStore
+        store = WorkspaceMemoryStore()
+        query_parts: list[str] = []
+        for msg in (session.chat_history or [])[-5:]:
+            if str(msg.get("role", "")) == "user":
+                query_parts.append(str(msg.get("content", ""))[:200])
+        if not query_parts:
+            return ""
+        query = " ".join(query_parts)[:500]
+        results = store.search_sync(query, limit=5, mode="hybrid")
+        if not results:
+            return ""
+        lines = ["## 相关历史记忆（自动召回）"]
+        total = 0
+        for item in results:
+            text = str(item.get("text", "")).strip()
+            if not text:
+                continue
+            snippet = text[:200]
+            if total + len(snippet) > 500:
+                break
+            lines.append(f"- {snippet}")
+            total += len(snippet)
+        if len(lines) <= 1:
+            return ""
+        return "\n".join(lines) + "\n"
+    except Exception:
+        return ""
+
+
 def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "interactive") -> str:
     workspace_context = _build_workspace_context_block()
+    memory_recall = _build_memory_recall_context(session)
     skills_context = _build_skills_context()
     mcp_context = _build_mcps_context(session)
     avatars_context = _build_avatars_context()
@@ -164,6 +198,7 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "- 委派前先查看 Avatars 列表确认目标分身存在。\n"
         "- 委派结果会通过子智能体事件流返回。\n\n"
         f"{todo_context}\n"
+        f"{memory_recall}"
         "## 当前会话上下文\n"
         f"- provider: {session.provider_name or 'default'}\n"
         f"- model: {session.model_name or 'default'}\n"
