@@ -1143,20 +1143,30 @@ async def dispatch_tool_async(
     *,
     confirm_gate: Optional[ConfirmGate] = None,
     event_callback: Optional[Any] = None,
+    team_manager: Optional[Any] = None,
 ) -> str:
     """Dispatch one tool call asynchronously and return result text."""
     gate = confirm_gate or SyncConfirmGate()
     try:
         if name in META_TOOL_NAMES:
-            team_manager = getattr(session, "_team_manager", None)
-            if team_manager is None:
+            tm = team_manager or getattr(session, "_team_manager", None)
+            import logging as _logging
+            _logging.getLogger("agenticx.cli.agent_tools").debug(
+                "[dispatch_tool] meta_tool=%s session=%s tm=%s (explicit=%s, attr=%s)",
+                name,
+                id(session),
+                id(tm) if tm else "None",
+                id(team_manager) if team_manager else "None",
+                id(getattr(session, "_team_manager", None)) if getattr(session, "_team_manager", None) else "None",
+            )
+            if tm is None:
                 return "ERROR: meta tool requires team manager in session"
             from agenticx.runtime.meta_tools import dispatch_meta_tool_async
 
             return await dispatch_meta_tool_async(
                 name,
                 arguments,
-                team_manager=team_manager,
+                team_manager=tm,
                 session=session,
             )
         if name == "bash_exec":
@@ -1195,6 +1205,12 @@ async def dispatch_tool_async(
             return _tool_list_files(arguments)
     except Exception as exc:
         return f"ERROR: {name} crashed: {exc}"
+    if name.startswith("confirm_"):
+        return (
+            "ERROR: Desktop mode does not provide confirm_* tools. "
+            "To request approval, directly call the real tool (e.g. bash_exec); "
+            "runtime will emit confirm_required and wait for UI confirmation."
+        )
     return f"ERROR: unknown tool '{name}'"
 
 

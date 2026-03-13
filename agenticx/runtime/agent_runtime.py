@@ -150,58 +150,74 @@ def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[
     - Keep assistant tool_calls only when each call id has a corresponding tool response in history.
       Unmatched calls are removed from that assistant message.
     """
-    declared_tool_call_ids: set[str] = set()
-    responded_tool_call_ids: set[str] = set()
-
-    for msg in messages:
-        role = str(msg.get("role", ""))
-        if role == "assistant":
-            for call in (msg.get("tool_calls") or []):
-                if isinstance(call, dict):
-                    cid = str(call.get("id", "")).strip()
-                    if cid:
-                        declared_tool_call_ids.add(cid)
-        elif role == "tool":
-            cid = str(msg.get("tool_call_id", "")).strip()
-            if cid:
-                responded_tool_call_ids.add(cid)
-
-    valid_tool_call_ids = declared_tool_call_ids & responded_tool_call_ids
-
     sanitized: List[Dict[str, Any]] = []
-    for msg in messages:
+    idx = 0
+    total = len(messages)
+
+    while idx < total:
+        msg = messages[idx]
         role = str(msg.get("role", ""))
-        if role == "assistant":
-            tool_calls = msg.get("tool_calls") or []
-            if not tool_calls:
+
+        if role != "assistant":
+            # Tool messages are only valid as contiguous responses immediately
+            # following an assistant tool_calls message. Standalone tool rows are dropped.
+            if role != "tool":
                 sanitized.append(msg)
-                continue
-            kept_calls: List[Dict[str, Any]] = []
-            for call in tool_calls:
-                if not isinstance(call, dict):
-                    continue
-                cid = str(call.get("id", "")).strip()
-                if cid and cid in valid_tool_call_ids:
-                    kept_calls.append(call)
-            if kept_calls:
-                msg_copy = dict(msg)
-                msg_copy["tool_calls"] = kept_calls
-                sanitized.append(msg_copy)
-            else:
-                # Remove dangling tool_calls but keep assistant content.
-                msg_copy = dict(msg)
-                msg_copy.pop("tool_calls", None)
-                sanitized.append(msg_copy)
+            idx += 1
             continue
 
-        if role == "tool":
-            cid = str(msg.get("tool_call_id", "")).strip()
-            if not cid or cid not in valid_tool_call_ids:
-                continue
+        tool_calls = msg.get("tool_calls") or []
+        if not tool_calls:
             sanitized.append(msg)
+            idx += 1
             continue
 
-        sanitized.append(msg)
+        expected_ids: set[str] = set()
+        call_map: Dict[str, Dict[str, Any]] = {}
+        for call in tool_calls:
+            if not isinstance(call, dict):
+                continue
+            cid = str(call.get("id", "")).strip()
+            if not cid:
+                continue
+            expected_ids.add(cid)
+            call_map[cid] = call
+
+        # Collect contiguous tool responses right after this assistant turn.
+        j = idx + 1
+        contiguous_tool_rows: List[Dict[str, Any]] = []
+        responded_ids: set[str] = set()
+        while j < total:
+            next_msg = messages[j]
+            if str(next_msg.get("role", "")) != "tool":
+                break
+            cid = str(next_msg.get("tool_call_id", "")).strip()
+            if cid and cid in expected_ids:
+                contiguous_tool_rows.append(next_msg)
+                responded_ids.add(cid)
+            j += 1
+
+        kept_calls: List[Dict[str, Any]] = []
+        for call in tool_calls:
+            if not isinstance(call, dict):
+                continue
+            cid = str(call.get("id", "")).strip()
+            if cid and cid in responded_ids and cid in call_map:
+                kept_calls.append(call_map[cid])
+        if kept_calls:
+            msg_copy = dict(msg)
+            msg_copy["tool_calls"] = kept_calls
+            sanitized.append(msg_copy)
+            sanitized.extend(contiguous_tool_rows)
+        else:
+            # Remove dangling tool_calls but keep assistant content text.
+            msg_copy = dict(msg)
+            msg_copy.pop("tool_calls", None)
+            sanitized.append(msg_copy)
+
+        # Skip contiguous tool block, whether kept or dropped.
+        idx = j
+
     return sanitized
 
 
@@ -304,6 +320,7 @@ class AgentRuntime:
         *,
         max_tool_rounds: int = MAX_TOOL_ROUNDS,
         hooks: Optional[HookRegistry] = None,
+        team_manager: Optional[Any] = None,
     ) -> None:
         self.llm = llm
         self.confirm_gate = confirm_gate
@@ -311,6 +328,7 @@ class AgentRuntime:
         self.hooks = hooks or HookRegistry()
         self.compactor = ContextCompactor(llm)
         self.loop_detector = LoopDetector()
+        self.team_manager = team_manager
         try:
             from agenticx.runtime.hooks.memory_hook import MemoryHook
             self.hooks.register(MemoryHook(), priority=-10)
@@ -406,6 +424,7 @@ class AgentRuntime:
                 )
             try:
                 messages = await self.hooks.run_before_model(messages, session)
+                messages = _sanitize_context_messages(messages)
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
                         self.llm.invoke,
@@ -645,6 +664,7 @@ class AgentRuntime:
                     pending_events.put_nowait(event_payload)
 
                 before_progress = _build_progress_signature(session)
+                effective_tm = self.team_manager or getattr(session, "_team_manager", None)
                 dispatch_task = asyncio.create_task(
                     dispatch_tool_async(
                         tool_name,
@@ -652,6 +672,7 @@ class AgentRuntime:
                         session,
                         confirm_gate=self.confirm_gate,
                         event_callback=_on_tool_event,
+                        team_manager=effective_tm,
                     )
                 )
 
