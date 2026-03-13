@@ -85,6 +85,7 @@ export function App() {
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
   const confirmScopeRef = useRef<string | null>(null);
   const autoApproveScopesRef = useRef<Set<string>>(new Set());
+  const denyScopesRef = useRef<Set<string>>(new Set());
   const [subPanelOpen, setSubPanelOpen] = useState(true);
   const subAgentsRef = useRef(subAgents);
   const subAgentSessionRef = useRef<Record<string, string>>({});
@@ -373,7 +374,11 @@ export function App() {
         return;
       }
       const scope = buildConfirmScope(question, context);
-      if (confirmStrategy === "semi-auto" && autoApproveScopesRef.current.has(scope)) {
+      if (denyScopesRef.current.has(scope)) {
+        resolve(false);
+        return;
+      }
+      if (autoApproveScopesRef.current.has(scope)) {
         resolve(true);
         return;
       }
@@ -492,16 +497,28 @@ export function App() {
         question={confirm.question}
         sourceLabel={confirm.agentId === "meta" ? "主智能体" : `子智能体 ${confirm.agentId}`}
         diff={confirm.diff}
-        onApprove={(allowSimilar) => {
-          if (confirmStrategy === "semi-auto" && allowSimilar && confirmScopeRef.current) {
-            autoApproveScopesRef.current.add(confirmScopeRef.current);
+        onApprove={(policy) => {
+          const scope = confirmScopeRef.current;
+          if (scope) {
+            if (policy === "allow-similar") {
+              autoApproveScopesRef.current.add(scope);
+              denyScopesRef.current.delete(scope);
+            } else if (policy === "deny-similar") {
+              denyScopesRef.current.add(scope);
+              autoApproveScopesRef.current.delete(scope);
+            }
           }
           confirmScopeRef.current = null;
           closeConfirm();
           confirmResolverRef.current?.(true);
           confirmResolverRef.current = null;
         }}
-        onReject={() => {
+        onReject={(policy) => {
+          const scope = confirmScopeRef.current;
+          if (scope && policy === "deny-similar") {
+            denyScopesRef.current.add(scope);
+            autoApproveScopesRef.current.delete(scope);
+          }
           confirmScopeRef.current = null;
           closeConfirm();
           confirmResolverRef.current?.(false);

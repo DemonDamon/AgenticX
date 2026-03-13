@@ -1,19 +1,21 @@
 import { useEffect, useState } from "react";
 
+type ConfirmPolicy = "once" | "allow-similar" | "deny-similar";
+
 type Props = {
   open: boolean;
   question: string;
   sourceLabel?: string;
   diff?: string;
-  onApprove: (allowSimilar: boolean) => void;
-  onReject: () => void;
+  onApprove: (policy: ConfirmPolicy) => void;
+  onReject: (policy: ConfirmPolicy) => void;
 };
 
 export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, onReject }: Props) {
-  const [allowSimilar, setAllowSimilar] = useState(false);
+  const [policy, setPolicy] = useState<ConfirmPolicy>("once");
 
   useEffect(() => {
-    if (open) setAllowSimilar(false);
+    if (open) setPolicy("once");
   }, [open, question]);
 
   if (!open) {
@@ -21,7 +23,7 @@ export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, on
   }
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="max-w-[90vw] w-[480px] rounded-xl border border-border bg-panel p-4 shadow-2xl">
+      <div className="max-w-[90vw] w-[560px] rounded-xl border border-border bg-panel p-4 shadow-2xl">
         <h3 className="mb-2 text-base font-semibold">需要确认</h3>
         {sourceLabel ? <p className="mb-1 text-xs text-slate-400">来源：{sourceLabel}</p> : null}
         <p className="mb-3 break-words text-sm text-slate-200">{question}</p>
@@ -30,22 +32,51 @@ export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, on
             {diff}
           </pre>
         ) : null}
-        <label className="mb-3 flex cursor-pointer items-center gap-2 text-xs text-slate-300">
-          <input
-            type="checkbox"
-            checked={allowSimilar}
-            onChange={(e) => setAllowSimilar(e.target.checked)}
-            className="h-4 w-4 rounded border-border bg-slate-900 accent-emerald-500"
-          />
-          本次会话自动允许同类操作
-        </label>
+
+        <div className="mb-3 rounded-md border border-border/70 bg-slate-900/40 p-3 text-xs text-slate-300">
+          <div className="mb-2 font-medium text-slate-200">本次确认策略</div>
+          <label className="mb-1 flex cursor-pointer items-center gap-2">
+            <input
+              type="radio"
+              name="confirm-policy"
+              checked={policy === "once"}
+              onChange={() => setPolicy("once")}
+              className="h-4 w-4 border-border bg-slate-900 accent-emerald-500"
+            />
+            仅本次允许
+          </label>
+          <label className="mb-1 flex cursor-pointer items-center gap-2">
+            <input
+              type="radio"
+              name="confirm-policy"
+              checked={policy === "allow-similar"}
+              onChange={() => setPolicy("allow-similar")}
+              className="h-4 w-4 border-border bg-slate-900 accent-emerald-500"
+            />
+            本会话允许同类操作
+          </label>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="radio"
+              name="confirm-policy"
+              checked={policy === "deny-similar"}
+              onChange={() => setPolicy("deny-similar")}
+              className="h-4 w-4 border-border bg-slate-900 accent-rose-500"
+            />
+            本会话拒绝同类操作
+          </label>
+        </div>
+
         <div className="flex justify-end gap-2">
-          <button className="rounded-lg border border-border px-3 py-1.5 text-sm transition hover:bg-slate-700" onClick={onReject}>
+          <button
+            className="rounded-lg border border-border px-3 py-1.5 text-sm transition hover:bg-slate-700"
+            onClick={() => onReject(policy)}
+          >
             取消
           </button>
           <button
             className="rounded-lg bg-emerald-500 px-3 py-1.5 text-sm text-black transition hover:bg-emerald-400"
-            onClick={() => onApprove(allowSimilar)}
+            onClick={() => onApprove(policy)}
           >
             确认执行
           </button>
