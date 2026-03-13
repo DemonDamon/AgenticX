@@ -2,7 +2,13 @@ import { create } from "zustand";
 
 export type UiStatus = "idle" | "listening" | "processing";
 export type MsgRole = "user" | "assistant" | "tool";
-export type SubAgentStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type SubAgentStatus =
+  | "pending"
+  | "awaiting_confirm"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
 export type ConfirmStrategy = "manual" | "semi-auto" | "auto";
 export type McpServer = {
   name: string;
@@ -59,6 +65,14 @@ export type SubAgentEvent = {
   ts: number;
 };
 
+export type PendingConfirm = {
+  requestId: string;
+  question: string;
+  agentId: string;
+  sessionId: string;
+  context?: Record<string, unknown>;
+};
+
 export type SubAgent = {
   id: string;
   name: string;
@@ -70,6 +84,7 @@ export type SubAgent = {
   currentAction?: string;
   resultSummary?: string;
   outputFiles?: string[];
+  pendingConfirm?: PendingConfirm;
   events: SubAgentEvent[];
 };
 

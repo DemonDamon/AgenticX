@@ -528,7 +528,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             if (payload.type === "confirm_required") {
               if (!isCurrentRequest()) continue;
               if (eventAgentId !== "meta") {
-                updateSubAgent(eventAgentId, { status: "pending", currentAction: "等待你的确认" });
+                updateSubAgent(eventAgentId, { status: "awaiting_confirm", currentAction: "等待你的确认" });
                 addSubAgentEvent(eventAgentId, {
                   type: "confirm_required",
                   content: payload.data?.question ?? "等待确认",

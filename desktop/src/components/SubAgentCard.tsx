@@ -7,11 +7,13 @@ type Props = {
   onRetry: (agentId: string) => void;
   onChat: (agentId: string) => void;
   onSelect: (agentId: string) => void;
+  onConfirmResolve?: (agentId: string, approved: boolean) => void;
   selected?: boolean;
 };
 
 const statusMap: Record<string, { icon: string; label: string; tone: string }> = {
   pending: { icon: "⏳", label: "等待中", tone: "text-amber-300" },
+  awaiting_confirm: { icon: "🛂", label: "待确认", tone: "text-orange-300" },
   running: { icon: "🔄", label: "执行中", tone: "text-cyan-300" },
   completed: { icon: "✅", label: "已完成", tone: "text-emerald-300" },
   failed: { icon: "❌", label: "失败", tone: "text-rose-300" },
@@ -24,11 +26,13 @@ export function SubAgentCard({
   onRetry,
   onChat,
   onSelect,
+  onConfirmResolve,
   selected = false,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const status = useMemo(() => statusMap[subAgent.status] ?? statusMap.pending, [subAgent.status]);
-  const canCancel = subAgent.status === "running" || subAgent.status === "pending";
+  const canCancel =
+    subAgent.status === "running" || subAgent.status === "pending" || subAgent.status === "awaiting_confirm";
   const canRetry = subAgent.status === "failed" || subAgent.status === "completed" || subAgent.status === "cancelled";
 
   return (
@@ -51,6 +55,32 @@ export function SubAgentCard({
       <div className="mb-2 line-clamp-2 text-xs text-slate-400">{subAgent.task}</div>
       {subAgent.currentAction ? (
         <div className="mb-2 text-xs text-slate-300">{subAgent.currentAction}</div>
+      ) : null}
+      {subAgent.status === "awaiting_confirm" && subAgent.pendingConfirm ? (
+        <div className="mb-2 rounded-md border border-orange-400/30 bg-orange-500/10 p-2">
+          <div className="mb-1.5 text-[11px] font-medium text-orange-200">需要你的确认</div>
+          <div className="mb-2 max-h-20 overflow-y-auto whitespace-pre-wrap text-xs text-slate-200">
+            {subAgent.pendingConfirm.question}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded-md bg-emerald-500/80 px-3 py-1 text-xs font-medium text-white transition hover:bg-emerald-400"
+              onClick={() => onConfirmResolve?.(subAgent.id, true)}
+            >
+              通过
+            </button>
+            <button
+              className="rounded-md bg-rose-500/70 px-3 py-1 text-xs font-medium text-white transition hover:bg-rose-400"
+              onClick={() => onConfirmResolve?.(subAgent.id, false)}
+            >
+              拒绝
+            </button>
+          </div>
+        </div>
+      ) : subAgent.status === "awaiting_confirm" ? (
+        <div className="mb-2 rounded-md border border-orange-400/30 bg-orange-500/10 p-2 text-xs text-orange-200">
+          等待确认中… 请查看弹窗或稍候
+        </div>
       ) : null}
       {subAgent.resultSummary ? (
         <div className="mb-2 rounded-md border border-emerald-500/20 bg-emerald-500/5 p-2">

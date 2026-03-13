@@ -70,6 +70,14 @@ let isQuitting = false;
 let serveStdoutBuffer = "";
 let serveStderrBuffer = "";
 
+// Suppress noisy Chromium network diagnostics
+// (e.g. chunked upload stream warnings during aborted renderer requests).
+// Set AGX_CHROMIUM_QUIET=0 to re-enable Chromium internals logs for debugging.
+if (process.env.AGX_CHROMIUM_QUIET !== "0") {
+  app.commandLine.appendSwitch("log-level", "3");
+  app.commandLine.appendSwitch("disable-logging");
+}
+
 function pickFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();

@@ -5,6 +5,73 @@ import remarkGfm from "remark-gfm";
 import { useAppStore, type Message } from "../store";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 
+function PaneModelPicker() {
+  const settings = useAppStore((s) => s.settings);
+  const activeProvider = useAppStore((s) => s.activeProvider);
+  const activeModel = useAppStore((s) => s.activeModel);
+  const setActiveModel = useAppStore((s) => s.setActiveModel);
+  const [open, setOpen] = useState(false);
+
+  const options = useMemo(() => {
+    const result: { provider: string; model: string; label: string }[] = [];
+    for (const [provName, entry] of Object.entries(settings.providers)) {
+      if (!entry.apiKey) continue;
+      if (entry.models.length > 0) {
+        for (const m of entry.models) result.push({ provider: provName, model: m, label: `${provName}/${m}` });
+      } else if (entry.model) {
+        result.push({ provider: provName, model: entry.model, label: `${provName}/${entry.model}` });
+      }
+    }
+    return result;
+  }, [settings.providers]);
+
+  const currentLabel = activeModel ? `${activeProvider}/${activeModel}` : "未选模型";
+
+  return (
+    <div className="relative">
+      <button
+        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-slate-400 transition hover:bg-slate-800 hover:text-cyan-300"
+        onClick={() => setOpen((v) => !v)}
+        title="切换模型"
+      >
+        <span className="max-w-[180px] truncate">{currentLabel}</span>
+        <span className="text-[9px]">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full left-0 z-40 mb-1 max-h-[220px] w-[240px] overflow-y-auto rounded-lg border border-border bg-slate-900 shadow-xl">
+            {options.length === 0 ? (
+              <div className="px-3 py-3 text-center text-xs text-slate-500">
+                请先在设置中配置模型
+              </div>
+            ) : (
+              options.map((opt) => {
+                const isActive = opt.provider === activeProvider && opt.model === activeModel;
+                return (
+                  <button
+                    key={`${opt.provider}:${opt.model}`}
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-cyan-500/10 hover:text-white ${
+                      isActive ? "text-cyan-300 bg-cyan-500/10" : "text-slate-300"
+                    }`}
+                    onClick={() => {
+                      setActiveModel(opt.provider, opt.model);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${isActive ? "bg-cyan-400" : "bg-slate-600"}`} />
+                    <span className="truncate">{opt.label}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 const mdComponents: Components = {
   p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
   h1: ({ children }) => <h1 className="mb-2 mt-3 text-base font-bold text-slate-100">{children}</h1>,
@@ -105,6 +172,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     const text = userText.trim();
     if (!text || !apiBase || !pane.sessionId) return;
     if (streaming) return;
+    const requestSessionId = pane.sessionId;
 
     const targetAgentId = (selectedSubAgent ?? "meta").trim() || "meta";
     if (targetAgentId === "meta") {
@@ -121,7 +189,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     abortRef.current = abortController;
 
     try {
-      const body: Record<string, unknown> = { session_id: pane.sessionId, user_input: text };
+      const body: Record<string, unknown> = { session_id: requestSessionId, user_input: text };
       if (activeProvider) body.provider = activeProvider;
       if (activeModel) body.model = activeModel;
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
@@ -171,6 +239,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               else addSubAgentEvent(eventAgentId, { type: "tool_result", content });
             }
             if (payload.type === "confirm_required") {
+              if (eventAgentId !== "meta") {
+                const confirmReqId = String(payload.data?.id ?? "");
+                updateSubAgent(eventAgentId, {
+                  status: "awaiting_confirm",
+                  currentAction: "等待你的确认",
+                  pendingConfirm: confirmReqId
+                    ? {
+                        requestId: confirmReqId,
+                        question: payload.data?.question ?? "是否确认执行？",
+                        agentId: eventAgentId,
+                        sessionId: requestSessionId,
+                        context: payload.data?.context,
+                      }
+                    : undefined,
+                });
+                addSubAgentEvent(eventAgentId, {
+                  type: "confirm_required",
+                  content: payload.data?.question ?? "等待确认",
+                });
+              }
               const ok = await onOpenConfirm(
                 payload.data?.id ?? "",
                 payload.data?.question ?? "是否确认执行？",
@@ -182,12 +270,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
                 body: JSON.stringify({
-                  session_id: pane.sessionId,
+                  session_id: requestSessionId,
                   request_id: payload.data?.id,
                   approved: ok,
                   agent_id: eventAgentId,
                 }),
               });
+            }
+            if (payload.type === "confirm_response") {
+              if (eventAgentId !== "meta") {
+                const approved = !!payload.data?.approved;
+                updateSubAgent(eventAgentId, {
+                  status: approved ? "running" : "cancelled",
+                  currentAction: approved ? "确认通过，继续执行" : "确认拒绝，执行终止",
+                  pendingConfirm: undefined,
+                });
+                addSubAgentEvent(eventAgentId, {
+                  type: "confirm_response",
+                  content: approved ? "确认通过" : "确认拒绝",
+                });
+              }
             }
             if (payload.type === "subagent_started") {
               const subId = payload.data?.agent_id;
@@ -197,7 +299,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   name: payload.data?.name ?? subId,
                   role: payload.data?.role ?? "worker",
                   task: payload.data?.task ?? "",
-                  sessionId: pane.sessionId || undefined,
+                  sessionId: requestSessionId || undefined,
                 });
               }
             }
@@ -437,6 +539,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 发送
               </button>
             )}
+          </div>
+          <div className="mt-1.5 flex items-center">
+            <PaneModelPicker />
           </div>
         </div>
       </div>
