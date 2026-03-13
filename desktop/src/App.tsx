@@ -91,6 +91,7 @@ export function App() {
   const subAgentSessionRef = useRef<Record<string, string>>({});
   const staleMissCountRef = useRef<Record<string, number>>({});
   const polledEventSeenRef = useRef<Record<string, Set<string>>>({});
+  const completionNotifiedRef = useRef<Set<string>>(new Set());
 
   const refreshMcpStatus = useCallback(async (sid: string = sessionId) => {
     if (!sid) return;
@@ -198,6 +199,10 @@ export function App() {
     );
     if (sessionIds.length === 0) return;
 
+    const runningAgents = subAgentsRef.current.filter(
+      (s) => s.status === "running" || s.status === "pending" || s.status === "awaiting_confirm"
+    );
+
     const seenRunningOrPending = new Set<string>();
     for (const sid of sessionIds) {
       try {
@@ -216,6 +221,7 @@ export function App() {
             result_summary?: string;
             error_text?: string;
             recent_events?: Array<{ type?: string; data?: Record<string, unknown> }>;
+            pending_confirm?: { request_id?: string; question?: string; context?: Record<string, unknown> } | null;
           }>;
         };
         if (!Array.isArray(data.subagents)) continue;
@@ -237,14 +243,28 @@ export function App() {
           }
 
           const status = item.status ?? "running";
+          const existing = subAgentsRef.current.find((sub) => sub.id === id);
+          const hasPendingConfirm = !!(item.pending_confirm?.request_id);
+          const effectiveStatus =
+            hasPendingConfirm
+              ? "awaiting_confirm" as const
+              : existing?.status === "awaiting_confirm" && status === "running"
+                ? "awaiting_confirm" as const
+                : status;
           if (status === "running" || status === "pending") {
+            seenRunningOrPending.add(id);
+            staleMissCountRef.current[id] = 0;
+          }
+          if (hasPendingConfirm) {
             seenRunningOrPending.add(id);
             staleMissCountRef.current[id] = 0;
           }
           const summaryText = (item.result_summary ?? "").trim();
           const outputFiles = extractOutputFiles(summaryText);
           const currentAction =
-            status === "completed"
+            effectiveStatus === "awaiting_confirm"
+              ? existing?.currentAction || "等待你的确认"
+              : status === "completed"
               ? summaryText
                 ? "已完成（查看摘要）"
                 : "已完成"
@@ -253,12 +273,42 @@ export function App() {
                 : status === "cancelled"
                   ? "已中断"
                   : "执行中";
+          const pendingConfirm =
+            hasPendingConfirm
+              ? {
+                  requestId: String(item.pending_confirm!.request_id ?? ""),
+                  question: String(item.pending_confirm!.question ?? "是否确认执行？"),
+                  agentId: id,
+                  sessionId: sid,
+                  context: item.pending_confirm!.context,
+                }
+              : effectiveStatus !== "awaiting_confirm"
+                ? undefined
+                : existing?.pendingConfirm;
           updateSubAgent(id, {
-            status,
+            status: effectiveStatus,
             currentAction,
             resultSummary: summaryText || undefined,
             outputFiles,
+            pendingConfirm,
           });
+
+          if (
+            (effectiveStatus === "completed" || effectiveStatus === "failed") &&
+            !completionNotifiedRef.current.has(id)
+          ) {
+            completionNotifiedRef.current.add(id);
+            const agentName = item.name ?? id;
+            const emoji = effectiveStatus === "completed" ? "✅" : "❌";
+            const statusLabel = effectiveStatus === "completed" ? "已完成" : "执行失败";
+            const summaryBody = summaryText || (effectiveStatus === "failed" ? (item.error_text || "未知错误") : "任务已结束");
+            const completionMsg = `${emoji} **子智能体 ${agentName} ${statusLabel}**\n\n${summaryBody}`;
+            const store = useAppStore.getState();
+            const matchingPane = store.panes.find((p) => p.sessionId === sid);
+            if (matchingPane) {
+              store.addPaneMessage(matchingPane.id, "tool", completionMsg, id);
+            }
+          }
 
           const seen = polledEventSeenRef.current[id] ?? new Set<string>();
           polledEventSeenRef.current[id] = seen;
@@ -277,6 +327,25 @@ export function App() {
                 ? evtData.text
                 : `${evtType || "event"}: ${JSON.stringify(evtData)}`;
             addSubAgentEvent(id, { type: evtType || "event", content: text });
+            if (evtType === "confirm_required") {
+              const reqId = String(evtData.id ?? evtData.request_id ?? "");
+              const question = String(evtData.question ?? "是否确认执行？");
+              const confirmCtx = (evtData.context ?? undefined) as Record<string, unknown> | undefined;
+              updateSubAgent(id, {
+                status: "awaiting_confirm",
+                currentAction: "等待你的确认",
+                pendingConfirm: reqId
+                  ? { requestId: reqId, question, agentId: id, sessionId: sid, context: confirmCtx }
+                  : undefined,
+              });
+            } else if (evtType === "confirm_response") {
+              const approved = !!evtData.approved;
+              updateSubAgent(id, {
+                status: approved ? "running" : "cancelled",
+                currentAction: approved ? "确认通过，继续执行" : "确认拒绝，已取消",
+                pendingConfirm: undefined,
+              });
+            }
           }
         }
       } catch {
@@ -287,16 +356,16 @@ export function App() {
     // Guard against stale "running" badges when SSE stream closed early.
     // Do NOT auto-mark as completed when backend has no record; that's misleading.
     for (const item of subAgentsRef.current) {
-      if (item.status !== "running" && item.status !== "pending") continue;
+      if (item.status !== "running" && item.status !== "pending" && item.status !== "awaiting_confirm") continue;
       if (seenRunningOrPending.has(item.id)) continue;
       const miss = (staleMissCountRef.current[item.id] ?? 0) + 1;
       staleMissCountRef.current[item.id] = miss;
-      if (miss === 2) {
+      if (miss === 5) {
         addSubAgentEvent(item.id, {
           type: "sync",
           content: "轮询暂未发现该任务，可能会话已切换或任务已归档，继续同步中",
         });
-      } else if (miss >= 4) {
+      } else if (miss === 10) {
         updateSubAgent(item.id, {
           currentAction: "状态失联：后台暂未返回该任务，建议展开详情并重试同步",
         });
@@ -311,7 +380,9 @@ export function App() {
   useEffect(() => {
     if (!apiBase || !apiToken) return;
     void syncSubAgents();
-    const runningCount = subAgents.filter((item) => item.status === "running" || item.status === "pending").length;
+    const runningCount = subAgents.filter(
+      (item) => item.status === "running" || item.status === "pending" || item.status === "awaiting_confirm"
+    ).length;
     const interval = runningCount > 0 ? 1500 : 4000;
     const timer = window.setInterval(() => void syncSubAgents(), interval);
     return () => window.clearInterval(timer);
@@ -459,6 +530,36 @@ export function App() {
     }
   };
 
+  const resolveSubAgentConfirm = async (agentId: string, approved: boolean) => {
+    if (!apiBase || !apiToken) return;
+    const sub = subAgentsRef.current.find((s) => s.id === agentId);
+    if (!sub?.pendingConfirm) return;
+    const { requestId, sessionId: confirmSid } = sub.pendingConfirm;
+    updateSubAgent(agentId, {
+      status: approved ? "running" : "cancelled",
+      currentAction: approved ? "确认通过，继续执行" : "确认拒绝，执行终止",
+      pendingConfirm: undefined,
+    });
+    addSubAgentEvent(agentId, {
+      type: "confirm_response",
+      content: approved ? "用户确认通过" : "用户确认拒绝",
+    });
+    try {
+      await fetch(`${apiBase}/api/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({
+          session_id: confirmSid,
+          request_id: requestId,
+          approved,
+          agent_id: agentId,
+        }),
+      });
+    } catch {
+      // confirm POST failure is non-fatal for UI
+    }
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-base">
       {!onboardingCompleted ? (
@@ -481,6 +582,7 @@ export function App() {
                   onRetry={(agentId) => void retrySubAgent(agentId)}
                   onChat={(agentId) => setSelectedSubAgent(agentId)}
                   onSelect={(agentId) => setSelectedSubAgent(agentId)}
+                  onConfirmResolve={(agentId, approved) => void resolveSubAgentConfirm(agentId, approved)}
                 />
               </>
             )}

@@ -10,6 +10,7 @@ type Props = {
   onRetry: (agentId: string) => void;
   onChat: (agentId: string) => void;
   onSelect: (agentId: string) => void;
+  onConfirmResolve?: (agentId: string, approved: boolean) => void;
 };
 
 export function SubAgentPanel({
@@ -20,11 +21,13 @@ export function SubAgentPanel({
   onCancel,
   onRetry,
   onChat,
-  onSelect
+  onSelect,
+  onConfirmResolve,
 }: Props) {
   const running = subAgents.filter((item) => item.status === "running").length;
   const done = subAgents.filter((item) => item.status === "completed").length;
   const pending = subAgents.filter((item) => item.status === "pending").length;
+  const awaitingConfirm = subAgents.filter((item) => item.status === "awaiting_confirm").length;
 
   return (
     <aside
@@ -44,7 +47,8 @@ export function SubAgentPanel({
           <div className="border-b border-border/60 px-3 py-2 text-xs text-slate-400">
             <span className="mr-2">运行 {running}</span>
             <span className="mr-2">完成 {done}</span>
-            <span>等待 {pending}</span>
+            <span className="mr-2">等待 {pending}</span>
+            <span>待确认 {awaitingConfirm}</span>
           </div>
           <div className="flex-1 space-y-2 overflow-y-auto p-2">
             {subAgents.length === 0 ? (
@@ -60,6 +64,7 @@ export function SubAgentPanel({
                   onRetry={onRetry}
                   onChat={onChat}
                   onSelect={onSelect}
+                  onConfirmResolve={onConfirmResolve}
                   selected={selectedSubAgent === subAgent.id}
                 />
               ))
