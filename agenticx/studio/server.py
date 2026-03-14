@@ -359,7 +359,7 @@ def create_studio_app() -> FastAPI:
             id(getattr(session, "_team_manager", None)),
             list(team_manager._agents.keys()) if team_manager else [],
         )
-        runtime = AgentRuntime(llm, managed.get_confirm_gate("meta"), team_manager=team_manager)
+        runtime = AgentRuntime(llm, managed.get_confirm_gate("meta"), team_manager=team_manager, max_tool_rounds=20)
 
         async def _event_stream() -> AsyncGenerator[str, None]:
             runtime_task: "asyncio.Task[None] | None" = None
@@ -446,7 +446,7 @@ def create_studio_app() -> FastAPI:
         session = managed.studio_session
         llm = ProviderResolver.resolve(provider_name=session.provider_name, model=session.model_name)
         loop_tm = managed.team_manager
-        runtime = AgentRuntime(llm, managed.get_confirm_gate("meta"), team_manager=loop_tm)
+        runtime = AgentRuntime(llm, managed.get_confirm_gate("meta"), team_manager=loop_tm, max_tool_rounds=20)
         controller = LoopController(max_iterations=max_iterations, completion_promise=completion_promise)
 
         async def _loop_stream() -> AsyncGenerator[str, None]:

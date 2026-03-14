@@ -67,7 +67,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   }) => ipcRenderer.invoke("health-check-model", payload),
 
   // Legacy
-  saveConfig: async (payload: { provider?: string; model?: string; apiKey?: string }) =>
+  saveConfig: async (payload: { provider?: string; model?: string; apiKey?: string; activeProvider?: string; activeModel?: string }) =>
     ipcRenderer.invoke("save-config", payload),
   nativeSay: async (text: string) => ipcRenderer.invoke("native-say", text),
 });

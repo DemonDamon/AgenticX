@@ -30,6 +30,8 @@ type AgxConfig = {
   user_mode?: "pro" | "lite";
   onboarding_completed?: boolean;
   confirm_strategy?: "manual" | "semi-auto" | "auto";
+  active_provider?: string;
+  active_model?: string;
 };
 
 const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
@@ -559,6 +561,8 @@ function registerIpc(): void {
       userMode: cfg.user_mode ?? "pro",
       onboardingCompleted: cfg.onboarding_completed ?? false,
       confirmStrategy: cfg.confirm_strategy ?? "semi-auto",
+      activeProvider: cfg.active_provider ?? "",
+      activeModel: cfg.active_model ?? "",
     };
   });
 
@@ -769,7 +773,7 @@ function registerIpc(): void {
   });
 
   // Legacy compatibility
-  ipcMain.handle("save-config", async (_event, payload: { provider?: string; model?: string; apiKey?: string }) => {
+  ipcMain.handle("save-config", async (_event, payload: { provider?: string; model?: string; apiKey?: string; activeProvider?: string; activeModel?: string }) => {
     const cfg = loadAgxConfig();
     const name = payload.provider || cfg.default_provider || "openai";
     if (!cfg.providers) cfg.providers = {};
@@ -778,6 +782,8 @@ function registerIpc(): void {
     if (payload.apiKey) cfg.providers[name].api_key = payload.apiKey;
     if (payload.model) cfg.providers[name].model = payload.model;
     cfg.default_provider = name;
+    if (payload.activeProvider) cfg.active_provider = payload.activeProvider;
+    if (payload.activeModel) cfg.active_model = payload.activeModel;
     saveAgxConfig(cfg);
     return { ok: true, path: CONFIG_PATH };
   });

@@ -18,6 +18,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio import StudioSession
+from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.runtime import AgentRuntime, AsyncConfirmGate, EventType, RuntimeEvent
 from agenticx.runtime.resource_monitor import ResourceMonitor
 
@@ -71,6 +72,8 @@ class SubAgentContext:
     attachments: Dict[str, str] = field(default_factory=dict)
     allowed_tool_names: List[str] = field(default_factory=list)
     spawn_tree_path: str = ""
+    provider_name: str = ""
+    model_name: str = ""
 
 
 class AgentTeamManager:
@@ -250,6 +253,9 @@ class AgentTeamManager:
             f"- name: {context.name}\n"
             f"- role: {context.role}\n"
             f"- delegated_task: {context.task}\n\n"
+            "## 模型配置\n"
+            f"- provider: {context.provider_name or session.provider_name or '(inherit)'}\n"
+            f"- model: {context.model_name or session.model_name or '(inherit)'}\n\n"
             "## 工作目录约束（必须遵守）\n"
             f"- 工作目录: {workspace_dir}\n"
             "- 所有文件读写和命令执行都必须限定在该目录或其子目录。\n"
@@ -318,6 +324,8 @@ class AgentTeamManager:
         cleanup: Optional[str] = None,
         run_timeout_seconds: Optional[int] = None,
         attachments: Optional[Sequence[Dict[str, Any]]] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         async with self._lock:
             active = self._active_running_count()
@@ -394,6 +402,8 @@ class AgentTeamManager:
                     if isinstance(item, dict)
                 ],
                 spawn_tree_path=spawn_tree_path,
+                provider_name=str(provider or "").strip(),
+                model_name=str(model or "").strip(),
             )
             self._agents[agent_id] = context
             context.status = SubAgentStatus.RUNNING
@@ -413,6 +423,8 @@ class AgentTeamManager:
                     "status": context.status.value,
                     "depth": context.depth,
                     "mode": context.mode,
+                    "provider": context.provider_name or self.base_session.provider_name or "",
+                    "model": context.model_name or self.base_session.model_name or "",
                 },
                 agent_id=context.agent_id,
             )
@@ -425,6 +437,8 @@ class AgentTeamManager:
             "task": context.task,
             "depth": context.depth,
             "mode": context.mode,
+            "provider": context.provider_name or self.base_session.provider_name or "",
+            "model": context.model_name or self.base_session.model_name or "",
         }
 
     async def cancel_subagent(self, agent_id: str) -> Dict[str, Any]:
@@ -528,6 +542,8 @@ class AgentTeamManager:
             role=previous.role,
             task=new_task,
             source_tool_call_id=previous.source_tool_call_id,
+            provider=previous.provider_name or None,
+            model=previous.model_name or None,
         )
         if not result.get("ok"):
             return result
@@ -611,6 +627,8 @@ class AgentTeamManager:
             "mode": context.mode,
             "cleanup": context.cleanup,
             "spawn_tree_path": context.spawn_tree_path,
+            "provider": context.provider_name or self.base_session.provider_name or "",
+            "model": context.model_name or self.base_session.model_name or "",
             "pending_confirm": pending_confirm,
         }
 
@@ -659,7 +677,14 @@ class AgentTeamManager:
                 )
             self._agent_sessions[context.agent_id] = session
         setattr(session, "_team_manager", self)
-        llm = self.llm_factory()
+        resolved_provider = context.provider_name or session.provider_name or self.base_session.provider_name
+        resolved_model = context.model_name or session.model_name or self.base_session.model_name
+        if resolved_provider or resolved_model:
+            llm = ProviderResolver.resolve(provider_name=resolved_provider, model=resolved_model)
+            session.provider_name = resolved_provider
+            session.model_name = resolved_model
+        else:
+            llm = self.llm_factory()
         runtime = AgentRuntime(llm, context.confirm_gate, max_tool_rounds=25, team_manager=self)
         system_prompt = self._build_subagent_system_prompt(context, session)
         started_at = time.time()

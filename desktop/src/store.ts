@@ -77,6 +77,8 @@ export type SubAgent = {
   id: string;
   name: string;
   role: string;
+  provider?: string;
+  model?: string;
   status: SubAgentStatus;
   task: string;
   sessionId?: string;
@@ -160,6 +162,7 @@ type AppState = {
   addPane: (avatarId: string | null, avatarName: string, sessionId: string) => string;
   removePane: (paneId: string) => void;
   addPaneMessage: (paneId: string, role: MsgRole, content: string, agentId?: string, provider?: string, model?: string) => void;
+  updateLastPaneMessage: (paneId: string, content: string) => void;
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string) => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
@@ -168,7 +171,7 @@ type AppState = {
   addMessage: (role: MsgRole, content: string, agentId?: string, provider?: string, model?: string) => void;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
   clearMessages: () => void;
-  addSubAgent: (item: Pick<SubAgent, "id" | "name" | "role" | "task"> & { sessionId?: string }) => void;
+  addSubAgent: (item: Pick<SubAgent, "id" | "name" | "role" | "task" | "provider" | "model"> & { sessionId?: string }) => void;
   updateSubAgent: (id: string, patch: Partial<SubAgent>) => void;
   addSubAgentEvent: (id: string, event: Omit<SubAgentEvent, "id" | "ts">) => void;
   removeSubAgent: (id: string) => void;
@@ -286,6 +289,16 @@ export const useAppStore = create<AppState>((set) => ({
             }
           : pane
       ),
+    })),
+  updateLastPaneMessage: (paneId, content) =>
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        if (pane.messages.length === 0) return pane;
+        const msgs = [...pane.messages];
+        msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], content };
+        return { ...pane, messages: msgs };
+      }),
     })),
   clearPaneMessages: (paneId) =>
     set((state) => ({

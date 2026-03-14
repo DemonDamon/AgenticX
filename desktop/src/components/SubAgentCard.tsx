@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SubAgent } from "../store";
 
 type Props = {
@@ -20,6 +20,91 @@ const statusMap: Record<string, { icon: string; label: string; tone: string }> =
   cancelled: { icon: "⏹", label: "已中断", tone: "text-slate-300" }
 };
 
+const AUTO_CONFIRM_SECONDS = 8;
+
+function ConfirmWithCountdown({
+  question,
+  agentId,
+  onConfirmResolve,
+}: {
+  question: string;
+  agentId: string;
+  onConfirmResolve?: (agentId: string, approved: boolean) => void;
+}) {
+  const [remaining, setRemaining] = useState(AUTO_CONFIRM_SECONDS);
+  const resolvedRef = useRef(false);
+
+  useEffect(() => {
+    resolvedRef.current = false;
+    setRemaining(AUTO_CONFIRM_SECONDS);
+    const interval = window.setInterval(() => {
+      setRemaining((prev) => {
+        if (prev <= 1) {
+          window.clearInterval(interval);
+          if (!resolvedRef.current) {
+            resolvedRef.current = true;
+            onConfirmResolve?.(agentId, true);
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(interval);
+    // Only restart when agentId or question changes (new confirm request)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId, question]);
+
+  const pct = ((AUTO_CONFIRM_SECONDS - remaining) / AUTO_CONFIRM_SECONDS) * 100;
+
+  const handleApprove = () => {
+    if (resolvedRef.current) return;
+    resolvedRef.current = true;
+    onConfirmResolve?.(agentId, true);
+  };
+
+  const handleDeny = () => {
+    if (resolvedRef.current) return;
+    resolvedRef.current = true;
+    onConfirmResolve?.(agentId, false);
+  };
+
+  return (
+    <div className="mb-2 rounded-md border border-orange-400/30 bg-orange-500/10 p-2">
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-[11px] font-medium text-orange-200">需要你的确认</span>
+        <span className="text-[10px] text-orange-300/70">
+          {remaining}s 后自动通过
+        </span>
+      </div>
+      <div className="mb-2 max-h-20 overflow-y-auto whitespace-pre-wrap text-xs text-slate-200">
+        {question}
+      </div>
+      {/* countdown progress bar */}
+      <div className="mb-2 h-1 overflow-hidden rounded-full bg-slate-700">
+        <div
+          className="h-full rounded-full bg-emerald-400 transition-all duration-1000 ease-linear"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          className="rounded-md bg-emerald-500/80 px-3 py-1 text-xs font-medium text-white transition hover:bg-emerald-400"
+          onClick={handleApprove}
+        >
+          通过
+        </button>
+        <button
+          className="rounded-md bg-rose-500/70 px-3 py-1 text-xs font-medium text-white transition hover:bg-rose-400"
+          onClick={handleDeny}
+        >
+          拒绝
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function SubAgentCard({
   subAgent,
   onCancel,
@@ -34,6 +119,10 @@ export function SubAgentCard({
   const canCancel =
     subAgent.status === "running" || subAgent.status === "pending" || subAgent.status === "awaiting_confirm";
   const canRetry = subAgent.status === "failed" || subAgent.status === "completed" || subAgent.status === "cancelled";
+  const modelLabel =
+    subAgent.model
+      ? (subAgent.provider ? `${subAgent.provider}/${subAgent.model}` : subAgent.model)
+      : "";
 
   return (
     <div
@@ -46,6 +135,11 @@ export function SubAgentCard({
           <div className="text-sm font-medium text-slate-200">{subAgent.name}</div>
           <div className="text-xs text-slate-400">{subAgent.role}</div>
           <div className="text-[11px] text-slate-500">ID: {subAgent.id}</div>
+          {modelLabel ? (
+            <div className="mt-1 inline-flex max-w-[220px] items-center rounded bg-slate-700/70 px-1.5 py-0.5 text-[10px] text-cyan-200">
+              {modelLabel}
+            </div>
+          ) : null}
         </button>
         <span className={`text-xs ${status.tone}`}>
           {status.icon} {status.label}
@@ -57,26 +151,11 @@ export function SubAgentCard({
         <div className="mb-2 text-xs text-slate-300">{subAgent.currentAction}</div>
       ) : null}
       {subAgent.status === "awaiting_confirm" && subAgent.pendingConfirm ? (
-        <div className="mb-2 rounded-md border border-orange-400/30 bg-orange-500/10 p-2">
-          <div className="mb-1.5 text-[11px] font-medium text-orange-200">需要你的确认</div>
-          <div className="mb-2 max-h-20 overflow-y-auto whitespace-pre-wrap text-xs text-slate-200">
-            {subAgent.pendingConfirm.question}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              className="rounded-md bg-emerald-500/80 px-3 py-1 text-xs font-medium text-white transition hover:bg-emerald-400"
-              onClick={() => onConfirmResolve?.(subAgent.id, true)}
-            >
-              通过
-            </button>
-            <button
-              className="rounded-md bg-rose-500/70 px-3 py-1 text-xs font-medium text-white transition hover:bg-rose-400"
-              onClick={() => onConfirmResolve?.(subAgent.id, false)}
-            >
-              拒绝
-            </button>
-          </div>
-        </div>
+        <ConfirmWithCountdown
+          question={subAgent.pendingConfirm.question}
+          agentId={subAgent.id}
+          onConfirmResolve={onConfirmResolve}
+        />
       ) : subAgent.status === "awaiting_confirm" ? (
         <div className="mb-2 rounded-md border border-orange-400/30 bg-orange-500/10 p-2 text-xs text-orange-200">
           等待确认中… 请查看弹窗或稍候

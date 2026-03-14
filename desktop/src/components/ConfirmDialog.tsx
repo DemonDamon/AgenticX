@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-type ConfirmPolicy = "once" | "allow-similar" | "deny-similar";
+type ConfirmPolicy = "ask-every-time" | "use-allowlist" | "run-everything";
 
 type Props = {
   open: boolean;
@@ -12,10 +12,10 @@ type Props = {
 };
 
 export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, onReject }: Props) {
-  const [policy, setPolicy] = useState<ConfirmPolicy>("once");
+  const [policy, setPolicy] = useState<ConfirmPolicy>("ask-every-time");
 
   useEffect(() => {
-    if (open) setPolicy("once");
+    if (open) setPolicy("ask-every-time");
   }, [open, question]);
 
   if (!open) {
@@ -39,31 +39,31 @@ export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, on
             <input
               type="radio"
               name="confirm-policy"
-              checked={policy === "once"}
-              onChange={() => setPolicy("once")}
+              checked={policy === "ask-every-time"}
+              onChange={() => setPolicy("ask-every-time")}
               className="h-4 w-4 border-border bg-slate-900 accent-emerald-500"
             />
-            仅本次允许
+            Ask Every Time（仅本次允许）
           </label>
           <label className="mb-1 flex cursor-pointer items-center gap-2">
             <input
               type="radio"
               name="confirm-policy"
-              checked={policy === "allow-similar"}
-              onChange={() => setPolicy("allow-similar")}
+              checked={policy === "use-allowlist"}
+              onChange={() => setPolicy("use-allowlist")}
               className="h-4 w-4 border-border bg-slate-900 accent-emerald-500"
             />
-            本会话允许同类操作
+            Use Allowlist（本会话允许同类）
           </label>
           <label className="flex cursor-pointer items-center gap-2">
             <input
               type="radio"
               name="confirm-policy"
-              checked={policy === "deny-similar"}
-              onChange={() => setPolicy("deny-similar")}
-              className="h-4 w-4 border-border bg-slate-900 accent-rose-500"
+              checked={policy === "run-everything"}
+              onChange={() => setPolicy("run-everything")}
+              className="h-4 w-4 border-border bg-slate-900 accent-amber-500"
             />
-            本会话拒绝同类操作
+            Run Everything（本会话不再询问）
           </label>
         </div>
 

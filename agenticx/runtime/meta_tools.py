@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 _meta_log = logging.getLogger(__name__)
 
 from agenticx.cli.studio_mcp import import_mcp_config, load_available_servers
 from agenticx.cli.studio_skill import get_all_skill_summaries
+from agenticx.cli.config_manager import ConfigManager
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.runtime.team_manager import AgentTeamManager
 
@@ -111,6 +113,8 @@ META_AGENT_TOOLS: List[Dict[str, Any]] = [
                     "mode": {"type": "string", "enum": ["run", "session"]},
                     "cleanup": {"type": "string", "enum": ["keep", "delete"]},
                     "run_timeout_seconds": {"type": "integer"},
+                    "provider": {"type": "string", "description": "Optional provider override for this sub-agent."},
+                    "model": {"type": "string", "description": "Optional model override for this sub-agent."},
                     "tools": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -190,6 +194,22 @@ META_AGENT_TOOLS: List[Dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "recommend_subagent_model",
+            "description": "Recommend a model for a delegated sub-agent task based on complexity and configured providers.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "Delegated task description."},
+                    "role": {"type": "string", "description": "Optional role, e.g. coder/researcher/tester."},
+                },
+                "required": ["task"],
                 "additionalProperties": False,
             },
         },
@@ -310,6 +330,168 @@ def _list_mcps_payload(session: Optional["StudioSession"]) -> Dict[str, Any]:
     }
 
 
+def _model_capability_score(provider: str, model: str) -> int:
+    text = f"{provider}/{model}".lower()
+    score = 50
+    strong_tokens = ("gpt-4", "sonnet", "opus", "glm-5", "r1", "max", "pro", "plus", "4.1")
+    weak_tokens = ("mini", "nano", "flash", "lite", "small", "tiny")
+    for token in strong_tokens:
+        if token in text:
+            score += 8
+    for token in weak_tokens:
+        if token in text:
+            score -= 7
+    return max(10, min(100, score))
+
+
+def _recommend_subagent_model_payload(
+    *,
+    task: str,
+    role: str = "",
+    session: Optional["StudioSession"] = None,
+) -> Dict[str, Any]:
+    task_text = (task or "").strip()
+    if not task_text:
+        return {"ok": False, "error": "missing task"}
+
+    role_text = (role or "").strip().lower()
+    lowered = task_text.lower()
+    # Heuristic complexity signals
+    hard_patterns = [
+        r"架构|重构|多智能体|并发|并行|跨文件|端到端|e2e|性能|优化|安全|迁移|数据库|mcp|生产|部署|回滚|排障|调试",
+        r"system|architecture|refactor|migration|security|benchmark|profil|incident|debug",
+    ]
+    easy_patterns = [
+        r"润色|改写|翻译|摘要|总结|文案|小改|微调|格式化",
+        r"rewrite|polish|translate|summar|copy|minor|small",
+    ]
+    hard_hits = sum(len(re.findall(pat, lowered, flags=re.IGNORECASE)) for pat in hard_patterns)
+    easy_hits = sum(len(re.findall(pat, lowered, flags=re.IGNORECASE)) for pat in easy_patterns)
+
+    base_score = 30
+    len_score = min(len(task_text) // 60, 20)
+    role_bonus = 8 if role_text in {"coder", "researcher", "architect", "tester"} else 0
+    complexity_score = base_score + len_score + hard_hits * 8 - easy_hits * 6 + role_bonus
+    complexity_score = max(0, min(100, complexity_score))
+    if complexity_score <= 40:
+        level = "low"
+    elif complexity_score <= 70:
+        level = "medium"
+    else:
+        level = "high"
+
+    reasons: List[str] = []
+    if hard_hits > 0:
+        reasons.append(f"检测到 {hard_hits} 个高复杂度信号")
+    if easy_hits > 0:
+        reasons.append(f"检测到 {easy_hits} 个低复杂度信号")
+    if len(task_text) > 400:
+        reasons.append("任务描述较长，通常需要更强推理稳定性")
+    if role_bonus > 0:
+        reasons.append(f"角色={role_text}，通常需要更多工具调用与规划能力")
+    if not reasons:
+        reasons.append("任务信息有限，按中等复杂度保守评估")
+
+    configured_candidates: List[Dict[str, Any]] = []
+    try:
+        cfg = ConfigManager.load()
+        for provider, provider_cfg in (cfg.providers or {}).items():
+            if not isinstance(provider_cfg, dict):
+                continue
+            model_name = str(provider_cfg.get("model", "")).strip()
+            if not model_name:
+                continue
+            configured_candidates.append(
+                {
+                    "provider": str(provider).strip(),
+                    "model": model_name,
+                    "score": _model_capability_score(str(provider), model_name),
+                }
+            )
+    except Exception:
+        configured_candidates = []
+
+    current_provider = str(getattr(session, "provider_name", "") or "").strip()
+    current_model = str(getattr(session, "model_name", "") or "").strip()
+    current_score = (
+        _model_capability_score(current_provider, current_model)
+        if current_provider and current_model
+        else 0
+    )
+
+    all_candidates = list(configured_candidates)
+    if current_provider and current_model:
+        exists = any(
+            item["provider"] == current_provider and item["model"] == current_model
+            for item in all_candidates
+        )
+        if not exists:
+            all_candidates.append(
+                {
+                    "provider": current_provider,
+                    "model": current_model,
+                    "score": current_score,
+                }
+            )
+    all_candidates.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
+
+    target_score = 40 if level == "low" else (60 if level == "medium" else 75)
+    chosen: Optional[Dict[str, Any]] = None
+    for item in all_candidates:
+        if int(item.get("score", 0)) >= target_score:
+            chosen = item
+            break
+    if chosen is None and all_candidates:
+        chosen = all_candidates[0]
+
+    recommendation = {
+        "provider": current_provider or "",
+        "model": current_model or "",
+        "score": current_score,
+    }
+    rec_reason = "保持当前模型，避免额外切换成本。"
+    if chosen is not None:
+        recommendation = {
+            "provider": str(chosen.get("provider", "")),
+            "model": str(chosen.get("model", "")),
+            "score": int(chosen.get("score", 0)),
+        }
+        if recommendation["provider"] == current_provider and recommendation["model"] == current_model:
+            rec_reason = "当前会话模型已满足该任务复杂度。"
+        else:
+            rec_reason = "推荐切换到能力更匹配的模型以提升子智能体稳定性。"
+
+    alternatives: List[Dict[str, Any]] = []
+    for item in all_candidates[:5]:
+        alternatives.append(
+            {
+                "provider": str(item.get("provider", "")),
+                "model": str(item.get("model", "")),
+                "score": int(item.get("score", 0)),
+            }
+        )
+
+    return {
+        "ok": True,
+        "complexity": {
+            "score": complexity_score,
+            "level": level,
+            "reasons": reasons[:5],
+        },
+        "current": {
+            "provider": current_provider,
+            "model": current_model,
+            "score": current_score,
+        },
+        "recommended": {
+            **recommendation,
+            "reason": rec_reason,
+        },
+        "alternatives": alternatives,
+        "note": "可在 spawn_subagent 中传 provider/model 来按推荐模型启动该子智能体。",
+    }
+
+
 async def dispatch_meta_tool_async(
     name: str,
     arguments: Dict[str, Any],
@@ -340,6 +522,8 @@ async def dispatch_meta_tool_async(
             cleanup=str(arguments.get("cleanup", "")).strip() or None,
             run_timeout_seconds=timeout_value,
             attachments=arguments.get("attachments") if isinstance(arguments.get("attachments"), list) else None,
+            provider=str(arguments.get("provider", "")).strip() or None,
+            model=str(arguments.get("model", "")).strip() or None,
         )
         return json.dumps(result, ensure_ascii=False)
 
@@ -480,6 +664,14 @@ async def dispatch_meta_tool_async(
             else "资源紧张，建议先等待当前子智能体完成。"
         )
         payload = {"ok": True, "check": check, "suggestion": suggestion}
+        return json.dumps(payload, ensure_ascii=False)
+
+    if name == "recommend_subagent_model":
+        payload = _recommend_subagent_model_payload(
+            task=str(arguments.get("task", "")).strip(),
+            role=str(arguments.get("role", "")).strip(),
+            session=session,
+        )
         return json.dumps(payload, ensure_ascii=False)
 
     if name == "list_skills":

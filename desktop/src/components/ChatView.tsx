@@ -35,6 +35,31 @@ const statusDot: Record<string, string> = {
   processing: "bg-amber-400 animate-spin"
 };
 
+const confirmModeLabel: Record<string, string> = {
+  manual: "Ask Every Time",
+  "semi-auto": "Use Allowlist",
+  auto: "Run Everything",
+};
+
+function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
+  const toolName = String(toolNameRaw ?? "tool");
+  const resultText = String(resultRaw ?? "");
+  const isError = /^\s*ERROR:/i.test(resultText);
+  const isBenignTodoConflict =
+    toolName === "todo_write" && /only one task can be in_progress/i.test(resultText);
+
+  if (isBenignTodoConflict) {
+    return {
+      content: "🧭 任务清单同步中：系统会自动收敛为单一进行中任务，无需操作。",
+      silent: false,
+    };
+  }
+  if (isError) {
+    return { content: `⚠️ ${toolName} 提示: ${resultText}`, silent: false };
+  }
+  return { content: `✅ ${toolName} 结果: ${resultText}`, silent: false };
+}
+
 const markdownComponents: Components = {
   table: ({ children }) => (
     <div className="my-2 overflow-x-auto">
@@ -294,6 +319,8 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           agent_id: string;
           name?: string;
           role?: string;
+          provider?: string;
+          model?: string;
           task?: string;
           status?: "pending" | "running" | "completed" | "failed" | "cancelled";
           result_summary?: string;
@@ -312,6 +339,8 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             id,
             name: item.name ?? id,
             role: item.role ?? "worker",
+            provider: item.provider ?? undefined,
+            model: item.model ?? undefined,
             task: item.task ?? "",
           });
         }
@@ -326,7 +355,13 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               : status === "cancelled"
                 ? "已中断"
                 : "执行中";
-        updateSubAgent(id, { status, currentAction });
+        const existing = currentSubs.find((s) => s.id === id);
+        updateSubAgent(id, {
+          status,
+          currentAction,
+          provider: item.provider ?? existing?.provider,
+          model: item.model ?? existing?.model,
+        });
 
         const transitionedToTerminal =
           prevStatus !== status && (status === "completed" || status === "failed" || status === "cancelled");
@@ -353,12 +388,16 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             const first = seen.values().next().value as string | undefined;
             if (first) seen.delete(first);
           }
+          const SILENT_TOOLS = new Set(["check_resources"]);
           let content = "";
           if (evtType === "tool_call") {
+            if (SILENT_TOOLS.has(String(evtData.name ?? ""))) continue;
             content = `🔧 ${String(evtData.name ?? "tool")}: ${JSON.stringify(evtData.arguments ?? {}).slice(0, 120)}`;
           } else if (evtType === "tool_result") {
             const result = typeof evtData.result === "string" ? evtData.result : JSON.stringify(evtData.result ?? {});
-            content = `✅ ${String(evtData.name ?? "tool")} 结果: ${result}`;
+            const formatted = formatToolResultMessage(evtData.name, result);
+            if (formatted.silent) continue;
+            content = formatted.content;
           } else if (evtType === "error") {
             content = `❌ ${String(evtData.text ?? "执行异常")}`;
           } else if (evtType === "confirm_required") {
@@ -508,9 +547,13 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               if (isCurrentRequest()) { streamTextRef.current = full; setStreamedAssistantText(full); }
             }
             if (payload.type === "tool_call") {
-              const content = `🔧 ${payload.data?.name ?? "tool"}: ${JSON.stringify(payload.data?.arguments ?? payload.data?.args ?? {}).slice(0, 120)}`;
-              if (eventAgentId === "meta") addMessage("tool", content, "meta");
-              else { updateSubAgent(eventAgentId, { status: "running", currentAction: `调用工具 ${payload.data?.name ?? "tool"}` }); addSubAgentEvent(eventAgentId, { type: "tool_call", content }); }
+              const toolName = payload.data?.name ?? "tool";
+              const SILENT_TOOLS_SSE = new Set(["check_resources"]);
+              if (!SILENT_TOOLS_SSE.has(toolName)) {
+                const content = `🔧 ${toolName}: ${JSON.stringify(payload.data?.arguments ?? payload.data?.args ?? {}).slice(0, 120)}`;
+                if (eventAgentId === "meta") addMessage("tool", content, "meta");
+                else { updateSubAgent(eventAgentId, { status: "running", currentAction: `调用工具 ${toolName}` }); addSubAgentEvent(eventAgentId, { type: "tool_call", content }); }
+              }
             }
             if (payload.type === "tool_result") {
               const toolName = payload.data?.name ?? "tool";
@@ -521,9 +564,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               } catch {
                 // Keep original plain text if not JSON.
               }
-              const content = `✅ ${toolName} 结果:\n${resultText}`;
-              if (eventAgentId === "meta") addMessage("tool", content, "meta");
-              else { addSubAgentEvent(eventAgentId, { type: "tool_result", content }); }
+              const formatted = formatToolResultMessage(toolName, resultText);
+              if (formatted.silent) continue;
+              if (eventAgentId === "meta") addMessage("tool", formatted.content, "meta");
+              else { addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content }); }
             }
             if (payload.type === "confirm_required") {
               if (!isCurrentRequest()) continue;
@@ -566,7 +610,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               full = payload.data?.text ?? full;
               if (isCurrentRequest()) { streamTextRef.current = full; setStreamedAssistantText(full); }
             }
-            if (payload.type === "subagent_started") { const subId = payload.data?.agent_id; if (subId) { addSubAgent({ id: subId, name: payload.data?.name ?? subId, role: payload.data?.role ?? "worker", task: payload.data?.task ?? "" }); addSubAgentEvent(subId, { type: "started", content: "已启动" }); } }
+            if (payload.type === "subagent_started") { const subId = payload.data?.agent_id; if (subId) { addSubAgent({ id: subId, name: payload.data?.name ?? subId, role: payload.data?.role ?? "worker", provider: payload.data?.provider ?? undefined, model: payload.data?.model ?? undefined, task: payload.data?.task ?? "" }); addSubAgentEvent(subId, { type: "started", content: "已启动" }); } }
             if (payload.type === "subagent_progress") { const subId = payload.data?.agent_id; if (subId) { updateSubAgent(subId, { currentAction: payload.data?.text ?? "执行中" }); addSubAgentEvent(subId, { type: "progress", content: payload.data?.text ?? "执行中" }); } }
             if (payload.type === "subagent_checkpoint") {
               const subId = payload.data?.agent_id;
@@ -799,7 +843,11 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               {headerModelPickerOpen && (
                 <div className="absolute left-0 top-full z-40 mt-1">
                   <ModelPickerDropdown
-                    onSelect={(p, m) => { setActiveModel(p, m); setHeaderModelPickerOpen(false); }}
+                    onSelect={(p, m) => {
+                      setActiveModel(p, m);
+                      setHeaderModelPickerOpen(false);
+                      void window.agenticxDesktop.saveConfig({ activeProvider: p, activeModel: m });
+                    }}
                     onClose={() => setHeaderModelPickerOpen(false)}
                   />
                 </div>
@@ -817,7 +865,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           )}
           {!isLite && (
             <span className="rounded bg-slate-700/70 px-2 py-0.5 text-[11px] text-slate-300">
-              审批: {confirmStrategy}
+              审批: {confirmModeLabel[confirmStrategy] ?? confirmStrategy}
             </span>
           )}
         </div>

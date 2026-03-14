@@ -10,6 +10,7 @@ import json
 import asyncio
 import hashlib
 import inspect
+import os
 import re
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Sequence
@@ -32,13 +33,55 @@ else:
 MAX_TOOL_ROUNDS = 10
 MAX_CONTEXT_CHARS = 16_000
 STOP_MESSAGE = "已中断当前生成"
-LLM_INVOKE_TIMEOUT_SECONDS = 45.0
+DEFAULT_LLM_INVOKE_TIMEOUT_SECONDS = 60.0
+PROVIDER_INVOKE_TIMEOUT_SECONDS: Dict[str, float] = {
+    # Some providers/models (especially tool-heavy rounds) often need longer first-token latency.
+    "volcengine": 120.0,
+    "bailian": 120.0,
+    "zhipu": 90.0,
+}
+DEFAULT_LLM_FIRST_FEEDBACK_SECONDS = 8.0
+PROVIDER_FIRST_FEEDBACK_SECONDS: Dict[str, float] = {
+    "volcengine": 12.0,
+    "bailian": 12.0,
+    "zhipu": 10.0,
+}
 
 
 def _truncate(text: str, limit: int = MAX_CONTEXT_CHARS) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + f"\n... (truncated, total {len(text)} chars)"
+
+
+def _resolve_llm_invoke_timeout_seconds(session: StudioSession) -> float:
+    env_raw = os.getenv("AGX_LLM_INVOKE_TIMEOUT_SECONDS", "").strip()
+    if env_raw:
+        try:
+            value = float(env_raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    provider_name = str(getattr(session, "provider_name", "") or "").strip().lower()
+    if provider_name and provider_name in PROVIDER_INVOKE_TIMEOUT_SECONDS:
+        return PROVIDER_INVOKE_TIMEOUT_SECONDS[provider_name]
+    return DEFAULT_LLM_INVOKE_TIMEOUT_SECONDS
+
+
+def _resolve_llm_first_feedback_seconds(session: StudioSession) -> float:
+    env_raw = os.getenv("AGX_LLM_FIRST_FEEDBACK_SECONDS", "").strip()
+    if env_raw:
+        try:
+            value = float(env_raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    provider_name = str(getattr(session, "provider_name", "") or "").strip().lower()
+    if provider_name and provider_name in PROVIDER_FIRST_FEEDBACK_SECONDS:
+        return PROVIDER_FIRST_FEEDBACK_SECONDS[provider_name]
+    return DEFAULT_LLM_FIRST_FEEDBACK_SECONDS
 
 
 def _serialize_artifacts(session: StudioSession) -> str:
@@ -377,15 +420,21 @@ class AgentRuntime:
                 agent_id=agent_id,
             )
             await self.hooks.run_on_compaction(compacted_count, compact_summary, session)
+        _is_system_trigger = user_input.startswith("[系统通知]")
         messages.append({"role": "user", "content": user_input})
         session.agent_messages.append({"role": "user", "content": user_input})
         synced_session_message_count = len(session.agent_messages)
-        session.chat_history.append({"role": "user", "content": user_input})
+        if not _is_system_trigger:
+            session.chat_history.append({"role": "user", "content": user_input})
         status_query_total = 0
         last_status_query_signature: Optional[str] = None
         repeated_status_query_count = 0
         executed_tool_names: List[str] = []
         rounds_without_todo = 0
+        invoke_timeout_seconds = _resolve_llm_invoke_timeout_seconds(session)
+        first_feedback_seconds = _resolve_llm_first_feedback_seconds(session)
+        provider_name = str(getattr(session, "provider_name", "") or "").strip()
+        model_name = str(getattr(session, "model_name", "") or "").strip()
 
         for round_idx in range(1, self.max_tool_rounds + 1):
             if await _check_should_stop():
@@ -425,7 +474,7 @@ class AgentRuntime:
             try:
                 messages = await self.hooks.run_before_model(messages, session)
                 messages = _sanitize_context_messages(messages)
-                response = await asyncio.wait_for(
+                invoke_task = asyncio.create_task(
                     asyncio.to_thread(
                         self.llm.invoke,
                         messages,
@@ -433,14 +482,50 @@ class AgentRuntime:
                         tool_choice="auto",
                         temperature=0.2,
                         max_tokens=1200,
-                    ),
-                    timeout=LLM_INVOKE_TIMEOUT_SECONDS,
+                    )
                 )
+                wait_started_at = asyncio.get_running_loop().time()
+                waiting_hint_emitted = False
+                last_pulse_at = wait_started_at
+                while True:
+                    if invoke_task.done():
+                        response = await invoke_task
+                        break
+                    now = asyncio.get_running_loop().time()
+                    elapsed = now - wait_started_at
+                    if (not waiting_hint_emitted) and elapsed >= first_feedback_seconds:
+                        waiting_hint_emitted = True
+                        last_pulse_at = now
+                        # UI feedback before first model output; FINAL event will overwrite this placeholder.
+                        yield RuntimeEvent(
+                            type=EventType.TOKEN.value,
+                            data={"text": "⏳"},
+                            agent_id=agent_id,
+                        )
+                    elif waiting_hint_emitted and (now - last_pulse_at) >= 3.0:
+                        last_pulse_at = now
+                        yield RuntimeEvent(
+                            type=EventType.TOKEN.value,
+                            data={"text": "…"},
+                            agent_id=agent_id,
+                        )
+                    if elapsed >= invoke_timeout_seconds:
+                        invoke_task.cancel()
+                        raise asyncio.TimeoutError()
+                    await asyncio.sleep(0.1)
                 await self.hooks.run_after_model(response, session)
             except asyncio.TimeoutError:
+                provider_hint = provider_name or "(unknown)"
+                model_hint = model_name or "(unknown)"
                 yield RuntimeEvent(
                     type=EventType.ERROR.value,
-                    data={"text": f"模型响应超时（>{int(LLM_INVOKE_TIMEOUT_SECONDS)}s），请检查当前 provider/model/api_key 是否匹配。"},
+                    data={
+                        "text": (
+                            f"模型响应超时（>{int(invoke_timeout_seconds)}s，provider={provider_hint}, model={model_hint}）。"
+                            "当前轮为工具可调用模式，模型可能在内部思考/函数规划后才返回。"
+                            "可切换更快模型，或提高 AGX_LLM_INVOKE_TIMEOUT_SECONDS。"
+                        )
+                    },
                     agent_id=agent_id,
                 )
                 return
@@ -521,7 +606,8 @@ class AgentRuntime:
                         f"{unique_tools}）。\n"
                         "当前模型未返回进一步正文，请继续给我下一步指令。"
                     )
-                session.chat_history.append({"role": "assistant", "content": final_text})
+                if not _is_system_trigger:
+                    session.chat_history.append({"role": "assistant", "content": final_text})
                 await self.hooks.run_on_agent_end(final_text, session)
                 yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
                 return
@@ -537,7 +623,8 @@ class AgentRuntime:
                 if response_text
                 else f"工具调用:\n{json.dumps(tool_calls, ensure_ascii=False)}"
             )
-            session.chat_history.append({"role": "assistant", "content": tool_call_text})
+            if not _is_system_trigger:
+                session.chat_history.append({"role": "assistant", "content": tool_call_text})
 
             for call in tool_calls:
                 if await _check_should_stop():
@@ -595,9 +682,10 @@ class AgentRuntime:
                         }
                     )
                     synced_session_message_count = len(session.agent_messages)
-                    session.chat_history.append(
-                        {"role": "assistant", "content": f"工具结果({tool_name}):\n{denied_message}"}
-                    )
+                    if not _is_system_trigger:
+                        session.chat_history.append(
+                            {"role": "assistant", "content": f"工具结果({tool_name}):\n{denied_message}"}
+                        )
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
                         data={"text": denied_message, "tool_call_id": tool_call_id},
@@ -620,11 +708,14 @@ class AgentRuntime:
                     else:
                         last_status_query_signature = signature
                         repeated_status_query_count = 1
-                    if status_query_total > 3 or repeated_status_query_count > 2:
+                    if status_query_total > 2 or repeated_status_query_count > 1:
                         throttled = (
-                            "已阻止高频 query_subagent_status 轮询。"
-                            "子智能体状态会通过 subagent_progress/subagent_completed 事件自动推送，"
-                            "无需重复查询；请继续给出总结或下一步动作。"
+                            "【已阻止】query_subagent_status 调用过于频繁，本次调用被拦截。\n"
+                            "⚠️ 你必须立即停止查询并执行以下操作之一：\n"
+                            "1) 如果子智能体仍在运行 → 直接告知用户任务正在后台执行，结束本轮对话，等待完成事件。\n"
+                            "2) 如果子智能体已完成 → 根据已知信息汇报结果，不再查询。\n"
+                            "3) 如果不确定 → 告知用户「任务已提交，完成后会自动通知」，结束本轮。\n"
+                            "禁止再次调用 query_subagent_status，否则将继续被拦截并消耗轮次配额。"
                         )
                         messages.append(
                             {
@@ -643,9 +734,10 @@ class AgentRuntime:
                             }
                         )
                         synced_session_message_count = len(session.agent_messages)
-                        session.chat_history.append(
-                            {"role": "assistant", "content": f"工具结果({tool_name}):\n{throttled}"}
-                        )
+                        if not _is_system_trigger:
+                            session.chat_history.append(
+                                {"role": "assistant", "content": f"工具结果({tool_name}):\n{throttled}"}
+                            )
                         yield RuntimeEvent(
                             type=EventType.TOOL_RESULT.value,
                             data={"name": tool_name, "result": throttled, "tool_call_id": tool_call_id},
@@ -744,9 +836,10 @@ class AgentRuntime:
                     }
                 )
                 synced_session_message_count = len(session.agent_messages)
-                session.chat_history.append(
-                    {"role": "assistant", "content": f"工具结果({tool_name}):\n{result}"}
-                )
+                if not _is_system_trigger:
+                    session.chat_history.append(
+                        {"role": "assistant", "content": f"工具结果({tool_name}):\n{result}"}
+                    )
                 yield RuntimeEvent(
                     type=EventType.TOOL_RESULT.value,
                     data={"name": tool_name, "result": result, "tool_call_id": tool_call_id},
