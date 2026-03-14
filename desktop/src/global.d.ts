@@ -13,6 +13,8 @@ type LoadConfigResult = {
   userMode?: "pro" | "lite";
   onboardingCompleted?: boolean;
   confirmStrategy?: "manual" | "semi-auto" | "auto";
+  activeProvider?: string;
+  activeModel?: string;
 };
 
 type ValidateKeyResult = { ok: boolean; error?: string; status?: number };
@@ -124,6 +126,8 @@ declare global {
         provider?: string;
         model?: string;
         apiKey?: string;
+        activeProvider?: string;
+        activeModel?: string;
       }) => Promise<{ ok: boolean; path: string }>;
       nativeSay: (text: string) => Promise<{ ok: boolean; reason?: string }>;
     };

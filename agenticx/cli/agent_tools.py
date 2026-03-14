@@ -387,6 +387,7 @@ META_TOOL_NAMES = {
     "retry_subagent",
     "query_subagent_status",
     "check_resources",
+    "recommend_subagent_model",
     "list_skills",
     "list_mcps",
 }

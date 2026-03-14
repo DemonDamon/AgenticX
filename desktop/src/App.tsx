@@ -92,6 +92,16 @@ export function App() {
   const staleMissCountRef = useRef<Record<string, number>>({});
   const polledEventSeenRef = useRef<Record<string, Set<string>>>({});
   const completionNotifiedRef = useRef<Set<string>>(new Set());
+  // Queue of terminal sub-agents waiting for Meta-Agent auto-report
+  const autoReportQueueRef = useRef<Array<{
+    agentId: string;
+    agentName: string;
+    summary: string;
+    sessionId: string;
+    status: "completed" | "failed";
+    attempts?: number;
+  }>>([]);
+  const autoReportingRef = useRef(false);
 
   const refreshMcpStatus = useCallback(async (sid: string = sessionId) => {
     if (!sid) return;
@@ -168,7 +178,14 @@ export function App() {
         model: defEntry?.model ?? "",
         apiKey: defEntry?.apiKey ?? "",
       });
-      if (defP && defEntry?.model) setActiveModel(defP, defEntry.model);
+      // Prefer last user-selected provider/model; fallback to default provider
+      const savedActiveProvider = cfg.activeProvider ?? "";
+      const savedActiveModel = cfg.activeModel ?? "";
+      if (savedActiveProvider && savedActiveModel) {
+        setActiveModel(savedActiveProvider, savedActiveModel);
+      } else if (defP && defEntry?.model) {
+        setActiveModel(defP, defEntry.model);
+      }
       window.agenticxDesktop.onOpenSettings(() => openSettings());
       watchWakewordLoop(async (text) => {
         if (text.trim()) {
@@ -216,6 +233,8 @@ export function App() {
             agent_id: string;
             name?: string;
             role?: string;
+            provider?: string;
+            model?: string;
             task?: string;
             status?: "pending" | "running" | "completed" | "failed" | "cancelled";
             result_summary?: string;
@@ -237,6 +256,8 @@ export function App() {
               id,
               name: item.name ?? id,
               role: item.role ?? "worker",
+              provider: item.provider ?? undefined,
+              model: item.model ?? undefined,
               task: item.task ?? "",
               sessionId: sid,
             });
@@ -288,6 +309,8 @@ export function App() {
           updateSubAgent(id, {
             status: effectiveStatus,
             currentAction,
+            provider: item.provider ?? existing?.provider,
+            model: item.model ?? existing?.model,
             resultSummary: summaryText || undefined,
             outputFiles,
             pendingConfirm,
@@ -308,6 +331,15 @@ export function App() {
             if (matchingPane) {
               store.addPaneMessage(matchingPane.id, "tool", completionMsg, id);
             }
+            // Enqueue auto-report so Meta-Agent will summarize proactively
+            autoReportQueueRef.current.push({
+              agentId: id,
+              agentName,
+              summary: summaryBody,
+              sessionId: sid,
+              status: effectiveStatus === "completed" ? "completed" : "failed",
+              attempts: 0,
+            });
           }
 
           const seen = polledEventSeenRef.current[id] ?? new Set<string>();
@@ -377,6 +409,145 @@ export function App() {
     }
   }, [apiBase, apiToken, sessionId, panes, addSubAgent, updateSubAgent, addSubAgentEvent]);
 
+  const triggerMetaReport = useCallback(async () => {
+    if (autoReportingRef.current) return;
+    const queue = autoReportQueueRef.current;
+    if (queue.length === 0) return;
+    if (!apiBase || !apiToken) return;
+
+    autoReportingRef.current = true;
+    // Snapshot only; dequeue on success to avoid silent message loss.
+    const batch = [...queue];
+
+    // Group by session so each session's Meta-Agent gets one message
+    const bySession = new Map<string, typeof batch>();
+    for (const item of batch) {
+      const existing = bySession.get(item.sessionId) ?? [];
+      existing.push(item);
+      bySession.set(item.sessionId, existing);
+    }
+    const deliveredAgentIds = new Set<string>();
+    const retryAgentIds = new Set<string>();
+
+    try {
+      for (const [sid, items] of bySession) {
+        const store = useAppStore.getState();
+        const matchingPane = store.panes.find((p) => p.sessionId === sid);
+        if (!matchingPane) {
+          for (const it of items) retryAgentIds.add(it.agentId);
+          continue;
+        }
+
+        const agentLines = items
+          .map((it) => {
+            const state = it.status === "completed" ? "已完成" : "失败";
+            return `- 【${it.agentName}】(${it.agentId}) [${state}]: ${it.summary.slice(0, 300)}`;
+          })
+          .join("\n");
+        const triggerMsg =
+          `[系统通知] 以下子智能体已结束（可能成功或失败），请立即向用户主动汇报：完成情况/失败原因、产出文件列表、下一步建议。\n${agentLines}`;
+
+        const activeProvider = store.activeProvider;
+        const activeModel = store.activeModel;
+        const body: Record<string, unknown> = { session_id: sid, user_input: triggerMsg };
+        if (activeProvider) body.provider = activeProvider;
+        if (activeModel) body.model = activeModel;
+
+        try {
+          const resp = await fetch(`${apiBase}/api/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+            body: JSON.stringify(body),
+          });
+          if (!resp.ok || !resp.body) {
+            for (const it of items) retryAgentIds.add(it.agentId);
+            continue;
+          }
+
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let full = "";
+          let buffer = "";
+          let placeholderAdded = false;
+          let metaResponded = false;
+
+          while (true) {
+            const { value: chunk, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(chunk, { stream: true });
+            const frames = buffer.split("\n\n");
+            buffer = frames.pop() ?? "";
+            for (const frame of frames) {
+              const line = frame.split("\n").find((l) => l.startsWith("data: "));
+              if (!line) continue;
+              try {
+                const payload = JSON.parse(line.slice(6));
+                if (payload.type === "token" && (payload.data?.agent_id ?? "meta") === "meta") {
+                  metaResponded = true;
+                  full += payload.data?.text ?? "";
+                  const s = useAppStore.getState();
+                  if (!placeholderAdded) {
+                    s.addPaneMessage(matchingPane.id, "assistant", full, "meta");
+                    placeholderAdded = true;
+                  } else {
+                    s.updateLastPaneMessage(matchingPane.id, full);
+                  }
+                }
+                if (payload.type === "final" && (payload.data?.agent_id ?? "meta") === "meta") {
+                  metaResponded = true;
+                  const finalText = String(payload.data?.text ?? "").trim();
+                  if (finalText) {
+                    const s = useAppStore.getState();
+                    if (!placeholderAdded) {
+                      s.addPaneMessage(matchingPane.id, "assistant", finalText, "meta");
+                    } else {
+                      s.updateLastPaneMessage(matchingPane.id, finalText);
+                    }
+                  }
+                }
+              } catch {
+                // ignore malformed frames
+              }
+            }
+          }
+          if (metaResponded) {
+            for (const it of items) deliveredAgentIds.add(it.agentId);
+          } else {
+            for (const it of items) retryAgentIds.add(it.agentId);
+          }
+        } catch {
+          // network error on auto-report is non-fatal, retry later.
+          for (const it of items) retryAgentIds.add(it.agentId);
+        }
+      }
+      if (deliveredAgentIds.size > 0 || retryAgentIds.size > 0) {
+        autoReportQueueRef.current = autoReportQueueRef.current
+          .filter((it) => !deliveredAgentIds.has(it.agentId))
+          .map((it) => {
+            if (!retryAgentIds.has(it.agentId)) return it;
+            return { ...it, attempts: (it.attempts ?? 0) + 1 };
+          })
+          .filter((it) => {
+            // Avoid endless retries; after several failures, keep one visible notice and drop.
+            if ((it.attempts ?? 0) <= 3) return true;
+            const s = useAppStore.getState();
+            const p = s.panes.find((pane) => pane.sessionId === it.sessionId);
+            if (p) {
+              s.addPaneMessage(
+                p.id,
+                "tool",
+                `⚠️ 子智能体 ${it.agentName} 已${it.status === "completed" ? "完成" : "失败"}，但自动汇报触发失败。请手动询问一次进展。`,
+                "meta"
+              );
+            }
+            return false;
+          });
+      }
+    } finally {
+      autoReportingRef.current = false;
+    }
+  }, [apiBase, apiToken]);
+
   useEffect(() => {
     if (!apiBase || !apiToken) return;
     void syncSubAgents();
@@ -384,9 +555,15 @@ export function App() {
       (item) => item.status === "running" || item.status === "pending" || item.status === "awaiting_confirm"
     ).length;
     const interval = runningCount > 0 ? 1500 : 4000;
-    const timer = window.setInterval(() => void syncSubAgents(), interval);
+    const timer = window.setInterval(async () => {
+      await syncSubAgents();
+      // After polling, if any sub-agents just completed, trigger Meta-Agent auto-report
+      if (autoReportQueueRef.current.length > 0) {
+        void triggerMetaReport();
+      }
+    }, interval);
     return () => window.clearInterval(timer);
-  }, [apiBase, apiToken, subAgents, syncSubAgents]);
+  }, [apiBase, apiToken, subAgents, syncSubAgents, triggerMetaReport]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -483,8 +660,13 @@ export function App() {
       apiKey: defEntry?.apiKey ?? "",
     });
 
-    if (result.defaultProvider && defEntry?.model) {
-      setActiveModel(result.defaultProvider, defEntry.model);
+    // Only switch active model if user hasn't manually chosen a different one yet
+    const curProvider = useAppStore.getState().activeProvider;
+    const curModel = useAppStore.getState().activeModel;
+    if (!curProvider || !curModel) {
+      if (result.defaultProvider && defEntry?.model) {
+        setActiveModel(result.defaultProvider, defEntry.model);
+      }
     }
     await window.agenticxDesktop.saveConfig({
       provider: result.defaultProvider,
@@ -492,6 +674,11 @@ export function App() {
       apiKey: defEntry?.apiKey ?? "",
     });
     stopSpeak();
+  };
+
+  const handleConfirmStrategyChange = async (strategy: "manual" | "semi-auto" | "auto") => {
+    setConfirmStrategy(strategy);
+    await window.agenticxDesktop.saveConfirmStrategy(strategy);
   };
 
   const cancelSubAgent = async (agentId: string) => {
@@ -602,13 +789,14 @@ export function App() {
         onApprove={(policy) => {
           const scope = confirmScopeRef.current;
           if (scope) {
-            if (policy === "allow-similar") {
+            if (policy === "use-allowlist") {
               autoApproveScopesRef.current.add(scope);
               denyScopesRef.current.delete(scope);
-            } else if (policy === "deny-similar") {
-              denyScopesRef.current.add(scope);
-              autoApproveScopesRef.current.delete(scope);
             }
+          }
+          if (policy === "run-everything") {
+            setConfirmStrategy("auto");
+            void window.agenticxDesktop.saveConfirmStrategy("auto");
           }
           confirmScopeRef.current = null;
           closeConfirm();
@@ -616,11 +804,7 @@ export function App() {
           confirmResolverRef.current = null;
         }}
         onReject={(policy) => {
-          const scope = confirmScopeRef.current;
-          if (scope && policy === "deny-similar") {
-            denyScopesRef.current.add(scope);
-            autoApproveScopesRef.current.delete(scope);
-          }
+          void policy; // reserved for future policy-specific reject handling
           confirmScopeRef.current = null;
           closeConfirm();
           confirmResolverRef.current?.(false);
@@ -634,6 +818,8 @@ export function App() {
         sessionId={sessionId}
         mcpServers={mcpServers}
         onRefreshMcp={refreshMcpStatus}
+        confirmStrategy={confirmStrategy}
+        onConfirmStrategyChange={handleConfirmStrategyChange}
         onClose={() => closeSettings()}
         onSave={handleSettingsSave}
       />

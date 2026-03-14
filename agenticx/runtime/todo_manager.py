@@ -94,8 +94,11 @@ class TodoManager:
             seen_contents.add(content)
             if status not in TODO_STATUSES:
                 raise ValueError(f"item {idx}: invalid status '{status}'")
+            # Be tolerant for model-generated todo payloads:
+            # when active_form is missing, fallback to content so runtime
+            # does not fail on an otherwise valid task item.
             if not active_form:
-                raise ValueError(f"item {idx}: active_form required")
+                active_form = content
             if status == "in_progress":
                 in_progress_count += 1
             parsed.append(TodoItem(content=content, status=status, active_form=active_form))

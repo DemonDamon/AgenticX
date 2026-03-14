@@ -12,6 +12,13 @@ function PaneModelPicker() {
   const setActiveModel = useAppStore((s) => s.setActiveModel);
   const [open, setOpen] = useState(false);
 
+  const handleSelect = (provider: string, model: string) => {
+    setActiveModel(provider, model);
+    setOpen(false);
+    // Persist selected provider/model so it survives app restarts
+    void window.agenticxDesktop.saveConfig({ activeProvider: provider, activeModel: model });
+  };
+
   const options = useMemo(() => {
     const result: { provider: string; model: string; label: string }[] = [];
     for (const [provName, entry] of Object.entries(settings.providers)) {
@@ -54,10 +61,7 @@ function PaneModelPicker() {
                     className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-cyan-500/10 hover:text-white ${
                       isActive ? "text-cyan-300 bg-cyan-500/10" : "text-slate-300"
                     }`}
-                    onClick={() => {
-                      setActiveModel(opt.provider, opt.model);
-                      setOpen(false);
-                    }}
+                    onClick={() => handleSelect(opt.provider, opt.model)}
                   >
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${isActive ? "bg-cyan-400" : "bg-slate-600"}`} />
                     <span className="truncate">{opt.label}</span>
@@ -127,6 +131,44 @@ function ModelBadge({ provider, model }: { provider?: string; model?: string }) 
       {label}
     </span>
   );
+}
+
+function isThinkingPlaceholderText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  return /^[\s⏳….·.]+$/.test(trimmed);
+}
+
+function StreamingThinkingIndicator() {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="relative inline-flex h-3 w-3">
+        <span className="absolute inline-flex h-full w-full rounded-full bg-cyan-400/50 animate-ping" />
+        <span className="relative inline-flex h-3 w-3 rounded-full bg-cyan-300 animate-pulse" />
+      </span>
+      <span className="text-xs font-medium tracking-wide text-cyan-200/90">AgenticX 正在深度思考</span>
+    </div>
+  );
+}
+
+function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
+  const toolName = String(toolNameRaw ?? "tool");
+  const resultText = String(resultRaw ?? "");
+  const compact = resultText.slice(0, 500);
+  const isError = /^\s*ERROR:/i.test(resultText);
+  const isBenignTodoConflict =
+    toolName === "todo_write" && /only one task can be in_progress/i.test(resultText);
+
+  if (isBenignTodoConflict) {
+    return {
+      content: "🧭 任务清单同步中：系统会自动收敛为单一进行中任务，无需操作。",
+      silent: false,
+    };
+  }
+  if (isError) {
+    return { content: `⚠️ ${toolName} 提示: ${compact}`, silent: false };
+  }
+  return { content: `✅ ${toolName} 结果: ${compact}`, silent: false };
 }
 
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
@@ -224,19 +266,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               setStreamedAssistantText(full);
             }
             if (payload.type === "tool_call") {
-              const content = `🔧 ${payload.data?.name ?? "tool"}: ${JSON.stringify(
-                payload.data?.arguments ?? payload.data?.args ?? {}
-              ).slice(0, 120)}`;
-              if (eventAgentId === "meta") addPaneMessage(pane.id, "tool", content, "meta");
-              else addSubAgentEvent(eventAgentId, { type: "tool_call", content });
+              const toolName = payload.data?.name ?? "tool";
+              // Filter out internal housekeeping tools that add no user-visible signal
+              const SILENT_TOOLS = new Set(["check_resources"]);
+              if (!SILENT_TOOLS.has(toolName)) {
+                const content = `🔧 ${toolName}: ${JSON.stringify(
+                  payload.data?.arguments ?? payload.data?.args ?? {}
+                ).slice(0, 120)}`;
+                if (eventAgentId === "meta") addPaneMessage(pane.id, "tool", content, "meta");
+                else addSubAgentEvent(eventAgentId, { type: "tool_call", content });
+              }
             }
             if (payload.type === "tool_result") {
-              const content = `✅ ${payload.data?.name ?? "tool"} 结果: ${String(payload.data?.result ?? "").slice(
-                0,
-                500
-              )}`;
-              if (eventAgentId === "meta") addPaneMessage(pane.id, "tool", content, "meta");
-              else addSubAgentEvent(eventAgentId, { type: "tool_result", content });
+              const formatted = formatToolResultMessage(payload.data?.name, payload.data?.result);
+              if (formatted.silent) continue;
+              if (eventAgentId === "meta") addPaneMessage(pane.id, "tool", formatted.content, "meta");
+              else addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content });
             }
             if (payload.type === "confirm_required") {
               if (eventAgentId !== "meta") {
@@ -298,6 +343,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   id: subId,
                   name: payload.data?.name ?? subId,
                   role: payload.data?.role ?? "worker",
+                  provider: payload.data?.provider ?? undefined,
+                  model: payload.data?.model ?? undefined,
                   task: payload.data?.task ?? "",
                   sessionId: requestSessionId || undefined,
                 });
@@ -463,12 +510,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   {streamingModel && (
                     <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />
                   )}
-                  {streamedAssistantText ? (
+                  {streamedAssistantText && !isThinkingPlaceholderText(streamedAssistantText) ? (
                     <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
                       {streamedAssistantText}
                     </ReactMarkdown>
                   ) : (
-                    <span className="text-slate-500">思考中...</span>
+                    <StreamingThinkingIndicator />
                   )}
                 </div>
               )}

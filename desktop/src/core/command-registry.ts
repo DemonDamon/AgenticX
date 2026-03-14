@@ -68,6 +68,12 @@ export type Phase1CommandContext = {
   addAssistantMessage: (content: string) => void;
 };
 
+function confirmStrategyLabel(strategy: "manual" | "semi-auto" | "auto"): string {
+  if (strategy === "manual") return "Ask Every Time";
+  if (strategy === "semi-auto") return "Use Allowlist";
+  return "Run Everything";
+}
+
 export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry {
   const registry = new CommandRegistry();
   registry.register({
@@ -149,13 +155,13 @@ export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry
   registry.register({
     id: "confirm",
     name: "/confirm",
-    description: "循环切换确认策略（manual/semi-auto/auto）",
+    description: "循环切换确认策略（Ask Every Time / Use Allowlist / Run Everything）",
     category: "settings",
     mode: "both",
     icon: "A",
     handler: async () => {
       const strategy = await ctx.cycleConfirmStrategy();
-      ctx.addAssistantMessage(`已切换确认策略为: ${strategy}`);
+      ctx.addAssistantMessage(`已切换确认策略为: ${confirmStrategyLabel(strategy)}`);
     },
   });
   registry.register({

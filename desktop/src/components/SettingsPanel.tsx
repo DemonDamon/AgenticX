@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const ALL_PROVIDERS = [
   "openai", "anthropic", "volcengine", "bailian",
@@ -19,6 +19,7 @@ type McpServer = {
 };
 
 type SettingsTab = "general" | "provider" | "mcp" | "workspace";
+type ConfirmMode = "manual" | "semi-auto" | "auto";
 
 type Props = {
   open: boolean;
@@ -27,6 +28,8 @@ type Props = {
   sessionId: string;
   mcpServers: McpServer[];
   onRefreshMcp: (sessionId?: string) => Promise<void>;
+  confirmStrategy: ConfirmMode;
+  onConfirmStrategyChange: (strategy: ConfirmMode) => Promise<void> | void;
   onClose: () => void;
   onSave: (result: {
     defaultProvider: string;
@@ -50,10 +53,13 @@ export function SettingsPanel({
   sessionId,
   mcpServers,
   onRefreshMcp,
+  confirmStrategy,
+  onConfirmStrategyChange,
   onClose,
   onSave,
 }: Props) {
-  const [tab, setTab] = useState<SettingsTab>("provider");
+  const initializedForOpenRef = useRef(false);
+  const [tab, setTab] = useState<SettingsTab>("general");
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
   const [draft, setDraft] = useState<Record<string, ProviderEntry>>({});
   const [defProv, setDefProv] = useState(defaultProvider);
@@ -68,7 +74,17 @@ export function SettingsPanel({
   const [mcpMessage, setMcpMessage] = useState("");
 
   useEffect(() => {
-    if (!open) return;
+    // Reset the guard when dialog is closed.
+    if (!open) {
+      initializedForOpenRef.current = false;
+      return;
+    }
+    // IMPORTANT: only initialize once per open cycle.
+    // Otherwise parent re-renders (or async prop updates) can overwrite
+    // user's in-panel selection and force active provider back to default.
+    if (initializedForOpenRef.current) return;
+    initializedForOpenRef.current = true;
+
     const merged: Record<string, ProviderEntry> = {};
     for (const name of ALL_PROVIDERS) {
       const saved = providers[name];
@@ -224,8 +240,24 @@ export function SettingsPanel({
             {/* === GENERAL TAB === */}
             {tab === "general" && (
               <div className="space-y-4">
-                <div className="text-sm text-slate-300">
-                  通用设置将在后续版本中扩展（主题、语言、确认策略等）。
+                <div className="rounded-md border border-border/60 bg-slate-900/40 p-3">
+                  <div className="mb-2 text-sm font-medium text-slate-200">工具执行权限模式</div>
+                  <select
+                    className="w-full rounded-md border border-border bg-slate-900 px-2 py-1.5 text-sm text-slate-200"
+                    value={confirmStrategy}
+                    onChange={(e) => void onConfirmStrategyChange(e.target.value as ConfirmMode)}
+                  >
+                    <option value="manual">Ask Every Time</option>
+                    <option value="semi-auto">Use Allowlist</option>
+                    <option value="auto">Run Everything</option>
+                  </select>
+                  <div className="mt-2 text-xs text-slate-400">
+                    {confirmStrategy === "manual"
+                      ? "每次工具执行都询问确认（最安全）。"
+                      : confirmStrategy === "semi-auto"
+                        ? "命中同类操作白名单自动放行，未命中时询问（推荐）。"
+                        : "默认全部自动执行，不再询问（高风险）。"}
+                  </div>
                 </div>
                 <div className="rounded-md border border-border/60 bg-slate-900/40 px-3 py-2.5 text-xs text-slate-400">
                   当前版本：AgenticX Desktop v0.2.0
