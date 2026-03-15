@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import json
+import logging
 import os
 import re
 import shlex
@@ -34,6 +35,8 @@ if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
 else:
     StudioSession = Any
+
+_log = logging.getLogger(__name__)
 
 
 SAFE_COMMANDS = {
@@ -774,11 +777,23 @@ async def _tool_file_write(
     confirm_gate: ConfirmGate,
     emit_event: Optional[Any] = None,
 ) -> str:
+    raw_path = str(arguments.get("path", "")).strip()
+    if not raw_path:
+        return (
+            "ERROR: missing required parameter 'path'. "
+            "You must provide a full file path, e.g. file_write(path='/Users/.../file.py', content='...')"
+        )
+    raw_content = arguments.get("content")
+    if raw_content is None:
+        return (
+            "ERROR: missing required parameter 'content'. "
+            "You must provide file content, e.g. file_write(path='/Users/.../file.py', content='...')"
+        )
     try:
-        path = _resolve_workspace_path(str(arguments.get("path", "")))
+        path = _resolve_workspace_path(raw_path)
     except ValueError as exc:
         return f"ERROR: {exc}"
-    new_text = str(arguments.get("content", ""))
+    new_text = str(raw_content)
     old_text = ""
     if path.exists():
         if not path.is_file():
@@ -1137,6 +1152,58 @@ def _tool_list_files(arguments: Dict[str, Any]) -> str:
     return "\n".join(lines) if lines else "(empty directory)"
 
 
+_TOOL_REQUIRED_PARAMS: Dict[str, List[str]] = {}
+for _td in STUDIO_TOOLS:
+    _fn = _td.get("function", {})
+    _name = _fn.get("name", "")
+    _req = _fn.get("parameters", {}).get("required", [])
+    if _name and _req:
+        _TOOL_REQUIRED_PARAMS[_name] = _req
+
+
+def _repair_malformed_file_tool_arguments(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Best-effort repair for malformed file tool arguments from weaker models."""
+    if name not in {"file_write", "file_edit"}:
+        return arguments
+    if not isinstance(arguments, dict):
+        return arguments
+
+    if name == "file_write":
+        allowed_keys = {"path", "content"}
+        extra_keys = [k for k in arguments.keys() if k not in allowed_keys]
+        if not extra_keys:
+            return arguments
+        repaired = dict(arguments)
+        extra_payload = "\n".join(str(arguments.get(k, "")) for k in extra_keys if str(arguments.get(k, "")).strip())
+        existing_content = str(repaired.get("content", ""))
+        if extra_payload:
+            repaired["content"] = f"{existing_content}\n{extra_payload}".strip() if existing_content else extra_payload
+        for key in extra_keys:
+            repaired.pop(key, None)
+        _log.warning(
+            "[tool-args-repair] repaired malformed file_write args, removed keys=%s",
+            extra_keys,
+        )
+        return repaired
+
+    allowed_keys = {"path", "old_text", "new_text", "occurrence"}
+    extra_keys = [k for k in arguments.keys() if k not in allowed_keys]
+    if not extra_keys:
+        return arguments
+    repaired = dict(arguments)
+    extra_payload = "\n".join(str(arguments.get(k, "")) for k in extra_keys if str(arguments.get(k, "")).strip())
+    if extra_payload:
+        base_new_text = str(repaired.get("new_text", ""))
+        repaired["new_text"] = f"{base_new_text}\n{extra_payload}".strip() if base_new_text else extra_payload
+    for key in extra_keys:
+        repaired.pop(key, None)
+    _log.warning(
+        "[tool-args-repair] repaired malformed file_edit args, removed keys=%s",
+        extra_keys,
+    )
+    return repaired
+
+
 async def dispatch_tool_async(
     name: str,
     arguments: Dict[str, Any],
@@ -1147,6 +1214,14 @@ async def dispatch_tool_async(
     team_manager: Optional[Any] = None,
 ) -> str:
     """Dispatch one tool call asynchronously and return result text."""
+    arguments = _repair_malformed_file_tool_arguments(name, arguments)
+    required = _TOOL_REQUIRED_PARAMS.get(name)
+    if required and not arguments:
+        return (
+            f"ERROR: {name}() called with empty arguments. "
+            f"Required parameters: {', '.join(required)}. "
+            f"Please provide all required parameters."
+        )
     gate = confirm_gate or SyncConfirmGate()
     try:
         if name in META_TOOL_NAMES:

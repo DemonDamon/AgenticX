@@ -44,6 +44,38 @@ const confirmModeLabel: Record<string, string> = {
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
   const toolName = String(toolNameRaw ?? "tool");
   const resultText = String(resultRaw ?? "");
+  if (toolName === "query_subagent_status") {
+    try {
+      const parsed = JSON.parse(resultText) as Record<string, unknown>;
+      const one = parsed?.subagent as Record<string, unknown> | undefined;
+      if (one) {
+        const name = String(one.name ?? one.agent_id ?? "subagent");
+        const status = String(one.status ?? "unknown");
+        const action = String(one.current_action ?? "").trim();
+        return {
+          content: `📡 状态快照: ${name} = ${status}${action ? ` · ${action}` : ""}`,
+          silent: false,
+        };
+      }
+      const rows = Array.isArray(parsed?.subagents) ? (parsed.subagents as Array<Record<string, unknown>>) : [];
+      if (rows.length > 0) {
+        const counts = rows.reduce(
+          (acc, row) => {
+            const s = String(row.status ?? "unknown");
+            acc[s] = (acc[s] ?? 0) + 1;
+            return acc;
+          },
+          {} as Record<string, number>
+        );
+        const summary = Object.entries(counts)
+          .map(([k, v]) => `${k}:${v}`)
+          .join(" ");
+        return { content: `📡 状态快照: ${rows.length} 个子智能体 (${summary})`, silent: false };
+      }
+    } catch {
+      // Fall through to generic formatter.
+    }
+  }
   const isError = /^\s*ERROR:/i.test(resultText);
   const isBenignTodoConflict =
     toolName === "todo_write" && /only one task can be in_progress/i.test(resultText);
@@ -436,8 +468,8 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
       addSubAgentEvent(agentId, { type: "cancel", content: "已发送中断请求" });
     } catch (err) {
-      updateSubAgent(agentId, { status: "running", currentAction: "中断失败，继续执行" });
-      addSubAgentEvent(agentId, { type: "error", content: `中断失败: ${String(err)}` });
+      updateSubAgent(agentId, { status: "cancelled", currentAction: "中断请求失败（后端未找到该任务）" });
+      addSubAgentEvent(agentId, { type: "error", content: `中断请求失败: ${String(err)}` });
     }
   };
 

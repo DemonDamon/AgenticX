@@ -19,8 +19,9 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio import StudioSession
 from agenticx.llms.provider_resolver import ProviderResolver
-from agenticx.runtime import AgentRuntime, AsyncConfirmGate, EventType, RuntimeEvent
+from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate, AsyncConfirmGate, EventType, RuntimeEvent
 from agenticx.runtime.resource_monitor import ResourceMonitor
+from agenticx.runtime.agent_runtime import STOP_MESSAGE
 
 _log = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ class AgentTeamManager:
                 continue
             if sid is not None and manager.owner_session_id != sid:
                 continue
-            payload = manager.get_status()
+            payload = manager.get_status_with_task_fallback()
             if not payload.get("ok"):
                 continue
             for item in payload.get("subagents", []) or []:
@@ -256,22 +257,26 @@ class AgentTeamManager:
             "## 模型配置\n"
             f"- provider: {context.provider_name or session.provider_name or '(inherit)'}\n"
             f"- model: {context.model_name or session.model_name or '(inherit)'}\n\n"
-            "## 工作目录约束（必须遵守）\n"
+            "## ⚠️ 轮次预算（严格遵守）\n"
+            "你最多只有 30 轮工具调用，必须高效利用每一轮：\n"
+            "- 前 1-2 轮：快速确认目标路径是否存在（最多 1 次 list_files）\n"
+            "- 第 3 轮起必须开始 write_file 产出代码，不要反复 read/list 做调研\n"
+            "- 严禁在探索/分析上消耗超过 3 轮\n"
+            "- 写完一个文件立即写下一个，不要规划完所有文件才开始写\n\n"
+            "## 工作目录约束\n"
             f"- 工作目录: {workspace_dir}\n"
-            "- 所有文件读写和命令执行都必须限定在该目录或其子目录。\n"
-            "- 禁止把 `/Users`、`~`、`/` 等系统路径当作默认探索目标。\n"
-            "- 若路径不确定，先用最小范围的 list/read 确认后再操作。\n\n"
+            "- 所有文件读写必须限定在该目录或其子目录\n"
+            "- 禁止扫描 `/Users`、`~`、`/` 等系统路径\n\n"
             "## 已注入上下文文件\n"
             f"{context_hint}\n\n"
             f"{parent_section}"
             "## 执行要求\n"
-            "- 先给出你即将执行的最小下一步，再调用工具。\n"
+            "- 优先产出文件，边写边推进，不要等规划完毕才动手。\n"
             "- 在 Desktop 服务模式下，不要要求用户输入 A/B，也不要调用不存在的 `confirm_*` 工具。\n"
             "- 需要确认高风险命令时，直接发起真实工具调用（如 bash_exec）；系统会自动弹出 confirm_required。\n"
-            "- 若用户没有明确给出落盘目录/路径：必须先提出建议路径并征求用户同意，再写文件。\n"
-            "- 只有在收到工具返回 `OK: wrote ...` / `OK: edited ...` / `OK: generated ...` 后，才能宣称“已生成/已落盘”。\n"
-            "- 对外汇报文件产出时，优先引用工具返回的绝对路径；若未拿到成功返回，必须明确说明“尚未写入磁盘”。\n"
-            "- 优先完成用户指定目录中的目标，不做无关全盘扫描。"
+            "- 只有在收到工具返回 `OK: wrote ...` / `OK: edited ...` 后，才能宣称已落盘。\n"
+            "- 对外汇报文件产出时，引用工具返回的绝对路径。\n"
+            "- 不做无关全盘扫描，直接在目标目录下工作。"
         )
 
     async def _emit(self, event: RuntimeEvent) -> None:
@@ -390,6 +395,7 @@ class AgentTeamManager:
                 task=task.strip(),
                 source_tool_call_id=source_tool_call_id,
                 context_files=dict(self.base_session.context_files),
+                confirm_gate=AutoApproveConfirmGate(),
                 parent_agent_id=parent_agent_id,
                 depth=parent_depth + 1,
                 mode=resolved_mode,
@@ -412,23 +418,38 @@ class AgentTeamManager:
                 self._run_subagent(context, allowed_tools=allowed_tools)
             )
 
-        await self._emit(
-            RuntimeEvent(
-                type=EventType.SUBAGENT_STARTED.value,
-                data={
-                    "agent_id": context.agent_id,
-                    "name": context.name,
-                    "role": context.role,
-                    "task": context.task,
-                    "status": context.status.value,
-                    "depth": context.depth,
-                    "mode": context.mode,
-                    "provider": context.provider_name or self.base_session.provider_name or "",
-                    "model": context.model_name or self.base_session.model_name or "",
-                },
-                agent_id=context.agent_id,
-            )
+        started_event = RuntimeEvent(
+            type=EventType.SUBAGENT_STARTED.value,
+            data={
+                "agent_id": context.agent_id,
+                "name": context.name,
+                "role": context.role,
+                "task": context.task,
+                "status": context.status.value,
+                "depth": context.depth,
+                "mode": context.mode,
+                "provider": context.provider_name or self.base_session.provider_name or "",
+                "model": context.model_name or self.base_session.model_name or "",
+            },
+            agent_id=context.agent_id,
         )
+        _log.info(
+            "[spawn_subagent] emitting SUBAGENT_STARTED agent=%s emitter=%s",
+            context.agent_id,
+            "yes" if self.event_emitter is not None else "NO_EMITTER",
+        )
+        await self._emit(started_event)
+        status_probe = self.get_status(context.agent_id)
+        if not status_probe.get("ok"):
+            _log.error(
+                "[spawn_subagent] status probe failed right after spawn: tm=%s owner_sid=%s agent=%s agents=%s archived=%s tasks=%s",
+                id(self),
+                self.owner_session_id,
+                context.agent_id,
+                list(self._agents.keys()),
+                list(self._archived_agents.keys()),
+                list(self._tasks.keys()),
+            )
         return {
             "ok": True,
             "agent_id": context.agent_id,
@@ -577,6 +598,92 @@ class AgentTeamManager:
             "subagents": [self._serialize_status(item) for item in merged.values()],
         }
 
+    def get_status_with_task_fallback(self, agent_id: Optional[str] = None) -> Dict[str, Any]:
+        """Return status and synthesize running entries from tasks when needed."""
+        status = self.get_status(agent_id)
+        if agent_id:
+            if status.get("ok"):
+                return status
+            task = self._tasks.get(agent_id)
+            if task is None or task.done():
+                return status
+            context = self._agents.get(agent_id)
+            if context is not None:
+                return {"ok": True, "subagent": self._serialize_status(context)}
+            return {
+                "ok": True,
+                "subagent": {
+                    "agent_id": agent_id,
+                    "name": agent_id,
+                    "role": "worker",
+                    "task": "",
+                    "status": SubAgentStatus.RUNNING.value,
+                    "updated_at": time.time(),
+                    "result_summary": "",
+                    "error_text": "",
+                    "recent_events": [],
+                    "depth": 1,
+                    "parent_agent_id": "meta",
+                    "mode": "run",
+                    "cleanup": "keep",
+                    "spawn_tree_path": "",
+                    "provider": self.base_session.provider_name or "",
+                    "model": self.base_session.model_name or "",
+                    "pending_confirm": None,
+                    "source": "task_fallback",
+                },
+            }
+
+        rows = list(status.get("subagents", [])) if status.get("ok") else []
+        known_ids = {str(item.get("agent_id", "")).strip() for item in rows}
+        running_task_ids = [aid for aid, task in self._tasks.items() if not task.done()]
+        if not running_task_ids:
+            return status
+
+        fallback_rows: List[Dict[str, Any]] = []
+        for aid in running_task_ids:
+            if aid in known_ids:
+                continue
+            context = self._agents.get(aid)
+            if context is not None:
+                row = self._serialize_status(context)
+                row["source"] = "task_fallback"
+                fallback_rows.append(row)
+                continue
+            fallback_rows.append(
+                {
+                    "agent_id": aid,
+                    "name": aid,
+                    "role": "worker",
+                    "task": "",
+                    "status": SubAgentStatus.RUNNING.value,
+                    "updated_at": time.time(),
+                    "result_summary": "",
+                    "error_text": "",
+                    "recent_events": [],
+                    "depth": 1,
+                    "parent_agent_id": "meta",
+                    "mode": "run",
+                    "cleanup": "keep",
+                    "spawn_tree_path": "",
+                    "provider": self.base_session.provider_name or "",
+                    "model": self.base_session.model_name or "",
+                    "pending_confirm": None,
+                    "source": "task_fallback",
+                }
+            )
+        if not fallback_rows:
+            return status
+        merged_rows = rows + fallback_rows
+        _log.warning(
+            "[get_status_with_task_fallback] synthesized %d rows from running tasks: tm=%s owner_sid=%s tasks=%s",
+            len(fallback_rows),
+            id(self),
+            self.owner_session_id,
+            running_task_ids,
+        )
+        return {"ok": True, "subagents": merged_rows}
+
     def get_confirm_gate(self, agent_id: str) -> Optional[AsyncConfirmGate]:
         context = self._agents.get(agent_id)
         if context is None:
@@ -685,30 +792,91 @@ class AgentTeamManager:
             session.model_name = resolved_model
         else:
             llm = self.llm_factory()
-        runtime = AgentRuntime(llm, context.confirm_gate, max_tool_rounds=25, team_manager=self)
+        runtime = AgentRuntime(llm, context.confirm_gate, max_tool_rounds=30, team_manager=self)
         system_prompt = self._build_subagent_system_prompt(context, session)
         started_at = time.time()
+        cancelled_by_request = False
+        timed_out = False
+        paused_at_limit = False
+        heartbeat_stop = asyncio.Event()
+        token_buffer = ""
+        token_last_emit_at = time.time()
+
+        async def _emit_progress(text: str) -> None:
+            await self._emit(
+                RuntimeEvent(
+                    type=EventType.SUBAGENT_PROGRESS.value,
+                    data={"agent_id": context.agent_id, "text": text},
+                    agent_id=context.agent_id,
+                )
+            )
+
+        async def _heartbeat() -> None:
+            # Emit lightweight heartbeat so UI can show liveness even when model is thinking.
+            while not heartbeat_stop.is_set():
+                await asyncio.sleep(3)
+                if heartbeat_stop.is_set():
+                    break
+                elapsed = int(time.time() - started_at)
+                await _emit_progress(f"执行中（{elapsed}s）…")
+
+        heartbeat_task = asyncio.create_task(_heartbeat())
+
+        async def _flush_token_buffer() -> None:
+            nonlocal token_buffer, token_last_emit_at
+            if not token_buffer:
+                return
+            await self._emit(
+                RuntimeEvent(
+                    type=EventType.TOKEN.value,
+                    data={"agent_id": context.agent_id, "text": token_buffer},
+                    agent_id=context.agent_id,
+                )
+            )
+            token_buffer = ""
+            token_last_emit_at = time.time()
 
         try:
+            def _should_stop() -> bool:
+                nonlocal cancelled_by_request, timed_out
+                if context.agent_id in self._cancelled:
+                    cancelled_by_request = True
+                    return True
+                if context.run_timeout_seconds > 0 and (time.time() - started_at) > context.run_timeout_seconds:
+                    timed_out = True
+                    return True
+                return False
+
             async for event in runtime.run_turn(
                 resume_input or context.task,
                 session,
-                should_stop=lambda: context.agent_id in self._cancelled
-                or (
-                    context.run_timeout_seconds > 0
-                    and (time.time() - started_at) > context.run_timeout_seconds
-                ),
+                should_stop=_should_stop,
                 agent_id=context.agent_id,
                 tools=allowed_tools,
                 system_prompt=system_prompt,
             ):
                 context.updated_at = time.time()
+                if event.type == EventType.TOKEN.value:
+                    tok = str(event.data.get("text", ""))
+                    if tok:
+                        token_buffer += tok
+                        now = time.time()
+                        if len(token_buffer) >= 120 or (now - token_last_emit_at) >= 0.2:
+                            await _flush_token_buffer()
+                    continue
+                await _flush_token_buffer()
                 if event.type == EventType.FINAL.value:
                     context.final_text = str(event.data.get("text", ""))
                 if event.type == EventType.ERROR.value:
                     context.error_text = str(event.data.get("text", ""))
                 if event.type == EventType.SUBAGENT_PAUSED.value:
-                    context.error_text = str(event.data.get("text", ""))
+                    paused_at_limit = True
+                    context.final_text = context.final_text or str(event.data.get("text", ""))
+                if event.type == EventType.ROUND_START.value:
+                    round_no = int(event.data.get("round", 0) or 0)
+                    max_rounds = int(event.data.get("max_rounds", 0) or 0)
+                    elapsed = int(time.time() - started_at)
+                    await _emit_progress(f"第 {round_no}/{max_rounds} 轮分析中（{elapsed}s）")
                 if event.type in {
                     EventType.TOOL_CALL.value,
                     EventType.TOOL_RESULT.value,
@@ -721,26 +889,41 @@ class AgentTeamManager:
                     context.recent_events.append({"type": event.type, "data": event.data})
                 if event.type in {EventType.TOOL_CALL.value, EventType.TOOL_RESULT.value}:
                     tool_name = str(event.data.get("name", "tool"))
+                    args = event.data.get("arguments") or event.data.get("args") or {}
+                    path_hint = ""
+                    if isinstance(args, dict):
+                        path_val = str(args.get("path", "")).strip()
+                        if path_val:
+                            path_hint = f" -> {path_val}"
                     action = (
-                        f"调用工具 {tool_name}"
+                        f"调用工具 {tool_name}{path_hint}"
                         if event.type == EventType.TOOL_CALL.value
                         else f"完成工具 {tool_name}"
                     )
-                    await self._emit(
-                        RuntimeEvent(
-                            type=EventType.SUBAGENT_PROGRESS.value,
-                            data={"agent_id": context.agent_id, "text": action},
-                            agent_id=context.agent_id,
-                        )
-                    )
+                    await _emit_progress(action)
                 await self._emit(event)
 
+            await _flush_token_buffer()
+
             if context.status != SubAgentStatus.CANCELLED:
-                context.status = (
-                    SubAgentStatus.FAILED
-                    if bool(context.error_text and not context.final_text)
-                    else SubAgentStatus.COMPLETED
-                )
+                if context.error_text == STOP_MESSAGE and cancelled_by_request:
+                    context.status = SubAgentStatus.CANCELLED
+                    context.error_text = "任务已取消"
+                elif context.error_text == STOP_MESSAGE and timed_out:
+                    context.status = SubAgentStatus.FAILED
+                    context.error_text = f"子智能体执行超时（>{context.run_timeout_seconds}s）"
+                elif context.error_text == STOP_MESSAGE:
+                    context.status = SubAgentStatus.CANCELLED
+                    context.error_text = "任务已中断"
+                elif paused_at_limit:
+                    context.status = SubAgentStatus.COMPLETED
+                    context.error_text = ""
+                else:
+                    context.status = (
+                        SubAgentStatus.FAILED
+                        if bool(context.error_text and not context.final_text)
+                        else SubAgentStatus.COMPLETED
+                    )
             context.updated_at = time.time()
         except asyncio.CancelledError:
             context.status = SubAgentStatus.CANCELLED
@@ -758,6 +941,14 @@ class AgentTeamManager:
                 )
             )
         finally:
+            heartbeat_stop.set()
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
             context.agent_messages = list(session.agent_messages)
             context.artifacts = dict(session.artifacts)
             context.context_files = dict(session.context_files)

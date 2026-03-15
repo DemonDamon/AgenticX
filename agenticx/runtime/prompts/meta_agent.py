@@ -120,6 +120,20 @@ def _build_active_subagents_context(session: StudioSession) -> str:
                     list(team_manager._agents.keys()),
                     list(team_manager._archived_agents.keys()),
                 )
+                try:
+                    from agenticx.runtime.team_manager import AgentTeamManager
+
+                    owner_sid = str(getattr(team_manager, "owner_session_id", "") or "").strip() or None
+                    global_rows = AgentTeamManager.collect_global_statuses(session_id=owner_sid)
+                    if global_rows:
+                        _ctx_log.warning(
+                            "[active_subagents_context] fallback global statuses count=%d sid=%s",
+                            len(global_rows),
+                            owner_sid,
+                        )
+                        rows = global_rows
+                except Exception:
+                    pass
 
         scratchpad = getattr(session, "scratchpad", None) or {}
         scratchpad_results: list[str] = []
@@ -250,7 +264,7 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "3.1) 在调用 `spawn_subagent` 前，先调用 `recommend_subagent_model(task, role)` 评估复杂度并给出模型建议。\n"
         "3.2) 你必须把推荐结果告知用户（复杂度级别、推荐模型、推荐理由），再决定是否继续派发。\n"
         "3.3) 若用户同意推荐模型，调用 `spawn_subagent` 时显式传入 `provider` 和 `model`；若用户未同意，则沿用当前会话模型。\n"
-        "4) 用户问“进度如何”/“状态”/“子智能体在干什么”时，**必须先调用 `query_subagent_status` 再回答**。即使你认为没有子智能体，也必须调用工具确认，禁止凭记忆或推测回答。\n"
+        "4) 用户问“进度如何”/“状态”/“子智能体在干什么”时，优先调用 `query_subagent_status` 获取一次最新状态；同一轮禁止重复轮询。\n"
         "5) 若某子智能体失控或偏航，调用 `cancel_subagent` 并重新规划。\n\n"
         "## 调度策略\n"
         "- 拆解任务前优先通过 todo_write 记录任务清单，保持单个 in_progress。\n"
@@ -275,7 +289,7 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "- 任何 `spawn_subagent` 之前都必须先调用一次 `recommend_subagent_model`，禁止跳过。\n"
         "- 在拿到工具结果前，不要输出长段解释；优先输出工具事件与结果。\n"
         "- 若当前不需要启动子智能体，就直接给最终答复，不要进入无意义等待。\n"
-        "- 当「当前子智能体状态」章节列出了 running/pending 的子智能体时，用户任何关于进度、状态、子智能体的提问都 **必须** 调用 `query_subagent_status`，绝不能跳过。同一轮最多调用 1 次。\n\n"
+        "- 当「当前子智能体状态」章节列出了 running/pending 的子智能体时，用户问进度可调用一次 `query_subagent_status`；拿到结果后必须直接回答，不得在同一轮再次调用。\n\n"
         "- 若涉及文件产出，必须要求子智能体给出可验证路径与工具成功证据；不要接受“口头已生成”。\n"
         "- 用户未明确指定落盘目录时，先建议路径并征求同意，再安排写入动作。\n\n"
         "- 当用户询问“你有什么能力 / skills / mcp / 工具”时：直接基于“已注册能力”章节作答，禁止调用 `check_resources` 或启动子智能体。\n"
@@ -290,7 +304,8 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "  3) 产出文件路径列表（如有）。\n"
         "  4) 下一步建议（用户是否需要验收/继续/重试）。\n"
         "- 绝不能启动子智能体后只说「已启动，请等待」就不管了。子智能体完成后你必须主动总结汇报，不能等用户追问。\n"
-        "- 如果本轮看到已完成的子智能体但还未向用户汇报过，先调用 `query_subagent_status` 获取最新状态，再给出结构化汇报。\n\n"
+        "- 如果本轮看到已完成的子智能体但还未向用户汇报过，可调用一次 `query_subagent_status` 校验后给出结构化汇报；禁止循环查询。\n"
+        "- 严禁编造进度百分比（如 75%）。只有工具返回明确数值时才可引用，否则用“进行中/已完成/失败”描述。\n\n"
         "## 已注册能力\n"
         f"{skills_context}"
         f"{mcp_context}\n"

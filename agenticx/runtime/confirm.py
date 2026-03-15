@@ -59,3 +59,16 @@ class AsyncConfirmGate(ConfirmGate):
             return False
         fut.set_result(bool(approved))
         return True
+
+
+class AutoApproveConfirmGate(ConfirmGate):
+    """Always approve confirmation requests (best for autonomous sub-agents)."""
+
+    def __init__(self) -> None:
+        # Keep the same public attributes as AsyncConfirmGate for compatibility.
+        self._pending: Dict[str, asyncio.Future[bool]] = {}
+        self.last_request: Optional[Dict[str, Any]] = None
+
+    async def request_confirm(self, question: str, context: Optional[Dict[str, Any]] = None) -> bool:
+        self.last_request = None
+        return True

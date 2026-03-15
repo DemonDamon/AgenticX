@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AvatarSidebar } from "./components/AvatarSidebar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -8,7 +8,6 @@ import { PaneManager } from "./components/PaneManager";
 import { SubAgentPanel } from "./components/SubAgentPanel";
 import { useAppStore } from "./store";
 import { stopSpeak } from "./voice/tts";
-import { watchWakewordLoop } from "./voice/wakeword";
 import { matchKeybinding } from "./core/keybinding-manager";
 
 function toProviderEntries(raw: Record<string, { api_key?: string; base_url?: string; model?: string; models?: string[] }>) {
@@ -50,6 +49,7 @@ export function App() {
   const apiToken = useAppStore((s) => s.apiToken);
   const sessionId = useAppStore((s) => s.sessionId);
   const panes = useAppStore((s) => s.panes);
+  const activePaneId = useAppStore((s) => s.activePaneId);
   const confirm = useAppStore((s) => s.confirm);
   const settings = useAppStore((s) => s.settings);
   const userMode = useAppStore((s) => s.userMode);
@@ -69,7 +69,6 @@ export function App() {
   const setMcpServers = useAppStore((s) => s.setMcpServers);
   const planMode = useAppStore((s) => s.planMode);
   const setPlanMode = useAppStore((s) => s.setPlanMode);
-  const setStatus = useAppStore((s) => s.setStatus);
   const subAgents = useAppStore((s) => s.subAgents);
   const addSubAgent = useAppStore((s) => s.addSubAgent);
   const selectedSubAgent = useAppStore((s) => s.selectedSubAgent);
@@ -86,6 +85,7 @@ export function App() {
   const confirmScopeRef = useRef<string | null>(null);
   const autoApproveScopesRef = useRef<Set<string>>(new Set());
   const denyScopesRef = useRef<Set<string>>(new Set());
+  const sessionInitDoneRef = useRef(false);
   const [subPanelOpen, setSubPanelOpen] = useState(true);
   const subAgentsRef = useRef(subAgents);
   const subAgentSessionRef = useRef<Record<string, string>>({});
@@ -102,10 +102,33 @@ export function App() {
     attempts?: number;
   }>>([]);
   const autoReportingRef = useRef(false);
+  const directNoticeSentRef = useRef<Set<string>>(new Set());
+  const activePaneSessionId = useMemo(
+    () => panes.find((pane) => pane.id === activePaneId)?.sessionId ?? sessionId,
+    [activePaneId, panes, sessionId]
+  );
+  const resolvePaneForSession = useCallback((sid: string, fallbackAgentId?: string) => {
+    const store = useAppStore.getState();
+    let pane = store.panes.find((p) => p.sessionId === sid);
+    if (!pane && fallbackAgentId) {
+      const mappedSid =
+        subAgentSessionRef.current[fallbackAgentId] ??
+        subAgentsRef.current.find((item) => item.id === fallbackAgentId)?.sessionId;
+      if (mappedSid) {
+        pane = store.panes.find((p) => p.sessionId === mappedSid);
+      }
+    }
+    if (!pane) {
+      const activePane = store.panes.find((p) => p.id === store.activePaneId);
+      pane = activePane ?? store.panes[0];
+    }
+    return pane;
+  }, []);
 
-  const refreshMcpStatus = useCallback(async (sid: string = sessionId) => {
-    if (!sid) return;
-    const status = await window.agenticxDesktop.loadMcpStatus(sid);
+  const refreshMcpStatus = useCallback(async (sid?: string) => {
+    const effectiveSid = sid || useAppStore.getState().sessionId;
+    if (!effectiveSid) return;
+    const status = await window.agenticxDesktop.loadMcpStatus(effectiveSid);
     if (status.ok && Array.isArray(status.servers)) {
       setMcpServers(
         status.servers.map((item) => ({
@@ -115,7 +138,7 @@ export function App() {
         }))
       );
     }
-  }, [sessionId, setMcpServers]);
+  }, [setMcpServers]);
 
   const buildConfirmScope = (
     question: string,
@@ -149,6 +172,8 @@ export function App() {
   };
 
   useEffect(() => {
+    if (sessionInitDoneRef.current) return;
+    sessionInitDoneRef.current = true;
     (async () => {
       const base = await window.agenticxDesktop.getApiBase();
       const token = await window.agenticxDesktop.getApiAuthToken();
@@ -178,7 +203,6 @@ export function App() {
         model: defEntry?.model ?? "",
         apiKey: defEntry?.apiKey ?? "",
       });
-      // Prefer last user-selected provider/model; fallback to default provider
       const savedActiveProvider = cfg.activeProvider ?? "";
       const savedActiveModel = cfg.activeModel ?? "";
       if (savedActiveProvider && savedActiveModel) {
@@ -187,29 +211,36 @@ export function App() {
         setActiveModel(defP, defEntry.model);
       }
       window.agenticxDesktop.onOpenSettings(() => openSettings());
-      watchWakewordLoop(async (text) => {
-        if (text.trim()) {
-          useAppStore.getState().addMessage("user", text.trim());
-          setStatus("processing");
-        } else {
-          setStatus("idle");
-        }
-      });
+      // NOTE:
+      // Auto wakeword listening on startup may keep requesting microphone capture
+      // and cause system-level indicator flashing on macOS.
+      // Keep wakeword disabled by default; user can still use manual mic input.
     })();
-  }, [openSettings, setApiBase, setApiToken, setSessionId, setPaneSessionId, setStatus, setUserMode, setOnboardingCompleted, setConfirmStrategy, refreshMcpStatus]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     subAgentsRef.current = subAgents;
   }, [subAgents]);
 
+  useEffect(() => {
+    if (!selectedSubAgent) return;
+    const selected = subAgents.find((item) => item.id === selectedSubAgent);
+    if (!selected) {
+      setSelectedSubAgent(null);
+      return;
+    }
+    const selectedSid = (selected.sessionId ?? "").trim();
+    if (selectedSid && activePaneSessionId && selectedSid !== activePaneSessionId) {
+      setSelectedSubAgent(null);
+    }
+  }, [selectedSubAgent, subAgents, activePaneSessionId, setSelectedSubAgent]);
+
   const syncSubAgents = useCallback(async () => {
     if (!apiBase || !apiToken) return;
-    const subAgentSids = subAgentsRef.current
-      .map((s) => s.sessionId ?? "")
-      .filter((s) => s.length > 0);
     const sessionIds = Array.from(
       new Set(
-        [sessionId, ...panes.map((pane) => pane.sessionId), ...subAgentSids]
+        [sessionId, ...panes.map((pane) => pane.sessionId)]
           .map((item) => item.trim())
           .filter((item) => item.length > 0)
       )
@@ -327,11 +358,11 @@ export function App() {
             const summaryBody = summaryText || (effectiveStatus === "failed" ? (item.error_text || "未知错误") : "任务已结束");
             const completionMsg = `${emoji} **子智能体 ${agentName} ${statusLabel}**\n\n${summaryBody}`;
             const store = useAppStore.getState();
-            const matchingPane = store.panes.find((p) => p.sessionId === sid);
+            const matchingPane = resolvePaneForSession(sid, id);
             if (matchingPane) {
               store.addPaneMessage(matchingPane.id, "tool", completionMsg, id);
             }
-            // Enqueue auto-report so Meta-Agent will summarize proactively
+            console.debug("[auto-report] enqueue: agent=%s name=%s status=%s sid=%s", id, agentName, effectiveStatus, sid);
             autoReportQueueRef.current.push({
               agentId: id,
               agentName,
@@ -390,6 +421,13 @@ export function App() {
     for (const item of subAgentsRef.current) {
       if (item.status !== "running" && item.status !== "pending" && item.status !== "awaiting_confirm") continue;
       if (seenRunningOrPending.has(item.id)) continue;
+      const lastRealEvtTs =
+        [...item.events].reverse().find((evt) => evt.type !== "sync")?.ts ?? 0;
+      if (lastRealEvtTs > 0 && Date.now() - lastRealEvtTs < 15000) {
+        // SSE has recent activity; avoid false "lost sync" warnings.
+        staleMissCountRef.current[item.id] = 0;
+        continue;
+      }
       const miss = (staleMissCountRef.current[item.id] ?? 0) + 1;
       staleMissCountRef.current[item.id] = miss;
       if (miss === 5) {
@@ -410,11 +448,15 @@ export function App() {
   }, [apiBase, apiToken, sessionId, panes, addSubAgent, updateSubAgent, addSubAgentEvent]);
 
   const triggerMetaReport = useCallback(async () => {
-    if (autoReportingRef.current) return;
+    if (autoReportingRef.current) {
+      console.debug("[auto-report] skipped: already reporting");
+      return;
+    }
     const queue = autoReportQueueRef.current;
     if (queue.length === 0) return;
     if (!apiBase || !apiToken) return;
 
+    console.debug("[auto-report] START: %d items in queue", queue.length, queue.map((q) => `${q.agentName}:${q.status}`));
     autoReportingRef.current = true;
     // Snapshot only; dequeue on success to avoid silent message loss.
     const batch = [...queue];
@@ -432,11 +474,27 @@ export function App() {
     try {
       for (const [sid, items] of bySession) {
         const store = useAppStore.getState();
-        const matchingPane = store.panes.find((p) => p.sessionId === sid);
+        const matchingPane = resolvePaneForSession(sid, items[0]?.agentId);
         if (!matchingPane) {
           for (const it of items) retryAgentIds.add(it.agentId);
           continue;
         }
+        const emitDirectNotice = () => {
+          const shouldEmit = items.some(
+            (it) => (it.attempts ?? 0) === 0 && !directNoticeSentRef.current.has(it.agentId)
+          );
+          if (!shouldEmit) return;
+          for (const it of items) directNoticeSentRef.current.add(it.agentId);
+          const lines = items
+            .map((it) => `- ${it.agentName}(${it.agentId}): ${it.summary.slice(0, 220)}`)
+            .join("\n");
+          store.addPaneMessage(
+            matchingPane.id,
+            "tool",
+            `⚠️ 子智能体已结束，但 Meta-Agent 自动汇报暂未成功。先给你直接结果：\n${lines}`,
+            "meta"
+          );
+        };
 
         const agentLines = items
           .map((it) => {
@@ -460,6 +518,7 @@ export function App() {
             body: JSON.stringify(body),
           });
           if (!resp.ok || !resp.body) {
+            emitDirectNotice();
             for (const it of items) retryAgentIds.add(it.agentId);
             continue;
           }
@@ -511,12 +570,16 @@ export function App() {
             }
           }
           if (metaResponded) {
+            console.debug("[auto-report] Meta responded for sid=%s, delivered=%d", sid, items.length);
             for (const it of items) deliveredAgentIds.add(it.agentId);
           } else {
+            console.debug("[auto-report] Meta did NOT respond for sid=%s, retrying %d items", sid, items.length);
+            emitDirectNotice();
             for (const it of items) retryAgentIds.add(it.agentId);
           }
         } catch {
           // network error on auto-report is non-fatal, retry later.
+          emitDirectNotice();
           for (const it of items) retryAgentIds.add(it.agentId);
         }
       }
@@ -531,7 +594,7 @@ export function App() {
             // Avoid endless retries; after several failures, keep one visible notice and drop.
             if ((it.attempts ?? 0) <= 3) return true;
             const s = useAppStore.getState();
-            const p = s.panes.find((pane) => pane.sessionId === it.sessionId);
+            const p = resolvePaneForSession(it.sessionId, it.agentId);
             if (p) {
               s.addPaneMessage(
                 p.id,
@@ -546,24 +609,26 @@ export function App() {
     } finally {
       autoReportingRef.current = false;
     }
-  }, [apiBase, apiToken]);
+  }, [apiBase, apiToken, resolvePaneForSession]);
 
   useEffect(() => {
     if (!apiBase || !apiToken) return;
-    void syncSubAgents();
-    const runningCount = subAgents.filter(
-      (item) => item.status === "running" || item.status === "pending" || item.status === "awaiting_confirm"
-    ).length;
-    const interval = runningCount > 0 ? 1500 : 4000;
-    const timer = window.setInterval(async () => {
+    const pollAndReport = async () => {
       await syncSubAgents();
-      // After polling, if any sub-agents just completed, trigger Meta-Agent auto-report
       if (autoReportQueueRef.current.length > 0) {
+        console.debug("[auto-report] queue=%d, firing triggerMetaReport", autoReportQueueRef.current.length);
         void triggerMetaReport();
       }
-    }, interval);
+    };
+    void pollAndReport();
+    // Use a short base interval; the actual poll frequency is fast enough for both
+    // active and idle scenarios without needing to tear down on subAgents changes.
+    const timer = window.setInterval(() => void pollAndReport(), 2000);
     return () => window.clearInterval(timer);
-  }, [apiBase, apiToken, subAgents, syncSubAgents, triggerMetaReport]);
+    // Intentionally exclude subAgents from deps to avoid interval teardown on every
+    // status update, which was causing auto-report queue to be reset before firing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiBase, apiToken, syncSubAgents, triggerMetaReport]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -694,8 +759,8 @@ export function App() {
       if (!resp.ok) throw new Error(await resp.text());
       addSubAgentEvent(agentId, { type: "cancel", content: "已发送中断请求" });
     } catch (err) {
-      updateSubAgent(agentId, { status: "running", currentAction: "中断失败，继续执行" });
-      addSubAgentEvent(agentId, { type: "error", content: `中断失败: ${String(err)}` });
+      updateSubAgent(agentId, { status: "cancelled", currentAction: "中断请求失败（后端未找到该任务）" });
+      addSubAgentEvent(agentId, { type: "error", content: `中断请求失败: ${String(err)}` });
     }
   };
 

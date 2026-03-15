@@ -108,11 +108,14 @@ def create_studio_app() -> FastAPI:
             logger.warning("Workspace bootstrap skipped: %s", exc)
         manager.cleanup_expired()
         managed = manager.get(session_id) if session_id else None
+        if managed is not None:
+            logger.info("[session] reused existing sid=%s", managed.session_id)
         if managed is None:
             avatar_cfg = avatar_registry.get_avatar(avatar_id) if avatar_id else None
             effective_provider = (avatar_cfg.default_provider if avatar_cfg and avatar_cfg.default_provider else provider)
             effective_model = (avatar_cfg.default_model if avatar_cfg and avatar_cfg.default_model else model)
             managed = manager.create(provider=effective_provider, model=effective_model, session_id=session_id)
+            logger.info("[session] CREATED new sid=%s (requested=%s)", managed.session_id, session_id)
             if avatar_cfg and avatar_cfg.workspace_dir:
                 managed.studio_session.workspace_dir = avatar_cfg.workspace_dir
             else:
@@ -229,6 +232,14 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="session not found")
 
         session = managed.studio_session
+        pending_subagent_summaries = session.scratchpad.pop("__pending_subagent_summaries__", [])
+        if isinstance(pending_subagent_summaries, list):
+            for entry in pending_subagent_summaries[:20]:
+                text = str(entry).strip()
+                if not text:
+                    continue
+                # Inject at turn boundary to avoid breaking assistant(tool_calls)->tool pairing.
+                session.agent_messages.append({"role": "system", "content": text})
         mode = (payload.mode or "interactive").strip().lower()
         if mode not in {"interactive", "auto"}:
             mode = "interactive"
@@ -332,12 +343,16 @@ def create_studio_app() -> FastAPI:
             await event_queue.put(event)
 
         async def _on_subagent_summary(summary: str, context) -> None:
-            # IMPORTANT: do NOT append async summary into agent_messages.
-            # It can interleave with assistant(tool_calls)->tool blocks and break
-            # strict providers that require contiguous tool responses.
             agent_id = getattr(context, "agent_id", "unknown")
             agent_name = getattr(context, "name", agent_id)
             status_val = getattr(getattr(context, "status", None), "value", "unknown")
+            pending_reports = session.scratchpad.get("__pending_subagent_summaries__", [])
+            if not isinstance(pending_reports, list):
+                pending_reports = []
+            pending_reports.append(
+                f"[subagent_summary] [{agent_name}] (ID: {agent_id}) 状态={status_val}\n{summary}"
+            )
+            session.scratchpad["__pending_subagent_summaries__"] = pending_reports[-50:]
             session.chat_history.append({
                 "role": "assistant",
                 "content": f"子智能体汇总:\n[{agent_name}] (ID: {agent_id}) 状态={status_val}\n{summary}",
@@ -405,6 +420,8 @@ def create_studio_app() -> FastAPI:
                         event_data = dict(event.data)
                         event_data.setdefault("agent_id", event.agent_id)
                         sse = SseEvent(type=event.type, data=event_data)
+                        if event.type in ("subagent_started", "subagent_completed", "subagent_error"):
+                            logger.info("[sse] yielding %s agent=%s", event.type, event.agent_id)
                         yield f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"
                     if not meta_done:
                         continue
@@ -484,16 +501,23 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="session_id and agent_id are required")
         managed = manager.get(session_id)
         if managed is None:
+            logger.warning("[cancel] session NOT FOUND sid=%s agent=%s", session_id, agent_id)
             raise HTTPException(status_code=404, detail="session not found")
         team_manager = managed.team_manager
         if team_manager is None:
+            logger.warning("[cancel] sid=%s agent=%s tm=None, trying global lookup", session_id, agent_id)
             team_manager = AgentTeamManager.find_manager_for_agent(
                 agent_id,
                 include_archived=False,
                 session_id=session_id,
             )
             if team_manager is None:
+                logger.warning("[cancel] sid=%s agent=%s global lookup also failed", session_id, agent_id)
                 raise HTTPException(status_code=404, detail="agent team not initialized")
+        logger.info(
+            "[cancel] sid=%s agent=%s tm=%s agents=%s",
+            session_id, agent_id, id(team_manager), list(team_manager._agents.keys()),
+        )
         result = await team_manager.cancel_subagent(agent_id)
         if not result.get("ok"):
             fallback_manager = AgentTeamManager.find_manager_for_agent(
@@ -504,6 +528,7 @@ def create_studio_app() -> FastAPI:
             if fallback_manager is not None and fallback_manager is not team_manager:
                 result = await fallback_manager.cancel_subagent(agent_id)
             if not result.get("ok"):
+                logger.warning("[cancel] FAILED sid=%s agent=%s result=%s", session_id, agent_id, result)
                 raise HTTPException(status_code=404, detail=result.get("message", "subagent not found"))
         return result
 
@@ -515,9 +540,20 @@ def create_studio_app() -> FastAPI:
         _check_token(x_agx_desktop_token)
         managed = manager.get(session_id)
         if managed is None:
+            all_sids = list(manager._sessions.keys())
+            logger.warning(
+                "[subagents/status] session NOT FOUND sid=%s known_sessions=%s",
+                session_id,
+                all_sids[:10],
+            )
             raise HTTPException(status_code=404, detail="session not found")
         if managed.team_manager is None:
-            logger.debug("[subagents/status] sid=%s tm=None", session_id)
+            registry_count = len(AgentTeamManager._registry)
+            logger.warning(
+                "[subagents/status] sid=%s tm=None registry_managers=%d",
+                session_id,
+                registry_count,
+            )
             global_rows = AgentTeamManager.collect_global_statuses(session_id=session_id)
             if global_rows:
                 logger.warning(
@@ -527,13 +563,14 @@ def create_studio_app() -> FastAPI:
                 )
                 return {"ok": True, "subagents": global_rows}
             return {"ok": True, "subagents": []}
-        logger.debug(
-            "[subagents/status] sid=%s tm=%s agents=%s",
+        logger.info(
+            "[subagents/status] sid=%s tm=%s agents=%s tasks=%s",
             session_id,
             id(managed.team_manager),
             list(managed.team_manager._agents.keys()),
+            {k: (not v.done()) for k, v in managed.team_manager._tasks.items()},
         )
-        status_payload = managed.team_manager.get_status()
+        status_payload = managed.team_manager.get_status_with_task_fallback()
         if (
             isinstance(status_payload, dict)
             and status_payload.get("ok")
