@@ -1,6 +1,6 @@
 """Runtime core exports."""
 
-from agenticx.runtime.confirm import AsyncConfirmGate, ConfirmGate, SyncConfirmGate
+from agenticx.runtime.confirm import AutoApproveConfirmGate, AsyncConfirmGate, ConfirmGate, SyncConfirmGate
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.scratchpad import Scratchpad
 from agenticx.runtime.todo_manager import TodoManager
@@ -54,6 +54,7 @@ __all__ = [
     "ConfirmGate",
     "SyncConfirmGate",
     "AsyncConfirmGate",
+    "AutoApproveConfirmGate",
     "EventType",
     "RuntimeEvent",
     "TodoManager",

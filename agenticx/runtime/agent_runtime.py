@@ -46,6 +46,8 @@ PROVIDER_FIRST_FEEDBACK_SECONDS: Dict[str, float] = {
     "bailian": 12.0,
     "zhipu": 10.0,
 }
+DEFAULT_STATUS_QUERY_BUDGET_PER_TURN = 2
+DEFAULT_STATUS_QUERY_COOLDOWN_SECONDS = 8.0
 
 
 def _truncate(text: str, limit: int = MAX_CONTEXT_CHARS) -> str:
@@ -82,6 +84,50 @@ def _resolve_llm_first_feedback_seconds(session: StudioSession) -> float:
     if provider_name and provider_name in PROVIDER_FIRST_FEEDBACK_SECONDS:
         return PROVIDER_FIRST_FEEDBACK_SECONDS[provider_name]
     return DEFAULT_LLM_FIRST_FEEDBACK_SECONDS
+
+
+def _resolve_status_query_budget_per_turn() -> int:
+    env_raw = os.getenv("AGX_STATUS_QUERY_BUDGET_PER_TURN", "").strip()
+    if env_raw:
+        try:
+            value = int(env_raw)
+            if value >= 1:
+                return value
+        except ValueError:
+            pass
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        cfg_value = ConfigManager.get_value("runtime.status_query_budget_per_turn")
+        if cfg_value is not None:
+            value = int(cfg_value)
+            if value >= 1:
+                return value
+    except Exception:
+        pass
+    return DEFAULT_STATUS_QUERY_BUDGET_PER_TURN
+
+
+def _resolve_status_query_cooldown_seconds() -> float:
+    env_raw = os.getenv("AGX_STATUS_QUERY_COOLDOWN_SECONDS", "").strip()
+    if env_raw:
+        try:
+            value = float(env_raw)
+            if value >= 0:
+                return value
+        except ValueError:
+            pass
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        cfg_value = ConfigManager.get_value("runtime.status_query_cooldown_seconds")
+        if cfg_value is not None:
+            value = float(cfg_value)
+            if value >= 0:
+                return value
+    except Exception:
+        pass
+    return DEFAULT_STATUS_QUERY_COOLDOWN_SECONDS
 
 
 def _serialize_artifacts(session: StudioSession) -> str:
@@ -370,7 +416,10 @@ class AgentRuntime:
         self.max_tool_rounds = max_tool_rounds
         self.hooks = hooks or HookRegistry()
         self.compactor = ContextCompactor(llm)
-        self.loop_detector = LoopDetector()
+        self.loop_detector = LoopDetector(
+            warning_threshold=4,
+            critical_threshold=8,
+        )
         self.team_manager = team_manager
         try:
             from agenticx.runtime.hooks.memory_hook import MemoryHook
@@ -427,8 +476,13 @@ class AgentRuntime:
         if not _is_system_trigger:
             session.chat_history.append({"role": "user", "content": user_input})
         status_query_total = 0
+        status_query_attempts_total = 0
+        max_status_queries_per_turn = _resolve_status_query_budget_per_turn()
+        min_status_query_interval_sec = _resolve_status_query_cooldown_seconds()
+        last_status_query_at = 0.0
         last_status_query_signature: Optional[str] = None
         repeated_status_query_count = 0
+        last_status_query_had_rows = False
         executed_tool_names: List[str] = []
         rounds_without_todo = 0
         invoke_timeout_seconds = _resolve_llm_invoke_timeout_seconds(session)
@@ -481,7 +535,7 @@ class AgentRuntime:
                         tools=active_tools,
                         tool_choice="auto",
                         temperature=0.2,
-                        max_tokens=1200,
+                        max_tokens=8192,
                     )
                 )
                 wait_started_at = asyncio.get_running_loop().time()
@@ -572,7 +626,7 @@ class AgentRuntime:
 
                         def _run_sync_stream() -> None:
                             try:
-                                for chunk in self.llm.stream(messages, temperature=0.2, max_tokens=1200):
+                                for chunk in self.llm.stream(messages, temperature=0.2, max_tokens=8192):
                                     tok = chunk if isinstance(chunk, str) else str(chunk.get("content", ""))
                                     if tok:
                                         token_queue.put_nowait(tok)
@@ -698,7 +752,135 @@ class AgentRuntime:
                     )
                     continue
                 if tool_name == "query_subagent_status":
+                    status_query_attempts_total += 1
+                    if agent_id == "meta" and status_query_attempts_total > max_status_queries_per_turn:
+                        budget_msg = (
+                            f"【已阻止】本轮状态查询已超过预算上限（{max_status_queries_per_turn} 次），为避免无效轮询已停止继续查询。\n"
+                            "请基于已有状态结果直接回复用户，或等待后台完成事件。"
+                        )
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "content": budget_msg,
+                            }
+                        )
+                        session.agent_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "content": budget_msg,
+                            }
+                        )
+                        synced_session_message_count = len(session.agent_messages)
+                        if not _is_system_trigger:
+                            session.chat_history.append(
+                                {"role": "assistant", "content": f"工具结果({tool_name}):\n{budget_msg}"}
+                            )
+                        yield RuntimeEvent(
+                            type=EventType.TOOL_RESULT.value,
+                            data={"name": tool_name, "result": budget_msg, "tool_call_id": tool_call_id},
+                            agent_id=agent_id,
+                        )
+                        if agent_id == "meta":
+                            final_text = (
+                                "本轮状态查询达到预算上限（2 次），已停止轮询。"
+                                "我会在子智能体完成/失败后主动汇报。"
+                            )
+                            await self.hooks.run_on_agent_end(final_text, session)
+                            yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
+                            return
+                        continue
+                    now_ts = time.time()
+                    if (
+                        agent_id == "meta"
+                        and last_status_query_at > 0
+                        and (now_ts - last_status_query_at) < min_status_query_interval_sec
+                    ):
+                        wait_left = max(1, int(min_status_query_interval_sec - (now_ts - last_status_query_at)))
+                        cooldown_msg = (
+                            "【已阻止】query_subagent_status 冷却中，避免无效轮询。\n"
+                            f"请至少等待 {wait_left}s 再次查询，或直接基于当前信息回答用户。"
+                        )
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "content": cooldown_msg,
+                            }
+                        )
+                        session.agent_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "content": cooldown_msg,
+                            }
+                        )
+                        synced_session_message_count = len(session.agent_messages)
+                        if not _is_system_trigger:
+                            session.chat_history.append(
+                                {"role": "assistant", "content": f"工具结果({tool_name}):\n{cooldown_msg}"}
+                            )
+                        yield RuntimeEvent(
+                            type=EventType.TOOL_RESULT.value,
+                            data={"name": tool_name, "result": cooldown_msg, "tool_call_id": tool_call_id},
+                            agent_id=agent_id,
+                        )
+                        if agent_id == "meta":
+                            final_text = (
+                                "状态查询处于冷却窗口，我先停止本轮轮询。"
+                                "若子智能体仍在运行，我会在完成事件到达后主动汇报。"
+                            )
+                            await self.hooks.run_on_agent_end(final_text, session)
+                            yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
+                            return
+                        continue
+                    if agent_id == "meta" and status_query_attempts_total >= 1:
+                        throttled_once = (
+                            "【已阻止】本轮已调用过一次 query_subagent_status，禁止同一轮重复轮询。\n"
+                            "请基于该次结果直接回答用户，或结束本轮等待后台完成事件。"
+                        )
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "content": throttled_once,
+                            }
+                        )
+                        session.agent_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "content": throttled_once,
+                            }
+                        )
+                        synced_session_message_count = len(session.agent_messages)
+                        if not _is_system_trigger:
+                            session.chat_history.append(
+                                {"role": "assistant", "content": f"工具结果({tool_name}):\n{throttled_once}"}
+                            )
+                        yield RuntimeEvent(
+                            type=EventType.TOOL_RESULT.value,
+                            data={"name": tool_name, "result": throttled_once, "tool_call_id": tool_call_id},
+                            agent_id=agent_id,
+                        )
+                        if agent_id == "meta":
+                            final_text = (
+                                "本轮状态已查询过一次，已停止重复轮询。"
+                                "若子智能体仍运行，我会在完成事件到达后主动汇报。"
+                            )
+                            await self.hooks.run_on_agent_end(final_text, session)
+                            yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
+                            return
+                        continue
                     status_query_total += 1
+                    last_status_query_at = now_ts
                     try:
                         signature = json.dumps(arguments, ensure_ascii=False, sort_keys=True)
                     except Exception:
@@ -708,7 +890,14 @@ class AgentRuntime:
                     else:
                         last_status_query_signature = signature
                         repeated_status_query_count = 1
-                    if status_query_total > 2 or repeated_status_query_count > 1:
+                    if (
+                        status_query_attempts_total > 20
+                        or (
+                            status_query_total > 12
+                            and repeated_status_query_count > 6
+                            and last_status_query_had_rows
+                        )
+                    ):
                         throttled = (
                             "【已阻止】query_subagent_status 调用过于频繁，本次调用被拦截。\n"
                             "⚠️ 你必须立即停止查询并执行以下操作之一：\n"
@@ -743,6 +932,14 @@ class AgentRuntime:
                             data={"name": tool_name, "result": throttled, "tool_call_id": tool_call_id},
                             agent_id=agent_id,
                         )
+                        if agent_id == "meta":
+                            final_text = (
+                                "检测到状态轮询过于频繁，已停止本轮自动执行。"
+                                "我会等待后台完成事件并主动给你汇报结果。"
+                            )
+                            await self.hooks.run_on_agent_end(final_text, session)
+                            yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
+                            return
                         continue
 
                 yield RuntimeEvent(
@@ -793,6 +990,22 @@ class AgentRuntime:
                     result = await dispatch_task
                 except Exception as exc:
                     result = f"ERROR: tool execution failed: {exc}"
+                if tool_name == "query_subagent_status":
+                    has_rows = False
+                    try:
+                        parsed = json.loads(result)
+                        if isinstance(parsed, dict):
+                            rows = parsed.get("subagents")
+                            if isinstance(rows, list) and len(rows) > 0:
+                                has_rows = True
+                            if isinstance(parsed.get("subagent"), dict):
+                                has_rows = True
+                    except Exception:
+                        has_rows = False
+                    last_status_query_had_rows = has_rows
+                    if not has_rows:
+                        status_query_total = max(0, status_query_total - 1)
+                        repeated_status_query_count = 0
                 result = await self.hooks.run_after_tool_call(tool_name, result, session)
                 if tool_name == "todo_write":
                     rounds_without_todo = 0
@@ -800,10 +1013,18 @@ class AgentRuntime:
                     rounds_without_todo += 1
                 executed_tool_names.append(tool_name)
                 after_progress = _build_progress_signature(session)
+                file_write_progress = (
+                    tool_name in {"file_write", "file_edit"}
+                    and isinstance(result, str)
+                    and (
+                        "OK: wrote " in result
+                        or "OK: edited " in result
+                    )
+                )
                 self.loop_detector.record_call(
                     tool_name,
                     LoopDetector.args_signature(arguments),
-                    has_progress=(before_progress != after_progress),
+                    has_progress=(before_progress != after_progress) or file_write_progress,
                 )
                 loop_issue = self.loop_detector.check()
                 if loop_issue is not None:

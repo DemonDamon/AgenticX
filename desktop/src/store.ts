@@ -84,6 +84,7 @@ export type SubAgent = {
   sessionId?: string;
   progress?: number;
   currentAction?: string;
+  liveOutput?: string;
   resultSummary?: string;
   outputFiles?: string[];
   pendingConfirm?: PendingConfirm;
@@ -365,15 +366,18 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => {
       const exists = state.subAgents.some((sub) => sub.id === item.id);
       if (exists) {
+        console.debug("[store] addSubAgent SKIP (dup)", item.id, "existing:", state.subAgents.length);
         return state;
       }
       const next: SubAgent = {
         ...item,
         status: "running",
+        liveOutput: "",
         resultSummary: "",
         outputFiles: [],
         events: []
       };
+      console.debug("[store] addSubAgent OK", item.id, item.name, "sid:", item.sessionId, "total:", state.subAgents.length + 1);
       return { subAgents: [...state.subAgents, next] };
     }),
   updateSubAgent: (id, patch) =>
@@ -382,17 +386,21 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   addSubAgentEvent: (id, event) =>
     set((state) => ({
-      subAgents: state.subAgents.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              events: [
-                ...item.events,
-                { id: uid(), ts: Date.now(), type: event.type, content: event.content }
-              ].slice(-100)
-            }
-          : item
-      )
+      subAgents: state.subAgents.map((item) => {
+        if (item.id !== id) return item;
+        const recent = item.events.slice(-30);
+        const isDup = recent.some(
+          (e) => e.type === event.type && e.content === event.content
+        );
+        if (isDup) return item;
+        return {
+          ...item,
+          events: [
+            ...item.events,
+            { id: uid(), ts: Date.now(), type: event.type, content: event.content }
+          ].slice(-100)
+        };
+      })
     })),
   removeSubAgent: (id) =>
     set((state) => ({

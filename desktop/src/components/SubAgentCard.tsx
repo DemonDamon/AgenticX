@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SubAgent } from "../store";
 
 type Props = {
@@ -21,6 +21,22 @@ const statusMap: Record<string, { icon: string; label: string; tone: string }> =
 };
 
 const AUTO_CONFIRM_SECONDS = 8;
+
+function isThinkingPlaceholderText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  return /^[\s⏳….·.]+$/.test(trimmed);
+}
+
+function ThinkingDots() {
+  return (
+    <div className="inline-flex items-center gap-1.5">
+      <span className="h-2.5 w-2.5 rounded-full bg-cyan-300 agx-dot-pulse" />
+      <span className="h-2.5 w-2.5 rounded-full bg-cyan-300 agx-dot-pulse" style={{ animationDelay: "0.2s" }} />
+      <span className="h-2.5 w-2.5 rounded-full bg-cyan-300 agx-dot-pulse" style={{ animationDelay: "0.4s" }} />
+    </div>
+  );
+}
 
 function ConfirmWithCountdown({
   question,
@@ -115,7 +131,27 @@ export function SubAgentCard({
   selected = false,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(false);
   const status = useMemo(() => statusMap[subAgent.status] ?? statusMap.pending, [subAgent.status]);
+  const handleCopyDetails = useCallback(() => {
+    const header = [
+      `智能体: ${subAgent.name} (${subAgent.id})`,
+      `角色: ${subAgent.role}`,
+      `任务: ${subAgent.task}`,
+      `状态: ${status.label}`,
+      subAgent.resultSummary ? `摘要: ${subAgent.resultSummary}` : "",
+    ].filter(Boolean).join("\n");
+    const events = subAgent.events
+      .slice()
+      .reverse()
+      .map((evt) => `[${evt.type}]${evt.content}`)
+      .join("\n");
+    void navigator.clipboard.writeText(`${header}\n\n${events}`).then(() => {
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 1500);
+    });
+  }, [subAgent, status.label]);
+
   const canCancel =
     subAgent.status === "running" || subAgent.status === "pending" || subAgent.status === "awaiting_confirm";
   const canRetry = subAgent.status === "failed" || subAgent.status === "completed" || subAgent.status === "cancelled";
@@ -219,7 +255,14 @@ export function SubAgentCard({
       </div>
 
       {expanded ? (
-        <div className="mt-2 max-h-36 space-y-1 overflow-y-auto rounded-md border border-border/60 bg-slate-900/60 p-2">
+        <div className="relative mt-2 max-h-36 space-y-1 overflow-y-auto rounded-md border border-border/60 bg-slate-900/60 p-2">
+          <button
+            className="sticky right-0 top-0 z-10 float-right rounded border border-slate-600 bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-700 hover:text-white"
+            title="复制全部详情"
+            onClick={handleCopyDetails}
+          >
+            {copyFeedback ? "已复制 ✓" : "复制"}
+          </button>
           {subAgent.events.length === 0 ? (
             <div className="text-xs text-slate-500">暂无事件</div>
           ) : (
@@ -233,6 +276,18 @@ export function SubAgentCard({
                 </div>
               ))
           )}
+          {subAgent.liveOutput?.trim() ? (
+            <div className="mt-2 rounded border border-cyan-500/20 bg-cyan-500/5 p-2">
+              <div className="mb-1 text-[11px] text-cyan-300">实时输出</div>
+              {isThinkingPlaceholderText(subAgent.liveOutput) ? (
+                <ThinkingDots />
+              ) : (
+                <div className="max-h-24 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[11px] text-slate-200">
+                  {subAgent.liveOutput}
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

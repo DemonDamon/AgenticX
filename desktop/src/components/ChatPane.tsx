@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAppStore, type Message } from "../store";
+import { startRecording, stopRecording } from "../voice/stt";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 
 function PaneModelPicker() {
@@ -154,6 +155,38 @@ function StreamingThinkingIndicator() {
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
   const toolName = String(toolNameRaw ?? "tool");
   const resultText = String(resultRaw ?? "");
+  if (toolName === "query_subagent_status") {
+    try {
+      const parsed = JSON.parse(resultText) as Record<string, unknown>;
+      const one = parsed?.subagent as Record<string, unknown> | undefined;
+      if (one) {
+        const name = String(one.name ?? one.agent_id ?? "subagent");
+        const status = String(one.status ?? "unknown");
+        const action = String(one.current_action ?? "").trim();
+        return {
+          content: `📡 状态快照: ${name} = ${status}${action ? ` · ${action}` : ""}`,
+          silent: false,
+        };
+      }
+      const rows = Array.isArray(parsed?.subagents) ? (parsed.subagents as Array<Record<string, unknown>>) : [];
+      if (rows.length > 0) {
+        const counts = rows.reduce(
+          (acc, row) => {
+            const s = String(row.status ?? "unknown");
+            acc[s] = (acc[s] ?? 0) + 1;
+            return acc;
+          },
+          {} as Record<string, number>
+        );
+        const summary = Object.entries(counts)
+          .map(([k, v]) => `${k}:${v}`)
+          .join(" ");
+        return { content: `📡 状态快照: ${rows.length} 个子智能体 (${summary})`, silent: false };
+      }
+    } catch {
+      // Fall through to generic formatter.
+    }
+  }
   const compact = resultText.slice(0, 500);
   const isError = /^\s*ERROR:/i.test(resultText);
   const isBenignTodoConflict =
@@ -190,6 +223,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const addSubAgentEvent = useAppStore((s) => s.addSubAgentEvent);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [recording, setRecording] = useState(false);
   const [streamedAssistantText, setStreamedAssistantText] = useState("");
   const [streamingModel, setStreamingModel] = useState<{ provider: string; model: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -208,7 +242,35 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     });
   }, [visibleMessages, streamedAssistantText]);
 
+  useEffect(() => {
+    return () => {
+      stopRecording();
+    };
+  }, []);
+
   if (!pane) return null;
+
+  const onMicClick = () => {
+    if (recording) {
+      stopRecording();
+      setRecording(false);
+      return;
+    }
+    setRecording(true);
+    void startRecording(
+      async (text) => {
+        setRecording(false);
+        await sendChat(text);
+      },
+      () => {
+        // Keep UI simple in pane mode: no interim transcript rendering.
+      }
+    );
+    window.setTimeout(() => {
+      stopRecording();
+      setRecording(false);
+    }, 5000);
+  };
 
   const sendChat = async (userText: string) => {
     const text = userText.trim();
@@ -261,9 +323,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           try {
             const payload = JSON.parse(line.slice(6));
             const eventAgentId = payload.data?.agent_id ?? "meta";
-            if (payload.type === "token" && eventAgentId === "meta") {
-              full += payload.data?.text ?? "";
-              setStreamedAssistantText(full);
+            if (payload.type === "token") {
+              if (eventAgentId === "meta") {
+                full += payload.data?.text ?? "";
+                setStreamedAssistantText(full);
+              } else {
+                const tok = String(payload.data?.text ?? "");
+                if (tok) {
+                  const sub = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
+                  const prev = sub?.liveOutput ?? "";
+                  const next = (prev + tok).slice(-4000);
+                  updateSubAgent(eventAgentId, { liveOutput: next });
+                }
+              }
             }
             if (payload.type === "tool_call") {
               const toolName = payload.data?.name ?? "tool";
@@ -278,10 +350,31 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               }
             }
             if (payload.type === "tool_result") {
-              const formatted = formatToolResultMessage(payload.data?.name, payload.data?.result);
+              const toolName = String(payload.data?.name ?? "");
+              const formatted = formatToolResultMessage(toolName, payload.data?.result);
               if (formatted.silent) continue;
               if (eventAgentId === "meta") addPaneMessage(pane.id, "tool", formatted.content, "meta");
               else addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content });
+              if (toolName === "spawn_subagent" && eventAgentId === "meta") {
+                try {
+                  const spawnResult = typeof payload.data?.result === "string"
+                    ? JSON.parse(payload.data.result)
+                    : payload.data?.result;
+                  const spawnId = spawnResult?.agent_id;
+                  if (spawnId) {
+                    console.debug("[ChatPane] spawn_subagent tool_result fallback addSubAgent", spawnId);
+                    addSubAgent({
+                      id: spawnId,
+                      name: spawnResult.name ?? spawnId,
+                      role: spawnResult.role ?? "worker",
+                      provider: spawnResult.provider ?? undefined,
+                      model: spawnResult.model ?? undefined,
+                      task: spawnResult.task ?? "",
+                      sessionId: requestSessionId || undefined,
+                    });
+                  }
+                } catch { /* ignore parse errors */ }
+              }
             }
             if (payload.type === "confirm_required") {
               if (eventAgentId !== "meta") {
@@ -338,6 +431,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             }
             if (payload.type === "subagent_started") {
               const subId = payload.data?.agent_id;
+              console.debug("[ChatPane] SSE subagent_started", subId, "sessionId:", requestSessionId);
               if (subId) {
                 addSubAgent({
                   id: subId,
@@ -348,19 +442,35 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   task: payload.data?.task ?? "",
                   sessionId: requestSessionId || undefined,
                 });
+                addSubAgentEvent(subId, { type: "started", content: "已启动" });
               }
             }
             if (payload.type === "subagent_progress") {
               const subId = payload.data?.agent_id;
-              if (subId) updateSubAgent(subId, { currentAction: payload.data?.text ?? "执行中" });
+              if (subId) {
+                const text = payload.data?.text ?? "执行中";
+                updateSubAgent(subId, { currentAction: text });
+                // Keep heartbeat visible in status line, but avoid flooding detail logs.
+                if (!/^执行中（\d+s）/.test(text)) {
+                  addSubAgentEvent(subId, { type: "progress", content: text });
+                }
+              }
             }
             if (payload.type === "subagent_checkpoint") {
               const subId = payload.data?.agent_id;
-              if (subId) updateSubAgent(subId, { status: "running", currentAction: payload.data?.text ?? "阶段检查点" });
+              if (subId) {
+                const text = payload.data?.text ?? "阶段检查点";
+                updateSubAgent(subId, { status: "running", currentAction: text });
+                addSubAgentEvent(subId, { type: "checkpoint", content: text });
+              }
             }
             if (payload.type === "subagent_paused") {
               const subId = payload.data?.agent_id;
-              if (subId) updateSubAgent(subId, { status: "failed", currentAction: payload.data?.text ?? "已暂停，等待指令" });
+              if (subId) {
+                const text = payload.data?.text ?? "已暂停，等待指令";
+                updateSubAgent(subId, { status: "running", currentAction: text });
+                addSubAgentEvent(subId, { type: "paused", content: text });
+              }
             }
             if (payload.type === "subagent_completed") {
               const subId = payload.data?.agent_id;
@@ -371,15 +481,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   resultSummary:
                     typeof payload.data?.summary === "string" ? payload.data.summary : undefined,
                 });
+                addSubAgentEvent(subId, { type: "completed", content: payload.data?.summary ?? "完成" });
               }
             }
             if (payload.type === "subagent_error") {
               const subId = payload.data?.agent_id;
               if (subId) {
+                const text = payload.data?.text ?? "执行异常";
                 updateSubAgent(subId, {
                   status: payload.data?.status === "cancelled" ? "cancelled" : "failed",
-                  currentAction: payload.data?.text ?? "执行异常",
+                  currentAction: text,
                 });
+                addSubAgentEvent(subId, { type: "error", content: text });
               }
             }
             if (payload.type === "final") {
@@ -400,7 +513,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         }
       }
 
-      if (full.trim()) {
+      if (full.trim() && !isThinkingPlaceholderText(full)) {
         addPaneMessage(pane.id, "assistant", full, "meta", activeProvider, activeModel);
       }
     } catch (error) {
@@ -578,13 +691,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 中断
               </button>
             ) : (
-              <button
-                className="h-9 shrink-0 rounded-lg bg-cyan-500 px-3 text-xs font-medium text-black transition hover:bg-cyan-400 disabled:opacity-40"
-                disabled={!input.trim() || !pane.sessionId}
-                onClick={() => void sendChat(input)}
-              >
-                发送
-              </button>
+              <>
+                <button
+                  className={`h-9 w-9 shrink-0 rounded-lg border border-border text-base transition ${
+                    recording ? "bg-rose-500/30 text-rose-200 hover:bg-rose-500/40" : "text-slate-200 hover:bg-slate-800"
+                  }`}
+                  onClick={onMicClick}
+                  title={recording ? "结束语音输入" : "语音输入"}
+                >
+                  🎙
+                </button>
+                <button
+                  className="h-9 shrink-0 rounded-lg bg-cyan-500 px-3 text-xs font-medium text-black transition hover:bg-cyan-400 disabled:opacity-40"
+                  disabled={!input.trim() || !pane.sessionId}
+                  onClick={() => void sendChat(input)}
+                >
+                  发送
+                </button>
+              </>
             )}
           </div>
           <div className="mt-1.5 flex items-center">

@@ -543,10 +543,7 @@ async def dispatch_meta_tool_async(
     if name == "query_subagent_status":
         requested_id = str(arguments.get("agent_id", "")).strip() or None
         owner_session_id = getattr(team_manager, "owner_session_id", None)
-        active_tasks = {
-            tid: (not t.done())
-            for tid, t in team_manager._tasks.items()
-        }
+        active_tasks = {tid: (not t.done()) for tid, t in team_manager._tasks.items()}
         agent_keys = list(team_manager._agents.keys())
         archived_keys = list(team_manager._archived_agents.keys())
 
@@ -565,6 +562,10 @@ async def dispatch_meta_tool_async(
             if stm_rows and not agent_keys and not archived_keys:
                 _meta_log.warning("[dispatch] using session._team_manager as primary (has %d agents)", len(stm_rows))
                 team_manager = session_tm
+                owner_session_id = getattr(team_manager, "owner_session_id", None)
+                active_tasks = {tid: (not t.done()) for tid, t in team_manager._tasks.items()}
+                agent_keys = list(team_manager._agents.keys())
+                archived_keys = list(team_manager._archived_agents.keys())
 
         _meta_log.info(
             "[dispatch] query_subagent_status: tm=%s agents=%s archived=%s tasks=%s sid=%s",
@@ -574,7 +575,7 @@ async def dispatch_meta_tool_async(
             active_tasks,
             owner_session_id,
         )
-        result = team_manager.get_status(requested_id)
+        result = team_manager.get_status_with_task_fallback(requested_id)
         if requested_id and not result.get("ok"):
             global_hit = AgentTeamManager.lookup_global_status(
                 requested_id,
@@ -640,9 +641,13 @@ async def dispatch_meta_tool_async(
 
                 running_tasks = sum(1 for running in active_tasks.values() if running)
                 if not rows and running_tasks > 0:
-                    _meta_log.warning(
-                        "[dispatch] BUG: no agents in status but %d tasks still running! tasks=%s",
-                        running_tasks, active_tasks,
+                    _meta_log.error(
+                        "[dispatch] BUG: empty status while tasks running. tm=%s sid=%s tasks=%s agents=%s archived=%s",
+                        id(team_manager),
+                        owner_session_id,
+                        active_tasks,
+                        list(team_manager._agents.keys()),
+                        list(team_manager._archived_agents.keys()),
                     )
                 result["summary"] = {
                     "total": len(rows),
