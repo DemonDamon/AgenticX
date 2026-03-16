@@ -170,9 +170,19 @@ def _build_active_subagents_context(session: StudioSession) -> str:
             s = item.get("status", "unknown")
             task = (item.get("task", "") or "")[:80]
             summary = (item.get("result_summary", "") or "")[:200]
+            output_files = item.get("output_files")
+            file_list = output_files if isinstance(output_files, list) else []
             lines.append(f"- [{s}] {name} (ID: {agent_id}): {task}")
             if summary and s in ("completed", "failed"):
                 lines.append(f"  摘要: {summary}")
+            if file_list:
+                rendered = ", ".join(str(p) for p in file_list[:10] if str(p).strip())
+                if rendered:
+                    lines.append(f"  产出文件: {rendered}")
+                    if s == "failed":
+                        lines.append(f"  提示: 虽然执行中断，但以下文件已成功写入磁盘：{rendered}")
+            elif s in ("failed", "completed"):
+                lines.append("  产出文件: (无)")
             if s in ("running", "pending"):
                 running += 1
             elif s == "completed":

@@ -2,7 +2,7 @@ import asyncio
 from typing import Any, Optional, Dict, List, AsyncGenerator, Generator, Union, cast
 import litellm  # type: ignore
 from pydantic import Field  # type: ignore
-from .base import BaseLLMProvider
+from .base import BaseLLMProvider, StreamChunk
 from .response import LLMResponse, TokenUsage, LLMChoice
 
 class LiteLLMProvider(BaseLLMProvider):
@@ -30,6 +30,9 @@ class LiteLLMProvider(BaseLLMProvider):
         else:
             raise ValueError(f"Unsupported prompt type: {type(prompt)}")
             
+        timeout = kwargs.pop("timeout", self.timeout)
+        max_retries = kwargs.pop("max_retries", self.max_retries)
+        fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         try:
             response = litellm.completion(
                 model=self.model,
@@ -38,9 +41,9 @@ class LiteLLMProvider(BaseLLMProvider):
                 api_key=self.api_key,
                 base_url=self.base_url,
                 api_version=self.api_version,
-                timeout=self.timeout,
-                max_retries=self.max_retries,
-                fallbacks=self.fallbacks,
+                timeout=timeout,
+                max_retries=max_retries,
+                fallbacks=fallbacks,
                 **kwargs,
             )
             return self._parse_response(response)
@@ -58,6 +61,9 @@ class LiteLLMProvider(BaseLLMProvider):
         else:
             raise ValueError(f"Unsupported prompt type: {type(prompt)}")
             
+        timeout = kwargs.pop("timeout", self.timeout)
+        max_retries = kwargs.pop("max_retries", self.max_retries)
+        fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         try:
             response = await litellm.acompletion(
                 model=self.model,
@@ -66,9 +72,9 @@ class LiteLLMProvider(BaseLLMProvider):
                 api_key=self.api_key,
                 base_url=self.base_url,
                 api_version=self.api_version,
-                timeout=self.timeout,
-                max_retries=self.max_retries,
-                fallbacks=self.fallbacks,
+                timeout=timeout,
+                max_retries=max_retries,
+                fallbacks=fallbacks,
                 **kwargs,
             )
             return self._parse_response(response)
@@ -85,6 +91,9 @@ class LiteLLMProvider(BaseLLMProvider):
         else:
             raise ValueError(f"Unsupported prompt type: {type(prompt)}")
             
+        timeout = kwargs.pop("timeout", self.timeout)
+        max_retries = kwargs.pop("max_retries", self.max_retries)
+        fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         response_stream = litellm.completion(
             model=self.model,
             messages=messages,
@@ -92,9 +101,9 @@ class LiteLLMProvider(BaseLLMProvider):
             api_key=self.api_key,
             base_url=self.base_url,
             api_version=self.api_version,
-            timeout=self.timeout,
-            max_retries=self.max_retries,
-            fallbacks=self.fallbacks,
+            timeout=timeout,
+            max_retries=max_retries,
+            fallbacks=fallbacks,
             **kwargs
         )
         try:
@@ -110,6 +119,73 @@ class LiteLLMProvider(BaseLLMProvider):
             # 处理可能的异常
             raise e
 
+    def stream_with_tools(
+        self,
+        prompt: Union[str, List[Dict]],
+        tools: Optional[List[Dict]] = None,
+        **kwargs: Any,
+    ) -> Generator[StreamChunk, None, None]:
+        """Stream content/tool-call deltas in a normalized chunk format."""
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": prompt}]
+        elif isinstance(prompt, list):
+            messages = prompt
+        else:
+            raise ValueError(f"Unsupported prompt type: {type(prompt)}")
+
+        timeout = kwargs.pop("timeout", self.timeout)
+        max_retries = kwargs.pop("max_retries", self.max_retries)
+        fallbacks = kwargs.pop("fallbacks", self.fallbacks)
+        response_stream = litellm.completion(
+            model=self.model,
+            messages=messages,
+            tools=tools,
+            stream=True,
+            api_key=self.api_key,
+            base_url=self.base_url,
+            api_version=self.api_version,
+            timeout=timeout,
+            max_retries=max_retries,
+            fallbacks=fallbacks,
+            **kwargs,
+        )
+        last_finish_reason = ""
+        try:
+            for chunk in response_stream:
+                chunk = cast(Any, chunk)
+                choices = getattr(chunk, "choices", None)
+                if not choices:
+                    continue
+                choice0 = choices[0]
+                finish_reason = getattr(choice0, "finish_reason", None)
+                if isinstance(finish_reason, str) and finish_reason:
+                    last_finish_reason = finish_reason
+                delta = getattr(choice0, "delta", None)
+                if delta is None:
+                    continue
+                content = getattr(delta, "content", None)
+                if isinstance(content, str) and content:
+                    yield {"type": "content", "text": content}
+                tool_calls = getattr(delta, "tool_calls", None)
+                if tool_calls:
+                    for tc in tool_calls:
+                        tc_any = cast(Any, tc)
+                        idx = getattr(tc_any, "index", 0)
+                        tc_id = getattr(tc_any, "id", "") or ""
+                        fn_obj = getattr(tc_any, "function", None)
+                        fn_name = getattr(fn_obj, "name", "") if fn_obj is not None else ""
+                        fn_args = getattr(fn_obj, "arguments", "") if fn_obj is not None else ""
+                        yield {
+                            "type": "tool_call_delta",
+                            "tool_index": int(idx) if isinstance(idx, int) else 0,
+                            "tool_call_id": str(tc_id),
+                            "tool_name": str(fn_name),
+                            "arguments_delta": str(fn_args),
+                        }
+            yield {"type": "done", "finish_reason": last_finish_reason}
+        except Exception as e:
+            raise e
+
     async def _astream_generator(self, prompt: Union[str, List[Dict]], **kwargs) -> AsyncGenerator[Union[str, Dict], None]:
         """Internal method to create the async generator for streaming."""
         # 处理不同的输入类型
@@ -121,6 +197,9 @@ class LiteLLMProvider(BaseLLMProvider):
             raise ValueError(f"Unsupported prompt type: {type(prompt)}")
             
         # 获取流式响应
+        timeout = kwargs.pop("timeout", self.timeout)
+        max_retries = kwargs.pop("max_retries", self.max_retries)
+        fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         response_stream = await litellm.acompletion(
             model=self.model,
             messages=messages,
@@ -128,9 +207,9 @@ class LiteLLMProvider(BaseLLMProvider):
             api_key=self.api_key,
             base_url=self.base_url,
             api_version=self.api_version,
-            timeout=self.timeout,
-            max_retries=self.max_retries,
-            fallbacks=self.fallbacks,
+            timeout=timeout,
+            max_retries=max_retries,
+            fallbacks=fallbacks,
             **kwargs
         )
         

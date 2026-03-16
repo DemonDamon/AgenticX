@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field, replace
@@ -75,6 +76,7 @@ class SubAgentContext:
     spawn_tree_path: str = ""
     provider_name: str = ""
     model_name: str = ""
+    output_files: List[str] = field(default_factory=list)
 
 
 class AgentTeamManager:
@@ -736,6 +738,7 @@ class AgentTeamManager:
             "spawn_tree_path": context.spawn_tree_path,
             "provider": context.provider_name or self.base_session.provider_name or "",
             "model": context.model_name or self.base_session.model_name or "",
+            "output_files": list(context.output_files[:200]),
             "pending_confirm": pending_confirm,
         }
 
@@ -792,7 +795,14 @@ class AgentTeamManager:
             session.model_name = resolved_model
         else:
             llm = self.llm_factory()
-        runtime = AgentRuntime(llm, context.confirm_gate, max_tool_rounds=30, team_manager=self)
+        runtime = AgentRuntime(
+            llm,
+            context.confirm_gate,
+            max_tool_rounds=30,
+            loop_warning_threshold=8,
+            loop_critical_threshold=16,
+            team_manager=self,
+        )
         system_prompt = self._build_subagent_system_prompt(context, session)
         started_at = time.time()
         cancelled_by_request = False
@@ -952,12 +962,13 @@ class AgentTeamManager:
             context.agent_messages = list(session.agent_messages)
             context.artifacts = dict(session.artifacts)
             context.context_files = dict(session.context_files)
+            context.output_files = self._extract_output_files_from_messages(context.agent_messages)
             context.result_summary = self._build_result_summary(context)
-            artifact_keys = [str(k) for k in context.artifacts.keys()]
+            produced_files = self._merge_output_files(context)
             self.base_session.scratchpad[f"subagent_result::{context.agent_id}"] = (
                 f"[{context.name}] 状态={context.status.value}, "
                 f"摘要: {(context.result_summary or '(无)')[:500]}, "
-                f"产出文件: {', '.join(artifact_keys[:20]) if artifact_keys else '(无)'}"
+                f"产出文件: {', '.join(produced_files[:20]) if produced_files else '(无)'}"
             )
             self._tasks.pop(context.agent_id, None)
             if context.mode != "session" or context.cleanup == "delete":
@@ -987,7 +998,7 @@ class AgentTeamManager:
             )
 
     def _build_result_summary(self, context: SubAgentContext) -> str:
-        file_list = [str(path) for path in context.artifacts.keys()]
+        file_list = self._merge_output_files(context)
         if context.status == SubAgentStatus.COMPLETED:
             text = context.final_text or "任务执行完成"
             summary = (
@@ -1003,3 +1014,42 @@ class AgentTeamManager:
         if len(summary) > 2000:
             summary = summary[:2000] + "...(truncated)"
         return summary
+
+    def _extract_output_files_from_messages(self, messages: List[Dict[str, Any]]) -> List[str]:
+        paths: List[str] = []
+        seen: set[str] = set()
+        for msg in messages:
+            if str(msg.get("role", "")) != "tool":
+                continue
+            tool_name = str(msg.get("name", "") or "").strip()
+            if tool_name not in {"file_write", "file_edit"}:
+                continue
+            content = str(msg.get("content", "") or "")
+            if not content:
+                continue
+            for raw_line in content.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                match = re.match(r"^OK:\s*(?:wrote|edited)\s+(.+?)(?:\s+\(\d+\s+chars\))?$", line)
+                if not match:
+                    continue
+                path = str(match.group(1) or "").strip()
+                if path and path not in seen:
+                    seen.add(path)
+                    paths.append(path)
+        return paths
+
+    def _merge_output_files(self, context: SubAgentContext) -> List[str]:
+        merged: List[str] = []
+        seen: set[str] = set()
+        for path in context.artifacts.keys():
+            p = str(path)
+            if p and p not in seen:
+                seen.add(p)
+                merged.append(p)
+        for p in context.output_files:
+            if p and p not in seen:
+                seen.add(p)
+                merged.append(p)
+        return merged
