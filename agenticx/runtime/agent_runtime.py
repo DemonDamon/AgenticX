@@ -12,6 +12,8 @@ import hashlib
 import inspect
 import os
 import re
+import threading
+import time
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Sequence
 
@@ -33,12 +35,17 @@ else:
 MAX_TOOL_ROUNDS = 10
 MAX_CONTEXT_CHARS = 16_000
 STOP_MESSAGE = "已中断当前生成"
-DEFAULT_LLM_INVOKE_TIMEOUT_SECONDS = 60.0
+DEFAULT_LLM_INVOKE_TIMEOUT_SECONDS = 120.0
 PROVIDER_INVOKE_TIMEOUT_SECONDS: Dict[str, float] = {
     # Some providers/models (especially tool-heavy rounds) often need longer first-token latency.
-    "volcengine": 120.0,
-    "bailian": 120.0,
-    "zhipu": 90.0,
+    "volcengine": 180.0,
+    "bailian": 180.0,
+    "zhipu": 150.0,
+}
+MODEL_INVOKE_TIMEOUT_SECONDS: Dict[str, float] = {
+    # Heavy reasoning + tool planning models usually need longer invoke windows.
+    "glm-5": 180.0,
+    "doubao-seed-2-0-pro-260215": 180.0,
 }
 DEFAULT_LLM_FIRST_FEEDBACK_SECONDS = 8.0
 PROVIDER_FIRST_FEEDBACK_SECONDS: Dict[str, float] = {
@@ -48,6 +55,8 @@ PROVIDER_FIRST_FEEDBACK_SECONDS: Dict[str, float] = {
 }
 DEFAULT_STATUS_QUERY_BUDGET_PER_TURN = 2
 DEFAULT_STATUS_QUERY_COOLDOWN_SECONDS = 8.0
+DEFAULT_LLM_HEARTBEAT_TIMEOUT_SECONDS = 60.0
+DEFAULT_LLM_HARD_TIMEOUT_SECONDS = 300.0
 
 
 def _truncate(text: str, limit: int = MAX_CONTEXT_CHARS) -> str:
@@ -65,6 +74,19 @@ def _resolve_llm_invoke_timeout_seconds(session: StudioSession) -> float:
                 return value
         except ValueError:
             pass
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        cfg_value = ConfigManager.get_value("runtime.llm_invoke_timeout_seconds")
+        if cfg_value is not None:
+            value = float(cfg_value)
+            if value > 0:
+                return value
+    except Exception:
+        pass
+    model_name = str(getattr(session, "model_name", "") or "").strip().lower()
+    if model_name and model_name in MODEL_INVOKE_TIMEOUT_SECONDS:
+        return MODEL_INVOKE_TIMEOUT_SECONDS[model_name]
     provider_name = str(getattr(session, "provider_name", "") or "").strip().lower()
     if provider_name and provider_name in PROVIDER_INVOKE_TIMEOUT_SECONDS:
         return PROVIDER_INVOKE_TIMEOUT_SECONDS[provider_name]
@@ -128,6 +150,70 @@ def _resolve_status_query_cooldown_seconds() -> float:
     except Exception:
         pass
     return DEFAULT_STATUS_QUERY_COOLDOWN_SECONDS
+
+
+def _resolve_llm_heartbeat_timeout_seconds(session: StudioSession) -> float:
+    env_raw = os.getenv("AGX_LLM_HEARTBEAT_TIMEOUT_SECONDS", "").strip()
+    if env_raw:
+        try:
+            value = float(env_raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        cfg_value = ConfigManager.get_value("runtime.llm_heartbeat_timeout_seconds")
+        if cfg_value is not None:
+            value = float(cfg_value)
+            if value > 0:
+                return value
+    except Exception:
+        pass
+    return DEFAULT_LLM_HEARTBEAT_TIMEOUT_SECONDS
+
+
+def _resolve_llm_hard_timeout_seconds(session: StudioSession) -> float:
+    env_raw = os.getenv("AGX_LLM_HARD_TIMEOUT_SECONDS", "").strip()
+    if env_raw:
+        try:
+            value = float(env_raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        cfg_value = ConfigManager.get_value("runtime.llm_hard_timeout_seconds")
+        if cfg_value is not None:
+            value = float(cfg_value)
+            if value > 0:
+                return value
+    except Exception:
+        pass
+    return DEFAULT_LLM_HARD_TIMEOUT_SECONDS
+
+
+def _repair_streamed_tool_arguments(raw: str) -> Dict[str, Any]:
+    text = (raw or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        pass
+    lpos = text.find("{")
+    rpos = text.rfind("}")
+    if lpos >= 0 and rpos > lpos:
+        try:
+            parsed = json.loads(text[lpos : rpos + 1])
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            pass
+    return {}
 
 
 def _serialize_artifacts(session: StudioSession) -> str:
@@ -399,6 +485,23 @@ def _build_progress_signature(session: StudioSession) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _extract_written_paths_from_result(result: str) -> List[str]:
+    if not isinstance(result, str) or not result:
+        return []
+    paths: List[str] = []
+    for raw_line in result.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = re.match(r"^OK:\s*(?:wrote|edited)\s+(.+?)(?:\s+\(\d+\s+chars\))?$", line)
+        if not match:
+            continue
+        path = str(match.group(1) or "").strip()
+        if path:
+            paths.append(path)
+    return paths
+
+
 class AgentRuntime:
     """LLM-driven runtime that emits structured events."""
 
@@ -408,6 +511,8 @@ class AgentRuntime:
         confirm_gate: ConfirmGate,
         *,
         max_tool_rounds: int = MAX_TOOL_ROUNDS,
+        loop_warning_threshold: int = 4,
+        loop_critical_threshold: int = 8,
         hooks: Optional[HookRegistry] = None,
         team_manager: Optional[Any] = None,
     ) -> None:
@@ -417,8 +522,8 @@ class AgentRuntime:
         self.hooks = hooks or HookRegistry()
         self.compactor = ContextCompactor(llm)
         self.loop_detector = LoopDetector(
-            warning_threshold=4,
-            critical_threshold=8,
+            warning_threshold=loop_warning_threshold,
+            critical_threshold=loop_critical_threshold,
         )
         self.team_manager = team_manager
         try:
@@ -484,8 +589,16 @@ class AgentRuntime:
         repeated_status_query_count = 0
         last_status_query_had_rows = False
         executed_tool_names: List[str] = []
+        disk_write_paths: set[str] = set()
         rounds_without_todo = 0
         invoke_timeout_seconds = _resolve_llm_invoke_timeout_seconds(session)
+        heartbeat_timeout_seconds = _resolve_llm_heartbeat_timeout_seconds(session)
+        hard_timeout_seconds = _resolve_llm_hard_timeout_seconds(session)
+        request_timeout_seconds = max(
+            invoke_timeout_seconds,
+            heartbeat_timeout_seconds,
+            hard_timeout_seconds,
+        ) + 15.0
         first_feedback_seconds = _resolve_llm_first_feedback_seconds(session)
         provider_name = str(getattr(session, "provider_name", "") or "").strip()
         model_name = str(getattr(session, "model_name", "") or "").strip()
@@ -528,45 +641,199 @@ class AgentRuntime:
             try:
                 messages = await self.hooks.run_before_model(messages, session)
                 messages = _sanitize_context_messages(messages)
-                invoke_task = asyncio.create_task(
-                    asyncio.to_thread(
-                        self.llm.invoke,
-                        messages,
-                        tools=active_tools,
-                        tool_choice="auto",
-                        temperature=0.2,
-                        max_tokens=8192,
+                response_text = ""
+                tool_calls: List[Dict[str, Any]] = []
+                response: Any
+                stream_with_tools = getattr(self.llm, "stream_with_tools", None)
+                used_stream_path = False
+                if callable(stream_with_tools):
+                    try:
+                        token_queue: asyncio.Queue[Dict[str, Any] | None] = asyncio.Queue()
+                        loop = asyncio.get_running_loop()
+                        stop_stream = threading.Event()
+
+                        def _queue_put(payload: Dict[str, Any] | None) -> None:
+                            loop.call_soon_threadsafe(token_queue.put_nowait, payload)
+
+                        def _run_sync_stream_with_tools() -> None:
+                            try:
+                                for chunk in stream_with_tools(
+                                    messages,
+                                    tools=list(active_tools),
+                                    tool_choice="auto",
+                                    temperature=0.2,
+                                    max_tokens=8192,
+                                    timeout=request_timeout_seconds,
+                                ):
+                                    if stop_stream.is_set():
+                                        break
+                                    if isinstance(chunk, dict):
+                                        _queue_put(dict(chunk))
+                            except Exception as exc:
+                                _queue_put(
+                                    {"type": "stream_error", "error": str(exc)}
+                                )
+                            finally:
+                                _queue_put(None)
+
+                        stream_task = loop.run_in_executor(
+                            None, _run_sync_stream_with_tools
+                        )
+                        stream_started_at = loop.time()
+                        first_chunk_at = 0.0
+                        last_chunk_at = 0.0
+                        waiting_hint_emitted = False
+                        last_pulse_at = stream_started_at
+                        tool_calls_acc: Dict[int, Dict[str, str]] = {}
+                        while True:
+                            if await _check_should_stop():
+                                stop_stream.set()
+                                yield RuntimeEvent(
+                                    type=EventType.ERROR.value,
+                                    data={"text": STOP_MESSAGE},
+                                    agent_id=agent_id,
+                                )
+                                return
+                            now = loop.time()
+                            elapsed = now - stream_started_at
+                            if (not waiting_hint_emitted) and elapsed >= first_feedback_seconds:
+                                waiting_hint_emitted = True
+                                last_pulse_at = now
+                                yield RuntimeEvent(
+                                    type=EventType.TOKEN.value,
+                                    data={"text": "⏳"},
+                                    agent_id=agent_id,
+                                )
+                            elif waiting_hint_emitted and (now - last_pulse_at) >= 3.0:
+                                last_pulse_at = now
+                                yield RuntimeEvent(
+                                    type=EventType.TOKEN.value,
+                                    data={"text": "…"},
+                                    agent_id=agent_id,
+                                )
+                            if elapsed >= hard_timeout_seconds:
+                                stop_stream.set()
+                                raise asyncio.TimeoutError()
+                            idle_limit = (
+                                invoke_timeout_seconds
+                                if first_chunk_at <= 0
+                                else heartbeat_timeout_seconds
+                            )
+                            idle_anchor = stream_started_at if first_chunk_at <= 0 else last_chunk_at
+                            if (now - idle_anchor) >= idle_limit:
+                                stop_stream.set()
+                                raise asyncio.TimeoutError()
+                            try:
+                                stream_chunk = await asyncio.wait_for(
+                                    token_queue.get(), timeout=0.1
+                                )
+                            except asyncio.TimeoutError:
+                                if stream_task.done():
+                                    break
+                                continue
+                            if stream_chunk is None:
+                                break
+                            chunk_type = str(stream_chunk.get("type", "")).strip()
+                            if chunk_type == "stream_error":
+                                raise RuntimeError(
+                                    str(stream_chunk.get("error", "stream error"))
+                                )
+                            if first_chunk_at <= 0:
+                                first_chunk_at = now
+                            last_chunk_at = now
+                            if chunk_type == "content":
+                                tok = str(stream_chunk.get("text", ""))
+                                if tok:
+                                    response_text += tok
+                                    yield RuntimeEvent(
+                                        type=EventType.TOKEN.value,
+                                        data={"text": tok},
+                                        agent_id=agent_id,
+                                    )
+                            elif chunk_type == "tool_call_delta":
+                                raw_idx = stream_chunk.get("tool_index", 0)
+                                idx = raw_idx if isinstance(raw_idx, int) else 0
+                                acc = tool_calls_acc.setdefault(
+                                    idx, {"id": "", "name": "", "arguments": ""}
+                                )
+                                tool_call_id = str(stream_chunk.get("tool_call_id", "")).strip()
+                                tool_name = str(stream_chunk.get("tool_name", "")).strip()
+                                args_delta = str(stream_chunk.get("arguments_delta", ""))
+                                if tool_call_id:
+                                    acc["id"] = tool_call_id
+                                if tool_name:
+                                    acc["name"] = tool_name
+                                if args_delta:
+                                    acc["arguments"] += args_delta
+                        await stream_task
+                        for idx in sorted(tool_calls_acc.keys()):
+                            item = tool_calls_acc[idx]
+                            args_obj = _repair_streamed_tool_arguments(item.get("arguments", ""))
+                            tool_calls.append(
+                                {
+                                    "id": item.get("id") or f"stream-{uuid.uuid4().hex[:8]}",
+                                    "type": "function",
+                                    "function": {
+                                        "name": item.get("name", ""),
+                                        "arguments": json.dumps(args_obj, ensure_ascii=False),
+                                    },
+                                }
+                            )
+                        response = type(
+                            "StreamResponse",
+                            (),
+                            {"content": response_text, "tool_calls": tool_calls},
+                        )()
+                        used_stream_path = True
+                    except Exception:
+                        used_stream_path = False
+                    finally:
+                        stop_stream.set()
+                        if "stream_task" in locals() and stream_task is not None:
+                            try:
+                                await asyncio.wait_for(asyncio.shield(stream_task), timeout=1.0)
+                            except Exception:
+                                pass
+                if not used_stream_path:
+                    invoke_task = asyncio.create_task(
+                        asyncio.to_thread(
+                            self.llm.invoke,
+                            messages,
+                            tools=active_tools,
+                            tool_choice="auto",
+                            temperature=0.2,
+                            max_tokens=8192,
+                            timeout=request_timeout_seconds,
+                        )
                     )
-                )
-                wait_started_at = asyncio.get_running_loop().time()
-                waiting_hint_emitted = False
-                last_pulse_at = wait_started_at
-                while True:
-                    if invoke_task.done():
-                        response = await invoke_task
-                        break
-                    now = asyncio.get_running_loop().time()
-                    elapsed = now - wait_started_at
-                    if (not waiting_hint_emitted) and elapsed >= first_feedback_seconds:
-                        waiting_hint_emitted = True
-                        last_pulse_at = now
-                        # UI feedback before first model output; FINAL event will overwrite this placeholder.
-                        yield RuntimeEvent(
-                            type=EventType.TOKEN.value,
-                            data={"text": "⏳"},
-                            agent_id=agent_id,
-                        )
-                    elif waiting_hint_emitted and (now - last_pulse_at) >= 3.0:
-                        last_pulse_at = now
-                        yield RuntimeEvent(
-                            type=EventType.TOKEN.value,
-                            data={"text": "…"},
-                            agent_id=agent_id,
-                        )
-                    if elapsed >= invoke_timeout_seconds:
-                        invoke_task.cancel()
-                        raise asyncio.TimeoutError()
-                    await asyncio.sleep(0.1)
+                    wait_started_at = asyncio.get_running_loop().time()
+                    waiting_hint_emitted = False
+                    last_pulse_at = wait_started_at
+                    while True:
+                        if invoke_task.done():
+                            response = await invoke_task
+                            break
+                        now = asyncio.get_running_loop().time()
+                        elapsed = now - wait_started_at
+                        if (not waiting_hint_emitted) and elapsed >= first_feedback_seconds:
+                            waiting_hint_emitted = True
+                            last_pulse_at = now
+                            yield RuntimeEvent(
+                                type=EventType.TOKEN.value,
+                                data={"text": "⏳"},
+                                agent_id=agent_id,
+                            )
+                        elif waiting_hint_emitted and (now - last_pulse_at) >= 3.0:
+                            last_pulse_at = now
+                            yield RuntimeEvent(
+                                type=EventType.TOKEN.value,
+                                data={"text": "…"},
+                                agent_id=agent_id,
+                            )
+                        if elapsed >= invoke_timeout_seconds:
+                            invoke_task.cancel()
+                            raise asyncio.TimeoutError()
+                        await asyncio.sleep(0.1)
                 await self.hooks.run_after_model(response, session)
             except asyncio.TimeoutError:
                 provider_hint = provider_name or "(unknown)"
@@ -623,15 +890,21 @@ class AgentRuntime:
                     streamed_text = ""
                     try:
                         token_queue: asyncio.Queue[str | None] = asyncio.Queue()
+                        stream_loop = asyncio.get_running_loop()
 
                         def _run_sync_stream() -> None:
                             try:
-                                for chunk in self.llm.stream(messages, temperature=0.2, max_tokens=8192):
+                                for chunk in self.llm.stream(
+                                    messages,
+                                    temperature=0.2,
+                                    max_tokens=8192,
+                                    timeout=request_timeout_seconds,
+                                ):
                                     tok = chunk if isinstance(chunk, str) else str(chunk.get("content", ""))
                                     if tok:
-                                        token_queue.put_nowait(tok)
+                                        stream_loop.call_soon_threadsafe(token_queue.put_nowait, tok)
                             finally:
-                                token_queue.put_nowait(None)
+                                stream_loop.call_soon_threadsafe(token_queue.put_nowait, None)
 
                         stream_task = asyncio.get_running_loop().run_in_executor(None, _run_sync_stream)
 
@@ -775,10 +1048,6 @@ class AgentRuntime:
                             }
                         )
                         synced_session_message_count = len(session.agent_messages)
-                        if not _is_system_trigger:
-                            session.chat_history.append(
-                                {"role": "assistant", "content": f"工具结果({tool_name}):\n{budget_msg}"}
-                            )
                         yield RuntimeEvent(
                             type=EventType.TOOL_RESULT.value,
                             data={"name": tool_name, "result": budget_msg, "tool_call_id": tool_call_id},
@@ -821,10 +1090,6 @@ class AgentRuntime:
                             }
                         )
                         synced_session_message_count = len(session.agent_messages)
-                        if not _is_system_trigger:
-                            session.chat_history.append(
-                                {"role": "assistant", "content": f"工具结果({tool_name}):\n{cooldown_msg}"}
-                            )
                         yield RuntimeEvent(
                             type=EventType.TOOL_RESULT.value,
                             data={"name": tool_name, "result": cooldown_msg, "tool_call_id": tool_call_id},
@@ -839,7 +1104,9 @@ class AgentRuntime:
                             yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
                             return
                         continue
-                    if agent_id == "meta" and status_query_attempts_total >= 1:
+                    # Allow exactly one status query per turn for meta agent;
+                    # block only from the second attempt in the same turn.
+                    if agent_id == "meta" and status_query_attempts_total > 1:
                         throttled_once = (
                             "【已阻止】本轮已调用过一次 query_subagent_status，禁止同一轮重复轮询。\n"
                             "请基于该次结果直接回答用户，或结束本轮等待后台完成事件。"
@@ -861,10 +1128,6 @@ class AgentRuntime:
                             }
                         )
                         synced_session_message_count = len(session.agent_messages)
-                        if not _is_system_trigger:
-                            session.chat_history.append(
-                                {"role": "assistant", "content": f"工具结果({tool_name}):\n{throttled_once}"}
-                            )
                         yield RuntimeEvent(
                             type=EventType.TOOL_RESULT.value,
                             data={"name": tool_name, "result": throttled_once, "tool_call_id": tool_call_id},
@@ -923,10 +1186,6 @@ class AgentRuntime:
                             }
                         )
                         synced_session_message_count = len(session.agent_messages)
-                        if not _is_system_trigger:
-                            session.chat_history.append(
-                                {"role": "assistant", "content": f"工具结果({tool_name}):\n{throttled}"}
-                            )
                         yield RuntimeEvent(
                             type=EventType.TOOL_RESULT.value,
                             data={"name": tool_name, "result": throttled, "tool_call_id": tool_call_id},
@@ -953,6 +1212,7 @@ class AgentRuntime:
                     pending_events.put_nowait(event_payload)
 
                 before_progress = _build_progress_signature(session)
+                before_disk_write_count = len(disk_write_paths)
                 effective_tm = self.team_manager or getattr(session, "_team_manager", None)
                 dispatch_task = asyncio.create_task(
                     dispatch_tool_async(
@@ -1021,10 +1281,26 @@ class AgentRuntime:
                         or "OK: edited " in result
                     )
                 )
+                if tool_name in {"file_write", "file_edit"} and isinstance(result, str):
+                    for path in _extract_written_paths_from_result(result):
+                        disk_write_paths.add(path)
+                disk_write_progress = (
+                    len(disk_write_paths) > before_disk_write_count
+                )
+                logical_progress = (
+                    tool_name in {"todo_write", "scratchpad_write", "bash_exec"}
+                    and isinstance(result, str)
+                    and not result.lstrip().startswith("ERROR:")
+                )
                 self.loop_detector.record_call(
                     tool_name,
                     LoopDetector.args_signature(arguments),
-                    has_progress=(before_progress != after_progress) or file_write_progress,
+                    has_progress=(
+                        (before_progress != after_progress)
+                        or file_write_progress
+                        or disk_write_progress
+                        or logical_progress
+                    ),
                 )
                 loop_issue = self.loop_detector.check()
                 if loop_issue is not None:

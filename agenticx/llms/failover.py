@@ -150,3 +150,19 @@ class FailoverProvider(BaseLLMProvider):
         logger.info("FailoverProvider: async streaming from fallback provider")
         async for chunk in self._fallback.astream(prompt, **kwargs):
             yield chunk
+
+    def stream_with_tools(
+        self, prompt: Union[str, List[Dict]], tools: List[Dict] | None = None, **kwargs: Any
+    ) -> Generator[Dict[str, Any], None, None]:
+        """Stream tool-call aware chunks from primary, fallback on error/cooldown."""
+        if not self._in_cooldown():
+            try:
+                yield from self._primary.stream_with_tools(prompt, tools=tools, **kwargs)
+                self._record_success()
+                return
+            except Exception as exc:
+                logger.warning("FailoverProvider: primary stream_with_tools failed — %s", exc)
+                self._record_failure()
+
+        logger.info("FailoverProvider: stream_with_tools from fallback provider")
+        yield from self._fallback.stream_with_tools(prompt, tools=tools, **kwargs)
