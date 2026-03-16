@@ -44,6 +44,31 @@ const confirmModeLabel: Record<string, string> = {
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
   const toolName = String(toolNameRaw ?? "tool");
   const resultText = String(resultRaw ?? "");
+  if (toolName === "spawn_subagent") {
+    try {
+      const parsed = JSON.parse(resultText) as Record<string, unknown>;
+      const agentId = String(parsed.agent_id ?? "").trim();
+      const name = String(parsed.name ?? (agentId || "subagent"));
+      const role = String(parsed.role ?? "worker");
+      const provider = String(parsed.provider ?? "").trim();
+      const model = String(parsed.model ?? "").trim();
+      const task = String(parsed.task ?? "").replace(/\s+/g, " ").trim();
+      const modelLabel = provider && model ? ` · ${provider}/${model}` : "";
+      const taskPreview = task ? `\n任务: ${task.slice(0, 140)}${task.length > 140 ? "…" : ""}` : "";
+      return {
+        content: `🚀 已启动子智能体: ${name} (${role})${modelLabel}${agentId ? `\nID: ${agentId}` : ""}${taskPreview}`,
+        silent: false,
+      };
+    } catch {
+      // Fall through to generic formatter.
+    }
+  }
+  if (toolName === "todo_write") {
+    const cleaned = resultText.replace(/\s+\n/g, "\n").trim();
+    if (/^\[[ xX]\]/m.test(cleaned)) {
+      return { content: `🗂 任务清单更新\n${cleaned}`, silent: false };
+    }
+  }
   if (toolName === "query_subagent_status") {
     try {
       const parsed = JSON.parse(resultText) as Record<string, unknown>;
@@ -90,6 +115,26 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
     return { content: `⚠️ ${toolName} 提示: ${resultText}`, silent: false };
   }
   return { content: `✅ ${toolName} 结果: ${resultText}`, silent: false };
+}
+
+function buildToolCallLivePreview(toolNameRaw: unknown, argsRaw: unknown): string | null {
+  const toolName = String(toolNameRaw ?? "").trim();
+  const args = (argsRaw ?? {}) as Record<string, unknown>;
+  if (toolName === "file_write") {
+    const path = String(args.path ?? "").trim();
+    const content = String(args.content ?? "");
+    if (!content.trim()) return null;
+    const preview = content.slice(0, 1200);
+    return `# file_write: ${path || "(unknown path)"}\n${preview}${content.length > 1200 ? "\n... (truncated)" : ""}`;
+  }
+  if (toolName === "file_edit") {
+    const path = String(args.path ?? "").trim();
+    const newText = String(args.new_text ?? "");
+    if (!newText.trim()) return null;
+    const preview = newText.slice(0, 1200);
+    return `# file_edit: ${path || "(unknown path)"}\n${preview}${newText.length > 1200 ? "\n... (truncated)" : ""}`;
+  }
+  return null;
 }
 
 const markdownComponents: Components = {
@@ -424,12 +469,26 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           let content = "";
           if (evtType === "tool_call") {
             if (SILENT_TOOLS.has(String(evtData.name ?? ""))) continue;
-            content = `🔧 ${String(evtData.name ?? "tool")}: ${JSON.stringify(evtData.arguments ?? {}).slice(0, 120)}`;
+            const toolName = String(evtData.name ?? "tool");
+            const toolArgs = evtData.arguments ?? {};
+            content = `🔧 ${toolName}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
+            const livePreview = buildToolCallLivePreview(toolName, toolArgs);
+            if (livePreview) {
+              const sub = useAppStore.getState().subAgents.find((item) => item.id === id);
+              const prev = sub?.liveOutput ?? "";
+              updateSubAgent(id, { liveOutput: `${prev}${prev ? "\n\n" : ""}${livePreview}`.slice(-12000) });
+            }
           } else if (evtType === "tool_result") {
             const result = typeof evtData.result === "string" ? evtData.result : JSON.stringify(evtData.result ?? {});
             const formatted = formatToolResultMessage(evtData.name, result);
             if (formatted.silent) continue;
             content = formatted.content;
+            const toolName = String(evtData.name ?? "");
+            if (toolName === "file_write" || toolName === "file_edit") {
+              const sub = useAppStore.getState().subAgents.find((item) => item.id === id);
+              const prev = sub?.liveOutput ?? "";
+              updateSubAgent(id, { liveOutput: `${prev}\n\n# ${toolName} applied`.slice(-12000) });
+            }
           } else if (evtType === "error") {
             content = `❌ ${String(evtData.text ?? "执行异常")}`;
           } else if (evtType === "confirm_required") {
@@ -580,11 +639,21 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             }
             if (payload.type === "tool_call") {
               const toolName = payload.data?.name ?? "tool";
+              const toolArgs = payload.data?.arguments ?? payload.data?.args ?? {};
               const SILENT_TOOLS_SSE = new Set(["check_resources"]);
               if (!SILENT_TOOLS_SSE.has(toolName)) {
-                const content = `🔧 ${toolName}: ${JSON.stringify(payload.data?.arguments ?? payload.data?.args ?? {}).slice(0, 120)}`;
+                const content = `🔧 ${toolName}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
                 if (eventAgentId === "meta") addMessage("tool", content, "meta");
-                else { updateSubAgent(eventAgentId, { status: "running", currentAction: `调用工具 ${toolName}` }); addSubAgentEvent(eventAgentId, { type: "tool_call", content }); }
+                else {
+                  updateSubAgent(eventAgentId, { status: "running", currentAction: `调用工具 ${toolName}` });
+                  addSubAgentEvent(eventAgentId, { type: "tool_call", content });
+                  const livePreview = buildToolCallLivePreview(toolName, toolArgs);
+                  if (livePreview) {
+                    const sub = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
+                    const prev = sub?.liveOutput ?? "";
+                    updateSubAgent(eventAgentId, { liveOutput: `${prev}${prev ? "\n\n" : ""}${livePreview}`.slice(-12000) });
+                  }
+                }
               }
             }
             if (payload.type === "tool_result") {
@@ -599,7 +668,14 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               const formatted = formatToolResultMessage(toolName, resultText);
               if (formatted.silent) continue;
               if (eventAgentId === "meta") addMessage("tool", formatted.content, "meta");
-              else { addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content }); }
+              else {
+                addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content });
+                if (toolName === "file_write" || toolName === "file_edit") {
+                  const sub = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
+                  const prev = sub?.liveOutput ?? "";
+                  updateSubAgent(eventAgentId, { liveOutput: `${prev}\n\n# ${toolName} applied`.slice(-12000) });
+                }
+              }
             }
             if (payload.type === "confirm_required") {
               if (!isCurrentRequest()) continue;
