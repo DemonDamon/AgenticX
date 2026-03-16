@@ -276,6 +276,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [streamingModel, setStreamingModel] = useState<{ provider: string; model: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const imeComposingRef = useRef(false);
 
   const visibleMessages = useMemo(
     () => (pane?.messages ?? []).filter((item) => !item.agentId || item.agentId === "meta"),
@@ -739,7 +740,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onCompositionStart={() => {
+                imeComposingRef.current = true;
+              }}
+              onCompositionEnd={() => {
+                window.setTimeout(() => {
+                  imeComposingRef.current = false;
+                }, 0);
+              }}
+              onBlur={() => {
+                imeComposingRef.current = false;
+              }}
               onKeyDown={(e) => {
+                const isImeComposing =
+                  e.nativeEvent.isComposing ||
+                  imeComposingRef.current ||
+                  e.key === "Process" ||
+                  e.keyCode === 229;
+                if (isImeComposing) return;
                 if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
                   e.preventDefault();
                   void createNewTopic(true);

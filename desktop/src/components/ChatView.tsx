@@ -238,6 +238,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const abortedByUserRef = useRef(false);
   const activeRequestIdRef = useRef(0);
   const modelBtnRef = useRef<HTMLButtonElement | null>(null);
+  const imeComposingRef = useRef(false);
   const polledEventSeenRef = useRef<Record<string, Set<string>>>({});
   const subAgentsRef = useRef(subAgents);
   const subAgentStatusRef = useRef<Record<string, string>>({});
@@ -844,7 +845,12 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   };
 
   const onKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
-    if (event.nativeEvent.isComposing) return;
+    const isImeComposing =
+      event.nativeEvent.isComposing ||
+      imeComposingRef.current ||
+      event.key === "Process" ||
+      event.keyCode === 229;
+    if (isImeComposing) return;
     if (!isLite && event.altKey && event.key === "ArrowUp") {
       event.preventDefault();
       if (history.length === 0) return;
@@ -1124,6 +1130,17 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                 setCommandOpen(false);
                 setCommandQuery("");
               }
+            }}
+            onCompositionStart={() => {
+              imeComposingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              window.setTimeout(() => {
+                imeComposingRef.current = false;
+              }, 0);
+            }}
+            onBlur={() => {
+              imeComposingRef.current = false;
             }}
             onKeyDown={onKeyDown}
             rows={input.split("\n").length > 3 ? 4 : input.includes("\n") ? 2 : 1}
