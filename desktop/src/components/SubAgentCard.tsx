@@ -255,7 +255,7 @@ export function SubAgentCard({
       </div>
 
       {expanded ? (
-        <div className="relative mt-2 max-h-36 space-y-1 overflow-y-auto rounded-md border border-border/60 bg-slate-900/60 p-2">
+        <div className="relative mt-2 max-h-52 space-y-1 overflow-y-auto rounded-md border border-border/60 bg-slate-900/60 p-2">
           <button
             className="sticky right-0 top-0 z-10 float-right rounded border border-slate-600 bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-700 hover:text-white"
             title="复制全部详情"
@@ -278,11 +278,11 @@ export function SubAgentCard({
           )}
           {subAgent.liveOutput?.trim() ? (
             <div className="mt-2 rounded border border-cyan-500/20 bg-cyan-500/5 p-2">
-              <div className="mb-1 text-[11px] text-cyan-300">实时输出</div>
+              <div className="mb-1 text-[11px] text-cyan-300">实时输出（代码流）</div>
               {isThinkingPlaceholderText(subAgent.liveOutput) ? (
                 <ThinkingDots />
               ) : (
-                <div className="max-h-24 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[11px] text-slate-200">
+                <div className="agx-code-stream max-h-44 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[11px] text-slate-100">
                   {subAgent.liveOutput}
                 </div>
               )}

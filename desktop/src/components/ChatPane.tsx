@@ -155,7 +155,35 @@ function StreamingThinkingIndicator() {
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
   const toolName = String(toolNameRaw ?? "tool");
   const resultText = String(resultRaw ?? "");
+  if (toolName === "spawn_subagent") {
+    try {
+      const parsed = JSON.parse(resultText) as Record<string, unknown>;
+      const agentId = String(parsed.agent_id ?? "").trim();
+      const name = String(parsed.name ?? (agentId || "subagent"));
+      const role = String(parsed.role ?? "worker");
+      const provider = String(parsed.provider ?? "").trim();
+      const model = String(parsed.model ?? "").trim();
+      const task = String(parsed.task ?? "").replace(/\s+/g, " ").trim();
+      const modelLabel = provider && model ? ` · ${provider}/${model}` : "";
+      const taskPreview = task ? `\n任务: ${task.slice(0, 140)}${task.length > 140 ? "…" : ""}` : "";
+      return {
+        content: `🚀 已启动子智能体: ${name} (${role})${modelLabel}${agentId ? `\nID: ${agentId}` : ""}${taskPreview}`,
+        silent: false,
+      };
+    } catch {
+      // Fall through to generic formatter.
+    }
+  }
+  if (toolName === "todo_write") {
+    const cleaned = resultText.replace(/\s+\n/g, "\n").trim();
+    if (/^\[[ xX]\]/m.test(cleaned)) {
+      return { content: `🗂 任务清单更新\n${cleaned}`, silent: false };
+    }
+  }
   if (toolName === "query_subagent_status") {
+    if (/【已阻止】/.test(resultText)) {
+      return { content: "", silent: true };
+    }
     try {
       const parsed = JSON.parse(resultText) as Record<string, unknown>;
       const one = parsed?.subagent as Record<string, unknown> | undefined;
@@ -202,6 +230,26 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
     return { content: `⚠️ ${toolName} 提示: ${compact}`, silent: false };
   }
   return { content: `✅ ${toolName} 结果: ${compact}`, silent: false };
+}
+
+function buildToolCallLivePreview(toolNameRaw: unknown, argsRaw: unknown): string | null {
+  const toolName = String(toolNameRaw ?? "").trim();
+  const args = (argsRaw ?? {}) as Record<string, unknown>;
+  if (toolName === "file_write") {
+    const path = String(args.path ?? "").trim();
+    const content = String(args.content ?? "");
+    if (!content.trim()) return null;
+    const preview = content.slice(0, 1200);
+    return `# file_write: ${path || "(unknown path)"}\n${preview}${content.length > 1200 ? "\n... (truncated)" : ""}`;
+  }
+  if (toolName === "file_edit") {
+    const path = String(args.path ?? "").trim();
+    const newText = String(args.new_text ?? "");
+    if (!newText.trim()) return null;
+    const preview = newText.slice(0, 1200);
+    return `# file_edit: ${path || "(unknown path)"}\n${preview}${newText.length > 1200 ? "\n... (truncated)" : ""}`;
+  }
+  return null;
 }
 
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
@@ -339,14 +387,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             }
             if (payload.type === "tool_call") {
               const toolName = payload.data?.name ?? "tool";
+              const toolArgs = payload.data?.arguments ?? payload.data?.args ?? {};
               // Filter out internal housekeeping tools that add no user-visible signal
               const SILENT_TOOLS = new Set(["check_resources"]);
               if (!SILENT_TOOLS.has(toolName)) {
                 const content = `🔧 ${toolName}: ${JSON.stringify(
-                  payload.data?.arguments ?? payload.data?.args ?? {}
+                  toolArgs
                 ).slice(0, 120)}`;
                 if (eventAgentId === "meta") addPaneMessage(pane.id, "tool", content, "meta");
-                else addSubAgentEvent(eventAgentId, { type: "tool_call", content });
+                else {
+                  addSubAgentEvent(eventAgentId, { type: "tool_call", content });
+                  const livePreview = buildToolCallLivePreview(toolName, toolArgs);
+                  if (livePreview) {
+                    const sub = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
+                    const prev = sub?.liveOutput ?? "";
+                    const next = `${prev}${prev ? "\n\n" : ""}${livePreview}`.slice(-12000);
+                    updateSubAgent(eventAgentId, { liveOutput: next });
+                  }
+                }
               }
             }
             if (payload.type === "tool_result") {
@@ -354,7 +412,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const formatted = formatToolResultMessage(toolName, payload.data?.result);
               if (formatted.silent) continue;
               if (eventAgentId === "meta") addPaneMessage(pane.id, "tool", formatted.content, "meta");
-              else addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content });
+              else {
+                addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content });
+                if (toolName === "file_write" || toolName === "file_edit") {
+                  const sub = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
+                  const prev = sub?.liveOutput ?? "";
+                  const marker = `\n\n# ${toolName} applied`;
+                  updateSubAgent(eventAgentId, { liveOutput: `${prev}${marker}`.slice(-12000) });
+                }
+              }
               if (toolName === "spawn_subagent" && eventAgentId === "meta") {
                 try {
                   const spawnResult = typeof payload.data?.result === "string"
@@ -497,7 +563,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             }
             if (payload.type === "final") {
               if (eventAgentId === "meta") {
-                full = payload.data?.text ?? full;
+                const finalText = String(payload.data?.text ?? "");
+                if (!full.trim() || isThinkingPlaceholderText(full)) {
+                  full = finalText || full;
+                } else if (finalText && !full.includes(finalText)) {
+                  full += "\n\n" + finalText;
+                }
                 setStreamedAssistantText(full);
               } else {
                 updateSubAgent(eventAgentId, { status: "completed", currentAction: "已完成" });
