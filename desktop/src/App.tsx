@@ -86,7 +86,7 @@ export function App() {
   const autoApproveScopesRef = useRef<Set<string>>(new Set());
   const denyScopesRef = useRef<Set<string>>(new Set());
   const sessionInitDoneRef = useRef(false);
-  const [subPanelOpen, setSubPanelOpen] = useState(true);
+  const [subPanelOpen, setSubPanelOpen] = useState(false);
   const subAgentsRef = useRef(subAgents);
   const subAgentSessionRef = useRef<Record<string, string>>({});
   const staleMissCountRef = useRef<Record<string, number>>({});
@@ -179,13 +179,36 @@ export function App() {
       const token = await window.agenticxDesktop.getApiAuthToken();
       setApiBase(base);
       setApiToken(token);
-      const resp = await fetch(`${base}/api/session`, {
-        headers: { "x-agx-desktop-token": token }
-      });
-      const data = await resp.json();
-      setSessionId(data.session_id);
-      setPaneSessionId("pane-meta", data.session_id);
-      await refreshMcpStatus(data.session_id);
+
+      let sessionCreated = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const resp = await fetch(`${base}/api/session`, {
+            headers: { "x-agx-desktop-token": token }
+          });
+          if (!resp.ok) {
+            console.error(`[App init] /api/session HTTP ${resp.status}, attempt ${attempt + 1}`);
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+            continue;
+          }
+          const data = await resp.json();
+          if (data.session_id) {
+            setSessionId(data.session_id);
+            setPaneSessionId("pane-meta", data.session_id);
+            await refreshMcpStatus(data.session_id).catch(() => {});
+            sessionCreated = true;
+            break;
+          }
+          console.error("[App init] /api/session returned no session_id", data);
+        } catch (err) {
+          console.error(`[App init] /api/session failed, attempt ${attempt + 1}:`, err);
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+      if (!sessionCreated) {
+        console.error("[App init] all session creation attempts failed");
+      }
+
       const cfg = await window.agenticxDesktop.loadConfig();
       const loadedMode = cfg.userMode === "lite" ? "lite" : "pro";
       setUserMode(loadedMode);
@@ -211,10 +234,6 @@ export function App() {
         setActiveModel(defP, defEntry.model);
       }
       window.agenticxDesktop.onOpenSettings(() => openSettings());
-      // NOTE:
-      // Auto wakeword listening on startup may keep requesting microphone capture
-      // and cause system-level indicator flashing on macOS.
-      // Keep wakeword disabled by default; user can still use manual mic input.
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -816,7 +835,7 @@ export function App() {
     <div className="flex h-screen overflow-hidden bg-base">
       {!onboardingCompleted ? (
         <OnboardingView onSelectMode={(mode) => void handleSelectMode(mode)} />
-      ) : sessionId && apiBase ? (
+      ) : apiBase ? (
         <>
           {userMode === "pro" && <AvatarSidebar />}
           <div className="flex flex-1 overflow-hidden">
