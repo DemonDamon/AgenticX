@@ -11,6 +11,7 @@ import { QuickActions } from "./QuickActions";
 import { ShortcutHints } from "./ShortcutHints";
 import { createPhase1Registry } from "../core/command-registry";
 import { KeybindingsPanel } from "./KeybindingsPanel";
+import { TodoUpdateCard, isTodoUpdateToolMessage } from "./TodoUpdateCard";
 
 type Props = {
   onOpenConfirm: (
@@ -161,6 +162,24 @@ function ModelBadge({ provider, model }: { provider?: string; model?: string }) 
   );
 }
 
+function isThinkingPlaceholderText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  return /^[\s⏳….·.]+$/.test(trimmed);
+}
+
+function StreamingThinkingIndicator() {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="relative inline-flex h-3 w-3">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400/50" />
+        <span className="relative inline-flex h-3 w-3 animate-pulse rounded-full bg-cyan-300" />
+      </span>
+      <span className="text-xs font-medium tracking-wide text-cyan-200/90">AgenticX 正在深度思考</span>
+    </div>
+  );
+}
+
 function MessageActions({
   msg,
   onCopy,
@@ -234,6 +253,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const streamTextRef = useRef("");
+  const streamRafRef = useRef<number | null>(null);
   const streamCommittedRef = useRef(false);
   const abortedByUserRef = useRef(false);
   const activeRequestIdRef = useRef(0);
@@ -321,6 +341,13 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
         listRef.current.scrollTop = listRef.current.scrollHeight;
       }
     });
+  };
+
+  const cancelStreamRenderFrame = () => {
+    if (streamRafRef.current !== null) {
+      window.cancelAnimationFrame(streamRafRef.current);
+      streamRafRef.current = null;
+    }
   };
 
   useEffect(() => {
@@ -560,12 +587,13 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       abortedByUserRef.current = true;
       abortRef.current?.abort();
       const partial = streamTextRef.current.trim();
-      if (partial && !streamCommittedRef.current) {
+      if (partial && !isThinkingPlaceholderText(partial) && !streamCommittedRef.current) {
         addMessage("assistant", streamTextRef.current, "meta", activeProvider, activeModel);
         streamCommittedRef.current = true;
       }
       addMessage("tool", "已中断上一轮生成，开始处理新消息", "meta");
       streamTextRef.current = "";
+      cancelStreamRenderFrame();
       setStreamedAssistantText("");
       setStreamingModel(null);
       setStatus("idle");
@@ -581,6 +609,42 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     const requestId = activeRequestIdRef.current + 1;
     activeRequestIdRef.current = requestId;
     const isCurrentRequest = () => activeRequestIdRef.current === requestId;
+    let insertAfterCursor = opts?.insertAfterId;
+    const appendAssistantMessage = (content: string) => {
+      if (insertAfterCursor) {
+        insertAfterCursor = insertMessageAfter(insertAfterCursor, {
+          role: "assistant",
+          content,
+          agentId: "meta",
+          provider: reqProvider,
+          model: reqModel,
+        });
+        return;
+      }
+      addMessage("assistant", content, "meta", reqProvider, reqModel);
+    };
+    const commitCurrentStreamIfNeeded = () => {
+      const partial = streamTextRef.current.trim();
+      if (!partial || isThinkingPlaceholderText(partial) || streamCommittedRef.current) return false;
+      appendAssistantMessage(streamTextRef.current);
+      streamCommittedRef.current = true;
+      return true;
+    };
+    const scheduleStreamTextUpdate = (nextText: string) => {
+      streamTextRef.current = nextText;
+      if (!isCurrentRequest()) return;
+      if (streamRafRef.current !== null) return;
+      streamRafRef.current = window.requestAnimationFrame(() => {
+        streamRafRef.current = null;
+        if (isCurrentRequest()) setStreamedAssistantText(streamTextRef.current);
+      });
+    };
+    const resetStreamSegment = () => {
+      streamTextRef.current = "";
+      cancelStreamRenderFrame();
+      if (isCurrentRequest()) setStreamedAssistantText("");
+      streamCommittedRef.current = false;
+    };
 
     if (!opts?.insertAfterId) {
       setInput("");
@@ -594,6 +658,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
 
     setStatus("processing");
     setStreaming(true);
+    cancelStreamRenderFrame();
     setStreamedAssistantText("");
     setStreamingModel(reqModel ? { provider: reqProvider, model: reqModel } : null);
     streamTextRef.current = "";
@@ -619,6 +684,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       if (!reader) { if (isCurrentRequest()) { setStatus("idle"); setStreaming(false); } return; }
 
       let full = "";
+      let cumulativeFull = "";
       let buffer = "";
       while (true) {
         if (!isCurrentRequest()) return;
@@ -635,8 +701,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             const eventAgentId = payload.data?.agent_id ?? "meta";
             if (payload.type === "token") {
               if (eventAgentId !== "meta") { addSubAgentEvent(eventAgentId, { type: "token", content: "生成中..." }); continue; }
-              full += payload.data?.text ?? "";
-              if (isCurrentRequest()) { streamTextRef.current = full; setStreamedAssistantText(full); }
+              const tokenText = String(payload.data?.text ?? "");
+              full += tokenText;
+              cumulativeFull += tokenText;
+              scheduleStreamTextUpdate(full);
             }
             if (payload.type === "tool_call") {
               const toolName = payload.data?.name ?? "tool";
@@ -644,8 +712,12 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               const SILENT_TOOLS_SSE = new Set(["check_resources"]);
               if (!SILENT_TOOLS_SSE.has(toolName)) {
                 const content = `🔧 ${toolName}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
-                if (eventAgentId === "meta") addMessage("tool", content, "meta");
-                else {
+                if (eventAgentId === "meta") {
+                  commitCurrentStreamIfNeeded();
+                  full = "";
+                  resetStreamSegment();
+                  addMessage("tool", content, "meta");
+                } else {
                   updateSubAgent(eventAgentId, { status: "running", currentAction: `调用工具 ${toolName}` });
                   addSubAgentEvent(eventAgentId, { type: "tool_call", content });
                   const livePreview = buildToolCallLivePreview(toolName, toolArgs);
@@ -716,8 +788,32 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             }
             if (payload.type === "final") {
               if (eventAgentId !== "meta") { updateSubAgent(eventAgentId, { status: "completed", currentAction: "已完成" }); addSubAgentEvent(eventAgentId, { type: "final", content: payload.data?.text ?? "" }); continue; }
-              full = payload.data?.text ?? full;
-              if (isCurrentRequest()) { streamTextRef.current = full; setStreamedAssistantText(full); }
+              const finalText = String(payload.data?.text ?? "");
+              if (finalText) {
+                if (finalText.startsWith(cumulativeFull)) {
+                  const delta = finalText.slice(cumulativeFull.length);
+                  if (delta) {
+                    full += delta;
+                    cumulativeFull += delta;
+                  }
+                } else if (finalText.startsWith(full)) {
+                  const delta = finalText.slice(full.length);
+                  if (delta) {
+                    full += delta;
+                    cumulativeFull += delta;
+                  }
+                } else if (
+                  finalText !== full &&
+                  finalText !== cumulativeFull &&
+                  !full.includes(finalText) &&
+                  !cumulativeFull.includes(finalText)
+                ) {
+                  const merged = full.trim() ? `\n\n${finalText}` : finalText;
+                  full += merged;
+                  cumulativeFull += merged;
+                }
+              }
+              scheduleStreamTextUpdate(full);
             }
             if (payload.type === "subagent_started") { const subId = payload.data?.agent_id; if (subId) { addSubAgent({ id: subId, name: payload.data?.name ?? subId, role: payload.data?.role ?? "worker", provider: payload.data?.provider ?? undefined, model: payload.data?.model ?? undefined, task: payload.data?.task ?? "" }); addSubAgentEvent(subId, { type: "started", content: "已启动" }); } }
             if (payload.type === "subagent_progress") { const subId = payload.data?.agent_id; if (subId) { updateSubAgent(subId, { currentAction: payload.data?.text ?? "执行中" }); addSubAgentEvent(subId, { type: "progress", content: payload.data?.text ?? "执行中" }); } }
@@ -746,12 +842,8 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
         scrollToBottom();
       }
 
-      if (isCurrentRequest() && full && !streamCommittedRef.current) {
-        if (opts?.insertAfterId) {
-          insertMessageAfter(opts.insertAfterId, { role: "assistant", content: full, agentId: "meta", provider: reqProvider, model: reqModel });
-        } else {
-          addMessage("assistant", full, "meta", reqProvider, reqModel);
-        }
+      if (isCurrentRequest() && full && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
+        appendAssistantMessage(full);
         streamCommittedRef.current = true;
         void speak(full);
       }
@@ -759,8 +851,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       if (!isCurrentRequest()) return;
       if (err instanceof DOMException && err.name === "AbortError") {
         if (!abortedByUserRef.current) {
-          const partial = streamTextRef.current.trim();
-          if (partial && !streamCommittedRef.current) { addMessage("assistant", streamTextRef.current, "meta", reqProvider, reqModel); streamCommittedRef.current = true; }
+          commitCurrentStreamIfNeeded();
           addMessage("tool", "已中断当前生成", "meta");
         }
       } else {
@@ -769,6 +860,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     } finally {
       if (!isCurrentRequest()) return;
       abortRef.current = null;
+      cancelStreamRenderFrame();
       streamTextRef.current = "";
       setStreamedAssistantText("");
       setStreamingModel(null);
@@ -803,9 +895,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     abortedByUserRef.current = true;
     abortRef.current?.abort();
     const partial = streamTextRef.current.trim();
-    if (partial && !streamCommittedRef.current) { addMessage("assistant", streamTextRef.current, "meta", activeProvider, activeModel); streamCommittedRef.current = true; }
+    if (partial && !isThinkingPlaceholderText(partial) && !streamCommittedRef.current) { addMessage("assistant", streamTextRef.current, "meta", activeProvider, activeModel); streamCommittedRef.current = true; }
     addMessage("tool", "已中断当前生成", "meta");
     streamTextRef.current = "";
+    cancelStreamRenderFrame();
     setStreamedAssistantText("");
     setStreamingModel(null);
     setStatus("idle");
@@ -1046,7 +1139,11 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               {!isLite && m.role === "assistant" && <ModelBadge provider={m.provider} model={m.model} />}
               <div className="msg-content break-words">
                 {m.role === "tool" ? (
-                  <span>{m.content}</span>
+                  isTodoUpdateToolMessage(m.content) ? (
+                    <TodoUpdateCard content={m.content} />
+                  ) : (
+                    <span>{m.content}</span>
+                  )
                 ) : (
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                     {m.content}
@@ -1067,16 +1164,12 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             <div className={`mr-8 rounded-xl rounded-tl-sm bg-slate-700/50 px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`}>
               {!isLite && streamingModel && <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />}
               <div className="msg-content break-words">
-                {streamedAssistantText ? (
+                {streamedAssistantText && !isThinkingPlaceholderText(streamedAssistantText) ? (
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                     {streamedAssistantText}
                   </ReactMarkdown>
                 ) : (
-                  <span className="inline-flex gap-1 text-slate-400">
-                    <span className="animate-bounce">·</span>
-                    <span className="animate-bounce" style={{ animationDelay: "0.1s" }}>·</span>
-                    <span className="animate-bounce" style={{ animationDelay: "0.2s" }}>·</span>
-                  </span>
+                  <StreamingThinkingIndicator />
                 )}
               </div>
             </div>

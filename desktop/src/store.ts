@@ -30,6 +30,15 @@ export type SessionItem = {
   avatarId: string | null;
   sessionName: string | null;
   updatedAt: number;
+  createdAt?: number;
+  pinned?: boolean;
+  archived?: boolean;
+};
+
+export type Taskspace = {
+  id: string;
+  label: string;
+  path: string;
 };
 
 export type GroupChat = {
@@ -47,6 +56,8 @@ export type ChatPane = {
   messages: Message[];
   historyOpen: boolean;
   contextInherited: boolean;
+  taskspacePanelOpen: boolean;
+  activeTaskspaceId: string | null;
 };
 
 export type Message = {
@@ -168,6 +179,8 @@ type AppState = {
   setPaneSessionId: (paneId: string, sessionId: string) => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
   togglePaneHistory: (paneId: string) => void;
+  toggleTaskspacePanel: (paneId: string) => void;
+  setActiveTaskspace: (paneId: string, taskspaceId: string | null) => void;
   setPaneContextInherited: (paneId: string, inherited: boolean) => void;
   addMessage: (role: MsgRole, content: string, agentId?: string, provider?: string, model?: string) => void;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
@@ -204,6 +217,8 @@ function makeDefaultPane(): ChatPane {
     messages: [],
     historyOpen: false,
     contextInherited: false,
+    taskspacePanelOpen: false,
+    activeTaskspaceId: null,
   };
 }
 
@@ -263,6 +278,8 @@ export const useAppStore = create<AppState>((set) => ({
           messages: [],
           historyOpen: false,
           contextInherited: false,
+          taskspacePanelOpen: false,
+          activeTaskspaceId: null,
         },
       ],
       activePaneId: paneId,
@@ -317,6 +334,18 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === paneId ? { ...pane, historyOpen: !pane.historyOpen } : pane
+      ),
+    })),
+  toggleTaskspacePanel: (paneId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, taskspacePanelOpen: !pane.taskspacePanelOpen } : pane
+      ),
+    })),
+  setActiveTaskspace: (paneId, taskspaceId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, activeTaskspaceId: taskspaceId } : pane
       ),
     })),
   setPaneContextInherited: (paneId, inherited) =>
