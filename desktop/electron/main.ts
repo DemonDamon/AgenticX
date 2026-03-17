@@ -32,10 +32,53 @@ type AgxConfig = {
   confirm_strategy?: "manual" | "semi-auto" | "auto";
   active_provider?: string;
   active_model?: string;
+  notifications?: {
+    email?: {
+      enabled?: boolean;
+      smtp_host?: string;
+      smtp_port?: number;
+      smtp_username?: string;
+      smtp_password?: string;
+      smtp_use_tls?: boolean;
+      from_email?: string;
+      default_to_email?: string;
+    };
+  };
+};
+
+type EmailConfig = {
+  enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_username: string;
+  smtp_password: string;
+  smtp_use_tls: boolean;
+  from_email: string;
+  default_to_email: string;
 };
 
 const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.yaml");
+const EMAIL_CONFIG_KEYS = new Set([
+  "enabled",
+  "smtp_host",
+  "smtp_port",
+  "smtp_username",
+  "smtp_password",
+  "smtp_use_tls",
+  "from_email",
+  "default_to_email",
+]);
+const DEFAULT_EMAIL_CONFIG: EmailConfig = {
+  enabled: true,
+  smtp_host: "",
+  smtp_port: 587,
+  smtp_username: "",
+  smtp_password: "",
+  smtp_use_tls: true,
+  from_email: "",
+  default_to_email: "bingzhenli@hotmail.com",
+};
 
 const KNOWN_BASE_URLS: Record<string, string> = {
   openai: "https://api.openai.com/v1",
@@ -61,6 +104,82 @@ function loadAgxConfig(): AgxConfig {
 function saveAgxConfig(cfg: AgxConfig): void {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_PATH, yaml.dump(cfg, { lineWidth: -1 }), "utf-8");
+}
+
+function normalizeEmailConfig(input: unknown): EmailConfig {
+  if (!input || typeof input !== "object") return { ...DEFAULT_EMAIL_CONFIG };
+  const row = input as Partial<EmailConfig>;
+  return {
+    enabled: Boolean(row.enabled ?? true),
+    smtp_host: String(row.smtp_host ?? "").trim(),
+    smtp_port: Number(row.smtp_port ?? 587) || 587,
+    smtp_username: String(row.smtp_username ?? "").trim(),
+    smtp_password: String(row.smtp_password ?? ""),
+    smtp_use_tls: Boolean(row.smtp_use_tls ?? true),
+    from_email: String(row.from_email ?? "").trim(),
+    default_to_email: String(row.default_to_email ?? "bingzhenli@hotmail.com").trim() || "bingzhenli@hotmail.com",
+  };
+}
+
+function parseBooleanStrict(value: unknown, field: string): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const lowered = value.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(lowered)) return true;
+    if (["false", "0", "no", "off"].includes(lowered)) return false;
+  }
+  throw new Error(`${field} must be boolean`);
+}
+
+function loadEmailConfigFromAgx(cfg: AgxConfig): EmailConfig {
+  const email = cfg.notifications?.email;
+  return normalizeEmailConfig(email);
+}
+
+function validateEmailConfigPayload(input: unknown): { ok: true; config: EmailConfig } | { ok: false; error: string } {
+  if (!input || typeof input !== "object") return { ok: false, error: "invalid payload: object required" };
+  const payload = input as Record<string, unknown>;
+  for (const key of Object.keys(payload)) {
+    if (!EMAIL_CONFIG_KEYS.has(key)) {
+      return { ok: false, error: `invalid field: ${key}` };
+    }
+  }
+  let enabled: boolean;
+  let smtpUseTls: boolean;
+  try {
+    enabled = parseBooleanStrict(payload.enabled, "enabled");
+    smtpUseTls = parseBooleanStrict(payload.smtp_use_tls, "smtp_use_tls");
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+  let smtpPort = 587;
+  try {
+    smtpPort = intValue(payload.smtp_port, "smtp_port");
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+  const normalized: EmailConfig = {
+    enabled,
+    smtp_host: String(payload.smtp_host ?? "").trim(),
+    smtp_port: smtpPort,
+    smtp_username: String(payload.smtp_username ?? "").trim(),
+    smtp_password: String(payload.smtp_password ?? ""),
+    smtp_use_tls: smtpUseTls,
+    from_email: String(payload.from_email ?? "").trim(),
+    default_to_email: String(payload.default_to_email ?? "bingzhenli@hotmail.com").trim() || "bingzhenli@hotmail.com",
+  };
+  if (!normalized.smtp_host.trim()) return { ok: false, error: "smtp_host is required" };
+  if (!normalized.smtp_username.trim()) return { ok: false, error: "smtp_username is required" };
+  if (!normalized.smtp_password.trim()) return { ok: false, error: "smtp_password is required" };
+  if (!normalized.from_email.trim()) return { ok: false, error: "from_email is required" };
+  if (!normalized.default_to_email.trim()) return { ok: false, error: "default_to_email is required" };
+  return { ok: true, config: normalized };
+}
+
+function intValue(raw: unknown, field: string): number {
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) throw new Error(`${field} must be integer`);
+  return parsed;
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -439,6 +558,208 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("delete-session", async (_event, sessionId: string) => {
+    const sid = String(sessionId || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    try {
+      const resp = await fetch(
+        `http://127.0.0.1:${String(apiPort)}/api/session?session_id=${encodeURIComponent(sid)}`,
+        {
+          method: "DELETE",
+          headers: { "x-agx-desktop-token": apiToken },
+        }
+      );
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("delete-sessions-batch", async (_event, sessionIds: string[]) => {
+    const ids = Array.isArray(sessionIds)
+      ? Array.from(new Set(sessionIds.map((id) => String(id || "").trim()).filter(Boolean)))
+      : [];
+    if (ids.length === 0) return { ok: true, deleted: [], failed: [] };
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions/batch-delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ session_ids: ids }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}`, deleted: [], failed: ids };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err), deleted: [], failed: ids };
+    }
+  });
+
+  ipcMain.handle("pin-session", async (_event, payload: { sessionId: string; pinned: boolean }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions/${encodeURIComponent(sid)}/pin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ pinned: !!payload.pinned }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("fork-session", async (_event, payload: { sessionId: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions/${encodeURIComponent(sid)}/fork`, {
+        method: "POST",
+        headers: { "x-agx-desktop-token": apiToken },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("archive-sessions", async (_event, payload: { sessionId: string; avatarId?: string | null }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    const avatarId = String(payload?.avatarId || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions/archive-before`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ session_id: sid, avatar_id: avatarId || undefined }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("list-taskspaces", async (_event, sessionId: string) => {
+    const sid = String(sessionId || "").trim();
+    if (!sid) return { ok: false, workspaces: [], error: "sessionId is required" };
+    try {
+      const resp = await fetch(
+        `http://127.0.0.1:${String(apiPort)}/api/taskspace/workspaces?session_id=${encodeURIComponent(sid)}`,
+        {
+          headers: { "x-agx-desktop-token": apiToken },
+        }
+      );
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, workspaces: [], error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, workspaces: [], error: String(err) };
+    }
+  });
+
+  ipcMain.handle("add-taskspace", async (_event, payload: { sessionId: string; path?: string; label?: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    const dirPath = String(payload?.path || "").trim();
+    const label = String(payload?.label || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/taskspace/workspaces`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ session_id: sid, path: dirPath || undefined, label: label || undefined }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("remove-taskspace", async (_event, payload: { sessionId: string; taskspaceId: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    const taskspaceId = String(payload?.taskspaceId || "").trim();
+    if (!sid || !taskspaceId) return { ok: false, error: "sessionId and taskspaceId are required" };
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/taskspace/workspaces`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ session_id: sid, taskspace_id: taskspaceId }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("list-taskspace-files", async (_event, payload: { sessionId: string; taskspaceId: string; path?: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    const taskspaceId = String(payload?.taskspaceId || "").trim();
+    const relPath = String(payload?.path || ".").trim() || ".";
+    if (!sid || !taskspaceId) return { ok: false, files: [], error: "sessionId and taskspaceId are required" };
+    try {
+      const query = `session_id=${encodeURIComponent(sid)}&taskspace_id=${encodeURIComponent(taskspaceId)}&path=${encodeURIComponent(relPath)}`;
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/taskspace/files?${query}`, {
+        headers: { "x-agx-desktop-token": apiToken },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, files: [], error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, files: [], error: String(err) };
+    }
+  });
+
+  ipcMain.handle("read-taskspace-file", async (_event, payload: { sessionId: string; taskspaceId: string; path: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    const taskspaceId = String(payload?.taskspaceId || "").trim();
+    const relPath = String(payload?.path || "").trim();
+    if (!sid || !taskspaceId || !relPath) {
+      return { ok: false, error: "sessionId, taskspaceId and path are required" };
+    }
+    try {
+      const query = `session_id=${encodeURIComponent(sid)}&taskspace_id=${encodeURIComponent(taskspaceId)}&path=${encodeURIComponent(relPath)}`;
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/taskspace/file?${query}`, {
+        headers: { "x-agx-desktop-token": apiToken },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("load-session-messages", async (_event, sessionId: string) => {
     const sid = String(sessionId || "").trim();
     if (!sid) return { ok: false, messages: [], error: "sessionId is required" };
@@ -564,6 +885,51 @@ function registerIpc(): void {
       activeProvider: cfg.active_provider ?? "",
       activeModel: cfg.active_model ?? "",
     };
+  });
+
+  ipcMain.handle("load-email-config", async () => {
+    const cfg = loadAgxConfig();
+    return { ok: true, config: loadEmailConfigFromAgx(cfg) };
+  });
+
+  ipcMain.handle("save-email-config", async (_event, payload: unknown) => {
+    const checked = validateEmailConfigPayload(payload);
+    if (!checked.ok) return { ok: false, error: checked.error };
+    try {
+      const cfg = loadAgxConfig();
+      const nextNotifications = { ...(cfg.notifications ?? {}) };
+      nextNotifications.email = { ...checked.config };
+      cfg.notifications = nextNotifications;
+      saveAgxConfig(cfg);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: "config_write_failed" };
+    }
+  });
+
+  ipcMain.handle("test-email-config", async (_event, payload: { config?: unknown; toEmail?: string }) => {
+    const checked = validateEmailConfigPayload(payload?.config ?? {});
+    if (!checked.ok) return { ok: false, error: checked.error };
+    const toEmail = String(payload?.toEmail ?? checked.config.default_to_email).trim() || checked.config.default_to_email;
+    try {
+      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/test-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-agx-desktop-token": apiToken,
+        },
+        body: JSON.stringify({
+          config: checked.config,
+          to_email: toEmail,
+        }),
+      });
+      if (!resp.ok) {
+        return { ok: false, error: `HTTP ${resp.status}: email_test_failed` };
+      }
+      return await resp.json();
+    } catch {
+      return { ok: false, error: "email_test_request_failed" };
+    }
   });
 
   ipcMain.handle("load-mcp-status", async (_event, sessionId: string) => {

@@ -20,6 +20,16 @@ type LoadConfigResult = {
 type ValidateKeyResult = { ok: boolean; error?: string; status?: number };
 type FetchModelsResult = { ok: boolean; models: string[]; error?: string };
 type HealthCheckResult = { ok: boolean; error?: string; latencyHint?: string };
+type EmailConfig = {
+  enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_username: string;
+  smtp_password: string;
+  smtp_use_tls: boolean;
+  from_email: string;
+  default_to_email: string;
+};
 type AvatarItem = {
   id: string;
   name: string;
@@ -34,6 +44,18 @@ type GroupItem = {
   name: string;
   avatar_ids: string[];
   routing?: string;
+};
+type TaskspaceItem = {
+  id: string;
+  label: string;
+  path: string;
+};
+type TaskspaceFileItem = {
+  name: string;
+  type: "file" | "dir";
+  path: string;
+  size: number;
+  modified: number;
 };
 
 type McpServerItem = { name: string; connected: boolean; command?: string };
@@ -59,9 +81,28 @@ declare global {
       updateAvatar: (payload: { id: string; name?: string; role?: string; avatar_url?: string; pinned?: boolean; system_prompt?: string }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       deleteAvatar: (id: string) => Promise<{ ok: boolean; error?: string }>;
 
-      listSessions: (avatarId?: string) => Promise<{ ok: boolean; sessions: Array<{ session_id: string; avatar_id: string | null; session_name: string | null; updated_at: number }> }>;
+      listSessions: (avatarId?: string) => Promise<{ ok: boolean; sessions: Array<{ session_id: string; avatar_id: string | null; avatar_name?: string | null; session_name: string | null; updated_at: number; created_at?: number; pinned?: boolean; archived?: boolean }> }>;
       createSession: (payload: { avatar_id?: string; name?: string; inherit_from_session_id?: string }) => Promise<{ ok: boolean; session_id?: string; inherited?: boolean; error?: string }>;
       renameSession: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
+      deleteSession: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
+      deleteSessionsBatch: (sessionIds: string[]) => Promise<{ ok: boolean; deleted?: string[]; failed?: string[]; error?: string }>;
+      pinSession: (payload: { sessionId: string; pinned: boolean }) => Promise<{ ok: boolean; pinned?: boolean; error?: string }>;
+      forkSession: (payload: { sessionId: string }) => Promise<{ ok: boolean; session_id?: string; session_name?: string; error?: string }>;
+      archiveSessions: (payload: { sessionId: string; avatarId?: string | null }) => Promise<{ ok: boolean; archived_count?: number; error?: string }>;
+      listTaskspaces: (sessionId: string) => Promise<{ ok: boolean; workspaces: TaskspaceItem[]; error?: string }>;
+      addTaskspace: (payload: { sessionId: string; path?: string; label?: string }) => Promise<{ ok: boolean; workspace?: TaskspaceItem; error?: string }>;
+      removeTaskspace: (payload: { sessionId: string; taskspaceId: string }) => Promise<{ ok: boolean; error?: string }>;
+      listTaskspaceFiles: (payload: { sessionId: string; taskspaceId: string; path?: string }) => Promise<{ ok: boolean; files: TaskspaceFileItem[]; error?: string }>;
+      readTaskspaceFile: (payload: { sessionId: string; taskspaceId: string; path: string }) => Promise<{
+        ok: boolean;
+        name?: string;
+        path?: string;
+        absolute_path?: string;
+        content?: string;
+        truncated?: boolean;
+        size?: number;
+        error?: string;
+      }>;
       loadSessionMessages: (sessionId: string) => Promise<{
         ok: boolean;
         messages: Array<{
@@ -83,6 +124,7 @@ declare global {
       deleteGroup: (id: string) => Promise<{ ok: boolean; error?: string }>;
 
       loadConfig: () => Promise<LoadConfigResult>;
+      loadEmailConfig: () => Promise<{ ok: boolean; config: EmailConfig; error?: string }>;
       loadMcpStatus: (sessionId: string) => Promise<McpStatusResult>;
       importMcpConfig: (payload: { sessionId: string; sourcePath: string }) => Promise<{
         ok: boolean;
@@ -96,6 +138,11 @@ declare global {
       saveUserMode: (mode: "pro" | "lite") => Promise<{ ok: boolean }>;
       saveOnboardingCompleted: (completed: boolean) => Promise<{ ok: boolean }>;
       saveConfirmStrategy: (strategy: "manual" | "semi-auto" | "auto") => Promise<{ ok: boolean }>;
+      saveEmailConfig: (payload: EmailConfig) => Promise<{ ok: boolean; error?: string }>;
+      testEmailConfig: (payload: {
+        config: EmailConfig;
+        toEmail?: string;
+      }) => Promise<{ ok: boolean; error?: string; message?: string }>;
       saveProvider: (payload: {
         name: string;
         apiKey?: string;
