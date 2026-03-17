@@ -117,11 +117,18 @@ def import_mcp_config(source_path: str, target_path: Optional[str] = None) -> Di
             }
 
     imported: List[str] = []
+    updated: List[str] = []
     skipped: List[str] = []
     merged: Dict[str, "MCPServerConfig"] = dict(existing_servers)
     for name, cfg in source_servers.items():
         if name in merged:
-            skipped.append(name)
+            old_payload = _serialize_server_config(merged[name])
+            new_payload = _serialize_server_config(cfg)
+            if old_payload == new_payload:
+                skipped.append(name)
+                continue
+            merged[name] = cfg
+            updated.append(name)
             continue
         merged[name] = cfg
         imported.append(name)
@@ -137,8 +144,10 @@ def import_mcp_config(source_path: str, target_path: Optional[str] = None) -> Di
         "source_path": str(source),
         "target_path": str(target),
         "imported": sorted(imported),
+        "updated": sorted(updated),
         "skipped": sorted(skipped),
         "total_imported": len(imported),
+        "total_updated": len(updated),
         "total_servers": len(merged),
     }
 

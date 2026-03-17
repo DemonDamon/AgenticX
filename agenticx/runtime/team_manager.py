@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 from agenticx.cli.agent_tools import STUDIO_TOOLS
+from agenticx.cli.config_manager import ConfigManager
 from agenticx.cli.studio import StudioSession
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate, AsyncConfirmGate, EventType, RuntimeEvent
@@ -28,6 +29,27 @@ _log = logging.getLogger(__name__)
 
 EventEmitter = Callable[[RuntimeEvent], Awaitable[None]]
 SummarySink = Callable[[str, "SubAgentContext"], Awaitable[None]]
+
+
+def _resolve_max_tool_rounds() -> int:
+    raw = str(os.getenv("AGX_MAX_TOOL_ROUNDS", "")).strip()
+    if not raw:
+        try:
+            global_data = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH)
+            project_data = ConfigManager._load_yaml(ConfigManager.PROJECT_CONFIG_PATH)
+            merged = ConfigManager._deep_merge(global_data, project_data)
+            cfg_val: Any = ConfigManager._get_nested(merged, "runtime.max_tool_rounds")
+        except Exception:
+            cfg_val = None
+        if cfg_val is not None:
+            raw = str(cfg_val).strip()
+    if not raw:
+        raw = "30"
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 30
+    return max(10, min(120, value))
 
 
 class SubAgentStatus(str, Enum):
@@ -798,7 +820,7 @@ class AgentTeamManager:
         runtime = AgentRuntime(
             llm,
             context.confirm_gate,
-            max_tool_rounds=30,
+            max_tool_rounds=_resolve_max_tool_rounds(),
             loop_warning_threshold=8,
             loop_critical_threshold=16,
             team_manager=self,

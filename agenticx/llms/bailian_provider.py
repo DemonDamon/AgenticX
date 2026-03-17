@@ -5,7 +5,7 @@ import requests  # type: ignore
 import aiohttp  # type: ignore
 from pydantic import Field  # type: ignore
 from loguru import logger  # type: ignore
-from .base import BaseLLMProvider
+from .base import BaseLLMProvider, StreamChunk
 from .response import LLMResponse, TokenUsage, LLMChoice
 
 class BailianProvider(BaseLLMProvider):
@@ -359,6 +359,180 @@ class BailianProvider(BaseLLMProvider):
                     yield chunk.choices[0].delta.content
         except Exception as e:
             raise Exception(f"Bailian API stream call failed: {str(e)}")
+
+    def stream_with_tools(
+        self,
+        prompt: Union[str, List[Dict]],
+        tools: Optional[List[Dict]] = None,
+        **kwargs: Any,
+    ) -> Generator[StreamChunk, None, None]:
+        """Stream content/tool-call deltas in a normalized chunk format."""
+        try:
+            if isinstance(prompt, str):
+                messages = [{"role": "user", "content": prompt}]
+            elif isinstance(prompt, list):
+                messages = prompt
+            else:
+                raise ValueError(
+                    "Prompt must be either a string or a list of message dictionaries"
+                )
+
+            if self._needs_native_request(self.model):
+                yield from self._stream_with_tools_native(
+                    messages=messages,
+                    tools=tools,
+                    **kwargs,
+                )
+                return
+
+            request_params = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": kwargs.get("temperature", self.temperature),
+                "stream": True,
+                **kwargs,
+            }
+            if tools:
+                request_params["tools"] = tools
+
+            final_params = self._prepare_bailian_params(request_params)
+            if self.client is None:
+                raise ValueError("Client not initialized")
+
+            response_stream = self.client.chat.completions.create(**final_params)
+            last_finish_reason = ""
+            for chunk in response_stream:
+                if not getattr(chunk, "choices", None):
+                    continue
+                choice = chunk.choices[0]
+                finish_reason = getattr(choice, "finish_reason", None)
+                if isinstance(finish_reason, str) and finish_reason:
+                    last_finish_reason = finish_reason
+                delta = getattr(choice, "delta", None)
+                if delta is None:
+                    continue
+
+                content = getattr(delta, "content", None)
+                if isinstance(content, str) and content:
+                    yield {"type": "content", "text": content}
+
+                tool_calls = getattr(delta, "tool_calls", None)
+                if tool_calls:
+                    for tc in tool_calls:
+                        idx = getattr(tc, "index", 0)
+                        tc_id = getattr(tc, "id", "") or ""
+                        fn_obj = getattr(tc, "function", None)
+                        fn_name = (
+                            getattr(fn_obj, "name", "") if fn_obj is not None else ""
+                        )
+                        fn_args = (
+                            getattr(fn_obj, "arguments", "")
+                            if fn_obj is not None
+                            else ""
+                        )
+                        try:
+                            tool_index = int(idx)
+                        except (TypeError, ValueError):
+                            tool_index = 0
+                        yield {
+                            "type": "tool_call_delta",
+                            "tool_index": tool_index,
+                            "tool_call_id": str(tc_id),
+                            "tool_name": str(fn_name),
+                            "arguments_delta": "" if fn_args is None else str(fn_args),
+                        }
+            yield {"type": "done", "finish_reason": last_finish_reason}
+        except Exception as e:
+            raise Exception(
+                f"Bailian API stream_with_tools call failed: {str(e)}"
+            ) from e
+
+    def _stream_with_tools_native(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict]] = None,
+        **kwargs: Any,
+    ) -> Generator[StreamChunk, None, None]:
+        """Stream with native HTTP for models needing Bailian-specific params."""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        request_params: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": kwargs.get("temperature", self.temperature),
+            "stream": True,
+            **kwargs,
+        }
+        if tools:
+            request_params["tools"] = tools
+        request_params["enable_thinking"] = False
+
+        url = f"{self.base_url}/chat/completions"
+        proxies = {"http": None, "https": None}
+        timeout = kwargs.get("timeout", self.timeout)
+        last_finish_reason = ""
+
+        with requests.post(
+            url,
+            headers=headers,
+            json=request_params,
+            timeout=timeout,
+            stream=True,
+            proxies=proxies,
+            verify=True,
+        ) as response:
+            if response.status_code != 200:
+                error_text = response.text[:1000] if response.text else "No error details"
+                raise Exception(f"HTTP {response.status_code}: {error_text}")
+            for raw_line in response.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                line = str(raw_line).strip()
+                if not line.startswith("data:"):
+                    continue
+                payload_text = line[5:].strip()
+                if not payload_text or payload_text == "[DONE]":
+                    continue
+                try:
+                    payload = json.loads(payload_text)
+                except Exception:
+                    continue
+                choices = payload.get("choices") if isinstance(payload, dict) else None
+                if not choices:
+                    continue
+                choice = choices[0] if isinstance(choices[0], dict) else {}
+                finish_reason = choice.get("finish_reason")
+                if isinstance(finish_reason, str) and finish_reason:
+                    last_finish_reason = finish_reason
+                delta = choice.get("delta")
+                if not isinstance(delta, dict):
+                    continue
+                content = delta.get("content")
+                if isinstance(content, str) and content:
+                    yield {"type": "content", "text": content}
+                tool_calls = delta.get("tool_calls")
+                if isinstance(tool_calls, list):
+                    for tc in tool_calls:
+                        if not isinstance(tc, dict):
+                            continue
+                        idx_raw = tc.get("index", 0)
+                        try:
+                            tool_index = int(idx_raw)
+                        except (TypeError, ValueError):
+                            tool_index = 0
+                        fn_obj = tc.get("function")
+                        fn = fn_obj if isinstance(fn_obj, dict) else {}
+                        fn_args = fn.get("arguments", "")
+                        yield {
+                            "type": "tool_call_delta",
+                            "tool_index": tool_index,
+                            "tool_call_id": str(tc.get("id", "") or ""),
+                            "tool_name": str(fn.get("name", "") or ""),
+                            "arguments_delta": "" if fn_args is None else str(fn_args),
+                        }
+        yield {"type": "done", "finish_reason": last_finish_reason}
     
     async def astream(self, prompt: Union[str, List[Dict]], **kwargs):  # type: ignore
         """Stream the Bailian model's response asynchronously."""

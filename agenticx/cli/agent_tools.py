@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from agenticx.cli.config_manager import ConfigManager
 from agenticx.cli.codegen_engine import CodeGenEngine, infer_output_path, write_generated_file
 from agenticx.cli.studio_mcp import import_mcp_config, load_available_servers, mcp_call_tool, mcp_connect
 from agenticx.cli.studio_skill import get_all_skill_summaries, skill_use as studio_skill_use
@@ -382,6 +383,71 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "lsp_goto_definition",
+            "description": "Jump to symbol definition at given file position.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string", "description": "Absolute or workspace-relative file path."},
+                    "line": {"type": "integer", "description": "Line number (1-based)."},
+                    "column": {"type": "integer", "description": "Column number (1-based)."},
+                },
+                "required": ["file", "line", "column"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lsp_find_references",
+            "description": "Find all references to a symbol at given file position.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string", "description": "Absolute or workspace-relative file path."},
+                    "line": {"type": "integer", "description": "Line number (1-based)."},
+                    "column": {"type": "integer", "description": "Column number (1-based)."},
+                },
+                "required": ["file", "line", "column"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lsp_hover",
+            "description": "Get type info and documentation for a symbol at given file position.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string", "description": "Absolute or workspace-relative file path."},
+                    "line": {"type": "integer", "description": "Line number (1-based)."},
+                    "column": {"type": "integer", "description": "Column number (1-based)."},
+                },
+                "required": ["file", "line", "column"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lsp_diagnostics",
+            "description": "Get lint/type diagnostics for a file or all opened files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string", "description": "Optional file path."},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 META_TOOL_NAMES = {
@@ -393,6 +459,8 @@ META_TOOL_NAMES = {
     "recommend_subagent_model",
     "list_skills",
     "list_mcps",
+    "send_bug_report_email",
+    "update_email_config",
 }
 
 
@@ -433,6 +501,50 @@ async def _confirm(
 
 def _path_from_arg(path_arg: str) -> Path:
     return Path(path_arg).expanduser()
+
+
+def _is_protected_config_path(path: Path) -> bool:
+    resolved = path.resolve(strict=False)
+    home_cfg = (Path.home() / ".agenticx" / "config.yaml").resolve(strict=False)
+    if resolved == home_cfg:
+        return True
+    return resolved.name == "config.yaml" and ".agenticx" in resolved.parts
+
+
+_TOOL_METADATA_LINE_RE = re.compile(r"^\s*(call_[A-Za-z0-9]+|sa-[a-z0-9]+)\s*$")
+
+
+def _strip_tool_metadata_noise_lines(text: str) -> str:
+    if not text:
+        return text
+    had_trailing_newline = text.endswith("\n")
+    lines = text.splitlines()
+    filtered = [line for line in lines if not _TOOL_METADATA_LINE_RE.fullmatch(line)]
+    out = "\n".join(filtered)
+    if had_trailing_newline and out:
+        out += "\n"
+    return out
+
+
+def _command_touches_protected_config(command: str, parts: List[str]) -> bool:
+    home_cfg = str((Path.home() / ".agenticx" / "config.yaml").resolve(strict=False))
+    markers = {
+        "~/.agenticx/config.yaml",
+        ".agenticx/config.yaml",
+        home_cfg,
+    }
+    lowered_command = command.lower()
+    if any(marker.lower() in lowered_command for marker in markers):
+        return True
+    for token in parts:
+        expanded = token.strip().strip("\"'").replace("\\ ", " ")
+        if not expanded:
+            continue
+        if expanded in markers:
+            return True
+        if expanded.endswith("/.agenticx/config.yaml"):
+            return True
+    return False
 
 
 def _resolve_workspace_path(path_arg: str) -> Path:
@@ -668,6 +780,12 @@ async def _tool_bash_exec(
         ):
             return "CANCELLED: user denied non-whitelisted command"
 
+    if _command_touches_protected_config(command, parts):
+        return (
+            "ERROR: direct access to ~/.agenticx/config.yaml is blocked for safety. "
+            "Use update_email_config for notifications.email.* changes."
+        )
+
     if command_name in PATH_GUARDED_READ_COMMANDS:
         guarded_paths = _extract_guarded_paths(command_name, parts)
         validation_error = _ensure_paths_within_workspace(guarded_paths)
@@ -715,16 +833,37 @@ async def _tool_bash_exec(
         ):
             return "CANCELLED: user denied high-risk command"
 
+    use_shell = bool(re.search(r"(;|&&|\|\||\||`|\$\(|>|<|\n)", command))
+    if not use_shell:
+        # Support common env-prefix command style like: FOO=bar cmd --arg
+        use_shell = bool(
+            re.match(
+                r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)+[^\s].*$",
+                command,
+            )
+        ) or command.lstrip().startswith("export ")
     try:
-        proc = await asyncio.to_thread(
-            subprocess.run,
-            parts,
-            shell=False,
-            cwd=str(cwd) if cwd else None,
-            capture_output=True,
-            text=True,
-            timeout=max(1, timeout_sec),
-        )
+        if use_shell:
+            proc = await asyncio.to_thread(
+                subprocess.run,
+                command,
+                shell=True,
+                executable="/bin/bash",
+                cwd=str(cwd) if cwd else None,
+                capture_output=True,
+                text=True,
+                timeout=max(1, timeout_sec),
+            )
+        else:
+            proc = await asyncio.to_thread(
+                subprocess.run,
+                parts,
+                shell=False,
+                cwd=str(cwd) if cwd else None,
+                capture_output=True,
+                text=True,
+                timeout=max(1, timeout_sec),
+            )
     except subprocess.TimeoutExpired:
         return f"ERROR: command timeout after {timeout_sec}s"
     except Exception as exc:
@@ -773,6 +912,7 @@ def _tool_file_read(arguments: Dict[str, Any]) -> str:
 
 async def _tool_file_write(
     arguments: Dict[str, Any],
+    session: StudioSession,
     *,
     confirm_gate: ConfirmGate,
     emit_event: Optional[Any] = None,
@@ -793,7 +933,12 @@ async def _tool_file_write(
         path = _resolve_workspace_path(raw_path)
     except ValueError as exc:
         return f"ERROR: {exc}"
-    new_text = str(raw_content)
+    if _is_protected_config_path(path):
+        return (
+            "ERROR: direct writes to ~/.agenticx/config.yaml are blocked for safety. "
+            "Use update_email_config meta tool for notifications.email.* updates."
+        )
+    new_text = _strip_tool_metadata_noise_lines(str(raw_content))
     old_text = ""
     if path.exists():
         if not path.is_file():
@@ -817,6 +962,9 @@ async def _tool_file_write(
         path.write_text(new_text, encoding="utf-8")
     except OSError as exc:
         return f"ERROR: write failed: {exc}"
+    scratchpad = getattr(session, "scratchpad", None)
+    if isinstance(scratchpad, dict):
+        scratchpad["__taskspace_hint__"] = str(path)
     return f"OK: wrote {path}"
 
 
@@ -830,8 +978,13 @@ async def _tool_file_edit(
         path = _resolve_workspace_path(str(arguments.get("path", "")))
     except ValueError as exc:
         return f"ERROR: {exc}"
+    if _is_protected_config_path(path):
+        return (
+            "ERROR: direct edits to ~/.agenticx/config.yaml are blocked for safety. "
+            "Use update_email_config meta tool for notifications.email.* updates."
+        )
     old_text_snippet = str(arguments.get("old_text", ""))
-    new_text_snippet = str(arguments.get("new_text", ""))
+    new_text_snippet = _strip_tool_metadata_noise_lines(str(arguments.get("new_text", "")))
     occurrence = int(arguments.get("occurrence", 1) or 1)
     if old_text_snippet == "":
         return "ERROR: old_text cannot be empty"
@@ -1152,6 +1305,97 @@ def _tool_list_files(arguments: Dict[str, Any]) -> str:
     return "\n".join(lines) if lines else "(empty directory)"
 
 
+def _resolve_lsp_settings() -> tuple[bool, float]:
+    try:
+        global_data = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH)
+        project_data = ConfigManager._load_yaml(ConfigManager.PROJECT_CONFIG_PATH)
+        merged = ConfigManager._deep_merge(global_data, project_data)
+        enabled_raw = ConfigManager._get_nested(merged, "lsp.enabled")
+        timeout_raw = ConfigManager._get_nested(merged, "lsp.startup_timeout")
+    except Exception:
+        enabled_raw = None
+        timeout_raw = None
+
+    if enabled_raw is None:
+        enabled = True
+    elif isinstance(enabled_raw, bool):
+        enabled = enabled_raw
+    elif isinstance(enabled_raw, str):
+        lowered = enabled_raw.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            enabled = True
+        elif lowered in {"0", "false", "no", "off"}:
+            enabled = False
+        else:
+            enabled = True
+    else:
+        enabled = bool(enabled_raw)
+    try:
+        timeout = float(timeout_raw if timeout_raw is not None else 30.0)
+    except (TypeError, ValueError):
+        timeout = 30.0
+    timeout = max(1.0, min(120.0, timeout))
+    return enabled, timeout
+
+
+def _infer_lsp_workspace_root(session: StudioSession) -> str:
+    # Prefer the first taskspace path when available.
+    try:
+        taskspaces = getattr(session, "taskspaces", None)
+        if isinstance(taskspaces, list) and taskspaces:
+            root = str(taskspaces[0].get("path", "")).strip()
+            if root:
+                return str(Path(root).expanduser().resolve(strict=False))
+    except Exception:
+        pass
+    try:
+        workspace_dir = str(getattr(session, "workspace_dir", "") or "").strip()
+        if workspace_dir:
+            return str(Path(workspace_dir).expanduser().resolve(strict=False))
+    except Exception:
+        pass
+    return str(_workspace_root())
+
+
+async def _dispatch_lsp_tool(name: str, arguments: Dict[str, Any], session: StudioSession) -> str:
+    from agenticx.tools.lsp_manager import LSPManager
+
+    mgr: Optional[LSPManager] = getattr(session, "_lsp_manager", None)
+    enabled, startup_timeout = _resolve_lsp_settings()
+    if mgr is None:
+        mgr = LSPManager(
+            _infer_lsp_workspace_root(session),
+            startup_timeout=startup_timeout,
+            enabled=enabled,
+        )
+        setattr(session, "_lsp_manager", mgr)
+
+    file_path = str(arguments.get("file", "")).strip()
+    line_raw = arguments.get("line", 1)
+    column_raw = arguments.get("column", 1)
+    try:
+        line = int(line_raw)
+    except (TypeError, ValueError):
+        line = 1
+    try:
+        column = int(column_raw)
+    except (TypeError, ValueError):
+        column = 1
+
+    try:
+        if name == "lsp_goto_definition":
+            return await mgr.tool_goto_definition(file_path, line, column)
+        if name == "lsp_find_references":
+            return await mgr.tool_find_references(file_path, line, column)
+        if name == "lsp_hover":
+            return await mgr.tool_hover(file_path, line, column)
+        if name == "lsp_diagnostics":
+            return await mgr.tool_diagnostics(file_path or None)
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": f"LSP error: {exc}"}, ensure_ascii=False)
+    return json.dumps({"ok": False, "error": f"unknown LSP tool: {name}"}, ensure_ascii=False)
+
+
 _TOOL_REQUIRED_PARAMS: Dict[str, List[str]] = {}
 for _td in STUDIO_TOOLS:
     _fn = _td.get("function", {})
@@ -1168,14 +1412,36 @@ def _repair_malformed_file_tool_arguments(name: str, arguments: Dict[str, Any]) 
     if not isinstance(arguments, dict):
         return arguments
 
+    def _is_tool_metadata_noise(value: Any) -> bool:
+        text = _strip_tool_metadata_noise_lines(str(value or "")).strip()
+        if not text:
+            return False
+        return bool(re.fullmatch(r"(call_[A-Za-z0-9]+|sa-[a-z0-9]+)", text))
+
+    def _collect_safe_extra_payload(extra_keys: List[str]) -> str:
+        # Only merge text-like alias fields; drop unknown keys to avoid
+        # leaking streamed tool-call metadata fragments into file content.
+        alias_keys = {"text", "body", "code", "value", "new_content", "newText"}
+        payloads: List[str] = []
+        for key in extra_keys:
+            if key not in alias_keys:
+                continue
+            raw = arguments.get(key, "")
+            if _is_tool_metadata_noise(raw):
+                continue
+            text = _strip_tool_metadata_noise_lines(str(raw)).strip()
+            if text:
+                payloads.append(text)
+        return "\n".join(payloads)
+
     if name == "file_write":
         allowed_keys = {"path", "content"}
         extra_keys = [k for k in arguments.keys() if k not in allowed_keys]
         if not extra_keys:
             return arguments
         repaired = dict(arguments)
-        extra_payload = "\n".join(str(arguments.get(k, "")) for k in extra_keys if str(arguments.get(k, "")).strip())
-        existing_content = str(repaired.get("content", ""))
+        extra_payload = _collect_safe_extra_payload(extra_keys)
+        existing_content = _strip_tool_metadata_noise_lines(str(repaired.get("content", "")))
         if extra_payload:
             repaired["content"] = f"{existing_content}\n{extra_payload}".strip() if existing_content else extra_payload
         for key in extra_keys:
@@ -1191,9 +1457,9 @@ def _repair_malformed_file_tool_arguments(name: str, arguments: Dict[str, Any]) 
     if not extra_keys:
         return arguments
     repaired = dict(arguments)
-    extra_payload = "\n".join(str(arguments.get(k, "")) for k in extra_keys if str(arguments.get(k, "")).strip())
+    extra_payload = _collect_safe_extra_payload(extra_keys)
     if extra_payload:
-        base_new_text = str(repaired.get("new_text", ""))
+        base_new_text = _strip_tool_metadata_noise_lines(str(repaired.get("new_text", "")))
         repaired["new_text"] = f"{base_new_text}\n{extra_payload}".strip() if base_new_text else extra_payload
     for key in extra_keys:
         repaired.pop(key, None)
@@ -1250,7 +1516,7 @@ async def dispatch_tool_async(
         if name == "file_read":
             return _tool_file_read(arguments)
         if name == "file_write":
-            return await _tool_file_write(arguments, confirm_gate=gate, emit_event=event_callback)
+            return await _tool_file_write(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "file_edit":
             return await _tool_file_edit(arguments, confirm_gate=gate, emit_event=event_callback)
         if name == "codegen":
@@ -1279,6 +1545,8 @@ async def dispatch_tool_async(
             return _tool_ask_user(arguments, service_mode=isinstance(gate, AsyncConfirmGate))
         if name == "list_files":
             return _tool_list_files(arguments)
+        if name.startswith("lsp_"):
+            return await _dispatch_lsp_tool(name, arguments, session)
     except Exception as exc:
         return f"ERROR: {name} crashed: {exc}"
     if name.startswith("confirm_"):
