@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, AsyncGenerator, Generator, Union, Dict, List, TypedDict, Literal
+from typing import Any, AsyncGenerator, Generator, Union, Dict, List, TypedDict, Literal, Optional
 from pydantic import BaseModel, Field, ConfigDict  # type: ignore
 
 from .response import LLMResponse
@@ -64,7 +64,7 @@ class BaseLLMProvider(ABC, BaseModel):
     def stream_with_tools(
         self,
         prompt: Union[str, List[Dict]],
-        tools: List[Dict] | None = None,
+        tools: Optional[List[Dict]] = None,
         **kwargs: Any,
     ) -> Generator[StreamChunk, None, None]:
         """

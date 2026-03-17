@@ -10,9 +10,11 @@ import json
 import logging
 import os
 import re
+import smtplib
 from pathlib import Path
 from typing import Any
 from typing import AsyncGenerator
+from email.message import EmailMessage
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -55,6 +57,39 @@ def create_studio_app() -> FastAPI:
     app.state.group_registry = group_registry
     desktop_token = os.getenv("AGX_DESKTOP_TOKEN", "").strip()
 
+    async def _shutdown_lsp_for_managed(managed: Any) -> None:
+        if managed is None:
+            return
+        session_obj = getattr(managed, "studio_session", None)
+        lsp_mgr = getattr(session_obj, "_lsp_manager", None) if session_obj is not None else None
+        if lsp_mgr is None:
+            return
+        try:
+            await lsp_mgr.shutdown_all()
+        except Exception as exc:
+            logger.debug("LSP shutdown skipped: %s", exc)
+
+    def _resolve_max_tool_rounds() -> int:
+        raw = str(os.getenv("AGX_MAX_TOOL_ROUNDS", "")).strip()
+        if not raw:
+            try:
+                global_data = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH)
+                project_data = ConfigManager._load_yaml(ConfigManager.PROJECT_CONFIG_PATH)
+                merged = ConfigManager._deep_merge(global_data, project_data)
+                cfg_val: Any = ConfigManager._get_nested(merged, "runtime.max_tool_rounds")
+            except Exception:
+                cfg_val = None
+            if cfg_val is not None:
+                raw = str(cfg_val).strip()
+        if not raw:
+            raw = "30"
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 30
+        # Guardrail: too low hurts completion, too high risks runaway loops/costs.
+        return max(10, min(120, value))
+
     def _resolve_mcp_auto_connect_setting() -> list[str] | None:
         """Resolve mcp.auto_connect.
 
@@ -93,6 +128,48 @@ def create_studio_app() -> FastAPI:
         if x_agx_desktop_token != desktop_token:
             raise HTTPException(status_code=401, detail="invalid desktop token")
 
+    def _normalize_email_config(payload: dict[str, Any]) -> dict[str, Any]:
+        def _parse_bool(value: Any, *, field: str) -> bool:
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                lowered = value.strip().lower()
+                if lowered in {"true", "1", "yes", "on"}:
+                    return True
+                if lowered in {"false", "0", "no", "off"}:
+                    return False
+            raise ValueError(f"{field} must be boolean")
+
+        return {
+            "enabled": _parse_bool(payload.get("enabled", True), field="enabled"),
+            "smtp_host": str(payload.get("smtp_host", "")).strip(),
+            "smtp_port": int(payload.get("smtp_port", 587) or 587),
+            "smtp_username": str(payload.get("smtp_username", "")).strip(),
+            "smtp_password": str(payload.get("smtp_password", "")),
+            "smtp_use_tls": _parse_bool(payload.get("smtp_use_tls", True), field="smtp_use_tls"),
+            "from_email": str(payload.get("from_email", "")).strip(),
+            "default_to_email": str(payload.get("default_to_email", "bingzhenli@hotmail.com")).strip() or "bingzhenli@hotmail.com",
+        }
+
+    def _mask_secret(secret: str) -> str:
+        text = str(secret or "")
+        if not text:
+            return ""
+        if len(text) <= 4:
+            return "*" * len(text)
+        return f"{text[:2]}{'*' * (len(text) - 4)}{text[-2:]}"
+
+    def _normalize_context_files(payload: Any) -> dict[str, str]:
+        if not isinstance(payload, dict):
+            return {}
+        normalized: dict[str, str] = {}
+        for raw_path, raw_content in payload.items():
+            path = str(raw_path or "").strip()
+            if not path:
+                continue
+            normalized[path] = str(raw_content or "")
+        return normalized
+
     @app.get("/api/session", response_model=SessionState)
     async def get_or_create_session(
         session_id: str | None = Query(default=None),
@@ -107,7 +184,7 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.warning("Workspace bootstrap skipped: %s", exc)
         manager.cleanup_expired()
-        managed = manager.get(session_id) if session_id else None
+        managed = manager.get(session_id, touch=False) if session_id else None
         if managed is not None:
             logger.info("[session] reused existing sid=%s", managed.session_id)
         if managed is None:
@@ -156,7 +233,7 @@ def create_studio_app() -> FastAPI:
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
-        managed = manager.get(session_id)
+        managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
         return {
@@ -184,7 +261,7 @@ def create_studio_app() -> FastAPI:
         session_id = str(payload.get("session_id", "")).strip()
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required")
-        managed = manager.get(session_id)
+        managed = manager.get(session_id, touch=False)
         if managed is None:
             return {"ok": True, "summary": ""}
         summary = manager._build_session_summary(managed.studio_session)
@@ -196,6 +273,8 @@ def create_studio_app() -> FastAPI:
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
+        managed = manager.get(session_id, touch=False)
+        await _shutdown_lsp_for_managed(managed)
         ok = manager.delete(session_id)
         if not ok:
             raise HTTPException(status_code=404, detail="session not found")
@@ -207,7 +286,7 @@ def create_studio_app() -> FastAPI:
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
-        managed = manager.get(payload.session_id)
+        managed = manager.get(payload.session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
         gate = managed.get_confirm_gate(payload.agent_id)
@@ -227,11 +306,17 @@ def create_studio_app() -> FastAPI:
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> StreamingResponse:
         _check_token(x_agx_desktop_token)
-        managed = manager.get(payload.session_id)
+        managed = manager.get(payload.session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
+        setattr(managed.studio_session, "taskspaces", list(managed.taskspaces or []))
+        manager.touch(payload.session_id)
+        if not managed.session_name:
+            manager.auto_title_session(payload.session_id, payload.user_input)
 
         session = managed.studio_session
+        if payload.context_files:
+            session.context_files.update(_normalize_context_files(payload.context_files))
         pending_subagent_summaries = session.scratchpad.pop("__pending_subagent_summaries__", [])
         if isinstance(pending_subagent_summaries, list):
             for entry in pending_subagent_summaries[:20]:
@@ -374,7 +459,19 @@ def create_studio_app() -> FastAPI:
             id(getattr(session, "_team_manager", None)),
             list(team_manager._agents.keys()) if team_manager else [],
         )
-        runtime = AgentRuntime(llm, managed.get_confirm_gate("meta"), team_manager=team_manager, max_tool_rounds=20)
+        try:
+            runtime = AgentRuntime(
+                llm,
+                managed.get_confirm_gate("meta"),
+                team_manager=team_manager,
+                max_tool_rounds=_resolve_max_tool_rounds(),
+            )
+        except TypeError:
+            # Backward-compatible fallback for test doubles / legacy signatures.
+            runtime = AgentRuntime(
+                llm,
+                managed.get_confirm_gate("meta"),
+            )
 
         async def _event_stream() -> AsyncGenerator[str, None]:
             runtime_task: "asyncio.Task[None] | None" = None
@@ -396,7 +493,7 @@ def create_studio_app() -> FastAPI:
                         should_stop=request.is_disconnected,
                         agent_id="meta",
                         tools=META_AGENT_TOOLS,
-                        system_prompt=build_meta_agent_system_prompt(session, mode=mode),
+                        system_prompt=build_meta_agent_system_prompt(session, mode=mode, taskspaces=managed.taskspaces),
                     ):
                         await event_queue.put(event)
                     await event_queue.put(None)
@@ -436,6 +533,19 @@ def create_studio_app() -> FastAPI:
             finally:
                 if runtime_task is not None and not runtime_task.done():
                     runtime_task.cancel()
+                taskspace_hint = str(session.scratchpad.pop("__taskspace_hint__", "") or "").strip()
+                if taskspace_hint:
+                    hint_path = Path(taskspace_hint).expanduser().resolve(strict=False)
+                    target_dir = hint_path if hint_path.is_dir() else hint_path.parent
+                    try:
+                        manager.add_taskspace(
+                            payload.session_id,
+                            path=str(target_dir),
+                            label=target_dir.name or "taskspace",
+                        )
+                    except Exception as exc:
+                        logger.debug("register taskspace hint skipped: %s", exc)
+                manager.persist(payload.session_id)
             yield 'data: {"type":"done","data":{}}\n\n'
 
         return StreamingResponse(_event_stream(), media_type="text/event-stream")
@@ -451,9 +561,11 @@ def create_studio_app() -> FastAPI:
         user_input = str(payload.get("user_input", "")).strip()
         if not session_id or not user_input:
             raise HTTPException(status_code=400, detail="session_id and user_input are required")
-        managed = manager.get(session_id)
+        managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
+        setattr(managed.studio_session, "taskspaces", list(managed.taskspaces or []))
+        manager.touch(session_id)
         try:
             max_iterations = int(payload.get("max_iterations", 8) or 8)
         except (TypeError, ValueError):
@@ -463,7 +575,18 @@ def create_studio_app() -> FastAPI:
         session = managed.studio_session
         llm = ProviderResolver.resolve(provider_name=session.provider_name, model=session.model_name)
         loop_tm = managed.team_manager
-        runtime = AgentRuntime(llm, managed.get_confirm_gate("meta"), team_manager=loop_tm, max_tool_rounds=20)
+        try:
+            runtime = AgentRuntime(
+                llm,
+                managed.get_confirm_gate("meta"),
+                team_manager=loop_tm,
+                max_tool_rounds=_resolve_max_tool_rounds(),
+            )
+        except TypeError:
+            runtime = AgentRuntime(
+                llm,
+                managed.get_confirm_gate("meta"),
+            )
         controller = LoopController(max_iterations=max_iterations, completion_promise=completion_promise)
 
         async def _loop_stream() -> AsyncGenerator[str, None]:
@@ -474,7 +597,7 @@ def create_studio_app() -> FastAPI:
                     session=session,
                     agent_id="meta",
                     tools=META_AGENT_TOOLS,
-                    system_prompt=build_meta_agent_system_prompt(session, mode="interactive"),
+                    system_prompt=build_meta_agent_system_prompt(session, mode="interactive", taskspaces=managed.taskspaces),
                 ):
                     if await request.is_disconnected():
                         break
@@ -485,6 +608,8 @@ def create_studio_app() -> FastAPI:
             except Exception as exc:
                 err = SseEvent(type="error", data={"text": f"Loop runtime error: {exc}"})
                 yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+            finally:
+                manager.persist(session_id)
             yield 'data: {"type":"done","data":{}}\n\n'
 
         return StreamingResponse(_loop_stream(), media_type="text/event-stream")
@@ -499,7 +624,7 @@ def create_studio_app() -> FastAPI:
         agent_id = str(payload.get("agent_id", ""))
         if not session_id or not agent_id:
             raise HTTPException(status_code=400, detail="session_id and agent_id are required")
-        managed = manager.get(session_id)
+        managed = manager.get(session_id, touch=False)
         if managed is None:
             logger.warning("[cancel] session NOT FOUND sid=%s agent=%s", session_id, agent_id)
             raise HTTPException(status_code=404, detail="session not found")
@@ -538,7 +663,7 @@ def create_studio_app() -> FastAPI:
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
-        managed = manager.get(session_id)
+        managed = manager.get(session_id, touch=False)
         if managed is None:
             all_sids = list(manager._sessions.keys())
             logger.warning(
@@ -597,7 +722,7 @@ def create_studio_app() -> FastAPI:
         refined_task = payload.get("task")
         if not session_id or not agent_id:
             raise HTTPException(status_code=400, detail="session_id and agent_id are required")
-        managed = manager.get(session_id)
+        managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
         team_manager = managed.team_manager
@@ -635,7 +760,7 @@ def create_studio_app() -> FastAPI:
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_mcp_admin_token(x_agx_desktop_token)
-        managed = manager.get(session_id)
+        managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
         sess = managed.studio_session
@@ -676,7 +801,7 @@ def create_studio_app() -> FastAPI:
         source_path = str(payload.get("source_path", "")).strip()
         if not session_id or not source_path:
             raise HTTPException(status_code=400, detail="session_id and source_path are required")
-        managed = manager.get(session_id)
+        managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
         result = import_mcp_config(source_path)
@@ -698,7 +823,7 @@ def create_studio_app() -> FastAPI:
         name = str(payload.get("name", "")).strip()
         if not session_id or not name:
             raise HTTPException(status_code=400, detail="session_id and name are required")
-        managed = manager.get(session_id)
+        managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
         sess = managed.studio_session
@@ -708,6 +833,63 @@ def create_studio_app() -> FastAPI:
         if not ok:
             raise HTTPException(status_code=400, detail=f"failed to connect MCP server: {name}")
         return {"ok": True, "name": name}
+
+    @app.post("/api/test-email")
+    async def test_email(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        config_raw = payload.get("config", {})
+        if not isinstance(config_raw, dict):
+            raise HTTPException(status_code=400, detail="config must be an object")
+        allowlist = {
+            "enabled",
+            "smtp_host",
+            "smtp_port",
+            "smtp_username",
+            "smtp_password",
+            "smtp_use_tls",
+            "from_email",
+            "default_to_email",
+        }
+        for key in config_raw.keys():
+            if key not in allowlist:
+                raise HTTPException(status_code=400, detail=f"invalid config key: {key}")
+        try:
+            config = _normalize_email_config(config_raw)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid email config payload")
+        if not config["enabled"]:
+            raise HTTPException(status_code=400, detail="email is disabled")
+        missing = [
+            key
+            for key in ("smtp_host", "smtp_username", "smtp_password", "from_email")
+            if not str(config.get(key, "")).strip()
+        ]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"missing required fields: {', '.join(missing)}")
+        to_email = str(payload.get("to_email", config["default_to_email"])).strip() or config["default_to_email"]
+        message = EmailMessage()
+        message["Subject"] = "[AgenticX] SMTP Test"
+        message["From"] = str(config["from_email"])
+        message["To"] = to_email
+        message.set_content(
+            "This is a test email from AgenticX Desktop.\n"
+            "If you received this email, SMTP configuration works correctly."
+        )
+        try:
+            with smtplib.SMTP(str(config["smtp_host"]), int(config["smtp_port"]), timeout=20) as smtp:
+                if bool(config["smtp_use_tls"]):
+                    smtp.starttls()
+                smtp.login(str(config["smtp_username"]), str(config["smtp_password"]))
+                smtp.send_message(message)
+        except Exception as exc:
+            logger.warning("email test failed: %s", exc)
+            raise HTTPException(status_code=400, detail="email test failed")
+        masked = dict(config)
+        masked["smtp_password"] = _mask_secret(str(masked.get("smtp_password", "")))
+        return {"ok": True, "message": "测试邮件发送成功。", "to_email": to_email, "config": masked}
 
     # --- Avatar CRUD ---
 
@@ -793,7 +975,7 @@ def create_studio_app() -> FastAPI:
         inherited_context_files: dict = {}
         inherited_scratchpad: dict = {}
         if inherit_from:
-            old_managed = manager.get(inherit_from)
+            old_managed = manager.get(inherit_from, touch=False)
             if old_managed is not None:
                 inherited_summary = manager._build_session_summary(old_managed.studio_session)
                 inherited_context_files = dict(old_managed.studio_session.context_files)
@@ -830,6 +1012,7 @@ def create_studio_app() -> FastAPI:
             "session_id": managed.session_id,
             "avatar_id": avatar_id,
             "session_name": session_name,
+            "created_at": managed.created_at,
             "inherited": bool(inherited_summary),
         }
 
@@ -848,6 +1031,189 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="session not found")
         return {"ok": True}
 
+    @app.post("/api/sessions/{session_id}/pin")
+    async def pin_session(
+        session_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        pinned_raw = payload.get("pinned", True)
+        if isinstance(pinned_raw, bool):
+            pinned = pinned_raw
+        elif isinstance(pinned_raw, str):
+            lowered = pinned_raw.strip().lower()
+            if lowered in {"true", "1", "yes", "on"}:
+                pinned = True
+            elif lowered in {"false", "0", "no", "off"}:
+                pinned = False
+            else:
+                raise HTTPException(status_code=400, detail="pinned must be a boolean")
+        else:
+            raise HTTPException(status_code=400, detail="pinned must be a boolean")
+        ok = manager.pin_session(session_id, pinned)
+        if not ok:
+            raise HTTPException(status_code=404, detail="session not found")
+        return {"ok": True, "session_id": session_id, "pinned": pinned}
+
+    @app.post("/api/sessions/{session_id}/fork")
+    async def fork_session(
+        session_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        managed = manager.fork_session(session_id)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        return {
+            "ok": True,
+            "session_id": managed.session_id,
+            "avatar_id": managed.avatar_id,
+            "session_name": managed.session_name,
+        }
+
+    @app.post("/api/sessions/archive-before")
+    async def archive_sessions_before(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        session_id = str(payload.get("session_id", "")).strip()
+        avatar_id_raw = payload.get("avatar_id")
+        avatar_id = str(avatar_id_raw).strip() if isinstance(avatar_id_raw, str) else None
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        count = manager.archive_sessions_before(session_id, avatar_id=avatar_id)
+        if count < 0:
+            raise HTTPException(status_code=404, detail="session not found")
+        return {"ok": True, "archived_count": count}
+
+    @app.post("/api/sessions/batch-delete")
+    async def batch_delete_sessions(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        raw_ids = payload.get("session_ids", [])
+        if not isinstance(raw_ids, list):
+            raise HTTPException(status_code=400, detail="session_ids must be a list")
+        session_ids: list[str] = []
+        seen: set[str] = set()
+        for raw in raw_ids:
+            sid = str(raw or "").strip()
+            if not sid or sid in seen:
+                continue
+            session_ids.append(sid)
+            seen.add(sid)
+        if not session_ids:
+            return {"ok": True, "deleted": [], "failed": []}
+        deleted: list[str] = []
+        failed: list[str] = []
+        for sid in session_ids:
+            try:
+                managed = manager.get(sid, touch=False)
+                await _shutdown_lsp_for_managed(managed)
+                ok = manager.delete(sid)
+            except Exception:
+                ok = False
+            if ok:
+                deleted.append(sid)
+            else:
+                failed.append(sid)
+        return {"ok": True, "deleted": deleted, "failed": failed}
+
+    # --- Taskspace management ---
+
+    @app.get("/api/taskspace/workspaces")
+    async def list_taskspace_workspaces(
+        session_id: str = Query(...),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        return {"ok": True, "workspaces": manager.list_taskspaces(session_id)}
+
+    @app.post("/api/taskspace/workspaces")
+    async def add_taskspace_workspace(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        session_id = str(payload.get("session_id", "")).strip()
+        path = str(payload.get("path", "")).strip() or None
+        label = str(payload.get("label", "")).strip() or None
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        try:
+            workspace = manager.add_taskspace(session_id, path=path, label=label)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except KeyError:
+            raise HTTPException(status_code=404, detail="session not found")
+        return {"ok": True, "workspace": workspace}
+
+    @app.delete("/api/taskspace/workspaces")
+    async def remove_taskspace_workspace(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        session_id = str(payload.get("session_id", "")).strip()
+        taskspace_id = str(payload.get("taskspace_id", "")).strip()
+        if not session_id or not taskspace_id:
+            raise HTTPException(status_code=400, detail="session_id and taskspace_id are required")
+        ok = manager.remove_taskspace(session_id, taskspace_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="taskspace not found")
+        return {"ok": True}
+
+    @app.get("/api/taskspace/files")
+    async def list_taskspace_files(
+        session_id: str = Query(...),
+        taskspace_id: str = Query(...),
+        path: str = Query(default="."),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        if not session_id or not taskspace_id:
+            raise HTTPException(status_code=400, detail="session_id and taskspace_id are required")
+        try:
+            files = manager.list_taskspace_files(session_id, taskspace_id, rel_path=path)
+        except KeyError as exc:
+            detail = str(exc.args[0]) if getattr(exc, "args", None) else "session not found"
+            raise HTTPException(status_code=404, detail=detail)
+        except (ValueError, FileNotFoundError, NotADirectoryError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"ok": True, "files": files}
+
+    @app.get("/api/taskspace/file")
+    async def read_taskspace_file(
+        session_id: str = Query(...),
+        taskspace_id: str = Query(...),
+        path: str = Query(...),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        if not session_id or not taskspace_id or not path:
+            raise HTTPException(status_code=400, detail="session_id, taskspace_id and path are required")
+        try:
+            file_payload = manager.read_taskspace_file(session_id, taskspace_id, rel_path=path)
+        except KeyError as exc:
+            detail = str(exc.args[0]) if getattr(exc, "args", None) else "session not found"
+            raise HTTPException(status_code=404, detail=detail)
+        except IsADirectoryError as exc:
+            raise HTTPException(status_code=400, detail=f"path is a directory: {exc}")
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"ok": True, **file_payload}
+
     # --- Avatar fork & AI generate ---
 
     @app.post("/api/avatars/fork")
@@ -861,7 +1227,7 @@ def create_studio_app() -> FastAPI:
         role = str(payload.get("role", "")).strip()
         if not session_id or not name:
             raise HTTPException(status_code=400, detail="session_id and name are required")
-        managed = manager.get(session_id)
+        managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
         config = avatar_registry.create_avatar(

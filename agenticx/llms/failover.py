@@ -13,7 +13,7 @@ Author: Damon Li
 
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict, Generator, List, Union
+from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Union
 
 from pydantic import PrivateAttr
 
@@ -152,7 +152,7 @@ class FailoverProvider(BaseLLMProvider):
             yield chunk
 
     def stream_with_tools(
-        self, prompt: Union[str, List[Dict]], tools: List[Dict] | None = None, **kwargs: Any
+        self, prompt: Union[str, List[Dict]], tools: Optional[List[Dict]] = None, **kwargs: Any
     ) -> Generator[Dict[str, Any], None, None]:
         """Stream tool-call aware chunks from primary, fallback on error/cooldown."""
         if not self._in_cooldown():

@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 import uuid
+from copy import deepcopy
+from datetime import datetime
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, Optional
 
@@ -30,9 +34,13 @@ class ManagedSession:
     sub_confirm_gates: Dict[str, AsyncConfirmGate] = field(default_factory=dict)
     team_manager: Optional[AgentTeamManager] = None
     updated_at: float = field(default_factory=time.time)
+    created_at: float = field(default_factory=time.time)
     avatar_id: Optional[str] = None
     avatar_name: Optional[str] = None
     session_name: Optional[str] = None
+    pinned: bool = False
+    archived: bool = False
+    taskspaces: list[dict[str, str]] = field(default_factory=list)
 
     def get_confirm_gate(self, agent_id: str = "meta") -> AsyncConfirmGate:
         if not agent_id or agent_id == "meta":
@@ -69,6 +77,8 @@ class SessionManager:
         self._sessions: Dict[str, ManagedSession] = {}
         self._session_store = SessionStore()
         self._sessions_root = os.path.join(os.path.expanduser("~"), ".agenticx", "sessions")
+        self._taskspaces_root = os.path.join(os.path.expanduser("~"), ".agenticx", "taskspaces")
+        self.max_taskspaces = 5
 
     def create(
         self,
@@ -84,39 +94,83 @@ class SessionManager:
             session_id=sid,
             studio_session=studio_session,
         )
+        self._restore_managed_metadata(sid, managed)
+        self._ensure_default_taskspace(managed)
         self._sessions[sid] = managed
         return managed
 
-    def get(self, session_id: str) -> Optional[ManagedSession]:
+    def get(self, session_id: str, *, touch: bool = False) -> Optional[ManagedSession]:
         managed = self._sessions.get(session_id)
+        if managed is None and self._session_exists_in_persistence(session_id):
+            managed = self.create(session_id=session_id)
         if managed is None:
             return None
-        managed.updated_at = time.time()
+        if touch:
+            managed.updated_at = time.time()
         return managed
 
-    def delete(self, session_id: str) -> bool:
-        managed = self._sessions.pop(session_id, None)
+    def touch(self, session_id: str) -> bool:
+        managed = self._sessions.get(session_id)
+        if managed is None:
+            return False
+        managed.updated_at = time.time()
+        return True
+
+    def persist(self, session_id: str) -> bool:
+        managed = self._sessions.get(session_id)
         if managed is None:
             return False
         self._persist_session_state(session_id, managed.studio_session)
-        if managed.team_manager is not None:
-            managed.team_manager.shutdown_now()
         return True
+
+    def delete(self, session_id: str) -> bool:
+        sid = str(session_id or "").strip()
+        existed_in_persistence = self._session_exists_in_persistence(sid)
+        managed = self._sessions.pop(sid, None)
+        if managed is not None and managed.team_manager is not None:
+            managed.team_manager.shutdown_now()
+        purged = self._purge_session_state(sid)
+        if managed is not None and not existed_in_persistence:
+            return True
+        return purged and existed_in_persistence
 
     def list_sessions(self, avatar_id: str | None = None) -> list[dict]:
         """List sessions, optionally filtered by avatar_id."""
         result = []
+        seen_session_ids: set[str] = set()
         for sid, managed in self._sessions.items():
+            if getattr(managed, "archived", False):
+                continue
             if avatar_id and getattr(managed, "avatar_id", None) != avatar_id:
                 continue
+            seen_session_ids.add(sid)
             result.append({
                 "session_id": sid,
                 "avatar_id": getattr(managed, "avatar_id", None),
                 "avatar_name": getattr(managed, "avatar_name", None),
                 "session_name": getattr(managed, "session_name", None),
                 "updated_at": managed.updated_at,
+                "created_at": getattr(managed, "created_at", managed.updated_at),
+                "pinned": bool(getattr(managed, "pinned", False)),
+                "archived": bool(getattr(managed, "archived", False)),
             })
-        result.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
+        for row in self._list_persisted_sessions():
+            sid = str(row.get("session_id", "")).strip()
+            if not sid or sid in seen_session_ids:
+                continue
+            if row.get("archived"):
+                continue
+            if avatar_id and row.get("avatar_id") != avatar_id:
+                continue
+            result.append(row)
+            seen_session_ids.add(sid)
+        result.sort(
+            key=lambda row: (
+                1 if row.get("pinned") else 0,
+                float(row.get("updated_at", 0)),
+            ),
+            reverse=True,
+        )
         return result
 
     def rename_session(self, session_id: str, name: str) -> bool:
@@ -126,7 +180,73 @@ class SessionManager:
             return False
         managed.session_name = name
         managed.updated_at = time.time()
+        self._persist_session_state(session_id, managed.studio_session)
         return True
+
+    def auto_title_session(self, session_id: str, first_user_message: str) -> bool:
+        managed = self._sessions.get(session_id)
+        if managed is None:
+            return False
+        if managed.session_name:
+            return False
+        title = self._build_auto_title(first_user_message)
+        if not title:
+            return False
+        managed.session_name = title
+        managed.updated_at = time.time()
+        self._persist_session_state(session_id, managed.studio_session)
+        return True
+
+    def pin_session(self, session_id: str, pinned: bool) -> bool:
+        managed = self._sessions.get(session_id)
+        if managed is None:
+            return False
+        managed.pinned = bool(pinned)
+        managed.updated_at = time.time()
+        self._persist_session_state(session_id, managed.studio_session)
+        return True
+
+    def fork_session(self, session_id: str) -> Optional[ManagedSession]:
+        source = self._sessions.get(session_id)
+        if source is None:
+            return None
+        forked = self.create(
+            provider=source.studio_session.provider_name,
+            model=source.studio_session.model_name,
+        )
+        forked.avatar_id = source.avatar_id
+        forked.avatar_name = source.avatar_name
+        forked.session_name = self._build_fork_name(source.session_name)
+        forked.studio_session.workspace_dir = source.studio_session.workspace_dir
+        forked.studio_session.chat_history = deepcopy(source.studio_session.chat_history or [])
+        forked.studio_session.agent_messages = deepcopy(getattr(source.studio_session, "agent_messages", []) or [])
+        forked.studio_session.context_files = deepcopy(source.studio_session.context_files or {})
+        forked.studio_session.scratchpad = deepcopy(source.studio_session.scratchpad or {})
+        forked.studio_session.artifacts = deepcopy(source.studio_session.artifacts or {})
+        forked.updated_at = time.time()
+        self._persist_session_state(forked.session_id, forked.studio_session)
+        return forked
+
+    def archive_sessions_before(self, session_id: str, avatar_id: str | None = None) -> int:
+        target = self._sessions.get(session_id)
+        if target is None:
+            return -1
+        target_avatar = avatar_id if avatar_id is not None else target.avatar_id
+        target_updated_at = float(target.updated_at)
+        archived_count = 0
+        for sid, managed in self._sessions.items():
+            if sid == session_id:
+                continue
+            if managed.archived:
+                continue
+            if managed.avatar_id != target_avatar:
+                continue
+            if float(managed.updated_at) < target_updated_at:
+                managed.archived = True
+                managed.updated_at = time.time()
+                self._persist_session_state(sid, managed.studio_session)
+                archived_count += 1
+        return archived_count
 
     def get_messages(self, session_id: str) -> list[dict]:
         """Return normalized chat messages for session."""
@@ -135,6 +255,114 @@ class SessionManager:
             return self._normalize_messages(getattr(managed.studio_session, "chat_history", []) or [])
         payload = self._load_messages_snapshot(session_id)
         return self._normalize_messages(payload)
+
+    def list_taskspaces(self, session_id: str) -> list[dict[str, str]]:
+        managed = self.get(session_id, touch=False)
+        if managed is None:
+            return []
+        self._ensure_default_taskspace(managed)
+        return [dict(item) for item in managed.taskspaces]
+
+    def add_taskspace(
+        self,
+        session_id: str,
+        *,
+        path: str | None = None,
+        label: str | None = None,
+    ) -> dict[str, str]:
+        managed = self.get(session_id, touch=False)
+        if managed is None:
+            raise KeyError("session not found")
+        resolved_path = self._resolve_taskspace_root(session_id, path)
+        for item in managed.taskspaces:
+            if item.get("path") == resolved_path:
+                return dict(item)
+        if len(managed.taskspaces) >= self.max_taskspaces:
+            raise ValueError(f"taskspace limit reached ({self.max_taskspaces})")
+        clean_label = (label or "").strip() or Path(resolved_path).name or "taskspace"
+        taskspace = {
+            "id": f"ts-{uuid.uuid4().hex[:8]}",
+            "label": clean_label,
+            "path": resolved_path,
+        }
+        managed.taskspaces.append(taskspace)
+        managed.updated_at = time.time()
+        self._persist_session_state(session_id, managed.studio_session)
+        return dict(taskspace)
+
+    def remove_taskspace(self, session_id: str, taskspace_id: str) -> bool:
+        managed = self.get(session_id, touch=False)
+        if managed is None:
+            return False
+        before = len(managed.taskspaces)
+        managed.taskspaces = [item for item in managed.taskspaces if item.get("id") != taskspace_id]
+        if len(managed.taskspaces) == before:
+            return False
+        self._ensure_default_taskspace(managed)
+        managed.updated_at = time.time()
+        self._persist_session_state(session_id, managed.studio_session)
+        return True
+
+    def list_taskspace_files(
+        self,
+        session_id: str,
+        taskspace_id: str,
+        rel_path: str = ".",
+    ) -> list[dict[str, Any]]:
+        managed = self.get(session_id, touch=False)
+        if managed is None:
+            raise KeyError("session not found")
+        taskspace = self._get_taskspace(managed, taskspace_id)
+        if taskspace is None:
+            raise KeyError("taskspace not found")
+        root = Path(taskspace["path"]).expanduser().resolve(strict=False)
+        target = self._resolve_inside_root(root, rel_path, expect_dir=True)
+        rows: list[dict[str, Any]] = []
+        for entry in sorted(target.iterdir(), key=lambda p: (0 if p.is_dir() else 1, p.name.lower())):
+            stat = entry.stat()
+            rows.append(
+                {
+                    "name": entry.name,
+                    "type": "dir" if entry.is_dir() else "file",
+                    "path": str(entry.relative_to(root)),
+                    "size": int(stat.st_size),
+                    "modified": float(stat.st_mtime),
+                }
+            )
+        return rows
+
+    def read_taskspace_file(
+        self,
+        session_id: str,
+        taskspace_id: str,
+        rel_path: str,
+        *,
+        max_bytes: int = 512 * 1024,
+    ) -> dict[str, Any]:
+        managed = self.get(session_id, touch=False)
+        if managed is None:
+            raise KeyError("session not found")
+        taskspace = self._get_taskspace(managed, taskspace_id)
+        if taskspace is None:
+            raise KeyError("taskspace not found")
+        root = Path(taskspace["path"]).expanduser().resolve(strict=False)
+        target = self._resolve_inside_root(root, rel_path, expect_dir=False)
+        if target.is_dir():
+            raise IsADirectoryError(str(target))
+        data = target.read_bytes()
+        truncated = False
+        if len(data) > max_bytes:
+            data = data[:max_bytes]
+            truncated = True
+        content = data.decode("utf-8", errors="replace")
+        return {
+            "name": target.name,
+            "path": str(target.relative_to(root)),
+            "absolute_path": str(target),
+            "content": content,
+            "truncated": truncated,
+            "size": int(target.stat().st_size),
+        }
 
     def cleanup_expired(self) -> None:
         now = time.time()
@@ -178,6 +406,21 @@ class SessionManager:
         except Exception:
             pass
 
+    def _restore_managed_metadata(self, session_id: str, managed: ManagedSession) -> None:
+        try:
+            metadata = self._session_store._load_latest_session_metadata_sync(session_id)
+        except Exception:
+            metadata = {}
+        if not isinstance(metadata, dict):
+            return
+        session_name = str(metadata.get("session_name", "")).strip()
+        if session_name:
+            managed.session_name = session_name
+        managed.created_at = self._to_float(metadata.get("created_at"), managed.created_at)
+        managed.pinned = bool(metadata.get("pinned", False))
+        managed.archived = bool(metadata.get("archived", False))
+        managed.taskspaces = self._sanitize_taskspaces(session_id, metadata.get("taskspaces"))
+
     def _persist_session_state(self, session_id: str, session: StudioSession) -> None:
         try:
             todos = session.todo_manager.to_payload()
@@ -190,6 +433,14 @@ class SessionManager:
                 "model": session.model_name or "",
                 "chat_messages": len(session.chat_history),
                 "artifacts": len(session.artifacts),
+                "session_name": getattr(self._sessions.get(session_id), "session_name", None),
+                "avatar_id": getattr(self._sessions.get(session_id), "avatar_id", None),
+                "avatar_name": getattr(self._sessions.get(session_id), "avatar_name", None),
+                "created_at": getattr(self._sessions.get(session_id), "created_at", time.time()),
+                "updated_at": getattr(self._sessions.get(session_id), "updated_at", time.time()),
+                "pinned": bool(getattr(self._sessions.get(session_id), "pinned", False)),
+                "archived": bool(getattr(self._sessions.get(session_id), "archived", False)),
+                "taskspaces": list(getattr(self._sessions.get(session_id), "taskspaces", []) or []),
             }
             self._session_store._save_session_summary_sync(session_id, summary, metadata)
             self._save_messages_snapshot(session_id, session.chat_history or [])
@@ -301,3 +552,206 @@ class SessionManager:
             f"last_assistant={last_assistant[:300]}\n"
             f"todos={session.todo_manager.render()[:600]}"
         )
+
+    def _build_auto_title(self, message: str) -> str:
+        compact = " ".join(str(message or "").split())
+        if not compact:
+            return ""
+        return compact[:30]
+
+    def _build_fork_name(self, base_name: Optional[str]) -> str:
+        text = str(base_name or "").strip()
+        if not text:
+            return "Fork Chat"
+        return f"{text} (Fork)"
+
+    def _to_float(self, value: Any, fallback: float) -> float:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        if parsed <= 0:
+            return fallback
+        return parsed
+
+    def _list_persisted_sessions(self) -> list[dict]:
+        rows: list[dict] = []
+        try:
+            # Load full history; previous hard cap (1000) caused "ghost" sessions
+            # to appear after bulk delete because older records surfaced next.
+            latest = self._session_store._list_latest_sessions_sync(limit=0)
+        except Exception:
+            latest = []
+        for item in latest:
+            sid = str(item.get("session_id", "")).strip()
+            if not sid:
+                continue
+            metadata = item.get("metadata", {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            created_at = self._to_float(metadata.get("created_at"), self._iso_to_epoch(item.get("created_at")))
+            updated_at = self._to_float(metadata.get("updated_at"), self._iso_to_epoch(item.get("created_at")))
+            rows.append(
+                {
+                    "session_id": sid,
+                    "avatar_id": metadata.get("avatar_id"),
+                    "avatar_name": metadata.get("avatar_name"),
+                    "session_name": metadata.get("session_name"),
+                    "updated_at": updated_at,
+                    "created_at": created_at,
+                    "pinned": bool(metadata.get("pinned", False)),
+                    "archived": bool(metadata.get("archived", False)),
+                }
+            )
+        known = {str(row.get("session_id", "")) for row in rows}
+        root = Path(self._sessions_root)
+        if root.exists():
+            for child in root.iterdir():
+                if not child.is_dir():
+                    continue
+                sid = child.name
+                if sid in known:
+                    continue
+                messages_path = child / "messages.json"
+                if not messages_path.exists():
+                    continue
+                mtime = float(messages_path.stat().st_mtime)
+                rows.append(
+                    {
+                        "session_id": sid,
+                        "avatar_id": None,
+                        "avatar_name": None,
+                        "session_name": None,
+                        "updated_at": mtime,
+                        "created_at": mtime,
+                        "pinned": False,
+                        "archived": False,
+                    }
+                )
+        return rows
+
+    def _purge_session_state(self, session_id: str) -> bool:
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False
+        db_ok = False
+        try:
+            self._session_store._purge_session_sync(sid)
+            db_ok = not self._session_store._session_exists_sync(sid)
+        except Exception:
+            db_ok = False
+        fs_ok = True
+        session_dir = Path(self._sessions_root) / sid
+        if session_dir.exists():
+            try:
+                shutil.rmtree(session_dir, ignore_errors=False)
+            except Exception:
+                fs_ok = False
+            else:
+                fs_ok = not session_dir.exists()
+        taskspace_ok = True
+        default_taskspace_dir = Path(self._taskspaces_root) / sid
+        if default_taskspace_dir.exists():
+            try:
+                shutil.rmtree(default_taskspace_dir, ignore_errors=False)
+            except Exception:
+                taskspace_ok = False
+            else:
+                taskspace_ok = not default_taskspace_dir.exists()
+        return db_ok and fs_ok and taskspace_ok
+
+    def _session_exists_in_persistence(self, session_id: str) -> bool:
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False
+        try:
+            metadata = self._session_store._load_latest_session_metadata_sync(sid)
+            if isinstance(metadata, dict) and metadata:
+                return True
+        except Exception:
+            pass
+        messages_path = Path(self._messages_path(sid))
+        return messages_path.exists()
+
+    def _iso_to_epoch(self, value: Any) -> float:
+        text = str(value or "").strip()
+        if not text:
+            return time.time()
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return time.time()
+
+    def _ensure_default_taskspace(self, managed: ManagedSession) -> None:
+        if managed.taskspaces:
+            return
+        managed.taskspaces = [
+            {
+                "id": "default",
+                "label": "默认工作区",
+                "path": self._resolve_taskspace_root(managed.session_id, None),
+            }
+        ]
+
+    def _resolve_taskspace_root(self, session_id: str, path: str | None) -> str:
+        if path and str(path).strip():
+            root = Path(str(path).strip()).expanduser()
+        else:
+            root = Path(self._taskspaces_root) / session_id / "default"
+        resolved = root.resolve(strict=False)
+        resolved.mkdir(parents=True, exist_ok=True)
+        return str(resolved)
+
+    def _sanitize_taskspaces(self, session_id: str, payload: Any) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        if isinstance(payload, list):
+            for item in payload:
+                if not isinstance(item, dict):
+                    continue
+                taskspace_id = str(item.get("id", "")).strip()
+                label = str(item.get("label", "")).strip()
+                path = str(item.get("path", "")).strip()
+                if not taskspace_id or not path:
+                    continue
+                resolved_path = self._resolve_taskspace_root(session_id, path)
+                rows.append(
+                    {
+                        "id": taskspace_id,
+                        "label": label or Path(resolved_path).name or "taskspace",
+                        "path": resolved_path,
+                    }
+                )
+                if len(rows) >= self.max_taskspaces:
+                    break
+        if not rows:
+            return []
+        dedup: list[dict[str, str]] = []
+        seen_paths: set[str] = set()
+        for row in rows:
+            row_path = row["path"]
+            if row_path in seen_paths:
+                continue
+            dedup.append(row)
+            seen_paths.add(row_path)
+            if len(dedup) >= self.max_taskspaces:
+                break
+        return dedup
+
+    def _get_taskspace(self, managed: ManagedSession, taskspace_id: str) -> Optional[dict[str, str]]:
+        for item in managed.taskspaces:
+            if item.get("id") == taskspace_id:
+                return item
+        return None
+
+    def _resolve_inside_root(self, root: Path, rel_path: str, *, expect_dir: bool) -> Path:
+        clean_rel = str(rel_path or ".").strip() or "."
+        target = (root / clean_rel).resolve(strict=False)
+        try:
+            target.relative_to(root)
+        except ValueError as exc:
+            raise ValueError("path escapes taskspace root") from exc
+        if not target.exists():
+            raise FileNotFoundError(str(target))
+        if expect_dir and not target.is_dir():
+            raise NotADirectoryError(str(target))
+        return target

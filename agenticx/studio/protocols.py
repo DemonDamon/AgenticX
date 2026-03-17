@@ -18,6 +18,7 @@ class ChatRequest(BaseModel):
     model: Optional[str] = None
     agent_id: Optional[str] = None
     mode: Optional[str] = "interactive"
+    context_files: Optional[Dict[str, str]] = None
 
 
 class ConfirmResponse(BaseModel):

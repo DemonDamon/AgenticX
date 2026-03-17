@@ -19,7 +19,7 @@ import openai  # type: ignore
 from pydantic import Field  # type: ignore
 from loguru import logger  # type: ignore
 
-from .base import BaseLLMProvider
+from .base import BaseLLMProvider, StreamChunk
 from .response import LLMResponse, TokenUsage, LLMChoice
 
 
@@ -438,6 +438,78 @@ class ArkLLMProvider(BaseLLMProvider):
         except Exception as e:
             logger.error(f"Ark streaming call failed: {str(e)}")
             raise Exception(f"Ark streaming call failed: {str(e)}") from e
+
+    def stream_with_tools(
+        self,
+        prompt: Union[str, List[Dict]],
+        tools: Optional[List[Dict]] = None,
+        **kwargs: Any,
+    ) -> Generator[StreamChunk, None, None]:
+        """Stream content/tool-call deltas in a normalized chunk format."""
+        try:
+            messages = self._convert_prompt_to_messages(prompt)
+            params = self._prepare_request_params(
+                messages,
+                tools=tools,
+                stream=True,
+                **kwargs,
+            )
+
+            logger.info(
+                f"Ark streaming-with-tools request: model={self._get_effective_model()}"
+            )
+
+            if self.client is None:
+                raise ValueError("Sync client not initialized")
+
+            response_stream = self.client.chat.completions.create(**params)
+            last_finish_reason = ""
+            for chunk in response_stream:
+                if not getattr(chunk, "choices", None):
+                    continue
+                choice = chunk.choices[0]
+                finish_reason = getattr(choice, "finish_reason", None)
+                if isinstance(finish_reason, str) and finish_reason:
+                    last_finish_reason = finish_reason
+                delta = getattr(choice, "delta", None)
+                if delta is None:
+                    continue
+
+                content = getattr(delta, "content", None)
+                if isinstance(content, str) and content:
+                    yield {"type": "content", "text": content}
+
+                tool_calls = getattr(delta, "tool_calls", None)
+                if tool_calls:
+                    for tc in tool_calls:
+                        idx = getattr(tc, "index", 0)
+                        tc_id = getattr(tc, "id", "") or ""
+                        fn_obj = getattr(tc, "function", None)
+                        fn_name = (
+                            getattr(fn_obj, "name", "") if fn_obj is not None else ""
+                        )
+                        fn_args = (
+                            getattr(fn_obj, "arguments", "")
+                            if fn_obj is not None
+                            else ""
+                        )
+                        try:
+                            tool_index = int(idx)
+                        except (TypeError, ValueError):
+                            tool_index = 0
+                        yield {
+                            "type": "tool_call_delta",
+                            "tool_index": tool_index,
+                            "tool_call_id": str(tc_id),
+                            "tool_name": str(fn_name),
+                            "arguments_delta": "" if fn_args is None else str(fn_args),
+                        }
+            yield {"type": "done", "finish_reason": last_finish_reason}
+        except Exception as e:
+            logger.error(f"Ark streaming-with-tools call failed: {str(e)}")
+            raise Exception(
+                f"Ark streaming-with-tools call failed: {str(e)}"
+            ) from e
 
     async def astream(
         self, prompt: Union[str, List[Dict]], **kwargs: Any

@@ -247,7 +247,47 @@ def _build_memory_recall_context(session: StudioSession) -> str:
         return ""
 
 
-def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "interactive") -> str:
+def _build_taskspaces_context(taskspaces: list[dict[str, str]] | None) -> str:
+    if not taskspaces:
+        return ""
+    lines = ["## 当前会话工作区（Taskspaces）"]
+    for ts in taskspaces:
+        label = ts.get("label", "")
+        path = ts.get("path", "")
+        ts_id = ts.get("id", "")
+        lines.append(f"- **{label}** → `{path}` (id: {ts_id})")
+    lines.append(
+        "提示：用户在 UI 中添加的工作区路径即为项目根目录。"
+        "执行 bash_exec / file_read / file_write 时，请基于上述路径操作，"
+        "无需再询问用户项目位置。\n"
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _build_lsp_context() -> str:
+    return (
+        "## 代码智能工具（LSP）\n"
+        "你可以使用以下工具获得 IDE 级别的代码理解能力：\n"
+        "- `lsp_goto_definition(file, line, column)`：跳转到符号定义\n"
+        "- `lsp_find_references(file, line, column)`：查找符号引用\n"
+        "- `lsp_hover(file, line, column)`：获取类型签名和文档\n"
+        "- `lsp_diagnostics(file?)`：获取 lint/类型错误\n\n"
+        "使用建议：\n"
+        "- 理解函数/类来源时，优先 `lsp_goto_definition`，不要先 grep。\n"
+        "- 重构前评估影响面时，优先 `lsp_find_references`。\n"
+        "- 判断 API 参数/返回值时，优先 `lsp_hover`。\n"
+        "- 改动代码后验证质量时，调用 `lsp_diagnostics`。\n\n"
+        "注意：首次调用可能需要几秒启动语言服务器；若未安装 pyright/ts-language-server，\n"
+        "请先提示用户安装，再提供降级方案。\n\n"
+    )
+
+
+def build_meta_agent_system_prompt(
+    session: StudioSession,
+    *,
+    mode: str = "interactive",
+    taskspaces: list[dict[str, str]] | None = None,
+) -> str:
     workspace_context = _build_workspace_context_block()
     memory_recall = _build_memory_recall_context(session)
     active_subagents = _build_active_subagents_context(session)
@@ -255,6 +295,8 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
     mcp_context = _build_mcps_context(session)
     avatars_context = _build_avatars_context()
     todo_context = _build_todo_context(session)
+    taskspaces_context = _build_taskspaces_context(taskspaces)
+    lsp_context = _build_lsp_context()
     mode_line = (
         "## 当前工作模式\n- interactive：可与用户多轮澄清，强调可控执行。\n\n"
         if mode != "auto"
@@ -262,7 +304,10 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
     )
     return (
         f"{workspace_context}\n"
-        "你是 AgenticX Desktop 的首席 Meta-Agent（CEO）。你的核心职责是调度与汇报，而非直接执行文件/命令类工具。\n\n"
+        "你是 AgenticX Desktop 的首席 Meta-Agent（CEO）。\n"
+        "你既能直接使用工具（bash_exec、file_read、file_write、file_edit 等），也能调度子智能体。\n"
+        "- 简单/快速任务（查目录、读文件、执行单条命令、回答事实性问题）：直接使用工具完成，不要委派子智能体。\n"
+        "- 复杂/多步骤任务（需多文件协作、长时间运行、需要专业角色）：拆解后通过 spawn_subagent 委派。\n\n"
         f"{mode_line}"
         "## 身份应答策略\n"
         "- 当用户询问“你是谁/你的定位”时，优先基于“身份与长期上下文”简洁回答（身份、职责、边界）。\n"
@@ -276,6 +321,7 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "3.3) 若用户同意推荐模型，调用 `spawn_subagent` 时显式传入 `provider` 和 `model`；若用户未同意，则沿用当前会话模型。\n"
         "4) 用户问“进度如何”/“状态”/“子智能体在干什么”时，优先调用 `query_subagent_status` 获取一次最新状态；同一轮禁止重复轮询。\n"
         "5) 若某子智能体失控或偏航，调用 `cancel_subagent` 并重新规划。\n\n"
+        "6) 当用户反馈明确 bug 且希望上报团队时，先询问是否发送邮件；用户同意后调用 `send_bug_report_email` 发送上下文。\n\n"
         "## 调度策略\n"
         "- 拆解任务前优先通过 todo_write 记录任务清单，保持单个 in_progress。\n"
         "- 简单任务：优先单子智能体，避免过度调度。\n"
@@ -300,6 +346,8 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "- 在拿到工具结果前，不要输出长段解释；优先输出工具事件与结果。\n"
         "- 若当前不需要启动子智能体，就直接给最终答复，不要进入无意义等待。\n"
         "- 当「当前子智能体状态」章节列出了 running/pending 的子智能体时，用户问进度可调用一次 `query_subagent_status`；拿到结果后必须直接回答，不得在同一轮再次调用。\n\n"
+        "- 连续 2 次工具失败后，先做一次失败归因并调整方案；禁止在同一错误模式下重复试错超过 2 次。\n"
+        "- 对 MCP 连接问题，优先走最短闭环：`file_read(mcp.json)` -> `mcp_import` -> `mcp_connect` -> 若失败仅补充 1 次最小验证（命令可执行性）；随后给出明确结论与下一步，不要无限深挖。\n\n"
         "- 若涉及文件产出，必须要求子智能体给出可验证路径与工具成功证据；不要接受“口头已生成”。\n"
         "- 用户未明确指定落盘目录时，先建议路径并征求同意，再安排写入动作。\n\n"
         "- 当用户询问“你有什么能力 / skills / mcp / 工具”时：直接基于“已注册能力”章节作答，禁止调用 `check_resources` 或启动子智能体。\n"
@@ -307,6 +355,11 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "- 工具调用语法必须是裸函数形式（如 `check_resources()`），禁止包裹在 `print(...)`、`<tool_code>...</tool_code>` 或其他文本模板中。\n\n"
         "- 工具执行授权禁止使用 A/B/C 文本确认；必须直接调用目标工具，由系统发出 `confirm_required` 事件。\n"
         "- Desktop 服务模式下禁止调用不存在的 `confirm_*` 工具；`A/B/C` 不得替代工具授权确认。\n\n"
+        "- 若用户提到“上报 bug/发邮件给团队”，先确认是否发送，再调用 `send_bug_report_email`；若邮箱未配置，先指导配置 notifications.email.*。\n\n"
+        "## 配置安全红线（必须遵守）\n"
+        "- 严禁通过 `file_write` / `file_edit` 直接修改 `~/.agenticx/config.yaml`。\n"
+        "- 当用户要求“帮我配置邮箱”时，只能调用 `update_email_config`，且仅允许写入 notifications.email.* 白名单字段。\n"
+        "- 禁止修改 provider/model/mcp/权限策略等非邮件配置项；如用户有此诉求，必须先解释风险并征求明确确认。\n\n"
         "## 子智能体完成后的主动汇报（关键）\n"
         "- 当「当前子智能体状态」或「历史子智能体结果」中出现 completed 或 failed 的子智能体，你 **必须在本轮回复中主动汇报**，包括：\n"
         "  1) 子智能体名称和任务概述。\n"
@@ -325,8 +378,10 @@ def build_meta_agent_system_prompt(session: StudioSession, *, mode: str = "inter
         "- 委派前先查看 Avatars 列表确认目标分身存在。\n"
         "- 委派结果会通过子智能体事件流返回。\n\n"
         f"{todo_context}\n"
+        f"{lsp_context}"
         f"{active_subagents}"
         f"{memory_recall}"
+        f"{taskspaces_context}"
         "## 当前会话上下文\n"
         f"- provider: {session.provider_name or 'default'}\n"
         f"- model: {session.model_name or 'default'}\n"

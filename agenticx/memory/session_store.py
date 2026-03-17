@@ -158,6 +158,115 @@ class SessionStore:
     async def search_session_summaries(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self._search_session_summaries_sync, query, limit)
 
+    async def load_latest_session_metadata(self, session_id: str) -> Dict[str, Any]:
+        return await asyncio.to_thread(self._load_latest_session_metadata_sync, session_id)
+
+    async def list_latest_sessions(self, limit: int = 500) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self._list_latest_sessions_sync, limit)
+
+    async def purge_session(self, session_id: str) -> bool:
+        return await asyncio.to_thread(self._purge_session_sync, session_id)
+
+    async def session_exists(self, session_id: str) -> bool:
+        return await asyncio.to_thread(self._session_exists_sync, session_id)
+
+    def _load_latest_session_metadata_sync(self, session_id: str) -> Dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT metadata
+                FROM session_summaries
+                WHERE session_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                return {}
+            try:
+                payload = json.loads(str(row["metadata"] or "{}"))
+            except Exception:
+                return {}
+            return payload if isinstance(payload, dict) else {}
+
+    def _list_latest_sessions_sync(self, limit: int = 500) -> List[Dict[str, Any]]:
+        safe_limit = int(limit)
+        use_limit = safe_limit > 0
+        with self._connect() as conn:
+            if use_limit:
+                rows = conn.execute(
+                    """
+                    SELECT s.session_id, s.created_at, s.metadata
+                    FROM session_summaries AS s
+                    INNER JOIN (
+                        SELECT session_id, MAX(created_at) AS max_created_at
+                        FROM session_summaries
+                        GROUP BY session_id
+                    ) AS latest
+                      ON s.session_id = latest.session_id
+                     AND s.created_at = latest.max_created_at
+                    ORDER BY s.created_at DESC
+                    LIMIT ?
+                    """,
+                    (safe_limit,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT s.session_id, s.created_at, s.metadata
+                    FROM session_summaries AS s
+                    INNER JOIN (
+                        SELECT session_id, MAX(created_at) AS max_created_at
+                        FROM session_summaries
+                        GROUP BY session_id
+                    ) AS latest
+                      ON s.session_id = latest.session_id
+                     AND s.created_at = latest.max_created_at
+                    ORDER BY s.created_at DESC
+                    """
+                ).fetchall()
+            result: List[Dict[str, Any]] = []
+            for row in rows:
+                metadata: Dict[str, Any] = {}
+                try:
+                    metadata = json.loads(str(row["metadata"] or "{}"))
+                except Exception:
+                    metadata = {}
+                result.append(
+                    {
+                        "session_id": str(row["session_id"]),
+                        "created_at": str(row["created_at"]),
+                        "metadata": metadata if isinstance(metadata, dict) else {},
+                    }
+                )
+            return result
+
+    def _purge_session_sync(self, session_id: str) -> bool:
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False
+        with self._connect() as conn:
+            c1 = conn.execute("DELETE FROM todos WHERE session_id = ?", (sid,)).rowcount
+            c2 = conn.execute("DELETE FROM scratchpad WHERE session_id = ?", (sid,)).rowcount
+            c3 = conn.execute("DELETE FROM session_summaries WHERE session_id = ?", (sid,)).rowcount
+            conn.commit()
+        return (c1 + c2 + c3) > 0
+
+    def _session_exists_sync(self, session_id: str) -> bool:
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False
+        with self._connect() as conn:
+            todos = conn.execute("SELECT 1 FROM todos WHERE session_id = ? LIMIT 1", (sid,)).fetchone()
+            if todos is not None:
+                return True
+            scratch = conn.execute("SELECT 1 FROM scratchpad WHERE session_id = ? LIMIT 1", (sid,)).fetchone()
+            if scratch is not None:
+                return True
+            summaries = conn.execute("SELECT 1 FROM session_summaries WHERE session_id = ? LIMIT 1", (sid,)).fetchone()
+            return summaries is not None
+
     def _search_session_summaries_sync(self, query: str, limit: int) -> List[Dict[str, Any]]:
         q = f"%{query.strip()}%"
         with self._connect() as conn:

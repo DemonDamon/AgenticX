@@ -10,6 +10,7 @@ import json
 import asyncio
 import hashlib
 import inspect
+import logging
 import os
 import re
 import threading
@@ -57,6 +58,7 @@ DEFAULT_STATUS_QUERY_BUDGET_PER_TURN = 2
 DEFAULT_STATUS_QUERY_COOLDOWN_SECONDS = 8.0
 DEFAULT_LLM_HEARTBEAT_TIMEOUT_SECONDS = 60.0
 DEFAULT_LLM_HARD_TIMEOUT_SECONDS = 300.0
+logger = logging.getLogger(__name__)
 
 
 def _truncate(text: str, limit: int = MAX_CONTEXT_CHARS) -> str:
@@ -197,12 +199,26 @@ def _resolve_llm_hard_timeout_seconds(session: StudioSession) -> float:
 
 
 def _repair_streamed_tool_arguments(raw: str) -> Dict[str, Any]:
+    def _sanitize_parsed_args(parsed: Dict[str, Any]) -> Dict[str, Any]:
+        # Drop leaked streamed metadata keys/values such as call_xxx / sa-xxxx
+        # before tool dispatch.
+        cleaned: Dict[str, Any] = {}
+        for key, value in parsed.items():
+            key_text = str(key).strip()
+            val_text = str(value).strip() if value is not None else ""
+            if re.fullmatch(r"call_[A-Za-z0-9]+", key_text):
+                continue
+            if re.fullmatch(r"(call_[A-Za-z0-9]+|sa-[a-z0-9]+)", val_text):
+                continue
+            cleaned[key] = value
+        return cleaned
+
     text = (raw or "").strip()
     if not text:
         return {}
     try:
         parsed = json.loads(text)
-        return parsed if isinstance(parsed, dict) else {}
+        return _sanitize_parsed_args(parsed) if isinstance(parsed, dict) else {}
     except Exception:
         pass
     lpos = text.find("{")
@@ -210,7 +226,7 @@ def _repair_streamed_tool_arguments(raw: str) -> Dict[str, Any]:
     if lpos >= 0 and rpos > lpos:
         try:
             parsed = json.loads(text[lpos : rpos + 1])
-            return parsed if isinstance(parsed, dict) else {}
+            return _sanitize_parsed_args(parsed) if isinstance(parsed, dict) else {}
         except Exception:
             pass
     return {}
@@ -314,6 +330,25 @@ def _parse_tool_arguments(raw_args: Any) -> Dict[str, Any]:
             return {}
         return decoded if isinstance(decoded, dict) else {}
     return {}
+
+
+def _summarize_tool_calls_for_history(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Keep only stable fields to avoid leaking runtime metadata ids into model context."""
+    summarized: List[Dict[str, Any]] = []
+    for call in tool_calls:
+        if not isinstance(call, dict):
+            continue
+        function_obj = call.get("function", {}) if isinstance(call.get("function"), dict) else {}
+        name = str(function_obj.get("name", "")).strip()
+        arguments = function_obj.get("arguments")
+        if isinstance(arguments, str):
+            parsed_args = _parse_tool_arguments(arguments)
+        elif isinstance(arguments, dict):
+            parsed_args = arguments
+        else:
+            parsed_args = {}
+        summarized.append({"name": name, "arguments": parsed_args})
+    return summarized
 
 
 def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -704,13 +739,6 @@ class AgentRuntime:
                                     data={"text": "⏳"},
                                     agent_id=agent_id,
                                 )
-                            elif waiting_hint_emitted and (now - last_pulse_at) >= 3.0:
-                                last_pulse_at = now
-                                yield RuntimeEvent(
-                                    type=EventType.TOKEN.value,
-                                    data={"text": "…"},
-                                    agent_id=agent_id,
-                                )
                             if elapsed >= hard_timeout_seconds:
                                 stop_stream.set()
                                 raise asyncio.TimeoutError()
@@ -786,6 +814,10 @@ class AgentRuntime:
                         )()
                         used_stream_path = True
                     except Exception:
+                        logger.warning(
+                            "stream_with_tools failed, fallback to invoke path",
+                            exc_info=True,
+                        )
                         used_stream_path = False
                     finally:
                         stop_stream.set()
@@ -821,13 +853,6 @@ class AgentRuntime:
                             yield RuntimeEvent(
                                 type=EventType.TOKEN.value,
                                 data={"text": "⏳"},
-                                agent_id=agent_id,
-                            )
-                        elif waiting_hint_emitted and (now - last_pulse_at) >= 3.0:
-                            last_pulse_at = now
-                            yield RuntimeEvent(
-                                type=EventType.TOKEN.value,
-                                data={"text": "…"},
                                 agent_id=agent_id,
                             )
                         if elapsed >= invoke_timeout_seconds:
@@ -945,10 +970,11 @@ class AgentRuntime:
                 "tool_calls": tool_calls,
             }
             messages.append(assistant_tool_message)
+            tool_calls_summary = _summarize_tool_calls_for_history(tool_calls)
             tool_call_text = (
-                f"{response_text}\n\n工具调用:\n{json.dumps(tool_calls, ensure_ascii=False)}"
+                f"{response_text}\n\n工具调用:\n{json.dumps(tool_calls_summary, ensure_ascii=False)}"
                 if response_text
-                else f"工具调用:\n{json.dumps(tool_calls, ensure_ascii=False)}"
+                else f"工具调用:\n{json.dumps(tool_calls_summary, ensure_ascii=False)}"
             )
             if not _is_system_trigger:
                 session.chat_history.append({"role": "assistant", "content": tool_call_text})

@@ -9,10 +9,14 @@ from __future__ import annotations
 import json
 import logging
 import re
+import smtplib
+from email.message import EmailMessage
+from datetime import datetime
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 _meta_log = logging.getLogger(__name__)
 
+from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio_mcp import import_mcp_config, load_available_servers
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.cli.config_manager import ConfigManager
@@ -23,7 +27,7 @@ if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
 
 
-META_AGENT_TOOLS: List[Dict[str, Any]] = [
+_META_ONLY_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -241,6 +245,52 @@ META_AGENT_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "send_bug_report_email",
+            "description": "Send bug report email using user-configured SMTP settings.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subject": {"type": "string", "description": "Email subject."},
+                    "bug_summary": {"type": "string", "description": "One-paragraph bug summary."},
+                    "bug_context": {"type": "string", "description": "Detailed bug context, logs, and repro info."},
+                    "to_email": {
+                        "type": "string",
+                        "description": "Recipient email. Defaults to configured default recipient or AgenticX team address.",
+                    },
+                    "include_recent_chat": {
+                        "type": "boolean",
+                        "description": "Whether to append recent user/assistant chat context.",
+                    },
+                },
+                "required": ["bug_summary", "bug_context"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_email_config",
+            "description": "Safely update notifications.email.* config with strict allowlist validation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "enabled": {"type": "boolean"},
+                    "smtp_host": {"type": "string"},
+                    "smtp_port": {"type": "integer"},
+                    "smtp_username": {"type": "string"},
+                    "smtp_password": {"type": "string"},
+                    "smtp_use_tls": {"type": "boolean"},
+                    "from_email": {"type": "string"},
+                    "default_to_email": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "memory_search",
             "description": "Search indexed workspace memory via fts/semantic/hybrid.",
             "parameters": {
@@ -286,6 +336,17 @@ META_AGENT_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+]
+
+_studio_tool_names = {
+    t.get("function", {}).get("name") for t in STUDIO_TOOLS if isinstance(t, dict)
+}
+_meta_only_names = {
+    t.get("function", {}).get("name") for t in _META_ONLY_TOOLS if isinstance(t, dict)
+}
+META_AGENT_TOOLS: List[Dict[str, Any]] = list(STUDIO_TOOLS) + [
+    t for t in _META_ONLY_TOOLS
+    if t.get("function", {}).get("name") not in _studio_tool_names
 ]
 
 
@@ -342,6 +403,215 @@ def _model_capability_score(provider: str, model: str) -> int:
         if token in text:
             score -= 7
     return max(10, min(100, score))
+
+
+def _read_email_config() -> Dict[str, Any]:
+    cfg = ConfigManager.load()
+    raw = cfg.providers if isinstance(cfg.providers, dict) else {}
+    # Backward-compatible path via set_value/get_value:
+    # notifications.email.*
+    email_cfg = ConfigManager.get_value("notifications.email")
+    if not isinstance(email_cfg, dict):
+        email_cfg = {}
+    # Also allow old top-level "email" block.
+    legacy_email_cfg = ConfigManager.get_value("email")
+    if isinstance(legacy_email_cfg, dict):
+        merged = dict(legacy_email_cfg)
+        merged.update(email_cfg)
+        email_cfg = merged
+
+    raw_port = email_cfg.get("smtp_port", 587)
+    try:
+        smtp_port = int(raw_port)
+    except Exception:
+        smtp_port = 587
+    if smtp_port <= 0 or smtp_port > 65535:
+        smtp_port = 587
+
+    try:
+        smtp_use_tls = _normalize_bool(email_cfg.get("smtp_use_tls", True), field="smtp_use_tls")
+    except ValueError:
+        smtp_use_tls = True
+    try:
+        enabled = _normalize_bool(email_cfg.get("enabled", True), field="enabled")
+    except ValueError:
+        enabled = True
+
+    return {
+        "smtp_host": str(email_cfg.get("smtp_host", "")).strip(),
+        "smtp_port": smtp_port,
+        "smtp_username": str(email_cfg.get("smtp_username", "")).strip(),
+        "smtp_password": str(email_cfg.get("smtp_password", "")).strip(),
+        "smtp_use_tls": smtp_use_tls,
+        "from_email": str(email_cfg.get("from_email", "")).strip(),
+        "default_to_email": str(email_cfg.get("default_to_email", "bingzhenli@hotmail.com")).strip() or "bingzhenli@hotmail.com",
+        "enabled": enabled,
+        "providers_count": len(raw),
+    }
+
+
+def _mask_password(secret: str) -> str:
+    text = str(secret or "")
+    if not text:
+        return ""
+    if len(text) <= 4:
+        return "*" * len(text)
+    return f"{text[:2]}{'*' * (len(text) - 4)}{text[-2:]}"
+
+
+def _normalize_bool(value: Any, *, field: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "off"}:
+            return False
+    raise ValueError(f"{field} must be a boolean")
+
+
+def _update_email_config(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    allowlist = {
+        "enabled",
+        "smtp_host",
+        "smtp_port",
+        "smtp_username",
+        "smtp_password",
+        "smtp_use_tls",
+        "from_email",
+        "default_to_email",
+    }
+    raw_updates = dict(arguments or {})
+    updates: Dict[str, Any] = {}
+    for key, value in raw_updates.items():
+        if key not in allowlist:
+            return {"ok": False, "error": "invalid_key", "message": f"非法配置键: {key}"}
+        if key in {"enabled", "smtp_use_tls"}:
+            try:
+                updates[key] = _normalize_bool(value, field=key)
+            except ValueError as exc:
+                return {"ok": False, "error": "invalid_value", "message": str(exc)}
+            continue
+        if key == "smtp_port":
+            try:
+                port = int(value)
+            except Exception:
+                return {"ok": False, "error": "invalid_value", "message": "smtp_port must be integer"}
+            if port <= 0 or port > 65535:
+                return {"ok": False, "error": "invalid_value", "message": "smtp_port must be in 1..65535"}
+            updates[key] = port
+            continue
+        updates[key] = str(value or "").strip()
+
+    if not updates:
+        return {"ok": False, "error": "empty_update", "message": "未提供可更新字段"}
+
+    for key, value in updates.items():
+        ConfigManager.set_value(f"notifications.email.{key}", value)
+
+    current = _read_email_config()
+    masked = dict(current)
+    masked["smtp_password"] = _mask_password(str(masked.get("smtp_password", "")))
+    return {
+        "ok": True,
+        "message": "邮件配置已更新。",
+        "updated_keys": sorted(list(updates.keys())),
+        "config": masked,
+    }
+
+
+def _send_bug_report_email(
+    *,
+    subject: str,
+    bug_summary: str,
+    bug_context: str,
+    to_email: str,
+    include_recent_chat: bool,
+    session: Optional["StudioSession"],
+) -> Dict[str, Any]:
+    cfg = _read_email_config()
+    if not cfg["enabled"]:
+        return {"ok": False, "error": "email_disabled", "message": "邮箱发送功能已在配置中禁用（notifications.email.enabled=false）。"}
+    required_keys = ["smtp_host", "smtp_username", "smtp_password", "from_email"]
+    missing = [key for key in required_keys if not str(cfg.get(key, "")).strip()]
+    if missing:
+        return {
+            "ok": False,
+            "error": "email_not_configured",
+            "message": (
+                "邮箱配置不完整，请先配置 notifications.email.*。"
+                f"缺失字段: {', '.join(missing)}"
+            ),
+            "required_config_example": {
+                "notifications": {
+                    "email": {
+                        "enabled": True,
+                        "smtp_host": "smtp.office365.com",
+                        "smtp_port": 587,
+                        "smtp_username": "your_email@example.com",
+                        "smtp_password": "your_app_password_or_smtp_password",
+                        "smtp_use_tls": True,
+                        "from_email": "your_email@example.com",
+                        "default_to_email": "bingzhenli@hotmail.com",
+                    }
+                }
+            },
+        }
+
+    final_subject = subject.strip() if subject and subject.strip() else f"[AgenticX Bug Report] {bug_summary[:60]}"
+    recipient = to_email.strip() if to_email and to_email.strip() else str(cfg["default_to_email"])
+    provider_name = str(getattr(session, "provider_name", "") or "")
+    model_name = str(getattr(session, "model_name", "") or "")
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    body_parts = [
+        f"时间: {now_text}",
+        f"来源: AgenticX Meta-Agent",
+        f"Provider/Model: {provider_name or '(unknown)'}/{model_name or '(unknown)'}",
+        "",
+        "## Bug Summary",
+        bug_summary.strip(),
+        "",
+        "## Bug Context",
+        bug_context.strip(),
+    ]
+
+    if include_recent_chat and session is not None:
+        history = list(getattr(session, "chat_history", []) or [])[-12:]
+        if history:
+            body_parts.append("")
+            body_parts.append("## Recent Chat Context")
+            for msg in history:
+                role = str(msg.get("role", "")).strip() or "unknown"
+                content = str(msg.get("content", "")).strip()
+                if content:
+                    body_parts.append(f"- {role}: {content[:500]}")
+
+    body_text = "\n".join(body_parts).strip()
+
+    message = EmailMessage()
+    message["Subject"] = final_subject
+    message["From"] = str(cfg["from_email"])
+    message["To"] = recipient
+    message.set_content(body_text)
+
+    try:
+        with smtplib.SMTP(str(cfg["smtp_host"]), int(cfg["smtp_port"]), timeout=30) as smtp:
+            if bool(cfg["smtp_use_tls"]):
+                smtp.starttls()
+            smtp.login(str(cfg["smtp_username"]), str(cfg["smtp_password"]))
+            smtp.send_message(message)
+    except Exception as exc:
+        _meta_log.warning("send_bug_report_email failed: %s", exc)
+        return {"ok": False, "error": "email_send_failed", "message": "发送失败，请检查 SMTP 配置与网络连通性。"}
+
+    return {
+        "ok": True,
+        "message": "邮件发送成功。",
+        "to_email": recipient,
+        "subject": final_subject,
+    }
 
 
 def _recommend_subagent_model_payload(
@@ -684,6 +954,20 @@ async def dispatch_meta_tool_async(
 
     if name == "list_mcps":
         return json.dumps(_list_mcps_payload(session), ensure_ascii=False)
+
+    if name == "send_bug_report_email":
+        result = _send_bug_report_email(
+            subject=str(arguments.get("subject", "") or ""),
+            bug_summary=str(arguments.get("bug_summary", "") or "").strip(),
+            bug_context=str(arguments.get("bug_context", "") or "").strip(),
+            to_email=str(arguments.get("to_email", "") or "").strip(),
+            include_recent_chat=bool(arguments.get("include_recent_chat", True)),
+            session=session,
+        )
+        return json.dumps(result, ensure_ascii=False)
+
+    if name == "update_email_config":
+        return json.dumps(_update_email_config(arguments), ensure_ascii=False)
 
     if name == "mcp_import":
         source_path = str(arguments.get("source_path", "")).strip()
