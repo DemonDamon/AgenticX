@@ -27,7 +27,7 @@ from agenticx.cli.studio_mcp import auto_connect_servers, import_mcp_config, loa
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.runtime import AgentRuntime
 from agenticx.runtime.auto_solve import AutoSolveMode
-from agenticx.runtime.events import RuntimeEvent
+from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.loop_controller import LoopController
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS
 from agenticx.runtime.prompts.meta_agent import build_meta_agent_system_prompt
@@ -115,6 +115,27 @@ def create_studio_app() -> FastAPI:
             names = [str(item).strip() for item in value if str(item).strip()]
             return names
         return []
+
+    def _flush_taskspace_hint(session_id: str, session_obj: Any) -> bool:
+        scratchpad = getattr(session_obj, "scratchpad", None)
+        if not isinstance(scratchpad, dict):
+            return False
+        taskspace_hint = str(scratchpad.pop("__taskspace_hint__", "") or "").strip()
+        taskspace_label_hint = str(scratchpad.pop("__taskspace_label_hint__", "") or "").strip()
+        if not taskspace_hint:
+            return False
+        hint_path = Path(taskspace_hint).expanduser().resolve(strict=False)
+        target_dir = hint_path if hint_path.is_dir() else hint_path.parent
+        try:
+            manager.add_taskspace(
+                session_id,
+                path=str(target_dir),
+                label=taskspace_label_hint or target_dir.name or "taskspace",
+            )
+            return True
+        except Exception as exc:
+            logger.debug("register taskspace hint skipped: %s", exc)
+            return False
 
     def _check_token(x_agx_desktop_token: str | None) -> None:
         if not desktop_token:
@@ -516,6 +537,8 @@ def create_studio_app() -> FastAPI:
                     else:
                         event_data = dict(event.data)
                         event_data.setdefault("agent_id", event.agent_id)
+                        if event.agent_id == "meta" and event.type == EventType.TOOL_RESULT.value:
+                            _flush_taskspace_hint(payload.session_id, session)
                         sse = SseEvent(type=event.type, data=event_data)
                         if event.type in ("subagent_started", "subagent_completed", "subagent_error"):
                             logger.info("[sse] yielding %s agent=%s", event.type, event.agent_id)
@@ -533,18 +556,7 @@ def create_studio_app() -> FastAPI:
             finally:
                 if runtime_task is not None and not runtime_task.done():
                     runtime_task.cancel()
-                taskspace_hint = str(session.scratchpad.pop("__taskspace_hint__", "") or "").strip()
-                if taskspace_hint:
-                    hint_path = Path(taskspace_hint).expanduser().resolve(strict=False)
-                    target_dir = hint_path if hint_path.is_dir() else hint_path.parent
-                    try:
-                        manager.add_taskspace(
-                            payload.session_id,
-                            path=str(target_dir),
-                            label=target_dir.name or "taskspace",
-                        )
-                    except Exception as exc:
-                        logger.debug("register taskspace hint skipped: %s", exc)
+                _flush_taskspace_hint(payload.session_id, session)
                 manager.persist(payload.session_id)
             yield 'data: {"type":"done","data":{}}\n\n'
 
@@ -603,12 +615,15 @@ def create_studio_app() -> FastAPI:
                         break
                     data = dict(event.data)
                     data.setdefault("agent_id", event.agent_id)
+                    if event.agent_id == "meta" and event.type == EventType.TOOL_RESULT.value:
+                        _flush_taskspace_hint(session_id, session)
                     sse = SseEvent(type=event.type, data=data)
                     yield f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"
             except Exception as exc:
                 err = SseEvent(type="error", data={"text": f"Loop runtime error: {exc}"})
                 yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
             finally:
+                _flush_taskspace_hint(session_id, session)
                 manager.persist(session_id)
             yield 'data: {"type":"done","data":{}}\n\n'
 

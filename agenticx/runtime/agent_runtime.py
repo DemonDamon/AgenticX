@@ -67,6 +67,13 @@ def _truncate(text: str, limit: int = MAX_CONTEXT_CHARS) -> str:
     return text[:limit] + f"\n... (truncated, total {len(text)} chars)"
 
 
+def _resolve_meta_tool_dispatchers():
+    """Resolve meta-only dispatchers lazily to avoid import cycles."""
+    from agenticx.runtime.meta_tools import _meta_only_names, dispatch_meta_tool_async
+
+    return _meta_only_names, dispatch_meta_tool_async
+
+
 def _resolve_llm_invoke_timeout_seconds(session: StudioSession) -> float:
     env_raw = os.getenv("AGX_LLM_INVOKE_TIMEOUT_SECONDS", "").strip()
     if env_raw:
@@ -1240,16 +1247,32 @@ class AgentRuntime:
                 before_progress = _build_progress_signature(session)
                 before_disk_write_count = len(disk_write_paths)
                 effective_tm = self.team_manager or getattr(session, "_team_manager", None)
-                dispatch_task = asyncio.create_task(
-                    dispatch_tool_async(
-                        tool_name,
-                        dispatch_arguments,
-                        session,
-                        confirm_gate=self.confirm_gate,
-                        event_callback=_on_tool_event,
-                        team_manager=effective_tm,
+                meta_only_names, meta_dispatch = _resolve_meta_tool_dispatchers()
+                if tool_name in meta_only_names:
+                    if effective_tm is None:
+                        dispatch_task = asyncio.create_task(
+                            asyncio.sleep(0, result=f"ERROR: meta tool '{tool_name}' requires team manager")
+                        )
+                    else:
+                        dispatch_task = asyncio.create_task(
+                            meta_dispatch(
+                                tool_name,
+                                dispatch_arguments,
+                                team_manager=effective_tm,
+                                session=session,
+                            )
+                        )
+                else:
+                    dispatch_task = asyncio.create_task(
+                        dispatch_tool_async(
+                            tool_name,
+                            dispatch_arguments,
+                            session,
+                            confirm_gate=self.confirm_gate,
+                            event_callback=_on_tool_event,
+                            team_manager=effective_tm,
+                        )
                     )
-                )
 
                 while True:
                     if await _check_should_stop():

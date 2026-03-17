@@ -718,6 +718,21 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("choose-directory", async () => {
+    const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
+    try {
+      const result = focused
+        ? await dialog.showOpenDialog(focused, { properties: ["openDirectory"] })
+        : await dialog.showOpenDialog({ properties: ["openDirectory"] });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { ok: false, canceled: true };
+      }
+      return { ok: true, path: result.filePaths[0] };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("list-taskspace-files", async (_event, payload: { sessionId: string; taskspaceId: string; path?: string }) => {
     const sid = String(payload?.sessionId || "").trim();
     const taskspaceId = String(payload?.taskspaceId || "").trim();

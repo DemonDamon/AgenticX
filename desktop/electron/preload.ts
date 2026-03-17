@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
         taskspace_id: payload.taskspaceId,
       }),
     }),
+  chooseDirectory: async () => ipcRenderer.invoke("choose-directory"),
   listTaskspaceFiles: async (payload: { sessionId: string; taskspaceId: string; path?: string }) =>
     desktopApiFetch(
       `/api/taskspace/files?session_id=${encodeURIComponent(payload.sessionId)}&taskspace_id=${encodeURIComponent(payload.taskspaceId)}&path=${encodeURIComponent(payload.path || ".")}`

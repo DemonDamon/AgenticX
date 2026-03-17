@@ -245,6 +245,22 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "set_taskspace",
+            "description": "Set or add a taskspace path for current session. The path will be registered after current turn.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute directory path."},
+                    "label": {"type": "string", "description": "Optional display alias for this taskspace."},
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "send_bug_report_email",
             "description": "Send bug report email using user-configured SMTP settings.",
             "parameters": {
@@ -954,6 +970,46 @@ async def dispatch_meta_tool_async(
 
     if name == "list_mcps":
         return json.dumps(_list_mcps_payload(session), ensure_ascii=False)
+
+    if name == "set_taskspace":
+        raw_path = str(arguments.get("path", "")).strip()
+        label = str(arguments.get("label", "")).strip()
+        if not raw_path:
+            return json.dumps({"ok": False, "error": "missing path"}, ensure_ascii=False)
+        if session is None:
+            return json.dumps({"ok": False, "error": "session unavailable"}, ensure_ascii=False)
+        scratchpad = getattr(session, "scratchpad", None)
+        if not isinstance(scratchpad, dict):
+            return json.dumps({"ok": False, "error": "session scratchpad unavailable"}, ensure_ascii=False)
+        scratchpad["__taskspace_hint__"] = raw_path
+        if label:
+            scratchpad["__taskspace_label_hint__"] = label
+        taskspaces = getattr(session, "taskspaces", None)
+        if isinstance(taskspaces, list):
+            exists = False
+            for item in taskspaces:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("path", "")).strip() == raw_path:
+                    exists = True
+                    break
+            if not exists:
+                taskspaces.append(
+                    {
+                        "id": f"hint-{datetime.utcnow().timestamp()}",
+                        "label": label or "taskspace",
+                        "path": raw_path,
+                    }
+                )
+        return json.dumps(
+            {
+                "ok": True,
+                "path": raw_path,
+                "label": label,
+                "message": "taskspace request accepted; desktop session will register it immediately.",
+            },
+            ensure_ascii=False,
+        )
 
     if name == "send_bug_report_email":
         result = _send_bug_report_email(

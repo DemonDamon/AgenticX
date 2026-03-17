@@ -22,6 +22,7 @@ type Props = {
   activeTaskspaceId: string | null;
   onActiveTaskspaceChange: (taskspaceId: string | null) => void;
   onPickFileForReference?: (path: string) => void;
+  autoRefreshKey?: number;
 };
 
 function detectLanguage(path: string): string {
@@ -44,6 +45,7 @@ export function TaskspacePanel({
   activeTaskspaceId,
   onActiveTaskspaceChange,
   onPickFileForReference,
+  autoRefreshKey,
 }: Props) {
   const [taskspaces, setTaskspaces] = useState<Taskspace[]>([]);
   const [loading, setLoading] = useState(false);
@@ -104,6 +106,20 @@ export function TaskspacePanel({
     await Promise.all(uniquePaths.map((path) => loadDir(taskspaceId, path, true)));
   };
 
+  const refreshListAndActiveTaskspace = async () => {
+    await loadTaskspaces();
+    const latest = await window.agenticxDesktop.listTaskspaces(sessionId);
+    if (!latest.ok || !Array.isArray(latest.workspaces)) return;
+    const refreshedActive =
+      latest.workspaces.find((item) => item.id === activeTaskspaceId) ??
+      latest.workspaces[0] ??
+      null;
+    if (refreshedActive) {
+      onActiveTaskspaceChange(refreshedActive.id);
+      await refreshTaskspace(refreshedActive.id);
+    }
+  };
+
   useEffect(() => {
     if (!sessionId) {
       setTaskspaces([]);
@@ -132,6 +148,13 @@ export function TaskspacePanel({
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, activeTaskspace?.id, expandedDirs]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    if (typeof autoRefreshKey !== "number" || autoRefreshKey <= 0) return;
+    void refreshListAndActiveTaskspace();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRefreshKey, sessionId]);
 
   useEffect(() => {
     if (!panelRef.current) return;
@@ -178,6 +201,35 @@ export function TaskspacePanel({
       return;
     }
     await loadTaskspaces();
+  };
+
+  const chooseDirectoryForTaskspace = async () => {
+    try {
+      const picker = window.agenticxDesktop.chooseDirectory;
+      if (typeof picker !== "function") {
+        setErrorText("当前客户端不支持目录选择，请重启桌面端后重试。");
+        return;
+      }
+      const picked = await picker();
+      if (!picked.ok) {
+        if (!picked.canceled) {
+          setErrorText(picked.error ?? "目录选择失败，请重试。");
+        }
+        return;
+      }
+      if (!picked.path) {
+        setErrorText("目录选择失败：未返回有效路径。");
+        return;
+      }
+      setErrorText("");
+      setNewPath(picked.path);
+      if (!newLabel.trim()) {
+        const bits = picked.path.split("/").filter(Boolean);
+        setNewLabel(bits[bits.length - 1] || "");
+      }
+    } catch (err) {
+      setErrorText(`目录选择失败：${String(err)}`);
+    }
   };
 
   const openFile = async (taskspaceId: string, relPath: string) => {
@@ -310,11 +362,10 @@ export function TaskspacePanel({
         <button
           className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700"
           onClick={() => {
-            if (!activeTaskspace) return;
             setErrorText("");
-            void refreshTaskspace(activeTaskspace.id);
+            void refreshListAndActiveTaskspace();
           }}
-          title="刷新当前 Taskspace"
+          title="刷新 Taskspace 列表与目录"
         >
           刷新
         </button>
@@ -337,6 +388,16 @@ export function TaskspacePanel({
               placeholder="目录绝对路径（可留空用默认）"
               className="mb-1 w-full rounded border border-border bg-slate-950 px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-cyan-500/50"
             />
+            <div className="mb-1 flex justify-end">
+              <button
+                type="button"
+                className="rounded border border-border px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
+                onClick={() => void chooseDirectoryForTaskspace()}
+                title="从系统目录中选择"
+              >
+                选择目录...
+              </button>
+            </div>
             <input
               value={newLabel}
               onChange={(e) => setNewLabel(e.target.value)}
