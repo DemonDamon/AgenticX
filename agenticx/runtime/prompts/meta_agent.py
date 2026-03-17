@@ -315,6 +315,7 @@ def build_meta_agent_system_prompt(
         "## 你的核心职责\n"
         "1) 与用户保持持续对话，随时回答进度、风险和下一步建议。\n"
         "2) 在复杂任务时拆分子任务，并调用 `spawn_subagent` 启动子智能体。\n"
+        "2.1) 当用户要求切换/新增工作区时，可直接调用 `set_taskspace(path, label?)`，无需要求用户手动进入 UI。\n"
         "3) 在启动前优先调用 `check_resources`，根据资源情况控制并行度。\n"
         "3.1) 在调用 `spawn_subagent` 前，先调用 `recommend_subagent_model(task, role)` 评估复杂度并给出模型建议。\n"
         "3.2) 你必须把推荐结果告知用户（复杂度级别、推荐模型、推荐理由），再决定是否继续派发。\n"

@@ -308,13 +308,13 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
       }
       const rows = Array.isArray(parsed?.subagents) ? (parsed.subagents as Array<Record<string, unknown>>) : [];
       if (rows.length > 0) {
-        const counts = rows.reduce(
+        const counts = rows.reduce<Record<string, number>>(
           (acc, row) => {
             const s = String(row.status ?? "unknown");
             acc[s] = (acc[s] ?? 0) + 1;
             return acc;
           },
-          {} as Record<string, number>
+          {}
         );
         const summary = Object.entries(counts)
           .map(([k, v]) => `${k}:${v}`)
@@ -340,6 +340,21 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
     return { content: `⚠️ ${toolName} 提示: ${compact}`, silent: false };
   }
   return { content: `✅ ${toolName} 结果: ${compact}`, silent: false };
+}
+
+function isSetTaskspaceToolSuccess(resultRaw: unknown): boolean {
+  if (resultRaw && typeof resultRaw === "object") {
+    return (resultRaw as { ok?: unknown }).ok === true;
+  }
+  if (typeof resultRaw !== "string") return false;
+  const text = resultRaw.trim();
+  if (!text) return false;
+  try {
+    const parsed = JSON.parse(text) as { ok?: unknown };
+    return parsed?.ok === true;
+  } catch {
+    return false;
+  }
 }
 
 function buildToolCallLivePreview(toolNameRaw: unknown, argsRaw: unknown): string | null {
@@ -369,6 +384,21 @@ function extractPathFromToolResult(text: string): string | null {
 }
 
 const TASKSPACE_WIDTH_STORAGE_KEY = "agenticx:taskspace-panel-width";
+
+type AtCandidate =
+  | {
+      kind: "file";
+      taskspaceId: string;
+      path: string;
+      label: string;
+    }
+  | {
+      kind: "taskspace";
+      taskspaceId: string;
+      path: string;
+      label: string;
+      alias: string;
+    };
 
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId));
@@ -402,8 +432,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const imeComposingRef = useRef(false);
   const [atOpen, setAtOpen] = useState(false);
   const [atQuery, setAtQuery] = useState("");
-  const [atCandidates, setAtCandidates] = useState<Array<{ taskspaceId: string; path: string; label: string }>>([]);
+  const [atCandidates, setAtCandidates] = useState<AtCandidate[]>([]);
   const [contextFiles, setContextFiles] = useState<Record<string, string>>({});
+  const [taskspaceAutoRefreshKey, setTaskspaceAutoRefreshKey] = useState(0);
   const [taskspaceWidth, setTaskspaceWidth] = useState(() => {
     try {
       const raw = window.localStorage.getItem(TASKSPACE_WIDTH_STORAGE_KEY);
@@ -475,7 +506,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       setAtCandidates([]);
       return;
     }
-    const flatRows: Array<{ taskspaceId: string; path: string; label: string }> = [];
+    const flatRows: AtCandidate[] = [];
+    const folderRows: Extract<AtCandidate, { kind: "taskspace" }>[] = wsResp.workspaces.map((item) => ({
+      kind: "taskspace",
+      taskspaceId: item.id,
+      path: item.path,
+      label: item.label || item.path.split("/").filter(Boolean).pop() || "taskspace",
+      alias: item.label || item.path.split("/").filter(Boolean).pop() || "taskspace",
+    }));
     const queue: string[] = ["."];
     const visited = new Set<string>();
     while (queue.length > 0 && flatRows.length < 200) {
@@ -493,7 +531,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (!listResp.ok || !Array.isArray(listResp.files)) continue;
       for (const row of listResp.files) {
         if (row.type === "file") {
-          flatRows.push({ taskspaceId: activeId, path: row.path, label: row.name });
+          flatRows.push({ kind: "file", taskspaceId: activeId, path: row.path, label: row.name });
           continue;
         }
         if (row.type === "dir" && !visited.has(row.path) && queue.length < 200) {
@@ -502,10 +540,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
     }
     const lowered = queryText.trim().toLowerCase();
-    const filtered = !lowered
+    const filteredFiles = !lowered
       ? flatRows.slice(0, 20)
       : flatRows.filter((item) => item.path.toLowerCase().includes(lowered)).slice(0, 20);
-    setAtCandidates(filtered);
+    const filteredFolders = !lowered
+      ? folderRows.slice(0, 8)
+      : folderRows
+          .filter(
+            (item) =>
+              item.alias.toLowerCase().includes(lowered) ||
+              item.path.toLowerCase().includes(lowered)
+          )
+          .slice(0, 8);
+    setAtCandidates([...filteredFolders, ...filteredFiles].slice(0, 24));
   };
 
   const addContextFile = async (taskspaceId: string, relPath: string) => {
@@ -518,6 +565,47 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!fileResp.ok || typeof fileResp.content !== "string") return;
     const key = String(fileResp.absolute_path || relPath);
     setContextFiles((prev) => ({ ...prev, [key]: fileResp.content ?? "" }));
+  };
+
+  const addTaskspaceAliasReference = async (taskspaceId: string, alias: string, absolutePath: string) => {
+    if (!pane.sessionId) return;
+    const queue: string[] = ["."];
+    const visited = new Set<string>();
+    const lines: string[] = [];
+    let fileCount = 0;
+    const maxFiles = 160;
+    while (queue.length > 0 && fileCount < maxFiles) {
+      const current = queue.shift() || ".";
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const listResp = await window.agenticxDesktop.listTaskspaceFiles({
+        sessionId: pane.sessionId,
+        taskspaceId,
+        path: current,
+      });
+      if (!listResp.ok || !Array.isArray(listResp.files)) continue;
+      for (const row of listResp.files) {
+        if (row.type === "dir") {
+          if (!visited.has(row.path)) queue.push(row.path);
+          continue;
+        }
+        lines.push(`- ${row.path}`);
+        fileCount += 1;
+        if (fileCount >= maxFiles) break;
+      }
+    }
+    const summary = [
+      `# directory_alias: ${alias}`,
+      `path: ${absolutePath}`,
+      "",
+      "files:",
+      ...lines,
+      fileCount >= maxFiles ? "- ... (truncated)" : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const key = `@dir:${alias}:${absolutePath}`;
+    setContextFiles((prev) => ({ ...prev, [key]: summary.slice(0, 16000) }));
   };
 
   const revealFileInTaskspace = useCallback(async (absPath: string) => {
@@ -766,6 +854,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     });
                   }
                 } catch { /* ignore parse errors */ }
+              }
+              if (
+                eventAgentId === "meta" &&
+                toolName === "set_taskspace" &&
+                isSetTaskspaceToolSuccess(payload.data?.result)
+              ) {
+                setTaskspaceAutoRefreshKey((prev) => prev + 1);
               }
             }
             if (payload.type === "confirm_required") {
@@ -1147,7 +1242,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     setInput((prev) => prev.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`));
                     setAtOpen(false);
                     setAtQuery("");
-                    void addContextFile(first.taskspaceId, first.path);
+                    if (first.kind === "taskspace") {
+                      void addTaskspaceAliasReference(first.taskspaceId, first.alias, first.path);
+                    } else {
+                      void addContextFile(first.taskspaceId, first.path);
+                    }
                     return;
                   }
                   e.preventDefault();
@@ -1210,22 +1309,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             <div className="mt-1 max-h-28 overflow-y-auto rounded border border-border bg-slate-950 p-1">
               {atCandidates.length === 0 ? (
                 <div className="px-2 py-1 text-[11px] text-slate-500">
-                  未找到匹配文件{atQuery ? `: ${atQuery}` : ""}
+                  未找到匹配文件/文件夹{atQuery ? `: ${atQuery}` : ""}
                 </div>
               ) : (
                 atCandidates.map((item) => (
                   <button
-                    key={`${item.taskspaceId}:${item.path}`}
+                    key={`${item.kind}:${item.taskspaceId}:${item.path}`}
                     className="block w-full rounded px-2 py-1 text-left text-[11px] text-slate-300 hover:bg-slate-800"
                     onClick={() => {
                       const mention = `@${item.label} `;
                       setInput((prev) => prev.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`));
                       setAtOpen(false);
                       setAtQuery("");
-                      void addContextFile(item.taskspaceId, item.path);
+                      if (item.kind === "taskspace") {
+                        void addTaskspaceAliasReference(item.taskspaceId, item.alias, item.path);
+                      } else {
+                        void addContextFile(item.taskspaceId, item.path);
+                      }
                     }}
                   >
-                    {item.path}
+                    {item.kind === "taskspace" ? `📁 ${item.label} → ${item.path}` : item.path}
                   </button>
                 ))
               )}
@@ -1254,6 +1357,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             sessionId={pane.sessionId}
             activeTaskspaceId={pane.activeTaskspaceId}
             onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
+            autoRefreshKey={taskspaceAutoRefreshKey}
             onPickFileForReference={(path) => {
               if (!pane.activeTaskspaceId) return;
               void addContextFile(pane.activeTaskspaceId, path);
