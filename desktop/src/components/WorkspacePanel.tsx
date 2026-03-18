@@ -335,8 +335,8 @@ export function WorkspacePanel({
       return (
         <div key={item.path} className="flex items-center gap-1">
           <button
-            className={`flex-1 rounded px-1 py-0.5 text-left text-xs hover:bg-surface-hover ${
-              selectedFilePath === item.path ? "text-cyan-300" : "text-text-subtle"
+            className={`flex-1 rounded px-1 py-0.5 text-left text-xs transition hover:bg-surface-hover ${
+              selectedFilePath === item.path ? "text-text-strong" : "text-text-subtle"
             }`}
             style={{ paddingLeft }}
             title={item.path}
@@ -345,7 +345,7 @@ export function WorkspacePanel({
             {item.name}
           </button>
           <button
-            className="rounded px-1 py-0.5 text-[10px] text-text-faint hover:bg-surface-hover hover:text-cyan-300"
+            className="rounded px-1 py-0.5 text-[10px] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
             onClick={() => onPickFileForReference?.(item.path)}
             title="引用到输入框"
           >
@@ -364,11 +364,15 @@ export function WorkspacePanel({
             {taskspaces.map((item) => (
               <button
                 key={item.id}
-                className={`shrink-0 rounded px-2 py-1 text-xs ${
+                className={`shrink-0 rounded px-2 py-1 text-xs transition ${
                   item.id === activeTaskspace?.id
-                    ? "bg-cyan-500/20 text-cyan-300"
-                    : "bg-surface-hover text-text-subtle hover:text-text-primary"
+                    ? "text-text-strong"
+                    : "text-text-subtle hover:text-text-primary hover:bg-surface-hover"
                 }`}
+                style={item.id === activeTaskspace?.id ? {
+                  background: "var(--ui-accent-surface)",
+                  color: "var(--ui-accent-text)",
+                } : {}}
                 onClick={() => onActiveTaskspaceChange(item.id)}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -407,7 +411,7 @@ export function WorkspacePanel({
                 value={newPath}
                 onChange={(e) => setNewPath(e.target.value)}
                 placeholder="目录绝对路径（可留空用默认）"
-                className="mb-1 w-full rounded border border-border bg-surface-panel px-2 py-1 text-[11px] text-text-primary outline-none focus:border-cyan-500/50"
+                className="mb-1 w-full rounded border border-border bg-surface-panel px-2 py-1 text-[11px] text-text-primary outline-none focus:border-border-strong"
               />
               <div className="mb-1 flex justify-end">
                 <button
@@ -423,7 +427,7 @@ export function WorkspacePanel({
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
                 placeholder="显示名称（可选）"
-                className="mb-2 w-full rounded border border-border bg-surface-panel px-2 py-1 text-[11px] text-text-primary outline-none focus:border-cyan-500/50"
+                className="mb-2 w-full rounded border border-border bg-surface-panel px-2 py-1 text-[11px] text-text-primary outline-none focus:border-border-strong"
               />
               <div className="flex items-center justify-end gap-1">
                 <button
@@ -437,7 +441,8 @@ export function WorkspacePanel({
                   取消
                 </button>
                 <button
-                  className="rounded bg-cyan-600 px-2 py-1 text-[11px] text-white hover:bg-cyan-500 disabled:opacity-50"
+                  className="rounded px-2 py-1 text-[11px] disabled:opacity-50 transition"
+                  style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
                   disabled={adding}
                   onClick={() => void addTaskspace(newPath, newLabel)}
                 >
@@ -459,8 +464,11 @@ export function WorkspacePanel({
         onMouseDown={startResizeSpawns}
         title="拖拽调整 Spawns 区域高度"
       >
-        <div className="h-[2px] bg-cyan-500/35 transition group-hover:bg-cyan-400/90" />
-        <div className="pointer-events-none absolute left-1/2 top-1/2 h-2 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-400/70 bg-surface-panel shadow-[0_0_10px_rgba(34,211,238,0.25)]" />
+        <div className="h-px transition" style={{ background: "var(--ui-accent-divider)" }} />
+        <div
+          className="pointer-events-none absolute left-1/2 top-1/2 h-1.5 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90"
+          style={{ borderColor: "var(--ui-accent-divider-hover)" }}
+        />
       </div>
 
       <div className="shrink-0 overflow-y-auto px-2 py-2" style={{ height: safeSpawnsHeight }}>

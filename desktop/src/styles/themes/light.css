@@ -39,4 +39,13 @@
   --status-success: #059669;
   --status-warning: #d97706;
   --status-error: #dc2626;
+
+  --ui-btn-primary-bg: #1e293b;
+  --ui-btn-primary-bg-hover: #0f172a;
+  --ui-btn-primary-text: #f8fafc;
+  --ui-accent-surface: rgba(15, 23, 42, 0.07);
+  --ui-accent-surface-hover: rgba(15, 23, 42, 0.12);
+  --ui-accent-text: #1e293b;
+  --ui-accent-divider: rgba(15, 23, 42, 0.12);
+  --ui-accent-divider-hover: rgba(15, 23, 42, 0.25);
 }

@@ -69,6 +69,14 @@ export type Message = {
   agentId?: string;
   provider?: string;
   model?: string;
+  attachments?: MessageAttachment[];
+};
+
+export type MessageAttachment = {
+  name: string;
+  mimeType: string;
+  size: number;
+  dataUrl?: string;
 };
 
 export type SubAgentEvent = {
@@ -179,7 +187,15 @@ type AppState = {
   setActivePaneId: (id: string) => void;
   addPane: (avatarId: string | null, avatarName: string, sessionId: string) => string;
   removePane: (paneId: string) => void;
-  addPaneMessage: (paneId: string, role: MsgRole, content: string, agentId?: string, provider?: string, model?: string) => void;
+  addPaneMessage: (
+    paneId: string,
+    role: MsgRole,
+    content: string,
+    agentId?: string,
+    provider?: string,
+    model?: string,
+    attachments?: MessageAttachment[]
+  ) => void;
   updateLastPaneMessage: (paneId: string, content: string) => void;
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string) => void;
@@ -188,7 +204,14 @@ type AppState = {
   toggleTaskspacePanel: (paneId: string) => void;
   setActiveTaskspace: (paneId: string, taskspaceId: string | null) => void;
   setPaneContextInherited: (paneId: string, inherited: boolean) => void;
-  addMessage: (role: MsgRole, content: string, agentId?: string, provider?: string, model?: string) => void;
+  addMessage: (
+    role: MsgRole,
+    content: string,
+    agentId?: string,
+    provider?: string,
+    model?: string,
+    attachments?: MessageAttachment[]
+  ) => void;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
   clearMessages: () => void;
   addSubAgent: (item: Pick<SubAgent, "id" | "name" | "role" | "task" | "provider" | "model"> & { sessionId?: string }) => void;
@@ -327,13 +350,13 @@ export const useAppStore = create<AppState>((set) => ({
           : state.activePaneId;
       return { panes: nextPanes, activePaneId: nextActive };
     }),
-  addPaneMessage: (paneId, role, content, agentId, provider, model) =>
+  addPaneMessage: (paneId, role, content, agentId, provider, model, attachments) =>
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === paneId
           ? {
               ...pane,
-              messages: [...pane.messages, { id: uid(), role, content, agentId, provider, model }],
+              messages: [...pane.messages, { id: uid(), role, content, agentId, provider, model, attachments }],
             }
           : pane
       ),
@@ -382,9 +405,9 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, contextInherited: inherited } : pane)),
     })),
-  addMessage: (role, content, agentId, provider, model) =>
+  addMessage: (role, content, agentId, provider, model, attachments) =>
     set((state) => {
-      const nextMessage: Message = { id: uid(), role, content, agentId, provider, model };
+      const nextMessage: Message = { id: uid(), role, content, agentId, provider, model, attachments };
       return {
         messages: [...state.messages, nextMessage],
         panes: state.panes.map((pane) =>
