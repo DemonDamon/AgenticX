@@ -72,6 +72,8 @@ export function App() {
   const setPlanMode = useAppStore((s) => s.setPlanMode);
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
+  const chatStyle = useAppStore((s) => s.chatStyle);
+  const setChatStyle = useAppStore((s) => s.setChatStyle);
   const subAgents = useAppStore((s) => s.subAgents);
   const addSubAgent = useAppStore((s) => s.addSubAgent);
   const selectedSubAgent = useAppStore((s) => s.selectedSubAgent);
@@ -867,7 +869,9 @@ export function App() {
         onRefreshMcp={refreshMcpStatus}
         confirmStrategy={confirmStrategy}
         theme={theme}
+        chatStyle={chatStyle}
         onThemeChange={setTheme}
+        onChatStyleChange={setChatStyle}
         onConfirmStrategyChange={handleConfirmStrategyChange}
         onClose={() => closeSettings()}
         onSave={handleSettingsSave}

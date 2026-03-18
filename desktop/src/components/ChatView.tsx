@@ -1,6 +1,4 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useAppStore, type Message } from "../store";
 import { SubAgentPanel } from "./SubAgentPanel";
 import { interruptOnInterimResult, interruptTtsOnUserSpeech } from "../voice/interrupt";
@@ -11,7 +9,10 @@ import { QuickActions } from "./QuickActions";
 import { ShortcutHints } from "./ShortcutHints";
 import { createPhase1Registry } from "../core/command-registry";
 import { KeybindingsPanel } from "./KeybindingsPanel";
-import { TodoUpdateCard, isTodoUpdateToolMessage } from "./TodoUpdateCard";
+import { MessageRenderer } from "./messages/MessageRenderer";
+import { ImBubble } from "./messages/ImBubble";
+import { TerminalLine } from "./messages/TerminalLine";
+import { CleanBlock } from "./messages/CleanBlock";
 
 type Props = {
   onOpenConfirm: (
@@ -138,20 +139,6 @@ function buildToolCallLivePreview(toolNameRaw: unknown, argsRaw: unknown): strin
   return null;
 }
 
-const markdownComponents: Components = {
-  table: ({ children }) => (
-    <div className="my-2 overflow-x-auto">
-      <table className="min-w-full border-collapse border border-border text-xs">{children}</table>
-    </div>
-  ),
-  th: ({ children }) => (
-    <th className="border border-border bg-surface-hover px-2 py-1 text-left text-text-primary">{children}</th>
-  ),
-  td: ({ children }) => (
-    <td className="border border-border px-2 py-1 align-top text-text-muted">{children}</td>
-  )
-};
-
 function ModelBadge({ provider, model }: { provider?: string; model?: string }) {
   if (!model) return null;
   const label = provider ? `${provider}/${model}` : model;
@@ -233,6 +220,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const clearMessages = useAppStore((s) => s.clearMessages);
   const subAgents = useAppStore((s) => s.subAgents);
   const selectedSubAgent = useAppStore((s) => s.selectedSubAgent);
+  const chatStyle = useAppStore((s) => s.chatStyle);
   const addSubAgent = useAppStore((s) => s.addSubAgent);
   const updateSubAgent = useAppStore((s) => s.updateSubAgent);
   const addSubAgentEvent = useAppStore((s) => s.addSubAgentEvent);
@@ -1126,30 +1114,12 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
         )}
         <div className={`mx-auto max-w-2xl space-y-3 ${isLite ? "text-[15px]" : ""}`}>
           {visibleMessages.map((m) => (
-            <div
-              key={m.id}
-              className={
-                m.role === "user"
-                  ? `ml-8 rounded-xl rounded-tr-sm bg-cyan-500/20 px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`
-                  : m.role === "assistant"
-                    ? `mr-8 rounded-xl rounded-tl-sm bg-surface-card px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`
-                    : "mx-4 rounded-lg border border-border bg-surface-card px-3 py-1.5 text-xs text-text-subtle"
-              }
-            >
-              {!isLite && m.role === "assistant" && <ModelBadge provider={m.provider} model={m.model} />}
-              <div className="msg-content break-words">
-                {m.role === "tool" ? (
-                  isTodoUpdateToolMessage(m.content) ? (
-                    <TodoUpdateCard content={m.content} />
-                  ) : (
-                    <span>{m.content}</span>
-                  )
-                ) : (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                    {m.content}
-                  </ReactMarkdown>
-                )}
-              </div>
+            <div key={m.id} className={`${isLite ? "text-[15px]" : "text-sm"}`}>
+              <MessageRenderer
+                message={m}
+                assistantBadge={!isLite && m.role === "assistant" ? <ModelBadge provider={m.provider} model={m.model} /> : undefined}
+                assistantName="Meta-Agent"
+              />
               {!isLite && (
                 <MessageActions
                   msg={m}
@@ -1161,18 +1131,59 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             </div>
           ))}
           {streaming && (
-            <div className={`mr-8 rounded-xl rounded-tl-sm bg-surface-card px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`}>
-              {!isLite && streamingModel && <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />}
-              <div className="msg-content break-words">
-                {streamedAssistantText && !isThinkingPlaceholderText(streamedAssistantText) ? (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                    {streamedAssistantText}
-                  </ReactMarkdown>
+            streamedAssistantText && !isThinkingPlaceholderText(streamedAssistantText) ? (
+              <div className={`${isLite ? "text-[15px]" : "text-sm"}`}>
+                {chatStyle === "terminal" ? (
+                  <TerminalLine
+                    message={{ id: "__stream__", role: "assistant", content: streamedAssistantText }}
+                    badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+                  />
+                ) : chatStyle === "clean" ? (
+                  <CleanBlock
+                    message={{ id: "__stream__", role: "assistant", content: streamedAssistantText }}
+                    badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+                  />
                 ) : (
-                  <StreamingThinkingIndicator />
+                  <ImBubble
+                    message={{ id: "__stream__", role: "assistant", content: streamedAssistantText }}
+                    badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+                    assistantName="Meta-Agent"
+                  />
                 )}
               </div>
-            </div>
+            ) : (
+              chatStyle === "terminal" ? (
+                <div className={`font-mono text-[13px] leading-6 ${isLite ? "text-[15px]" : "text-sm"}`}>
+                  <div className="flex items-start gap-2">
+                    <span className="mt-[2px] select-none text-xs" style={{ color: "var(--chat-terminal-meta)" }}>
+                      ┃
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      {!isLite && streamingModel && <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />}
+                      <StreamingThinkingIndicator />
+                    </div>
+                  </div>
+                </div>
+              ) : chatStyle === "clean" ? (
+                <div
+                  className={`w-full rounded-md border px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`}
+                  style={{
+                    background: "var(--chat-clean-assistant-bg)",
+                    borderColor: "var(--chat-clean-assistant-border)",
+                  }}
+                >
+                  {!isLite && streamingModel && <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />}
+                  <StreamingThinkingIndicator />
+                </div>
+              ) : (
+                <div className={`mr-8 rounded-xl rounded-tl-sm bg-surface-card px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`}>
+                  {!isLite && streamingModel && <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />}
+                  <div className="msg-content break-words">
+                    <StreamingThinkingIndicator />
+                  </div>
+                </div>
+              )
+            )
           )}
         </div>
       </div>

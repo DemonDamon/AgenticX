@@ -1,14 +1,14 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import ReactMarkdown from "react-markdown";
-import type { Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useAppStore, type Message } from "../store";
 import { startRecording, stopRecording } from "../voice/stt";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { WorkspacePanel } from "./WorkspacePanel";
 import { MessageRenderer } from "./messages/MessageRenderer";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
+import { ImBubble } from "./messages/ImBubble";
+import { TerminalLine } from "./messages/TerminalLine";
+import { CleanBlock } from "./messages/CleanBlock";
 
 const NEW_TOPIC_PREF_KEY = "agx:newTopicInherit";
 
@@ -187,40 +187,6 @@ function PaneModelPicker() {
     </div>
   );
 }
-
-const mdComponents: Components = {
-  p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
-  h1: ({ children }) => <h1 className="mb-2 mt-3 text-base font-bold text-text-strong">{children}</h1>,
-  h2: ({ children }) => <h2 className="mb-1.5 mt-2 text-sm font-bold text-text-strong">{children}</h2>,
-  h3: ({ children }) => <h3 className="mb-1 mt-1.5 text-sm font-semibold text-text-strong">{children}</h3>,
-  ul: ({ children }) => <ul className="mb-2 list-disc space-y-0.5 pl-4">{children}</ul>,
-  ol: ({ children }) => <ol className="mb-2 list-decimal space-y-0.5 pl-4">{children}</ol>,
-  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-  strong: ({ children }) => <strong className="font-semibold text-text-strong">{children}</strong>,
-  em: ({ children }) => <em className="italic text-text-muted">{children}</em>,
-  a: ({ href, children }) => (
-    <a href={href} className="text-cyan-400 underline hover:text-cyan-300" target="_blank" rel="noreferrer">
-      {children}
-    </a>
-  ),
-  blockquote: ({ children }) => (
-    <blockquote className="my-2 border-l-2 border-border pl-3 text-text-subtle italic">{children}</blockquote>
-  ),
-  hr: () => <hr className="my-3 border-border" />,
-  pre: ({ children }) => (
-    <pre className="my-2 overflow-x-auto rounded-md bg-surface-card px-4 py-3 text-xs leading-relaxed">
-      {children}
-    </pre>
-  ),
-  code: ({ children, className }) => {
-    const isBlock = !!className;
-    return isBlock ? (
-      <code className={`${className ?? ""} font-mono`}>{children}</code>
-    ) : (
-      <code className="rounded bg-surface-card px-1 py-0.5 text-xs font-mono text-cyan-300">{children}</code>
-    );
-  },
-};
 
 type Props = {
   paneId: string;
@@ -403,6 +369,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const updateSubAgent = useAppStore((s) => s.updateSubAgent);
   const addSubAgentEvent = useAppStore((s) => s.addSubAgentEvent);
   const subAgents = useAppStore((s) => s.subAgents);
+  const avatars = useAppStore((s) => s.avatars);
+  const chatStyle = useAppStore((s) => s.chatStyle);
+
+  const paneAvatarMeta = useMemo(() => {
+    const aid = pane?.avatarId;
+    if (!aid || aid.startsWith("group:")) return { name: pane?.avatarName || "AI", url: undefined };
+    const found = avatars.find((a) => a.id === aid);
+    return {
+      name: found?.name || pane?.avatarName || "AI",
+      url: found?.avatarUrl || undefined,
+    };
+  }, [pane?.avatarId, pane?.avatarName, avatars]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -621,24 +599,66 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           message={message}
           assistantBadge={message.role === "assistant" ? <ModelBadge provider={message.provider} model={message.model} /> : undefined}
           onRevealPath={(path) => void revealFileInTaskspace(path)}
+          assistantName={paneAvatarMeta.name}
+          assistantAvatarUrl={paneAvatarMeta.url}
         />
       ))}
       {streaming ? (
-        <div className="mr-8 min-w-0 overflow-hidden rounded-xl rounded-tl-sm border border-border bg-surface-bubble px-3 py-2 text-sm">
-          {streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : null}
-          {streamedAssistantText && !isThinkingPlaceholderText(streamedAssistantText) ? (
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-              {streamedAssistantText}
-            </ReactMarkdown>
+        streamedAssistantText && !isThinkingPlaceholderText(streamedAssistantText) ? (
+          chatStyle === "terminal" ? (
+            <TerminalLine
+              message={{ id: "__stream__", role: "assistant", content: streamedAssistantText }}
+              badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+            />
+          ) : chatStyle === "clean" ? (
+            <CleanBlock
+              message={{ id: "__stream__", role: "assistant", content: streamedAssistantText }}
+              badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+            />
           ) : (
-            <div className="mt-1">
+            <ImBubble
+              message={{ id: "__stream__", role: "assistant", content: streamedAssistantText }}
+              badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+              assistantName={paneAvatarMeta.name}
+              assistantAvatarUrl={paneAvatarMeta.url}
+            />
+          )
+        ) : (
+          chatStyle === "terminal" ? (
+            <div className="font-mono text-[13px] leading-6">
+              <div className="flex items-start gap-2">
+                <span className="mt-[2px] select-none text-xs" style={{ color: "var(--chat-terminal-meta)" }}>
+                  ┃
+                </span>
+                <div className="min-w-0 flex-1">
+                  {streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : null}
+                  <WorkingIndicator text="Thinking..." />
+                </div>
+              </div>
+            </div>
+          ) : chatStyle === "clean" ? (
+            <div
+              className="w-full rounded-md border px-3 py-2"
+              style={{
+                background: "var(--chat-clean-assistant-bg)",
+                borderColor: "var(--chat-clean-assistant-border)",
+              }}
+            >
+              {streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : null}
               <WorkingIndicator text="Thinking..." />
             </div>
-          )}
-        </div>
+          ) : (
+            <div className="mr-8 min-w-0 overflow-hidden rounded-xl rounded-tl-sm border border-border bg-surface-bubble px-3 py-2 text-sm">
+              {streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : null}
+              <div className="mt-1">
+                <WorkingIndicator text="Thinking..." />
+              </div>
+            </div>
+          )
+        )
       ) : null}
     </>
-  ), [revealFileInTaskspace, streamedAssistantText, streaming, streamingModel, visibleMessages]);
+  ), [chatStyle, paneAvatarMeta, revealFileInTaskspace, streamedAssistantText, streaming, streamingModel, visibleMessages]);
 
   const onMicClick = () => {
     if (recording) {

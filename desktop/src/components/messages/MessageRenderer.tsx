@@ -1,7 +1,9 @@
 import type { Message } from "../../store";
 import type { ReactNode } from "react";
-import { UserBubble } from "./UserBubble";
-import { AssistantBubble } from "./AssistantBubble";
+import { useAppStore } from "../../store";
+import { ImBubble } from "./ImBubble";
+import { TerminalLine } from "./TerminalLine";
+import { CleanBlock } from "./CleanBlock";
 import { ToolCallCard } from "./ToolCallCard";
 import { SystemNotice } from "./SystemNotice";
 import { TodoUpdateCard } from "../TodoUpdateCard";
@@ -10,6 +12,8 @@ type Props = {
   message: Message;
   assistantBadge?: ReactNode;
   onRevealPath?: (path: string) => void;
+  assistantName?: string;
+  assistantAvatarUrl?: string;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -21,9 +25,20 @@ function isTodoUpdateToolMessage(content: string): boolean {
   return content.includes("Todos have been modified successfully.");
 }
 
-export function MessageRenderer({ message, assistantBadge, onRevealPath }: Props) {
-  if (message.role === "user") return <UserBubble message={message} />;
-  if (message.role === "assistant") return <AssistantBubble message={message} badge={assistantBadge} />;
+export function MessageRenderer({ message, assistantBadge, onRevealPath, assistantName, assistantAvatarUrl }: Props) {
+  const chatStyle = useAppStore((s) => s.chatStyle);
+  if (message.role === "user" || message.role === "assistant") {
+    if (chatStyle === "terminal") return <TerminalLine message={message} badge={assistantBadge} />;
+    if (chatStyle === "clean") return <CleanBlock message={message} badge={assistantBadge} />;
+    return (
+      <ImBubble
+        message={message}
+        badge={assistantBadge}
+        assistantName={assistantName}
+        assistantAvatarUrl={assistantAvatarUrl}
+      />
+    );
+  }
   if (message.role === "tool") {
     if (isTodoUpdateToolMessage(message.content)) {
       return (
