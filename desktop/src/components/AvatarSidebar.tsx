@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Settings } from "lucide-react";
 import { useAppStore, type Avatar, type GroupChat } from "../store";
 import { AvatarCreateDialog } from "./AvatarCreateDialog";
 
@@ -235,15 +236,15 @@ export function AvatarSidebar() {
 
   return (
     <>
-      <aside className="flex h-full w-[220px] min-w-[200px] max-w-[260px] flex-col border-r border-border/60 bg-slate-900/70">
+      <aside className="flex h-full w-full flex-col bg-surface-sidebar">
         {/* macOS traffic-light safe zone */}
         <div className="drag-region h-[38px] shrink-0" />
         {/* Meta-Agent entry */}
         <button
-          className={`flex items-center gap-2.5 border-b border-border/40 px-3 py-2.5 text-left transition ${
+          className={`mx-2 mb-1 flex items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left transition-all ${
             activeAvatarId === null
-              ? "bg-cyan-500/10 text-cyan-400"
-              : "text-slate-300 hover:bg-slate-800"
+              ? "border-border-strong bg-surface-card text-text-strong"
+              : "border-transparent text-text-muted hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
           }`}
           onClick={() => void openOrFocusPane(null, "Meta-Agent")}
         >
@@ -252,15 +253,15 @@ export function AvatarSidebar() {
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium">Meta-Agent</div>
-            <div className="truncate text-[10px] text-slate-500">全局调度</div>
+            <div className="truncate text-[10px] text-text-faint">全局调度</div>
           </div>
         </button>
 
         {/* Avatar list */}
-        <div className="flex items-center justify-between border-b border-border/40 px-3 py-1.5">
-          <span className="text-[11px] font-medium text-slate-500">分身 ({avatars.length})</span>
+        <div className="flex items-center justify-between px-4 py-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-text-faint">分身 ({avatars.length})</span>
           <button
-            className="rounded px-1.5 py-0.5 text-[11px] text-slate-400 transition hover:bg-slate-700 hover:text-white"
+            className="rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
             onClick={() => setCreateOpen(true)}
           >
             + 新建
@@ -269,7 +270,7 @@ export function AvatarSidebar() {
 
         <div className="flex-1 overflow-y-auto py-1">
           {sortedAvatars.length === 0 && (
-            <div className="px-3 py-6 text-center text-xs text-slate-600">
+            <div className="px-3 py-6 text-center text-xs text-text-faint">
               暂无分身，点击上方"新建"创建
             </div>
           )}
@@ -279,10 +280,10 @@ export function AvatarSidebar() {
             return (
               <div key={avatar.id}>
                 <button
-                  className={`flex w-full items-center gap-2.5 px-3 py-2 text-left transition ${
+                  className={`mx-2 flex w-[calc(100%-16px)] items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left transition-all ${
                     isActive
-                      ? "bg-cyan-500/10 text-cyan-400"
-                      : "text-slate-300 hover:bg-slate-800"
+                      ? "border-border-strong bg-surface-card text-text-strong"
+                      : "border-transparent text-text-muted hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
                   }`}
                   onClick={() => void openOrFocusPane(avatar.id, avatar.name)}
                   onContextMenu={(e) => {
@@ -311,7 +312,7 @@ export function AvatarSidebar() {
                       {avatar.pinned && <span className="text-[10px] text-amber-400">*</span>}
                     </div>
                     {avatar.role && (
-                      <div className="truncate text-[10px] text-slate-500">{avatar.role}</div>
+                      <div className="truncate text-[10px] text-text-faint">{avatar.role}</div>
                     )}
                   </div>
                 </button>
@@ -321,11 +322,11 @@ export function AvatarSidebar() {
         </div>
 
         {/* Group chats */}
-        <div className="border-t border-border/40">
-          <div className="flex items-center justify-between px-3 py-1.5">
-            <span className="text-[11px] font-medium text-slate-500">群聊 ({groups.length})</span>
+        <div className="mt-2">
+          <div className="flex items-center justify-between px-4 py-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-text-faint">群聊 ({groups.length})</span>
             <button
-              className="rounded px-1.5 py-0.5 text-[11px] text-slate-400 transition hover:bg-slate-700 hover:text-white"
+              className="rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
               onClick={() => setGroupCreateOpen(true)}
             >
               + 新建
@@ -341,10 +342,10 @@ export function AvatarSidebar() {
               return (
                 <button
                   key={group.id}
-                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left transition ${
+                  className={`mx-2 flex w-[calc(100%-16px)] items-center gap-2 rounded-[10px] border px-2.5 py-1.5 text-left transition-all ${
                     isActive
-                      ? "bg-violet-500/10 text-violet-300"
-                      : "text-slate-300 hover:bg-slate-800"
+                      ? "border-border-strong bg-surface-card text-text-strong"
+                      : "border-transparent text-text-muted hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
                   }`}
                   onClick={() => void openOrFocusGroupPane(group)}
                   onContextMenu={(e) => {
@@ -361,7 +362,7 @@ export function AvatarSidebar() {
                       <div className="truncate text-xs">{group.name}</div>
                       {hasPane && <span className="h-1.5 w-1.5 rounded-full bg-violet-300" />}
                     </div>
-                    <div className="truncate text-[10px] text-slate-500">
+                    <div className="truncate text-[10px] text-text-faint">
                       {group.avatarIds.length} avatars ·{" "}
                       {group.avatarIds
                         .map((id) => avatars.find((a) => a.id === id)?.name || id.slice(0, 4))
@@ -375,17 +376,14 @@ export function AvatarSidebar() {
         </div>
 
         {/* Settings entry */}
-        <div className="shrink-0 border-t border-border/40 px-3 py-2">
+        <div className="shrink-0 px-2 py-2">
           <button
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-slate-400 transition hover:bg-slate-700 hover:text-white"
+            className="flex w-full items-center gap-2.5 rounded-[10px] border border-transparent px-2.5 py-2 text-left text-[13px] font-semibold text-text-subtle transition-all hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
             onClick={() => openSettings()}
           >
-            <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.431.992a7.723 7.723 0 0 1 0 .255c-.007.378.138.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-            </svg>
+            <Settings className="h-4 w-4 shrink-0" aria-hidden />
             <span>设置</span>
-            <span className="ml-auto text-[10px] text-slate-600">模型 · MCP · 偏好</span>
+            <span className="ml-auto text-[10px] font-normal text-text-faint">模型 · MCP · 偏好</span>
           </button>
         </div>
       </aside>
@@ -394,7 +392,7 @@ export function AvatarSidebar() {
       {contextMenu && (
         <div
           ref={menuRef}
-          className="fixed z-50 min-w-[120px] rounded-lg border border-border bg-panel py-1 shadow-xl"
+          className="fixed z-50 min-w-[120px] rounded-lg border border-border bg-surface-panel py-1 shadow-xl"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           {[
@@ -406,7 +404,7 @@ export function AvatarSidebar() {
               className={`w-full px-3 py-1.5 text-left text-xs transition ${
                 item.id === "delete"
                   ? "text-rose-400 hover:bg-rose-500/10"
-                  : "text-slate-300 hover:bg-slate-700"
+                  : "text-text-muted hover:bg-surface-hover"
               }`}
               onClick={() => void handleContextAction(item.id)}
             >
@@ -419,17 +417,17 @@ export function AvatarSidebar() {
       {groupContextMenu && (
         <div
           ref={groupMenuRef}
-          className="fixed z-50 min-w-[180px] rounded-lg border border-border bg-panel py-1 shadow-xl"
+          className="fixed z-50 min-w-[180px] rounded-lg border border-border bg-surface-panel py-1 shadow-xl"
           style={{ left: groupContextMenu.x, top: groupContextMenu.y }}
         >
           <button
-            className="w-full px-3 py-1.5 text-left text-xs text-slate-300 transition hover:bg-slate-700"
+            className="w-full px-3 py-1.5 text-left text-xs text-text-muted transition hover:bg-surface-hover"
             onClick={() => void handleGroupContextAction("view")}
           >
             查看成员
           </button>
           <button
-            className="w-full px-3 py-1.5 text-left text-xs text-slate-300 transition hover:bg-slate-700"
+            className="w-full px-3 py-1.5 text-left text-xs text-text-muted transition hover:bg-surface-hover"
             onClick={() => void handleGroupContextAction("edit")}
           >
             编辑群聊
@@ -538,14 +536,14 @@ function GroupEditorInline({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div
-        className="w-80 rounded-xl border border-border bg-slate-900 p-4 shadow-2xl"
+        className="w-80 rounded-xl border border-border bg-surface-panel p-4 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="mb-3 text-sm font-semibold text-white">{initialGroup ? "编辑群聊" : "新建群聊"}</h3>
 
-        <label className="mb-1 block text-[11px] text-slate-400">群名称</label>
+        <label className="mb-1 block text-[11px] text-text-subtle">群名称</label>
         <input
-          className="mb-3 w-full rounded-md border border-border bg-slate-800 px-2.5 py-1.5 text-xs text-white outline-none focus:border-cyan-500"
+          className="mb-3 w-full rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-strong"
           value={name}
           onChange={(e) => setName(e.target.value)}
           disabled={Boolean(readOnly)}
@@ -553,15 +551,15 @@ function GroupEditorInline({
           autoFocus
         />
 
-        <label className="mb-1 block text-[11px] text-slate-400">选择分身</label>
-        <div className="mb-3 max-h-36 overflow-y-auto rounded-md border border-border bg-slate-800 p-1.5">
+        <label className="mb-1 block text-[11px] text-text-subtle">选择分身</label>
+        <div className="mb-3 max-h-36 overflow-y-auto rounded-md border border-border bg-surface-card p-1.5">
           {avatars.length === 0 && (
-            <div className="py-2 text-center text-[11px] text-slate-500">暂无可用分身</div>
+            <div className="py-2 text-center text-[11px] text-text-faint">暂无可用分身</div>
           )}
           {avatars.map((a) => (
             <label
               key={a.id}
-              className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs text-slate-300 hover:bg-slate-700"
+              className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs text-text-muted hover:bg-surface-hover"
             >
               <input
                 type="checkbox"
@@ -571,14 +569,14 @@ function GroupEditorInline({
                 className="accent-cyan-500"
               />
               <span className="truncate">{a.name}</span>
-              {a.role && <span className="ml-auto truncate text-[10px] text-slate-500">{a.role}</span>}
+              {a.role && <span className="ml-auto truncate text-[10px] text-text-faint">{a.role}</span>}
             </label>
           ))}
         </div>
 
-        <label className="mb-1 block text-[11px] text-slate-400">路由策略</label>
+        <label className="mb-1 block text-[11px] text-text-subtle">路由策略</label>
         <select
-          className="mb-4 w-full rounded-md border border-border bg-slate-800 px-2.5 py-1.5 text-xs text-white outline-none focus:border-cyan-500"
+          className="mb-4 w-full rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-strong"
           value={routing}
           onChange={(e) => setRouting(e.target.value)}
           disabled={Boolean(readOnly)}
@@ -590,7 +588,7 @@ function GroupEditorInline({
 
         <div className="flex justify-end gap-2">
           <button
-            className="rounded-md px-3 py-1.5 text-xs text-slate-400 transition hover:bg-slate-700 hover:text-white"
+            className="rounded-md px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
             onClick={onClose}
           >
             取消

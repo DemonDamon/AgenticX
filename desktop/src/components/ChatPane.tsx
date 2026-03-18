@@ -6,8 +6,9 @@ import remarkGfm from "remark-gfm";
 import { useAppStore, type Message } from "../store";
 import { startRecording, stopRecording } from "../voice/stt";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
-import { TaskspacePanel } from "./TaskspacePanel";
-import { TodoUpdateCard, isTodoUpdateToolMessage } from "./TodoUpdateCard";
+import { WorkspacePanel } from "./WorkspacePanel";
+import { MessageRenderer } from "./messages/MessageRenderer";
+import { WorkingIndicator } from "./messages/WorkingIndicator";
 
 const NEW_TOPIC_PREF_KEY = "agx:newTopicInherit";
 
@@ -37,36 +38,36 @@ function NewTopicButton({ onNewTopic }: { onNewTopic: (inherit: boolean) => void
   return (
     <div ref={ref} className="relative flex shrink-0">
       <button
-        className="h-9 rounded-l-lg border border-r-0 border-border px-2.5 text-xs text-slate-300 transition hover:bg-slate-800"
+        className="h-9 rounded-l-lg border border-r-0 border-border px-2.5 text-xs text-text-muted transition hover:bg-surface-hover"
         onClick={() => onNewTopic(inherit)}
         title={inherit ? "新对话（继承上下文）" : "新对话（全新开始）"}
       >
         新对话
       </button>
       <button
-        className="h-9 rounded-r-lg border border-border px-1.5 text-xs text-slate-400 transition hover:bg-slate-800 hover:text-cyan-300"
+        className="h-9 rounded-r-lg border border-border px-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
         onClick={() => setOpen((prev) => !prev)}
         title="切换默认模式"
       >
         ▾
       </button>
       {open ? (
-        <div className="absolute bottom-full left-0 z-50 mb-1 min-w-[170px] rounded-md border border-border/80 bg-slate-900/95 p-1 shadow-2xl">
+        <div className="absolute bottom-full left-0 z-50 mb-1 min-w-[170px] rounded-md border border-border bg-surface-panel p-1 shadow-2xl backdrop-blur-xl">
           <button
-            className="flex w-full items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800"
+            className="flex w-full items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => pick(false)}
           >
             <span className="w-4 text-center text-cyan-400">{inherit ? "" : "✓"}</span>
             <span>全新对话</span>
-            <span className="ml-auto text-[10px] text-slate-500">不继承</span>
+            <span className="ml-auto text-[10px] text-text-faint">不继承</span>
           </button>
           <button
-            className="flex w-full items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800"
+            className="flex w-full items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => pick(true)}
           >
             <span className="w-4 text-center text-cyan-400">{inherit ? "✓" : ""}</span>
             <span>继承上下文</span>
-            <span className="ml-auto text-[10px] text-slate-500">携带摘要</span>
+            <span className="ml-auto text-[10px] text-text-faint">携带摘要</span>
           </button>
         </div>
       ) : null}
@@ -102,9 +103,9 @@ class HistoryPanelBoundary extends Component<
     if (this.state.hasError) {
       if (this.state.retryCount < 2) return null;
       return (
-        <div className="h-full w-[220px] shrink-0 border-l border-border/60 bg-slate-900/50 flex items-center justify-center">
+        <div className="h-full w-[220px] shrink-0 border-l border-border bg-surface-panel flex items-center justify-center">
           <button
-            className="rounded px-3 py-2 text-xs text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+            className="rounded px-3 py-2 text-xs text-text-subtle hover:bg-surface-hover hover:text-text-strong"
             onClick={() => this.setState({ hasError: false, retryCount: 0 })}
           >
             历史面板出错，点击重试
@@ -148,7 +149,7 @@ function PaneModelPicker() {
   return (
     <div className="relative">
       <button
-        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-slate-400 transition hover:bg-slate-800 hover:text-cyan-300"
+        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
         onClick={() => setOpen((v) => !v)}
         title="切换模型"
       >
@@ -158,9 +159,9 @@ function PaneModelPicker() {
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 z-40 mb-1 max-h-[220px] w-[240px] overflow-y-auto rounded-lg border border-border bg-slate-900 shadow-xl">
+          <div className="absolute bottom-full left-0 z-40 mb-1 max-h-[220px] w-[240px] overflow-y-auto rounded-lg border border-border bg-surface-panel shadow-xl backdrop-blur-xl">
             {options.length === 0 ? (
-              <div className="px-3 py-3 text-center text-xs text-slate-500">
+              <div className="px-3 py-3 text-center text-xs text-text-faint">
                 请先在设置中配置模型
               </div>
             ) : (
@@ -169,12 +170,12 @@ function PaneModelPicker() {
                 return (
                   <button
                     key={`${opt.provider}:${opt.model}`}
-                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-cyan-500/10 hover:text-white ${
-                      isActive ? "text-cyan-300 bg-cyan-500/10" : "text-slate-300"
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-surface-hover hover:text-text-strong ${
+                      isActive ? "text-cyan-300 bg-cyan-500/10" : "text-text-muted"
                     }`}
                     onClick={() => handleSelect(opt.provider, opt.model)}
                   >
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${isActive ? "bg-cyan-400" : "bg-slate-600"}`} />
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${isActive ? "bg-cyan-400" : "bg-surface-hover"}`} />
                     <span className="truncate">{opt.label}</span>
                   </button>
                 );
@@ -189,25 +190,25 @@ function PaneModelPicker() {
 
 const mdComponents: Components = {
   p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
-  h1: ({ children }) => <h1 className="mb-2 mt-3 text-base font-bold text-slate-100">{children}</h1>,
-  h2: ({ children }) => <h2 className="mb-1.5 mt-2 text-sm font-bold text-slate-200">{children}</h2>,
-  h3: ({ children }) => <h3 className="mb-1 mt-1.5 text-sm font-semibold text-slate-200">{children}</h3>,
+  h1: ({ children }) => <h1 className="mb-2 mt-3 text-base font-bold text-text-strong">{children}</h1>,
+  h2: ({ children }) => <h2 className="mb-1.5 mt-2 text-sm font-bold text-text-strong">{children}</h2>,
+  h3: ({ children }) => <h3 className="mb-1 mt-1.5 text-sm font-semibold text-text-strong">{children}</h3>,
   ul: ({ children }) => <ul className="mb-2 list-disc space-y-0.5 pl-4">{children}</ul>,
   ol: ({ children }) => <ol className="mb-2 list-decimal space-y-0.5 pl-4">{children}</ol>,
   li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-  strong: ({ children }) => <strong className="font-semibold text-slate-100">{children}</strong>,
-  em: ({ children }) => <em className="italic text-slate-300">{children}</em>,
+  strong: ({ children }) => <strong className="font-semibold text-text-strong">{children}</strong>,
+  em: ({ children }) => <em className="italic text-text-muted">{children}</em>,
   a: ({ href, children }) => (
     <a href={href} className="text-cyan-400 underline hover:text-cyan-300" target="_blank" rel="noreferrer">
       {children}
     </a>
   ),
   blockquote: ({ children }) => (
-    <blockquote className="my-2 border-l-2 border-slate-500 pl-3 text-slate-400 italic">{children}</blockquote>
+    <blockquote className="my-2 border-l-2 border-border pl-3 text-text-subtle italic">{children}</blockquote>
   ),
-  hr: () => <hr className="my-3 border-slate-600/60" />,
+  hr: () => <hr className="my-3 border-border" />,
   pre: ({ children }) => (
-    <pre className="my-2 overflow-x-auto rounded-md bg-slate-900/80 px-4 py-3 text-xs leading-relaxed">
+    <pre className="my-2 overflow-x-auto rounded-md bg-surface-card px-4 py-3 text-xs leading-relaxed">
       {children}
     </pre>
   ),
@@ -216,7 +217,7 @@ const mdComponents: Components = {
     return isBlock ? (
       <code className={`${className ?? ""} font-mono`}>{children}</code>
     ) : (
-      <code className="rounded bg-slate-900/60 px-1 py-0.5 text-xs font-mono text-cyan-300">{children}</code>
+      <code className="rounded bg-surface-card px-1 py-0.5 text-xs font-mono text-cyan-300">{children}</code>
     );
   },
 };
@@ -238,7 +239,7 @@ function ModelBadge({ provider, model }: { provider?: string; model?: string }) 
   if (!model) return null;
   const label = provider ? `${provider}/${model}` : model;
   return (
-    <span className="mb-1 inline-block rounded bg-slate-600/60 px-1.5 py-0.5 text-[10px] text-slate-400">
+    <span className="mb-1 inline-block rounded bg-surface-card-strong px-1.5 py-0.5 text-[10px] text-text-faint">
       {label}
     </span>
   );
@@ -248,18 +249,6 @@ function isThinkingPlaceholderText(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return true;
   return /^[\s⏳….·.]+$/.test(trimmed);
-}
-
-function StreamingThinkingIndicator() {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="relative inline-flex h-3 w-3">
-        <span className="absolute inline-flex h-full w-full rounded-full bg-cyan-400/50 animate-ping" />
-        <span className="relative inline-flex h-3 w-3 rounded-full bg-cyan-300 animate-pulse" />
-      </span>
-      <span className="text-xs font-medium tracking-wide text-cyan-200/90">AgenticX 正在深度思考</span>
-    </div>
-  );
 }
 
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
@@ -377,12 +366,6 @@ function buildToolCallLivePreview(toolNameRaw: unknown, argsRaw: unknown): strin
   return null;
 }
 
-function extractPathFromToolResult(text: string): string | null {
-  const match = text.match(/OK:\s(?:wrote|edited)\s(.+)$/);
-  if (!match) return null;
-  return (match[1] || "").trim();
-}
-
 const TASKSPACE_WIDTH_STORAGE_KEY = "agenticx:taskspace-panel-width";
 
 type AtCandidate =
@@ -419,6 +402,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const addSubAgent = useAppStore((s) => s.addSubAgent);
   const updateSubAgent = useAppStore((s) => s.updateSubAgent);
   const addSubAgentEvent = useAppStore((s) => s.addSubAgentEvent);
+  const subAgents = useAppStore((s) => s.subAgents);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -452,6 +436,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     () => (pane?.messages ?? []).filter((item) => !item.agentId || item.agentId === "meta"),
     [pane?.messages]
   );
+  const paneSubAgents = useMemo(() => {
+    const sid = (pane?.sessionId ?? "").trim();
+    if (!sid) return [];
+    return subAgents.filter((item) => (item.sessionId ?? "").trim() === sid);
+  }, [pane?.sessionId, subAgents]);
 
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -627,56 +616,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const renderedMessages = useMemo(() => (
     <>
       {visibleMessages.map((message) => (
-        <div
+        <MessageRenderer
           key={message.id}
-          className={
-            message.role === "user"
-              ? "ml-6 min-w-0 overflow-hidden rounded-xl rounded-tr-sm bg-cyan-500/20 px-3 py-2 text-sm"
-              : message.role === "assistant"
-                ? "mr-6 min-w-0 overflow-hidden rounded-xl rounded-tl-sm bg-slate-700/50 px-3 py-2 text-sm"
-                : "min-w-0 overflow-hidden rounded-lg border border-border/50 bg-slate-800/40 px-3 py-1.5 text-xs text-slate-300"
-          }
-        >
-          {message.role === "assistant" && <ModelBadge provider={message.provider} model={message.model} />}
-          {message.role === "tool" ? (
-            <div className="space-y-1">
-              {isTodoUpdateToolMessage(message.content) ? (
-                <TodoUpdateCard content={message.content} />
-              ) : (
-                <>
-                  <span className="break-all">{message.content}</span>
-                  {extractPathFromToolResult(message.content) ? (
-                    <button
-                      className="rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-cyan-300 hover:bg-slate-600"
-                      onClick={() => void revealFileInTaskspace(extractPathFromToolResult(message.content) || "")}
-                    >
-                      查看此文件
-                    </button>
-                  ) : null}
-                </>
-              )}
-            </div>
-          ) : (
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-              {message.content}
-            </ReactMarkdown>
-          )}
-        </div>
+          message={message}
+          assistantBadge={message.role === "assistant" ? <ModelBadge provider={message.provider} model={message.model} /> : undefined}
+          onRevealPath={(path) => void revealFileInTaskspace(path)}
+        />
       ))}
-      {streaming && (
-        <div className="mr-6 min-w-0 overflow-hidden rounded-xl rounded-tl-sm bg-slate-700/50 px-3 py-2 text-sm">
-          {streamingModel && (
-            <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />
-          )}
+      {streaming ? (
+        <div className="mr-8 min-w-0 overflow-hidden rounded-xl rounded-tl-sm border border-border bg-surface-bubble px-3 py-2 text-sm">
+          {streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : null}
           {streamedAssistantText && !isThinkingPlaceholderText(streamedAssistantText) ? (
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
               {streamedAssistantText}
             </ReactMarkdown>
           ) : (
-            <StreamingThinkingIndicator />
+            <div className="mt-1">
+              <WorkingIndicator text="Thinking..." />
+            </div>
           )}
         </div>
-      )}
+      ) : null}
     </>
   ), [revealFileInTaskspace, streamedAssistantText, streaming, streamingModel, visibleMessages]);
 
@@ -708,7 +668,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (streaming) return;
     const requestSessionId = pane.sessionId;
 
-    const targetAgentId = (selectedSubAgent ?? "meta").trim() || "meta";
+    const selectedIsPaneSubagent =
+      !!selectedSubAgent && paneSubAgents.some((item) => item.id === selectedSubAgent);
+    const targetAgentId = selectedIsPaneSubagent ? selectedSubAgent : "meta";
     if (targetAgentId === "meta") {
       addPaneMessage(pane.id, "user", text, "meta");
     } else {
@@ -1110,22 +1072,88 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     window.addEventListener("mouseup", onUp);
   };
 
+  const cancelPaneSubAgent = async (agentId: string) => {
+    if (!apiBase || !apiToken || !pane.sessionId) return;
+    const sub = subAgents.find((item) => item.id === agentId);
+    const targetSessionId = (sub?.sessionId ?? pane.sessionId).trim() || pane.sessionId;
+    updateSubAgent(agentId, { status: "cancelled", currentAction: "用户请求中断..." });
+    try {
+      const resp = await fetch(`${apiBase}/api/subagent/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ session_id: targetSessionId, agent_id: agentId }),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      addSubAgentEvent(agentId, { type: "cancel", content: "已发送中断请求" });
+    } catch (err) {
+      updateSubAgent(agentId, { status: "cancelled", currentAction: "中断请求失败（后端未找到该任务）" });
+      addSubAgentEvent(agentId, { type: "error", content: `中断请求失败: ${String(err)}` });
+    }
+  };
+
+  const retryPaneSubAgent = async (agentId: string) => {
+    if (!apiBase || !apiToken || !pane.sessionId) return;
+    const sub = subAgents.find((item) => item.id === agentId);
+    const targetSessionId = (sub?.sessionId ?? pane.sessionId).trim() || pane.sessionId;
+    updateSubAgent(agentId, { status: "pending", currentAction: "正在重试..." });
+    try {
+      const resp = await fetch(`${apiBase}/api/subagent/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ session_id: targetSessionId, agent_id: agentId }),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      addSubAgentEvent(agentId, { type: "retry", content: "已发送重试请求" });
+    } catch (err) {
+      updateSubAgent(agentId, { status: "failed", currentAction: "重试失败" });
+      addSubAgentEvent(agentId, { type: "error", content: `重试失败: ${String(err)}` });
+    }
+  };
+
+  const resolvePaneSubAgentConfirm = async (agentId: string, approved: boolean) => {
+    if (!apiBase || !apiToken || !pane.sessionId) return;
+    const sub = subAgents.find((item) => item.id === agentId);
+    if (!sub?.pendingConfirm) return;
+    const targetSessionId = (sub.pendingConfirm.sessionId ?? pane.sessionId).trim() || pane.sessionId;
+    updateSubAgent(agentId, {
+      status: approved ? "running" : "cancelled",
+      currentAction: approved ? "确认通过，继续执行" : "确认拒绝，执行终止",
+      pendingConfirm: undefined,
+    });
+    addSubAgentEvent(agentId, {
+      type: "confirm_response",
+      content: approved ? "用户确认通过" : "用户确认拒绝",
+    });
+    try {
+      await fetch(`${apiBase}/api/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({
+          session_id: targetSessionId,
+          request_id: sub.pendingConfirm.requestId,
+          approved,
+          agent_id: agentId,
+        }),
+      });
+    } catch {
+      // confirm POST failure is non-fatal for UI
+    }
+  };
+
   return (
     <div
       ref={paneRef}
-      className={`flex h-full min-w-0 flex-1 rounded-md border ${
-        focused ? "border-cyan-500/40" : "border-border/60"
-      } bg-slate-950/60`}
+      className="flex h-full min-w-0 flex-1"
       onMouseDown={onFocus}
     >
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        <div className="drag-region flex h-10 shrink-0 items-center justify-between border-b border-border/60 px-3">
+        <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
           <div className="min-w-0">
-            <div className="truncate text-sm font-medium text-slate-200">{pane.avatarName}</div>
-            <div className="flex items-center gap-1.5 truncate text-[10px] text-slate-500">
+            <div className="truncate text-sm font-medium text-text-strong">{pane.avatarName}</div>
+            <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">
               <span>session: {pane.sessionId ? pane.sessionId.slice(0, 8) + "…" : "-"}</span>
               {visibleMessages.length > 0 && (
-                <span className="rounded bg-slate-700/50 px-1 text-slate-400">{visibleMessages.length} 条</span>
+                <span className="rounded bg-surface-card px-1 text-text-subtle">{visibleMessages.length} 条</span>
               )}
               {pane.contextInherited && (
                 <span className="rounded bg-emerald-500/20 px-1 text-emerald-400">已继承</span>
@@ -1134,25 +1162,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           </div>
           <div className="no-drag flex items-center gap-1">
             <button
-              className={`rounded px-2 py-0.5 text-[11px] ${
+              className={`rounded px-2 py-0.5 text-[11px] transition ${
                 pane.taskspacePanelOpen
-                  ? "bg-cyan-500/20 text-cyan-300"
-                  : "text-slate-400 hover:bg-slate-800 hover:text-cyan-300"
+                  ? "bg-surface-card-strong text-text-strong"
+                  : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
               }`}
               onClick={() => toggleTaskspacePanel(pane.id)}
-              title="切换 Taskspace 面板"
+              title="切换工作区面板"
             >
-              目录
+              工作区
             </button>
             <button
-              className="rounded px-2 py-0.5 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-cyan-300"
+              className="rounded px-2 py-0.5 text-[11px] text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
               onClick={() => togglePaneHistory(pane.id)}
               title="切换历史面板"
             >
               历史
             </button>
             <button
-              className="rounded px-2 py-0.5 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-rose-300"
+              className="rounded px-2 py-0.5 text-[11px] text-text-faint transition hover:bg-surface-hover hover:text-status-error"
               onClick={() => removePane(pane.id)}
               title="关闭窗格"
             >
@@ -1161,19 +1189,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           </div>
         </div>
 
-        <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-2">
+        <div ref={listRef} className="flex-1 overflow-y-auto px-6 py-3">
           {!pane.sessionId ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 text-xs text-slate-500">
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-xs text-text-faint">
               <span className="animate-pulse">正在初始化会话...</span>
               <button
-                className="rounded-md border border-border px-3 py-1.5 text-xs text-slate-400 transition hover:bg-slate-800 hover:text-cyan-300"
+                className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
                 onClick={() => void initSession(false)}
               >
                 重试
               </button>
             </div>
           ) : visibleMessages.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-xs text-slate-500">暂无消息</div>
+            <div className="flex h-full items-center justify-center text-xs text-text-faint">暂无消息</div>
           ) : (
             <div className="space-y-2">
               {renderedMessages}
@@ -1181,7 +1209,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           )}
         </div>
 
-        <div className="shrink-0 border-t border-border/60 bg-slate-900/60 px-3 py-2">
+        <div className="shrink-0 border-t border-border bg-surface-composer px-4 py-2.5 backdrop-blur-md">
+          <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
+            <span className="rounded border border-border bg-surface-card px-2 py-0.5">
+              Context Files: {Object.keys(contextFiles).length}
+            </span>
+            <span className="rounded border border-border bg-surface-card px-2 py-0.5">
+              Session: {pane.sessionId ? `${pane.sessionId.slice(0, 8)}...` : "-"}
+            </span>
+            {activeProvider && activeModel ? (
+              <span className="rounded border border-border bg-surface-card px-2 py-0.5">
+                {activeProvider}/{activeModel}
+              </span>
+            ) : null}
+          </div>
           {selectedSubAgent ? (
             <div className="mb-1 inline-flex items-center gap-2 rounded border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-xs text-cyan-200">
               对话目标: {selectedSubAgent}
@@ -1255,7 +1296,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               }}
               rows={input.includes("\n") ? 2 : 1}
               placeholder="输入消息，Enter 发送..."
-              className="min-h-[36px] flex-1 resize-none rounded-lg border border-border bg-slate-950/80 px-2.5 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
+              className="min-h-[36px] flex-1 resize-none rounded-lg border border-border bg-surface-card px-3 py-2 text-sm text-text-primary outline-none transition focus:border-border-strong"
             />
             {streaming ? (
               <button
@@ -1268,7 +1309,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               <>
                 <button
                   className={`h-9 w-9 shrink-0 rounded-lg border border-border text-base transition ${
-                    recording ? "bg-rose-500/30 text-rose-200 hover:bg-rose-500/40" : "text-slate-200 hover:bg-slate-800"
+                    recording ? "bg-rose-500/30 text-rose-200 hover:bg-rose-500/40" : "text-text-primary hover:bg-surface-hover"
                   }`}
                   onClick={onMicClick}
                   title={recording ? "结束语音输入" : "语音输入"}
@@ -1306,16 +1347,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             </div>
           ) : null}
           {atOpen ? (
-            <div className="mt-1 max-h-28 overflow-y-auto rounded border border-border bg-slate-950 p-1">
+            <div className="mt-1 max-h-28 overflow-y-auto rounded border border-border bg-surface-panel p-1 backdrop-blur-xl">
               {atCandidates.length === 0 ? (
-                <div className="px-2 py-1 text-[11px] text-slate-500">
+                <div className="px-2 py-1 text-[11px] text-text-faint">
                   未找到匹配文件/文件夹{atQuery ? `: ${atQuery}` : ""}
                 </div>
               ) : (
                 atCandidates.map((item) => (
                   <button
                     key={`${item.kind}:${item.taskspaceId}:${item.path}`}
-                    className="block w-full rounded px-2 py-1 text-left text-[11px] text-slate-300 hover:bg-slate-800"
+                    className="block w-full rounded px-2 py-1 text-left text-[11px] text-text-muted hover:bg-surface-hover"
                     onClick={() => {
                       const mention = `@${item.label} `;
                       setInput((prev) => prev.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`));
@@ -1344,16 +1385,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         <SessionHistoryPanel pane={pane} />
       </HistoryPanelBoundary>
       {pane.taskspacePanelOpen ? (
-        <div className="relative h-full shrink-0 border-l border-border/60" style={{ width: taskspaceWidth }}>
+        <div className="relative h-full shrink-0 border-l border-border" style={{ width: taskspaceWidth }}>
           <div
             className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
             onMouseDown={startResizeTaskspace}
-            title="拖拽调整目录面板宽度"
+            title="拖拽调整工作区面板宽度"
           >
             <div className="mx-auto h-full w-[2px] bg-cyan-500/35 transition group-hover:bg-cyan-400/80" />
-            <div className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-400/70 bg-slate-900/90 opacity-80 shadow-[0_0_10px_rgba(34,211,238,0.3)] transition group-hover:opacity-100" />
+            <div className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-400/70 bg-surface-panel opacity-80 shadow-[0_0_10px_rgba(34,211,238,0.3)] transition group-hover:opacity-100" />
           </div>
-          <TaskspacePanel
+          <WorkspacePanel
             sessionId={pane.sessionId}
             activeTaskspaceId={pane.activeTaskspaceId}
             onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
@@ -1363,6 +1404,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               void addContextFile(pane.activeTaskspaceId, path);
               setInput((prev) => `${prev}${prev.endsWith(" ") || !prev ? "" : " "}@${path.split("/").pop() || path} `);
             }}
+            subAgents={paneSubAgents}
+            selectedSubAgent={selectedSubAgent}
+            onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
+            onRetry={(agentId) => void retryPaneSubAgent(agentId)}
+            onChat={(agentId) => setSelectedSubAgent(agentId)}
+            onSelect={(agentId) => setSelectedSubAgent(agentId)}
+            onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
           />
         </div>
       ) : null}

@@ -326,12 +326,12 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
               if (e.key === "Enter") void saveRename(item.session_id);
               if (e.key === "Escape") setEditingId(null);
             }}
-            className="w-full rounded border border-cyan-500/50 bg-slate-800 px-2 py-1 text-xs text-slate-200 outline-none"
+            className="w-full rounded border border-cyan-500/50 bg-surface-hover px-2 py-1 text-xs text-text-primary outline-none"
           />
         ) : (
           <button
             className={`flex w-full flex-col items-start rounded px-2 py-1 text-left text-xs transition ${
-              active ? "bg-cyan-500/15 text-cyan-200" : "text-slate-300 hover:bg-slate-800"
+              active ? "bg-cyan-500/15 text-cyan-200" : "text-text-muted hover:bg-surface-hover"
             }`}
             onClick={() => {
               if (selectMode) {
@@ -366,7 +366,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
               <span className="truncate">{label}</span>
               {unread ? <span className="inline-block h-1.5 w-1.5 rounded-full bg-cyan-300" /> : null}
             </span>
-            <span className="mt-0.5 truncate w-full text-[9px] text-slate-500">
+            <span className="mt-0.5 truncate w-full text-[9px] text-text-faint">
               {timeAgo(createdAt)}
             </span>
           </button>
@@ -379,7 +379,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
     if (items.length === 0) return null;
     return (
       <div className="mb-2">
-        <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">{groupTitle}</div>
+        <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-text-faint">{groupTitle}</div>
         {items.map((item) => renderSessionItem(item))}
       </div>
     );
@@ -472,13 +472,13 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
   };
 
   return (
-    <div className="h-full w-[220px] shrink-0 border-l border-border/60 bg-slate-900/50">
-      <div className="border-b border-border/60 px-3 py-2 text-xs text-slate-400">
+    <div className="h-full w-[220px] shrink-0 border-l border-border bg-surface-card">
+      <div className="border-b border-border px-3 py-2 text-xs text-text-subtle">
         <div className="flex items-center justify-between gap-2">
           <span>{title} · 历史会话</span>
           {!selectMode ? (
             <button
-              className="rounded border border-border/70 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-slate-800"
+              className="rounded border border-border px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
               onClick={() => {
                 setSelectMode(true);
                 setContextMenu(null);
@@ -489,7 +489,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
           ) : (
             <div className="flex items-center gap-1">
               <button
-                className="rounded border border-border/70 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-slate-800"
+                className="rounded border border-border px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
                 onClick={toggleSelectAll}
                 disabled={batchDeleting}
                 title="全选或取消全选"
@@ -505,7 +505,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
                 {batchDeleting ? "删除中..." : `删除${selectedSessionIds.length > 0 ? ` (${selectedSessionIds.length})` : ""}`}
               </button>
               <button
-                className="rounded border border-border/70 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-slate-800"
+                className="rounded border border-border px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
                 onClick={() => {
                   setSelectMode(false);
                   setSelectedSessionIds([]);
@@ -520,7 +520,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
       </div>
       <div className="max-h-[calc(100%-35px)] overflow-y-auto px-2 py-2">
         {sessions.length === 0 ? (
-          <div className="rounded border border-dashed border-border/60 p-2 text-center text-xs text-slate-500">
+          <div className="rounded border border-dashed border-border p-2 text-center text-xs text-text-faint">
             暂无会话
           </div>
         ) : (
@@ -534,49 +534,49 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
       </div>
       {contextMenu ? (
         <div
-          className="fixed z-50 min-w-[180px] rounded-md border border-border/80 bg-slate-900/95 p-1 shadow-2xl"
+          className="fixed z-50 min-w-[180px] rounded-md border border-border bg-surface-panel p-1 shadow-2xl"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800"
+            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("pin")}
           >
             {contextMenu.item.pinned ? "Unpin" : "Pin"}
           </button>
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800"
+            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("fork")}
           >
             Fork Chat
           </button>
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800"
+            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("open_new_tab")}
           >
             Open in New Tab
           </button>
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800"
+            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("mark_unread")}
           >
             Mark as Unread
           </button>
-          <div className="my-1 border-t border-border/60" />
+          <div className="my-1 border-t border-border" />
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800"
+            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("delete")}
           >
             Delete
           </button>
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800"
+            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("rename")}
           >
             Rename
           </button>
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800"
+            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("archive_prior")}
           >
             Archive Prior Chats

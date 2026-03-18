@@ -10,6 +10,7 @@ export type SubAgentStatus =
   | "failed"
   | "cancelled";
 export type ConfirmStrategy = "manual" | "semi-auto" | "auto";
+export type ThemeMode = "dark" | "light" | "dim";
 export type McpServer = {
   name: string;
   connected: boolean;
@@ -146,6 +147,7 @@ type AppState = {
   commandPaletteOpen: boolean;
   keybindingsPanelOpen: boolean;
   planMode: boolean;
+  theme: ThemeMode;
   confirmStrategy: ConfirmStrategy;
   mcpServers: McpServer[];
   avatars: Avatar[];
@@ -164,6 +166,7 @@ type AppState = {
   setCommandPaletteOpen: (v: boolean) => void;
   setKeybindingsPanelOpen: (v: boolean) => void;
   setPlanMode: (v: boolean) => void;
+  setTheme: (theme: ThemeMode) => void;
   setConfirmStrategy: (v: ConfirmStrategy) => void;
   setMcpServers: (servers: McpServer[]) => void;
   setAvatars: (avatars: Avatar[]) => void;
@@ -235,6 +238,7 @@ export const useAppStore = create<AppState>((set) => ({
   commandPaletteOpen: false,
   keybindingsPanelOpen: false,
   planMode: false,
+  theme: "dark",
   confirmStrategy: "semi-auto",
   mcpServers: [],
   avatars: [],
@@ -258,6 +262,7 @@ export const useAppStore = create<AppState>((set) => ({
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
   setKeybindingsPanelOpen: (keybindingsPanelOpen) => set({ keybindingsPanelOpen }),
   setPlanMode: (planMode) => set({ planMode }),
+  setTheme: (theme) => set({ theme }),
   setConfirmStrategy: (confirmStrategy) => set({ confirmStrategy }),
   setMcpServers: (mcpServers) => set({ mcpServers }),
   setAvatars: (avatars) => set({ avatars }),

@@ -5,7 +5,8 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { OnboardingView } from "./components/OnboardingView";
 import { LiteChatView } from "./components/LiteChatView";
 import { PaneManager } from "./components/PaneManager";
-import { SubAgentPanel } from "./components/SubAgentPanel";
+import { SidebarResizer } from "./components/SidebarResizer";
+import { Topbar } from "./components/Topbar";
 import { useAppStore } from "./store";
 import { stopSpeak } from "./voice/tts";
 import { matchKeybinding } from "./core/keybinding-manager";
@@ -69,6 +70,8 @@ export function App() {
   const setMcpServers = useAppStore((s) => s.setMcpServers);
   const planMode = useAppStore((s) => s.planMode);
   const setPlanMode = useAppStore((s) => s.setPlanMode);
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
   const subAgents = useAppStore((s) => s.subAgents);
   const addSubAgent = useAppStore((s) => s.addSubAgent);
   const selectedSubAgent = useAppStore((s) => s.selectedSubAgent);
@@ -86,7 +89,7 @@ export function App() {
   const autoApproveScopesRef = useRef<Set<string>>(new Set());
   const denyScopesRef = useRef<Set<string>>(new Set());
   const sessionInitDoneRef = useRef(false);
-  const [subPanelOpen, setSubPanelOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const subAgentsRef = useRef(subAgents);
   const subAgentSessionRef = useRef<Record<string, string>>({});
   const staleMissCountRef = useRef<Record<string, number>>({});
@@ -650,6 +653,30 @@ export function App() {
   }, [apiBase, apiToken, syncSubAgents, triggerMetaReport]);
 
   useEffect(() => {
+    try {
+      const savedTheme = window.localStorage.getItem("agx-theme");
+      if (savedTheme === "dark" || savedTheme === "light" || savedTheme === "dim") {
+        setTheme(savedTheme);
+      }
+      const savedSidebarWidth = window.localStorage.getItem("agx-sidebar-width");
+      if (savedSidebarWidth) {
+        document.documentElement.style.setProperty("--sidebar-width", savedSidebarWidth);
+      }
+    } catch {
+      // ignore storage failures
+    }
+  }, [setTheme]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      window.localStorage.setItem("agx-theme", theme);
+    } catch {
+      // ignore storage failures
+    }
+  }, [theme]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       if (isEditableTarget(event.target)) return;
@@ -765,102 +792,38 @@ export function App() {
     await window.agenticxDesktop.saveConfirmStrategy(strategy);
   };
 
-  const cancelSubAgent = async (agentId: string) => {
-    if (!apiBase || !sessionId) return;
-    const targetSessionId = subAgentSessionRef.current[agentId] ?? sessionId;
-    updateSubAgent(agentId, { status: "cancelled", currentAction: "用户请求中断..." });
-    try {
-      const resp = await fetch(`${apiBase}/api/subagent/cancel`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-        body: JSON.stringify({ session_id: targetSessionId, agent_id: agentId }),
-      });
-      if (!resp.ok) throw new Error(await resp.text());
-      addSubAgentEvent(agentId, { type: "cancel", content: "已发送中断请求" });
-    } catch (err) {
-      updateSubAgent(agentId, { status: "cancelled", currentAction: "中断请求失败（后端未找到该任务）" });
-      addSubAgentEvent(agentId, { type: "error", content: `中断请求失败: ${String(err)}` });
-    }
-  };
-
-  const retrySubAgent = async (agentId: string) => {
-    if (!apiBase || !sessionId) return;
-    const targetSessionId = subAgentSessionRef.current[agentId] ?? sessionId;
-    updateSubAgent(agentId, { status: "pending", currentAction: "正在重试..." });
-    try {
-      const resp = await fetch(`${apiBase}/api/subagent/retry`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-        body: JSON.stringify({ session_id: targetSessionId, agent_id: agentId }),
-      });
-      if (!resp.ok) throw new Error(await resp.text());
-      addSubAgentEvent(agentId, { type: "retry", content: "已发送重试请求" });
-    } catch (err) {
-      updateSubAgent(agentId, { status: "failed", currentAction: "重试失败" });
-      addSubAgentEvent(agentId, { type: "error", content: `重试失败: ${String(err)}` });
-    }
-  };
-
-  const resolveSubAgentConfirm = async (agentId: string, approved: boolean) => {
-    if (!apiBase || !apiToken) return;
-    const sub = subAgentsRef.current.find((s) => s.id === agentId);
-    if (!sub?.pendingConfirm) return;
-    const { requestId, sessionId: confirmSid } = sub.pendingConfirm;
-    updateSubAgent(agentId, {
-      status: approved ? "running" : "cancelled",
-      currentAction: approved ? "确认通过，继续执行" : "确认拒绝，执行终止",
-      pendingConfirm: undefined,
-    });
-    addSubAgentEvent(agentId, {
-      type: "confirm_response",
-      content: approved ? "用户确认通过" : "用户确认拒绝",
-    });
-    try {
-      await fetch(`${apiBase}/api/confirm`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-        body: JSON.stringify({
-          session_id: confirmSid,
-          request_id: requestId,
-          approved,
-          agent_id: agentId,
-        }),
-      });
-    } catch {
-      // confirm POST failure is non-fatal for UI
-    }
-  };
-
   return (
-    <div className="flex h-screen overflow-hidden bg-base">
+    <div className={`agx-app ${sidebarCollapsed || userMode !== "pro" || !onboardingCompleted || !apiBase ? "sidebar-collapsed" : ""}`}>
       {!onboardingCompleted ? (
         <OnboardingView onSelectMode={(mode) => void handleSelectMode(mode)} />
       ) : apiBase ? (
         <>
-          {userMode === "pro" && <AvatarSidebar />}
-          <div className="flex flex-1 overflow-hidden">
-            {userMode === "lite" ? (
-              <LiteChatView onOpenConfirm={onOpenConfirm} />
-            ) : (
-              <>
-                <PaneManager onOpenConfirm={onOpenConfirm} />
-                <SubAgentPanel
-                  open={subPanelOpen}
-                  subAgents={subAgents}
-                  selectedSubAgent={selectedSubAgent}
-                  onToggle={() => setSubPanelOpen((v) => !v)}
-                  onCancel={(agentId) => void cancelSubAgent(agentId)}
-                  onRetry={(agentId) => void retrySubAgent(agentId)}
-                  onChat={(agentId) => setSelectedSubAgent(agentId)}
-                  onSelect={(agentId) => setSelectedSubAgent(agentId)}
-                  onConfirmResolve={(agentId, approved) => void resolveSubAgentConfirm(agentId, approved)}
-                />
-              </>
-            )}
+          {userMode === "pro" && !sidebarCollapsed ? (
+            <div className="agx-sidebar-shell">
+              <AvatarSidebar />
+              <SidebarResizer />
+            </div>
+          ) : null}
+          <div className="agx-main-shell">
+            {userMode === "pro" ? (
+              <Topbar
+                sidebarCollapsed={sidebarCollapsed}
+                onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
+              />
+            ) : null}
+            <div className="agx-content">
+              <div className="agx-main-content">
+                {userMode === "lite" ? (
+                  <LiteChatView onOpenConfirm={onOpenConfirm} />
+                ) : (
+                  <PaneManager onOpenConfirm={onOpenConfirm} />
+                )}
+              </div>
+            </div>
           </div>
         </>
       ) : (
-        <div className="flex flex-1 items-center justify-center text-slate-500">
+        <div className="flex flex-1 items-center justify-center text-text-faint">
           正在连接 AgenticX 服务...
         </div>
       )}
@@ -903,6 +866,8 @@ export function App() {
         mcpServers={mcpServers}
         onRefreshMcp={refreshMcpStatus}
         confirmStrategy={confirmStrategy}
+        theme={theme}
+        onThemeChange={setTheme}
         onConfirmStrategyChange={handleConfirmStrategyChange}
         onClose={() => closeSettings()}
         onSave={handleSettingsSave}

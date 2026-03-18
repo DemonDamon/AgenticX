@@ -67,43 +67,43 @@ export function TodoUpdateCard({ content }: { content: string }) {
   const percent = parsed.total > 0 ? Math.round((parsed.completed / parsed.total) * 100) : 0;
 
   return (
-    <div className="rounded-lg border border-slate-600/70 bg-slate-900/50 px-2.5 py-2">
+    <div className="rounded-lg border border-border bg-surface-card px-2.5 py-2">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="text-[11px] font-medium text-cyan-300">任务清单</span>
           <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">
             {parsed.completed}/{parsed.total}
           </span>
-          <span className="rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300">{percent}%</span>
+          <span className="rounded bg-surface-hover px-1.5 py-0.5 text-[10px] text-text-muted">{percent}%</span>
           {inProgress > 0 ? (
             <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">进行中 {inProgress}</span>
           ) : null}
           {pending > 0 ? (
-            <span className="rounded bg-slate-700/80 px-1.5 py-0.5 text-[10px] text-slate-300">待办 {pending}</span>
+            <span className="rounded bg-surface-card px-1.5 py-0.5 text-[10px] text-text-muted">待办 {pending}</span>
           ) : null}
         </div>
         <button
-          className="rounded px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+          className="rounded px-1.5 py-0.5 text-[10px] text-text-subtle hover:bg-surface-hover hover:text-text-primary"
           onClick={() => setExpanded((prev) => !prev)}
           title={expanded ? "收起任务项" : "展开任务项"}
         >
           {expanded ? "收起" : "展开"}
         </button>
       </div>
-      <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
+      <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-surface-hover">
         <div className="h-full rounded-full bg-cyan-400/80 transition-all" style={{ width: `${percent}%` }} />
       </div>
       {expanded ? (
         <div className="space-y-1">
           {parsed.items.map((item, idx) => (
-            <div key={`${item.content}-${idx}`} className="flex items-start gap-2 rounded px-1 py-0.5 hover:bg-slate-800/60">
+            <div key={`${item.content}-${idx}`} className="flex items-start gap-2 rounded px-1 py-0.5 hover:bg-surface-card">
               <span
                 className={
                   item.status === "completed"
                     ? "mt-0.5 text-[11px] text-emerald-300"
                     : item.status === "in_progress"
                       ? "mt-0.5 text-[11px] text-amber-300"
-                      : "mt-0.5 text-[11px] text-slate-400"
+                      : "mt-0.5 text-[11px] text-text-subtle"
                 }
               >
                 {item.status === "completed" ? "✓" : item.status === "in_progress" ? "●" : "○"}
@@ -112,10 +112,10 @@ export function TodoUpdateCard({ content }: { content: string }) {
                 <div
                   className={
                     item.status === "completed"
-                      ? "text-[11px] text-slate-400 line-through"
+                      ? "text-[11px] text-text-subtle line-through"
                       : item.status === "in_progress"
                         ? "text-[11px] font-medium text-amber-100"
-                        : "text-[11px] text-slate-200"
+                        : "text-[11px] text-text-primary"
                   }
                 >
                   {item.content}

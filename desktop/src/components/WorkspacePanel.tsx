@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import type { Taskspace } from "../store";
 import Prism from "prismjs";
 import "prismjs/components/prism-bash";
 import "prismjs/components/prism-json";
@@ -8,6 +7,8 @@ import "prismjs/components/prism-markdown";
 import "prismjs/components/prism-python";
 import "prismjs/components/prism-typescript";
 import "prismjs/themes/prism-tomorrow.css";
+import type { SubAgent, Taskspace } from "../store";
+import { SubAgentCard } from "./SubAgentCard";
 
 type TaskspaceFile = {
   name: string;
@@ -17,12 +18,26 @@ type TaskspaceFile = {
   modified: number;
 };
 
+type FilePreview = {
+  path: string;
+  content: string;
+  truncated: boolean;
+  size: number;
+};
+
 type Props = {
   sessionId: string;
   activeTaskspaceId: string | null;
   onActiveTaskspaceChange: (taskspaceId: string | null) => void;
   onPickFileForReference?: (path: string) => void;
   autoRefreshKey?: number;
+  subAgents: SubAgent[];
+  selectedSubAgent: string | null;
+  onCancel: (agentId: string) => void;
+  onRetry: (agentId: string) => void;
+  onChat: (agentId: string) => void;
+  onSelect: (agentId: string) => void;
+  onConfirmResolve?: (agentId: string, approved: boolean) => void;
 };
 
 function detectLanguage(path: string): string {
@@ -40,12 +55,19 @@ function nodeKey(taskspaceId: string, relPath: string): string {
   return `${taskspaceId}:${relPath || "."}`;
 }
 
-export function TaskspacePanel({
+export function WorkspacePanel({
   sessionId,
   activeTaskspaceId,
   onActiveTaskspaceChange,
   onPickFileForReference,
   autoRefreshKey,
+  subAgents,
+  selectedSubAgent,
+  onCancel,
+  onRetry,
+  onChat,
+  onSelect,
+  onConfirmResolve,
 }: Props) {
   const [taskspaces, setTaskspaces] = useState<Taskspace[]>([]);
   const [loading, setLoading] = useState(false);
@@ -53,26 +75,41 @@ export function TaskspacePanel({
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [entriesByDir, setEntriesByDir] = useState<Record<string, TaskspaceFile[]>>({});
   const [selectedFilePath, setSelectedFilePath] = useState("");
-  const [preview, setPreview] = useState<{ content: string; truncated: boolean; size: number } | null>(null);
+  const [filePreview, setFilePreview] = useState<FilePreview | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newPath, setNewPath] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [adding, setAdding] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [panelHeight, setPanelHeight] = useState(0);
-  const [previewHeight, setPreviewHeight] = useState(280);
+  const [spawnsHeight, setSpawnsHeight] = useState(220);
 
   const activeTaskspace = useMemo(
     () => taskspaces.find((item) => item.id === activeTaskspaceId) ?? taskspaces[0] ?? null,
     [taskspaces, activeTaskspaceId]
   );
 
+  const maxSpawnsHeight = panelHeight > 0 ? Math.floor(panelHeight * 0.7) : 520;
+  const minSpawnsHeight = 140;
+  const safeSpawnsHeight = Math.max(minSpawnsHeight, Math.min(maxSpawnsHeight, spawnsHeight));
+
+  useEffect(() => {
+    setSpawnsHeight((prev) => Math.max(minSpawnsHeight, Math.min(maxSpawnsHeight, prev)));
+  }, [maxSpawnsHeight]);
+
+  const highlightedCode = useMemo(() => {
+    if (!filePreview) return "";
+    const language = detectLanguage(filePreview.path);
+    const grammar = Prism.languages[language] ?? Prism.languages.clike;
+    return Prism.highlight(filePreview.content, grammar, language);
+  }, [filePreview]);
+
   const loadTaskspaces = async () => {
     if (!sessionId) return;
     setLoading(true);
     const result = await window.agenticxDesktop.listTaskspaces(sessionId);
     if (!result.ok) {
-      setErrorText(result.error ?? "加载 Taskspace 失败");
+      setErrorText(result.error ?? "加载工作区失败");
       setLoading(false);
       return;
     }
@@ -111,9 +148,7 @@ export function TaskspacePanel({
     const latest = await window.agenticxDesktop.listTaskspaces(sessionId);
     if (!latest.ok || !Array.isArray(latest.workspaces)) return;
     const refreshedActive =
-      latest.workspaces.find((item) => item.id === activeTaskspaceId) ??
-      latest.workspaces[0] ??
-      null;
+      latest.workspaces.find((item) => item.id === activeTaskspaceId) ?? latest.workspaces[0] ?? null;
     if (refreshedActive) {
       onActiveTaskspaceChange(refreshedActive.id);
       await refreshTaskspace(refreshedActive.id);
@@ -126,7 +161,7 @@ export function TaskspacePanel({
       setExpandedDirs(new Set());
       setEntriesByDir({});
       setSelectedFilePath("");
-      setPreview(null);
+      setFilePreview(null);
       setErrorText("");
       return;
     }
@@ -166,13 +201,6 @@ export function TaskspacePanel({
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    if (!panelHeight) return;
-    const maxHeight = Math.floor(panelHeight * 0.75);
-    const minHeight = 160;
-    setPreviewHeight((prev) => Math.max(minHeight, Math.min(maxHeight, prev)));
-  }, [panelHeight]);
-
   const addTaskspace = async (pathValue: string, labelValue: string) => {
     setAdding(true);
     const result = await window.agenticxDesktop.addTaskspace({
@@ -182,7 +210,7 @@ export function TaskspacePanel({
     });
     setAdding(false);
     if (!result.ok) {
-      setErrorText(result.error ?? "添加 Taskspace 失败");
+      setErrorText(result.error ?? "添加工作区失败");
       return;
     }
     setErrorText("");
@@ -193,11 +221,11 @@ export function TaskspacePanel({
   };
 
   const removeTaskspace = async (taskspaceId: string) => {
-    const confirmed = window.confirm("确认移除该 Taskspace 吗？");
+    const confirmed = window.confirm("确认移除该工作区吗？");
     if (!confirmed) return;
     const result = await window.agenticxDesktop.removeTaskspace({ sessionId, taskspaceId });
     if (!result.ok) {
-      setErrorText(result.error ?? "移除 Taskspace 失败");
+      setErrorText(result.error ?? "移除工作区失败");
       return;
     }
     await loadTaskspaces();
@@ -241,7 +269,8 @@ export function TaskspacePanel({
       return;
     }
     setSelectedFilePath(relPath);
-    setPreview({
+    setFilePreview({
+      path: relPath,
       content: result.content ?? "",
       truncated: !!result.truncated,
       size: Number(result.size ?? 0),
@@ -262,16 +291,14 @@ export function TaskspacePanel({
     setExpandedDirs(next);
   };
 
-  const startResizePreview = (event: ReactMouseEvent<HTMLDivElement>) => {
+  const startResizeSpawns = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     const startY = event.clientY;
-    const startHeight = previewHeight;
-    const maxHeight = panelHeight ? Math.floor(panelHeight * 0.75) : 520;
-    const minHeight = 160;
+    const startHeight = safeSpawnsHeight;
     const onMove = (moveEvent: MouseEvent) => {
       const delta = startY - moveEvent.clientY;
-      const next = Math.max(minHeight, Math.min(maxHeight, startHeight + delta));
-      setPreviewHeight(next);
+      const next = Math.max(minSpawnsHeight, Math.min(maxSpawnsHeight, startHeight + delta));
+      setSpawnsHeight(next);
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
@@ -329,129 +356,168 @@ export function TaskspacePanel({
     });
   };
 
-  const highlightedCode = useMemo(() => {
-    const content = preview?.content ?? "";
-    const language = detectLanguage(selectedFilePath);
-    const grammar = Prism.languages[language] ?? Prism.languages.clike;
-    return Prism.highlight(content, grammar, language);
-  }, [preview?.content, selectedFilePath]);
-
   return (
-    <div ref={panelRef} className="flex h-full min-h-0 w-full flex-col bg-surface-panel">
-      <div className="relative flex items-center gap-1 border-b border-border px-2 py-2">
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-          {taskspaces.map((item) => (
-            <button
-              key={item.id}
-              className={`shrink-0 rounded px-2 py-1 text-xs ${
-                item.id === activeTaskspace?.id
-                  ? "bg-cyan-500/20 text-cyan-300"
-                  : "bg-surface-hover text-text-subtle hover:text-text-primary"
-              }`}
-              onClick={() => onActiveTaskspaceChange(item.id)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                void removeTaskspace(item.id);
-              }}
-              title={item.path}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <button
-          className="rounded bg-surface-hover px-2 py-1 text-xs text-text-muted hover:bg-surface-hover"
-          onClick={() => {
-            setErrorText("");
-            void refreshListAndActiveTaskspace();
-          }}
-          title="刷新 Taskspace 列表与目录"
-        >
-          刷新
-        </button>
-        <button
-          className="rounded bg-surface-hover px-2 py-1 text-xs text-text-muted hover:bg-surface-hover"
-          onClick={() => {
-            setShowAddForm((prev) => !prev);
-            setErrorText("");
-          }}
-          title="新增 Taskspace"
-        >
-          +
-        </button>
-        {showAddForm ? (
-          <div className="absolute right-2 top-10 z-10 w-[280px] rounded-md border border-border bg-surface-panel p-2 shadow-2xl">
-            <div className="mb-1 text-[11px] text-text-subtle">新增 Taskspace</div>
-            <input
-              value={newPath}
-              onChange={(e) => setNewPath(e.target.value)}
-              placeholder="目录绝对路径（可留空用默认）"
-              className="mb-1 w-full rounded border border-border bg-surface-panel px-2 py-1 text-[11px] text-text-primary outline-none focus:border-cyan-500/50"
-            />
-            <div className="mb-1 flex justify-end">
+    <div ref={panelRef} className="relative flex h-full min-h-0 w-full flex-col bg-surface-panel">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="relative flex items-center gap-1 border-b border-border px-2 py-2">
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+            {taskspaces.map((item) => (
               <button
-                type="button"
-                className="rounded border border-border px-2 py-1 text-[11px] text-text-muted hover:bg-surface-hover"
-                onClick={() => void chooseDirectoryForTaskspace()}
-                title="从系统目录中选择"
-              >
-                选择目录...
-              </button>
-            </div>
-            <input
-              value={newLabel}
-              onChange={(e) => setNewLabel(e.target.value)}
-              placeholder="显示名称（可选）"
-              className="mb-2 w-full rounded border border-border bg-surface-panel px-2 py-1 text-[11px] text-text-primary outline-none focus:border-cyan-500/50"
-            />
-            <div className="flex items-center justify-end gap-1">
-              <button
-                className="rounded px-2 py-1 text-[11px] text-text-subtle hover:bg-surface-hover"
-                onClick={() => {
-                  setShowAddForm(false);
-                  setNewPath("");
-                  setNewLabel("");
+                key={item.id}
+                className={`shrink-0 rounded px-2 py-1 text-xs ${
+                  item.id === activeTaskspace?.id
+                    ? "bg-cyan-500/20 text-cyan-300"
+                    : "bg-surface-hover text-text-subtle hover:text-text-primary"
+                }`}
+                onClick={() => onActiveTaskspaceChange(item.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  void removeTaskspace(item.id);
                 }}
+                title={item.path}
               >
-                取消
+                {item.label}
               </button>
-              <button
-                className="rounded bg-cyan-600 px-2 py-1 text-[11px] text-white hover:bg-cyan-500 disabled:opacity-50"
-                disabled={adding}
-                onClick={() => void addTaskspace(newPath, newLabel)}
-              >
-                {adding ? "添加中..." : "确认添加"}
-              </button>
-            </div>
+            ))}
           </div>
-        ) : null}
+          <button
+            className="rounded bg-surface-hover px-2 py-1 text-xs text-text-muted hover:bg-surface-hover"
+            onClick={() => {
+              setErrorText("");
+              void refreshListAndActiveTaskspace();
+            }}
+            title="刷新工作区列表与目录"
+          >
+            刷新
+          </button>
+          <button
+            className="rounded bg-surface-hover px-2 py-1 text-xs text-text-muted hover:bg-surface-hover"
+            onClick={() => {
+              setShowAddForm((prev) => !prev);
+              setErrorText("");
+            }}
+            title="新增工作区"
+          >
+            +
+          </button>
+          {showAddForm ? (
+            <div className="absolute right-2 top-10 z-10 w-[280px] rounded-md border border-border bg-surface-panel p-2 shadow-2xl">
+              <div className="mb-1 text-[11px] text-text-subtle">新增工作区</div>
+              <input
+                value={newPath}
+                onChange={(e) => setNewPath(e.target.value)}
+                placeholder="目录绝对路径（可留空用默认）"
+                className="mb-1 w-full rounded border border-border bg-surface-panel px-2 py-1 text-[11px] text-text-primary outline-none focus:border-cyan-500/50"
+              />
+              <div className="mb-1 flex justify-end">
+                <button
+                  type="button"
+                  className="rounded border border-border px-2 py-1 text-[11px] text-text-muted hover:bg-surface-hover"
+                  onClick={() => void chooseDirectoryForTaskspace()}
+                  title="从系统目录中选择"
+                >
+                  选择目录...
+                </button>
+              </div>
+              <input
+                value={newLabel}
+                onChange={(e) => setNewLabel(e.target.value)}
+                placeholder="显示名称（可选）"
+                className="mb-2 w-full rounded border border-border bg-surface-panel px-2 py-1 text-[11px] text-text-primary outline-none focus:border-cyan-500/50"
+              />
+              <div className="flex items-center justify-end gap-1">
+                <button
+                  className="rounded px-2 py-1 text-[11px] text-text-subtle hover:bg-surface-hover"
+                  onClick={() => {
+                    setShowAddForm(false);
+                    setNewPath("");
+                    setNewLabel("");
+                  }}
+                >
+                  取消
+                </button>
+                <button
+                  className="rounded bg-cyan-600 px-2 py-1 text-[11px] text-white hover:bg-cyan-500 disabled:opacity-50"
+                  disabled={adding}
+                  onClick={() => void addTaskspace(newPath, newLabel)}
+                >
+                  {adding ? "添加中..." : "确认添加"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto border-b border-border px-2 py-2">
+          {loading ? <div className="text-xs text-text-faint">加载中...</div> : null}
+          {!loading && !activeTaskspace ? <div className="text-xs text-text-faint">暂无工作区</div> : null}
+          {!loading && activeTaskspace ? renderDir(activeTaskspace.id, ".", 0) : null}
+        </div>
       </div>
-      <div className="flex-1 overflow-y-auto border-b border-border px-2 py-2">
-        {loading ? <div className="text-xs text-text-faint">加载中...</div> : null}
-        {!loading && !activeTaskspace ? <div className="text-xs text-text-faint">暂无 Taskspace</div> : null}
-        {!loading && activeTaskspace ? renderDir(activeTaskspace.id, ".", 0) : null}
-      </div>
+
       <div
         className="group relative shrink-0 cursor-row-resize px-2"
-        onMouseDown={startResizePreview}
-        title="拖拽调整代码预览高度"
+        onMouseDown={startResizeSpawns}
+        title="拖拽调整 Spawns 区域高度"
       >
         <div className="h-[2px] bg-cyan-500/35 transition group-hover:bg-cyan-400/90" />
         <div className="pointer-events-none absolute left-1/2 top-1/2 h-2 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-400/70 bg-surface-panel shadow-[0_0_10px_rgba(34,211,238,0.25)]" />
       </div>
-      <div className="flex shrink-0 flex-col px-2 py-2" style={{ height: previewHeight }}>
-        <div className="mb-1 truncate text-xs text-text-faint">{selectedFilePath || "文件预览"}</div>
-        <pre className="min-h-0 flex-1 overflow-auto rounded bg-surface-panel p-2 text-[11px] leading-5">
-          <code
-            className={`language-${detectLanguage(selectedFilePath)}`}
-            dangerouslySetInnerHTML={{ __html: highlightedCode }}
-          />
-        </pre>
-        {preview?.truncated ? (
-          <div className="pt-1 text-[10px] text-amber-300">文件过大，已截断显示（{preview.size} bytes）。</div>
-        ) : null}
-        {errorText ? <div className="pt-1 text-[10px] text-rose-300">{errorText}</div> : null}
+
+      <div className="shrink-0 overflow-y-auto px-2 py-2" style={{ height: safeSpawnsHeight }}>
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs text-text-subtle">Spawns ({subAgents.length})</span>
+          <span className="text-[10px] text-text-faint">仅当前会话</span>
+        </div>
+        {subAgents.length === 0 ? (
+          <div className="rounded-md border border-border bg-surface-card px-2 py-3 text-xs text-text-faint">
+            当前工作区还没有派生子智能体
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {subAgents.map((subAgent) => (
+              <SubAgentCard
+                key={subAgent.id}
+                subAgent={subAgent}
+                selected={selectedSubAgent === subAgent.id}
+                onCancel={onCancel}
+                onRetry={onRetry}
+                onChat={onChat}
+                onSelect={onSelect}
+                onConfirmResolve={onConfirmResolve}
+              />
+            ))}
+          </div>
+        )}
       </div>
+
+      {filePreview ? (
+        <div className="absolute inset-2 z-30 flex min-h-0 flex-col rounded-lg border border-border-strong bg-surface-panel shadow-2xl backdrop-blur-xl">
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+            <div className="truncate text-xs text-text-subtle">{filePreview.path}</div>
+            <button
+              className="rounded border border-border px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
+              onClick={() => setFilePreview(null)}
+            >
+              关闭
+            </button>
+          </div>
+          <pre className="min-h-0 flex-1 overflow-auto px-3 py-2 text-[11px] leading-5">
+            <code
+              className={`language-${detectLanguage(filePreview.path)}`}
+              dangerouslySetInnerHTML={{ __html: highlightedCode }}
+            />
+          </pre>
+          {filePreview.truncated ? (
+            <div className="border-t border-border px-3 py-1 text-[10px] text-amber-300">
+              文件过大，已截断显示（{filePreview.size} bytes）。
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {errorText ? (
+        <div className="border-t border-border px-2 py-1 text-[10px] text-rose-300">{errorText}</div>
+      ) : null}
     </div>
   );
 }

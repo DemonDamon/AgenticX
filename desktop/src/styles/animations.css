@@ -1,0 +1,70 @@
+@keyframes agx-dot-pulse {
+  0%,
+  80%,
+  100% {
+    transform: scale(0.72);
+    opacity: 0.45;
+  }
+  40% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+}
+
+@keyframes agx-working-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes agx-working-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.agx-dot-pulse {
+  animation: agx-dot-pulse 1.1s infinite ease-in-out;
+}
+
+.agx-working-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--text-subtle) 60%, transparent);
+  border-top-color: var(--text-strong);
+  animation: agx-working-spin var(--ds-spinner-dur) linear infinite;
+}
+
+.agx-working-shimmer {
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.3),
+    rgba(255, 255, 255, 0.95),
+    rgba(255, 255, 255, 0.3)
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: agx-working-shimmer 2.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .agx-working-spinner {
+    animation-duration: var(--ds-spinner-dur) !important;
+    animation-iteration-count: infinite !important;
+  }
+}

@@ -388,6 +388,8 @@ function createWindow(): void {
     skipTaskbar: false,
     titleBarStyle: "hiddenInset",
     vibrancy: "under-window",
+    visualEffectState: "followWindow",
+    backgroundColor: "#00000000",
     roundedCorners: true,
     trafficLightPosition: { x: 14, y: 14 },
     webPreferences: {
