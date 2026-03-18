@@ -912,12 +912,9 @@ class AgentRuntime:
 
             if not tool_calls:
                 if response_text.strip():
+                    # Tokens were already streamed to the client during the
+                    # invoke/stream phase above; do NOT re-send them here.
                     final_text = response_text.strip()
-                    for tok in _iter_text_chunks(final_text):
-                        if await _check_should_stop():
-                            yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
-                            return
-                        yield RuntimeEvent(type=EventType.TOKEN.value, data={"text": tok}, agent_id=agent_id)
                 else:
                     streamed_text = ""
                     try:
