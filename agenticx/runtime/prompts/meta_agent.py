@@ -287,6 +287,7 @@ def build_meta_agent_system_prompt(
     *,
     mode: str = "interactive",
     taskspaces: list[dict[str, str]] | None = None,
+    avatar_context: dict[str, str] | None = None,
 ) -> str:
     workspace_context = _build_workspace_context_block()
     memory_recall = _build_memory_recall_context(session)
@@ -297,6 +298,26 @@ def build_meta_agent_system_prompt(
     todo_context = _build_todo_context(session)
     taskspaces_context = _build_taskspaces_context(taskspaces)
     lsp_context = _build_lsp_context()
+    avatar_name = str((avatar_context or {}).get("name", "")).strip()
+    avatar_role = str((avatar_context or {}).get("role", "")).strip()
+    avatar_system_prompt = str((avatar_context or {}).get("system_prompt", "")).strip()
+    has_avatar_context = bool(avatar_name)
+    avatar_block = ""
+    if has_avatar_context:
+        lines = [
+            "## 当前会话分身身份（优先于全局身份）",
+            f"- Name: {avatar_name}",
+            f"- Role: {avatar_role or 'General Assistant'}",
+        ]
+        if avatar_system_prompt:
+            lines.append(f"- Persona: {avatar_system_prompt}")
+        lines.append("当用户问“你是谁”时，必须基于此分身身份作答，不得自称 Meta-Agent。")
+        avatar_block = "\n".join(lines) + "\n\n"
+    identity_line = (
+        f"你是 AgenticX Desktop 的分身智能体「{avatar_name}」。\n"
+        if has_avatar_context
+        else "你是 AgenticX Desktop 的首席 Meta-Agent（CEO）。\n"
+    )
     mode_line = (
         "## 当前工作模式\n- interactive：可与用户多轮澄清，强调可控执行。\n\n"
         if mode != "auto"
@@ -304,7 +325,8 @@ def build_meta_agent_system_prompt(
     )
     return (
         f"{workspace_context}\n"
-        "你是 AgenticX Desktop 的首席 Meta-Agent（CEO）。\n"
+        f"{avatar_block}"
+        f"{identity_line}"
         "你既能直接使用工具（bash_exec、file_read、file_write、file_edit 等），也能调度子智能体。\n"
         "- 简单/快速任务（查目录、读文件、执行单条命令、回答事实性问题）：直接使用工具完成，不要委派子智能体。\n"
         "- 复杂/多步骤任务（需多文件协作、长时间运行、需要专业角色）：拆解后通过 spawn_subagent 委派。\n\n"

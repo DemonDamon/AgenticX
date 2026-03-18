@@ -493,6 +493,16 @@ def create_studio_app() -> FastAPI:
                 llm,
                 managed.get_confirm_gate("meta"),
             )
+        avatar_context: dict[str, str] | None = None
+        active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
+        if active_avatar_id and not active_avatar_id.startswith("group:"):
+            avatar_cfg = avatar_registry.get_avatar(active_avatar_id)
+            if avatar_cfg is not None:
+                avatar_context = {
+                    "name": avatar_cfg.name or active_avatar_id,
+                    "role": avatar_cfg.role or "",
+                    "system_prompt": avatar_cfg.system_prompt or "",
+                }
 
         async def _event_stream() -> AsyncGenerator[str, None]:
             runtime_task: "asyncio.Task[None] | None" = None
@@ -514,7 +524,12 @@ def create_studio_app() -> FastAPI:
                         should_stop=request.is_disconnected,
                         agent_id="meta",
                         tools=META_AGENT_TOOLS,
-                        system_prompt=build_meta_agent_system_prompt(session, mode=mode, taskspaces=managed.taskspaces),
+                        system_prompt=build_meta_agent_system_prompt(
+                            session,
+                            mode=mode,
+                            taskspaces=managed.taskspaces,
+                            avatar_context=avatar_context,
+                        ),
                     ):
                         await event_queue.put(event)
                     await event_queue.put(None)
