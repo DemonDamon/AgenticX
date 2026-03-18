@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Message } from "../../store";
+import { AttachmentCard } from "./AttachmentCard";
 
 type Props = {
   message: Message;
@@ -62,6 +63,16 @@ export function ImBubble({ message, badge, assistantName, assistantAvatarUrl, us
           className={`relative min-w-0 rounded-xl border px-3 py-2 text-sm ${isUser ? "rounded-tr-[4px]" : "rounded-tl-[4px]"}`}
           style={bubbleStyle}
         >
+          {isUser && message.attachments && message.attachments.length > 0 ? (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {message.attachments.map((attachment) => (
+                <AttachmentCard
+                  key={`${attachment.name}:${attachment.size}:${attachment.mimeType}`}
+                  attachment={attachment}
+                />
+              ))}
+            </div>
+          ) : null}
           <div className="msg-content break-words">
             {badge}
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>

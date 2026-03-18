@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { useAppStore, type Message } from "../store";
+import { useAppStore, type Message, type MessageAttachment } from "../store";
 import { startRecording, stopRecording } from "../voice/stt";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { WorkspacePanel } from "./WorkspacePanel";
@@ -188,6 +188,133 @@ function PaneModelPicker() {
   );
 }
 
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+      <line x1="12" y1="19" x2="12" y2="5" />
+      <polyline points="5 12 12 5 19 12" />
+    </svg>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+      <rect x="9" y="2" width="6" height="13" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <line x1="12" y1="17" x2="12" y2="21" />
+      <line x1="8" y1="21" x2="16" y2="21" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5">
+      <rect x="5" y="5" width="14" height="14" rx="2" />
+    </svg>
+  );
+}
+
+type ActionCircleButtonProps = {
+  hasInput: boolean;
+  streaming: boolean;
+  recording: boolean;
+  onSend: () => void;
+  onMic: () => void;
+  onStop: () => void;
+};
+
+function ActionCircleButton({ hasInput, streaming, recording, onSend, onMic, onStop }: ActionCircleButtonProps) {
+  let onClick: () => void;
+  let title: string;
+  let icon: ReactNode;
+  let filled: boolean;
+
+  if (streaming) {
+    onClick = onStop;
+    title = "中断生成";
+    icon = <StopIcon />;
+    filled = false;
+  } else if (hasInput) {
+    onClick = onSend;
+    title = "发送";
+    icon = <SendIcon />;
+    filled = true;
+  } else if (recording) {
+    onClick = onMic;
+    title = "停止录音";
+    icon = (
+      <span className="flex gap-0.5 items-end h-4">
+        {[0, 1, 2, 3].map((i) => (
+          <span
+            key={i}
+            className="w-0.5 rounded-full animate-pulse"
+            style={{
+              background: "currentColor",
+              height: `${[8, 14, 10, 12][i]}px`,
+              animationDelay: `${i * 0.12}s`,
+            }}
+          />
+        ))}
+      </span>
+    );
+    filled = false;
+  } else {
+    onClick = onMic;
+    title = "语音输入";
+    icon = <MicIcon />;
+    filled = false;
+  }
+
+  return (
+    <button
+      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-all duration-150 active:scale-95 ${
+        filled ? "" : "text-text-faint hover:text-text-muted"
+      }`}
+      style={
+        filled
+          ? { background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }
+          : undefined
+      }
+      onClick={onClick}
+      title={title}
+    >
+      {icon}
+    </button>
+  );
+}
+
+function AttachmentChip({ file, onRemove }: { file: AttachedFile; onRemove: () => void }) {
+  const isImage = !!file.dataUrl || file.mimeType.startsWith("image/");
+  return (
+    <div className="inline-flex max-w-[260px] items-center gap-2 rounded-lg border border-border bg-surface-panel px-2 py-1 text-xs">
+      {isImage && file.dataUrl ? (
+        <img src={file.dataUrl} alt={file.name} className="h-8 w-8 shrink-0 rounded object-cover" />
+      ) : (
+        <span className="text-sm text-text-faint">{file.status === "error" ? "⚠️" : "📄"}</span>
+      )}
+      <div className="min-w-0">
+        <div className="truncate text-text-muted">{file.name}</div>
+        {file.status === "parsing" ? (
+          <div className="text-[10px] text-text-faint animate-pulse">解析中...</div>
+        ) : file.status === "error" ? (
+          <div className="text-[10px] text-status-error">{file.errorText || "解析失败"}</div>
+        ) : (
+          <div className="text-[10px] text-text-faint">{formatFileSize(file.size)}</div>
+        )}
+      </div>
+      <button
+        className="shrink-0 rounded px-1 text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+        onClick={onRemove}
+        title="移除附件"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
 type Props = {
   paneId: string;
   focused: boolean;
@@ -333,6 +460,52 @@ function buildToolCallLivePreview(toolNameRaw: unknown, argsRaw: unknown): strin
 }
 
 const TASKSPACE_WIDTH_STORAGE_KEY = "agenticx:taskspace-panel-width";
+const TEXT_ATTACHMENT_LIMIT = 32000;
+
+type AttachedFileStatus = "parsing" | "ready" | "error";
+
+type AttachedFile = {
+  name: string;
+  size: number;
+  mimeType: string;
+  status: AttachedFileStatus;
+  content: string;
+  dataUrl?: string;
+  errorText?: string;
+};
+
+function isImageFile(file: File): boolean {
+  return file.type.startsWith("image/");
+}
+
+function isLikelyTextFile(file: File): boolean {
+  if (file.type.startsWith("text/")) return true;
+  const lower = file.name.toLowerCase();
+  return [
+    ".py",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".json",
+    ".md",
+    ".txt",
+    ".yaml",
+    ".yml",
+    ".sh",
+    ".bash",
+    ".toml",
+    ".xml",
+    ".csv",
+    ".sql",
+  ].some((ext) => lower.endsWith(ext));
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1024) return `${size}B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)}KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)}MB`;
+}
 
 type AtCandidate =
   | {
@@ -395,7 +568,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [atOpen, setAtOpen] = useState(false);
   const [atQuery, setAtQuery] = useState("");
   const [atCandidates, setAtCandidates] = useState<AtCandidate[]>([]);
-  const [contextFiles, setContextFiles] = useState<Record<string, string>>({});
+  const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [taskspaceAutoRefreshKey, setTaskspaceAutoRefreshKey] = useState(0);
   const [taskspaceWidth, setTaskspaceWidth] = useState(() => {
     try {
@@ -419,6 +593,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!sid) return [];
     return subAgents.filter((item) => (item.sessionId ?? "").trim() === sid);
   }, [pane?.sessionId, subAgents]);
+  const attachmentEntries = useMemo(() => Object.entries(contextFiles), [contextFiles]);
+  const readyAttachments = useMemo(
+    () => attachmentEntries.filter(([, file]) => file.status === "ready").map(([, file]) => file),
+    [attachmentEntries]
+  );
 
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -531,7 +710,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     });
     if (!fileResp.ok || typeof fileResp.content !== "string") return;
     const key = String(fileResp.absolute_path || relPath);
-    setContextFiles((prev) => ({ ...prev, [key]: fileResp.content ?? "" }));
+    const content = (fileResp.content ?? "").slice(0, TEXT_ATTACHMENT_LIMIT);
+    setContextFiles((prev) => ({
+      ...prev,
+      [key]: {
+        name: key.split("/").pop() || key,
+        size: content.length,
+        mimeType: "text/plain",
+        status: "ready",
+        content,
+      },
+    }));
   };
 
   const addTaskspaceAliasReference = async (taskspaceId: string, alias: string, absolutePath: string) => {
@@ -572,7 +761,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       .filter(Boolean)
       .join("\n");
     const key = `@dir:${alias}:${absolutePath}`;
-    setContextFiles((prev) => ({ ...prev, [key]: summary.slice(0, 16000) }));
+    const content = summary.slice(0, 16000);
+    setContextFiles((prev) => ({
+      ...prev,
+      [key]: {
+        name: key,
+        size: content.length,
+        mimeType: "text/plain",
+        status: "ready",
+        content,
+      },
+    }));
   };
 
   const revealFileInTaskspace = useCallback(async (absPath: string) => {
@@ -660,6 +859,104 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     </>
   ), [chatStyle, paneAvatarMeta, revealFileInTaskspace, streamedAssistantText, streaming, streamingModel, visibleMessages]);
 
+  const removeAttachment = useCallback((key: string) => {
+    setContextFiles((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  const parseLocalFile = useCallback((file: File, key: string) => {
+    setContextFiles((prev) => ({
+      ...prev,
+      [key]: {
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || "application/octet-stream",
+        status: "parsing",
+        content: "",
+      },
+    }));
+
+    if (isImageFile(file)) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === "string" ? reader.result : "";
+        setContextFiles((prev) => ({
+          ...prev,
+          [key]: {
+            name: file.name,
+            size: file.size,
+            mimeType: file.type || "image/*",
+            status: "ready",
+            content: `[图片: ${file.name}]`,
+            dataUrl,
+          },
+        }));
+      };
+      reader.onerror = () => {
+        setContextFiles((prev) => ({
+          ...prev,
+          [key]: {
+            name: file.name,
+            size: file.size,
+            mimeType: file.type || "image/*",
+            status: "error",
+            content: "",
+            errorText: "图片解析失败",
+          },
+        }));
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    if (isLikelyTextFile(file)) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = typeof reader.result === "string" ? reader.result : "";
+        setContextFiles((prev) => ({
+          ...prev,
+          [key]: {
+            name: file.name,
+            size: file.size,
+            mimeType: file.type || "text/plain",
+            status: "ready",
+            content: text.slice(0, TEXT_ATTACHMENT_LIMIT),
+          },
+        }));
+      };
+      reader.onerror = () => {
+        setContextFiles((prev) => ({
+          ...prev,
+          [key]: {
+            name: file.name,
+            size: file.size,
+            mimeType: file.type || "text/plain",
+            status: "error",
+            content: "",
+            errorText: "文本解析失败",
+          },
+        }));
+      };
+      reader.readAsText(file);
+      return;
+    }
+
+    setContextFiles((prev) => ({
+      ...prev,
+      [key]: {
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || "application/octet-stream",
+        status: "error",
+        content: "",
+        errorText: "不支持的文件格式",
+      },
+    }));
+  }, []);
+
   const onMicClick = () => {
     if (recording) {
       stopRecording();
@@ -687,12 +984,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!text || !apiBase || !pane.sessionId) return;
     if (streaming) return;
     const requestSessionId = pane.sessionId;
+    const userAttachments: MessageAttachment[] = readyAttachments.map((file) => ({
+      name: file.name,
+      mimeType: file.mimeType,
+      size: file.size,
+      dataUrl: file.dataUrl,
+    }));
 
     const selectedIsPaneSubagent =
       !!selectedSubAgent && paneSubAgents.some((item) => item.id === selectedSubAgent);
     const targetAgentId = selectedIsPaneSubagent ? selectedSubAgent : "meta";
     if (targetAgentId === "meta") {
-      addPaneMessage(pane.id, "user", text, "meta");
+      addPaneMessage(pane.id, "user", text, "meta", undefined, undefined, userAttachments);
     } else {
       addSubAgentEvent(targetAgentId, { type: "user", content: text });
       addPaneMessage(pane.id, "tool", `🗣 发送给 ${targetAgentId}: ${text}`, "meta");
@@ -728,8 +1031,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (activeProvider) body.provider = activeProvider;
       if (activeModel) body.model = activeModel;
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
-      if (Object.keys(contextFiles).length > 0) {
-        body.context_files = contextFiles;
+      if (attachmentEntries.length > 0) {
+        const contextFilePayload: Record<string, string> = {};
+        for (const [, file] of attachmentEntries) {
+          if (file.status !== "ready") continue;
+          if (file.dataUrl || file.mimeType.startsWith("image/")) {
+            contextFilePayload[file.name] = "[图片文件]";
+          } else {
+            contextFilePayload[file.name] = file.content;
+          }
+        }
+        if (Object.keys(contextFilePayload).length > 0) {
+          body.context_files = contextFilePayload;
+        }
       }
       const resp = await fetch(`${apiBase}/api/chat`, {
         method: "POST",
@@ -1232,7 +1546,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         <div className="shrink-0 border-t border-border bg-surface-composer px-4 py-2.5 backdrop-blur-md">
           <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
             <span className="rounded border border-border bg-surface-card px-2 py-0.5">
-              Context Files: {Object.keys(contextFiles).length}
+              Context Files: {attachmentEntries.length}
             </span>
             <span className="rounded border border-border bg-surface-card px-2 py-0.5">
               Session: {pane.sessionId ? `${pane.sessionId.slice(0, 8)}...` : "-"}
@@ -1244,18 +1558,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             ) : null}
           </div>
           {selectedSubAgent ? (
-            <div className="mb-1 inline-flex items-center gap-2 rounded border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-xs text-cyan-200">
+            <div className="mb-1 inline-flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-0.5 text-xs text-text-muted">
               对话目标: {selectedSubAgent}
               <button
-                className="rounded px-1 hover:bg-cyan-500/20"
+                className="rounded px-1 hover:bg-surface-hover"
                 onClick={() => setSelectedSubAgent(null)}
               >
                 切回 Meta
               </button>
             </div>
           ) : null}
-          <div className="flex items-end gap-2">
-            <NewTopicButton onNewTopic={createNewTopic} />
+          <div className="rounded-2xl border border-border bg-surface-card transition-colors focus-within:border-border-strong">
+            {attachmentEntries.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+                {attachmentEntries.map(([key, file]) => (
+                  <AttachmentChip key={key} file={file} onRemove={() => removeAttachment(key)} />
+                ))}
+              </div>
+            ) : null}
             <textarea
               value={input}
               onChange={(e) => {
@@ -1315,57 +1635,59 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 }
               }}
               rows={input.includes("\n") ? 2 : 1}
-              placeholder="输入消息，Enter 发送..."
-              className="min-h-[36px] flex-1 resize-none rounded-lg border border-border bg-surface-card px-3 py-2 text-sm text-text-primary outline-none transition focus:border-border-strong"
+              placeholder="发消息..."
+              className="block min-h-[40px] w-full resize-none bg-transparent px-4 pb-0 pt-3 text-sm text-text-primary outline-none placeholder:text-text-faint"
             />
-            {streaming ? (
-              <button
-                className="h-9 shrink-0 rounded-lg bg-rose-500 px-3 text-xs font-medium text-white transition hover:bg-rose-400"
-                onClick={() => abortRef.current?.abort()}
-              >
-                中断
-              </button>
-            ) : (
-              <>
+            <div className="flex items-center justify-between px-2 pb-2 pt-1">
+              <div className="flex items-center gap-0.5">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    const files = e.target.files;
+                    if (!files) return;
+                    for (const file of Array.from(files)) {
+                      const key = `${file.name}:${file.size}:${file.lastModified}`;
+                      parseLocalFile(file, key);
+                    }
+                    e.target.value = "";
+                  }}
+                />
                 <button
-                  className={`h-9 w-9 shrink-0 rounded-lg border border-border text-base transition ${
-                    recording ? "bg-rose-500/30 text-rose-200 hover:bg-rose-500/40" : "text-text-primary hover:bg-surface-hover"
-                  }`}
-                  onClick={onMicClick}
-                  title={recording ? "结束语音输入" : "语音输入"}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+                  title="上传附件"
+                  onClick={() => fileInputRef.current?.click()}
                 >
-                  🎙
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+                  </svg>
                 </button>
+                <NewTopicButton onNewTopic={createNewTopic} />
                 <button
-                  className="h-9 shrink-0 rounded-lg bg-cyan-500 px-3 text-xs font-medium text-black transition hover:bg-cyan-400 disabled:opacity-40"
-                  disabled={!input.trim() || !pane.sessionId}
-                  onClick={() => void sendChat(input)}
+                  className="flex h-7 items-center gap-1 rounded-lg px-2 text-[12px] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+                  title="更多"
                 >
-                  发送
+                  <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5">
+                    <rect x="3" y="3" width="8" height="8" rx="1.5" />
+                    <rect x="13" y="3" width="8" height="8" rx="1.5" />
+                    <rect x="3" y="13" width="8" height="8" rx="1.5" />
+                    <rect x="13" y="13" width="8" height="8" rx="1.5" />
+                  </svg>
+                  <span>更多</span>
                 </button>
-              </>
-            )}
-          </div>
-          {Object.keys(contextFiles).length > 0 ? (
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              {Object.keys(contextFiles).map((path) => (
-                <button
-                  key={path}
-                  className="rounded bg-cyan-500/10 px-2 py-0.5 text-[10px] text-cyan-300 hover:bg-cyan-500/20"
-                  onClick={() =>
-                    setContextFiles((prev) => {
-                      const next = { ...prev };
-                      delete next[path];
-                      return next;
-                    })
-                  }
-                  title="点击移除引用"
-                >
-                  @{path}
-                </button>
-              ))}
+              </div>
+              <ActionCircleButton
+                hasInput={!!input.trim() && !!pane.sessionId}
+                streaming={streaming}
+                recording={recording}
+                onSend={() => void sendChat(input)}
+                onMic={onMicClick}
+                onStop={() => abortRef.current?.abort()}
+              />
             </div>
-          ) : null}
+          </div>
           {atOpen ? (
             <div className="mt-1 max-h-28 overflow-y-auto rounded border border-border bg-surface-panel p-1 backdrop-blur-xl">
               {atCandidates.length === 0 ? (
@@ -1411,8 +1733,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             onMouseDown={startResizeTaskspace}
             title="拖拽调整工作区面板宽度"
           >
-            <div className="mx-auto h-full w-[2px] bg-cyan-500/35 transition group-hover:bg-cyan-400/80" />
-            <div className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-400/70 bg-surface-panel opacity-80 shadow-[0_0_10px_rgba(34,211,238,0.3)] transition group-hover:opacity-100" />
+            <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
+            <div className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90" style={{ borderColor: "var(--ui-accent-divider-hover)" }} />
           </div>
           <WorkspacePanel
             sessionId={pane.sessionId}
