@@ -10,7 +10,7 @@ export function PaneDivider({ onDrag }: Props) {
 
   return (
     <div
-      className="group relative w-1.5 shrink-0 cursor-col-resize bg-transparent"
+      className="group relative w-1 shrink-0 cursor-col-resize bg-transparent"
       onMouseDown={(event) => {
         draggingRef.current = true;
         lastXRef.current = event.clientX;
@@ -30,7 +30,7 @@ export function PaneDivider({ onDrag }: Props) {
       }}
       title="拖拽调整窗格宽度"
     >
-      <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/50 transition group-hover:bg-cyan-500/70" />
+      <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-[rgba(255,255,255,0.06)] transition group-hover:bg-[rgba(255,255,255,0.18)]" />
     </div>
   );
 }

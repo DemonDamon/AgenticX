@@ -63,17 +63,17 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-[440px] max-w-[95vw] rounded-xl border border-border bg-panel p-5">
-        <h3 className="mb-4 text-base font-semibold text-slate-200">创建数字分身</h3>
+      <div className="w-[440px] max-w-[95vw] rounded-xl border border-border bg-surface-panel p-5">
+        <h3 className="mb-4 text-base font-semibold text-text-primary">创建数字分身</h3>
 
-        <div className="mb-4 flex gap-1 rounded-lg bg-slate-800/60 p-0.5">
+        <div className="mb-4 flex gap-1 rounded-lg bg-surface-card p-0.5">
           {([["manual", "手动创建"], ["ai", "AI 生成"]] as const).map(([key, label]) => (
             <button
               key={key}
               className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition ${
                 mode === key
                   ? "bg-cyan-500/20 text-cyan-400"
-                  : "text-slate-400 hover:text-slate-200"
+                  : "text-text-subtle hover:text-text-primary"
               }`}
               onClick={() => setMode(key)}
             >
@@ -85,30 +85,30 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
         {mode === "manual" ? (
           <>
             <div className="space-y-3">
-              <label className="block text-sm text-slate-300">
+              <label className="block text-sm text-text-muted">
                 名称 <span className="text-rose-400">*</span>
                 <input
-                  className="mt-1 w-full rounded-md border border-border bg-slate-900 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="例：Coder、Researcher、Writer"
                   autoFocus
                 />
               </label>
-              <label className="block text-sm text-slate-300">
+              <label className="block text-sm text-text-muted">
                 角色
                 <input
-                  className="mt-1 w-full rounded-md border border-border bg-slate-900 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
                   placeholder="例：全栈开发工程师、数据分析师"
                 />
               </label>
-              <label className="block text-sm text-slate-300">
+              <label className="block text-sm text-text-muted">
                 System Prompt
-                <span className="ml-1 text-xs text-slate-500">(可选)</span>
+                <span className="ml-1 text-xs text-text-faint">(可选)</span>
                 <textarea
-                  className="mt-1 w-full resize-none rounded-md border border-border bg-slate-900 px-3 py-2 text-sm"
+                  className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
                   rows={3}
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
@@ -118,7 +118,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
             </div>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
-                className="rounded-md border border-border px-4 py-1.5 text-sm text-slate-400 transition hover:bg-slate-700"
+                className="rounded-md border border-border px-4 py-1.5 text-sm text-text-subtle transition hover:bg-surface-hover"
                 onClick={resetAndClose}
               >
                 取消
@@ -135,10 +135,10 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
         ) : (
           <>
             <div className="space-y-3">
-              <label className="block text-sm text-slate-300">
+              <label className="block text-sm text-text-muted">
                 描述你想要的分身
                 <textarea
-                  className="mt-1 w-full resize-none rounded-md border border-border bg-slate-900 px-3 py-2 text-sm"
+                  className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
                   rows={4}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -154,7 +154,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
             </div>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
-                className="rounded-md border border-border px-4 py-1.5 text-sm text-slate-400 transition hover:bg-slate-700"
+                className="rounded-md border border-border px-4 py-1.5 text-sm text-text-subtle transition hover:bg-surface-hover"
                 onClick={resetAndClose}
               >
                 取消

@@ -33,16 +33,16 @@ export function ModelPicker({ open, onSelect, onClose }: Props) {
   return (
     <>
       <div className="fixed inset-0 z-30" onClick={onClose} />
-      <div className="absolute bottom-full left-0 z-40 mb-1 max-h-[280px] w-[280px] overflow-y-auto rounded-lg border border-border bg-slate-900 shadow-xl">
+      <div className="absolute bottom-full left-0 z-40 mb-1 max-h-[280px] w-[280px] overflow-y-auto rounded-lg border border-border bg-surface-panel shadow-xl">
         {options.length === 0 ? (
-          <div className="px-3 py-4 text-center text-xs text-slate-500">
+          <div className="px-3 py-4 text-center text-xs text-text-faint">
             请先在设置中配置 Provider 和模型
           </div>
         ) : (
           options.map((opt) => (
             <button
               key={`${opt.provider}:${opt.model}`}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-300 transition hover:bg-cyan-500/10 hover:text-white"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-text-muted transition hover:bg-cyan-500/10 hover:text-text-strong"
               onClick={() => {
                 onSelect(opt.provider, opt.model);
                 onClose();

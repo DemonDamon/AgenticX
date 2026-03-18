@@ -1,0 +1,13 @@
+:root {
+  --ds-layer-modal: 10000;
+  --ds-layer-toast: 11000;
+
+  --ds-dur-fast: 120ms;
+  --ds-dur-normal: 160ms;
+  --ds-dur-slow: 220ms;
+
+  --ds-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ds-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --ds-spinner-dur: 0.7s;
+}

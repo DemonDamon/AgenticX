@@ -141,14 +141,14 @@ function buildToolCallLivePreview(toolNameRaw: unknown, argsRaw: unknown): strin
 const markdownComponents: Components = {
   table: ({ children }) => (
     <div className="my-2 overflow-x-auto">
-      <table className="min-w-full border-collapse border border-slate-600 text-xs">{children}</table>
+      <table className="min-w-full border-collapse border border-border text-xs">{children}</table>
     </div>
   ),
   th: ({ children }) => (
-    <th className="border border-slate-600 bg-slate-800 px-2 py-1 text-left text-slate-200">{children}</th>
+    <th className="border border-border bg-surface-hover px-2 py-1 text-left text-text-primary">{children}</th>
   ),
   td: ({ children }) => (
-    <td className="border border-slate-700 px-2 py-1 align-top text-slate-300">{children}</td>
+    <td className="border border-border px-2 py-1 align-top text-text-muted">{children}</td>
   )
 };
 
@@ -156,7 +156,7 @@ function ModelBadge({ provider, model }: { provider?: string; model?: string }) 
   if (!model) return null;
   const label = provider ? `${provider}/${model}` : model;
   return (
-    <span className="mb-1 inline-block rounded bg-slate-600/60 px-1.5 py-0.5 text-[10px] text-slate-400">
+    <span className="mb-1 inline-block rounded bg-surface-card px-1.5 py-0.5 text-[10px] text-text-subtle">
       {label}
     </span>
   );
@@ -193,11 +193,11 @@ function MessageActions({
 }) {
   if (msg.role !== "assistant") return null;
   return (
-    <div className="mt-1.5 flex items-center gap-3 text-[11px] text-slate-500">
-      <button className="transition hover:text-slate-300" onClick={onCopy} title="复制">
+    <div className="mt-1.5 flex items-center gap-3 text-[11px] text-text-faint">
+      <button className="transition hover:text-text-muted" onClick={onCopy} title="复制">
         复制
       </button>
-      <button className="transition hover:text-slate-300" onClick={onRetry} title="重试">
+      <button className="transition hover:text-text-muted" onClick={onRetry} title="重试">
         重试
       </button>
       <button className="transition hover:text-cyan-400" onClick={onReanswer} title="换模型回答">
@@ -1034,13 +1034,13 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       <div className="drag-region flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
         <div className="flex w-20 items-center" />
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-slate-300">AgenticX</span>
-          {!isLite && <span className="text-slate-600">·</span>}
+          <span className="text-sm font-medium text-text-muted">AgenticX</span>
+          {!isLite && <span className="text-text-faint">·</span>}
           {!isLite && (
             <div className="relative">
               <button
                 ref={modelBtnRef}
-                className="no-drag flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-slate-400 transition hover:bg-slate-700 hover:text-cyan-400"
+                className="no-drag flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-cyan-400"
                 onClick={() => setHeaderModelPickerOpen((v) => !v)}
                 title="切换模型"
               >
@@ -1062,7 +1062,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             </div>
           )}
           {status !== "idle" && (
-            <span className="flex items-center gap-1.5 text-xs text-slate-400">
+            <span className="flex items-center gap-1.5 text-xs text-text-subtle">
               <span className={`inline-block h-2 w-2 rounded-full ${statusDot[status]}`} />
               {statusLabel[status]}
             </span>
@@ -1071,16 +1071,16 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[11px] text-amber-300">计划模式</span>
           )}
           {!isLite && (
-            <span className="rounded bg-slate-700/70 px-2 py-0.5 text-[11px] text-slate-300">
+            <span className="rounded bg-surface-hover px-2 py-0.5 text-[11px] text-text-muted">
               审批: {confirmModeLabel[confirmStrategy] ?? confirmStrategy}
             </span>
           )}
         </div>
         <div className="flex w-auto items-center justify-end gap-2">
-          <div className="no-drag inline-flex rounded-md border border-border/80 bg-slate-800/60 p-0.5">
+          <div className="no-drag inline-flex rounded-md border border-border bg-surface-card p-0.5">
             <button
               className={`rounded px-2 py-1 text-[11px] transition ${
-                userMode === "pro" ? "bg-cyan-500/20 text-cyan-200" : "text-slate-400 hover:text-slate-200"
+                userMode === "pro" ? "bg-cyan-500/20 text-cyan-200" : "text-text-subtle hover:text-text-primary"
               }`}
               onClick={() => {
                 if (userMode !== "pro") void applyUserMode("pro");
@@ -1091,7 +1091,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             </button>
             <button
               className={`rounded px-2 py-1 text-[11px] transition ${
-                userMode === "lite" ? "bg-cyan-500/20 text-cyan-200" : "text-slate-400 hover:text-slate-200"
+                userMode === "lite" ? "bg-cyan-500/20 text-cyan-200" : "text-text-subtle hover:text-text-primary"
               }`}
               onClick={() => {
                 if (userMode !== "lite") void applyUserMode("lite");
@@ -1103,14 +1103,14 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           </div>
           {(subAgents.length > 0 || isLite) ? (
             <button
-              className="no-drag rounded-md px-2 py-1 text-xs text-slate-400 transition hover:bg-slate-700 hover:text-white"
+              className="no-drag rounded-md px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
               onClick={() => setPanelOpen((v) => !v)}
               title="子智能体面板"
             >
               团队{subAgents.length > 0 ? `(${subAgents.length})` : ""}
             </button>
           ) : null}
-          <button className="no-drag rounded-md px-2 py-1 text-xs text-slate-400 transition hover:bg-slate-700 hover:text-white" onClick={() => openSettings()} title="设置">⚙</button>
+          <button className="no-drag rounded-md px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong" onClick={() => openSettings()} title="设置">⚙</button>
         </div>
       </div>
 
@@ -1118,7 +1118,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-3">
         {visibleMessages.length === 0 && (
           <div className="flex h-full items-center justify-center">
-            <div className="text-center text-slate-500">
+            <div className="text-center text-text-faint">
               <div className="mb-2 text-3xl">🤖</div>
               <div className="text-sm">{isLite ? "问我任何问题，或使用下方推荐操作" : "输入你的需求开始对话"}</div>
             </div>
@@ -1132,8 +1132,8 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                 m.role === "user"
                   ? `ml-8 rounded-xl rounded-tr-sm bg-cyan-500/20 px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`
                   : m.role === "assistant"
-                    ? `mr-8 rounded-xl rounded-tl-sm bg-slate-700/50 px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`
-                    : "mx-4 rounded-lg border border-border/50 bg-slate-800/40 px-3 py-1.5 text-xs text-slate-400"
+                    ? `mr-8 rounded-xl rounded-tl-sm bg-surface-card px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`
+                    : "mx-4 rounded-lg border border-border bg-surface-card px-3 py-1.5 text-xs text-text-subtle"
               }
             >
               {!isLite && m.role === "assistant" && <ModelBadge provider={m.provider} model={m.model} />}
@@ -1161,7 +1161,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             </div>
           ))}
           {streaming && (
-            <div className={`mr-8 rounded-xl rounded-tl-sm bg-slate-700/50 px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`}>
+            <div className={`mr-8 rounded-xl rounded-tl-sm bg-surface-card px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`}>
               {!isLite && streamingModel && <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />}
               <div className="msg-content break-words">
                 {streamedAssistantText && !isThinkingPlaceholderText(streamedAssistantText) ? (
@@ -1178,7 +1178,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       </div>
 
       {/* Input area */}
-      <div className="relative shrink-0 border-t border-border bg-panel/80 px-4 py-3">
+      <div className="relative shrink-0 border-t border-border bg-surface-panel/80 px-4 py-3">
         {!isLite && (
           <CommandPalette
             open={commandOpen}
@@ -1239,9 +1239,9 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             rows={input.split("\n").length > 3 ? 4 : input.includes("\n") ? 2 : 1}
             placeholder={canSend ? (isLite ? (selectedSubAgent ? `对 ${selectedSubAgentName} 发送消息...` : "问我任何问题...") : (planMode ? "计划模式：描述目标，我只返回可执行计划" : (selectedSubAgent ? `对 ${selectedSubAgentName} 发送补充指令，Enter 发送` : "输入需求，Enter 发送（生成中可直接追问）"))) : "连接中..."}
             disabled={!canSend && !streaming}
-            className="min-h-[40px] max-h-[120px] flex-1 resize-none rounded-xl border border-border bg-slate-900/80 px-3 py-2.5 text-sm outline-none transition placeholder:text-slate-500 focus:border-cyan-500/50"
+            className="min-h-[40px] max-h-[120px] flex-1 resize-none rounded-xl border border-border bg-surface-card px-3 py-2.5 text-sm outline-none transition placeholder:text-text-faint focus:border-cyan-500/50"
           />
-          <button className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-lg transition hover:bg-slate-700" onClick={onMicClick} title="语音输入">🎙</button>
+          <button className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-lg transition hover:bg-surface-hover" onClick={onMicClick} title="语音输入">🎙</button>
           {streaming ? (
             <div className="flex items-center gap-2">
               <button className="flex h-10 shrink-0 items-center rounded-xl bg-rose-500 px-4 text-sm font-medium text-white transition hover:bg-rose-400" onClick={stopStreaming}>中断</button>
@@ -1267,13 +1267,13 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       {/* Reanswer model picker */}
       {modelPickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-[300px] rounded-xl border border-border bg-slate-900 p-3">
-            <div className="mb-2 text-sm font-medium text-slate-300">选择模型重新回答</div>
+          <div className="w-[300px] rounded-xl border border-border bg-surface-panel p-3">
+            <div className="mb-2 text-sm font-medium text-text-muted">选择模型重新回答</div>
             <ModelPickerDropdown
               onSelect={(p, m) => { onReanswerSelect(p, m); setModelPickerOpen(false); }}
               onClose={() => { setModelPickerOpen(false); setReanswerTarget(null); }}
             />
-            <button className="mt-2 w-full rounded-md border border-border py-1.5 text-xs text-slate-400 hover:bg-slate-800" onClick={() => { setModelPickerOpen(false); setReanswerTarget(null); }}>取消</button>
+            <button className="mt-2 w-full rounded-md border border-border py-1.5 text-xs text-text-subtle hover:bg-surface-hover" onClick={() => { setModelPickerOpen(false); setReanswerTarget(null); }}>取消</button>
           </div>
         </div>
       )}
@@ -1298,14 +1298,14 @@ function ModelPickerDropdown({ onSelect, onClose }: { onSelect: (p: string, m: s
   }, [settings.providers]);
 
   if (options.length === 0) {
-    return <div className="px-3 py-4 text-center text-xs text-slate-500">请先在设置中配置 Provider 和模型</div>;
+    return <div className="px-3 py-4 text-center text-xs text-text-faint">请先在设置中配置 Provider 和模型</div>;
   }
   return (
     <div className="max-h-[240px] overflow-y-auto">
       {options.map((opt) => (
         <button
           key={`${opt.provider}:${opt.model}`}
-          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-300 transition hover:bg-cyan-500/10 hover:text-white"
+          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-muted transition hover:bg-cyan-500/10 hover:text-text-strong"
           onClick={() => { onSelect(opt.provider, opt.model); onClose(); }}
         >
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400" />

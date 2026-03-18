@@ -1,0 +1,28 @@
+:root[data-theme="dim"] {
+  color-scheme: dark;
+  --text-primary: #d9dce1;
+  --text-strong: #f6f7f9;
+  --text-muted: rgba(225, 229, 236, 0.72);
+  --text-subtle: rgba(225, 229, 236, 0.58);
+  --text-faint: rgba(225, 229, 236, 0.42);
+
+  --surface-base: transparent;
+  --surface-panel: rgba(18, 22, 31, 0.75);
+  --surface-sidebar: rgba(20, 20, 24, 0.68);
+  --surface-topbar: rgba(16, 20, 28, 0.58);
+  --surface-messages: transparent;
+  --surface-composer: rgba(16, 20, 28, 0.62);
+  --surface-card: rgba(255, 255, 255, 0.035);
+  --surface-card-strong: rgba(255, 255, 255, 0.1);
+  --surface-hover: rgba(255, 255, 255, 0.075);
+  --surface-bubble: rgba(255, 255, 255, 0.1);
+  --surface-bubble-user: rgba(91, 157, 255, 0.36);
+
+  --border-subtle: rgba(255, 255, 255, 0.045);
+  --border-muted: rgba(255, 255, 255, 0.035);
+  --border-strong: rgba(255, 255, 255, 0.09);
+
+  --status-success: rgba(130, 230, 195, 0.94);
+  --status-warning: rgba(255, 184, 110, 0.94);
+  --status-error: rgba(255, 122, 122, 0.94);
+}

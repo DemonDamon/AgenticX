@@ -1,0 +1,28 @@
+:root[data-theme="light"] {
+  color-scheme: light;
+  --text-primary: #1e293b;
+  --text-strong: #0f172a;
+  --text-muted: #475569;
+  --text-subtle: #64748b;
+  --text-faint: #94a3b8;
+
+  --surface-base: #f1f5f9;
+  --surface-panel: rgba(255, 255, 255, 0.94);
+  --surface-sidebar: rgba(248, 250, 252, 0.98);
+  --surface-topbar: rgba(255, 255, 255, 0.9);
+  --surface-messages: rgba(255, 255, 255, 0.92);
+  --surface-composer: rgba(255, 255, 255, 0.92);
+  --surface-card: rgba(15, 23, 42, 0.04);
+  --surface-card-strong: rgba(15, 23, 42, 0.08);
+  --surface-hover: rgba(15, 23, 42, 0.07);
+  --surface-bubble: rgba(15, 23, 42, 0.06);
+  --surface-bubble-user: rgba(59, 130, 246, 0.2);
+
+  --border-subtle: rgba(15, 23, 42, 0.12);
+  --border-muted: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.2);
+
+  --status-success: #059669;
+  --status-warning: #d97706;
+  --status-error: #dc2626;
+}

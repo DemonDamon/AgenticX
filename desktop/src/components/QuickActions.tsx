@@ -18,7 +18,7 @@ export function QuickActions({ onSend }: Props) {
         <button
           key={text.label}
           onClick={() => onSend(text.prompt)}
-          className="rounded-full border border-border bg-slate-800/60 px-3 py-1.5 text-xs text-slate-300 transition hover:bg-slate-700"
+          className="rounded-full border border-border bg-surface-card px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface-hover"
         >
           {text.label}
         </button>
