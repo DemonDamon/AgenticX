@@ -6,12 +6,14 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 import smtplib
 from email.message import EmailMessage
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 _meta_log = logging.getLogger(__name__)
@@ -20,6 +22,7 @@ from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio_mcp import import_mcp_config, load_available_servers
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.runtime.team_manager import AgentTeamManager
 
@@ -119,6 +122,8 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
                     "run_timeout_seconds": {"type": "integer"},
                     "provider": {"type": "string", "description": "Optional provider override for this sub-agent."},
                     "model": {"type": "string", "description": "Optional model override for this sub-agent."},
+                    "workspace_dir": {"type": "string", "description": "Optional workspace override for this sub-agent."},
+                    "system_prompt": {"type": "string", "description": "Optional persona/system prompt for this sub-agent."},
                     "tools": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -352,6 +357,47 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_avatar_workspace",
+            "description": "Read files from avatar workspace without spawning sub-agent.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "avatar_id": {"type": "string", "description": "Target avatar ID."},
+                    "files": {
+                        "type": "array",
+                        "description": "Optional relative file paths in avatar workspace.",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["avatar_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "chat_with_avatar",
+            "description": "Send an internal question to an avatar and return its reply.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "avatar_id": {"type": "string", "description": "Target avatar ID."},
+                    "message": {"type": "string", "description": "Question sent to avatar."},
+                    "relay_mode": {
+                        "type": "string",
+                        "enum": ["verbatim", "summary"],
+                        "description": "How the meta-agent should relay this reply to user.",
+                    },
+                },
+                "required": ["avatar_id", "message"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 _studio_tool_names = {
@@ -364,6 +410,218 @@ META_AGENT_TOOLS: List[Dict[str, Any]] = list(STUDIO_TOOLS) + [
     t for t in _META_ONLY_TOOLS
     if t.get("function", {}).get("name") not in _studio_tool_names
 ]
+
+_DEFAULT_AVATAR_WS_FILES: List[str] = ["IDENTITY.md", "MEMORY.md", "memory/today"]
+
+
+def _collapse_text(text: str) -> str:
+    return " ".join(str(text or "").split())
+
+
+def _safe_read_text(path: Path, *, limit: int = 3000) -> Dict[str, Any]:
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            raw = fh.read(limit + 1)
+    except FileNotFoundError:
+        return {"ok": True, "exists": False, "content": "", "truncated": False}
+    except Exception as exc:
+        return {"ok": False, "exists": False, "content": "", "truncated": False, "error": str(exc)}
+    truncated = len(raw) > limit
+    content = raw[:limit] if truncated else raw
+    return {"ok": True, "exists": True, "content": content, "truncated": truncated}
+
+
+def _resolve_workspace_file_specs(requested_files: Any) -> List[str]:
+    if isinstance(requested_files, list):
+        specs = [str(item or "").strip() for item in requested_files if str(item or "").strip()]
+        return specs or list(_DEFAULT_AVATAR_WS_FILES)
+    return list(_DEFAULT_AVATAR_WS_FILES)
+
+
+def _expand_workspace_specs(specs: List[str]) -> List[str]:
+    expanded: List[str] = []
+    seen: set[str] = set()
+    today = datetime.now().date()
+    recent_days = [(today - timedelta(days=offset)).isoformat() for offset in range(0, 3)]
+    for spec in specs:
+        if spec == "memory/today":
+            for date_text in recent_days:
+                rel = f"memory/{date_text}.md"
+                if rel not in seen:
+                    seen.add(rel)
+                    expanded.append(rel)
+            continue
+        if spec not in seen:
+            seen.add(spec)
+            expanded.append(spec)
+    return expanded
+
+
+def _read_avatar_workspace_payload(avatar_id: str, requested_files: Any) -> Dict[str, Any]:
+    from agenticx.avatar.registry import AvatarRegistry
+
+    registry = AvatarRegistry()
+    avatar = registry.get_avatar(avatar_id)
+    if avatar is None:
+        return {"ok": False, "error": f"avatar not found: {avatar_id}"}
+    workspace_dir = str(avatar.workspace_dir or "").strip()
+    if not workspace_dir:
+        return {"ok": False, "error": f"avatar workspace not configured: {avatar_id}"}
+    workspace_root = Path(workspace_dir).expanduser().resolve(strict=False)
+    specs = _expand_workspace_specs(_resolve_workspace_file_specs(requested_files))
+    rows: List[Dict[str, Any]] = []
+    for rel in specs[:20]:
+        if not rel or rel.startswith("/") or ".." in Path(rel).parts:
+            rows.append({"path": rel, "ok": False, "error": "invalid relative path"})
+            continue
+        target = (workspace_root / rel).resolve(strict=False)
+        try:
+            target.relative_to(workspace_root)
+        except Exception:
+            rows.append({"path": rel, "ok": False, "error": "path escapes avatar workspace"})
+            continue
+        payload = _safe_read_text(target)
+        rows.append({"path": rel, **payload})
+    return {
+        "ok": True,
+        "avatar": {
+            "id": avatar.id,
+            "name": avatar.name,
+            "role": avatar.role or "",
+        },
+        "workspace_dir": str(workspace_root),
+        "files": rows,
+    }
+
+
+def _load_avatar_recent_chat_messages(avatar_id: str, *, limit: int = 8) -> Dict[str, Any]:
+    from agenticx.memory.session_store import SessionStore
+
+    store = SessionStore()
+    try:
+        sessions = store._list_latest_sessions_sync(limit=200)
+    except Exception:
+        sessions = []
+    candidates: List[Dict[str, Any]] = []
+    for row in sessions:
+        metadata = row.get("metadata", {})
+        if not isinstance(metadata, dict):
+            continue
+        if str(metadata.get("avatar_id", "")).strip() != avatar_id:
+            continue
+        if bool(metadata.get("archived", False)):
+            continue
+        session_id = str(row.get("session_id", "")).strip()
+        if not session_id:
+            continue
+        updated_at = metadata.get("updated_at") or metadata.get("created_at") or 0
+        try:
+            sort_key = float(updated_at)
+        except (TypeError, ValueError):
+            sort_key = 0.0
+        candidates.append({"session_id": session_id, "sort_key": sort_key})
+    if not candidates:
+        return {"session_id": "", "messages": []}
+    candidates.sort(key=lambda item: float(item.get("sort_key", 0)), reverse=True)
+    chosen_id = str(candidates[0].get("session_id", "")).strip()
+    if not chosen_id:
+        return {"session_id": "", "messages": []}
+    messages_path = Path.home() / ".agenticx" / "sessions" / chosen_id / "messages.json"
+    try:
+        data = json.loads(messages_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"session_id": chosen_id, "messages": []}
+    if not isinstance(data, list):
+        return {"session_id": chosen_id, "messages": []}
+    normalized: List[Dict[str, str]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role", "")).strip()
+        if role not in {"user", "assistant"}:
+            continue
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        normalized.append({"role": role, "content": content[:1000]})
+    return {"session_id": chosen_id, "messages": normalized[-max(1, limit):]}
+
+
+async def _chat_with_avatar_payload(
+    avatar_id: str,
+    message: str,
+    *,
+    relay_mode: str,
+    session: Optional["StudioSession"],
+) -> Dict[str, Any]:
+    from agenticx.avatar.registry import AvatarRegistry
+
+    registry = AvatarRegistry()
+    avatar = registry.get_avatar(avatar_id)
+    if avatar is None:
+        return {"ok": False, "error": f"avatar not found: {avatar_id}"}
+
+    workspace_payload = _read_avatar_workspace_payload(avatar_id, ["IDENTITY.md", "MEMORY.md"])
+    file_lines: List[str] = []
+    for item in workspace_payload.get("files", []) if isinstance(workspace_payload, dict) else []:
+        if not isinstance(item, dict) or not item.get("exists"):
+            continue
+        path = str(item.get("path", "")).strip()
+        content = str(item.get("content", "")).strip()
+        if not path or not content:
+            continue
+        file_lines.append(f"## {path}\n{content[:1200]}")
+    workspace_context = "\n\n".join(file_lines)
+
+    provider_name = str(avatar.default_provider or "").strip() or str(getattr(session, "provider_name", "") or "").strip()
+    model_name = str(avatar.default_model or "").strip() or str(getattr(session, "model_name", "") or "").strip()
+    if not provider_name or not model_name:
+        return {"ok": False, "error": "provider/model not configured for avatar or current session"}
+
+    try:
+        llm = ProviderResolver.resolve(provider_name=provider_name, model=model_name)
+    except Exception as exc:
+        return {"ok": False, "error": f"failed to initialize avatar model: {exc}"}
+
+    recent_chat = await asyncio.to_thread(_load_avatar_recent_chat_messages, avatar_id)
+    recent_messages = recent_chat.get("messages", []) if isinstance(recent_chat, dict) else []
+    if not isinstance(recent_messages, list):
+        recent_messages = []
+
+    system_prompt = (
+        f"你是 AgenticX 分身 {avatar.name}。\n"
+        f"角色: {avatar.role or 'General Assistant'}\n"
+        f"分身系统提示: {avatar.system_prompt or '(none)'}\n"
+        "请基于分身身份与记忆回答问题，回答要直接、简洁、可执行。"
+    )
+    if workspace_context:
+        system_prompt += f"\n\n以下是该分身 workspace 的已知信息：\n{workspace_context}"
+
+    llm_messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    llm_messages.extend(recent_messages[-8:])
+    llm_messages.append({"role": "user", "content": message})
+    try:
+        response = await llm.ainvoke(llm_messages)
+    except Exception as exc:
+        return {"ok": False, "error": f"avatar chat failed: {exc}"}
+    raw_reply = str(getattr(response, "content", "") or "").strip()
+    if not raw_reply:
+        raw_reply = "(empty reply)"
+    relay_text = raw_reply if relay_mode == "verbatim" else _collapse_text(raw_reply)[:280]
+    return {
+        "ok": True,
+        "avatar": {
+            "id": avatar.id,
+            "name": avatar.name,
+            "role": avatar.role or "",
+        },
+        "provider": provider_name,
+        "model": model_name,
+        "source_session_id": str(recent_chat.get("session_id", "")).strip() if isinstance(recent_chat, dict) else "",
+        "relay_mode": relay_mode,
+        "reply": raw_reply,
+        "relay_text": relay_text,
+    }
 
 
 def _list_skills_payload() -> Dict[str, Any]:
@@ -810,6 +1068,8 @@ async def dispatch_meta_tool_async(
             attachments=arguments.get("attachments") if isinstance(arguments.get("attachments"), list) else None,
             provider=str(arguments.get("provider", "")).strip() or None,
             model=str(arguments.get("model", "")).strip() or None,
+            workspace_dir=str(arguments.get("workspace_dir", "")).strip() or None,
+            system_prompt=str(arguments.get("system_prompt", "")).strip() or None,
         )
         return json.dumps(result, ensure_ascii=False)
 
@@ -1063,12 +1323,42 @@ async def dispatch_meta_tool_async(
         avatar = registry.get_avatar(avatar_id)
         if avatar is None:
             return json.dumps({"ok": False, "error": f"avatar not found: {avatar_id}"}, ensure_ascii=False)
+        workspace_dir = str(avatar.workspace_dir or "").strip()
+        if not workspace_dir:
+            return json.dumps({"ok": False, "error": f"avatar workspace not configured: {avatar_id}"}, ensure_ascii=False)
         result = await team_manager.spawn_subagent(
             name=avatar.name,
             role=avatar.role or "delegated avatar",
             task=task,
             source_tool_call_id=str(arguments.get("__tool_call_id", "")).strip(),
+            provider=str(avatar.default_provider or "").strip() or None,
+            model=str(avatar.default_model or "").strip() or None,
+            workspace_dir=workspace_dir,
+            system_prompt=str(avatar.system_prompt or "").strip() or None,
         )
         return json.dumps(result, ensure_ascii=False)
+
+    if name == "read_avatar_workspace":
+        avatar_id = str(arguments.get("avatar_id", "")).strip()
+        if not avatar_id:
+            return json.dumps({"ok": False, "error": "avatar_id is required"}, ensure_ascii=False)
+        payload = _read_avatar_workspace_payload(avatar_id, arguments.get("files"))
+        return json.dumps(payload, ensure_ascii=False)
+
+    if name == "chat_with_avatar":
+        avatar_id = str(arguments.get("avatar_id", "")).strip()
+        message = str(arguments.get("message", "")).strip()
+        relay_mode = str(arguments.get("relay_mode", "summary") or "summary").strip().lower()
+        if relay_mode not in {"verbatim", "summary"}:
+            relay_mode = "summary"
+        if not avatar_id or not message:
+            return json.dumps({"ok": False, "error": "avatar_id and message are required"}, ensure_ascii=False)
+        payload = await _chat_with_avatar_payload(
+            avatar_id,
+            message,
+            relay_mode=relay_mode,
+            session=session,
+        )
+        return json.dumps(payload, ensure_ascii=False)
 
     return json.dumps({"ok": False, "error": f"unknown meta tool: {name}"}, ensure_ascii=False)
