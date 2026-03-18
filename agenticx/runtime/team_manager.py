@@ -99,6 +99,8 @@ class SubAgentContext:
     provider_name: str = ""
     model_name: str = ""
     output_files: List[str] = field(default_factory=list)
+    workspace_dir: str = ""
+    persona_prompt: str = ""
 
 
 class AgentTeamManager:
@@ -215,11 +217,15 @@ class AgentTeamManager:
     def _unregister(self) -> None:
         AgentTeamManager._registry.pop(self._manager_id, None)
 
-    def _build_isolated_session(self) -> StudioSession:
+    def _build_isolated_session(self, workspace_dir: Optional[str] = None) -> StudioSession:
+        resolved_workspace_dir = (
+            str(workspace_dir or "").strip()
+            or self.base_session.workspace_dir
+        )
         session = StudioSession(
             provider_name=self.base_session.provider_name,
             model_name=self.base_session.model_name,
-            workspace_dir=self.base_session.workspace_dir,
+            workspace_dir=resolved_workspace_dir,
         )
         # MCP clients are shared, while per-agent messages/artifacts remain isolated.
         session.mcp_hub = self.base_session.mcp_hub
@@ -270,6 +276,11 @@ class AgentTeamManager:
             if parent_summary
             else ""
         )
+        persona_section = (
+            f"- persona: {context.persona_prompt}\n"
+            if context.persona_prompt
+            else ""
+        )
         return (
             "你是 AgenticX Studio 的子智能体。\n"
             "你的核心目标：在指定工作目录中完成被委派任务，并持续汇报可验证进展。\n\n"
@@ -278,6 +289,7 @@ class AgentTeamManager:
             f"- name: {context.name}\n"
             f"- role: {context.role}\n"
             f"- delegated_task: {context.task}\n\n"
+            f"{persona_section}"
             "## 模型配置\n"
             f"- provider: {context.provider_name or session.provider_name or '(inherit)'}\n"
             f"- model: {context.model_name or session.model_name or '(inherit)'}\n\n"
@@ -355,6 +367,8 @@ class AgentTeamManager:
         attachments: Optional[Sequence[Dict[str, Any]]] = None,
         provider: Optional[str] = None,
         model: Optional[str] = None,
+        workspace_dir: Optional[str] = None,
+        system_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         async with self._lock:
             active = self._active_running_count()
@@ -434,6 +448,8 @@ class AgentTeamManager:
                 spawn_tree_path=spawn_tree_path,
                 provider_name=str(provider or "").strip(),
                 model_name=str(model or "").strip(),
+                workspace_dir=str(workspace_dir or "").strip(),
+                persona_prompt=str(system_prompt or "").strip(),
             )
             self._agents[agent_id] = context
             context.status = SubAgentStatus.RUNNING
@@ -484,6 +500,7 @@ class AgentTeamManager:
             "mode": context.mode,
             "provider": context.provider_name or self.base_session.provider_name or "",
             "model": context.model_name or self.base_session.model_name or "",
+            "workspace_dir": context.workspace_dir or self.base_session.workspace_dir or "",
         }
 
     async def cancel_subagent(self, agent_id: str) -> Dict[str, Any]:
@@ -556,7 +573,7 @@ class AgentTeamManager:
 
     def _rebuild_agent_session(self, context: SubAgentContext) -> StudioSession:
         """Rebuild a session from saved context (used when resuming completed/failed agents)."""
-        session = self._build_isolated_session()
+        session = self._build_isolated_session(workspace_dir=context.workspace_dir)
         session.context_files.update(context.context_files)
         session.artifacts.update(context.artifacts)
         if context.agent_messages:
@@ -589,6 +606,8 @@ class AgentTeamManager:
             source_tool_call_id=previous.source_tool_call_id,
             provider=previous.provider_name or None,
             model=previous.model_name or None,
+            workspace_dir=previous.workspace_dir or None,
+            system_prompt=previous.persona_prompt or None,
         )
         if not result.get("ok"):
             return result
@@ -799,7 +818,7 @@ class AgentTeamManager:
         if context.mode == "session" and existing_session is not None:
             session = existing_session
         else:
-            session = self._build_isolated_session()
+            session = self._build_isolated_session(workspace_dir=context.workspace_dir)
             session.context_files.update(context.context_files)
             session.artifacts.update(context.artifacts)
             setattr(session, "_team_manager", self)
