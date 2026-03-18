@@ -11,6 +11,7 @@ export type SubAgentStatus =
   | "cancelled";
 export type ConfirmStrategy = "manual" | "semi-auto" | "auto";
 export type ThemeMode = "dark" | "light" | "dim";
+export type ChatStyle = "im" | "terminal" | "clean";
 export type McpServer = {
   name: string;
   connected: boolean;
@@ -148,6 +149,7 @@ type AppState = {
   keybindingsPanelOpen: boolean;
   planMode: boolean;
   theme: ThemeMode;
+  chatStyle: ChatStyle;
   confirmStrategy: ConfirmStrategy;
   mcpServers: McpServer[];
   avatars: Avatar[];
@@ -167,6 +169,7 @@ type AppState = {
   setKeybindingsPanelOpen: (v: boolean) => void;
   setPlanMode: (v: boolean) => void;
   setTheme: (theme: ThemeMode) => void;
+  setChatStyle: (style: ChatStyle) => void;
   setConfirmStrategy: (v: ConfirmStrategy) => void;
   setMcpServers: (servers: McpServer[]) => void;
   setAvatars: (avatars: Avatar[]) => void;
@@ -225,6 +228,18 @@ function makeDefaultPane(): ChatPane {
   };
 }
 
+const CHAT_STYLE_STORAGE_KEY = "agx-chat-style";
+
+function loadChatStyle(): ChatStyle {
+  try {
+    const saved = window.localStorage.getItem(CHAT_STYLE_STORAGE_KEY);
+    if (saved === "im" || saved === "terminal" || saved === "clean") return saved;
+  } catch {
+    // ignore storage errors
+  }
+  return "im";
+}
+
 export const useAppStore = create<AppState>((set) => ({
   apiBase: "",
   apiToken: "",
@@ -239,6 +254,7 @@ export const useAppStore = create<AppState>((set) => ({
   keybindingsPanelOpen: false,
   planMode: false,
   theme: "dark",
+  chatStyle: loadChatStyle(),
   confirmStrategy: "semi-auto",
   mcpServers: [],
   avatars: [],
@@ -263,6 +279,15 @@ export const useAppStore = create<AppState>((set) => ({
   setKeybindingsPanelOpen: (keybindingsPanelOpen) => set({ keybindingsPanelOpen }),
   setPlanMode: (planMode) => set({ planMode }),
   setTheme: (theme) => set({ theme }),
+  setChatStyle: (chatStyle) =>
+    set(() => {
+      try {
+        window.localStorage.setItem(CHAT_STYLE_STORAGE_KEY, chatStyle);
+      } catch {
+        // ignore storage errors
+      }
+      return { chatStyle };
+    }),
   setConfirmStrategy: (confirmStrategy) => set({ confirmStrategy }),
   setMcpServers: (mcpServers) => set({ mcpServers }),
   setAvatars: (avatars) => set({ avatars }),

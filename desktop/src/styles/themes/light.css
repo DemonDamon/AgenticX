@@ -17,6 +17,20 @@
   --surface-hover: rgba(15, 23, 42, 0.07);
   --surface-bubble: rgba(15, 23, 42, 0.06);
   --surface-bubble-user: rgba(59, 130, 246, 0.2);
+  --chat-im-user-bg: rgba(34, 197, 94, 0.28);
+  --chat-im-user-border: rgba(22, 163, 74, 0.35);
+  --chat-im-user-text: #0b3b21;
+  --chat-im-assistant-bg: rgba(15, 23, 42, 0.04);
+  --chat-im-assistant-border: rgba(15, 23, 42, 0.14);
+  --chat-im-assistant-text: #0f172a;
+  --chat-im-avatar-bg: rgba(15, 23, 42, 0.1);
+  --chat-terminal-user: #166534;
+  --chat-terminal-assistant: #0f172a;
+  --chat-terminal-meta: #64748b;
+  --chat-clean-user-accent: #16a34a;
+  --chat-clean-user-bg: rgba(34, 197, 94, 0.1);
+  --chat-clean-assistant-bg: rgba(15, 23, 42, 0.03);
+  --chat-clean-assistant-border: rgba(15, 23, 42, 0.1);
 
   --border-subtle: rgba(15, 23, 42, 0.12);
   --border-muted: rgba(15, 23, 42, 0.08);

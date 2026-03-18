@@ -7,6 +7,7 @@ import {
   FolderOpen,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
+import type { ChatStyle } from "../store";
 
 const ALL_PROVIDERS = [
   "openai", "anthropic", "volcengine", "bailian",
@@ -50,7 +51,9 @@ type Props = {
   onRefreshMcp: (sessionId?: string) => Promise<void>;
   confirmStrategy: ConfirmMode;
   theme: "dark" | "light" | "dim";
+  chatStyle: ChatStyle;
   onThemeChange: (theme: "dark" | "light" | "dim") => void;
+  onChatStyleChange: (style: ChatStyle) => void;
   onConfirmStrategyChange: (strategy: ConfirmMode) => Promise<void> | void;
   onClose: () => void;
   onSave: (result: {
@@ -338,7 +341,9 @@ export function SettingsPanel({
   onRefreshMcp,
   confirmStrategy,
   theme,
+  chatStyle,
   onThemeChange,
+  onChatStyleChange,
   onConfirmStrategyChange,
   onClose,
   onSave,
@@ -548,6 +553,18 @@ export function SettingsPanel({
                       <option value="dark">Dark</option>
                       <option value="dim">Dim</option>
                       <option value="light">Light</option>
+                    </select>
+                  </label>
+                  <label className="mt-3 block text-sm text-text-muted">
+                    聊天风格
+                    <select
+                      className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
+                      value={chatStyle}
+                      onChange={(e) => onChatStyleChange(e.target.value as ChatStyle)}
+                    >
+                      <option value="im">IM 风格（头像 + 右侧绿色用户气泡）</option>
+                      <option value="terminal">Terminal 风格（等宽前缀）</option>
+                      <option value="clean">Clean 风格（极简分隔块）</option>
                     </select>
                   </label>
                 </Panel>
