@@ -40,7 +40,6 @@ export function AvatarSidebar() {
   const [createOpen, setCreateOpen] = useState(false);
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
   const [groupEditTarget, setGroupEditTarget] = useState<GroupChat | null>(null);
-  const [groupEditReadOnly, setGroupEditReadOnly] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [groupContextMenu, setGroupContextMenu] = useState<GroupContextMenuState>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -208,23 +207,22 @@ export function AvatarSidebar() {
     }
   };
 
-  const handleGroupContextAction = async (action: "view" | "edit" | "delete") => {
+  const handleGroupDelete = async (group: GroupChat) => {
+    const confirmed = window.confirm(`确定删除群聊「${group.name}」吗？此操作不可恢复。`);
+    if (!confirmed) return;
+    const groupPaneId = `group:${group.id}`;
+    panes.filter((item) => item.avatarId === groupPaneId).forEach((item) => removePane(item.id));
+    setGroups(groups.filter((g) => g.id !== group.id));
+    await window.agenticxDesktop.deleteGroup(group.id);
+    await refreshGroups();
+  };
+
+  const handleGroupContextAction = async (action: "view") => {
     if (!groupContextMenu) return;
     const group = groups.find((item) => item.id === groupContextMenu.groupId);
     setGroupContextMenu(null);
     if (!group) return;
-    if (action === "delete") {
-      const groupPaneId = `group:${group.id}`;
-      panes.filter((item) => item.avatarId === groupPaneId).forEach((item) => removePane(item.id));
-      setGroups(groups.filter((g) => g.id !== group.id));
-      void (async () => {
-        await window.agenticxDesktop.deleteGroup(group.id);
-        await refreshGroups();
-      })();
-      return;
-    }
-    setGroupEditReadOnly(action === "view");
-    setGroupEditTarget(group);
+    if (action === "view") setGroupEditTarget(group);
   };
 
   const sortedAvatars = useMemo(() => {
@@ -424,19 +422,7 @@ export function AvatarSidebar() {
             className="w-full px-3 py-1.5 text-left text-xs text-text-muted transition hover:bg-surface-hover"
             onClick={() => void handleGroupContextAction("view")}
           >
-            查看成员
-          </button>
-          <button
-            className="w-full px-3 py-1.5 text-left text-xs text-text-muted transition hover:bg-surface-hover"
-            onClick={() => void handleGroupContextAction("edit")}
-          >
-            编辑群聊
-          </button>
-          <button
-            className="w-full px-3 py-1.5 text-left text-xs text-rose-400 transition hover:bg-rose-500/10"
-            onClick={() => void handleGroupContextAction("delete")}
-          >
-            删除群聊
+            查看群聊
           </button>
         </div>
       )}
@@ -465,14 +451,17 @@ export function AvatarSidebar() {
         <GroupEditorInline
           avatars={avatars}
           initialGroup={groupEditTarget}
-          readOnly={groupEditReadOnly}
+          onDelete={async (groupId) => {
+            const group = groups.find((item) => item.id === groupId);
+            if (!group) return;
+            await handleGroupDelete(group);
+            setGroupEditTarget(null);
+          }}
           onClose={() => {
             setGroupEditTarget(null);
-            setGroupEditReadOnly(false);
           }}
           onSaved={() => {
             setGroupEditTarget(null);
-            setGroupEditReadOnly(false);
             void refreshGroups();
           }}
         />
@@ -484,13 +473,13 @@ export function AvatarSidebar() {
 function GroupEditorInline({
   avatars,
   initialGroup,
-  readOnly,
+  onDelete,
   onClose,
   onSaved,
 }: {
   avatars: Avatar[];
   initialGroup?: GroupChat;
-  readOnly?: boolean;
+  onDelete?: (groupId: string) => Promise<void>;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -546,7 +535,6 @@ function GroupEditorInline({
           className="mb-3 w-full rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-strong"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          disabled={Boolean(readOnly)}
           placeholder="输入群聊名称"
           autoFocus
         />
@@ -565,7 +553,6 @@ function GroupEditorInline({
                 type="checkbox"
                 checked={selectedIds.has(a.id)}
                 onChange={() => toggle(a.id)}
-                disabled={Boolean(readOnly)}
                 className="accent-cyan-500"
               />
               <span className="truncate">{a.name}</span>
@@ -576,32 +563,49 @@ function GroupEditorInline({
 
         <label className="mb-1 block text-[11px] text-text-subtle">路由策略</label>
         <select
-          className="mb-4 w-full rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-strong"
+          className="mb-1 w-full rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-strong"
           value={routing}
           onChange={(e) => setRouting(e.target.value)}
-          disabled={Boolean(readOnly)}
         >
-          <option value="user-directed">User Directed</option>
-          <option value="meta-routed">Meta Routed</option>
-          <option value="round-robin">Round Robin</option>
+          <option value="user-directed">用户指定 · 你点谁谁回复</option>
+          <option value="meta-routed">智能路由 · Meta-Agent 自动选人</option>
+          <option value="round-robin">轮流回复 · 按顺序每人答一次</option>
         </select>
+        <p className="mb-4 text-[10px] text-text-faint">
+          {{
+            "user-directed": "每次发消息时，手动 @某个分身，只有被点名的人回复。",
+            "meta-routed": "由 Meta-Agent 根据问题内容自动判断最合适的分身来回复。",
+            "round-robin": "分身按加入顺序轮流回复，每人一次，周而复始。",
+          }[routing]}
+        </p>
 
-        <div className="flex justify-end gap-2">
+        <div className="flex items-center justify-between gap-2">
+          {initialGroup ? (
+            <button
+              className="rounded-md px-3 py-1.5 text-xs text-rose-400 transition hover:bg-rose-500/10"
+              onClick={() => {
+                if (!onDelete || !initialGroup) return;
+                void onDelete(initialGroup.id);
+              }}
+            >
+              删除群聊
+            </button>
+          ) : (
+            <div />
+          )}
           <button
             className="rounded-md px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
             onClick={onClose}
           >
             取消
           </button>
-          {!readOnly && (
-            <button
-              className="rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-cyan-500 disabled:opacity-40"
-              disabled={!name.trim() || selectedIds.size === 0 || loading}
-              onClick={() => void handleSave()}
-            >
-              {loading ? "保存中..." : initialGroup ? "保存" : "创建"}
-            </button>
-          )}
+          <button
+            className="rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-cyan-500 disabled:opacity-40"
+            disabled={!name.trim() || selectedIds.size === 0 || loading}
+            onClick={() => void handleSave()}
+          >
+            {loading ? "保存中..." : initialGroup ? "保存" : "创建"}
+          </button>
         </div>
       </div>
     </div>
