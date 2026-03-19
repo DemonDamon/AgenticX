@@ -304,6 +304,35 @@ def test_workspace_boundary_blocks_outside_list_files(monkeypatch, tmp_path: Pat
     assert result.startswith("ERROR: path escapes workspace:")
 
 
+def test_repair_malformed_file_write_strips_metadata_from_value() -> None:
+    repaired = agent_tools._repair_malformed_file_tool_arguments(
+        "file_write",
+        {
+            "path": "demo.py",
+            "content": "print('ok')",
+            "value": "call_54b953f0639040309a058eac\nsa-26e692b3",
+        },
+    )
+    assert "call_54b953f0639040309a058eac" not in str(repaired.get("content", ""))
+    assert "sa-26e692b3" not in str(repaired.get("content", ""))
+
+
+def test_file_write_strips_metadata_lines_before_persist(monkeypatch, tmp_path: Path) -> None:
+    target = tmp_path / "demo.py"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+    payload = "print('ok')\ncall_54b953f0639040309a058eac\nsa-26e692b3\n"
+    result = agent_tools.dispatch_tool(
+        "file_write",
+        {"path": str(target), "content": payload},
+        StudioSession(),
+    )
+    assert result.startswith("OK: wrote")
+    text = target.read_text(encoding="utf-8")
+    assert "call_54b953f0639040309a058eac" not in text
+    assert "sa-26e692b3" not in text
+
+
 def test_codegen_updates_session_artifacts_and_history(monkeypatch, tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

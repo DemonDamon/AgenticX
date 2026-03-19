@@ -76,6 +76,23 @@ async def _collect(runtime: AgentRuntime, session: StudioSession, text: str) -> 
     return items
 
 
+class _InvalidToolNameLLM:
+    def invoke(self, *_args, **_kwargs):
+        return _FakeResponse(
+            "bad tool call",
+            [
+                {
+                    "id": "call-invalid",
+                    "type": "function",
+                    "function": {"name": None, "arguments": {}},
+                }
+            ],
+        )
+
+    def stream(self, *_args, **_kwargs):
+        yield ""
+
+
 def test_runtime_event_flow_tool_confirm_result_final(monkeypatch) -> None:
     from agenticx.runtime import agent_runtime as runtime_module
 
@@ -183,3 +200,44 @@ def test_runtime_rejects_tool_outside_allowlist(monkeypatch) -> None:
     events = __import__("asyncio").run(_collect_blocked())
     assert called["n"] == 0
     assert any("不在当前允许列表" in str(e["data"].get("text", "")) for e in events if e["type"] == EventType.ERROR.value)
+
+
+def test_runtime_handles_invalid_tool_name_without_none_noise(monkeypatch) -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    called = {"n": 0}
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        called["n"] += 1
+        return "tool-ok"
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    runtime = AgentRuntime(_InvalidToolNameLLM(), _ApproveGate())
+    events = __import__("asyncio").run(_collect(runtime, StudioSession(), "who is cole"))
+
+    assert called["n"] == 0
+    error_texts = [str(e["data"].get("text", "")) for e in events if e["type"] == EventType.ERROR.value]
+    assert not any("Tool 'None'" in text or "工具 'None'" in text for text in error_texts)
+
+
+def test_summarize_tool_calls_for_history_removes_runtime_ids() -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    tool_calls = [
+        {
+            "id": "call_abc123",
+            "type": "function",
+            "function": {
+                "name": "file_write",
+                "arguments": "{\"path\":\"demo.py\",\"content\":\"print('ok')\"}",
+            },
+        }
+    ]
+    summary = runtime_module._summarize_tool_calls_for_history(tool_calls)
+    assert summary == [
+        {
+            "name": "file_write",
+            "arguments": {"path": "demo.py", "content": "print('ok')"},
+        }
+    ]
+    assert "call_abc123" not in str(summary)

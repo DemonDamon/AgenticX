@@ -143,3 +143,22 @@ def test_meta_tools_retry_subagent() -> None:
         assert retry_data["agent_id"] != original_id
 
     asyncio.run(_run())
+
+
+def test_delegate_to_avatar_missing_args_is_skipped() -> None:
+    async def _run() -> None:
+        manager = AgentTeamManager(
+            llm_factory=lambda: _QuickTextLLM(),
+            base_session=StudioSession(),
+        )
+        raw = await dispatch_meta_tool_async(
+            "delegate_to_avatar",
+            {},
+            team_manager=manager,
+        )
+        data = json.loads(raw)
+        assert data["ok"] is True
+        assert data["skipped"] is True
+        assert data["reason"] == "missing_args"
+
+    asyncio.run(_run())
