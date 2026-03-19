@@ -3,7 +3,7 @@ name: agenticx-quickstart
 description: AgenticX zero-to-hero quickstart guide. Use when the user wants to get started with AgenticX, create their first project, build their first agent, or run their first workflow. Covers installation, project scaffolding, agent creation, task execution, and CLI basics.
 metadata:
   author: AgenticX
-  version: "0.3.0"
+  version: "0.3.1"
 ---
 
 # AgenticX Quickstart
