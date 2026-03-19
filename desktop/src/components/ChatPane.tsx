@@ -344,9 +344,29 @@ function isThinkingPlaceholderText(text: string): boolean {
   return /^[\s⏳….·.]+$/.test(trimmed);
 }
 
+function normalizeStreamText(text: string): string {
+  return String(text ?? "").replace(/\s+/g, " ").trim();
+}
+
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
   const toolName = String(toolNameRaw ?? "tool");
   const resultText = String(resultRaw ?? "");
+  if (toolName === "delegate_to_avatar") {
+    try {
+      const parsed = JSON.parse(resultText) as Record<string, unknown>;
+      const delegated = Boolean(parsed.delegated);
+      const avatarName = String(parsed.avatar_name ?? "");
+      const delegationId = String(parsed.delegation_id ?? parsed.agent_id ?? "").trim();
+      if (delegated) {
+        return {
+          content: `🤝 已委派给 ${avatarName || "分身"}${delegationId ? `\nID: ${delegationId}` : ""}`,
+          silent: false,
+        };
+      }
+    } catch {
+      // Fall through to generic formatter.
+    }
+  }
   if (toolName === "spawn_subagent") {
     try {
       const parsed = JSON.parse(resultText) as Record<string, unknown>;
@@ -524,13 +544,17 @@ type AtCandidate =
 
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId));
+  const panes = useAppStore((s) => s.panes);
   const removePane = useAppStore((s) => s.removePane);
+  const addPane = useAppStore((s) => s.addPane);
+  const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const togglePaneHistory = useAppStore((s) => s.togglePaneHistory);
   const toggleTaskspacePanel = useAppStore((s) => s.toggleTaskspacePanel);
   const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const addPaneMessage = useAppStore((s) => s.addPaneMessage);
   const clearPaneMessages = useAppStore((s) => s.clearPaneMessages);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
+  const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const setPaneContextInherited = useAppStore((s) => s.setPaneContextInherited);
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -599,6 +623,71 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     [attachmentEntries]
   );
 
+  const hasDelegation = useMemo(() => {
+    const fromPaneSubs = paneSubAgents.some(
+      (sub) =>
+        (sub.status === "running" || sub.status === "pending") &&
+        (sub.id.startsWith("dlg-") || sub.events?.some((evt) => evt.type.startsWith("delegation")))
+    );
+    if (fromPaneSubs) return true;
+    const paneName = (pane?.avatarName ?? "").trim().toLowerCase();
+    if (!paneName) return false;
+    return subAgents.some(
+      (sub) =>
+        (sub.status === "running" || sub.status === "pending") &&
+        sub.id.startsWith("dlg-") &&
+        (sub.name ?? "").trim().toLowerCase() === paneName
+    );
+  }, [paneSubAgents, subAgents, pane?.avatarName]);
+
+  const lastPollCountRef = useRef(0);
+
+  useEffect(() => {
+    if (!pane?.sessionId) return;
+    if (!hasDelegation && (pane.messages?.length ?? 0) > 0) return;
+    let active = true;
+    const poll = async () => {
+      if (!active) return;
+      try {
+        const result = await window.agenticxDesktop.loadSessionMessages(pane.sessionId);
+        if (!active) return;
+        if (result.ok && Array.isArray(result.messages) && result.messages.length > 0) {
+          if (result.messages.length <= lastPollCountRef.current) return;
+          lastPollCountRef.current = result.messages.length;
+          const seen = new Set<string>();
+          const deduped: Message[] = [];
+          for (let idx = 0; idx < result.messages.length; idx++) {
+            const item = result.messages[idx];
+            const role = String(item.role ?? "");
+            const content = String(item.content ?? "").trim();
+            if (!content) continue;
+            const key = `${role}::${content.slice(0, 300)}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            deduped.push({
+              id: `dlgpoll-${pane.sessionId}-${idx}`,
+              role: item.role,
+              content: item.content,
+              agentId: item.agent_id ?? "meta",
+              provider: item.provider,
+              model: item.model,
+            });
+          }
+          setPaneMessages(pane.id, deduped);
+        }
+      } catch {
+        // ignore polling failures
+      }
+    };
+    void poll();
+    if (!hasDelegation) return;
+    const timer = window.setInterval(() => void poll(), 3000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [hasDelegation, pane?.sessionId, pane?.id, pane?.messages?.length, setPaneMessages]);
+
   useEffect(() => {
     requestAnimationFrame(() => {
       if (listRef.current) {
@@ -624,6 +713,43 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, []);
 
   if (!pane) return null;
+
+  const openDelegatedAvatarSession = async (agentId: string): Promise<boolean> => {
+    const sub = useAppStore.getState().subAgents.find((item) => item.id === agentId);
+    const targetSessionId = (sub?.sessionId ?? "").trim();
+    if (!targetSessionId) return false;
+
+    const targetName = String(sub?.name ?? "").trim();
+    const existingPane = panes.find((item) => {
+      if (!item.avatarId || item.avatarId.startsWith("group:")) return false;
+      const found = avatars.find((avatar) => avatar.id === item.avatarId);
+      return !!found && found.name === targetName;
+    });
+    const targetPaneId = existingPane?.id ?? addPane(null, targetName || "Avatar", targetSessionId);
+    setPaneSessionId(targetPaneId, targetSessionId);
+    setActivePaneId(targetPaneId);
+    setSelectedSubAgent(null);
+
+    try {
+      const result = await window.agenticxDesktop.loadSessionMessages(targetSessionId);
+      if (result.ok && Array.isArray(result.messages)) {
+        const mapped: Message[] = result.messages.map((item) => ({
+          id: `${targetSessionId}-${item.id ?? Math.random().toString(16).slice(2)}`,
+          role: item.role,
+          content: item.content,
+          agentId: item.agent_id ?? "meta",
+          provider: item.provider,
+          model: item.model,
+        }));
+        setPaneMessages(targetPaneId, mapped);
+      } else {
+        setPaneMessages(targetPaneId, []);
+      }
+    } catch {
+      setPaneMessages(targetPaneId, []);
+    }
+    return true;
+  };
 
   const cancelStreamRenderFrame = () => {
     if (streamRafRef.current !== null) {
@@ -803,57 +929,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         />
       ))}
       {streaming ? (
-        streamedAssistantText && !isThinkingPlaceholderText(streamedAssistantText) ? (
-          chatStyle === "terminal" ? (
-            <TerminalLine
-              message={{ id: "__stream__", role: "assistant", content: streamedAssistantText }}
-              badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
-            />
-          ) : chatStyle === "clean" ? (
-            <CleanBlock
-              message={{ id: "__stream__", role: "assistant", content: streamedAssistantText }}
-              badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
-            />
-          ) : (
-            <ImBubble
-              message={{ id: "__stream__", role: "assistant", content: streamedAssistantText }}
-              badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
-              assistantName={paneAvatarMeta.name}
-              assistantAvatarUrl={paneAvatarMeta.url}
-            />
-          )
+        chatStyle === "terminal" ? (
+          <TerminalLine
+            message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
+            badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+          />
+        ) : chatStyle === "clean" ? (
+          <CleanBlock
+            message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
+            badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+          />
         ) : (
-          chatStyle === "terminal" ? (
-            <div className="font-mono text-[13px] leading-6">
-              <div className="flex items-start gap-2">
-                <span className="mt-[2px] select-none text-xs" style={{ color: "var(--chat-terminal-meta)" }}>
-                  ┃
-                </span>
-                <div className="min-w-0 flex-1">
-                  {streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : null}
-                  <WorkingIndicator text="Thinking..." />
-                </div>
-              </div>
-            </div>
-          ) : chatStyle === "clean" ? (
-            <div
-              className="w-full rounded-md border px-3 py-2"
-              style={{
-                background: "var(--chat-clean-assistant-bg)",
-                borderColor: "var(--chat-clean-assistant-border)",
-              }}
-            >
-              {streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : null}
-              <WorkingIndicator text="Thinking..." />
-            </div>
-          ) : (
-            <div className="mr-8 min-w-0 overflow-hidden rounded-xl rounded-tl-sm border border-border bg-surface-bubble px-3 py-2 text-sm">
-              {streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : null}
-              <div className="mt-1">
-                <WorkingIndicator text="Thinking..." />
-              </div>
-            </div>
-          )
+          <ImBubble
+            message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
+            badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+            assistantName={paneAvatarMeta.name}
+            assistantAvatarUrl={paneAvatarMeta.url}
+          />
         )
       ) : null}
     </>
@@ -1216,16 +1308,43 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const subId = payload.data?.agent_id;
               console.debug("[ChatPane] SSE subagent_started", subId, "sessionId:", requestSessionId);
               if (subId) {
+                const isDelegation = Boolean(payload.data?.delegation);
+                const avatarSessionId =
+                  (typeof payload.data?.avatar_session_id === "string" && payload.data.avatar_session_id.trim()) || "";
                 addSubAgent({
                   id: subId,
                   name: payload.data?.name ?? subId,
-                  role: payload.data?.role ?? "worker",
+                  role: payload.data?.role ?? (isDelegation ? "delegated avatar" : "worker"),
                   provider: payload.data?.provider ?? undefined,
                   model: payload.data?.model ?? undefined,
                   task: payload.data?.task ?? "",
-                  sessionId: requestSessionId || undefined,
+                  sessionId: isDelegation ? (requestSessionId || undefined) : (avatarSessionId || requestSessionId || undefined),
                 });
-                addSubAgentEvent(subId, { type: "started", content: "已启动" });
+                updateSubAgent(subId, {
+                  status: "running",
+                  currentAction: isDelegation ? "委派执行中" : "执行中",
+                });
+                addSubAgentEvent(
+                  subId,
+                  { type: isDelegation ? "delegation_started" : "started", content: isDelegation ? `已委派给 ${payload.data?.name ?? subId}` : "已启动" }
+                );
+                if (isDelegation && avatarSessionId) {
+                  const dlgName = String(payload.data?.name ?? "").trim();
+                  const dlgAvatarId = typeof payload.data?.avatar_id === "string" ? payload.data.avatar_id.trim() : "";
+                  const store = useAppStore.getState();
+                  const existingPane = store.panes.find((p) => {
+                    if (p.avatarId && dlgAvatarId && p.avatarId === dlgAvatarId) return true;
+                    return dlgName && (p.avatarName ?? "").trim().toLowerCase() === dlgName.toLowerCase();
+                  });
+                  if (existingPane) {
+                    // Only sync session if the pane has no session yet (freshly opened).
+                    // Never overwrite an active session — the delegation already runs
+                    // in _find_or_create_avatar_session which reuses the avatar's existing session.
+                  } else {
+                    const newPaneId = addPane(dlgAvatarId || null, dlgName || subId, avatarSessionId);
+                    setActivePaneId(newPaneId);
+                  }
+                }
               }
             }
             if (payload.type === "subagent_progress") {
@@ -1258,24 +1377,35 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             if (payload.type === "subagent_completed") {
               const subId = payload.data?.agent_id;
               if (subId) {
+                const isDelegation = Boolean(payload.data?.delegation);
                 updateSubAgent(subId, {
                   status: "completed",
-                  currentAction: "已完成（查看摘要）",
+                  currentAction: isDelegation ? "委派完成（查看摘要）" : "已完成（查看摘要）",
                   resultSummary:
                     typeof payload.data?.summary === "string" ? payload.data.summary : undefined,
+                  sessionId:
+                    (typeof payload.data?.avatar_session_id === "string" && payload.data.avatar_session_id.trim())
+                      || undefined,
                 });
-                addSubAgentEvent(subId, { type: "completed", content: payload.data?.summary ?? "完成" });
+                addSubAgentEvent(
+                  subId,
+                  { type: isDelegation ? "delegation_completed" : "completed", content: payload.data?.summary ?? "完成" }
+                );
               }
             }
             if (payload.type === "subagent_error") {
               const subId = payload.data?.agent_id;
               if (subId) {
                 const text = payload.data?.text ?? "执行异常";
+                const isDelegation = Boolean(payload.data?.delegation);
                 updateSubAgent(subId, {
                   status: payload.data?.status === "cancelled" ? "cancelled" : "failed",
                   currentAction: text,
+                  sessionId:
+                    (typeof payload.data?.avatar_session_id === "string" && payload.data.avatar_session_id.trim())
+                      || undefined,
                 });
-                addSubAgentEvent(subId, { type: "error", content: text });
+                addSubAgentEvent(subId, { type: isDelegation ? "delegation_error" : "error", content: text });
               }
             }
             if (payload.type === "final") {
@@ -1295,10 +1425,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                       cumulativeFull += delta;
                     }
                   } else if (
-                    finalText !== full &&
-                    finalText !== cumulativeFull &&
-                    !full.includes(finalText) &&
-                    !cumulativeFull.includes(finalText)
+                    normalizeStreamText(finalText) !== normalizeStreamText(full) &&
+                    normalizeStreamText(finalText) !== normalizeStreamText(cumulativeFull) &&
+                    !normalizeStreamText(full).includes(normalizeStreamText(finalText)) &&
+                    !normalizeStreamText(cumulativeFull).includes(normalizeStreamText(finalText))
                   ) {
                     const merged = full.trim() ? `\n\n${finalText}` : finalText;
                     full += merged;
@@ -1750,7 +1880,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             selectedSubAgent={selectedSubAgent}
             onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
             onRetry={(agentId) => void retryPaneSubAgent(agentId)}
-            onChat={(agentId) => setSelectedSubAgent(agentId)}
+            onChat={(agentId) => {
+              const sub = paneSubAgents.find((item) => item.id === agentId);
+              const isDelegation = agentId.startsWith("dlg-") || !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
+              if (isDelegation) {
+                void openDelegatedAvatarSession(agentId);
+                return;
+              }
+              setSelectedSubAgent(agentId);
+            }}
             onSelect={(agentId) => setSelectedSubAgent(agentId)}
             onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
           />

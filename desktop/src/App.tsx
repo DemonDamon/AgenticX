@@ -11,6 +11,25 @@ import { useAppStore } from "./store";
 import { stopSpeak } from "./voice/tts";
 import { matchKeybinding } from "./core/keybinding-manager";
 
+const WORKSPACE_STATE_STORAGE_KEY = "agx-workspace-state-v1";
+
+type PersistedPaneState = {
+  id: string;
+  avatarId: string | null;
+  avatarName: string;
+  sessionId: string;
+  historyOpen: boolean;
+  contextInherited: boolean;
+  taskspacePanelOpen: boolean;
+  activeTaskspaceId: string | null;
+};
+
+type PersistedWorkspaceState = {
+  sessionId: string;
+  activePaneId: string;
+  panes: PersistedPaneState[];
+};
+
 function toProviderEntries(raw: Record<string, { api_key?: string; base_url?: string; model?: string; models?: string[] }>) {
   const result: Record<string, { apiKey: string; baseUrl: string; model: string; models: string[] }> = {};
   for (const [name, cfg] of Object.entries(raw)) {
@@ -43,6 +62,55 @@ function extractOutputFiles(summary?: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const sessionId = String(obj.sessionId ?? "").trim();
+  const activePaneId = String(obj.activePaneId ?? "").trim();
+  const panesRaw = Array.isArray(obj.panes) ? obj.panes : [];
+  const panes: PersistedPaneState[] = panesRaw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const row = item as Record<string, unknown>;
+      const id = String(row.id ?? "").trim();
+      const avatarName = String(row.avatarName ?? "").trim();
+      if (!id || !avatarName) return null;
+      return {
+        id,
+        avatarId: row.avatarId == null ? null : String(row.avatarId),
+        avatarName,
+        sessionId: String(row.sessionId ?? "").trim(),
+        historyOpen: Boolean(row.historyOpen),
+        contextInherited: Boolean(row.contextInherited),
+        taskspacePanelOpen: Boolean(row.taskspacePanelOpen),
+        activeTaskspaceId: row.activeTaskspaceId == null ? null : String(row.activeTaskspaceId),
+      };
+    })
+    .filter((item): item is PersistedPaneState => !!item);
+  if (panes.length === 0) return null;
+  return { sessionId, activePaneId, panes };
+}
+
+async function requestSession(
+  base: string,
+  token: string,
+  params?: { sessionId?: string; avatarId?: string | null }
+): Promise<string> {
+  const query = new URLSearchParams();
+  const wantedSessionId = String(params?.sessionId ?? "").trim();
+  const avatarId = String(params?.avatarId ?? "").trim();
+  if (wantedSessionId) query.set("session_id", wantedSessionId);
+  if (avatarId) query.set("avatar_id", avatarId);
+  const resp = await fetch(`${base}/api/session${query.size > 0 ? `?${query.toString()}` : ""}`, {
+    headers: { "x-agx-desktop-token": token },
+  });
+  if (!resp.ok) throw new Error(`/api/session HTTP ${resp.status}`);
+  const data = (await resp.json()) as { session_id?: string };
+  const sid = String(data.session_id ?? "").trim();
+  if (!sid) throw new Error("/api/session returned empty session_id");
+  return sid;
 }
 
 export function App() {
@@ -91,6 +159,7 @@ export function App() {
   const autoApproveScopesRef = useRef<Set<string>>(new Set());
   const denyScopesRef = useRef<Set<string>>(new Set());
   const sessionInitDoneRef = useRef(false);
+  const workspaceHydratedRef = useRef(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const subAgentsRef = useRef(subAgents);
   const subAgentSessionRef = useRef<Record<string, string>>({});
@@ -185,33 +254,67 @@ export function App() {
       setApiBase(base);
       setApiToken(token);
 
-      let sessionCreated = false;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const resp = await fetch(`${base}/api/session`, {
-            headers: { "x-agx-desktop-token": token }
-          });
-          if (!resp.ok) {
-            console.error(`[App init] /api/session HTTP ${resp.status}, attempt ${attempt + 1}`);
-            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-            continue;
+      let recovered = false;
+      try {
+        const raw = window.localStorage.getItem(WORKSPACE_STATE_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : null;
+        const saved = normalizePersistedWorkspaceState(parsed);
+        if (saved) {
+          const hydratedPanes: PersistedPaneState[] = [];
+          for (const pane of saved.panes) {
+            try {
+              const sid = await requestSession(base, token, {
+                sessionId: pane.sessionId || undefined,
+                avatarId: pane.avatarId,
+              });
+              hydratedPanes.push({ ...pane, sessionId: sid });
+            } catch (err) {
+              console.error("[App init] restore pane failed:", pane.id, err);
+            }
           }
-          const data = await resp.json();
-          if (data.session_id) {
-            setSessionId(data.session_id);
-            setPaneSessionId("pane-meta", data.session_id);
-            await refreshMcpStatus(data.session_id).catch(() => {});
+          if (hydratedPanes.length > 0) {
+            const nextActivePaneId =
+              hydratedPanes.some((pane) => pane.id === saved.activePaneId)
+                ? saved.activePaneId
+                : hydratedPanes[0].id;
+            useAppStore.setState({
+              panes: hydratedPanes.map((pane) => ({ ...pane, messages: [] })),
+              activePaneId: nextActivePaneId,
+            });
+            const metaPane = hydratedPanes.find((pane) => pane.id === "pane-meta");
+            const nextSessionId =
+              (metaPane?.sessionId ?? "").trim() ||
+              (hydratedPanes.find((pane) => pane.id === nextActivePaneId)?.sessionId ?? "").trim() ||
+              saved.sessionId;
+            if (nextSessionId) {
+              setSessionId(nextSessionId);
+              await refreshMcpStatus(nextSessionId).catch(() => {});
+              recovered = true;
+            }
+          }
+        }
+      } catch (err) {
+        console.error("[App init] restore workspace state failed:", err);
+      }
+
+      if (!recovered) {
+        let sessionCreated = false;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const sid = await requestSession(base, token);
+            setSessionId(sid);
+            setPaneSessionId("pane-meta", sid);
+            await refreshMcpStatus(sid).catch(() => {});
             sessionCreated = true;
             break;
+          } catch (err) {
+            console.error(`[App init] /api/session failed, attempt ${attempt + 1}:`, err);
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
           }
-          console.error("[App init] /api/session returned no session_id", data);
-        } catch (err) {
-          console.error(`[App init] /api/session failed, attempt ${attempt + 1}:`, err);
-          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
         }
-      }
-      if (!sessionCreated) {
-        console.error("[App init] all session creation attempts failed");
+        if (!sessionCreated) {
+          console.error("[App init] all session creation attempts failed");
+        }
       }
 
       const cfg = await window.agenticxDesktop.loadConfig();
@@ -239,9 +342,33 @@ export function App() {
         setActiveModel(defP, defEntry.model);
       }
       window.agenticxDesktop.onOpenSettings(() => openSettings());
+      workspaceHydratedRef.current = true;
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!workspaceHydratedRef.current) return;
+    const snapshot: PersistedWorkspaceState = {
+      sessionId,
+      activePaneId,
+      panes: panes.map((pane) => ({
+        id: pane.id,
+        avatarId: pane.avatarId,
+        avatarName: pane.avatarName,
+        sessionId: pane.sessionId,
+        historyOpen: pane.historyOpen,
+        contextInherited: pane.contextInherited,
+        taskspacePanelOpen: pane.taskspacePanelOpen,
+        activeTaskspaceId: pane.activeTaskspaceId,
+      })),
+    };
+    try {
+      window.localStorage.setItem(WORKSPACE_STATE_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      // ignore storage failures
+    }
+  }, [sessionId, activePaneId, panes]);
 
   useEffect(() => {
     subAgentsRef.current = subAgents;
