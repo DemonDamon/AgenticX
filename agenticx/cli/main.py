@@ -25,6 +25,41 @@ from typer.core import TyperGroup
 
 from agenticx._version import __version__
 
+
+def _suppress_macos_dock_icon():
+    """Prevent headless server process from showing a dock icon on macOS."""
+    if sys.platform != "darwin":
+        return
+    try:
+        from AppKit import NSApplication
+        NSApplication.sharedApplication().setActivationPolicy_(2)
+        return
+    except ImportError:
+        pass
+    try:
+        import ctypes
+        ctypes.cdll.LoadLibrary(
+            "/System/Library/Frameworks/AppKit.framework/AppKit"
+        )
+        objc = ctypes.cdll.LoadLibrary("/usr/lib/libobjc.A.dylib")
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.sel_registerName.restype = ctypes.c_void_p
+        objc.objc_msgSend.restype = ctypes.c_void_p
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        ns_app = objc.objc_msgSend(
+            objc.objc_getClass(b"NSApplication"),
+            objc.sel_registerName(b"sharedApplication"),
+        )
+        objc.objc_msgSend.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64,
+        ]
+        objc.objc_msgSend(
+            ns_app, objc.sel_registerName(b"setActivationPolicy:"), 2,
+        )
+    except Exception:
+        pass
+
+
 # 延迟导入函数
 def _get_client():
     """延迟导入客户端"""
@@ -431,6 +466,7 @@ def serve(
     reload: bool = typer.Option(False, "--reload", help="开发模式热重载"),
 ):
     """启动 Studio FastAPI 服务（SSE 事件流）"""
+    _suppress_macos_dock_icon()
     try:
         from agenticx.studio.server import create_studio_app
         import uvicorn
