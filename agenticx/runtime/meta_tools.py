@@ -11,6 +11,8 @@ import json
 import logging
 import re
 import smtplib
+import time
+import uuid
 from email.message import EmailMessage
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -151,11 +153,11 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "cancel_subagent",
-            "description": "Cancel a running sub-agent by ID.",
+            "description": "Cancel a running sub-agent by ID or avatar name.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "agent_id": {"type": "string", "description": "Target sub-agent ID."},
+                    "agent_id": {"type": "string", "description": "Sub-agent ID or avatar name."},
                 },
                 "required": ["agent_id"],
                 "additionalProperties": False,
@@ -170,7 +172,7 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "agent_id": {"type": "string", "description": "Target sub-agent ID."},
+                    "agent_id": {"type": "string", "description": "Sub-agent ID or avatar name."},
                     "task": {
                         "type": "string",
                         "description": "Optional refined task for retry.",
@@ -185,11 +187,11 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "query_subagent_status",
-            "description": "Query status for one/all sub-agents.",
+            "description": "Query status for one/all sub-agents. Supports agent_id, avatar name, or avatar_id.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "agent_id": {"type": "string", "description": "Optional sub-agent ID."},
+                    "agent_id": {"type": "string", "description": "Sub-agent ID, avatar name, or avatar ID."},
                 },
                 "additionalProperties": False,
             },
@@ -1036,6 +1038,353 @@ def _recommend_subagent_model_payload(
     }
 
 
+def _find_or_create_avatar_session(
+    session_manager: Any,
+    avatar_id: str,
+    avatar_config: Any,
+) -> Any:
+    """Find active avatar session, or create one using avatar defaults."""
+    target_id = str(avatar_id or "").strip()
+    if not target_id:
+        raise ValueError("avatar_id is required")
+
+    sessions_dict = getattr(session_manager, "_sessions", None) or {}
+    best = None
+    best_updated = 0.0
+    for managed in sessions_dict.values():
+        if getattr(managed, "archived", False):
+            continue
+        if str(getattr(managed, "avatar_id", "")).strip() != target_id:
+            continue
+        updated = float(getattr(managed, "updated_at", 0) or 0)
+        if best is None or updated > best_updated:
+            best = managed
+            best_updated = updated
+    if best is not None:
+        return best
+
+    try:
+        rows = session_manager.list_sessions(avatar_id=target_id)
+    except Exception:
+        rows = []
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict) or row.get("archived"):
+                continue
+            sid = str(row.get("session_id", "")).strip()
+            if not sid:
+                continue
+            managed = session_manager.get(sid, touch=False)
+            if managed is not None:
+                return managed
+
+    provider_name = str(getattr(avatar_config, "default_provider", "") or "").strip() or None
+    model_name = str(getattr(avatar_config, "default_model", "") or "").strip() or None
+    managed = session_manager.create(provider=provider_name, model=model_name)
+    managed.avatar_id = target_id
+    managed.avatar_name = str(getattr(avatar_config, "name", "") or "").strip() or target_id
+    managed.session_name = managed.avatar_name
+    managed.updated_at = time.time()
+
+    session = managed.studio_session
+    if provider_name:
+        session.provider_name = provider_name
+    if model_name:
+        session.model_name = model_name
+    workspace_dir = str(getattr(avatar_config, "workspace_dir", "") or "").strip()
+    if workspace_dir:
+        session.workspace_dir = workspace_dir
+    setattr(session, "_session_manager", session_manager)
+    setattr(session, "_owner_session_id", managed.session_id)
+    session_manager.persist(managed.session_id)
+    return managed
+
+
+def _extract_recent_assistant_text(session: Any) -> str:
+    chat_history = getattr(session, "chat_history", None) or []
+    for msg in reversed(chat_history):
+        if not isinstance(msg, dict):
+            continue
+        if str(msg.get("role", "")).strip() != "assistant":
+            continue
+        content = str(msg.get("content", "")).strip()
+        if content:
+            return content
+    return ""
+
+
+async def _run_delegation_in_avatar_session(
+    *,
+    avatar_managed: Any,
+    avatar_config: Any,
+    task: str,
+    meta_scratchpad: Dict[str, Any],
+    delegation_id: str,
+    session_manager: Any,
+    cancel_event: asyncio.Event,
+    meta_team_manager: Optional[AgentTeamManager] = None,
+    fallback_provider: Optional[str] = None,
+    fallback_model: Optional[str] = None,
+) -> None:
+    from agenticx.runtime.agent_runtime import AgentRuntime
+    from agenticx.runtime.events import EventType, RuntimeEvent
+
+    avatar_session = avatar_managed.studio_session
+    setattr(avatar_session, "_session_manager", session_manager)
+    setattr(avatar_session, "_owner_session_id", avatar_managed.session_id)
+
+    workspace_dir = str(getattr(avatar_config, "workspace_dir", "") or "").strip()
+    if workspace_dir:
+        avatar_session.workspace_dir = workspace_dir
+
+    provider_name = (
+        str(getattr(avatar_config, "default_provider", "") or "").strip()
+        or str(getattr(avatar_session, "provider_name", "") or "").strip()
+        or (fallback_provider or "").strip()
+    )
+    model_name = (
+        str(getattr(avatar_config, "default_model", "") or "").strip()
+        or str(getattr(avatar_session, "model_name", "") or "").strip()
+        or (fallback_model or "").strip()
+    )
+    if not provider_name or not model_name:
+        raise RuntimeError("avatar provider/model not configured")
+
+    llm = ProviderResolver.resolve(provider_name=provider_name, model=model_name)
+    avatar_session.provider_name = provider_name
+    avatar_session.model_name = model_name
+
+    team_manager = avatar_managed.get_or_create_team(
+        llm_factory=lambda: ProviderResolver.resolve(provider_name=provider_name, model=model_name),
+        event_emitter=None,
+        summary_sink=None,
+    )
+    setattr(avatar_session, "_team_manager", team_manager)
+
+    runtime = AgentRuntime(
+        llm,
+        avatar_managed.get_confirm_gate("meta"),
+        team_manager=team_manager,
+    )
+    avatar_name = str(getattr(avatar_config, "name", "") or "").strip() or str(getattr(avatar_managed, "avatar_name", "") or "").strip()
+    avatar_role = str(getattr(avatar_config, "role", "") or "").strip()
+    avatar_sys_prompt = str(getattr(avatar_config, "system_prompt", "") or "").strip()
+    avatar_context = {
+        "name": avatar_name,
+        "role": avatar_role,
+        "system_prompt": avatar_sys_prompt,
+    }
+
+    workspace_hint = str(getattr(avatar_session, "workspace_dir", "") or "").strip()
+    delegation_system_prompt = (
+        f"你是 AgenticX 分身 **{avatar_name}**。\n"
+        f"角色: {avatar_role or 'General Assistant'}\n"
+    )
+    if avatar_sys_prompt:
+        delegation_system_prompt += f"分身自定义指令: {avatar_sys_prompt}\n"
+    delegation_system_prompt += (
+        "\n## 核心规则\n"
+        "- 你是一个执行型 agent，优先亲自动手完成任务。\n"
+        "- 如果委派任务复杂需要拆分，可以使用 `spawn_subagent` 创建临时子智能体帮忙。\n"
+        f"- **严禁创建与自己同名（{avatar_name}）的子智能体**。子智能体必须用不同的名字（如 '{avatar_name}-researcher'、'{avatar_name}-coder' 等）。\n"
+        "- 禁止调用 `delegate_to_avatar`（那是 Meta-Agent 专属工具）。\n"
+        "- 可以用 `query_subagent_status` 查询自己创建的子智能体进度。\n"
+        "- 回复使用中文，简洁务实。\n\n"
+        "## 回复要求\n"
+        "- 优先动手执行，不要反复确认。\n"
+        "- 边做边汇报，每完成一步简要说明。\n"
+        "- 完成后给出结构化总结。\n"
+    )
+    if workspace_hint:
+        delegation_system_prompt += f"\n## 工作目录\n- {workspace_hint}\n"
+
+    delegated_input = f"[委派任务] 来自 Meta-Agent:\n{task}"
+    final_text = ""
+    error_text = ""
+    status = "running"
+
+    async def _should_stop() -> bool:
+        return bool(cancel_event.is_set())
+
+    last_persist_at = time.time()
+    persist_interval = 5.0
+
+    try:
+        async for event in runtime.run_turn(
+            delegated_input,
+            avatar_session,
+            should_stop=_should_stop,
+            agent_id=delegation_id,
+            tools=[t for t in META_AGENT_TOOLS if t.get("function", {}).get("name") != "delegate_to_avatar"],
+            system_prompt=delegation_system_prompt,
+        ):
+            if event.type == EventType.FINAL.value:
+                final_text = str(event.data.get("text", "")).strip()
+            elif event.type == EventType.ERROR.value:
+                error_text = str(event.data.get("text", "")).strip()
+            now = time.time()
+            if now - last_persist_at >= persist_interval:
+                try:
+                    session_manager.persist(avatar_managed.session_id)
+                except Exception:
+                    pass
+                last_persist_at = now
+        summary = final_text or _extract_recent_assistant_text(avatar_session) or "任务执行完成（无文本输出）"
+        if error_text and not final_text:
+            status = "failed"
+        elif cancel_event.is_set():
+            status = "cancelled"
+            if not error_text:
+                error_text = "任务已取消"
+        else:
+            status = "completed"
+    except Exception as exc:
+        status = "failed"
+        error_text = str(exc)
+        summary = ""
+
+    if status == "failed":
+        summary = summary if "summary" in locals() else ""
+        if not summary:
+            summary = f"委派执行失败: {error_text or '未知错误'}"
+    elif status == "cancelled":
+        summary = summary if "summary" in locals() else ""
+        if not summary:
+            summary = "委派任务已取消"
+
+    result_text = (
+        f"[{avatar_context['name']}] 状态={status}, "
+        f"摘要: {(summary or '(无)')[:500]}"
+    )
+    if error_text and status != "completed":
+        result_text += f", 错误: {error_text[:300]}"
+    meta_scratchpad[f"delegation_result::{delegation_id}"] = result_text
+    # Keep backward-compatible fallback channel for status aggregation.
+    meta_scratchpad[f"subagent_result::{delegation_id}"] = result_text
+
+    pending_reports = meta_scratchpad.get("__pending_subagent_summaries__", [])
+    if not isinstance(pending_reports, list):
+        pending_reports = []
+    pending_reports.append(
+        f"[delegation_summary] [{avatar_context['name']}] (ID: {delegation_id}) 状态={status}\n{summary}"
+    )
+    meta_scratchpad["__pending_subagent_summaries__"] = pending_reports[-50:]
+
+    info = getattr(avatar_managed, "_delegation_info", None)
+    if not isinstance(info, dict):
+        info = {}
+    info.update(
+        {
+            "delegation_id": delegation_id,
+            "task": task,
+            "status": status,
+            "summary": summary,
+            "error": error_text,
+            "avatar_session_id": avatar_managed.session_id,
+            "completed_at": time.time(),
+        }
+    )
+    setattr(avatar_managed, "_delegation_info", info)
+    avatar_managed.updated_at = time.time()
+
+    if meta_team_manager is not None:
+        event_type = EventType.SUBAGENT_COMPLETED.value if status == "completed" else EventType.SUBAGENT_ERROR.value
+        event_payload: Dict[str, Any] = {
+            "agent_id": delegation_id,
+            "name": avatar_context["name"] or delegation_id,
+            "status": status,
+            "summary": summary,
+            "text": error_text or summary,
+            "delegation": True,
+            "avatar_id": str(getattr(avatar_config, "id", "") or ""),
+            "avatar_session_id": avatar_managed.session_id,
+        }
+        try:
+            await meta_team_manager._emit(
+                RuntimeEvent(
+                    type=event_type,
+                    data=event_payload,
+                    agent_id="meta",
+                )
+            )
+        except Exception:
+            _meta_log.debug("emit delegation terminal event failed", exc_info=True)
+
+    session_manager.persist(avatar_managed.session_id)
+
+
+def _lookup_avatar_session_status(session_manager: Any, query: str) -> Optional[Dict[str, Any]]:
+    """Search SessionManager for an active avatar session matching query (name or avatar_id)."""
+    q = query.strip().lower()
+    if not q:
+        return None
+    sessions_dict = getattr(session_manager, "_sessions", None)
+    if not sessions_dict:
+        return None
+    best = None
+    best_updated = 0.0
+    for sid, managed in sessions_dict.items():
+        if getattr(managed, "archived", False):
+            continue
+        avatar_name = (getattr(managed, "avatar_name", None) or "").strip().lower()
+        avatar_id = (getattr(managed, "avatar_id", None) or "").strip().lower()
+        delegation_info = getattr(managed, "_delegation_info", None)
+        delegation_id = ""
+        if isinstance(delegation_info, dict):
+            delegation_id = str(delegation_info.get("delegation_id", "")).strip().lower()
+        if avatar_name != q and avatar_id != q and delegation_id != q:
+            continue
+        updated = float(getattr(managed, "updated_at", 0) or 0)
+        if best is None or updated > best_updated:
+            best = managed
+            best_updated = updated
+    if best is None:
+        return None
+    studio_sess = getattr(best, "studio_session", None)
+    chat_len = len(getattr(studio_sess, "chat_history", []) or []) if studio_sess else 0
+    agent_msgs_len = len(getattr(studio_sess, "agent_messages", []) or []) if studio_sess else 0
+    last_messages: List[str] = []
+    if studio_sess:
+        for msg in reversed(getattr(studio_sess, "chat_history", []) or []):
+            content = str(msg.get("content", "")).strip()
+            if content and msg.get("role") == "assistant":
+                last_messages.append(content[:300])
+                if len(last_messages) >= 3:
+                    break
+    tm = getattr(best, "team_manager", None)
+    has_running_tasks = False
+    if tm is not None:
+        has_running_tasks = any(not t.done() for t in getattr(tm, "_tasks", {}).values())
+    delegation_task = getattr(best, "_delegation_task", None)
+    delegation_info = getattr(best, "_delegation_info", None)
+    has_running_delegation = bool(delegation_task is not None and not delegation_task.done())
+    delegation_status = ""
+    if isinstance(delegation_info, dict):
+        delegation_status = str(delegation_info.get("status", "")).strip().lower()
+    is_active = has_running_tasks or has_running_delegation or (time.time() - best_updated < 120)
+    status_value = "running" if is_active else "idle"
+    if not is_active and delegation_status in {"completed", "failed", "cancelled"}:
+        status_value = delegation_status
+    task_text = "(avatar independent session)"
+    if isinstance(delegation_info, dict):
+        task_text = str(delegation_info.get("task", "")).strip() or task_text
+    return {
+        "agent_id": best.session_id,
+        "name": getattr(best, "avatar_name", None) or query,
+        "avatar_id": getattr(best, "avatar_id", None) or "",
+        "role": "avatar",
+        "task": task_text,
+        "status": status_value,
+        "updated_at": best_updated,
+        "chat_messages": chat_len,
+        "agent_messages": agent_msgs_len,
+        "recent_output": last_messages,
+        "delegation_running": has_running_delegation,
+        "delegation_info": delegation_info if isinstance(delegation_info, dict) else None,
+        "source": "avatar_session_fallback",
+    }
+
+
 async def dispatch_meta_tool_async(
     name: str,
     arguments: Dict[str, Any],
@@ -1044,6 +1393,47 @@ async def dispatch_meta_tool_async(
     session: Optional["StudioSession"] = None,
 ) -> str:
     if name == "spawn_subagent":
+        spawn_name = str(arguments.get("name", "")).strip()
+        if spawn_name and session is not None:
+            _own_avatar_name = ""
+            _session_manager = getattr(session, "_session_manager", None)
+            if _session_manager is not None:
+                _owner_sid = str(getattr(session, "_owner_session_id", "") or "").strip()
+                if _owner_sid:
+                    _own_managed = getattr(_session_manager, "_sessions", {}).get(_owner_sid)
+                    if _own_managed is not None:
+                        _own_avatar_name = str(getattr(_own_managed, "avatar_name", "") or "").strip()
+            if _own_avatar_name and spawn_name.lower() == _own_avatar_name.lower():
+                return json.dumps({
+                    "ok": False,
+                    "error": "self_name_blocked",
+                    "message": (
+                        f"禁止创建与自己同名（{_own_avatar_name}）的子智能体。"
+                        f"请使用不同的名字，如 '{_own_avatar_name}-researcher' 或 '{_own_avatar_name}-coder'。"
+                    ),
+                }, ensure_ascii=False)
+        if spawn_name:
+            from agenticx.avatar.registry import AvatarRegistry
+            _avatar_registry = AvatarRegistry()
+            _all_avatars = _avatar_registry.list_avatars()
+            for _av in _all_avatars:
+                if spawn_name.lower() in (
+                    (_av.name or "").lower(),
+                    (_av.id or "").lower(),
+                ):
+                    _meta_log.warning(
+                        "[dispatch] BLOCKED spawn_subagent for registered avatar '%s' (id=%s), redirecting to delegate_to_avatar",
+                        spawn_name, _av.id,
+                    )
+                    return json.dumps({
+                        "ok": False,
+                        "error": "avatar_exists",
+                        "message": (
+                            f"'{spawn_name}' 是已注册的数字分身（avatar_id={_av.id}），"
+                            f"禁止用 spawn_subagent 创建同名临时智能体。"
+                            f"请改用 delegate_to_avatar(avatar_id=\"{_av.id}\", task=\"...\") 来委派任务。"
+                        ),
+                    }, ensure_ascii=False)
         tools = arguments.get("tools")
         tool_list: Optional[List[str]] = None
         if isinstance(tools, list):
@@ -1074,7 +1464,38 @@ async def dispatch_meta_tool_async(
         return json.dumps(result, ensure_ascii=False)
 
     if name == "cancel_subagent":
-        result = await team_manager.cancel_subagent(str(arguments.get("agent_id", "")).strip())
+        requested_id = str(arguments.get("agent_id", "")).strip()
+        result = await team_manager.cancel_subagent(requested_id)
+        if result.get("ok"):
+            return json.dumps(result, ensure_ascii=False)
+        # Fallback: true delegation task running in avatar real session.
+        if requested_id and session is not None:
+            sm = getattr(session, "_session_manager", None)
+            sessions_dict = getattr(sm, "_sessions", None) if sm is not None else None
+            if isinstance(sessions_dict, dict):
+                for managed in sessions_dict.values():
+                    if getattr(managed, "archived", False):
+                        continue
+                    info = getattr(managed, "_delegation_info", None)
+                    if not isinstance(info, dict):
+                        continue
+                    delegation_id = str(info.get("delegation_id", "")).strip()
+                    if delegation_id != requested_id:
+                        continue
+                    cancel_evt = getattr(managed, "_delegation_cancel_event", None)
+                    if isinstance(cancel_evt, asyncio.Event):
+                        cancel_evt.set()
+                        info["status"] = "cancelled"
+                        info["cancelled_at"] = time.time()
+                    return json.dumps(
+                        {
+                            "ok": True,
+                            "agent_id": requested_id,
+                            "status": "cancelled",
+                            "message": "delegation cancel requested",
+                        },
+                        ensure_ascii=False,
+                    )
         return json.dumps(result, ensure_ascii=False)
 
     if name == "retry_subagent":
@@ -1130,6 +1551,16 @@ async def dispatch_meta_tool_async(
             if global_hit is not None:
                 _meta_log.warning("[dispatch] fallback global hit for agent_id=%s", requested_id)
                 result = {"ok": True, "subagent": global_hit}
+
+        # --- Avatar session fallback ---
+        # If still not found, check SessionManager for an active avatar session
+        if requested_id and not result.get("ok") and session is not None:
+            sm = getattr(session, "_session_manager", None)
+            if sm is not None:
+                avatar_hit = _lookup_avatar_session_status(sm, requested_id)
+                if avatar_hit is not None:
+                    _meta_log.info("[dispatch] avatar session fallback hit for '%s'", requested_id)
+                    result = {"ok": True, "subagent": avatar_hit}
         if result.get("ok") and requested_id is None:
             rows = result.get("subagents", [])
             if isinstance(rows, list):
@@ -1317,26 +1748,145 @@ async def dispatch_meta_tool_async(
         avatar_id = str(arguments.get("avatar_id", "")).strip()
         task = str(arguments.get("task", "")).strip()
         if not avatar_id or not task:
-            return json.dumps({"ok": False, "error": "avatar_id and task are required"}, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "ok": True,
+                    "skipped": True,
+                    "reason": "missing_args",
+                    "message": "delegate_to_avatar skipped: avatar_id and task are required",
+                    "suggestion": "For identity questions, answer directly from avatars list; use chat_with_avatar for internal relay chat.",
+                },
+                ensure_ascii=False,
+            )
         from agenticx.avatar.registry import AvatarRegistry
         registry = AvatarRegistry()
         avatar = registry.get_avatar(avatar_id)
         if avatar is None:
             return json.dumps({"ok": False, "error": f"avatar not found: {avatar_id}"}, ensure_ascii=False)
-        workspace_dir = str(avatar.workspace_dir or "").strip()
-        if not workspace_dir:
-            return json.dumps({"ok": False, "error": f"avatar workspace not configured: {avatar_id}"}, ensure_ascii=False)
-        result = await team_manager.spawn_subagent(
-            name=avatar.name,
-            role=avatar.role or "delegated avatar",
-            task=task,
-            source_tool_call_id=str(arguments.get("__tool_call_id", "")).strip(),
-            provider=str(avatar.default_provider or "").strip() or None,
-            model=str(avatar.default_model or "").strip() or None,
-            workspace_dir=workspace_dir,
-            system_prompt=str(avatar.system_prompt or "").strip() or None,
+
+        if session is None:
+            return json.dumps({"ok": False, "error": "session unavailable"}, ensure_ascii=False)
+        session_manager = getattr(session, "_session_manager", None)
+        if session_manager is None:
+            return json.dumps({"ok": False, "error": "SessionManager not available"}, ensure_ascii=False)
+        scratchpad = getattr(session, "scratchpad", None)
+        if not isinstance(scratchpad, dict):
+            return json.dumps({"ok": False, "error": "session scratchpad unavailable"}, ensure_ascii=False)
+
+        avatar_managed = _find_or_create_avatar_session(session_manager, avatar_id, avatar)
+
+        existing_task = getattr(avatar_managed, "_delegation_task", None)
+        existing_info = getattr(avatar_managed, "_delegation_info", None)
+        if existing_task is not None and not existing_task.done():
+            existing_dlg_id = ""
+            if isinstance(existing_info, dict):
+                existing_dlg_id = str(existing_info.get("delegation_id", "")).strip()
+            return json.dumps(
+                {
+                    "ok": True,
+                    "delegated": True,
+                    "already_running": True,
+                    "delegation_id": existing_dlg_id,
+                    "avatar_id": avatar_id,
+                    "avatar_name": avatar.name,
+                    "avatar_session_id": avatar_managed.session_id,
+                    "message": f"{avatar.name} 已有一个委派任务正在执行（{existing_dlg_id}），请等待完成后再委派新任务。",
+                },
+                ensure_ascii=False,
+            )
+
+        delegation_id = f"dlg-{uuid.uuid4().hex[:8]}"
+        cancel_event = asyncio.Event()
+        meta_provider = str(getattr(session, "provider_name", "") or "").strip()
+        meta_model = str(getattr(session, "model_name", "") or "").strip()
+
+        async def _delegation_wrapper() -> None:
+            try:
+                await _run_delegation_in_avatar_session(
+                    avatar_managed=avatar_managed,
+                    avatar_config=avatar,
+                    task=task,
+                    meta_scratchpad=scratchpad,
+                    delegation_id=delegation_id,
+                    session_manager=session_manager,
+                    cancel_event=cancel_event,
+                    meta_team_manager=team_manager,
+                    fallback_provider=meta_provider,
+                    fallback_model=meta_model,
+                )
+            except Exception as exc:
+                _meta_log.error(
+                    "[delegation] background task failed for dlg=%s avatar=%s: %s",
+                    delegation_id, avatar_id, exc, exc_info=True,
+                )
+                info = getattr(avatar_managed, "_delegation_info", None)
+                if isinstance(info, dict):
+                    info["status"] = "failed"
+                    info["error"] = str(exc)
+                    info["completed_at"] = time.time()
+                scratchpad[f"delegation_result::{delegation_id}"] = (
+                    f"[{avatar.name}] 状态=failed, 错误: {str(exc)[:500]}"
+                )
+                try:
+                    session_manager.persist(avatar_managed.session_id)
+                except Exception:
+                    pass
+
+        background_task = asyncio.create_task(_delegation_wrapper())
+        setattr(avatar_managed, "_delegation_task", background_task)
+        setattr(avatar_managed, "_delegation_cancel_event", cancel_event)
+        setattr(
+            avatar_managed,
+            "_delegation_info",
+            {
+                "delegation_id": delegation_id,
+                "task": task,
+                "from_session": str(
+                    getattr(session, "_owner_session_id", "")
+                    or getattr(team_manager, "owner_session_id", "")
+                    or ""
+                ).strip(),
+                "status": "running",
+                "started_at": time.time(),
+                "avatar_id": avatar_id,
+                "avatar_name": str(avatar.name or ""),
+                "avatar_session_id": avatar_managed.session_id,
+            },
         )
-        return json.dumps(result, ensure_ascii=False)
+        avatar_managed.updated_at = time.time()
+        session_manager.persist(avatar_managed.session_id)
+
+        from agenticx.runtime.events import EventType, RuntimeEvent
+
+        await team_manager._emit(
+            RuntimeEvent(
+                type=EventType.SUBAGENT_STARTED.value,
+                data={
+                    "agent_id": delegation_id,
+                    "name": avatar.name,
+                    "role": avatar.role or "delegated avatar",
+                    "task": task,
+                    "delegation": True,
+                    "avatar_id": avatar_id,
+                    "avatar_session_id": avatar_managed.session_id,
+                },
+                agent_id="meta",
+            )
+        )
+
+        return json.dumps(
+            {
+                "ok": True,
+                "delegated": True,
+                "delegation_id": delegation_id,
+                "agent_id": delegation_id,
+                "avatar_id": avatar_id,
+                "avatar_name": avatar.name,
+                "avatar_session_id": avatar_managed.session_id,
+                "task": task,
+            },
+            ensure_ascii=False,
+        )
 
     if name == "read_avatar_workspace":
         avatar_id = str(arguments.get("avatar_id", "")).strip()
