@@ -103,7 +103,7 @@ class HistoryPanelBoundary extends Component<
     if (this.state.hasError) {
       if (this.state.retryCount < 2) return null;
       return (
-        <div className="h-full w-[220px] shrink-0 border-l border-border bg-surface-panel flex items-center justify-center">
+        <div className="h-full w-[220px] shrink-0 border-l border-border bg-surface-card flex items-center justify-center">
           <button
             className="rounded px-3 py-2 text-xs text-text-subtle hover:bg-surface-hover hover:text-text-strong"
             onClick={() => this.setState({ hasError: false, retryCount: 0 })}
@@ -1673,7 +1673,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           )}
         </div>
 
-        <div className="shrink-0 border-t border-border bg-surface-composer px-4 py-2.5 backdrop-blur-md">
+        <div className="shrink-0 border-t border-border px-4 py-2.5">
           <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
             <span className="rounded border border-border bg-surface-card px-2 py-0.5">
               Context Files: {attachmentEntries.length}

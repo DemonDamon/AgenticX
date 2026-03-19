@@ -82,7 +82,8 @@ export function WorkspacePanel({
   const [adding, setAdding] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [panelHeight, setPanelHeight] = useState(0);
-  const [spawnsHeight, setSpawnsHeight] = useState(220);
+  const [spawnsHeight, setSpawnsHeight] = useState(0);
+  const spawnsInitialized = useRef(false);
 
   const activeTaskspace = useMemo(
     () => taskspaces.find((item) => item.id === activeTaskspaceId) ?? taskspaces[0] ?? null,
@@ -94,8 +95,13 @@ export function WorkspacePanel({
   const safeSpawnsHeight = Math.max(minSpawnsHeight, Math.min(maxSpawnsHeight, spawnsHeight));
 
   useEffect(() => {
+    if (panelHeight > 0 && !spawnsInitialized.current) {
+      spawnsInitialized.current = true;
+      setSpawnsHeight(Math.floor(panelHeight / 2));
+      return;
+    }
     setSpawnsHeight((prev) => Math.max(minSpawnsHeight, Math.min(maxSpawnsHeight, prev)));
-  }, [maxSpawnsHeight]);
+  }, [panelHeight, maxSpawnsHeight]);
 
   const highlightedCode = useMemo(() => {
     if (!filePreview) return "";
@@ -357,7 +363,7 @@ export function WorkspacePanel({
   };
 
   return (
-    <div ref={panelRef} className="relative flex h-full min-h-0 w-full flex-col bg-surface-panel">
+    <div ref={panelRef} className="relative flex h-full min-h-0 w-full flex-col bg-surface-card">
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="relative flex items-center gap-1 border-b border-border px-2 py-2">
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
