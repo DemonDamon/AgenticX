@@ -317,7 +317,7 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         "## 安全与确认规则（必须遵守）\n"
         "- bash_exec 仅对白名单命令自动执行；非白名单命令必须先征得用户确认。\n"
         "- file_write 与 file_edit 必须先展示 unified diff，再征得用户确认。\n"
-        "- 当信息不足、需求含糊、或操作有副作用时，优先使用 ask_user。\n"
+        "- 当信息不足或需求含糊时，直接以文字回复追问用户，不要调用工具。\n"
         "- 多步骤任务优先使用 todo_write 跟踪进度，保持只有一个 in_progress。\n"
         "- 对中间结果优先写入 scratchpad_write，后续步骤先 scratchpad_read 复用。\n"
         "- 优先最小改动，避免无关重构。\n"
@@ -791,8 +791,12 @@ class AgentRuntime:
                                 acc = tool_calls_acc.setdefault(
                                     idx, {"id": "", "name": "", "arguments": ""}
                                 )
-                                tool_call_id = str(stream_chunk.get("tool_call_id", "")).strip()
-                                tool_name = str(stream_chunk.get("tool_name", "")).strip()
+                                raw_tc_id = stream_chunk.get("tool_call_id", "")
+                                tool_call_id = str(raw_tc_id).strip() if isinstance(raw_tc_id, str) else ""
+                                raw_tn = stream_chunk.get("tool_name", "")
+                                tool_name = str(raw_tn).strip() if isinstance(raw_tn, str) and raw_tn is not None else ""
+                                if tool_name.lower() == "none":
+                                    tool_name = ""
                                 args_delta = str(stream_chunk.get("arguments_delta", ""))
                                 if tool_call_id:
                                     acc["id"] = tool_call_id
@@ -803,13 +807,20 @@ class AgentRuntime:
                         await stream_task
                         for idx in sorted(tool_calls_acc.keys()):
                             item = tool_calls_acc[idx]
+                            accumulated_name = (item.get("name") or "").strip()
+                            if not accumulated_name or accumulated_name.lower() == "none":
+                                logger.warning(
+                                    "Dropping streamed tool_call at index %d with empty/invalid name",
+                                    idx,
+                                )
+                                continue
                             args_obj = _repair_streamed_tool_arguments(item.get("arguments", ""))
                             tool_calls.append(
                                 {
                                     "id": item.get("id") or f"stream-{uuid.uuid4().hex[:8]}",
                                     "type": "function",
                                     "function": {
-                                        "name": item.get("name", ""),
+                                        "name": accumulated_name,
                                         "arguments": json.dumps(args_obj, ensure_ascii=False),
                                     },
                                 }
@@ -890,7 +901,13 @@ class AgentRuntime:
                 )
                 return
             response_text = (response.content or "").strip()
-            tool_calls = response.tool_calls or []
+            raw_tc = response.tool_calls or []
+            tool_calls = [
+                tc for tc in raw_tc
+                if isinstance(tc, dict)
+                and (tc.get("function", {}) if isinstance(tc.get("function"), dict) else {}).get("name")
+                and str((tc.get("function", {}) if isinstance(tc.get("function"), dict) else {}).get("name", "")).strip().lower() != "none"
+            ]
             if not tool_calls:
                 inline_tool = _extract_inline_tool_call(response_text, allowed_tool_names)
                 if inline_tool is not None:
@@ -975,25 +992,59 @@ class AgentRuntime:
             }
             messages.append(assistant_tool_message)
             tool_calls_summary = _summarize_tool_calls_for_history(tool_calls)
-            tool_call_text = (
-                f"{response_text}\n\n工具调用:\n{json.dumps(tool_calls_summary, ensure_ascii=False)}"
-                if response_text
-                else f"工具调用:\n{json.dumps(tool_calls_summary, ensure_ascii=False)}"
-            )
+            tool_call_text = f"工具调用:\n{json.dumps(tool_calls_summary, ensure_ascii=False)}"
             if not _is_system_trigger:
-                session.chat_history.append({"role": "assistant", "content": tool_call_text})
+                session.chat_history.append({"role": "tool", "content": tool_call_text})
 
             for call in tool_calls:
                 if await _check_should_stop():
                     yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
                     return
                 function_obj = call.get("function", {}) if isinstance(call, dict) else {}
-                tool_name = str(function_obj.get("name", "")).strip()
+                raw_tool_name = function_obj.get("name", "")
+                tool_name = str(raw_tool_name).strip() if isinstance(raw_tool_name, str) else ""
+                if tool_name.lower() == "none":
+                    tool_name = ""
                 tool_call_id = str(call.get("id", "")) if isinstance(call, dict) else ""
                 arguments = _parse_tool_arguments(function_obj.get("arguments"))
                 dispatch_arguments = dict(arguments)
                 dispatch_arguments["__tool_call_id"] = tool_call_id
                 dispatch_arguments["__agent_id"] = agent_id
+                if not tool_name:
+                    invalid_message = "模型返回了无效工具调用（缺少 tool name），已忽略本次调用。"
+                    tool_name = "unknown_tool"
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": invalid_message,
+                        }
+                    )
+                    session.agent_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": invalid_message,
+                        }
+                    )
+                    synced_session_message_count = len(session.agent_messages)
+                    if not _is_system_trigger:
+                        session.chat_history.append(
+                            {"role": "tool", "content": f"工具结果({tool_name}):\n{invalid_message}"}
+                        )
+                    yield RuntimeEvent(
+                        type=EventType.ERROR.value,
+                        data={"text": invalid_message, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_RESULT.value,
+                        data={"name": tool_name, "result": invalid_message, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
+                    continue
                 hook_outcome = await self.hooks.run_before_tool_call(tool_name, arguments, session)
                 if hook_outcome.blocked:
                     blocked_message = hook_outcome.reason or f"工具 {tool_name} 被策略阻止。"
@@ -1333,10 +1384,15 @@ class AgentRuntime:
                 disk_write_progress = (
                     len(disk_write_paths) > before_disk_write_count
                 )
+                PROGRESS_TOOLS = {
+                    "todo_write", "scratchpad_write", "bash_exec",
+                    "file_read", "list_files", "file_search", "grep_search",
+                }
                 logical_progress = (
-                    tool_name in {"todo_write", "scratchpad_write", "bash_exec"}
+                    tool_name in PROGRESS_TOOLS
                     and isinstance(result, str)
                     and not result.lstrip().startswith("ERROR:")
+                    and len(result.strip()) > 10
                 )
                 self.loop_detector.record_call(
                     tool_name,
@@ -1381,7 +1437,7 @@ class AgentRuntime:
                 synced_session_message_count = len(session.agent_messages)
                 if not _is_system_trigger:
                     session.chat_history.append(
-                        {"role": "assistant", "content": f"工具结果({tool_name}):\n{result}"}
+                        {"role": "tool", "content": f"工具结果({tool_name}):\n{result}"}
                     )
                 yield RuntimeEvent(
                     type=EventType.TOOL_RESULT.value,
