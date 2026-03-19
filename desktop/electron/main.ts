@@ -91,6 +91,10 @@ const KNOWN_BASE_URLS: Record<string, string> = {
   kimi: "https://api.moonshot.cn/v1",
 };
 
+const PROVIDER_FALLBACK_MODELS: Record<string, string[]> = {
+  minimax: ["MiniMax-M2.5"],
+};
+
 function loadAgxConfig(): AgxConfig {
   if (!fs.existsSync(CONFIG_PATH)) return { version: "1", providers: {} };
   try {
@@ -1079,14 +1083,29 @@ function registerIpc(): void {
   }) => {
     const base = (payload.baseUrl || KNOWN_BASE_URLS[payload.provider] || "").replace(/\/+$/, "");
     if (!base) return { ok: false, error: "未知 provider，请填写 API 地址" };
-    const url = `${base}/models`;
+    const isMinimax = payload.provider === "minimax";
+    const url = isMinimax ? `${base}/chat/completions` : `${base}/models`;
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 10000);
-      const resp = await fetch(url, {
-        headers: { Authorization: `Bearer ${payload.apiKey}` },
-        signal: controller.signal,
-      });
+      const resp = isMinimax
+        ? await fetch(url, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${payload.apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "MiniMax-M2.5",
+              messages: [{ role: "user", content: "hi" }],
+              max_tokens: 1,
+            }),
+            signal: controller.signal,
+          })
+        : await fetch(url, {
+            headers: { Authorization: `Bearer ${payload.apiKey}` },
+            signal: controller.signal,
+          });
       clearTimeout(timer);
       if (resp.ok) return { ok: true, status: resp.status };
       const body = await resp.text().catch(() => "");
@@ -1112,7 +1131,13 @@ function registerIpc(): void {
         signal: controller.signal,
       });
       clearTimeout(timer);
-      if (!resp.ok) return { ok: false, models: [], error: `HTTP ${resp.status}` };
+      if (!resp.ok) {
+        const fallback = PROVIDER_FALLBACK_MODELS[payload.provider];
+        if (resp.status === 404 && Array.isArray(fallback) && fallback.length > 0) {
+          return { ok: true, models: fallback };
+        }
+        return { ok: false, models: [], error: `HTTP ${resp.status}` };
+      }
       const data = await resp.json() as { data?: Array<{ id: string }> };
       const models = (data.data ?? []).map((m) => m.id).sort();
       return { ok: true, models };

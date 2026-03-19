@@ -273,12 +273,16 @@ class ArkLLMProvider(BaseLLMProvider):
                 if tc_list:
                     raw_tool_calls = []
                     for tc in tc_list:
+                        fn_obj = getattr(tc, "function", None)
+                        fn_name = getattr(fn_obj, "name", "") if fn_obj is not None else ""
+                        if not isinstance(fn_name, str) or fn_name.lower() == "none":
+                            fn_name = ""
                         raw_tool_calls.append({
                             "id": getattr(tc, "id", ""),
                             "type": getattr(tc, "type", "function"),
                             "function": {
-                                "name": getattr(getattr(tc, "function", None), "name", ""),
-                                "arguments": getattr(getattr(tc, "function", None), "arguments", "{}"),
+                                "name": fn_name,
+                                "arguments": getattr(fn_obj, "arguments", "{}") if fn_obj is not None else "{}",
                             },
                         })
 
@@ -485,9 +489,12 @@ class ArkLLMProvider(BaseLLMProvider):
                         idx = getattr(tc, "index", 0)
                         tc_id = getattr(tc, "id", "") or ""
                         fn_obj = getattr(tc, "function", None)
-                        fn_name = (
+                        raw_fn_name = (
                             getattr(fn_obj, "name", "") if fn_obj is not None else ""
                         )
+                        fn_name = str(raw_fn_name) if isinstance(raw_fn_name, str) else ""
+                        if fn_name.lower() == "none":
+                            fn_name = ""
                         fn_args = (
                             getattr(fn_obj, "arguments", "")
                             if fn_obj is not None
@@ -501,7 +508,7 @@ class ArkLLMProvider(BaseLLMProvider):
                             "type": "tool_call_delta",
                             "tool_index": tool_index,
                             "tool_call_id": str(tc_id),
-                            "tool_name": str(fn_name),
+                            "tool_name": fn_name,
                             "arguments_delta": "" if fn_args is None else str(fn_args),
                         }
             yield {"type": "done", "finish_reason": last_finish_reason}
