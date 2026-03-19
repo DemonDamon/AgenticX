@@ -101,6 +101,7 @@ class SubAgentContext:
     output_files: List[str] = field(default_factory=list)
     workspace_dir: str = ""
     persona_prompt: str = ""
+    avatar_id: str = ""
 
 
 class AgentTeamManager:
@@ -140,37 +141,48 @@ class AgentTeamManager:
 
     @classmethod
     def collect_global_statuses(cls, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Collect merged statuses across all managers as a fallback."""
+        """Collect merged statuses across all managers as a fallback.
+
+        When session_id is given, first tries same-session managers; if no
+        results found, widens to ALL managers (cross-session).
+        """
         merged: Dict[str, Dict[str, Any]] = {}
         stale_ids: List[str] = []
         sid = (session_id or "").strip() or None
-        for manager_id, manager in cls._registry.items():
-            if manager is None:
-                stale_ids.append(manager_id)
-                continue
-            if sid is not None and manager.owner_session_id != sid:
-                continue
-            payload = manager.get_status_with_task_fallback()
-            if not payload.get("ok"):
-                continue
-            for item in payload.get("subagents", []) or []:
-                aid = str(item.get("agent_id", "")).strip()
-                if not aid:
+
+        def _merge_from_managers(*, restrict_sid: Optional[str]) -> None:
+            for manager_id, manager in cls._registry.items():
+                if manager is None:
+                    stale_ids.append(manager_id)
                     continue
-                prev = merged.get(aid)
-                if prev is None:
-                    merged[aid] = item
+                if restrict_sid is not None and manager.owner_session_id != restrict_sid:
                     continue
-                prev_status = str(prev.get("status", ""))
-                curr_status = str(item.get("status", ""))
-                active = {"running", "pending"}
-                if curr_status in active and prev_status not in active:
-                    merged[aid] = item
-                elif curr_status in active and prev_status in active:
-                    prev_updated = float(prev.get("updated_at", 0) or 0)
-                    curr_updated = float(item.get("updated_at", 0) or 0)
-                    if curr_updated >= prev_updated:
+                payload = manager.get_status_with_task_fallback()
+                if not payload.get("ok"):
+                    continue
+                for item in payload.get("subagents", []) or []:
+                    aid = str(item.get("agent_id", "")).strip()
+                    if not aid:
+                        continue
+                    prev = merged.get(aid)
+                    if prev is None:
                         merged[aid] = item
+                        continue
+                    prev_status = str(prev.get("status", ""))
+                    curr_status = str(item.get("status", ""))
+                    active = {"running", "pending"}
+                    if curr_status in active and prev_status not in active:
+                        merged[aid] = item
+                    elif curr_status in active and prev_status in active:
+                        prev_updated = float(prev.get("updated_at", 0) or 0)
+                        curr_updated = float(item.get("updated_at", 0) or 0)
+                        if curr_updated >= prev_updated:
+                            merged[aid] = item
+
+        _merge_from_managers(restrict_sid=sid)
+        if not merged and sid is not None:
+            _log.info("[collect_global] no results for session %s, widening to all managers", sid)
+            _merge_from_managers(restrict_sid=None)
         for manager_id in stale_ids:
             cls._registry.pop(manager_id, None)
         return list(merged.values())
@@ -189,6 +201,16 @@ class AgentTeamManager:
             payload = manager.get_status(aid)
             if payload.get("ok"):
                 return payload.get("subagent")
+        if sid is not None:
+            for manager in cls._registry.values():
+                if manager is None:
+                    continue
+                if manager.owner_session_id == sid:
+                    continue
+                payload = manager.get_status(aid)
+                if payload.get("ok"):
+                    _log.info("[lookup_global] cross-session hit for '%s' in tm=%s", aid, manager._manager_id)
+                    return payload.get("subagent")
         return None
 
     @classmethod
@@ -369,6 +391,7 @@ class AgentTeamManager:
         model: Optional[str] = None,
         workspace_dir: Optional[str] = None,
         system_prompt: Optional[str] = None,
+        avatar_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         async with self._lock:
             active = self._active_running_count()
@@ -450,6 +473,7 @@ class AgentTeamManager:
                 model_name=str(model or "").strip(),
                 workspace_dir=str(workspace_dir or "").strip(),
                 persona_prompt=str(system_prompt or "").strip(),
+                avatar_id=str(avatar_id or "").strip(),
             )
             self._agents[agent_id] = context
             context.status = SubAgentStatus.RUNNING
@@ -505,6 +529,10 @@ class AgentTeamManager:
 
     async def cancel_subagent(self, agent_id: str) -> Dict[str, Any]:
         context = self._agents.get(agent_id)
+        if context is None:
+            context = self._find_by_name_or_avatar(agent_id)
+            if context is not None:
+                agent_id = context.agent_id
         if context is None:
             return {"ok": False, "error": "not_found", "message": f"未找到子智能体: {agent_id}"}
         self._cancelled.add(agent_id)
@@ -589,6 +617,10 @@ class AgentTeamManager:
     async def retry_subagent(self, agent_id: str, refined_task: Optional[str] = None) -> Dict[str, Any]:
         previous = self._agents.get(agent_id)
         if previous is None:
+            previous = self._find_by_name_or_avatar(agent_id)
+            if previous is not None:
+                agent_id = previous.agent_id
+        if previous is None:
             return {"ok": False, "error": "not_found", "message": f"未找到子智能体: {agent_id}"}
         if previous.status == SubAgentStatus.RUNNING:
             return {"ok": False, "error": "still_running", "message": "子智能体仍在运行，无法重试"}
@@ -618,6 +650,16 @@ class AgentTeamManager:
             new_context.artifacts.update(previous.artifacts)
         return result
 
+    def _find_by_name_or_avatar(self, query: str) -> Optional[SubAgentContext]:
+        """Fallback lookup by name (case-insensitive) or avatar_id."""
+        q = query.strip().lower()
+        for ctx in list(self._agents.values()) + list(self._archived_agents.values()):
+            if ctx.avatar_id and ctx.avatar_id.lower() == q:
+                return ctx
+            if ctx.name and ctx.name.lower() == q:
+                return ctx
+        return None
+
     def get_status(self, agent_id: Optional[str] = None) -> Dict[str, Any]:
         _log.debug(
             "[get_status] tm_id=%s, _agents=%s, _archived=%s, query_agent_id=%s",
@@ -630,6 +672,8 @@ class AgentTeamManager:
             context = self._agents.get(agent_id)
             if context is None:
                 context = self._archived_agents.get(agent_id)
+            if context is None:
+                context = self._find_by_name_or_avatar(agent_id)
             if context is None:
                 return {"ok": False, "error": "not_found"}
             return {"ok": True, "subagent": self._serialize_status(context)}
@@ -781,6 +825,7 @@ class AgentTeamManager:
             "model": context.model_name or self.base_session.model_name or "",
             "output_files": list(context.output_files[:200]),
             "pending_confirm": pending_confirm,
+            "avatar_id": context.avatar_id or None,
         }
 
     def _archive_context(self, context: SubAgentContext) -> None:

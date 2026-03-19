@@ -29,6 +29,7 @@ from agenticx.runtime import AgentRuntime
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.loop_controller import LoopController
+from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS
 from agenticx.runtime.prompts.meta_agent import build_meta_agent_system_prompt
 from agenticx.runtime.team_manager import AgentTeamManager
@@ -473,6 +474,7 @@ def create_studio_app() -> FastAPI:
             summary_sink=_on_subagent_summary,
         )
         setattr(session, "_team_manager", team_manager)
+        setattr(session, "_session_manager", manager)
         logger.debug(
             "[chat] sid=%s managed.tm=%s session._tm=%s tm._agents=%s",
             payload.session_id,
@@ -495,7 +497,8 @@ def create_studio_app() -> FastAPI:
             )
         avatar_context: dict[str, str] | None = None
         active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
-        if active_avatar_id and not active_avatar_id.startswith("group:"):
+        is_avatar_session = bool(active_avatar_id and not active_avatar_id.startswith("group:"))
+        if is_avatar_session:
             avatar_cfg = avatar_registry.get_avatar(active_avatar_id)
             if avatar_cfg is not None:
                 avatar_context = {
@@ -503,6 +506,38 @@ def create_studio_app() -> FastAPI:
                     "role": avatar_cfg.role or "",
                     "system_prompt": avatar_cfg.system_prompt or "",
                 }
+
+        def _build_avatar_direct_prompt() -> str:
+            if avatar_context is None:
+                return ""
+            name = avatar_context.get("name", "")
+            role = avatar_context.get("role", "")
+            sys_prompt = avatar_context.get("system_prompt", "")
+            ws = str(getattr(session, "workspace_dir", "") or "").strip()
+            prompt = (
+                f"你是 AgenticX 分身 **{name}**。\n"
+                f"角色: {role or 'General Assistant'}\n"
+            )
+            if sys_prompt:
+                prompt += f"分身自定义指令: {sys_prompt}\n"
+            prompt += (
+                "\n## 核心规则\n"
+                "- 你是一个执行型 agent，优先亲自动手完成任务。\n"
+                "- 如果任务复杂需要拆分，可以使用 `spawn_subagent` 创建临时子智能体帮忙。\n"
+                f"- **严禁创建与自己同名（{name}）的子智能体**。子智能体必须用不同的名字（如 '{name}-researcher'、'{name}-coder' 等）。\n"
+                "- 禁止调用 `delegate_to_avatar`（那是 Meta-Agent 专属工具）。\n"
+                "- 可以用 `query_subagent_status` 查询自己创建的子智能体进度。\n"
+                "- 回复使用中文，简洁务实。\n"
+                "- 优先动手执行，不要反复确认。\n"
+                "- 边做边汇报，每完成一步简要说明。\n"
+            )
+            if ws:
+                prompt += f"\n## 工作目录\n- {ws}\n"
+            return prompt
+
+        effective_tools: list = list(META_AGENT_TOOLS) if not is_avatar_session else [
+            t for t in META_AGENT_TOOLS if t.get("function", {}).get("name") != "delegate_to_avatar"
+        ]
 
         async def _event_stream() -> AsyncGenerator[str, None]:
             runtime_task: "asyncio.Task[None] | None" = None
@@ -518,18 +553,22 @@ def create_studio_app() -> FastAPI:
                             f"请直接给出可执行方案并自动推进。\n"
                             f"原始请求：{payload.user_input}"
                         )
+                    if is_avatar_session:
+                        sys_prompt = _build_avatar_direct_prompt()
+                    else:
+                        sys_prompt = build_meta_agent_system_prompt(
+                            session,
+                            mode=mode,
+                            taskspaces=managed.taskspaces,
+                            avatar_context=avatar_context,
+                        )
                     async for event in runtime.run_turn(
                         effective_input,
                         session,
                         should_stop=request.is_disconnected,
                         agent_id="meta",
-                        tools=META_AGENT_TOOLS,
-                        system_prompt=build_meta_agent_system_prompt(
-                            session,
-                            mode=mode,
-                            taskspaces=managed.taskspaces,
-                            avatar_context=avatar_context,
-                        ),
+                        tools=effective_tools,
+                        system_prompt=sys_prompt,
                     ):
                         await event_queue.put(event)
                     await event_queue.put(None)
@@ -616,6 +655,11 @@ def create_studio_app() -> FastAPI:
             )
         controller = LoopController(max_iterations=max_iterations, completion_promise=completion_promise)
 
+        loop_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
+        loop_is_avatar = bool(loop_avatar_id and not loop_avatar_id.startswith("group:"))
+        loop_tools: list = list(STUDIO_TOOLS) if loop_is_avatar else list(META_AGENT_TOOLS)
+        loop_sys_prompt = build_meta_agent_system_prompt(session, mode="interactive", taskspaces=managed.taskspaces)
+
         async def _loop_stream() -> AsyncGenerator[str, None]:
             try:
                 async for event in controller.run_loop(
@@ -623,8 +667,8 @@ def create_studio_app() -> FastAPI:
                     runtime=runtime,
                     session=session,
                     agent_id="meta",
-                    tools=META_AGENT_TOOLS,
-                    system_prompt=build_meta_agent_system_prompt(session, mode="interactive", taskspaces=managed.taskspaces),
+                    tools=loop_tools,
+                    system_prompt=loop_sys_prompt,
                 ):
                     if await request.is_disconnected():
                         break
@@ -739,7 +783,45 @@ def create_studio_app() -> FastAPI:
                     len(global_rows),
                 )
                 status_payload = {"ok": True, "subagents": global_rows}
-        return status_payload if isinstance(status_payload, dict) else {"ok": True, "subagents": []}
+
+        if not isinstance(status_payload, dict):
+            status_payload = {"ok": True, "subagents": []}
+        rows = status_payload.get("subagents") or []
+        if not isinstance(rows, list):
+            rows = []
+        known_ids = {str(r.get("agent_id", "")) for r in rows if isinstance(r, dict)}
+        for _sid, _managed in manager._sessions.items():
+            info = getattr(_managed, "_delegation_info", None)
+            if not isinstance(info, dict):
+                continue
+            dlg_id = str(info.get("delegation_id", "")).strip()
+            if not dlg_id or dlg_id in known_ids:
+                continue
+            if _sid == session_id:
+                continue
+            from_session = str(info.get("from_session", "")).strip()
+            if not from_session or from_session != session_id:
+                continue
+            task_obj = getattr(_managed, "_delegation_task", None)
+            is_running = task_obj is not None and not task_obj.done()
+            dlg_status = str(info.get("status", "")).strip()
+            if is_running:
+                dlg_status = "running"
+            elif not dlg_status:
+                dlg_status = "completed" if (task_obj is not None and task_obj.done()) else "unknown"
+            rows.append({
+                "agent_id": dlg_id,
+                "name": str(info.get("avatar_name", "")).strip() or str(getattr(_managed, "avatar_name", "")).strip() or dlg_id,
+                "role": "delegated avatar",
+                "task": str(info.get("task", "")).strip(),
+                "status": dlg_status,
+                "result_summary": str(info.get("summary", "")).strip() if dlg_status in ("completed", "failed") else None,
+                "error_text": str(info.get("error", "")).strip() if dlg_status == "failed" else None,
+                "delegation": True,
+                "avatar_session_id": str(info.get("avatar_session_id", _sid)).strip(),
+            })
+        status_payload["subagents"] = rows
+        return status_payload
 
     @app.post("/api/subagent/retry")
     async def retry_subagent(
