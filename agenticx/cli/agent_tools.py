@@ -263,21 +263,6 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "ask_user",
-            "description": "Ask user a clarification or confirmation question.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "question": {"type": "string", "description": "Question to ask the user."},
-                },
-                "required": ["question"],
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "todo_write",
             "description": "Update structured task list for current agent session.",
             "parameters": {
