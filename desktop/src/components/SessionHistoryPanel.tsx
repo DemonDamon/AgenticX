@@ -326,12 +326,12 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
               if (e.key === "Enter") void saveRename(item.session_id);
               if (e.key === "Escape") setEditingId(null);
             }}
-            className="w-full rounded border border-cyan-500/50 bg-surface-hover px-2 py-1 text-xs text-text-primary outline-none"
+            className="w-full rounded border border-border-strong bg-surface-hover px-2 py-1 text-xs text-text-primary outline-none"
           />
         ) : (
           <button
             className={`flex w-full flex-col items-start rounded px-2 py-1 text-left text-xs transition ${
-              active ? "bg-cyan-500/15 text-cyan-200" : "text-text-muted hover:bg-surface-hover"
+              active ? "bg-surface-hover font-medium text-text-strong" : "text-text-muted hover:bg-surface-hover"
             }`}
             onClick={() => {
               if (selectMode) {
@@ -358,13 +358,13 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
                   type="checkbox"
                   checked={selectedSessionIds.includes(item.session_id)}
                   onChange={() => toggleSelectSession(item.session_id)}
-                  className="h-3 w-3 accent-cyan-400"
+                  className="h-3 w-3 accent-neutral-400"
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : null}
               {item.pinned ? <span className="text-[10px] text-amber-300">pin</span> : null}
               <span className="truncate">{label}</span>
-              {unread ? <span className="inline-block h-1.5 w-1.5 rounded-full bg-cyan-300" /> : null}
+              {unread ? <span className="inline-block h-1.5 w-1.5 rounded-full bg-text-muted" /> : null}
             </span>
             <span className="mt-0.5 truncate w-full text-[9px] text-text-faint">
               {timeAgo(createdAt)}
