@@ -46,6 +46,22 @@ const confirmModeLabel: Record<string, string> = {
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
   const toolName = String(toolNameRaw ?? "tool");
   const resultText = String(resultRaw ?? "");
+  if (toolName === "delegate_to_avatar") {
+    try {
+      const parsed = JSON.parse(resultText) as Record<string, unknown>;
+      const delegated = Boolean(parsed.delegated);
+      const avatarName = String(parsed.avatar_name ?? "");
+      const delegationId = String(parsed.delegation_id ?? parsed.agent_id ?? "").trim();
+      if (delegated) {
+        return {
+          content: `🤝 已委派给 ${avatarName || "分身"}${delegationId ? `\nID: ${delegationId}` : ""}`,
+          silent: false,
+        };
+      }
+    } catch {
+      // Fall through to generic formatter.
+    }
+  }
   if (toolName === "spawn_subagent") {
     try {
       const parsed = JSON.parse(resultText) as Record<string, unknown>;
@@ -155,6 +171,10 @@ function isThinkingPlaceholderText(text: string): boolean {
   return /^[\s⏳….·.]+$/.test(trimmed);
 }
 
+function normalizeStreamText(text: string): string {
+  return String(text ?? "").replace(/\s+/g, " ").trim();
+}
+
 function StreamingThinkingIndicator() {
   return (
     <div className="flex items-center gap-2">
@@ -220,6 +240,9 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const clearMessages = useAppStore((s) => s.clearMessages);
   const subAgents = useAppStore((s) => s.subAgents);
   const selectedSubAgent = useAppStore((s) => s.selectedSubAgent);
+  const setSessionId = useAppStore((s) => s.setSessionId);
+  const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
+  const avatars = useAppStore((s) => s.avatars);
   const chatStyle = useAppStore((s) => s.chatStyle);
   const addSubAgent = useAppStore((s) => s.addSubAgent);
   const updateSubAgent = useAppStore((s) => s.updateSubAgent);
@@ -397,6 +420,40 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     });
     setHistoryIndex(-1);
   };
+
+  const openDelegatedAvatarSession = useCallback(
+    async (agentId: string) => {
+      const sub = useAppStore.getState().subAgents.find((item) => item.id === agentId);
+      const targetSessionId = (sub?.sessionId ?? "").trim();
+      if (!targetSessionId) return false;
+
+      const matchedAvatar = avatars.find((item) => item.name === (sub?.name ?? ""));
+      if (matchedAvatar?.id) setActiveAvatarId(matchedAvatar.id);
+      setSessionId(targetSessionId);
+      setSelectedSubAgent(null);
+
+      try {
+        const result = await window.agenticxDesktop.loadSessionMessages(targetSessionId);
+        clearMessages();
+        if (result.ok && Array.isArray(result.messages)) {
+          for (const item of result.messages) {
+            const role = item.role === "user" || item.role === "assistant" || item.role === "tool" ? item.role : "assistant";
+            addMessage(
+              role,
+              item.content,
+              item.agent_id ?? "meta",
+              item.provider,
+              item.model
+            );
+          }
+        }
+      } catch {
+        clearMessages();
+      }
+      return true;
+    },
+    [avatars, setActiveAvatarId, setSessionId, setSelectedSubAgent, clearMessages, addMessage]
+  );
 
   const syncSubAgents = useCallback(async () => {
     if (!apiBase || !sessionId) return;
@@ -791,10 +848,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                     cumulativeFull += delta;
                   }
                 } else if (
-                  finalText !== full &&
-                  finalText !== cumulativeFull &&
-                  !full.includes(finalText) &&
-                  !cumulativeFull.includes(finalText)
+                  normalizeStreamText(finalText) !== normalizeStreamText(full) &&
+                  normalizeStreamText(finalText) !== normalizeStreamText(cumulativeFull) &&
+                  !normalizeStreamText(full).includes(normalizeStreamText(finalText)) &&
+                  !normalizeStreamText(cumulativeFull).includes(normalizeStreamText(finalText))
                 ) {
                   const merged = full.trim() ? `\n\n${finalText}` : finalText;
                   full += merged;
@@ -803,7 +860,32 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               }
               scheduleStreamTextUpdate(full);
             }
-            if (payload.type === "subagent_started") { const subId = payload.data?.agent_id; if (subId) { addSubAgent({ id: subId, name: payload.data?.name ?? subId, role: payload.data?.role ?? "worker", provider: payload.data?.provider ?? undefined, model: payload.data?.model ?? undefined, task: payload.data?.task ?? "" }); addSubAgentEvent(subId, { type: "started", content: "已启动" }); } }
+            if (payload.type === "subagent_started") {
+              const subId = payload.data?.agent_id;
+              if (subId) {
+                const isDelegation = Boolean(payload.data?.delegation);
+                addSubAgent({
+                  id: subId,
+                  name: payload.data?.name ?? subId,
+                  role: payload.data?.role ?? (isDelegation ? "delegated avatar" : "worker"),
+                  provider: payload.data?.provider ?? undefined,
+                  model: payload.data?.model ?? undefined,
+                  task: payload.data?.task ?? "",
+                  sessionId: isDelegation ? sessionId : (typeof payload.data?.avatar_session_id === "string" ? payload.data.avatar_session_id : undefined),
+                });
+                updateSubAgent(subId, {
+                  status: "running",
+                  currentAction: isDelegation ? "委派执行中" : "执行中",
+                });
+                addSubAgentEvent(
+                  subId,
+                  {
+                    type: isDelegation ? "delegation_started" : "started",
+                    content: isDelegation ? `已委派给 ${payload.data?.name ?? subId}` : "已启动",
+                  }
+                );
+              }
+            }
             if (payload.type === "subagent_progress") { const subId = payload.data?.agent_id; if (subId) { updateSubAgent(subId, { currentAction: payload.data?.text ?? "执行中" }); addSubAgentEvent(subId, { type: "progress", content: payload.data?.text ?? "执行中" }); } }
             if (payload.type === "subagent_checkpoint") {
               const subId = payload.data?.agent_id;
@@ -819,8 +901,36 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                 addSubAgentEvent(subId, { type: "paused", content: payload.data?.text ?? "已暂停，等待指令" });
               }
             }
-            if (payload.type === "subagent_completed") { const subId = payload.data?.agent_id; if (subId) { updateSubAgent(subId, { status: "completed", currentAction: "已完成" }); addSubAgentEvent(subId, { type: "completed", content: payload.data?.summary ?? "完成" }); } }
-            if (payload.type === "subagent_error") { const subId = payload.data?.agent_id; if (subId) { updateSubAgent(subId, { status: payload.data?.status === "cancelled" ? "cancelled" : "failed", currentAction: payload.data?.text ?? "执行异常" }); addSubAgentEvent(subId, { type: "error", content: payload.data?.text ?? "执行异常" }); } }
+            if (payload.type === "subagent_completed") {
+              const subId = payload.data?.agent_id;
+              if (subId) {
+                const isDelegation = Boolean(payload.data?.delegation);
+                updateSubAgent(subId, {
+                  status: "completed",
+                  currentAction: isDelegation ? "委派完成" : "已完成",
+                  sessionId: typeof payload.data?.avatar_session_id === "string" ? payload.data.avatar_session_id : undefined,
+                });
+                addSubAgentEvent(subId, {
+                  type: isDelegation ? "delegation_completed" : "completed",
+                  content: payload.data?.summary ?? (isDelegation ? "委派完成" : "完成"),
+                });
+              }
+            }
+            if (payload.type === "subagent_error") {
+              const subId = payload.data?.agent_id;
+              if (subId) {
+                const isDelegation = Boolean(payload.data?.delegation);
+                updateSubAgent(subId, {
+                  status: payload.data?.status === "cancelled" ? "cancelled" : "failed",
+                  currentAction: payload.data?.text ?? "执行异常",
+                  sessionId: typeof payload.data?.avatar_session_id === "string" ? payload.data.avatar_session_id : undefined,
+                });
+                addSubAgentEvent(subId, {
+                  type: isDelegation ? "delegation_error" : "error",
+                  content: payload.data?.text ?? "执行异常",
+                });
+              }
+            }
             if (payload.type === "error") {
               if (eventAgentId === "meta") addMessage("tool", `❌ ${payload.data?.text ?? "未知错误"}`, "meta");
               else { updateSubAgent(eventAgentId, { status: "failed", currentAction: payload.data?.text ?? "执行异常" }); addSubAgentEvent(eventAgentId, { type: "error", content: payload.data?.text ?? "未知错误" }); }
@@ -1131,59 +1241,25 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             </div>
           ))}
           {streaming && (
-            streamedAssistantText && !isThinkingPlaceholderText(streamedAssistantText) ? (
-              <div className={`${isLite ? "text-[15px]" : "text-sm"}`}>
-                {chatStyle === "terminal" ? (
-                  <TerminalLine
-                    message={{ id: "__stream__", role: "assistant", content: streamedAssistantText }}
-                    badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
-                  />
-                ) : chatStyle === "clean" ? (
-                  <CleanBlock
-                    message={{ id: "__stream__", role: "assistant", content: streamedAssistantText }}
-                    badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
-                  />
-                ) : (
-                  <ImBubble
-                    message={{ id: "__stream__", role: "assistant", content: streamedAssistantText }}
-                    badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
-                    assistantName="Meta-Agent"
-                  />
-                )}
-              </div>
-            ) : (
-              chatStyle === "terminal" ? (
-                <div className={`font-mono text-[13px] leading-6 ${isLite ? "text-[15px]" : "text-sm"}`}>
-                  <div className="flex items-start gap-2">
-                    <span className="mt-[2px] select-none text-xs" style={{ color: "var(--chat-terminal-meta)" }}>
-                      ┃
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      {!isLite && streamingModel && <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />}
-                      <StreamingThinkingIndicator />
-                    </div>
-                  </div>
-                </div>
+            <div className={`${isLite ? "text-[15px]" : "text-sm"}`}>
+              {chatStyle === "terminal" ? (
+                <TerminalLine
+                  message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
+                  badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+                />
               ) : chatStyle === "clean" ? (
-                <div
-                  className={`w-full rounded-md border px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`}
-                  style={{
-                    background: "var(--chat-clean-assistant-bg)",
-                    borderColor: "var(--chat-clean-assistant-border)",
-                  }}
-                >
-                  {!isLite && streamingModel && <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />}
-                  <StreamingThinkingIndicator />
-                </div>
+                <CleanBlock
+                  message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
+                  badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+                />
               ) : (
-                <div className={`mr-8 rounded-xl rounded-tl-sm bg-surface-card px-3 py-2 ${isLite ? "text-[15px]" : "text-sm"}`}>
-                  {!isLite && streamingModel && <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />}
-                  <div className="msg-content break-words">
-                    <StreamingThinkingIndicator />
-                  </div>
-                </div>
-              )
-            )
+                <ImBubble
+                  message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
+                  badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+                  assistantName="Meta-Agent"
+                />
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -1272,7 +1348,15 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
         onToggle={() => setPanelOpen((v) => !v)}
         onCancel={onCancelSubAgent}
         onRetry={onRetrySubAgent}
-        onChat={(id) => setSelectedSubAgent(id)}
+        onChat={(id) => {
+          const sub = subAgents.find((item) => item.id === id);
+          const isDelegation = id.startsWith("dlg-") || !!(sub?.sessionId && sub?.events?.some((evt) => evt.type.startsWith("delegation")));
+          if (isDelegation) {
+            void openDelegatedAvatarSession(id);
+            return;
+          }
+          setSelectedSubAgent(id);
+        }}
         onSelect={(id) => setSelectedSubAgent(id)}
       />
       {/* Reanswer model picker */}
