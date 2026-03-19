@@ -29,6 +29,129 @@ def test_session_manager_restores_and_persists(tmp_path: Path) -> None:
     assert managed.studio_session.scratchpad.get("k") == "v"
 
     managed.studio_session.scratchpad["k2"] = "v2"
-    assert manager.delete(sid) is True
+    assert manager.persist(sid) is True
     restored = store._load_scratchpad_sync(sid)
     assert restored.get("k2") == "v2"
+    assert manager.delete(sid) is True
+    assert store._load_scratchpad_sync(sid) == {}
+
+
+def test_list_sessions_restores_from_persisted_state_after_restart(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+
+    manager = SessionManager()
+    manager._session_store = store  # test override
+    manager._sessions_root = str(sessions_root)
+
+    sid = "restart-session-id"
+    managed = manager.create(session_id=sid)
+    managed.session_name = "重启后保留"
+    managed.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "hello"},
+        {"id": "a1", "role": "assistant", "content": "world"},
+    ]
+    assert manager.persist(sid) is True
+
+    fresh = SessionManager()
+    fresh._session_store = store  # test override
+    fresh._sessions_root = str(sessions_root)
+
+    sessions = fresh.list_sessions()
+    session_ids = {row["session_id"] for row in sessions}
+    assert sid in session_ids
+
+
+def test_get_lazy_restores_persisted_session(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+
+    manager = SessionManager()
+    manager._session_store = store  # test override
+    manager._sessions_root = str(sessions_root)
+
+    sid = "lazy-restore-session-id"
+    managed = manager.create(session_id=sid)
+    managed.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "hello"},
+    ]
+    assert manager.persist(sid) is True
+
+    fresh = SessionManager()
+    fresh._session_store = store  # test override
+    fresh._sessions_root = str(sessions_root)
+
+    loaded = fresh.get(sid, touch=False)
+    assert loaded is not None
+    assert loaded.session_id == sid
+    assert len(loaded.studio_session.chat_history) == 1
+
+
+def test_taskspace_apis_can_lazy_restore_session(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    taskspaces_root = tmp_path / "taskspaces"
+
+    manager = SessionManager()
+    manager._session_store = store  # test override
+    manager._sessions_root = str(sessions_root)
+    manager._taskspaces_root = str(taskspaces_root)
+
+    sid = "taskspace-lazy-restore-session-id"
+    managed = manager.create(session_id=sid)
+    assert manager.persist(sid) is True
+
+    fresh = SessionManager()
+    fresh._session_store = store  # test override
+    fresh._sessions_root = str(sessions_root)
+    fresh._taskspaces_root = str(taskspaces_root)
+
+    rows = fresh.list_taskspaces(sid)
+    assert rows
+    assert rows[0]["id"] == "default"
+
+
+def test_delete_purges_persistence_and_removes_from_listing(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    taskspaces_root = tmp_path / "taskspaces"
+
+    manager = SessionManager()
+    manager._session_store = store  # test override
+    manager._sessions_root = str(sessions_root)
+    manager._taskspaces_root = str(taskspaces_root)
+
+    sid = "delete-persisted-session-id"
+    managed = manager.create(session_id=sid)
+    managed.session_name = "to-delete"
+    managed.studio_session.chat_history = [{"id": "u1", "role": "user", "content": "bye"}]
+    assert manager.persist(sid) is True
+
+    fresh = SessionManager()
+    fresh._session_store = store  # test override
+    fresh._sessions_root = str(sessions_root)
+    fresh._taskspaces_root = str(taskspaces_root)
+
+    # Simulate deletion from a history list item that is not yet loaded in memory.
+    assert fresh.delete(sid) is True
+    assert fresh.get(sid, touch=False) is None
+    assert sid not in {row["session_id"] for row in fresh.list_sessions()}
+
+
+def test_list_sessions_not_capped_to_one_thousand(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    manager = SessionManager()
+    manager._session_store = store  # test override
+
+    total = 1005
+    for idx in range(total):
+        sid = f"bulk-session-{idx:04d}"
+        store._save_session_summary_sync(
+            sid,
+            "summary",
+            {"session_name": f"s-{idx}", "updated_at": float(idx + 1), "created_at": float(idx + 1)},
+        )
+
+    listed = manager.list_sessions()
+    ids = {row["session_id"] for row in listed}
+    assert len(ids) >= total

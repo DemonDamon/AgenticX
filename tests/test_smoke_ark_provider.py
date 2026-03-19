@@ -299,3 +299,57 @@ class TestArkProviderParsing:
         assert result.token_usage.completion_tokens == 20
         assert result.token_usage.total_tokens == 30
         assert result.metadata["provider"] == "ark"
+
+
+class TestArkProviderStreaming:
+    """Test ArkLLMProvider streaming helpers."""
+
+    def test_stream_with_tools_emits_content_and_tool_delta(self):
+        """Verify stream_with_tools normalizes both content and tool-call chunks."""
+        from agenticx.llms import ArkLLMProvider
+
+        provider = ArkLLMProvider(api_key="test-key")
+
+        delta_content = MagicMock()
+        delta_content.content = "hello"
+        delta_content.tool_calls = None
+        choice_content = MagicMock()
+        choice_content.delta = delta_content
+        choice_content.finish_reason = None
+        chunk_content = MagicMock()
+        chunk_content.choices = [choice_content]
+
+        delta_tool = MagicMock()
+        tc = MagicMock()
+        tc.index = "1"
+        tc.id = "call_1"
+        tc.function = MagicMock()
+        tc.function.name = "bash_exec"
+        tc.function.arguments = None
+        delta_tool.content = None
+        delta_tool.tool_calls = [tc]
+        choice_tool = MagicMock()
+        choice_tool.delta = delta_tool
+        choice_tool.finish_reason = "tool_calls"
+        chunk_tool = MagicMock()
+        chunk_tool.choices = [choice_tool]
+
+        provider.client = MagicMock()
+        provider.client.chat.completions.create.return_value = [chunk_content, chunk_tool]
+
+        chunks = list(
+            provider.stream_with_tools(
+                [{"role": "user", "content": "test"}],
+                tools=[{"type": "function", "function": {"name": "bash_exec"}}],
+            )
+        )
+
+        assert chunks[0] == {"type": "content", "text": "hello"}
+        assert chunks[1] == {
+            "type": "tool_call_delta",
+            "tool_index": 1,
+            "tool_call_id": "call_1",
+            "tool_name": "bash_exec",
+            "arguments_delta": "",
+        }
+        assert chunks[2] == {"type": "done", "finish_reason": "tool_calls"}
