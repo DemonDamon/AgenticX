@@ -3,6 +3,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Message } from "../../store";
 import { AttachmentCard } from "./AttachmentCard";
+import { ReasoningBlock } from "./ReasoningBlock";
+import { parseReasoningContent } from "./reasoning-parser";
 
 type Props = {
   message: Message;
@@ -40,6 +42,11 @@ export function ImBubble({ message, badge, assistantName, assistantAvatarUrl, us
   const isUser = message.role === "user";
   const displayName = isUser ? (userName || "我") : (assistantName || "AI");
   const avatarUrl = isUser ? undefined : assistantAvatarUrl;
+  const isStreaming = message.id === "__stream__";
+  const parsed = !isUser ? parseReasoningContent(message.content) : null;
+  const hasThinkTag = parsed?.hasReasoningTag ?? false;
+  const bodyText = !isUser && hasThinkTag ? (parsed?.response ?? "") : message.content;
+  const hasBody = !!bodyText?.trim();
   const bubbleStyle: CSSProperties = isUser
     ? {
         background: "var(--chat-im-user-bg)",
@@ -75,7 +82,12 @@ export function ImBubble({ message, badge, assistantName, assistantAvatarUrl, us
           ) : null}
           <div className="msg-content break-words">
             {badge}
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+            {!isUser && isStreaming && (hasThinkTag || !hasBody) ? (
+              <ReasoningBlock text={parsed?.reasoning ?? ""} streaming />
+            ) : !isUser && !isStreaming && parsed?.reasoning ? (
+              <ReasoningBlock text={parsed.reasoning} />
+            ) : null}
+            {hasBody ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyText}</ReactMarkdown> : null}
           </div>
         </div>
       </div>
