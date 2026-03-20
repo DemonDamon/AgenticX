@@ -405,7 +405,16 @@ function createWindow(): void {
     void mainWindow.loadFile(indexPath).catch(() => {});
   } else {
     const devUrl = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
-    void mainWindow.loadURL(devUrl).catch(() => {});
+    void mainWindow.loadURL(devUrl).catch(() => {
+      const distFallback = path.join(__dirname, "..", "dist", "index.html");
+      if (fs.existsSync(distFallback)) {
+        mainWindow?.loadFile(distFallback).catch(() => {});
+      } else {
+        mainWindow?.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
+          `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:SF Pro Text,PingFang SC,sans-serif;background:#14141c;color:rgba(255,255,255,.7);-webkit-app-region:drag"><div style="text-align:center"><h3 style="margin:0">无法连接到开发服务器</h3><p style="margin-top:.5rem;font-size:.85rem;opacity:.6">请确保已运行 <code>npm run dev</code></p></div></body></html>`
+        )}`).catch(() => {});
+      }
+    });
   }
   mainWindow.on("close", (event) => {
     if (!isQuitting) {
