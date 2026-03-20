@@ -617,6 +617,12 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
     return map;
   }, [avatarList]);
 
+  const showMetaAgent = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return "meta-agent".includes(q) || "meta agent".includes(q) || "元智能体".includes(q);
+  }, [search]);
+
   const filteredIds = useMemo(() => {
     if (!group) return [];
     const q = search.trim().toLowerCase();
@@ -743,15 +749,27 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
         ) : null}
       </div>
       <div className="relative min-h-0 flex-1 overflow-y-auto">
-        {group.avatarIds.length === 0 && !search.trim() ? (
-          <p className="p-3 text-xs text-text-faint">暂无成员，点击下方 ＋ 添加分身。</p>
-        ) : filteredIds.length === 0 && search.trim() ? (
+        {filteredIds.length === 0 && !showMetaAgent && search.trim() ? (
           <p className="p-3 text-xs text-text-faint">无匹配成员，换个关键词试试。</p>
         ) : (
           <div
             className="grid gap-x-1 gap-y-3 px-2 py-3"
             style={{ gridTemplateColumns: `repeat(${memberGrid.columns}, minmax(0, 1fr))` }}
           >
+            {/* Meta-Agent: 固定首位、不可移除 */}
+            {showMetaAgent ? (
+              <div className="relative flex flex-col items-center gap-1.5 rounded-lg text-center">
+                <div
+                  className="flex shrink-0 items-center justify-center rounded-xl bg-cyan-600 font-bold text-white"
+                  style={{ width: memberGrid.avatarSize, height: memberGrid.avatarSize }}
+                >
+                  MA
+                </div>
+                <span className={`w-full truncate px-0.5 text-text-muted ${memberGrid.nameClass}`} title="Meta-Agent · 群聊协调者">
+                  Meta-Agent
+                </span>
+              </div>
+            ) : null}
             {filteredIds.map((id) => {
               const a = avatarById.get(id);
               const label = a?.name ?? id.slice(0, 6);
@@ -1776,11 +1794,41 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
               const avatarUrl = String(payload.data?.avatar_url ?? "");
               const content = String(payload.data?.content ?? "");
+              const errorText = String(payload.data?.error ?? "");
               setGroupTyping((prev) => {
                 const next = { ...prev };
                 delete next[eventAgentId];
                 return next;
               });
+              if (content.trim()) {
+                addPaneMessage(
+                  pane.id,
+                  "assistant",
+                  content,
+                  eventAgentId,
+                  activeProvider,
+                  activeModel,
+                  undefined,
+                  { avatarName, avatarUrl: avatarUrl || undefined }
+                );
+              } else if (errorText.trim()) {
+                addPaneMessage(
+                  pane.id,
+                  "assistant",
+                  `${avatarName} 回复失败：${errorText}`,
+                  eventAgentId,
+                  activeProvider,
+                  activeModel,
+                  undefined,
+                  { avatarName, avatarUrl: avatarUrl || undefined }
+                );
+              }
+              continue;
+            }
+            if (payload.type === "group_nudge") {
+              const avatarName = String(payload.data?.avatar_name ?? "组长");
+              const avatarUrl = String(payload.data?.avatar_url ?? "");
+              const content = String(payload.data?.content ?? "");
               if (content.trim()) {
                 addPaneMessage(
                   pane.id,

@@ -70,7 +70,7 @@ export function AvatarSidebar() {
           id: g.id,
           name: g.name,
           avatarIds: g.avatar_ids ?? [],
-          routing: g.routing ?? "user-directed",
+          routing: g.routing ?? "intelligent",
         }))
       );
     }
@@ -211,7 +211,12 @@ export function AvatarSidebar() {
     const confirmed = window.confirm(`确定删除群聊「${group.name}」吗？此操作不可恢复。`);
     if (!confirmed) return;
     const groupPaneId = `group:${group.id}`;
-    panes.filter((item) => item.avatarId === groupPaneId).forEach((item) => removePane(item.id));
+    const groupPanes = panes.filter((item) => item.avatarId === groupPaneId);
+    const nonGroupPanes = panes.filter((item) => item.avatarId !== groupPaneId);
+    if (nonGroupPanes.length === 0 && groupPanes.length > 0) {
+      addPane(null, "Meta-Agent", "");
+    }
+    groupPanes.forEach((item) => removePane(item.id));
     setGroups(groups.filter((g) => g.id !== group.id));
     await window.agenticxDesktop.deleteGroup(group.id);
     await refreshGroups();
@@ -485,7 +490,7 @@ function GroupEditorInline({
 }) {
   const [name, setName] = useState(initialGroup?.name ?? "");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(initialGroup?.avatarIds ?? []));
-  const [routing, setRouting] = useState(initialGroup?.routing ?? "user-directed");
+  const [routing, setRouting] = useState(initialGroup?.routing ?? "intelligent");
   const [loading, setLoading] = useState(false);
 
   const toggle = (id: string) => {
@@ -567,12 +572,14 @@ function GroupEditorInline({
           value={routing}
           onChange={(e) => setRouting(e.target.value)}
         >
+          <option value="intelligent">智能对话 · 像项目经理一样自动分配</option>
           <option value="user-directed">用户指定 · 你点谁谁回复</option>
           <option value="meta-routed">智能路由 · Meta-Agent 自动选人</option>
           <option value="round-robin">轮流回复 · 按顺序每人答一次</option>
         </select>
         <p className="mb-4 text-[10px] text-text-faint">
           {{
+            "intelligent": "Meta-Agent 在后台持续看全局上下文，自动选人、追踪线程，并在成员未响应时主动督办。",
             "user-directed": "每次发消息时，手动 @某个分身，只有被点名的人回复。",
             "meta-routed": "由 Meta-Agent 根据问题内容自动判断最合适的分身来回复。",
             "round-robin": "分身按加入顺序轮流回复，每人一次，周而复始。",
