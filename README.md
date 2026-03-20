@@ -297,6 +297,32 @@ python examples/microsandbox_example.py
 
 Technical blog: [examples/microsandbox_blog.md](examples/microsandbox_blog.md)
 
+### Intent Recognition Service
+
+**Intelligent Intent Recognition System**
+```bash
+# Intent recognition service example
+python examples/agenticx-for-intent-recognition/main.py
+```
+
+A production-grade, layered intent recognition service built entirely on the AgenticX framework, demonstrating real-world usage of Agents, Workflows, Tools, and Storage systems.
+
+Architecture:
+- **Agent Layer**: Hierarchical agent design — a base `IntentRecognitionAgent` (LLM-powered) with specialized agents (`GeneralIntentAgent`, `SearchIntentAgent`, `FunctionIntentAgent`) for fine-grained classification
+- **Workflow Engine**: Pipeline-based orchestration — preprocessing → intent classification → entity extraction → rule matching → post-processing; plus dedicated workflows for each intent type
+- **Tool System**: Hybrid entity extraction (`UIE` + `LLM` + `Rule` extractors with confidence-weighted fusion), regex/full-text matching, and a full post-processing suite (confidence adjustment, conflict resolution, entity optimization, intent refinement)
+- **API Gateway**: Async service layer with rate limiting, concurrent control, batch processing, health checks, and performance metrics
+- **Storage**: SQLite-backed data persistence for training data management via `UnifiedStorageManager`
+- **Data Models**: Pydantic-based type-safe data contracts for API requests/responses and domain objects
+
+Key capabilities:
+- **Three-tier Intent Classification**: General dialogue (greetings, chitchat), information search (factual/how-to/comparison queries), and function/tool invocation
+- **Hybrid Entity Extraction**: Combines UIE models, LLM, and rule-based extractors with intelligent fusion strategies
+- **Full Post-processing Pipeline**: Confidence adjustment, conflict resolution, entity optimization, and intent refinement
+- **Extensible Design**: Add new intent types by simply creating a new agent and workflow — zero changes to existing code
+
+See: [examples/agenticx-for-intent-recognition/](examples/agenticx-for-intent-recognition/)
+
 ### GUI Agent / Embodiment (M16)
 
 **GUI Automation Agent**
@@ -320,6 +346,25 @@ Key capabilities:
 - **DAG Verification**: Multi-path task verification with dual-semantic dependencies
 
 See: [examples/agenticx-for-guiagent/](examples/agenticx-for-guiagent/)
+
+### More Application Examples
+
+| Project | Description | Path |
+|---------|-------------|------|
+| **Agent Skills** | Skill discovery, matching, and SOP-driven skill execution for agents | [examples/agenticx-for-agent-skills/](examples/agenticx-for-agent-skills/) |
+| **AgentKit** | Volcengine AgentKit integration with Docker-ready agent deployment | [examples/agenticx-for-agentkit/](examples/agenticx-for-agentkit/) |
+| **ChatBI** | Conversational BI — natural language to data insights | [examples/agenticx-for-chatbi/](examples/agenticx-for-chatbi/) |
+| **Deep Research** | Multi-source deep research and report generation | [examples/agenticx-for-deepresearch/](examples/agenticx-for-deepresearch/) |
+| **Doc Parser** | Intelligent document parsing (PDF, Word, PPT) | [examples/agenticx-for-docparser/](examples/agenticx-for-docparser/) |
+| **Finance** | Financial news hunting and analysis | [examples/agenticx-for-finance/](examples/agenticx-for-finance/) |
+| **Future Prediction** | Predictive analysis and forecasting | [examples/agenticx-for-future-prediction/](examples/agenticx-for-future-prediction/) |
+| **GraphRAG** | Knowledge graph-enhanced retrieval-augmented generation | [examples/agenticx-for-graphrag/](examples/agenticx-for-graphrag/) |
+| **Math Modeling** | Mathematical modeling assistant | [examples/agenticx-for-math-modeling/](examples/agenticx-for-math-modeling/) |
+| **Model Architecture Discovery** | Automated model architecture search and discovery | [examples/agenticx-for-modelarch-discovery/](examples/agenticx-for-modelarch-discovery/) |
+| **Query Optimizer** | SQL/query optimization agent | [examples/agenticx-for-queryoptimizer/](examples/agenticx-for-queryoptimizer/) |
+| **Sandbox** | Secure code execution sandbox | [examples/agenticx-for-sandbox/](examples/agenticx-for-sandbox/) |
+| **Spec Coding** | Specification-driven code generation | [examples/agenticx-for-spec-coding/](examples/agenticx-for-spec-coding/) |
+| **Vibe Coding** | AI-assisted creative/vibe coding | [examples/agenticx-for-vibecoding/](examples/agenticx-for-vibecoding/) |
 
 ## Technical Architecture
 
