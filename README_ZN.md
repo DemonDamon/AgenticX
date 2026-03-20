@@ -304,6 +304,32 @@ python examples/microsandbox_example.py
 
 技术博客: [examples/microsandbox_blog.md](examples/microsandbox_blog.md)
 
+### 意图识别服务
+
+**智能意图识别系统**
+```bash
+# 意图识别服务示例
+python examples/agenticx-for-intent-recognition/main.py
+```
+
+一个完全基于 AgenticX 框架构建的生产级分层意图识别服务，展示了 Agent、Workflow、Tool、Storage 等核心系统的真实应用场景。
+
+架构设计：
+- **Agent 层**: 层次化智能体设计 — 基础 `IntentRecognitionAgent`（LLM 驱动）搭配专业智能体（`GeneralIntentAgent`、`SearchIntentAgent`、`FunctionIntentAgent`），实现细粒度意图分类
+- **工作流引擎**: 流水线式编排 — 文本预处理 → 意图分类 → 实体抽取 → 规则匹配 → 后处理；每种意图类型还有专属工作流
+- **工具系统**: 混合实体抽取（`UIE` + `LLM` + `Rule` 三源融合，置信度加权），正则/精确匹配工具，以及完整的后处理套件（置信度调整、冲突解决、实体优化、意图精化）
+- **API 网关**: 异步服务层，支持限流、并发控制、批量处理、健康检查和性能指标监控
+- **存储层**: 基于 SQLite 的数据持久化，通过 `UnifiedStorageManager` 管理训练数据
+- **数据模型**: 基于 Pydantic 的类型安全数据契约，覆盖 API 请求/响应和领域对象
+
+核心能力：
+- **三层意图分类**: 通用对话（问候、闲聊）、信息搜索（事实/方法/对比查询）、工具/功能调用
+- **混合实体抽取**: 融合 UIE 模型、LLM 和规则抽取器，支持多种智能融合策略
+- **完整后处理流水线**: 置信度调整、冲突解决、实体优化、意图精化一体化处理
+- **高可扩展性**: 新增意图类型只需添加新的 Agent 和 Workflow，无需修改已有代码
+
+详见: [examples/agenticx-for-intent-recognition/](examples/agenticx-for-intent-recognition/)
+
 ### GUI Agent / 具身智能 (M16)
 
 **GUI 自动化智能体**
@@ -327,6 +353,25 @@ python examples/agenticx-for-guiagent/AgenticX-GUIAgent/main.py
 - **DAG 验证**: 多路径任务验证，支持双语义依赖
 
 详见: [examples/agenticx-for-guiagent/](examples/agenticx-for-guiagent/)
+
+### 更多应用示例
+
+| 项目 | 描述 | 路径 |
+|------|------|------|
+| **Agent Skills** | 技能发现、匹配与 SOP 驱动的智能体技能执行 | [examples/agenticx-for-agent-skills/](examples/agenticx-for-agent-skills/) |
+| **AgentKit** | 火山引擎 AgentKit 集成，支持 Docker 部署 | [examples/agenticx-for-agentkit/](examples/agenticx-for-agentkit/) |
+| **ChatBI** | 对话式 BI — 自然语言驱动数据洞察 | [examples/agenticx-for-chatbi/](examples/agenticx-for-chatbi/) |
+| **Deep Research** | 多源深度调研与报告生成 | [examples/agenticx-for-deepresearch/](examples/agenticx-for-deepresearch/) |
+| **Doc Parser** | 智能文档解析（PDF、Word、PPT） | [examples/agenticx-for-docparser/](examples/agenticx-for-docparser/) |
+| **Finance** | 财经新闻猎手与分析 | [examples/agenticx-for-finance/](examples/agenticx-for-finance/) |
+| **Future Prediction** | 预测分析与趋势预判 | [examples/agenticx-for-future-prediction/](examples/agenticx-for-future-prediction/) |
+| **GraphRAG** | 知识图谱增强的检索增强生成 | [examples/agenticx-for-graphrag/](examples/agenticx-for-graphrag/) |
+| **Math Modeling** | 数学建模助手 | [examples/agenticx-for-math-modeling/](examples/agenticx-for-math-modeling/) |
+| **Model Architecture Discovery** | 自动化模型架构搜索与发现 | [examples/agenticx-for-modelarch-discovery/](examples/agenticx-for-modelarch-discovery/) |
+| **Query Optimizer** | SQL/查询优化智能体 | [examples/agenticx-for-queryoptimizer/](examples/agenticx-for-queryoptimizer/) |
+| **Sandbox** | 安全代码执行沙箱 | [examples/agenticx-for-sandbox/](examples/agenticx-for-sandbox/) |
+| **Spec Coding** | 规范驱动的代码生成 | [examples/agenticx-for-spec-coding/](examples/agenticx-for-spec-coding/) |
+| **Vibe Coding** | AI 辅助创意编程 | [examples/agenticx-for-vibecoding/](examples/agenticx-for-vibecoding/) |
 
 ## 技术架构
 ![智能体系统架构图](assets/智能体系统架构图.png)
