@@ -25,7 +25,7 @@ class GroupChatConfig:
     id: str
     name: str
     avatar_ids: List[str] = field(default_factory=list)
-    routing: str = "user-directed"  # user-directed | meta-routed | round-robin
+    routing: str = "intelligent"  # intelligent | user-directed | meta-routed | round-robin
     created_at: str = ""
     updated_at: str = ""
 
@@ -93,7 +93,7 @@ class GroupChatRegistry:
         self,
         name: str,
         avatar_ids: List[str],
-        routing: str = "user-directed",
+        routing: str = "intelligent",
     ) -> GroupChatConfig:
         group_id = uuid.uuid4().hex[:12]
         now = datetime.now(timezone.utc).isoformat()
