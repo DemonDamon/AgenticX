@@ -88,7 +88,7 @@ def create_studio_app() -> FastAPI:
             or "群聊"
         )
         avatar_ids = list(gcfg.avatar_ids) if gcfg else []
-        routing = str(getattr(gcfg, "routing", "meta-routed") or "meta-routed").strip()
+        routing = str(getattr(gcfg, "routing", "intelligent") or "intelligent").strip()
         return {"id": gid, "name": display_name, "avatar_ids": avatar_ids, "routing": routing}
 
     async def _shutdown_lsp_for_managed(managed: Any) -> None:
@@ -488,7 +488,7 @@ def create_studio_app() -> FastAPI:
                     group_id = str(group_payload.get("id", "") or "")
                     group_name = str(group_payload.get("name", "") or "群聊")
                     group_members = list(group_payload.get("avatar_ids") or [])
-                    group_routing = str(group_payload.get("routing", "meta-routed") or "meta-routed")
+                    group_routing = str(group_payload.get("routing", "intelligent") or "intelligent")
 
                     targets = router.pick_targets(
                         group_id=group_id,
@@ -531,7 +531,9 @@ def create_studio_app() -> FastAPI:
                     ):
                         if await request.is_disconnected():
                             break
-                        evt_type = "group_skipped" if reply.skipped else "group_reply"
+                        evt_type = str(getattr(reply, "event_type", "") or "")
+                        if not evt_type:
+                            evt_type = "group_skipped" if reply.skipped else "group_reply"
                         evt = SseEvent(
                             type=evt_type,
                             data={
@@ -1543,8 +1545,8 @@ def create_studio_app() -> FastAPI:
         _check_token(x_agx_desktop_token)
         name = str(payload.get("name", "")).strip()
         avatar_ids = payload.get("avatar_ids", [])
-        routing = str(payload.get("routing", "user-directed")).strip()
-        allowed_routing = {"user-directed", "meta-routed", "round-robin"}
+        routing = str(payload.get("routing", "intelligent")).strip()
+        allowed_routing = {"user-directed", "meta-routed", "round-robin", "intelligent"}
         if not name or not avatar_ids:
             raise HTTPException(status_code=400, detail="name and avatar_ids are required")
         if not isinstance(avatar_ids, list):
@@ -1573,7 +1575,7 @@ def create_studio_app() -> FastAPI:
     ) -> dict:
         _check_token(x_agx_desktop_token)
         patch: dict[str, Any] = {}
-        allowed_routing = {"user-directed", "meta-routed", "round-robin"}
+        allowed_routing = {"user-directed", "meta-routed", "round-robin", "intelligent"}
         if "name" in payload:
             name = str(payload.get("name", "")).strip()
             if not name:
@@ -1596,7 +1598,7 @@ def create_studio_app() -> FastAPI:
                 raise HTTPException(status_code=400, detail="avatar_ids must contain at least one valid avatar")
             patch["avatar_ids"] = normalized_avatar_ids
         if "routing" in payload:
-            routing = str(payload.get("routing", "user-directed")).strip()
+            routing = str(payload.get("routing", "intelligent")).strip()
             if routing not in allowed_routing:
                 raise HTTPException(status_code=400, detail="invalid routing strategy")
             patch["routing"] = routing
