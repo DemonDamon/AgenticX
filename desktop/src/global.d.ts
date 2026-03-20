@@ -111,8 +111,12 @@ declare global {
           role: "user" | "assistant" | "tool";
           content: string;
           agent_id?: string;
+          avatar_name?: string;
+          avatar_url?: string;
           provider?: string;
           model?: string;
+          quoted_message_id?: string;
+          quoted_content?: string;
         }>;
         error?: string;
       }>;

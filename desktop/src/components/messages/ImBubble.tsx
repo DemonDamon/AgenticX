@@ -1,4 +1,5 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Message } from "../../store";
@@ -12,6 +13,13 @@ type Props = {
   assistantName?: string;
   assistantAvatarUrl?: string;
   userName?: string;
+  onCopyMessage?: (message: Message) => void;
+  onQuoteMessage?: (message: Message) => void;
+  onFavoriteMessage?: (message: Message) => void;
+  onToggleSelectMessage?: (message: Message) => void;
+  onForwardMessage?: (message: Message) => void;
+  selectable?: boolean;
+  selected?: boolean;
 };
 
 function Avatar({ label, imageUrl }: { label: string; imageUrl?: string }) {
@@ -38,7 +46,20 @@ function Avatar({ label, imageUrl }: { label: string; imageUrl?: string }) {
   );
 }
 
-export function ImBubble({ message, badge, assistantName, assistantAvatarUrl, userName }: Props) {
+export function ImBubble({
+  message,
+  badge,
+  assistantName,
+  assistantAvatarUrl,
+  userName,
+  onCopyMessage,
+  onQuoteMessage,
+  onFavoriteMessage,
+  onToggleSelectMessage,
+  onForwardMessage,
+  selectable,
+  selected,
+}: Props) {
   const isUser = message.role === "user";
   const displayName = isUser ? (userName || "我") : (assistantName || "AI");
   const avatarUrl = isUser ? undefined : assistantAvatarUrl;
@@ -58,10 +79,38 @@ export function ImBubble({ message, badge, assistantName, assistantAvatarUrl, us
         borderColor: "var(--chat-im-assistant-border)",
         color: "var(--chat-im-assistant-text)",
       };
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (ev: globalThis.MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(ev.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
+
+  const openContextMenu = (ev: ReactMouseEvent) => {
+    ev.preventDefault();
+    setMenuPos({ x: ev.clientX, y: ev.clientY });
+    setMenuOpen(true);
+  };
 
   return (
-    <div className={`flex gap-2 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
+    <div className={`group relative flex gap-2 ${isUser ? "flex-row-reverse" : "flex-row"}`} onContextMenu={openContextMenu}>
       <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
+        {selectable ? (
+          <button
+            type="button"
+            className={`mb-1 h-4 w-4 rounded border ${selected ? "border-cyan-400 bg-cyan-500/30" : "border-border bg-surface-card"}`}
+            onClick={() => onToggleSelectMessage?.(message)}
+            aria-label={selected ? "取消选择消息" : "选择消息"}
+          />
+        ) : null}
         <Avatar label={displayName} imageUrl={avatarUrl} />
       </div>
       <div className={`flex min-w-0 max-w-[80%] flex-col ${isUser ? "items-end" : "items-start"}`}>
@@ -82,6 +131,11 @@ export function ImBubble({ message, badge, assistantName, assistantAvatarUrl, us
           ) : null}
           <div className="msg-content break-words">
             {badge}
+            {message.quotedContent ? (
+              <div className="mb-2 rounded-md border border-border bg-surface-panel/70 px-2 py-1 text-xs text-text-faint">
+                <span className="line-clamp-2">{message.quotedContent}</span>
+              </div>
+            ) : null}
             {!isUser && isStreaming && (hasThinkTag || !hasBody) ? (
               <ReasoningBlock text={parsed?.reasoning ?? ""} streaming />
             ) : !isUser && !isStreaming && parsed?.reasoning ? (
@@ -90,7 +144,27 @@ export function ImBubble({ message, badge, assistantName, assistantAvatarUrl, us
             {hasBody ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyText}</ReactMarkdown> : null}
           </div>
         </div>
+        <div className="mt-1 hidden items-center gap-2 text-[11px] text-text-faint group-hover:flex">
+          <button type="button" className="hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>复制</button>
+          <button type="button" className="hover:text-text-strong" onClick={() => onQuoteMessage?.(message)}>引用</button>
+          <button type="button" className="hover:text-text-strong" onClick={() => onFavoriteMessage?.(message)}>收藏</button>
+          <button type="button" className="hover:text-text-strong" onClick={() => onForwardMessage?.(message)}>转发</button>
+          <button type="button" className="hover:text-text-strong" onClick={() => onToggleSelectMessage?.(message)}>多选</button>
+        </div>
       </div>
+      {menuOpen ? (
+        <div
+          ref={menuRef}
+          className="fixed z-[80] w-36 rounded-lg border border-border bg-surface-panel p-1 shadow-2xl"
+          style={{ left: menuPos.x, top: menuPos.y }}
+        >
+          <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onCopyMessage?.(message); }}>复制</button>
+          <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onQuoteMessage?.(message); }}>引用</button>
+          <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onFavoriteMessage?.(message); }}>收藏</button>
+          <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onForwardMessage?.(message); }}>转发</button>
+          <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onToggleSelectMessage?.(message); }}>多选</button>
+        </div>
+      ) : null}
     </div>
   );
 }

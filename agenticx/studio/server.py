@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import smtplib
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from typing import AsyncGenerator
@@ -32,6 +33,7 @@ from agenticx.runtime.loop_controller import LoopController
 from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS
 from agenticx.runtime.prompts.meta_agent import build_meta_agent_system_prompt
+from agenticx.runtime.group_router import GroupChatRouter, META_LEADER_AGENT_ID, META_LEADER_NAME
 from agenticx.runtime.team_manager import AgentTeamManager
 from agenticx.studio.protocols import ChatRequest, ConfirmResponse, SessionState, SseEvent
 from agenticx.studio.session_manager import SessionManager
@@ -57,6 +59,37 @@ def create_studio_app() -> FastAPI:
     app.state.avatar_registry = avatar_registry
     app.state.group_registry = group_registry
     desktop_token = os.getenv("AGX_DESKTOP_TOKEN", "").strip()
+
+    def _meta_group_chat_payload(
+        managed: Any,
+        requested_group_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """When session avatar_id is group:<id>, narrow Meta-Agent avatar list to group members."""
+        gid = str(requested_group_id or "").strip()
+        aid = str(getattr(managed, "avatar_id", "") or "").strip()
+        if not gid:
+            if not aid.startswith("group:"):
+                return None
+            gid = aid.split(":", 1)[1].strip()
+        if not gid:
+            return None
+        gcfg = group_registry.get_group(gid) if gid else None
+        if gcfg is None:
+            return None
+        expected_avatar_id = f"group:{gid}"
+        if aid != expected_avatar_id:
+            managed.avatar_id = expected_avatar_id
+            if not getattr(managed, "avatar_name", None):
+                managed.avatar_name = gcfg.name or gid
+        display_name = (
+            (gcfg.name if gcfg else "")
+            or str(getattr(managed, "session_name", "") or "").strip()
+            or gid
+            or "群聊"
+        )
+        avatar_ids = list(gcfg.avatar_ids) if gcfg else []
+        routing = str(getattr(gcfg, "routing", "meta-routed") or "meta-routed").strip()
+        return {"id": gid, "name": display_name, "avatar_ids": avatar_ids, "routing": routing}
 
     async def _shutdown_lsp_for_managed(managed: Any) -> None:
         if managed is None:
@@ -432,6 +465,94 @@ def create_studio_app() -> FastAPI:
                 yield 'data: {"type":"done","data":{}}\n\n'
             return StreamingResponse(_subagent_message_stream(), media_type="text/event-stream")
 
+        requested_group_id = str(payload.group_id or "").strip()
+        group_payload = _meta_group_chat_payload(
+            managed,
+            requested_group_id=requested_group_id or None,
+        )
+        is_group_session = group_payload is not None
+        if is_group_session:
+            async def _group_chat_stream() -> AsyncGenerator[str, None]:
+                try:
+                    llm_factory = lambda provider, model: ProviderResolver.resolve(
+                        provider_name=provider or session.provider_name,
+                        model=model or session.model_name,
+                    )
+                    router = GroupChatRouter(
+                        avatar_registry=avatar_registry,
+                        llm_factory=llm_factory,
+                        max_tool_rounds=_resolve_max_tool_rounds(),
+                    )
+                    mentioned_ids = list(payload.mentioned_avatar_ids or [])
+                    quoted_content = str(payload.quoted_content or "")
+                    group_id = str(group_payload.get("id", "") or "")
+                    group_name = str(group_payload.get("name", "") or "群聊")
+                    group_members = list(group_payload.get("avatar_ids") or [])
+                    group_routing = str(group_payload.get("routing", "meta-routed") or "meta-routed")
+
+                    targets = router.pick_targets(
+                        group_id=group_id,
+                        group_avatar_ids=group_members,
+                        routing=group_routing,
+                        mentioned_avatar_ids=mentioned_ids,
+                        scratchpad=session.scratchpad if isinstance(session.scratchpad, dict) else {},
+                    )
+                    mentioned_set = set(mentioned_ids) & set(group_members)
+                    if META_LEADER_AGENT_ID in targets:
+                        typing_evt = SseEvent(
+                            type="group_typing",
+                            data={
+                                "agent_id": META_LEADER_AGENT_ID,
+                                "avatar_name": META_LEADER_NAME,
+                            },
+                        )
+                        yield f"data: {json.dumps(typing_evt.model_dump(), ensure_ascii=False)}\n\n"
+                    for aid in mentioned_set:
+                        avatar_cfg = avatar_registry.get_avatar(aid)
+                        typing_evt = SseEvent(
+                            type="group_typing",
+                            data={
+                                "agent_id": aid,
+                                "avatar_name": (avatar_cfg.name if avatar_cfg else aid),
+                            },
+                        )
+                        yield f"data: {json.dumps(typing_evt.model_dump(), ensure_ascii=False)}\n\n"
+
+                    async for reply in router.run_group_turn(
+                        base_session=session,
+                        group_id=group_id,
+                        group_name=group_name,
+                        routing=group_routing,
+                        group_avatar_ids=group_members,
+                        mentioned_avatar_ids=mentioned_ids,
+                        user_input=payload.user_input,
+                        quoted_content=quoted_content,
+                        should_stop=request.is_disconnected,
+                    ):
+                        if await request.is_disconnected():
+                            break
+                        evt_type = "group_skipped" if reply.skipped else "group_reply"
+                        evt = SseEvent(
+                            type=evt_type,
+                            data={
+                                "agent_id": reply.agent_id,
+                                "avatar_name": reply.avatar_name,
+                                "avatar_url": reply.avatar_url,
+                                "content": reply.content,
+                                "skipped": reply.skipped,
+                                "error": reply.error,
+                            },
+                        )
+                        yield f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+                except Exception as exc:
+                    err = SseEvent(type="error", data={"text": f"Group runtime error: {exc}"})
+                    yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                finally:
+                    manager.persist(payload.session_id)
+                yield 'data: {"type":"done","data":{}}\n\n'
+
+            return StreamingResponse(_group_chat_stream(), media_type="text/event-stream")
+
         try:
             llm = _resolve_llm()
         except Exception as exc:
@@ -561,6 +682,7 @@ def create_studio_app() -> FastAPI:
                             mode=mode,
                             taskspaces=managed.taskspaces,
                             avatar_context=avatar_context,
+                            group_chat=_meta_group_chat_payload(managed),
                         )
                     async for event in runtime.run_turn(
                         effective_input,
@@ -658,7 +780,12 @@ def create_studio_app() -> FastAPI:
         loop_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
         loop_is_avatar = bool(loop_avatar_id and not loop_avatar_id.startswith("group:"))
         loop_tools: list = list(STUDIO_TOOLS) if loop_is_avatar else list(META_AGENT_TOOLS)
-        loop_sys_prompt = build_meta_agent_system_prompt(session, mode="interactive", taskspaces=managed.taskspaces)
+        loop_sys_prompt = build_meta_agent_system_prompt(
+            session,
+            mode="interactive",
+            taskspaces=managed.taskspaces,
+            group_chat=_meta_group_chat_payload(managed),
+        )
 
         async def _loop_stream() -> AsyncGenerator[str, None]:
             try:
@@ -1490,5 +1617,68 @@ def create_studio_app() -> FastAPI:
         if not ok:
             raise HTTPException(status_code=404, detail="group not found")
         return {"ok": True}
+
+    @app.post("/api/memory/save")
+    async def save_message_memory(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        session_id = str(payload.get("session_id", "") or "").strip()
+        content = str(payload.get("content", "") or "").strip()
+        source_message_id = str(payload.get("message_id", "") or "").strip()
+        if not session_id or not content:
+            raise HTTPException(status_code=400, detail="session_id and content are required")
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        scratch = getattr(managed.studio_session, "scratchpad", None)
+        if not isinstance(scratch, dict):
+            scratch = {}
+            setattr(managed.studio_session, "scratchpad", scratch)
+        records = scratch.get("saved_messages")
+        if not isinstance(records, list):
+            records = []
+        records.append({
+            "message_id": source_message_id,
+            "content": content,
+            "saved_at": str(datetime.now().isoformat()),
+        })
+        scratch["saved_messages"] = records[-200:]
+        manager.persist(session_id)
+        return {"ok": True, "saved_count": len(scratch["saved_messages"])}
+
+    @app.post("/api/messages/forward")
+    async def forward_messages(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        source_session_id = str(payload.get("source_session_id", "") or "").strip()
+        target_session_id = str(payload.get("target_session_id", "") or "").strip()
+        messages = payload.get("messages", [])
+        if not source_session_id or not target_session_id:
+            raise HTTPException(status_code=400, detail="source_session_id and target_session_id are required")
+        if not isinstance(messages, list) or not messages:
+            raise HTTPException(status_code=400, detail="messages must be a non-empty list")
+        target_managed = manager.get(target_session_id, touch=False)
+        if target_managed is None:
+            raise HTTPException(status_code=404, detail="target session not found")
+        normalized_parts: list[str] = []
+        for item in messages:
+            if not isinstance(item, dict):
+                continue
+            sender = str(item.get("sender", "") or "").strip() or "unknown"
+            content = str(item.get("content", "") or "").strip()
+            if not content:
+                continue
+            normalized_parts.append(f"[{sender}] {content}")
+        if not normalized_parts:
+            raise HTTPException(status_code=400, detail="no valid messages to forward")
+        merged = "转发消息如下：\n" + "\n".join(normalized_parts)
+        target_managed.studio_session.chat_history.append({"role": "user", "content": merged})
+        target_managed.updated_at = datetime.now().timestamp()
+        manager.persist(target_session_id)
+        return {"ok": True, "forwarded": len(normalized_parts)}
 
     return app

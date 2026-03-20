@@ -83,7 +83,7 @@ export function WorkspacePanel({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [panelHeight, setPanelHeight] = useState(0);
   const [spawnsHeight, setSpawnsHeight] = useState(0);
-  const spawnsInitialized = useRef(false);
+  const spawnsUserResized = useRef(false);
 
   const activeTaskspace = useMemo(
     () => taskspaces.find((item) => item.id === activeTaskspaceId) ?? taskspaces[0] ?? null,
@@ -95,12 +95,14 @@ export function WorkspacePanel({
   const safeSpawnsHeight = Math.max(minSpawnsHeight, Math.min(maxSpawnsHeight, spawnsHeight));
 
   useEffect(() => {
-    if (panelHeight > 0 && !spawnsInitialized.current) {
-      spawnsInitialized.current = true;
-      setSpawnsHeight(Math.floor(panelHeight / 2));
-      return;
+    if (panelHeight <= 0) return;
+    if (!spawnsUserResized.current) {
+      // Keep default near visual 1:1 before user manually drags.
+      const initial = Math.floor(panelHeight * 0.56);
+      setSpawnsHeight(Math.max(minSpawnsHeight, Math.min(maxSpawnsHeight, initial)));
+    } else {
+      setSpawnsHeight((prev) => Math.max(minSpawnsHeight, Math.min(maxSpawnsHeight, prev)));
     }
-    setSpawnsHeight((prev) => Math.max(minSpawnsHeight, Math.min(maxSpawnsHeight, prev)));
   }, [panelHeight, maxSpawnsHeight]);
 
   const highlightedCode = useMemo(() => {
@@ -299,6 +301,7 @@ export function WorkspacePanel({
 
   const startResizeSpawns = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
+    spawnsUserResized.current = true;
     const startY = event.clientY;
     const startHeight = safeSpawnsHeight;
     const onMove = (moveEvent: MouseEvent) => {

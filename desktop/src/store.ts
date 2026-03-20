@@ -50,6 +50,8 @@ export type GroupChat = {
   routing: string;
 };
 
+export type SidePanelTab = "workspace" | "members";
+
 export type ChatPane = {
   id: string;
   avatarId: string | null;
@@ -59,6 +61,9 @@ export type ChatPane = {
   historyOpen: boolean;
   contextInherited: boolean;
   taskspacePanelOpen: boolean;
+  membersPanelOpen: boolean;
+  /** Legacy persisted field; no longer used for visibility control. */
+  sidePanelTab: SidePanelTab;
   activeTaskspaceId: string | null;
 };
 
@@ -67,8 +72,12 @@ export type Message = {
   role: MsgRole;
   content: string;
   agentId?: string;
+  avatarName?: string;
+  avatarUrl?: string;
   provider?: string;
   model?: string;
+  quotedMessageId?: string;
+  quotedContent?: string;
   attachments?: MessageAttachment[];
 };
 
@@ -194,14 +203,19 @@ type AppState = {
     agentId?: string,
     provider?: string,
     model?: string,
-    attachments?: MessageAttachment[]
+    attachments?: MessageAttachment[],
+    extras?: Partial<Pick<Message, "avatarName" | "avatarUrl" | "quotedMessageId" | "quotedContent">>
   ) => void;
   updateLastPaneMessage: (paneId: string, content: string) => void;
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string) => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
   togglePaneHistory: (paneId: string) => void;
+  /** @deprecated Prefer cycleSidePanel / openSidePanel */
   toggleTaskspacePanel: (paneId: string) => void;
+  toggleMembersPanel: (paneId: string) => void;
+  cycleSidePanel: (paneId: string, tab: SidePanelTab) => void;
+  openSidePanel: (paneId: string, tab: SidePanelTab) => void;
   setActiveTaskspace: (paneId: string, taskspaceId: string | null) => void;
   setPaneContextInherited: (paneId: string, inherited: boolean) => void;
   addMessage: (
@@ -210,7 +224,8 @@ type AppState = {
     agentId?: string,
     provider?: string,
     model?: string,
-    attachments?: MessageAttachment[]
+    attachments?: MessageAttachment[],
+    extras?: Partial<Pick<Message, "avatarName" | "avatarUrl" | "quotedMessageId" | "quotedContent">>
   ) => void;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
   clearMessages: () => void;
@@ -247,6 +262,8 @@ function makeDefaultPane(): ChatPane {
     historyOpen: false,
     contextInherited: false,
     taskspacePanelOpen: false,
+    membersPanelOpen: false,
+    sidePanelTab: "workspace",
     activeTaskspaceId: null,
   };
 }
@@ -263,7 +280,7 @@ function loadChatStyle(): ChatStyle {
   return "im";
 }
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   apiBase: "",
   apiToken: "",
   sessionId: "",
@@ -332,6 +349,8 @@ export const useAppStore = create<AppState>((set) => ({
           historyOpen: false,
           contextInherited: false,
           taskspacePanelOpen: false,
+          membersPanelOpen: false,
+          sidePanelTab: "workspace",
           activeTaskspaceId: null,
         },
       ],
@@ -350,13 +369,16 @@ export const useAppStore = create<AppState>((set) => ({
           : state.activePaneId;
       return { panes: nextPanes, activePaneId: nextActive };
     }),
-  addPaneMessage: (paneId, role, content, agentId, provider, model, attachments) =>
+  addPaneMessage: (paneId, role, content, agentId, provider, model, attachments, extras) =>
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === paneId
           ? {
               ...pane,
-              messages: [...pane.messages, { id: uid(), role, content, agentId, provider, model, attachments }],
+              messages: [
+                ...pane.messages,
+                { id: uid(), role, content, agentId, provider, model, attachments, ...extras },
+              ],
             }
           : pane
       ),
@@ -389,12 +411,32 @@ export const useAppStore = create<AppState>((set) => ({
         pane.id === paneId ? { ...pane, historyOpen: !pane.historyOpen } : pane
       ),
     })),
-  toggleTaskspacePanel: (paneId) =>
+  cycleSidePanel: (paneId, tab) =>
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        if (tab === "workspace") {
+          return { ...pane, taskspacePanelOpen: !pane.taskspacePanelOpen, sidePanelTab: "workspace" };
+        }
+        return { ...pane, membersPanelOpen: !pane.membersPanelOpen, sidePanelTab: "members" };
+      }),
+    })),
+  openSidePanel: (paneId, tab) =>
     set((state) => ({
       panes: state.panes.map((pane) =>
-        pane.id === paneId ? { ...pane, taskspacePanelOpen: !pane.taskspacePanelOpen } : pane
+        pane.id === paneId
+          ? tab === "workspace"
+            ? { ...pane, taskspacePanelOpen: true, sidePanelTab: "workspace" }
+            : { ...pane, membersPanelOpen: true, sidePanelTab: "members" }
+          : pane
       ),
     })),
+  toggleTaskspacePanel: (paneId) => {
+    get().cycleSidePanel(paneId, "workspace");
+  },
+  toggleMembersPanel: (paneId) => {
+    get().cycleSidePanel(paneId, "members");
+  },
   setActiveTaskspace: (paneId, taskspaceId) =>
     set((state) => ({
       panes: state.panes.map((pane) =>
@@ -405,9 +447,9 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, contextInherited: inherited } : pane)),
     })),
-  addMessage: (role, content, agentId, provider, model, attachments) =>
+  addMessage: (role, content, agentId, provider, model, attachments, extras) =>
     set((state) => {
-      const nextMessage: Message = { id: uid(), role, content, agentId, provider, model, attachments };
+      const nextMessage: Message = { id: uid(), role, content, agentId, provider, model, attachments, ...extras };
       return {
         messages: [...state.messages, nextMessage],
         panes: state.panes.map((pane) =>
