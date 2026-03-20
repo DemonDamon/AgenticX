@@ -14,11 +14,15 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     session_id: str
     user_input: str = Field(..., min_length=1)
+    group_id: Optional[str] = None
     provider: Optional[str] = None
     model: Optional[str] = None
     agent_id: Optional[str] = None
     mode: Optional[str] = "interactive"
     context_files: Optional[Dict[str, str]] = None
+    mentioned_avatar_ids: Optional[List[str]] = None
+    quoted_message_id: Optional[str] = None
+    quoted_content: Optional[str] = None
 
 
 class ConfirmResponse(BaseModel):

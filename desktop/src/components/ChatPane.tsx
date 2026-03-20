@@ -1,6 +1,6 @@
-import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { useAppStore, type Message, type MessageAttachment } from "../store";
+import { useAppStore, type Avatar, type ChatPane as ChatPaneState, type Message, type MessageAttachment } from "../store";
 import { startRecording, stopRecording } from "../voice/stt";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { WorkspacePanel } from "./WorkspacePanel";
@@ -11,6 +11,19 @@ import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
 
 const NEW_TOPIC_PREF_KEY = "agx:newTopicInherit";
+const FALLBACK_PANE: ChatPaneState = {
+  id: "fallback-pane",
+  avatarId: null,
+  avatarName: "Meta-Agent",
+  sessionId: "",
+  messages: [],
+  historyOpen: false,
+  contextInherited: false,
+  taskspacePanelOpen: false,
+  membersPanelOpen: false,
+  sidePanelTab: "workspace",
+  activeTaskspaceId: null,
+};
 
 function NewTopicButton({ onNewTopic }: { onNewTopic: (inherit: boolean) => void }) {
   const [open, setOpen] = useState(false);
@@ -529,6 +542,13 @@ function formatFileSize(size: number): string {
 
 type AtCandidate =
   | {
+      kind: "avatar";
+      avatarId: string;
+      label: string;
+      role: string;
+      avatarUrl?: string;
+    }
+  | {
       kind: "file";
       taskspaceId: string;
       path: string;
@@ -542,14 +562,418 @@ type AtCandidate =
       alias: string;
     };
 
+const MEMBER_PALETTE = [
+  "bg-cyan-600",
+  "bg-violet-600",
+  "bg-rose-600",
+  "bg-amber-600",
+  "bg-emerald-600",
+  "bg-sky-600",
+  "bg-fuchsia-600",
+];
+
+function memberInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase() || "?";
+}
+
+function memberColorClass(id: string): string {
+  let h = 0;
+  for (const ch of id) h = ((h << 5) - h + ch.charCodeAt(0)) | 0;
+  return MEMBER_PALETTE[Math.abs(h) % MEMBER_PALETTE.length];
+}
+
+const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
+  groupId,
+  avatarList,
+}: {
+  groupId: string;
+  avatarList: Avatar[];
+}) {
+  const [search, setSearch] = useState("");
+  const [mode, setMode] = useState<"browse" | "add" | "remove">("browse");
+  const [saving, setSaving] = useState(false);
+  const [errorText, setErrorText] = useState("");
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [panelWidth, setPanelWidth] = useState(0);
+  const groups = useAppStore((s) => s.groups);
+  const setGroups = useAppStore((s) => s.setGroups);
+  const group = groups.find((g) => g.id === groupId);
+
+  useEffect(() => {
+    if (!panelRef.current) return;
+    const target = panelRef.current;
+    const update = () => setPanelWidth(target.clientWidth);
+    update();
+    const observer = new ResizeObserver(() => update());
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, []);
+
+  const avatarById = useMemo(() => {
+    const map = new Map<string, Avatar>();
+    for (const item of avatarList) map.set(item.id, item);
+    return map;
+  }, [avatarList]);
+
+  const filteredIds = useMemo(() => {
+    if (!group) return [];
+    const q = search.trim().toLowerCase();
+    if (!q) return group.avatarIds;
+    return group.avatarIds.filter((id) => {
+      const a = avatarById.get(id);
+      const name = (a?.name ?? id).toLowerCase();
+      const role = (a?.role ?? "").toLowerCase();
+      return name.includes(q) || role.includes(q);
+    });
+  }, [group, avatarById, search]);
+
+  const addCandidates = useMemo(() => {
+    if (!group) return [];
+    const selected = new Set(group.avatarIds);
+    const q = search.trim().toLowerCase();
+    return avatarList.filter((a) => {
+      if (selected.has(a.id)) return false;
+      if (!q) return true;
+      return a.name.toLowerCase().includes(q) || a.role.toLowerCase().includes(q);
+    });
+  }, [group, avatarList, search]);
+
+  const memberGrid = useMemo(() => {
+    const width = panelWidth || 320;
+    const columns = width <= 250 ? 2 : width <= 360 ? 3 : 4;
+    const avatarSize = width <= 250 ? 38 : width <= 360 ? 44 : 48;
+    const nameClass = width <= 250 ? "text-[10px]" : "text-[11px]";
+    return { columns, avatarSize, nameClass };
+  }, [panelWidth]);
+
+  const [dialogChecked, setDialogChecked] = useState<Set<string>>(new Set());
+  const [dialogSearch, setDialogSearch] = useState("");
+
+  const dialogCandidates = useMemo(() => {
+    if (mode !== "add" || !group) return [];
+    const existing = new Set(group.avatarIds);
+    const q = dialogSearch.trim().toLowerCase();
+    return avatarList.filter((a) => {
+      if (existing.has(a.id)) return false;
+      if (!q) return true;
+      return a.name.toLowerCase().includes(q) || a.role.toLowerCase().includes(q);
+    });
+  }, [mode, group, avatarList, dialogSearch]);
+
+  if (!group) {
+    return (
+      <div ref={panelRef} className="flex h-full flex-col bg-surface-card p-3">
+        <p className="text-xs text-text-faint">未找到该群配置，可在侧栏刷新群列表后重试。</p>
+      </div>
+    );
+  }
+
+  const persistMembers = async (nextAvatarIds: string[]) => {
+    if (!group || saving) return;
+    setSaving(true);
+    setErrorText("");
+    const prevAvatarIds = group.avatarIds;
+    setGroups(
+      groups.map((item) => (item.id === group.id ? { ...item, avatarIds: nextAvatarIds } : item))
+    );
+    try {
+      const res = await window.agenticxDesktop.updateGroup({
+        id: group.id,
+        avatar_ids: nextAvatarIds,
+      });
+      if (!res.ok) {
+        throw new Error(res.error || "更新群成员失败");
+      }
+    } catch (err) {
+      setGroups(
+        groups.map((item) => (item.id === group.id ? { ...item, avatarIds: prevAvatarIds } : item))
+      );
+      setErrorText(err instanceof Error ? err.message : "更新群成员失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddMember = (avatarId: string) => {
+    if (!group || group.avatarIds.includes(avatarId)) return;
+    void persistMembers([...group.avatarIds, avatarId]);
+  };
+
+  const handleRemoveMember = (avatarId: string) => {
+    if (!group || !group.avatarIds.includes(avatarId)) return;
+    void persistMembers(group.avatarIds.filter((id) => id !== avatarId));
+  };
+
+  const openAddDialog = () => {
+    setDialogChecked(new Set());
+    setDialogSearch("");
+    setMode("add");
+  };
+
+  const handleDialogConfirm = () => {
+    if (!group || dialogChecked.size === 0) return;
+    void persistMembers([...group.avatarIds, ...Array.from(dialogChecked)]);
+    setMode("browse");
+  };
+
+  return (
+    <div ref={panelRef} className="flex h-full min-h-0 flex-col bg-surface-card">
+      <div className="shrink-0 space-y-2 border-b border-border px-3 py-2">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="搜索群成员"
+          className="w-full rounded-lg border border-border bg-surface-panel px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-faint focus:border-border-strong"
+        />
+        {errorText ? <p className="text-[10px] text-rose-300">{errorText}</p> : null}
+        {mode === "remove" ? (
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-rose-300">点击成员头像移出群聊</span>
+            <button
+              type="button"
+              className="rounded px-2 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+              onClick={() => setMode("browse")}
+            >
+              完成
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <div className="relative min-h-0 flex-1 overflow-y-auto">
+        {group.avatarIds.length === 0 && !search.trim() ? (
+          <p className="p-3 text-xs text-text-faint">暂无成员，点击下方 ＋ 添加分身。</p>
+        ) : filteredIds.length === 0 && search.trim() ? (
+          <p className="p-3 text-xs text-text-faint">无匹配成员，换个关键词试试。</p>
+        ) : (
+          <div
+            className="grid gap-x-1 gap-y-3 px-2 py-3"
+            style={{ gridTemplateColumns: `repeat(${memberGrid.columns}, minmax(0, 1fr))` }}
+          >
+            {filteredIds.map((id) => {
+              const a = avatarById.get(id);
+              const label = a?.name ?? id.slice(0, 6);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    if (mode === "remove") handleRemoveMember(id);
+                  }}
+                  disabled={saving}
+                  className={`relative flex flex-col items-center gap-1.5 rounded-lg text-center transition ${
+                    mode === "remove" ? "cursor-pointer hover:bg-surface-hover" : "cursor-default"
+                  } disabled:opacity-60`}
+                >
+                  {a?.avatarUrl ? (
+                    <img
+                      src={a.avatarUrl}
+                      alt=""
+                      className="shrink-0 rounded-xl object-cover"
+                      style={{ width: memberGrid.avatarSize, height: memberGrid.avatarSize }}
+                    />
+                  ) : (
+                    <div
+                      className={`flex shrink-0 items-center justify-center rounded-xl font-bold text-white ${memberColorClass(id)}`}
+                      style={{ width: memberGrid.avatarSize, height: memberGrid.avatarSize }}
+                    >
+                      {memberInitials(label)}
+                    </div>
+                  )}
+                  <span className={`w-full truncate px-0.5 text-text-muted ${memberGrid.nameClass}`} title={`${label}${a?.role ? ` · ${a.role}` : ""}\n${id}`}>
+                    {label}
+                  </span>
+                  {mode === "remove" ? (
+                    <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-[11px] font-bold leading-none text-white shadow">−</span>
+                  ) : null}
+                </button>
+              );
+            })}
+            {/* ── 微信风格: 添加 / 移出 两个虚线方块 ── */}
+            {!search.trim() ? (
+              <>
+                <div className="relative flex flex-col items-center gap-1.5 text-center">
+                  <button
+                    type="button"
+                    onClick={openAddDialog}
+                    disabled={saving}
+                    className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-2xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
+                    style={{ width: memberGrid.avatarSize, height: memberGrid.avatarSize }}
+                    title="添加成员"
+                  >
+                    +
+                  </button>
+                  <span className={`text-text-muted ${memberGrid.nameClass}`}>添加</span>
+                </div>
+                <div className="relative flex flex-col items-center gap-1.5 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setMode((prev) => (prev === "remove" ? "browse" : "remove"))}
+                    disabled={saving || group.avatarIds.length === 0}
+                    className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-2xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
+                    style={{ width: memberGrid.avatarSize, height: memberGrid.avatarSize }}
+                    title="移出成员"
+                  >
+                    −
+                  </button>
+                  <span className={`text-text-muted ${memberGrid.nameClass}`}>移出</span>
+                </div>
+              </>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      {/* ── 添加成员 模态对话框（微信风格） ── */}
+      {mode === "add" ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setMode("browse")}>
+          <div
+            className="flex h-[480px] w-[520px] max-w-[90vw] flex-col overflow-hidden rounded-xl border border-border bg-surface-panel shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 标题栏 */}
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
+              <span className="text-sm font-semibold text-text-strong">添加群成员</span>
+              <span className="text-xs text-text-faint">
+                {dialogChecked.size > 0 ? `已选 ${dialogChecked.size} 人` : ""}
+              </span>
+            </div>
+
+            {/* 主体区域：左列表 + 右已选 */}
+            <div className="flex min-h-0 flex-1">
+              {/* 左侧：搜索 + 可选列表 */}
+              <div className="flex min-h-0 flex-1 flex-col border-r border-border">
+                <div className="shrink-0 px-3 py-2">
+                  <input
+                    type="search"
+                    value={dialogSearch}
+                    onChange={(e) => setDialogSearch(e.target.value)}
+                    placeholder="搜索"
+                    autoFocus
+                    className="w-full rounded-lg border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-faint focus:border-border-strong"
+                  />
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-1">
+                  {dialogCandidates.length === 0 ? (
+                    <p className="px-3 py-4 text-center text-xs text-text-faint">
+                      {dialogSearch.trim() ? "无匹配结果" : "所有分身都已在群里"}
+                    </p>
+                  ) : (
+                    <div className="flex flex-col">
+                      {dialogCandidates.map((a) => {
+                        const checked = dialogChecked.has(a.id);
+                        return (
+                          <label
+                            key={a.id}
+                            className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 transition hover:bg-surface-hover"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setDialogChecked((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(a.id)) next.delete(a.id);
+                                  else next.add(a.id);
+                                  return next;
+                                });
+                              }}
+                              className="h-4 w-4 shrink-0 accent-cyan-500"
+                            />
+                            {a.avatarUrl ? (
+                              <img src={a.avatarUrl} alt="" className="h-9 w-9 shrink-0 rounded-lg object-cover" />
+                            ) : (
+                              <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white ${memberColorClass(a.id)}`}>
+                                {memberInitials(a.name || a.id)}
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-xs text-text-primary">{a.name || a.id}</div>
+                              {a.role ? <div className="truncate text-[10px] text-text-faint">{a.role}</div> : null}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 右侧：已选预览 */}
+              <div className="flex w-[160px] shrink-0 flex-col bg-surface-card">
+                <div className="shrink-0 px-3 py-2">
+                  <span className="text-[11px] text-text-faint">已选成员</span>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-2">
+                  {dialogChecked.size === 0 ? (
+                    <p className="px-1 text-[11px] text-text-faint">勾选左侧分身</p>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      {Array.from(dialogChecked).map((id) => {
+                        const a = avatarById.get(id);
+                        const label = a?.name ?? id.slice(0, 6);
+                        return (
+                          <div key={id} className="flex items-center gap-2 rounded-md px-1 py-1">
+                            {a?.avatarUrl ? (
+                              <img src={a.avatarUrl} alt="" className="h-7 w-7 shrink-0 rounded-md object-cover" />
+                            ) : (
+                              <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white ${memberColorClass(id)}`}>
+                                {memberInitials(label)}
+                              </div>
+                            )}
+                            <span className="min-w-0 flex-1 truncate text-[11px] text-text-muted">{label}</span>
+                            <button
+                              type="button"
+                              className="shrink-0 text-xs text-text-faint transition hover:text-rose-400"
+                              onClick={() => setDialogChecked((prev) => { const n = new Set(prev); n.delete(id); return n; })}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 底部按钮 */}
+            <div className="flex shrink-0 items-center justify-end gap-3 border-t border-border px-4 py-3">
+              <button
+                type="button"
+                className="rounded-lg border border-border px-4 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                onClick={() => setMode("browse")}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-cyan-600 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50"
+                disabled={dialogChecked.size === 0 || saving}
+                onClick={handleDialogConfirm}
+              >
+                添加{dialogChecked.size > 0 ? ` (${dialogChecked.size})` : ""}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
-  const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId));
+  const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
   const panes = useAppStore((s) => s.panes);
   const removePane = useAppStore((s) => s.removePane);
   const addPane = useAppStore((s) => s.addPane);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const togglePaneHistory = useAppStore((s) => s.togglePaneHistory);
-  const toggleTaskspacePanel = useAppStore((s) => s.toggleTaskspacePanel);
+  const cycleSidePanel = useAppStore((s) => s.cycleSidePanel);
+  const openSidePanel = useAppStore((s) => s.openSidePanel);
   const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const addPaneMessage = useAppStore((s) => s.addPaneMessage);
   const clearPaneMessages = useAppStore((s) => s.clearPaneMessages);
@@ -567,7 +991,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const addSubAgentEvent = useAppStore((s) => s.addSubAgentEvent);
   const subAgents = useAppStore((s) => s.subAgents);
   const avatars = useAppStore((s) => s.avatars);
+  const groups = useAppStore((s) => s.groups);
   const chatStyle = useAppStore((s) => s.chatStyle);
+  const isGroupPane = Boolean(pane?.avatarId?.startsWith("group:"));
+  const groupChatId = isGroupPane && pane?.avatarId ? pane.avatarId.slice("group:".length) : "";
+  const activeGroup = useMemo(
+    () => (isGroupPane ? groups.find((g) => g.id === groupChatId) : undefined),
+    [groups, isGroupPane, groupChatId]
+  );
+  const groupMembers = useMemo(
+    () =>
+      (activeGroup?.avatarIds ?? [])
+        .map((id) => avatars.find((a) => a.id === id))
+        .filter((a): a is Avatar => Boolean(a)),
+    [activeGroup, avatars]
+  );
+  const workspacePanelOpen = !!pane?.taskspacePanelOpen;
 
   const paneAvatarMeta = useMemo(() => {
     const aid = pane?.avatarId;
@@ -592,6 +1031,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [atOpen, setAtOpen] = useState(false);
   const [atQuery, setAtQuery] = useState("");
   const [atCandidates, setAtCandidates] = useState<AtCandidate[]>([]);
+  const [groupTyping, setGroupTyping] = useState<Record<string, string>>({});
+  const [quotingMessage, setQuotingMessage] = useState<Message | null>(null);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [taskspaceAutoRefreshKey, setTaskspaceAutoRefreshKey] = useState(0);
@@ -609,8 +1051,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [paneWidth, setPaneWidth] = useState(0);
 
   const visibleMessages = useMemo(
-    () => (pane?.messages ?? []).filter((item) => !item.agentId || item.agentId === "meta"),
-    [pane?.messages]
+    () =>
+      (pane?.messages ?? []).filter((item) => {
+        if (isGroupPane) return true;
+        return !item.agentId || item.agentId === "meta";
+      }),
+    [isGroupPane, pane?.messages]
   );
   const paneSubAgents = useMemo(() => {
     const sid = (pane?.sessionId ?? "").trim();
@@ -669,8 +1115,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               role: item.role,
               content: item.content,
               agentId: item.agent_id ?? "meta",
+              avatarName: item.avatar_name,
+              avatarUrl: item.avatar_url,
               provider: item.provider,
               model: item.model,
+              quotedMessageId: item.quoted_message_id,
+              quotedContent: item.quoted_content,
             });
           }
           setPaneMessages(pane.id, deduped);
@@ -712,8 +1162,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     return () => observer.disconnect();
   }, []);
 
-  if (!pane) return null;
-
   const openDelegatedAvatarSession = async (agentId: string): Promise<boolean> => {
     const sub = useAppStore.getState().subAgents.find((item) => item.id === agentId);
     const targetSessionId = (sub?.sessionId ?? "").trim();
@@ -738,8 +1186,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           role: item.role,
           content: item.content,
           agentId: item.agent_id ?? "meta",
+          avatarName: item.avatar_name,
+          avatarUrl: item.avatar_url,
           provider: item.provider,
           model: item.model,
+          quotedMessageId: item.quoted_message_id,
+          quotedContent: item.quoted_content,
         }));
         setPaneMessages(targetPaneId, mapped);
       } else {
@@ -759,10 +1211,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   };
 
   const searchAtCandidates = async (queryText: string) => {
-    if (!pane.sessionId) return;
+    const lowered = queryText.trim().toLowerCase();
+    const avatarCandidates: AtCandidate[] = isGroupPane
+      ? groupMembers
+          .filter((a) => !lowered || a.name.toLowerCase().includes(lowered) || a.role.toLowerCase().includes(lowered))
+          .map((a) => ({
+            kind: "avatar" as const,
+            avatarId: a.id,
+            label: a.name,
+            role: a.role,
+            avatarUrl: a.avatarUrl || undefined,
+          }))
+      : [];
+
+    if (!pane.sessionId) {
+      setAtCandidates(avatarCandidates.slice(0, 24));
+      return;
+    }
     const wsResp = await window.agenticxDesktop.listTaskspaces(pane.sessionId);
     if (!wsResp.ok || !Array.isArray(wsResp.workspaces) || wsResp.workspaces.length === 0) {
-      setAtCandidates([]);
+      setAtCandidates(avatarCandidates.slice(0, 24));
       return;
     }
     const activeId = pane.activeTaskspaceId && wsResp.workspaces.some((item) => item.id === pane.activeTaskspaceId)
@@ -775,10 +1243,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       path: ".",
     });
     if (!rootResp.ok || !Array.isArray(rootResp.files)) {
-      setAtCandidates([]);
+      setAtCandidates(avatarCandidates.slice(0, 24));
       return;
     }
-    const flatRows: AtCandidate[] = [];
+    const flatRows: Extract<AtCandidate, { kind: "file" }>[] = [];
     const folderRows: Extract<AtCandidate, { kind: "taskspace" }>[] = wsResp.workspaces.map((item) => ({
       kind: "taskspace",
       taskspaceId: item.id,
@@ -811,7 +1279,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         }
       }
     }
-    const lowered = queryText.trim().toLowerCase();
     const filteredFiles = !lowered
       ? flatRows.slice(0, 20)
       : flatRows.filter((item) => item.path.toLowerCase().includes(lowered)).slice(0, 20);
@@ -824,7 +1291,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               item.path.toLowerCase().includes(lowered)
           )
           .slice(0, 8);
-    setAtCandidates([...filteredFolders, ...filteredFiles].slice(0, 24));
+    setAtCandidates([...avatarCandidates, ...filteredFolders, ...filteredFiles].slice(0, 24));
   };
 
   const addContextFile = async (taskspaceId: string, relPath: string) => {
@@ -912,9 +1379,95 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     });
     if (result.ok && result.workspace?.id) {
       setActiveTaskspace(pane.id, result.workspace.id);
-      if (!pane.taskspacePanelOpen) toggleTaskspacePanel(pane.id);
+      if (!pane.taskspacePanelOpen) openSidePanel(pane.id, "workspace");
     }
-  }, [pane.id, pane.sessionId, pane.taskspacePanelOpen, setActiveTaskspace, toggleTaskspacePanel]);
+  }, [pane.id, pane.sessionId, pane.taskspacePanelOpen, setActiveTaskspace, openSidePanel]);
+
+  const copyMessage = useCallback(async (message: Message) => {
+    try {
+      await navigator.clipboard.writeText(message.content || "");
+    } catch {
+      // ignore clipboard failures
+    }
+  }, []);
+
+  const favoriteMessage = useCallback(async (message: Message) => {
+    if (!apiBase || !pane.sessionId) return;
+    try {
+      await fetch(`${apiBase}/api/memory/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({
+          session_id: pane.sessionId,
+          message_id: message.id,
+          content: message.content,
+        }),
+      });
+    } catch {
+      // ignore favorite failures in UI
+    }
+  }, [apiBase, apiToken, pane.sessionId]);
+
+  const toggleSelectMessage = useCallback((message: Message) => {
+    setSelectedMessageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(message.id)) next.delete(message.id);
+      else next.add(message.id);
+      return next;
+    });
+  }, []);
+
+  const selectedMessages = useMemo(
+    () => visibleMessages.filter((m) => selectedMessageIds.has(m.id)),
+    [visibleMessages, selectedMessageIds]
+  );
+
+  const forwardOneMessage = useCallback(async (message: Message) => {
+    if (!apiBase || !pane.sessionId) return;
+    const target = window.prompt("请输入转发目标会话ID");
+    if (!target) return;
+    try {
+      await fetch(`${apiBase}/api/messages/forward`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({
+          source_session_id: pane.sessionId,
+          target_session_id: target.trim(),
+          messages: [
+            {
+              sender: message.role === "assistant" ? message.avatarName || message.agentId || "assistant" : "user",
+              content: message.content,
+            },
+          ],
+        }),
+      });
+    } catch {
+      // ignore forward failures in UI
+    }
+  }, [apiBase, apiToken, pane.sessionId]);
+
+  const forwardSelectedMessages = useCallback(async () => {
+    if (!apiBase || !pane.sessionId || selectedMessages.length === 0) return;
+    const target = window.prompt("请输入转发目标会话ID");
+    if (!target) return;
+    try {
+      await fetch(`${apiBase}/api/messages/forward`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({
+          source_session_id: pane.sessionId,
+          target_session_id: target.trim(),
+          messages: selectedMessages.map((m) => ({
+            sender: m.role === "assistant" ? m.avatarName || m.agentId || "assistant" : "user",
+            content: m.content,
+          })),
+        }),
+      });
+      setSelectedMessageIds(new Set());
+    } catch {
+      // ignore forward failures in UI
+    }
+  }, [apiBase, apiToken, pane.sessionId, selectedMessages]);
 
   const renderedMessages = useMemo(() => (
     <>
@@ -926,9 +1479,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           onRevealPath={(path) => void revealFileInTaskspace(path)}
           assistantName={paneAvatarMeta.name}
           assistantAvatarUrl={paneAvatarMeta.url}
+          onCopyMessage={copyMessage}
+          onQuoteMessage={(msg) => setQuotingMessage(msg)}
+          onFavoriteMessage={favoriteMessage}
+          onForwardMessage={forwardOneMessage}
+          onToggleSelectMessage={toggleSelectMessage}
+          selectable={selectedMessageIds.size > 0}
+          selected={selectedMessageIds.has(message.id)}
         />
       ))}
-      {streaming ? (
+      {Object.entries(groupTyping).map(([agentId, name]) => (
+        <ImBubble
+          key={`typing-${agentId}`}
+          message={{ id: `typing-${agentId}`, role: "assistant", content: `${name} 正在输入...`, avatarName: name, agentId }}
+          assistantName={name}
+        />
+      ))}
+      {streaming && !isGroupPane ? (
         chatStyle === "terminal" ? (
           <TerminalLine
             message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
@@ -949,7 +1516,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         )
       ) : null}
     </>
-  ), [chatStyle, paneAvatarMeta, revealFileInTaskspace, streamedAssistantText, streaming, streamingModel, visibleMessages]);
+  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, isGroupPane, paneAvatarMeta, revealFileInTaskspace, selectedMessageIds, streamedAssistantText, streaming, streamingModel, toggleSelectMessage, visibleMessages]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -1086,13 +1653,41 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     const selectedIsPaneSubagent =
       !!selectedSubAgent && paneSubAgents.some((item) => item.id === selectedSubAgent);
     const targetAgentId = selectedIsPaneSubagent ? selectedSubAgent : "meta";
+    const mentionMap = new Map(
+      groupMembers.map((a) => [a.name.trim().toLowerCase(), a.id])
+    );
+    const mentionRegex = /@([^\s@]+)/g;
+    const mentionedAvatarIds: string[] = [];
+    if (isGroupPane) {
+      let m: RegExpExecArray | null;
+      while ((m = mentionRegex.exec(text)) !== null) {
+        const matchedName = (m[1] || "").trim().toLowerCase();
+        const avatarId = mentionMap.get(matchedName);
+        if (avatarId && !mentionedAvatarIds.includes(avatarId)) mentionedAvatarIds.push(avatarId);
+      }
+    }
     if (targetAgentId === "meta") {
-      addPaneMessage(pane.id, "user", text, "meta", undefined, undefined, userAttachments);
+      addPaneMessage(
+        pane.id,
+        "user",
+        text,
+        "meta",
+        undefined,
+        undefined,
+        userAttachments,
+        quotingMessage
+          ? {
+              quotedMessageId: quotingMessage.id,
+              quotedContent: `${quotingMessage.avatarName || quotingMessage.agentId || quotingMessage.role}: ${quotingMessage.content.slice(0, 120)}`,
+            }
+          : undefined
+      );
     } else {
       addSubAgentEvent(targetAgentId, { type: "user", content: text });
       addPaneMessage(pane.id, "tool", `🗣 发送给 ${targetAgentId}: ${text}`, "meta");
     }
     setInput("");
+    setQuotingMessage(null);
     setStreaming(true);
     cancelStreamRenderFrame();
     setStreamedAssistantText("");
@@ -1123,6 +1718,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (activeProvider) body.provider = activeProvider;
       if (activeModel) body.model = activeModel;
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
+      if (isGroupPane && targetAgentId === "meta") {
+        body.group_id = groupChatId;
+        body.mentioned_avatar_ids = mentionedAvatarIds;
+        if (quotingMessage) {
+          body.quoted_message_id = quotingMessage.id;
+          body.quoted_content = `${quotingMessage.avatarName || quotingMessage.agentId || quotingMessage.role}: ${quotingMessage.content}`;
+        }
+      }
       if (attachmentEntries.length > 0) {
         const contextFilePayload: Record<string, string> = {};
         for (const [, file] of attachmentEntries) {
@@ -1164,6 +1767,42 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           try {
             const payload = JSON.parse(line.slice(6));
             const eventAgentId = payload.data?.agent_id ?? "meta";
+            if (payload.type === "group_typing") {
+              const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
+              setGroupTyping((prev) => ({ ...prev, [eventAgentId]: avatarName }));
+              continue;
+            }
+            if (payload.type === "group_reply") {
+              const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
+              const avatarUrl = String(payload.data?.avatar_url ?? "");
+              const content = String(payload.data?.content ?? "");
+              setGroupTyping((prev) => {
+                const next = { ...prev };
+                delete next[eventAgentId];
+                return next;
+              });
+              if (content.trim()) {
+                addPaneMessage(
+                  pane.id,
+                  "assistant",
+                  content,
+                  eventAgentId,
+                  activeProvider,
+                  activeModel,
+                  undefined,
+                  { avatarName, avatarUrl: avatarUrl || undefined }
+                );
+              }
+              continue;
+            }
+            if (payload.type === "group_skipped") {
+              setGroupTyping((prev) => {
+                const next = { ...prev };
+                delete next[eventAgentId];
+                return next;
+              });
+              continue;
+            }
             if (payload.type === "token") {
               if (eventAgentId === "meta") {
                 const tokenText = String(payload.data?.text ?? "");
@@ -1328,7 +1967,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   subId,
                   { type: isDelegation ? "delegation_started" : "started", content: isDelegation ? `已委派给 ${payload.data?.name ?? subId}` : "已启动" }
                 );
-                if (isDelegation && avatarSessionId) {
+                if (isDelegation && avatarSessionId && !isGroupPane) {
                   const dlgName = String(payload.data?.name ?? "").trim();
                   const dlgAvatarId = typeof payload.data?.avatar_id === "string" ? payload.data.avatar_id.trim() : "";
                   const store = useAppStore.getState();
@@ -1463,6 +2102,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       cancelStreamRenderFrame();
       streamTextRef.current = "";
       streamCommittedRef.current = false;
+      setGroupTyping({});
       setStreaming(false);
       setStreamedAssistantText("");
       setStreamingModel(null);
@@ -1504,12 +2144,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     void initSession(inherit, prevSessionId);
   };
 
-  const maxTaskspaceWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.45)) : 520;
+  const maxTaskspaceWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.4)) : 480;
   const minTaskspaceWidth = 220;
 
   useEffect(() => {
     setTaskspaceWidth((prev) => Math.min(maxTaskspaceWidth, Math.max(minTaskspaceWidth, prev)));
   }, [maxTaskspaceWidth]);
+
 
   useEffect(() => {
     try {
@@ -1518,6 +2159,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       // ignore storage access failures
     }
   }, [taskspaceWidth]);
+
 
   const startResizeTaskspace = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -1627,11 +2269,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           <div className="no-drag flex items-center gap-1">
             <button
               className={`rounded px-2 py-0.5 text-[11px] transition ${
-                pane.taskspacePanelOpen
+                workspacePanelOpen
                   ? "bg-surface-card-strong text-text-strong"
                   : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
               }`}
-              onClick={() => toggleTaskspacePanel(pane.id)}
+              onClick={() => cycleSidePanel(pane.id, "workspace")}
               title="切换工作区面板"
             >
               工作区
@@ -1698,6 +2340,34 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               </button>
             </div>
           ) : null}
+          {quotingMessage ? (
+            <div className="mb-1 flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-1 text-xs text-text-muted">
+              <span className="truncate">
+                引用 {quotingMessage.avatarName || quotingMessage.agentId || quotingMessage.role}: {quotingMessage.content.slice(0, 80)}
+              </span>
+              <button className="rounded px-1 hover:bg-surface-hover" onClick={() => setQuotingMessage(null)}>取消</button>
+            </div>
+          ) : null}
+          {selectedMessageIds.size > 0 ? (
+            <div className="mb-1 flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-1 text-xs text-text-muted">
+              <span>已多选 {selectedMessageIds.size} 条</span>
+              <button className="rounded px-1 hover:bg-surface-hover" onClick={() => void forwardSelectedMessages()}>转发</button>
+              <button
+                className="rounded px-1 hover:bg-surface-hover"
+                onClick={async () => {
+                  const merged = selectedMessages.map((m) => m.content).join("\n\n");
+                  try {
+                    await navigator.clipboard.writeText(merged);
+                  } catch {
+                    // ignore clipboard failures
+                  }
+                }}
+              >
+                复制
+              </button>
+              <button className="rounded px-1 hover:bg-surface-hover" onClick={() => setSelectedMessageIds(new Set())}>取消</button>
+            </div>
+          ) : null}
           <div className="rounded-2xl border border-border bg-surface-card transition-colors focus-within:border-border-strong">
             {attachmentEntries.length > 0 ? (
               <div className="flex flex-wrap gap-1.5 px-3 pt-3">
@@ -1753,6 +2423,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     setInput((prev) => prev.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`));
                     setAtOpen(false);
                     setAtQuery("");
+                    if (first.kind === "avatar") {
+                      return;
+                    }
                     if (first.kind === "taskspace") {
                       void addTaskspaceAliasReference(first.taskspaceId, first.alias, first.path);
                     } else {
@@ -1822,18 +2495,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             <div className="mt-1 max-h-28 overflow-y-auto rounded border border-border bg-surface-panel p-1 backdrop-blur-xl">
               {atCandidates.length === 0 ? (
                 <div className="px-2 py-1 text-[11px] text-text-faint">
-                  未找到匹配文件/文件夹{atQuery ? `: ${atQuery}` : ""}
+                  未找到匹配对象{atQuery ? `: ${atQuery}` : ""}
                 </div>
               ) : (
                 atCandidates.map((item) => (
                   <button
-                    key={`${item.kind}:${item.taskspaceId}:${item.path}`}
+                    key={
+                      item.kind === "avatar"
+                        ? `avatar:${item.avatarId}`
+                        : `${item.kind}:${item.taskspaceId}:${item.path}`
+                    }
                     className="block w-full rounded px-2 py-1 text-left text-[11px] text-text-muted hover:bg-surface-hover"
                     onClick={() => {
                       const mention = `@${item.label} `;
                       setInput((prev) => prev.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`));
                       setAtOpen(false);
                       setAtQuery("");
+                      if (item.kind === "avatar") {
+                        return;
+                      }
                       if (item.kind === "taskspace") {
                         void addTaskspaceAliasReference(item.taskspaceId, item.alias, item.path);
                       } else {
@@ -1841,7 +2521,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                       }
                     }}
                   >
-                    {item.kind === "taskspace" ? `📁 ${item.label} → ${item.path}` : item.path}
+                    {item.kind === "avatar"
+                      ? `👤 ${item.label}${item.role ? ` · ${item.role}` : ""}`
+                      : item.kind === "taskspace"
+                      ? `📁 ${item.label} → ${item.path}`
+                      : item.path}
                   </button>
                 ))
               )}
@@ -1853,10 +2537,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         </div>
       </div>
 
-      <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}`}>
-        <SessionHistoryPanel pane={pane} />
-      </HistoryPanelBoundary>
-      {pane.taskspacePanelOpen ? (
+      {workspacePanelOpen ? (
         <div className="relative h-full shrink-0 border-l border-border" style={{ width: taskspaceWidth }}>
           <div
             className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
@@ -1866,34 +2547,73 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
             <div className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90" style={{ borderColor: "var(--ui-accent-divider-hover)" }} />
           </div>
-          <WorkspacePanel
-            sessionId={pane.sessionId}
-            activeTaskspaceId={pane.activeTaskspaceId}
-            onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
-            autoRefreshKey={taskspaceAutoRefreshKey}
-            onPickFileForReference={(path) => {
-              if (!pane.activeTaskspaceId) return;
-              void addContextFile(pane.activeTaskspaceId, path);
-              setInput((prev) => `${prev}${prev.endsWith(" ") || !prev ? "" : " "}@${path.split("/").pop() || path} `);
-            }}
-            subAgents={paneSubAgents}
-            selectedSubAgent={selectedSubAgent}
-            onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
-            onRetry={(agentId) => void retryPaneSubAgent(agentId)}
-            onChat={(agentId) => {
-              const sub = paneSubAgents.find((item) => item.id === agentId);
-              const isDelegation = agentId.startsWith("dlg-") || !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
-              if (isDelegation) {
-                void openDelegatedAvatarSession(agentId);
-                return;
-              }
-              setSelectedSubAgent(agentId);
-            }}
-            onSelect={(agentId) => setSelectedSubAgent(agentId)}
-            onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
-          />
+          {isGroupPane ? (
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="h-[260px] shrink-0 border-b border-border">
+                <GroupMembersSidePanel groupId={groupChatId} avatarList={avatars} />
+              </div>
+              <div className="min-h-0 flex-1">
+                <WorkspacePanel
+                  sessionId={pane.sessionId}
+                  activeTaskspaceId={pane.activeTaskspaceId}
+                  onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
+                  autoRefreshKey={taskspaceAutoRefreshKey}
+                  onPickFileForReference={(path) => {
+                    if (!pane.activeTaskspaceId) return;
+                    void addContextFile(pane.activeTaskspaceId, path);
+                    setInput((prev) => `${prev}${prev.endsWith(" ") || !prev ? "" : " "}@${path.split("/").pop() || path} `);
+                  }}
+                  subAgents={paneSubAgents}
+                  selectedSubAgent={selectedSubAgent}
+                  onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
+                  onRetry={(agentId) => void retryPaneSubAgent(agentId)}
+                  onChat={(agentId) => {
+                    const sub = paneSubAgents.find((item) => item.id === agentId);
+                    const isDelegation = agentId.startsWith("dlg-") || !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
+                    if (isDelegation) {
+                      void openDelegatedAvatarSession(agentId);
+                      return;
+                    }
+                    setSelectedSubAgent(agentId);
+                  }}
+                  onSelect={(agentId) => setSelectedSubAgent(agentId)}
+                  onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
+                />
+              </div>
+            </div>
+          ) : (
+            <WorkspacePanel
+              sessionId={pane.sessionId}
+              activeTaskspaceId={pane.activeTaskspaceId}
+              onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
+              autoRefreshKey={taskspaceAutoRefreshKey}
+              onPickFileForReference={(path) => {
+                if (!pane.activeTaskspaceId) return;
+                void addContextFile(pane.activeTaskspaceId, path);
+                setInput((prev) => `${prev}${prev.endsWith(" ") || !prev ? "" : " "}@${path.split("/").pop() || path} `);
+              }}
+              subAgents={paneSubAgents}
+              selectedSubAgent={selectedSubAgent}
+              onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
+              onRetry={(agentId) => void retryPaneSubAgent(agentId)}
+              onChat={(agentId) => {
+                const sub = paneSubAgents.find((item) => item.id === agentId);
+                const isDelegation = agentId.startsWith("dlg-") || !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
+                if (isDelegation) {
+                  void openDelegatedAvatarSession(agentId);
+                  return;
+                }
+                setSelectedSubAgent(agentId);
+              }}
+              onSelect={(agentId) => setSelectedSubAgent(agentId)}
+              onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
+            />
+          )}
         </div>
       ) : null}
+      <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}`}>
+        <SessionHistoryPanel pane={pane} />
+      </HistoryPanelBoundary>
     </div>
   );
 }

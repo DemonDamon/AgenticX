@@ -21,6 +21,8 @@ type PersistedPaneState = {
   historyOpen: boolean;
   contextInherited: boolean;
   taskspacePanelOpen: boolean;
+  membersPanelOpen: boolean;
+  sidePanelTab: "workspace" | "members";
   activeTaskspaceId: string | null;
 };
 
@@ -85,6 +87,8 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         historyOpen: Boolean(row.historyOpen),
         contextInherited: Boolean(row.contextInherited),
         taskspacePanelOpen: Boolean(row.taskspacePanelOpen),
+        membersPanelOpen: Boolean(row.membersPanelOpen),
+        sidePanelTab: row.sidePanelTab === "members" ? ("members" as const) : ("workspace" as const),
         activeTaskspaceId: row.activeTaskspaceId == null ? null : String(row.activeTaskspaceId),
       };
     })
@@ -278,7 +282,12 @@ export function App() {
                 ? saved.activePaneId
                 : hydratedPanes[0].id;
             useAppStore.setState({
-              panes: hydratedPanes.map((pane) => ({ ...pane, messages: [] })),
+              panes: hydratedPanes.map((pane) => ({
+                ...pane,
+                messages: [],
+                membersPanelOpen: pane.membersPanelOpen ?? false,
+                sidePanelTab: pane.sidePanelTab ?? "workspace",
+              })),
               activePaneId: nextActivePaneId,
             });
             const metaPane = hydratedPanes.find((pane) => pane.id === "pane-meta");
@@ -360,6 +369,8 @@ export function App() {
         historyOpen: pane.historyOpen,
         contextInherited: pane.contextInherited,
         taskspacePanelOpen: pane.taskspacePanelOpen,
+        membersPanelOpen: pane.membersPanelOpen,
+        sidePanelTab: pane.sidePanelTab,
         activeTaskspaceId: pane.activeTaskspaceId,
       })),
     };

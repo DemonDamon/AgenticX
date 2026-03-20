@@ -529,8 +529,12 @@ class SessionManager:
                     "role": role,
                     "content": str(item.get("content", "")),
                     "agent_id": str(item.get("agent_id", "meta") or "meta"),
+                    "avatar_name": str(item.get("avatar_name", "") or ""),
+                    "avatar_url": str(item.get("avatar_url", "") or ""),
                     "provider": str(item.get("provider", "") or ""),
                     "model": str(item.get("model", "") or ""),
+                    "quoted_message_id": str(item.get("quoted_message_id", "") or ""),
+                    "quoted_content": str(item.get("quoted_content", "") or ""),
                 }
             )
         return normalized

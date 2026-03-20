@@ -6,6 +6,8 @@ Author: Damon Li
 
 from __future__ import annotations
 
+from typing import Any
+
 from agenticx.cli.studio import StudioSession
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.workspace.loader import load_workspace_context
@@ -59,16 +61,25 @@ def _build_todo_context(session: StudioSession) -> str:
     return f"### Todo（当前会话）\n{rendered}\n"
 
 
-def _build_avatars_context() -> str:
+def _build_avatars_context(*, allowed_avatar_ids: set[str] | None = None) -> str:
+    """Build Avatars block for Meta-Agent. When allowed_avatar_ids is set (group chat), only those rows."""
     try:
         from agenticx.avatar.registry import AvatarRegistry
         registry = AvatarRegistry()
         avatars = registry.list_avatars()
     except Exception:
         avatars = []
+    if allowed_avatar_ids is not None:
+        allowed = {str(x).strip() for x in allowed_avatar_ids if str(x).strip()}
+        avatars = [a for a in avatars if getattr(a, "id", "") in allowed]
+        title = f"### 本群成员 ({len(avatars)})"
+        empty_note = "- (本群尚未配置有效成员，请用户在群聊设置中勾选分身)\n"
+    else:
+        title = f"### Avatars ({len(avatars)})"
+        empty_note = "- (no avatars configured)\n"
     if not avatars:
-        return "### Avatars (0)\n- (no avatars configured)\n"
-    lines = [f"### Avatars ({len(avatars)})"]
+        return f"{title}\n{empty_note}"
+    lines = [title]
     for avatar in avatars:
         lines.append(f"- {avatar.name} (id={avatar.id}): {avatar.role or 'general'}")
     return "\n".join(lines) + "\n"
@@ -288,13 +299,21 @@ def build_meta_agent_system_prompt(
     mode: str = "interactive",
     taskspaces: list[dict[str, str]] | None = None,
     avatar_context: dict[str, str] | None = None,
+    group_chat: dict[str, Any] | None = None,
 ) -> str:
     workspace_context = _build_workspace_context_block()
     memory_recall = _build_memory_recall_context(session)
     active_subagents = _build_active_subagents_context(session)
     skills_context = _build_skills_context()
     mcp_context = _build_mcps_context(session)
-    avatars_context = _build_avatars_context()
+    group_allowed: set[str] | None = None
+    group_name = ""
+    if group_chat and isinstance(group_chat, dict):
+        raw_ids = group_chat.get("avatar_ids")
+        if isinstance(raw_ids, list):
+            group_allowed = {str(x).strip() for x in raw_ids if str(x).strip()}
+        group_name = str(group_chat.get("name", "") or "").strip()
+    avatars_context = _build_avatars_context(allowed_avatar_ids=group_allowed)
     todo_context = _build_todo_context(session)
     taskspaces_context = _build_taskspaces_context(taskspaces)
     lsp_context = _build_lsp_context()
@@ -313,6 +332,16 @@ def build_meta_agent_system_prompt(
             lines.append(f"- Persona: {avatar_system_prompt}")
         lines.append("当用户问“你是谁”时，必须基于此分身身份作答，不得自称 Meta-Agent。")
         avatar_block = "\n".join(lines) + "\n\n"
+    group_block = ""
+    if group_allowed is not None:
+        gn = group_name or "（未命名群聊）"
+        group_block = (
+            "## 群聊模式（必须遵守）\n"
+            f"- 当前会话是群聊「{gn}」。\n"
+            "- 下文「本群成员」列表是**唯一**可信的群内分身集合；用户问「有谁/成员/群里都有谁/在场有哪些分身」时，只能列举该列表中的成员。\n"
+            "- **禁止**把未出现在「本群成员」中的其他已注册分身算作本群成员；全局注册表若更大，在本会话中视为无关。\n"
+            "- `delegate_to_avatar` / `chat_with_avatar` 仅针对「本群成员」中的 id；勿对群外分身做群内调度表述。\n\n"
+        )
     identity_line = (
         f"你是 AgenticX Desktop 的分身智能体「{avatar_name}」。\n"
         if has_avatar_context
@@ -323,9 +352,15 @@ def build_meta_agent_system_prompt(
         if mode != "auto"
         else "## 当前工作模式\n- auto：面向非技术用户，优先自动求解并输出简洁结论，减少术语与实现细节。\n\n"
     )
+    group_collab_line = (
+        "- 群聊模式下身份类问题仅基于「本群成员」列表；不得混入群外分身。\n"
+        if group_allowed is not None
+        else ""
+    )
     return (
         f"{workspace_context}\n"
         f"{avatar_block}"
+        f"{group_block}"
         f"{identity_line}"
         "你既能直接使用工具（bash_exec、file_read、file_write、file_edit 等），也能调度子智能体。\n"
         "- 简单/快速任务（查目录、读文件、执行单条命令、回答事实性问题）：直接使用工具完成，不要委派子智能体。\n"
@@ -399,6 +434,7 @@ def build_meta_agent_system_prompt(
         f"{mcp_context}\n"
         f"{avatars_context}\n"
         "## 分身协作\n"
+        f"{group_collab_line}"
         "- 当用户问“某分身是谁/角色是什么/ID 是什么”等身份类问题时，直接基于 Avatars 列表回答，禁止调用 `delegate_to_avatar`。\n"
         "- 身份类或能力类说明场景中，不要在正文输出可执行的工具调用示例（如 `delegate_to_avatar(...)`），避免误触发。\n"
         "- 查询分身 workspace 已落盘信息（identity/memory/task 线索）时，优先使用 `read_avatar_workspace`，避免无意义创建子智能体。\n"

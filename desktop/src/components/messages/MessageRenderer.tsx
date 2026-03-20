@@ -14,6 +14,13 @@ type Props = {
   onRevealPath?: (path: string) => void;
   assistantName?: string;
   assistantAvatarUrl?: string;
+  onCopyMessage?: (message: Message) => void;
+  onQuoteMessage?: (message: Message) => void;
+  onFavoriteMessage?: (message: Message) => void;
+  onToggleSelectMessage?: (message: Message) => void;
+  onForwardMessage?: (message: Message) => void;
+  selectable?: boolean;
+  selected?: boolean;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -25,7 +32,20 @@ function isTodoUpdateToolMessage(content: string): boolean {
   return content.includes("Todos have been modified successfully.");
 }
 
-export function MessageRenderer({ message, assistantBadge, onRevealPath, assistantName, assistantAvatarUrl }: Props) {
+export function MessageRenderer({
+  message,
+  assistantBadge,
+  onRevealPath,
+  assistantName,
+  assistantAvatarUrl,
+  onCopyMessage,
+  onQuoteMessage,
+  onFavoriteMessage,
+  onToggleSelectMessage,
+  onForwardMessage,
+  selectable,
+  selected,
+}: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   if (message.role === "user" || message.role === "assistant") {
     if (chatStyle === "terminal") return <TerminalLine message={message} badge={assistantBadge} />;
@@ -34,8 +54,15 @@ export function MessageRenderer({ message, assistantBadge, onRevealPath, assista
       <ImBubble
         message={message}
         badge={assistantBadge}
-        assistantName={assistantName}
-        assistantAvatarUrl={assistantAvatarUrl}
+        assistantName={message.avatarName || assistantName}
+        assistantAvatarUrl={message.avatarUrl || assistantAvatarUrl}
+        onCopyMessage={onCopyMessage}
+        onQuoteMessage={onQuoteMessage}
+        onFavoriteMessage={onFavoriteMessage}
+        onToggleSelectMessage={onToggleSelectMessage}
+        onForwardMessage={onForwardMessage}
+        selectable={selectable}
+        selected={selected}
       />
     );
   }
