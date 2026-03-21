@@ -576,6 +576,7 @@ def create_studio_app() -> FastAPI:
                         llm_factory=llm_factory,
                         max_tool_rounds=_resolve_max_tool_rounds(),
                         meta_leader_display_name=meta_leader_label,
+                        confirm_gate_factory=lambda agent_id: managed.get_confirm_gate(agent_id),
                     )
                     quoted_content = str(payload.quoted_content or "")
                     quoted_message_id = str(payload.quoted_message_id or "")

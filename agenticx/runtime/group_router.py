@@ -123,12 +123,14 @@ class GroupChatRouter:
         llm_factory: Callable[[str | None, str | None], Any],
         max_tool_rounds: int,
         meta_leader_display_name: str | None = None,
+        confirm_gate_factory: Callable[[str], "AsyncConfirmGate"] | None = None,
     ) -> None:
         self.avatar_registry = avatar_registry
         self.llm_factory = llm_factory
         self.max_tool_rounds = max(1, int(max_tool_rounds))
         label = str(meta_leader_display_name or "").strip()
         self._meta_leader_label = label or "Machi"
+        self._confirm_gate_factory = confirm_gate_factory
 
     @staticmethod
     def _typing_event(agent_id: str, avatar_name: str) -> GroupReply:
@@ -723,9 +725,14 @@ class GroupChatRouter:
         else:
             local_user_input = user_input
 
+        confirm_gate = (
+            self._confirm_gate_factory(avatar_id)
+            if self._confirm_gate_factory is not None
+            else AsyncConfirmGate()
+        )
         runtime = AgentRuntime(
             llm,
-            AsyncConfirmGate(),
+            confirm_gate,
             max_tool_rounds=self.max_tool_rounds,
         )
         if progress_queue is not None:
