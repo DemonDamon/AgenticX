@@ -278,6 +278,35 @@ def create_studio_app() -> FastAPI:
                 break
         return normalized
 
+    def _history_attachments_from_image_inputs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Persist image rows for chat_history / messages.json so Desktop can reload thumbnails."""
+        out: list[dict[str, Any]] = []
+        for im in items:
+            data_url = str(im.get("data_url", "")).strip()
+            if not data_url.startswith("data:image/"):
+                continue
+            mime = str(im.get("mime_type", "") or "").strip()
+            if not mime and data_url.startswith("data:"):
+                semi = data_url.find(";")
+                if semi > 5:
+                    mime = data_url[5:semi]
+            if not mime:
+                mime = "image/png"
+            name = str(im.get("name", "") or "").strip() or "image"
+            try:
+                size_val = int(im.get("size", 0) or 0)
+            except (TypeError, ValueError):
+                size_val = 0
+            out.append(
+                {
+                    "name": name,
+                    "mime_type": mime,
+                    "size": size_val,
+                    "data_url": data_url,
+                }
+            )
+        return out
+
     @app.get("/api/session", response_model=SessionState)
     async def get_or_create_session(
         session_id: str | None = Query(default=None),
@@ -746,6 +775,7 @@ def create_studio_app() -> FastAPI:
                             group_chat=_meta_group_chat_payload(managed),
                         )
                     user_message_content: Any | None = None
+                    history_user_attachments: list[dict[str, Any]] | None = None
                     if image_inputs:
                         content_blocks: list[dict[str, Any]] = [{"type": "text", "text": effective_input}]
                         for image in image_inputs:
@@ -756,6 +786,7 @@ def create_studio_app() -> FastAPI:
                                 }
                             )
                         user_message_content = content_blocks
+                        history_user_attachments = _history_attachments_from_image_inputs(image_inputs)
                     async for event in runtime.run_turn(
                         effective_input,
                         session,
@@ -764,6 +795,7 @@ def create_studio_app() -> FastAPI:
                         tools=effective_tools,
                         system_prompt=sys_prompt,
                         user_message_content=user_message_content,
+                        history_user_attachments=history_user_attachments,
                     ):
                         await event_queue.put(event)
                     await event_queue.put(None)
