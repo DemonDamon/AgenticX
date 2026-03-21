@@ -33,6 +33,8 @@ class ChatRequest(BaseModel):
     quoted_content: Optional[str] = None
     # Meta-Agent display name when acting as group leader (UI bubble title, not system role text).
     meta_leader_display_name: Optional[str] = None
+    # Human user's display name in group chat (shown in dialogue context; optional).
+    user_display_name: Optional[str] = None
 
 
 class ConfirmResponse(BaseModel):
