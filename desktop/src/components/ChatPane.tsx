@@ -1,6 +1,13 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { useAppStore, type Avatar, type ChatPane as ChatPaneState, type Message, type MessageAttachment } from "../store";
+import {
+  useAppStore,
+  type Avatar,
+  type ChatPane as ChatPaneState,
+  type Message,
+  type MessageAttachment,
+  type PendingConfirm,
+} from "../store";
 import { startRecording, stopRecording } from "../voice/stt";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { WorkspacePanel } from "./WorkspacePanel";
@@ -1104,6 +1111,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const avatars = useAppStore((s) => s.avatars);
   const groups = useAppStore((s) => s.groups);
   const chatStyle = useAppStore((s) => s.chatStyle);
+  const userDisplayName = useAppStore((s) => s.userDisplayName);
+  const userBubbleLabel = useMemo(() => userDisplayName.trim() || "我", [userDisplayName]);
   const isGroupPane = Boolean(pane?.avatarId?.startsWith("group:"));
   const groupChatId = isGroupPane && pane?.avatarId ? pane.avatarId.slice("group:".length) : "";
   const activeGroup = useMemo(
@@ -1143,6 +1152,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [atQuery, setAtQuery] = useState("");
   const [atCandidates, setAtCandidates] = useState<AtCandidate[]>([]);
   const [groupTyping, setGroupTyping] = useState<Record<string, string>>({});
+  const lastGroupProgressRef = useRef<Record<string, string>>({});
   const [quotingMessage, setQuotingMessage] = useState<Message | null>(null);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [forwardPickerOpen, setForwardPickerOpen] = useState(false);
@@ -1696,11 +1706,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           onRevealPath={(path) => void revealFileInTaskspace(path)}
           assistantName={paneAvatarMeta.name}
           assistantAvatarUrl={paneAvatarMeta.url}
+          userName={userBubbleLabel}
           onCopyMessage={copyMessage}
           onQuoteMessage={(msg) => setQuotingMessage(msg)}
           onFavoriteMessage={favoriteMessage}
           onForwardMessage={forwardOneMessage}
           onToggleSelectMessage={toggleSelectMessage}
+          onResolveInlineConfirm={(confirm, approved) => void resolveGroupInlineConfirm(confirm, approved)}
           selectable={selectedMessageIds.size > 0}
           selected={selectedMessageIds.has(message.id)}
         />
@@ -1733,7 +1745,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         )
       ) : null}
     </>
-  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, isGroupPane, paneAvatarMeta, revealFileInTaskspace, selectedMessageIds, streamedAssistantText, streaming, streamingModel, toggleSelectMessage, visibleMessages]);
+  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, isGroupPane, paneAvatarMeta, resolveGroupInlineConfirm, revealFileInTaskspace, selectedMessageIds, streamedAssistantText, streaming, streamingModel, toggleSelectMessage, userBubbleLabel, visibleMessages]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -1949,6 +1961,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         body.group_id = groupChatId;
         body.mentioned_avatar_ids = mentionedAvatarIds;
         body.meta_leader_display_name = metaLeaderDisplayName;
+        body.user_display_name = userBubbleLabel;
         if (quotingMessage) {
           body.quoted_message_id = quotingMessage.id;
           body.quoted_content = `${quotingMessage.avatarName || quotingMessage.agentId || quotingMessage.role}: ${quotingMessage.content}`;
@@ -1986,6 +1999,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         body: JSON.stringify(body),
         signal: abortController.signal,
       });
+      lastGroupProgressRef.current = {};
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
       const reader = resp.body?.getReader();
@@ -2010,6 +2024,64 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             if (payload.type === "group_typing") {
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
               setGroupTyping((prev) => ({ ...prev, [eventAgentId]: avatarName }));
+              continue;
+            }
+            if (payload.type === "group_progress") {
+              const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
+              const avatarUrl = String(payload.data?.avatar_url ?? "");
+              const progressText = String(payload.data?.content ?? "").trim();
+              setGroupTyping((prev) => ({ ...prev, [eventAgentId]: avatarName }));
+              if (!progressText) continue;
+              const prevText = lastGroupProgressRef.current[eventAgentId] ?? "";
+              if (prevText === progressText) continue;
+              lastGroupProgressRef.current[eventAgentId] = progressText;
+              addPaneMessage(
+                pane.id,
+                "tool",
+                `${avatarName}：${progressText}`,
+                eventAgentId,
+                activeProvider,
+                activeModel,
+                undefined,
+                { avatarName, avatarUrl: avatarUrl || undefined }
+              );
+              continue;
+            }
+            if (payload.type === "group_blocked") {
+              const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
+              const avatarUrl = String(payload.data?.avatar_url ?? "");
+              const blockedText = String(payload.data?.content ?? "").trim();
+              const requestId = String(payload.data?.confirm_request_id ?? "").trim();
+              setGroupTyping((prev) => {
+                const next = { ...prev };
+                delete next[eventAgentId];
+                return next;
+              });
+              if (!blockedText) continue;
+              const prevText = lastGroupProgressRef.current[eventAgentId] ?? "";
+              if (prevText === blockedText) continue;
+              lastGroupProgressRef.current[eventAgentId] = blockedText;
+              addPaneMessage(
+                pane.id,
+                "tool",
+                `${avatarName}：⏸ ${blockedText}`,
+                eventAgentId,
+                activeProvider,
+                activeModel,
+                undefined,
+                {
+                  avatarName,
+                  avatarUrl: avatarUrl || undefined,
+                  inlineConfirm: requestId
+                    ? {
+                        requestId,
+                        question: blockedText,
+                        agentId: eventAgentId,
+                        sessionId: requestSessionId,
+                      }
+                    : undefined,
+                }
+              );
               continue;
             }
             if (payload.type === "group_reply") {
@@ -2526,6 +2598,40 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       // confirm POST failure is non-fatal for UI
     }
   };
+
+  async function resolveGroupInlineConfirm(confirm: PendingConfirm, approved: boolean) {
+    if (!apiBase || !apiToken || !pane.sessionId) return;
+    const targetSessionId = (confirm.sessionId ?? pane.sessionId).trim() || pane.sessionId;
+    setPaneMessages(
+      pane.id,
+      visibleMessages.map((msg) => {
+        if (msg.inlineConfirm?.requestId !== confirm.requestId) return msg;
+        return { ...msg, inlineConfirm: undefined };
+      })
+    );
+    addPaneMessage(
+      pane.id,
+      "tool",
+      `${confirm.agentId}：${approved ? "确认通过，继续执行" : "确认拒绝，执行终止"}`,
+      confirm.agentId,
+      activeProvider,
+      activeModel
+    );
+    try {
+      await fetch(`${apiBase}/api/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({
+          session_id: targetSessionId,
+          request_id: confirm.requestId,
+          approved,
+          agent_id: confirm.agentId,
+        }),
+      });
+    } catch {
+      // confirm POST failure is non-fatal for UI
+    }
+  }
 
   return (
     <div
