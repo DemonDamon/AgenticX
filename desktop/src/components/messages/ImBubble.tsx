@@ -24,6 +24,22 @@ type Props = {
   selected?: boolean;
 };
 
+/** Cycling 1→3 dots for group-chat typing rows (name shown in header only). */
+function TypingDots() {
+  const [count, setCount] = useState(1);
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setCount((c) => (c >= 3 ? 1 : c + 1));
+    }, 400);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <span className="inline-block min-w-[1em] tabular-nums" aria-hidden>
+      {".".repeat(count)}
+    </span>
+  );
+}
+
 function Avatar({ label, imageUrl }: { label: string; imageUrl?: string }) {
   const char = label.slice(0, 1) || "?";
   if (imageUrl) {
@@ -66,6 +82,7 @@ export function ImBubble({
   const displayName = isUser ? (userName || "我") : (assistantName || "AI");
   const avatarUrl = isUser ? undefined : assistantAvatarUrl;
   const isStreaming = message.id === "__stream__";
+  const isGroupTyping = !isUser && typeof message.id === "string" && message.id.startsWith("typing-");
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
   const hasThinkTag = parsed?.hasReasoningTag ?? false;
   const bodyText = !isUser && hasThinkTag ? (parsed?.response ?? "") : message.content;
@@ -153,6 +170,11 @@ export function ImBubble({
                 ) : null}
                 {message.forwardedHistory ? (
                   <ForwardedHistoryCard history={message.forwardedHistory} onOpen={() => setForwardedModalOpen(true)} />
+                ) : isGroupTyping ? (
+                  <span className="inline-flex items-baseline gap-0.5" aria-live="polite" aria-label="正在输入">
+                    <span>正在输入</span>
+                    <TypingDots />
+                  </span>
                 ) : (
                   <>
                     {!isUser && isStreaming && (hasThinkTag || !hasBody) ? (
