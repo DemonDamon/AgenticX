@@ -13,6 +13,7 @@ import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { Toast } from "./ds/Toast";
 import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
 import { isKnownNonVisionChatModel } from "../utils/model-vision";
+import { attachmentsFromSessionRow } from "../utils/session-message-map";
 
 const NEW_TOPIC_PREF_KEY = "agx:newTopicInherit";
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
@@ -537,6 +538,8 @@ type LoadedSessionMessage = {
       timestamp?: number;
     }>;
   };
+  /** From messages.json / GET /api/session/messages */
+  attachments?: unknown;
 };
 
 function mapLoadedSessionMessage(item: LoadedSessionMessage, idPrefix: string, index: number): Message {
@@ -575,6 +578,7 @@ function mapLoadedSessionMessage(item: LoadedSessionMessage, idPrefix: string, i
             items: forwardedItems,
           }
         : undefined,
+    attachments: attachmentsFromSessionRow(item.attachments),
   };
 }
 
@@ -1201,8 +1205,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             const item = result.messages[idx];
             const role = String(item.role ?? "");
             const content = String(item.content ?? "").trim();
-            if (!content) continue;
-            const key = `${role}::${content.slice(0, 300)}`;
+            const rowAtts = attachmentsFromSessionRow(
+              (item as { attachments?: unknown }).attachments
+            );
+            if (!content && !rowAtts?.length) continue;
+            const attSig =
+              rowAtts?.length && rowAtts[0]?.dataUrl
+                ? rowAtts[0].dataUrl.slice(0, 72)
+                : "";
+            const key = `${role}::${content.slice(0, 300)}::${attSig}`;
             if (seen.has(key)) continue;
             seen.add(key);
             deduped.push(mapLoadedSessionMessage(item as LoadedSessionMessage, `dlgpoll-${pane.sessionId}`, idx));
@@ -2547,7 +2558,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           </div>
         </div>
 
-        <div ref={listRef} className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-3">
+        <div
+          ref={listRef}
+          className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-3"
+        >
           {!pane.sessionId ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-xs text-text-faint">
               <span className="animate-pulse">正在初始化会话...</span>
@@ -2565,6 +2579,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               {renderedMessages}
             </div>
           )}
+          <Toast
+            placement="inline-bottom-center"
+            variant="warning"
+            open={attachToastOpen}
+            message={VISION_UNSUPPORTED_TOAST}
+            onClose={() => setAttachToastOpen(false)}
+            timeoutMs={3200}
+          />
         </div>
 
         <div className="shrink-0 border-t border-border px-4 py-2.5">
@@ -2924,13 +2946,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           await executeForward(targetPayload, followUpNote);
           setSelectedMessageIds(new Set());
         }}
-      />
-      <Toast
-        variant="info"
-        open={attachToastOpen}
-        message={VISION_UNSUPPORTED_TOAST}
-        onClose={() => setAttachToastOpen(false)}
-        timeoutMs={3200}
       />
     </div>
   );
