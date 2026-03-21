@@ -34,7 +34,7 @@ from agenticx.runtime.loop_controller import LoopController
 from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS
 from agenticx.runtime.prompts.meta_agent import build_meta_agent_system_prompt
-from agenticx.runtime.group_router import GroupChatRouter, META_LEADER_AGENT_ID, META_LEADER_NAME
+from agenticx.runtime.group_router import GroupChatRouter, META_LEADER_AGENT_ID
 from agenticx.runtime.team_manager import AgentTeamManager
 from agenticx.studio.protocols import ChatRequest, ConfirmResponse, SessionState, SseEvent
 from agenticx.studio.session_manager import SessionManager
@@ -566,10 +566,12 @@ def create_studio_app() -> FastAPI:
                         provider_name=provider or session.provider_name,
                         model=model or session.model_name,
                     )
+                    meta_leader_label = str(getattr(payload, "meta_leader_display_name", None) or "").strip() or "Machi"
                     router = GroupChatRouter(
                         avatar_registry=avatar_registry,
                         llm_factory=llm_factory,
                         max_tool_rounds=_resolve_max_tool_rounds(),
+                        meta_leader_display_name=meta_leader_label,
                     )
                     mentioned_ids = list(payload.mentioned_avatar_ids or [])
                     quoted_content = str(payload.quoted_content or "")
@@ -591,7 +593,7 @@ def create_studio_app() -> FastAPI:
                             type="group_typing",
                             data={
                                 "agent_id": META_LEADER_AGENT_ID,
-                                "avatar_name": META_LEADER_NAME,
+                                "avatar_name": meta_leader_label,
                             },
                         )
                         yield f"data: {json.dumps(typing_evt.model_dump(), ensure_ascii=False)}\n\n"

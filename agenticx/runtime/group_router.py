@@ -61,10 +61,13 @@ class GroupChatRouter:
         avatar_registry: AvatarRegistry,
         llm_factory: Callable[[str | None, str | None], Any],
         max_tool_rounds: int,
+        meta_leader_display_name: str | None = None,
     ) -> None:
         self.avatar_registry = avatar_registry
         self.llm_factory = llm_factory
         self.max_tool_rounds = max(1, int(max_tool_rounds))
+        label = str(meta_leader_display_name or "").strip()
+        self._meta_leader_label = label or "Machi"
 
     def pick_targets(
         self,
@@ -305,13 +308,13 @@ class GroupChatRouter:
             final_text = "我先给出当前可确认的进展：暂无足够信息，请指明想看的模块或成员。"
         context.append_agent(
             agent_id=META_LEADER_AGENT_ID,
-            agent_name=META_LEADER_NAME,
+            agent_name=self._meta_leader_label,
             text=final_text,
             avatar_url="",
         )
         return GroupReply(
             agent_id=META_LEADER_AGENT_ID,
-            avatar_name=META_LEADER_NAME,
+            avatar_name=self._meta_leader_label,
             avatar_url="",
             content=final_text,
             skipped=False,
@@ -332,7 +335,7 @@ class GroupChatRouter:
         force_reply: bool,
     ) -> GroupReply:
         if avatar_id == META_LEADER_AGENT_ID:
-            avatar_name = META_LEADER_NAME
+            avatar_name = self._meta_leader_label
             avatar_role = "Group Leader"
             avatar_prompt = (
                 "你是群聊组长。优先给出高信号、可执行的方案；"
@@ -534,13 +537,13 @@ class GroupChatRouter:
         nudge_text = f"@{nudge_name} 团长刚才的问题需要你来回答，请直接给出进度和下一步。"
         context.append_agent(
             agent_id=META_LEADER_AGENT_ID,
-            agent_name=META_LEADER_NAME,
+            agent_name=self._meta_leader_label,
             text=nudge_text,
             avatar_url="",
         )
         yield GroupReply(
             agent_id=META_LEADER_AGENT_ID,
-            avatar_name=META_LEADER_NAME,
+            avatar_name=self._meta_leader_label,
             avatar_url="",
             content=nudge_text,
             skipped=False,
