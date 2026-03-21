@@ -10,8 +10,11 @@ import { ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
+import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
 
 const NEW_TOPIC_PREF_KEY = "agx:newTopicInherit";
+/** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
+const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
 const FALLBACK_PANE: ChatPaneState = {
   id: "fallback-pane",
   avatarId: null,
@@ -1824,9 +1827,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const sendChat = async (userText: string) => {
     const text = userText.trim();
-    if (!text || !apiBase || !pane.sessionId) return;
+    const hasReadyAttachments = readyAttachments.length > 0;
+    if ((!text && !hasReadyAttachments) || !apiBase || !pane.sessionId) return;
     if (streaming) return;
     const requestSessionId = pane.sessionId;
+    const messageText = text || ATTACHMENT_ONLY_USER_PROMPT;
     const userAttachments: MessageAttachment[] = readyAttachments.map((file) => ({
       name: file.name,
       mimeType: file.mimeType,
@@ -1854,7 +1859,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       addPaneMessage(
         pane.id,
         "user",
-        text,
+        messageText,
         "meta",
         undefined,
         undefined,
@@ -1867,8 +1872,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           : undefined
       );
     } else {
-      addSubAgentEvent(targetAgentId, { type: "user", content: text });
-      addPaneMessage(pane.id, "tool", `🗣 发送给 ${targetAgentId}: ${text}`, "meta");
+      addSubAgentEvent(targetAgentId, { type: "user", content: messageText });
+      addPaneMessage(pane.id, "tool", `🗣 发送给 ${targetAgentId}: ${messageText}`, "meta");
     }
     setInput("");
     setQuotingMessage(null);
@@ -1898,7 +1903,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     };
 
     try {
-      const body: Record<string, unknown> = { session_id: requestSessionId, user_input: text };
+      const body: Record<string, unknown> = { session_id: requestSessionId, user_input: messageText };
       if (activeProvider) body.provider = activeProvider;
       if (activeModel) body.model = activeModel;
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
@@ -2639,6 +2644,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onBlur={() => {
                 imeComposingRef.current = false;
               }}
+              onPaste={(e) => {
+                const dt = e.clipboardData;
+                const raw = extractClipboardImageFiles(dt);
+                if (raw.length === 0) return;
+                e.preventDefault();
+                const files = withClipboardImageNames(raw);
+                const plain = dt?.getData("text/plain") ?? "";
+                if (plain) {
+                  setInput((prev) => {
+                    const next = plain.replace(/\r\n/g, "\n");
+                    if (!prev) return next;
+                    const sep = prev.endsWith("\n") || next.startsWith("\n") ? "" : "\n";
+                    return `${prev}${sep}${next}`;
+                  });
+                }
+                for (const file of files) {
+                  const key = `${file.name}:${file.size}:${file.lastModified}`;
+                  parseLocalFile(file, key);
+                }
+              }}
               onKeyDown={(e) => {
                 const isImeComposing =
                   e.nativeEvent.isComposing ||
@@ -2718,7 +2743,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 </button>
               </div>
               <ActionCircleButton
-                hasInput={!!input.trim() && !!pane.sessionId}
+                hasInput={!!pane.sessionId && (!!input.trim() || readyAttachments.length > 0)}
                 streaming={streaming}
                 recording={recording}
                 onSend={() => void sendChat(input)}
