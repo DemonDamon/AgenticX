@@ -256,11 +256,26 @@ async function startStudioServe(): Promise<void> {
   const cmd = `agx serve --host 127.0.0.1 --port ${String(apiPort)}`;
   const desktopHome = os.homedir();
   // Use login shell to inherit user's PATH (conda/pyenv/etc) in packaged app
+  // Augment PATH with common conda/pyenv/local bin dirs so packaged .app
+  // can find `agx` even without inheriting the user's interactive shell PATH.
+  const extraPaths = [
+    "/opt/miniconda3/bin",
+    "/opt/miniconda3/condabin",
+    `${desktopHome}/miniconda3/bin`,
+    `${desktopHome}/opt/miniconda3/bin`,
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    `${desktopHome}/.local/bin`,
+    `${desktopHome}/bin`,
+  ].join(":");
+  const augmentedPath = `${extraPaths}:${process.env.PATH ?? "/usr/bin:/bin"}`;
+
   serveProcess = spawn("/bin/zsh", ["-l", "-c", cmd], {
     cwd: desktopHome,
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
+      PATH: augmentedPath,
       AGX_DESKTOP_TOKEN: apiToken,
       AGX_WORKSPACE_ROOT: desktopHome,
       AGX_DESKTOP_UNRESTRICTED_FS: "1",
@@ -461,7 +476,7 @@ function createTray(): void {
       mainWindow.focus();
     }
   });
-  tray.setToolTip("AgenticX Desktop");
+  tray.setToolTip("Machi");
 }
 
 function registerIpc(): void {
@@ -1215,6 +1230,8 @@ function registerIpc(): void {
     return { ok: true };
   });
 }
+
+app.setName("Machi");
 
 app.whenReady().then(async () => {
   try {
