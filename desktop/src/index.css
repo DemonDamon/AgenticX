@@ -63,6 +63,32 @@ body {
 .msg-content h2 { @apply text-sm; }
 .msg-content h3 { @apply text-xs; }
 
+/* GFM tables (react-markdown + remark-gfm) — default UA styles are invisible on dark bubbles */
+.msg-content table {
+  border-collapse: collapse;
+  width: 100%;
+  max-width: 100%;
+  margin: 0.5em 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+.msg-content th,
+.msg-content td {
+  border: 1px solid var(--border-subtle);
+  padding: 0.4em 0.55em;
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+}
+.msg-content thead th {
+  background: color-mix(in srgb, var(--surface-card) 70%, transparent);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.msg-content tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--surface-hover) 25%, transparent);
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
