@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { useAppStore, type ChatPane, type Message } from "../store";
+import { attachmentsFromSessionRow } from "../utils/session-message-map";
 
 function timeAgo(ts: number): string {
   const diff = Date.now() / 1000 - ts;
@@ -182,6 +183,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
           quotedMessageId: item.quoted_message_id,
           quotedContent: item.quoted_content,
           timestamp: typeof item.timestamp === "number" ? item.timestamp : undefined,
+          attachments: attachmentsFromSessionRow(item.attachments),
           forwardedHistory: item.forwarded_history
             ? {
                 title: String(item.forwarded_history.title || "").trim() || "聊天记录",

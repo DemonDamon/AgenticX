@@ -130,6 +130,7 @@ declare global {
           quoted_message_id?: string;
           quoted_content?: string;
           timestamp?: number;
+          attachments?: Array<{ name?: string; mime_type?: string; size?: number; data_url?: string }>;
           forwarded_history?: ForwardedHistoryCard;
         }>;
         error?: string;

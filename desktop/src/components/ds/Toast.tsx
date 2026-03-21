@@ -1,27 +1,36 @@
 import { useEffect } from "react";
 
+export type ToastPlacement = "fixed-bottom-right" | "inline-center" | "inline-bottom-center";
+
 type Props = {
   open: boolean;
   message: string;
   onClose: () => void;
   timeoutMs?: number;
-  /** Info row with icon (Cherry-style notice). */
-  variant?: "default" | "info";
+  /** Warning row with yellow exclamation (model / attach notices). */
+  variant?: "default" | "warning";
+  placement?: ToastPlacement;
 };
 
-function InfoIcon() {
+function WarningIcon() {
   return (
     <span
-      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
-      style={{ background: "var(--ui-btn-primary-bg, #2563eb)" }}
+      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 text-[13px] font-bold leading-none text-amber-950 shadow-sm"
       aria-hidden
     >
-      i
+      !
     </span>
   );
 }
 
-export function Toast({ open, message, onClose, timeoutMs = 2600, variant = "default" }: Props) {
+export function Toast({
+  open,
+  message,
+  onClose,
+  timeoutMs = 2600,
+  variant = "default",
+  placement = "fixed-bottom-right",
+}: Props) {
   useEffect(() => {
     if (!open) return;
     const timer = window.setTimeout(onClose, timeoutMs);
@@ -29,17 +38,37 @@ export function Toast({ open, message, onClose, timeoutMs = 2600, variant = "def
   }, [open, onClose, timeoutMs]);
 
   if (!open) return null;
+
+  const inner = (
+    <div
+      className={`rounded-lg border border-border bg-surface-card/95 shadow-lg backdrop-blur-sm ${
+        variant === "warning" ? "flex max-w-[min(90%,20rem)] items-center gap-2 px-3 py-2.5" : "px-3 py-2"
+      } text-xs text-text-primary`}
+    >
+      {variant === "warning" ? <WarningIcon /> : null}
+      <span className={variant === "warning" ? "leading-snug" : ""}>{message}</span>
+    </div>
+  );
+
+  if (placement === "inline-center") {
+    return (
+      <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+        {inner}
+      </div>
+    );
+  }
+
+  if (placement === "inline-bottom-center") {
+    return (
+      <div className="pointer-events-none absolute inset-0 z-30 flex items-end justify-center px-2 pb-5 pt-0">
+        {inner}
+      </div>
+    );
+  }
+
   return (
     <div className="pointer-events-none fixed bottom-4 right-4 z-toast">
-      <div
-        className={`rounded-lg border border-border bg-surface-card shadow-lg ${
-          variant === "info" ? "flex max-w-[min(92vw,22rem)] items-start gap-2 px-3 py-2.5" : "px-3 py-2"
-        } text-xs text-text-primary`}
-      >
-        {variant === "info" ? <InfoIcon /> : null}
-        <span className={variant === "info" ? "pt-0.5 leading-snug" : ""}>{message}</span>
-      </div>
+      {inner}
     </div>
   );
 }
-

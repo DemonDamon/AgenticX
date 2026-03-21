@@ -9,6 +9,7 @@ import { QuickActions } from "./QuickActions";
 import { ShortcutHints } from "./ShortcutHints";
 import { createPhase1Registry } from "../core/command-registry";
 import { KeybindingsPanel } from "./KeybindingsPanel";
+import { attachmentsFromSessionRow } from "../utils/session-message-map";
 import { MessageRenderer } from "./messages/MessageRenderer";
 import { ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
@@ -443,7 +444,8 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               item.content,
               item.agent_id ?? "meta",
               item.provider,
-              item.model
+              item.model,
+              attachmentsFromSessionRow(item.attachments)
             );
           }
         }
