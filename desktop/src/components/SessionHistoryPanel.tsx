@@ -167,14 +167,38 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
     try {
       const result = await window.agenticxDesktop.loadSessionMessages(sessionId);
       if (result.ok && Array.isArray(result.messages)) {
-        const mapped: Message[] = result.messages.map((item) => ({
-          id: `${sessionId}-${item.id ?? Math.random().toString(16).slice(2)}`,
+        const mapped: Message[] = result.messages.map((item, index) => {
+          const storedId = item.id != null ? String(item.id).trim() : "";
+          const id = `${sessionId}-i${index}${storedId ? `-${storedId}` : ""}`;
+          return {
+          id,
           role: item.role,
           content: item.content,
           agentId: item.agent_id ?? "meta",
+          avatarName: item.avatar_name,
+          avatarUrl: item.avatar_url,
           provider: item.provider,
           model: item.model,
-        }));
+          quotedMessageId: item.quoted_message_id,
+          quotedContent: item.quoted_content,
+          timestamp: typeof item.timestamp === "number" ? item.timestamp : undefined,
+          forwardedHistory: item.forwarded_history
+            ? {
+                title: String(item.forwarded_history.title || "").trim() || "聊天记录",
+                sourceSession: String(item.forwarded_history.source_session || "").trim(),
+                items: Array.isArray(item.forwarded_history.items)
+                  ? item.forwarded_history.items.map((entry) => ({
+                      sender: String(entry.sender || "").trim() || "unknown",
+                      role: String(entry.role || "").trim() || "assistant",
+                      content: String(entry.content || ""),
+                      avatarUrl: String(entry.avatar_url || "").trim() || undefined,
+                      timestamp: typeof entry.timestamp === "number" ? entry.timestamp : undefined,
+                    }))
+                  : [],
+              }
+            : undefined,
+        };
+        });
         setPaneMessages(targetPaneId, mapped);
         return;
       }

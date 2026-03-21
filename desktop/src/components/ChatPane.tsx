@@ -9,6 +9,7 @@ import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
+import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 
 const NEW_TOPIC_PREF_KEY = "agx:newTopicInherit";
 const FALLBACK_PANE: ChatPaneState = {
@@ -507,6 +508,70 @@ type AttachedFile = {
   errorText?: string;
 };
 
+type LoadedSessionMessage = {
+  id?: string;
+  role: "user" | "assistant" | "tool";
+  content: string;
+  agent_id?: string;
+  avatar_name?: string;
+  avatar_url?: string;
+  provider?: string;
+  model?: string;
+  quoted_message_id?: string;
+  quoted_content?: string;
+  timestamp?: number;
+  forwarded_history?: {
+    title?: string;
+    source_session?: string;
+    items?: Array<{
+      sender?: string;
+      role?: string;
+      content?: string;
+      avatar_url?: string;
+      timestamp?: number;
+    }>;
+  };
+};
+
+function mapLoadedSessionMessage(item: LoadedSessionMessage, idPrefix: string, index: number): Message {
+  const forwarded = item.forwarded_history;
+  const forwardedItems = Array.isArray(forwarded?.items)
+    ? forwarded.items
+        .filter((entry) => entry && typeof entry === "object")
+        .map((entry) => ({
+          sender: String(entry.sender || "").trim() || "unknown",
+          role: String(entry.role || "").trim() || "assistant",
+          content: String(entry.content || ""),
+          avatarUrl: String(entry.avatar_url || "").trim() || undefined,
+          timestamp: typeof entry.timestamp === "number" ? entry.timestamp : undefined,
+        }))
+    : [];
+  const storedId = item.id != null ? String(item.id).trim() : "";
+  // Must be unique per row: backend may send "" or duplicate ids; empty string would collapse many messages into one id.
+  const id = `${idPrefix}-i${index}${storedId ? `-${storedId}` : ""}`;
+  return {
+    id,
+    role: item.role,
+    content: item.content,
+    agentId: item.agent_id ?? "meta",
+    avatarName: item.avatar_name,
+    avatarUrl: item.avatar_url,
+    provider: item.provider,
+    model: item.model,
+    quotedMessageId: item.quoted_message_id,
+    quotedContent: item.quoted_content,
+    timestamp: typeof item.timestamp === "number" ? item.timestamp : undefined,
+    forwardedHistory:
+      forwarded && forwardedItems.length > 0
+        ? {
+            title: String(forwarded.title || "").trim() || "聊天记录",
+            sourceSession: String(forwarded.source_session || "").trim(),
+            items: forwardedItems,
+          }
+        : undefined,
+  };
+}
+
 function isImageFile(file: File): boolean {
   return file.type.startsWith("image/");
 }
@@ -997,6 +1062,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const clearPaneMessages = useAppStore((s) => s.clearPaneMessages);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
+  const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneContextInherited = useAppStore((s) => s.setPaneContextInherited);
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -1052,6 +1118,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [groupTyping, setGroupTyping] = useState<Record<string, string>>({});
   const [quotingMessage, setQuotingMessage] = useState<Message | null>(null);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
+  const [forwardPickerOpen, setForwardPickerOpen] = useState(false);
+  const [pendingForwardMessages, setPendingForwardMessages] = useState<
+    Array<{ sender: string; role: string; content: string; avatar_url?: string; timestamp?: number }>
+  >([]);
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [taskspaceAutoRefreshKey, setTaskspaceAutoRefreshKey] = useState(0);
@@ -1128,18 +1198,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             const key = `${role}::${content.slice(0, 300)}`;
             if (seen.has(key)) continue;
             seen.add(key);
-            deduped.push({
-              id: `dlgpoll-${pane.sessionId}-${idx}`,
-              role: item.role,
-              content: item.content,
-              agentId: item.agent_id ?? "meta",
-              avatarName: item.avatar_name,
-              avatarUrl: item.avatar_url,
-              provider: item.provider,
-              model: item.model,
-              quotedMessageId: item.quoted_message_id,
-              quotedContent: item.quoted_content,
-            });
+            deduped.push(mapLoadedSessionMessage(item as LoadedSessionMessage, `dlgpoll-${pane.sessionId}`, idx));
           }
           setPaneMessages(pane.id, deduped);
         }
@@ -1199,18 +1258,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     try {
       const result = await window.agenticxDesktop.loadSessionMessages(targetSessionId);
       if (result.ok && Array.isArray(result.messages)) {
-        const mapped: Message[] = result.messages.map((item) => ({
-          id: `${targetSessionId}-${item.id ?? Math.random().toString(16).slice(2)}`,
-          role: item.role,
-          content: item.content,
-          agentId: item.agent_id ?? "meta",
-          avatarName: item.avatar_name,
-          avatarUrl: item.avatar_url,
-          provider: item.provider,
-          model: item.model,
-          quotedMessageId: item.quoted_message_id,
-          quotedContent: item.quoted_content,
-        }));
+        const mapped: Message[] = result.messages.map((item, index) =>
+          mapLoadedSessionMessage(item as LoadedSessionMessage, targetSessionId, index)
+        );
         setPaneMessages(targetPaneId, mapped);
       } else {
         setPaneMessages(targetPaneId, []);
@@ -1440,52 +1490,166 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     [visibleMessages, selectedMessageIds]
   );
 
-  const forwardOneMessage = useCallback(async (message: Message) => {
-    if (!apiBase || !pane.sessionId) return;
-    const target = window.prompt("请输入转发目标会话ID");
-    if (!target) return;
-    try {
-      await fetch(`${apiBase}/api/messages/forward`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-        body: JSON.stringify({
-          source_session_id: pane.sessionId,
-          target_session_id: target.trim(),
-          messages: [
-            {
-              sender: message.role === "assistant" ? message.avatarName || message.agentId || "assistant" : "user",
-              content: message.content,
-            },
-          ],
-        }),
-      });
-    } catch {
-      // ignore forward failures in UI
-    }
-  }, [apiBase, apiToken, pane.sessionId]);
+  const resolveForwardTarget = useCallback(
+    async (payload: ForwardConfirmPayload): Promise<{ paneId: string; sessionId: string }> => {
+      const state = useAppStore.getState();
+      if (payload.type === "session") {
+        const sid = payload.sessionId.trim();
+        const p = state.panes.find((item) => (item.sessionId || "").trim() === sid);
+        if (!p) {
+          throw new Error("找不到对应窗格，请从侧栏重新打开该会话后再试");
+        }
+        return { paneId: p.id, sessionId: sid };
+      }
+      if (payload.type === "avatar") {
+        let pane = state.panes.find((item) => item.avatarId === payload.avatarId);
+        if (!pane) {
+          const paneId = addPane(payload.avatarId, payload.displayName, "");
+          setActiveAvatarId(payload.avatarId);
+          const created = await window.agenticxDesktop.createSession({ avatar_id: payload.avatarId });
+          if (!created.ok || !created.session_id) {
+            throw new Error(created.error || "创建分身会话失败");
+          }
+          setPaneSessionId(paneId, created.session_id);
+          return { paneId, sessionId: created.session_id };
+        }
+        let sid = (pane.sessionId || "").trim();
+        if (!sid) {
+          const created = await window.agenticxDesktop.createSession({ avatar_id: payload.avatarId });
+          if (!created.ok || !created.session_id) {
+            throw new Error(created.error || "创建分身会话失败");
+          }
+          setPaneSessionId(pane.id, created.session_id);
+          sid = created.session_id;
+        }
+        setActivePaneId(pane.id);
+        setActiveAvatarId(payload.avatarId);
+        return { paneId: pane.id, sessionId: sid };
+      }
+      const groupAvatarId = `group:${payload.groupId}`;
+      let groupPane = state.panes.find((item) => item.avatarId === groupAvatarId);
+      if (!groupPane) {
+        const paneId = addPane(groupAvatarId, `群聊 · ${payload.displayName}`, "");
+        setActiveAvatarId(null);
+        const created = await window.agenticxDesktop.createSession({
+          avatar_id: groupAvatarId,
+          name: payload.displayName,
+        });
+        if (!created.ok || !created.session_id) {
+          throw new Error(created.error || "创建群聊会话失败");
+        }
+        setPaneSessionId(paneId, created.session_id);
+        return { paneId, sessionId: created.session_id };
+      }
+      let sid = (groupPane.sessionId || "").trim();
+      if (!sid) {
+        const created = await window.agenticxDesktop.createSession({
+          avatar_id: groupAvatarId,
+          name: payload.displayName,
+        });
+        if (!created.ok || !created.session_id) {
+          throw new Error(created.error || "创建群聊会话失败");
+        }
+        setPaneSessionId(groupPane.id, created.session_id);
+        sid = created.session_id;
+      }
+      setActivePaneId(groupPane.id);
+      setActiveAvatarId(null);
+      return { paneId: groupPane.id, sessionId: sid };
+    },
+    [addPane, setActiveAvatarId, setActivePaneId, setPaneSessionId]
+  );
 
-  const forwardSelectedMessages = useCallback(async () => {
-    if (!apiBase || !pane.sessionId || selectedMessages.length === 0) return;
-    const target = window.prompt("请输入转发目标会话ID");
-    if (!target) return;
-    try {
-      await fetch(`${apiBase}/api/messages/forward`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-        body: JSON.stringify({
-          source_session_id: pane.sessionId,
-          target_session_id: target.trim(),
-          messages: selectedMessages.map((m) => ({
-            sender: m.role === "assistant" ? m.avatarName || m.agentId || "assistant" : "user",
-            content: m.content,
-          })),
-        }),
-      });
-      setSelectedMessageIds(new Set());
-    } catch {
-      // ignore forward failures in UI
-    }
-  }, [apiBase, apiToken, pane.sessionId, selectedMessages]);
+  const executeForward = useCallback(
+    async (targetPayload: ForwardConfirmPayload, followUpNote: string) => {
+      if (!apiBase || !pane.sessionId || pendingForwardMessages.length === 0) return;
+      const follow = followUpNote.trim();
+      try {
+        const { paneId: targetPaneId, sessionId: targetSessionId } = await resolveForwardTarget(targetPayload);
+        const resp = await fetch(`${apiBase}/api/messages/forward`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+          body: JSON.stringify({
+            source_session_id: pane.sessionId,
+            target_session_id: targetSessionId,
+            messages: pendingForwardMessages,
+          }),
+        });
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => "");
+          throw new Error(text.slice(0, 200) || `转发失败 HTTP ${resp.status}`);
+        }
+        setActivePaneId(targetPaneId);
+        const targetPaneMeta = useAppStore.getState().panes.find((p) => p.id === targetPaneId);
+        const aid = targetPaneMeta?.avatarId;
+        if (aid?.startsWith("group:")) {
+          setActiveAvatarId(null);
+        } else {
+          setActiveAvatarId(aid ?? null);
+        }
+        const prompt = follow || "请阅读上一条转发的聊天记录并给出你的回应。";
+        useAppStore.getState().setForwardAutoReply({
+          paneId: targetPaneId,
+          sessionId: targetSessionId,
+          text: prompt,
+        });
+        try {
+          const result = await window.agenticxDesktop.loadSessionMessages(targetSessionId);
+          if (result.ok && Array.isArray(result.messages)) {
+            const mapped: Message[] = result.messages.map((item, index) =>
+              mapLoadedSessionMessage(item as LoadedSessionMessage, targetSessionId, index)
+            );
+            setPaneMessages(targetPaneId, mapped);
+          }
+        } catch {
+          // keep server state; pane may refresh on next poll
+        }
+      } catch (err) {
+        console.error("[ChatPane] forward failed:", err);
+        throw err;
+      } finally {
+        setPendingForwardMessages([]);
+      }
+    },
+    [
+      apiBase,
+      apiToken,
+      pane.sessionId,
+      pendingForwardMessages,
+      resolveForwardTarget,
+      setActiveAvatarId,
+      setActivePaneId,
+      setPaneMessages,
+    ]
+  );
+
+  const forwardOneMessage = useCallback((message: Message) => {
+    const sender = message.role === "assistant" ? message.avatarName || message.agentId || "AI" : "我";
+    setPendingForwardMessages([
+      {
+        sender,
+        role: message.role,
+        content: message.content,
+        avatar_url: message.avatarUrl,
+        timestamp: message.timestamp,
+      },
+    ]);
+    setForwardPickerOpen(true);
+  }, []);
+
+  const forwardSelectedMessages = useCallback(() => {
+    if (selectedMessages.length === 0) return;
+    setPendingForwardMessages(
+      selectedMessages.map((message) => ({
+        sender: message.role === "assistant" ? message.avatarName || message.agentId || "AI" : "我",
+        role: message.role,
+        content: message.content,
+        avatar_url: message.avatarUrl,
+        timestamp: message.timestamp,
+      }))
+    );
+    setForwardPickerOpen(true);
+  }, [selectedMessages]);
 
   const renderedMessages = useMemo(() => (
     <>
@@ -1655,6 +1819,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       setRecording(false);
     }, 5000);
   };
+
+  const sendChatRef = useRef<(text: string) => Promise<void>>(async () => {});
 
   const sendChat = async (userText: string) => {
     const text = userText.trim();
@@ -2158,6 +2324,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
   };
 
+  sendChatRef.current = sendChat;
+
+  const forwardAutoReply = useAppStore((s) => s.forwardAutoReply);
+  useEffect(() => {
+    if (!forwardAutoReply) return;
+    if (forwardAutoReply.paneId !== paneId) return;
+    if ((pane.sessionId || "").trim() !== forwardAutoReply.sessionId.trim()) return;
+    useAppStore.getState().setForwardAutoReply(null);
+    void sendChatRef.current(forwardAutoReply.text);
+  }, [forwardAutoReply, paneId, pane.sessionId]);
+
   const initSession = async (inherit = false, prevSessionId?: string) => {
     const avatarId =
       pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
@@ -2399,11 +2576,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           {selectedMessageIds.size > 0 ? (
             <div className="mb-1 flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-1 text-xs text-text-muted">
               <span>已多选 {selectedMessageIds.size} 条</span>
-              <button className="rounded px-1 hover:bg-surface-hover" onClick={() => void forwardSelectedMessages()}>转发</button>
+              <button className="rounded px-1 hover:bg-surface-hover" onClick={forwardSelectedMessages}>转发</button>
               <button
                 className="rounded px-1 hover:bg-surface-hover"
                 onClick={async () => {
-                  const merged = selectedMessages.map((m) => m.content).join("\n\n");
+                  const merged = selectedMessages
+                    .map((message) => {
+                      const name = message.role === "user" ? "我" : message.avatarName || message.agentId || "AI";
+                      const time = message.timestamp
+                        ? new Date(message.timestamp).toLocaleTimeString("zh-CN", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "";
+                      return `[${name}]${time ? ` ${time}` : ""}\n${message.content}`;
+                    })
+                    .join("\n\n");
                   try {
                     await navigator.clipboard.writeText(merged);
                   } catch {
@@ -2662,6 +2850,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}`}>
         <SessionHistoryPanel pane={pane} />
       </HistoryPanelBoundary>
+      <ForwardPicker
+        open={forwardPickerOpen}
+        currentSessionId={pane.sessionId}
+        panes={panes}
+        avatars={avatars}
+        groups={groups}
+        onClose={() => {
+          setForwardPickerOpen(false);
+          setPendingForwardMessages([]);
+        }}
+        onConfirm={async (targetPayload, followUpNote) => {
+          await executeForward(targetPayload, followUpNote);
+          setSelectedMessageIds(new Set());
+        }}
+      />
     </div>
   );
 }
