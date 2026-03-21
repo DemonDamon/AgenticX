@@ -6,6 +6,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -1663,24 +1664,63 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="source_session_id and target_session_id are required")
         if not isinstance(messages, list) or not messages:
             raise HTTPException(status_code=400, detail="messages must be a non-empty list")
+        source_managed = manager.get(source_session_id, touch=False)
         target_managed = manager.get(target_session_id, touch=False)
         if target_managed is None:
             raise HTTPException(status_code=404, detail="target session not found")
-        normalized_parts: list[str] = []
+        normalized_items: list[dict[str, Any]] = []
         for item in messages:
             if not isinstance(item, dict):
                 continue
             sender = str(item.get("sender", "") or "").strip() or "unknown"
+            role = str(item.get("role", "") or "").strip() or "assistant"
+            avatar_url = str(item.get("avatar_url", "") or "").strip()
             content = str(item.get("content", "") or "").strip()
+            timestamp_raw = item.get("timestamp")
+            timestamp: int | None
+            try:
+                timestamp = int(timestamp_raw) if timestamp_raw is not None else None
+            except (TypeError, ValueError):
+                timestamp = None
             if not content:
                 continue
-            normalized_parts.append(f"[{sender}] {content}")
-        if not normalized_parts:
+            normalized_items.append(
+                {
+                    "sender": sender,
+                    "role": role,
+                    "content": content,
+                    "avatar_url": avatar_url or None,
+                    "timestamp": timestamp,
+                }
+            )
+        if not normalized_items:
             raise HTTPException(status_code=400, detail="no valid messages to forward")
-        merged = "转发消息如下：\n" + "\n".join(normalized_parts)
-        target_managed.studio_session.chat_history.append({"role": "user", "content": merged})
+        source_name = "会话"
+        if source_managed is not None:
+            source_name = (
+                str(getattr(source_managed, "session_name", "") or "").strip()
+                or str(getattr(source_managed, "avatar_name", "") or "").strip()
+                or source_name
+            )
+        preview_lines = [f"{item['sender']}: {item['content']}" for item in normalized_items[:2]]
+        preview_text = "\n".join(preview_lines) if preview_lines else "聊天记录"
+        ts = int(datetime.now().timestamp() * 1000)
+        forward_entry: dict[str, Any] = {
+            "role": "user",
+            "content": preview_text,
+            "timestamp": ts,
+            "forwarded_history": {
+                "title": f"聊天记录 · 来自 {source_name}",
+                "source_session": source_session_id,
+                "items": normalized_items,
+            },
+        }
+        session = target_managed.studio_session
+        session.chat_history.append(forward_entry)
+        # run_turn reads agent_messages, not chat_history alone — mirror so the model sees the forward.
+        session.agent_messages.append(copy.deepcopy(forward_entry))
         target_managed.updated_at = datetime.now().timestamp()
         manager.persist(target_session_id)
-        return {"ok": True, "forwarded": len(normalized_parts)}
+        return {"ok": True, "forwarded": len(normalized_items), "appended_messages": 1}
 
     return app
