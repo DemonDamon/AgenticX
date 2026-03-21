@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import type { ChatStyle } from "../store";
+import { useAppStore } from "../store";
 
 const ALL_PROVIDERS = [
   "openai", "anthropic", "volcengine", "bailian",
@@ -348,6 +349,8 @@ export function SettingsPanel({
   onClose,
   onSave,
 }: Props) {
+  const userDisplayName = useAppStore((s) => s.userDisplayName);
+  const setUserDisplayName = useAppStore((s) => s.setUserDisplayName);
   const initializedForOpenRef = useRef(false);
   const [tab, setTab] = useState<SettingsTab>("general");
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
@@ -567,6 +570,20 @@ export function SettingsPanel({
                       <option value="clean">Clean 风格（极简分隔块）</option>
                     </select>
                   </label>
+                  <label className="mt-3 block text-sm text-text-muted">
+                    群内显示名称
+                    <input
+                      type="text"
+                      className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
+                      value={userDisplayName}
+                      onChange={(e) => setUserDisplayName(e.target.value)}
+                      placeholder="留空则显示「我」，并参与群聊上下文标注"
+                      maxLength={48}
+                    />
+                  </label>
+                  <p className="mt-1 text-[11px] text-text-subtle">
+                    分身回复时会按此名称识别「人类提问者」；勿无故 @ 组长，除非需要协调。
+                  </p>
                 </Panel>
                 <Panel title="Permissions">
                   <div className="mb-2 text-sm font-medium text-text-primary">工具执行权限模式</div>
