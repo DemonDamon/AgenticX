@@ -653,7 +653,7 @@ export function App() {
           store.addPaneMessage(
             matchingPane.id,
             "tool",
-            `⚠️ 子智能体已结束，但 Meta-Agent 自动汇报暂未成功。先给你直接结果：\n${lines}`,
+            `⚠️ 子智能体已结束，但 Machi 自动汇报暂未成功。先给你直接结果：\n${lines}`,
             "meta"
           );
         };

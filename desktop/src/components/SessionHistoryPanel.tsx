@@ -95,7 +95,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
 
-  const title = useMemo(() => (pane.avatarName || "Meta-Agent").trim(), [pane.avatarName]);
+  const title = useMemo(() => (pane.avatarName || "Machi").trim(), [pane.avatarName]);
 
   const groupedSessions = useMemo<GroupedSessions>(() => {
     const now = new Date();
@@ -430,7 +430,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
       return;
     }
     if (action === "open_new_tab") {
-      const paneId = addPane(item.avatar_id ?? null, item.avatar_name || "Meta-Agent", item.session_id);
+      const paneId = addPane(item.avatar_id ?? null, item.avatar_name || "Machi", item.session_id);
       await switchSession(item.session_id, paneId);
       return;
     }

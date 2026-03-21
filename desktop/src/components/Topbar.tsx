@@ -11,7 +11,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
   const panes = useAppStore((s) => s.panes);
   const activePaneId = useAppStore((s) => s.activePaneId);
   const activePane = useMemo(() => panes.find((pane) => pane.id === activePaneId), [activePaneId, panes]);
-  const title = activePane?.avatarName ?? "Meta-Agent";
+  const title = activePane?.avatarName ?? "Machi";
 
   return (
     <div className="agx-topbar">
