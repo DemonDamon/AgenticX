@@ -2061,6 +2061,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const prevText = lastGroupProgressRef.current[eventAgentId] ?? "";
               if (prevText === blockedText) continue;
               lastGroupProgressRef.current[eventAgentId] = blockedText;
+              const strategy = useAppStore.getState().confirmStrategy;
+              if (strategy === "auto" && requestId) {
+                addPaneMessage(
+                  pane.id,
+                  "tool",
+                  `${avatarName}：确认通过，继续执行`,
+                  eventAgentId,
+                  activeProvider,
+                  activeModel,
+                  undefined,
+                  { avatarName, avatarUrl: avatarUrl || undefined }
+                );
+                fetch(`${apiBase}/api/confirm`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+                  body: JSON.stringify({
+                    session_id: requestSessionId,
+                    request_id: requestId,
+                    approved: true,
+                    agent_id: eventAgentId,
+                  }),
+                }).catch(() => {});
+                continue;
+              }
               addPaneMessage(
                 pane.id,
                 "tool",
