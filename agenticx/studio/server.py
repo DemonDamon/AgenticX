@@ -45,7 +45,10 @@ logger = logging.getLogger(__name__)
 
 
 def _minimax_m2_family_no_vision(model_name: str) -> bool:
-    """MiniMax M2.x chat line does not accept image/audio input (vendor docs, e.g. M2.7)."""
+    """MiniMax M2 chat line does not accept image/audio input (vendor docs).
+
+    Applies to MiniMax-M2, M2.1, M2.5, M2.7 and *-highspeed SKUs; exclude ids containing vl/vision.
+    """
     raw = str(model_name or "").strip().lower()
     if not raw:
         return False
@@ -53,7 +56,7 @@ def _minimax_m2_family_no_vision(model_name: str) -> bool:
         raw = raw.rsplit("/", 1)[-1]
     if "vl" in raw or "vision" in raw:
         return False
-    if "minimax-m2" in raw:
+    if raw.startswith("minimax-m2"):
         return True
     return bool(re.match(r"^m2[.\-_]?\d", raw))
 
