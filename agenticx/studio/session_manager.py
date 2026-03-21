@@ -523,6 +523,11 @@ class SessionManager:
             role = str(item.get("role", "assistant"))
             if role not in {"user", "assistant", "tool"}:
                 role = "assistant"
+            raw_timestamp = item.get("timestamp")
+            try:
+                parsed_timestamp = int(raw_timestamp) if raw_timestamp is not None else None
+            except (TypeError, ValueError):
+                parsed_timestamp = None
             normalized.append(
                 {
                     "id": str(item.get("id", "")),
@@ -535,6 +540,8 @@ class SessionManager:
                     "model": str(item.get("model", "") or ""),
                     "quoted_message_id": str(item.get("quoted_message_id", "") or ""),
                     "quoted_content": str(item.get("quoted_content", "") or ""),
+                    "timestamp": parsed_timestamp,
+                    "forwarded_history": item.get("forwarded_history"),
                 }
             )
         return normalized
