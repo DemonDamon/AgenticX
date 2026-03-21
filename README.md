@@ -11,7 +11,7 @@
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/agenticx)](https://pypi.org/project/agenticx/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/DemonDamon/AgenticX)
 
-[Features](#core-features) • [Quick Start](#quick-start) • [Examples](#complete-examples) • [Architecture](#technical-architecture) • [Progress](#development-progress)
+[Architecture](#system-architecture) • [Features](#core-features) • [Quick Start](#quick-start) • [Examples](#complete-examples) • [Progress](#development-progress)
 
 </div>
 
@@ -24,6 +24,14 @@
 ## Vision
 
 **AgenticX** aims to create a unified, scalable, production-ready multi-agent application development framework, empowering developers to build everything from simple automation assistants to complex collaborative intelligent agent systems.
+
+## System Architecture
+
+<div align="center">
+<img src="assets/AgenticX System Architecture.png" alt="AgenticX System Architecture — 5-tier overview covering UI, Studio Runtime, Core Framework, Platform Services, and Domain Extensions" width="900" />
+</div>
+
+The framework is organized into 5 tiers: **User Interface** (Desktop / CLI / SDK) → **Studio Runtime** (Session Manager, Meta-Agent, Team Manager, Avatar & Group Chat) → **Core Framework** (Orchestration, Execution, Agent, Memory, Tools, LLM Providers, Hooks) → **Platform Services** (Observability, Protocols, Security, Storage) → **Domain Extensions** (GUI Agent, Knowledge & GraphRAG, AgentKit Integration).
 
 ## Core Features
 
@@ -484,12 +492,6 @@ graph TD
     Memory --> VectorStore
     Knowledge --> GraphStore
 ```
-
-The architecture diagram above is a Mermaid text version. Below is a visual overview of the full system architecture across all 5 tiers — from User Interface down to Domain Extensions:
-
-<div align="center">
-<img src="assets/AgenticX System Architecture.png" alt="AgenticX System Architecture — 5-tier overview covering UI, Studio Runtime, Core Framework, Platform Services, and Domain Extensions" width="900" />
-</div>
 
 ## Development Progress
 
