@@ -7,13 +7,13 @@ const KNOWN_TEXT_ONLY_RE =
   /(gpt-3\.5|gpt-35|text-embedding|embedding-3|whisper|davinci|babbage|deepseek-chat|deepseek-coder|deepseek-reasoner)/i;
 
 /**
- * MiniMax M2.x chat line (e.g. M2.7): vendor docs state no image/audio input.
- * Slug is model id without provider prefix, lowercased.
+ * MiniMax M2 product line: vendor docs state no image/audio input for these chat models
+ * (M2, M2.1, M2.5, M2.7 and *-highspeed; not VL). Slug = model id without provider prefix.
  */
 function minimaxM2TextOnlySlug(slug: string): boolean {
   const s = slug.toLowerCase();
   if (/vl|vision/.test(s)) return false;
-  if (s.includes("minimax-m2")) return true;
+  if (s.startsWith("minimax-m2")) return true;
   if (/^m2[.\-_]?\d/.test(s)) return true;
   return false;
 }
