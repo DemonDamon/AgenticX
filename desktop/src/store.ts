@@ -285,7 +285,7 @@ function makeDefaultPane(): ChatPane {
   return {
     id: "pane-meta",
     avatarId: null,
-    avatarName: "Meta-Agent",
+    avatarName: "Machi",
     sessionId: "",
     messages: [],
     historyOpen: false,

@@ -214,7 +214,7 @@ export function AvatarSidebar() {
     const groupPanes = panes.filter((item) => item.avatarId === groupPaneId);
     const nonGroupPanes = panes.filter((item) => item.avatarId !== groupPaneId);
     if (nonGroupPanes.length === 0 && groupPanes.length > 0) {
-      addPane(null, "Meta-Agent", "");
+      addPane(null, "Machi", "");
     }
     groupPanes.forEach((item) => removePane(item.id));
     setGroups(groups.filter((g) => g.id !== group.id));
@@ -249,13 +249,13 @@ export function AvatarSidebar() {
               ? "border-border-strong bg-surface-card text-text-strong"
               : "border-transparent text-text-muted hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
           }`}
-          onClick={() => void openOrFocusPane(null, "Meta-Agent")}
+          onClick={() => void openOrFocusPane(null, "Machi")}
         >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 text-xs font-bold text-white">
             M
           </div>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">Meta-Agent</div>
+            <div className="truncate text-sm font-medium">Machi</div>
             <div className="truncate text-[10px] text-text-faint">全局调度</div>
           </div>
         </button>
@@ -574,14 +574,14 @@ function GroupEditorInline({
         >
           <option value="intelligent">智能对话 · 像项目经理一样自动分配</option>
           <option value="user-directed">用户指定 · 你点谁谁回复</option>
-          <option value="meta-routed">智能路由 · Meta-Agent 自动选人</option>
+          <option value="meta-routed">智能路由 · Machi 自动选人</option>
           <option value="round-robin">轮流回复 · 按顺序每人答一次</option>
         </select>
         <p className="mb-4 text-[10px] text-text-faint">
           {{
-            "intelligent": "Meta-Agent 在后台持续看全局上下文，自动选人、追踪线程，并在成员未响应时主动督办。",
+            "intelligent": "Machi 在后台持续看全局上下文，自动选人、追踪线程，并在成员未响应时主动督办。",
             "user-directed": "每次发消息时，手动 @某个分身，只有被点名的人回复。",
-            "meta-routed": "由 Meta-Agent 根据问题内容自动判断最合适的分身来回复。",
+            "meta-routed": "由 Machi 根据问题内容自动判断最合适的分身来回复。",
             "round-robin": "分身按加入顺序轮流回复，每人一次，周而复始。",
           }[routing]}
         </p>

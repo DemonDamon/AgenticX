@@ -1230,7 +1230,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               <MessageRenderer
                 message={m}
                 assistantBadge={!isLite && m.role === "assistant" ? <ModelBadge provider={m.provider} model={m.model} /> : undefined}
-                assistantName="Meta-Agent"
+                assistantName="Machi"
               />
               {!isLite && (
                 <MessageActions
@@ -1258,7 +1258,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                 <ImBubble
                   message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
                   badge={!isLite && streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
-                  assistantName="Meta-Agent"
+                  assistantName="Machi"
                 />
               )}
             </div>

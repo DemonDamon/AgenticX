@@ -22,7 +22,7 @@ const VISION_UNSUPPORTED_TOAST = "模型不支持该文件类型";
 const FALLBACK_PANE: ChatPaneState = {
   id: "fallback-pane",
   avatarId: null,
-  avatarName: "Meta-Agent",
+  avatarName: "Machi",
   sessionId: "",
   messages: [],
   historyOpen: false,
@@ -662,9 +662,12 @@ function memberColorClass(id: string): string {
 const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
   groupId,
   avatarList,
+  metaLeaderLabel,
 }: {
   groupId: string;
   avatarList: Avatar[];
+  /** Meta-Agent pane title; shown as group coordinator in member grid. */
+  metaLeaderLabel: string;
 }) {
   const [search, setSearch] = useState("");
   const [mode, setMode] = useState<"browse" | "add" | "remove">("browse");
@@ -695,8 +698,15 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
   const showMetaAgent = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
-    return "meta-agent".includes(q) || "meta agent".includes(q) || "元智能体".includes(q);
-  }, [search]);
+    const label = metaLeaderLabel.trim().toLowerCase();
+    return (
+      "meta-agent".includes(q) ||
+      "meta agent".includes(q) ||
+      "元智能体".includes(q) ||
+      "组长".includes(q) ||
+      (label.length > 0 && label.includes(q))
+    );
+  }, [search, metaLeaderLabel]);
 
   const filteredIds = useMemo(() => {
     if (!group) return [];
@@ -835,13 +845,16 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
             {showMetaAgent ? (
               <div className="relative flex flex-col items-center gap-1.5 rounded-lg text-center">
                 <div
-                  className="flex shrink-0 items-center justify-center rounded-xl bg-cyan-600 font-bold text-white"
+                  className="flex shrink-0 items-center justify-center rounded-xl bg-cyan-600 text-[10px] font-bold leading-tight text-white"
                   style={{ width: memberGrid.avatarSize, height: memberGrid.avatarSize }}
                 >
-                  MA
+                  {memberInitials(metaLeaderLabel)}
                 </div>
-                <span className={`w-full truncate px-0.5 text-text-muted ${memberGrid.nameClass}`} title="Meta-Agent · 群聊协调者">
-                  Meta-Agent
+                <span
+                  className={`w-full truncate px-0.5 text-text-muted ${memberGrid.nameClass}`}
+                  title={`${metaLeaderLabel} · 群聊协调者`}
+                >
+                  {metaLeaderLabel}
                 </span>
               </div>
             ) : null}
@@ -1061,6 +1074,10 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
   const panes = useAppStore((s) => s.panes);
+  const metaLeaderDisplayName = useMemo(() => {
+    const mp = panes.find((p) => p.avatarId === null);
+    return (mp?.avatarName ?? "").trim() || "Machi";
+  }, [panes]);
   const removePane = useAppStore((s) => s.removePane);
   const addPane = useAppStore((s) => s.addPane);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
@@ -1931,6 +1948,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (isGroupPane && targetAgentId === "meta") {
         body.group_id = groupChatId;
         body.mentioned_avatar_ids = mentionedAvatarIds;
+        body.meta_leader_display_name = metaLeaderDisplayName;
         if (quotingMessage) {
           body.quoted_message_id = quotingMessage.id;
           body.quoted_content = `${quotingMessage.avatarName || quotingMessage.agentId || quotingMessage.role}: ${quotingMessage.content}`;
@@ -2030,7 +2048,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               continue;
             }
             if (payload.type === "group_nudge") {
-              const avatarName = String(payload.data?.avatar_name ?? "组长");
+              const avatarName = String(payload.data?.avatar_name ?? metaLeaderDisplayName);
               const avatarUrl = String(payload.data?.avatar_url ?? "");
               const content = String(payload.data?.content ?? "");
               if (content.trim()) {
@@ -2868,7 +2886,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           {isGroupPane ? (
             <div className="flex h-full min-h-0 flex-col">
               <div className="h-[260px] shrink-0 border-b border-border">
-                <GroupMembersSidePanel groupId={groupChatId} avatarList={avatars} />
+                <GroupMembersSidePanel
+                  groupId={groupChatId}
+                  avatarList={avatars}
+                  metaLeaderLabel={metaLeaderDisplayName}
+                />
               </div>
               <div className="min-h-0 flex-1">
                 <WorkspacePanel
