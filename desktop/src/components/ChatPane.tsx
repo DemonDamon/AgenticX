@@ -1708,7 +1708,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       {Object.entries(groupTyping).map(([agentId, name]) => (
         <ImBubble
           key={`typing-${agentId}`}
-          message={{ id: `typing-${agentId}`, role: "assistant", content: `${name} 正在输入...`, avatarName: name, agentId }}
+          message={{ id: `typing-${agentId}`, role: "assistant", content: "", avatarName: name, agentId }}
           assistantName={name}
         />
       ))}
