@@ -226,6 +226,41 @@ def create_studio_app() -> FastAPI:
             normalized[path] = str(raw_content or "")
         return normalized
 
+    def _normalize_image_inputs(payload: Any) -> list[dict[str, Any]]:
+        max_images = 4
+        max_data_url_chars = 8_000_000
+        if not isinstance(payload, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        for raw in payload:
+            if hasattr(raw, "model_dump"):
+                item = raw.model_dump()  # pydantic model
+            elif isinstance(raw, dict):
+                item = raw
+            else:
+                continue
+            data_url = str(item.get("data_url", "")).strip()
+            if not data_url.startswith("data:image/"):
+                continue
+            if len(data_url) > max_data_url_chars:
+                continue
+            size_raw = item.get("size", 0)
+            try:
+                size_value = int(size_raw or 0)
+            except (TypeError, ValueError):
+                size_value = 0
+            normalized.append(
+                {
+                    "name": str(item.get("name", "")).strip(),
+                    "data_url": data_url,
+                    "mime_type": str(item.get("mime_type", "")).strip(),
+                    "size": size_value,
+                }
+            )
+            if len(normalized) >= max_images:
+                break
+        return normalized
+
     @app.get("/api/session", response_model=SessionState)
     async def get_or_create_session(
         session_id: str | None = Query(default=None),
@@ -373,6 +408,7 @@ def create_studio_app() -> FastAPI:
         session = managed.studio_session
         if payload.context_files:
             session.context_files.update(_normalize_context_files(payload.context_files))
+        image_inputs = _normalize_image_inputs(payload.image_inputs)
         pending_subagent_summaries = session.scratchpad.pop("__pending_subagent_summaries__", [])
         if isinstance(pending_subagent_summaries, list):
             for entry in pending_subagent_summaries[:20]:
@@ -687,6 +723,25 @@ def create_studio_app() -> FastAPI:
                             avatar_context=avatar_context,
                             group_chat=_meta_group_chat_payload(managed),
                         )
+                    user_message_content: Any | None = None
+                    if image_inputs:
+                        multimodal_text = effective_input
+                        if str(session.provider_name or "").strip().lower() == "minimax":
+                            multimodal_text = (
+                                "【重要】用户图片已作为多模态内容与本消息一并提交，请直接基于视觉输入作答。"
+                                "不要使用 bash_exec/curl/wget 等去下载图片或访问外网图片链接；"
+                                "不要假设必须先抓取链接才能识别图片。\n\n"
+                                f"{effective_input}"
+                            )
+                        content_blocks: list[dict[str, Any]] = [{"type": "text", "text": multimodal_text}]
+                        for image in image_inputs:
+                            content_blocks.append(
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": image["data_url"]},
+                                }
+                            )
+                        user_message_content = content_blocks
                     async for event in runtime.run_turn(
                         effective_input,
                         session,
@@ -694,6 +749,7 @@ def create_studio_app() -> FastAPI:
                         agent_id="meta",
                         tools=effective_tools,
                         system_prompt=sys_prompt,
+                        user_message_content=user_message_content,
                     ):
                         await event_queue.put(event)
                     await event_queue.put(None)

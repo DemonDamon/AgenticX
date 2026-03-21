@@ -1877,6 +1877,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
     setInput("");
     setQuotingMessage(null);
+    // Clear attachments immediately so chips do not linger until the stream ends (finally also clears).
+    setContextFiles({});
     setStreaming(true);
     cancelStreamRenderFrame();
     setStreamedAssistantText("");
@@ -1916,6 +1918,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         }
       }
       if (attachmentEntries.length > 0) {
+        const imageInputs = readyAttachments
+          .filter((file) => !!file.dataUrl && file.mimeType.startsWith("image/"))
+          .map((file) => ({
+            name: file.name,
+            data_url: file.dataUrl,
+            mime_type: file.mimeType,
+            size: file.size,
+          }));
+        const canSendImageInputs = targetAgentId === "meta" && !isGroupPane;
+        if (canSendImageInputs && imageInputs.length > 0) {
+          body.image_inputs = imageInputs;
+        }
         const contextFilePayload: Record<string, string> = {};
         for (const [, file] of attachmentEntries) {
           if (file.status !== "ready") continue;
