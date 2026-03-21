@@ -10,6 +10,9 @@
     "build": "vite build && tsc -p electron/tsconfig.json",
     "start": "electron .",
     "build:mac": "npm run build && electron-builder --mac",
+    "build:mac:arm64": "npm run build && electron-builder --mac --arm64",
+    "build:mac:x64": "npm run build && electron-builder --mac --x64",
+    "build:mac:all": "npm run build && electron-builder --mac --arm64 && electron-builder --mac --x64",
     "build:win": "npm run build && electron-builder --win",
     "build:linux": "npm run build && electron-builder --linux"
   },

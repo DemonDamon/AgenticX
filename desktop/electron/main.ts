@@ -6,6 +6,7 @@ import {
   Menu,
   MenuItemConstructorOptions,
   nativeImage,
+  shell,
   Tray
 } from "electron";
 import { spawn, ChildProcess, execFile } from "node:child_process";
@@ -251,24 +252,46 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
   ];
 }
 
+function buildAugmentedPath(): string {
+  const home = os.homedir();
+  const extraPaths = [
+    "/opt/miniconda3/bin",
+    "/opt/miniconda3/condabin",
+    `${home}/miniconda3/bin`,
+    `${home}/opt/miniconda3/bin`,
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    `${home}/.local/bin`,
+    `${home}/bin`,
+  ].join(":");
+  return `${extraPaths}:${process.env.PATH ?? "/usr/bin:/bin"}`;
+}
+
+async function checkAgxCli(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const proc = spawn("/bin/zsh", ["-l", "-c", "agx --version"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, PATH: buildAugmentedPath() },
+    });
+    let resolved = false;
+    const done = (ok: boolean) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      try { proc.kill(); } catch { /* noop */ }
+      resolve(ok);
+    };
+    const timer = setTimeout(() => done(false), 8000);
+    proc.on("close", (code) => done(code === 0));
+    proc.on("error", () => done(false));
+  });
+}
+
 async function startStudioServe(): Promise<void> {
   apiPort = await pickFreePort();
   const cmd = `agx serve --host 127.0.0.1 --port ${String(apiPort)}`;
   const desktopHome = os.homedir();
-  // Use login shell to inherit user's PATH (conda/pyenv/etc) in packaged app
-  // Augment PATH with common conda/pyenv/local bin dirs so packaged .app
-  // can find `agx` even without inheriting the user's interactive shell PATH.
-  const extraPaths = [
-    "/opt/miniconda3/bin",
-    "/opt/miniconda3/condabin",
-    `${desktopHome}/miniconda3/bin`,
-    `${desktopHome}/opt/miniconda3/bin`,
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    `${desktopHome}/.local/bin`,
-    `${desktopHome}/bin`,
-  ].join(":");
-  const augmentedPath = `${extraPaths}:${process.env.PATH ?? "/usr/bin:/bin"}`;
+  const augmentedPath = buildAugmentedPath();
 
   serveProcess = spawn("/bin/zsh", ["-l", "-c", cmd], {
     cwd: desktopHome,
@@ -1244,6 +1267,36 @@ app.whenReady().then(async () => {
         app.dock.setIcon(iconPath);
       }
     }
+
+    const agxOk = await checkAgxCli();
+    if (!agxOk) {
+      const installDocsUrl = "https://github.com/agenticx/agenticx#installation";
+      const { response } = await dialog.showMessageBox({
+        type: "warning",
+        title: "缺少 agx 命令行工具",
+        message: "Machi 需要 agx CLI 才能启动",
+        detail: [
+          "未检测到 agx 命令，请先在终端运行以下命令安装：",
+          "",
+          "  curl -sSL https://raw.githubusercontent.com/agenticx/agenticx/main/install.sh | bash",
+          "",
+          "或者通过 pip 安装：",
+          "",
+          "  pip install agenticx",
+          "",
+          "安装完成后重新打开 Machi。",
+        ].join("\n"),
+        buttons: ["查看安装说明", "退出"],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (response === 0) {
+        void shell.openExternal(installDocsUrl);
+      }
+      app.quit();
+      return;
+    }
+
     registerIpc();
     await startStudioServe();
     await waitServeReady();
@@ -1251,7 +1304,7 @@ app.whenReady().then(async () => {
     createTray();
   } catch (error) {
     await dialog.showErrorBox(
-      "AgenticX Desktop 启动失败",
+      "Machi 启动失败",
       `无法启动本地服务，请检查 agx 是否可用。\n\n${String(error)}`
     );
     app.quit();
