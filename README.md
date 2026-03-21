@@ -27,30 +27,55 @@
 
 ## Core Features
 
-### Core Framework (Completed)
-- **Agent Core**: Agent execution engine based on 12-Factor Agents methodology
-- **Orchestration Engine**: Graph-based orchestration engine supporting complex workflows, conditional routing, and parallel execution
-- **Tool System**: Unified tool interface supporting function decorators, remote tools (MCP), and built-in toolsets
-- **Memory System**: Deep integration with Mem0 for long-term memory, supporting arbitrary LLM models
-- **Communication Protocol**: A2A inter-agent communication, MCP resource access protocol
-- **Task Validation**: Pydantic-based output parsing and auto-repair
-- **GUI Agent / Embodiment**: Complete GUI automation framework with action reflection, stuck detection, action caching, REACT parsing, device-cloud routing, and DAG task verification
+### Core Framework
+- **Agent Core**: Agent execution engine based on 12-Factor Agents methodology, with Meta-Agent CEO dispatcher, agent team management, think-act loop, event-driven architecture, self-repair, and overflow recovery
+- **Orchestration Engine**: Graph-based workflow engine + Flow system with decorators, execution plans, conditional routing, and parallel execution
+- **Tool System**: Unified tool interface with function decorators, MCP Hub (multi-server aggregation), remote tools v2, OpenAPI toolset, sandbox tools, skill bundles, and document routers
+- **Memory System**: Hierarchical memory (core / episodic / semantic), Mem0 deep integration, workspace memory, short-term memory, memory decay, hybrid search, compaction flush, MCP memory, and memory intelligence engine
+- **LLM Providers**: 15+ providers — OpenAI, Anthropic, Ollama, Gemini, Kimi/Moonshot, MiniMax, Ark/VolcEngine, Zhipu, Qianfan, Bailian/Dashscope — with response caching, transcript sanitizer, and failover routing
+- **Communication Protocols**: A2A inter-agent protocol (client / server / AgentCard / skill-as-tool), MCP resource access protocol
+- **Task Validation**: Pydantic-based output parsing, auto-repair, and guiderails
 
-### Enterprise-Grade Monitoring (Completed)
-- **Observability**: Complete callback system, real-time monitoring, trajectory analysis
-- **Performance Monitoring**: Real-time metrics collection, Prometheus integration, system monitoring
-- **Trajectory Analysis**: Execution path tracing, failure analysis, performance bottleneck identification
-- **Data Export**: Multi-format export (JSON/CSV/Prometheus), time series analysis
+### Avatar & Team Collaboration
+- **Avatar System**: Avatar registry (CRUD), group chat with multiple routing strategies (user-directed / meta-routed / round-robin)
+- **Meta-Agent Runtime**: CEO dispatcher with dynamic sub-agent orchestration, team management with concurrency limits, archived snapshots, and session isolation
+- **Collaboration Patterns**: Delegation, role-playing, conversation management, task locks, and collaboration metrics
 
-### Developer Experience (Planned)
-- **CLI Tools**: Command-line tools for project creation, deployment, and monitoring
-- **Web UI**: Visual agent management and monitoring interface
-- **IDE Integration**: VS Code extension, Jupyter kernel support
+### Knowledge & Retrieval
+- **Knowledge Base**: Document processing pipeline with chunkers, readers, extractors, and graph builders (GraphRAG)
+- **Retrieval System**: Vector retriever, BM25 retriever, graph retriever, hybrid retriever, auto-retriever, and reranker
+- **Embeddings**: OpenAI, Bailian, SiliconFlow, LiteLLM, with smart routing
 
-### Enterprise Security (Planned)
-- **Security Sandbox**: Secure code execution environment and resource isolation
-- **Multi-tenancy**: RBAC permission control, data isolation
-- **Human Approval**: Human-in-the-loop workflows, risk control
+### Developer Experience
+- **CLI Tools** (`agx`): serve, studio, loop, run, project, deploy, codegen, docs, skills, hooks, debug, scaffold, and config management
+- **Web UI (Studio)**: FastAPI-based management server with session management, real-time WebSocket, and protocol support
+- **Desktop App**: Electron + React + Zustand + Vite, Pro/Lite dual mode (multi-pane / single-pane), command palette, settings panel, avatar sidebar, sub-agent panel, session history, and workspace panel
+
+### Enterprise Security
+- **Safety Layer**: Leak detection, input sanitizer, advanced injection detector, policy engine (rules / severity / actions), input validator, sandbox policy, and audit logging
+- **Sandbox**: Docker, Microsandbox, and Subprocess backends; Jupyter kernel manager, stateful code interpreter, sandbox templates
+- **Session Security**: Database-backed sessions, write locks, in-memory sessions
+
+### Observability & Evaluation
+- **Monitoring**: Complete callback system, real-time metrics, Prometheus/OpenTelemetry integration, trajectory analysis, span tree, WebSocket streaming
+- **Evaluation Framework**: EvalSet-based evaluation, LLM judge, composite judge, span evaluator, trajectory matcher, trace-to-evalset converter
+- **Data Export**: Multi-format export (JSON / CSV / Prometheus), time series analysis
+
+### Storage Layer
+- **Key-Value**: SQLite, Redis, PostgreSQL, MongoDB, InMemory
+- **Vector**: Milvus, Qdrant, Chroma, Faiss, PgVector, Pinecone, Weaviate
+- **Graph**: Neo4j, Nebula
+- **Object**: S3, GCS, Azure
+- **Unified Manager**: Storage router, migration support, unified storage interface
+
+### GUI Agent / Embodiment
+- **Action Reflection**: A/B/C result classification with heuristic and VLM reflection modes
+- **Stuck Detection & Recovery**: Consecutive failure detection, repeat pattern recognition, intelligent recovery strategy recommendation
+- **Action Caching**: Action-tree-based trajectory caching with exact and fuzzy matching (up to 9x speedup)
+- **REACT Output Parsing**: Standardized REACT format parsing with compact action schema
+- **Device-Cloud Routing**: Dynamic selection of on-device or cloud model based on task complexity and sensitivity
+- **DAG Task Verification**: DAG-based multi-path task verification with dual semantic dependencies
+- **Human-in-the-Loop**: Collector, component, and event model for human oversight
 
 ## Quick Start
 
@@ -371,75 +396,130 @@ See: [examples/agenticx-for-guiagent/](examples/agenticx-for-guiagent/)
 ```mermaid
 graph TD
     subgraph "User Interface Layer"
+        Desktop["Desktop App (Electron + React)"]
+        CLI["CLI (agx serve / loop / run / project)"]
         SDK[Python SDK]
-        CLI[CLI Tools]
-        UI[Web UI]
+    end
+
+    subgraph "Studio Runtime Layer"
+        StudioServer["Studio Server (FastAPI)"]
+        SessionMgr[Session Manager]
+        MetaAgent["Meta-Agent (CEO Dispatcher)"]
+        TeamMgr[Agent Team Manager]
+        AvatarSys["Avatar & Group Chat"]
     end
 
     subgraph "Core Framework Layer"
-        subgraph "Orchestration Engine"
-            Orchestrator[Workflow Orchestrator]
+        subgraph "Orchestration"
+            WorkflowEngine[Workflow Engine]
+            Flow["Flow System"]
         end
-        subgraph "Execution Engine"
-            AgentExecutor[Agent Executor]
-            TaskValidator[Task Validator]
+        subgraph "Execution"
+            AgentRuntime["Agent Runtime (Studio)"]
+            AgentExecutor["Agent Executor (Core)"]
+            TaskValidator[Task Validator & Output Parser]
         end
         subgraph "Core Components"
             Agent[Agent]
             Task[Task]
-            Tool[Tool]
-            Memory[Memory]
-            LLM[LLM Provider]
+            Tool[Tool System & MCP Hub]
+            Memory["Memory (Mem0 / Short-term / Workspace)"]
+            LLM["LLM Providers (OpenAI / Anthropic / Ollama / 10+)"]
         end
+        Collaboration["Collaboration & Delegation"]
+        Hooks["Hooks System"]
     end
 
     subgraph "Platform Services Layer"
         subgraph "Observability"
-            Monitoring[Monitoring System]
+            Monitoring["Monitoring & Trajectory"]
+            Prometheus[Prometheus / OpenTelemetry]
         end
-        subgraph "Communication Protocols"
-            Protocols[Protocol Handler]
+        subgraph "Protocols"
+            A2A["A2A Protocol"]
+            MCP["MCP Protocol"]
         end
-        subgraph "Security Governance"
-            Security[Security Service]
+        subgraph "Security"
+            Safety["Safety Layer (Leak Detection / Sanitizer / Policy)"]
+            Sandbox["Execution Sandbox"]
+        end
+        subgraph "Storage"
+            KVStore["Key-Value (SQLite / Redis)"]
+            VectorStore["Vector (Milvus / Qdrant / Chroma)"]
+            GraphStore["Graph (Neo4j / NetworkX)"]
         end
     end
 
-    SDK --> Orchestrator
-    Orchestrator --> AgentExecutor
+    subgraph "Domain Extensions"
+        Embodiment["GUI Agent / Embodiment"]
+        Knowledge["Knowledge & GraphRAG"]
+    end
+
+    Desktop --> StudioServer
+    CLI --> StudioServer
+    SDK --> AgentExecutor
+
+    StudioServer --> SessionMgr
+    SessionMgr --> MetaAgent
+    MetaAgent --> TeamMgr
+    MetaAgent --> AvatarSys
+    TeamMgr --> AgentRuntime
+
+    AgentRuntime --> Agent
     AgentExecutor --> Agent
+    WorkflowEngine --> AgentExecutor
+
     Agent --> Tool
     Agent --> Memory
     Agent --> LLM
+    Agent --> Hooks
+
+    AgentRuntime --> Monitoring
     AgentExecutor --> Monitoring
-    Agent --> Protocols
+    Agent --> A2A
+    Tool --> MCP
+
+    Agent --> Safety
+    Memory --> KVStore
+    Memory --> VectorStore
+    Knowledge --> GraphStore
 ```
+
+The architecture diagram above is a Mermaid text version. Below is a visual overview of the full system architecture across all 5 tiers — from User Interface down to Domain Extensions:
+
+<div align="center">
+<img src="assets/AgenticX System Architecture.png" alt="AgenticX System Architecture — 5-tier overview covering UI, Studio Runtime, Core Framework, Platform Services, and Domain Extensions" width="900" />
+</div>
 
 ## Development Progress
 
-### ✅ Completed Modules (M1-M9, M16)
+### ✅ Completed Modules (M1-M11, M13-M17)
 
 | Module | Status | Description |
 |---------|--------|-------------|
-| **M1** | ✅ | Core Abstraction Layer - Basic data structures like Agent, Task, Tool, Workflow |
-| **M2** | ✅ | LLM Service Layer - Unified LLM interface based on LiteLLM, supporting 100+ models |
-| **M3** | ✅ | Tool System - Function decorators, MCP remote tools, built-in toolsets |
-| **M4** | ✅ | Memory System - Deep integration with Mem0, supporting custom LLM |
-| **M5** | ✅ | Agent Core - Complete think-act loop, event-driven architecture |
-| **M6** | ✅ | Task Validation - Pydantic-based output parsing and auto-repair |
-| **M7** | ✅ | Orchestration Engine - Graph-based workflows, conditional routing, parallel execution |
-| **M8** | ✅ | Communication Protocols - A2A agent communication, MCP resource access |
-| **M9** | ✅ | Observability - Complete monitoring, trajectory analysis, performance metrics |
-| **M16** | ✅ | Embodiment Module - GUI Agent framework with action reflection, stuck detection, action caching, REACT output parsing, device-cloud routing, and DAG task verification |
+| **M1** | ✅ | Core Abstraction Layer — Agent, Task, Tool, Workflow, Event Bus, Component, and Pydantic data contracts |
+| **M2** | ✅ | LLM Service Layer — 15+ providers (OpenAI / Anthropic / Ollama / Gemini / Kimi / MiniMax / Ark / Zhipu / Qianfan / Bailian), response caching, failover routing |
+| **M3** | ✅ | Tool System — Function decorators, MCP Hub, remote tools v2, OpenAPI toolset, sandbox tools, skill bundles, document routers |
+| **M4** | ✅ | Memory System — Hierarchical (core / episodic / semantic), Mem0, workspace, short-term, memory decay, hybrid search, memory intelligence engine |
+| **M5** | ✅ | Agent Core — Meta-Agent CEO dispatcher, think-act loop, event-driven architecture, self-repair, overflow recovery, reflection |
+| **M6** | ✅ | Task Validation — Pydantic-based output parsing, auto-repair, guiderails |
+| **M7** | ✅ | Orchestration Engine — Graph-based workflow engine + Flow system with decorators, execution plans, conditional routing, parallel execution |
+| **M8** | ✅ | Communication Protocols — A2A (client / server / AgentCard / skill-as-tool), MCP resource access, AGUI protocol |
+| **M9** | ✅ | Observability — Callbacks, real-time monitoring, trajectory analysis, span tree, WebSocket streaming, Prometheus / OpenTelemetry integration |
+| **M10** | ✅ | Developer Experience — CLI (`agx` with 15+ commands), Studio Server (FastAPI), Desktop App (Electron + React + Zustand, Pro/Lite dual mode) |
+| **M11** | ✅ | Enterprise Security — Safety layer (leak detection / sanitizer / injection detector / policy / audit), Sandbox (Docker / Microsandbox / Subprocess / Jupyter kernel / code interpreter) |
+| **M13** | ✅ | Knowledge & Retrieval — Knowledge base with document processing, chunkers, graphers (GraphRAG), readers; retrieval (vector / BM25 / graph / hybrid / auto); embeddings (OpenAI / Bailian / SiliconFlow / LiteLLM) |
+| **M14** | ✅ | Avatar & Collaboration — Avatar registry, group chat (user-directed / meta-routed / round-robin), delegation, role-playing, conversation patterns, team management |
+| **M15** | ✅ | Evaluation Framework — EvalSet, LLM judge, composite judge, span evaluator, trajectory matcher, trace converter |
+| **M16** | ✅ | Embodiment — GUI Agent framework with action reflection, stuck detection, action caching, REACT parsing, device-cloud routing, DAG verification, human-in-the-loop |
+| **M17** | ✅ | Storage Layer — Key-Value (SQLite / Redis / PostgreSQL / MongoDB), Vector (Milvus / Qdrant / Chroma / Faiss / PgVector / Pinecone / Weaviate), Graph (Neo4j / Nebula), Object (S3 / GCS / Azure) |
 
-### Planned Modules (M10-M13)
+### 🚧 Planned Modules
 
 | Module | Status | Description |
 |---------|--------|-------------|
-| **M10** | 🚧 | Developer Experience - CLI, Web UI, IDE integration |
-| **M11** | 🚧 | Enterprise Security - Multi-tenancy, RBAC, security sandbox |
-| **M12** | 🚧 | Agent Evolution - Architecture search, knowledge distillation |
-| **M13** | 🚧 | Knowledge Hub - Enterprise data connection, unified search |
+| **M12** | 🚧 | Agent Evolution — Architecture search, knowledge distillation, adaptive planning |
+| **M18** | 🚧 | Multi-tenancy & RBAC — Per-tenant data isolation, fine-grained permission control |
 
 ## Core Advantages
 
