@@ -44,6 +44,20 @@ from agenticx.workspace.loader import ensure_workspace
 logger = logging.getLogger(__name__)
 
 
+def _minimax_m2_family_no_vision(model_name: str) -> bool:
+    """MiniMax M2.x chat line does not accept image/audio input (vendor docs, e.g. M2.7)."""
+    raw = str(model_name or "").strip().lower()
+    if not raw:
+        return False
+    if "/" in raw:
+        raw = raw.rsplit("/", 1)[-1]
+    if "vl" in raw or "vision" in raw:
+        return False
+    if "minimax-m2" in raw:
+        return True
+    return bool(re.match(r"^m2[.\-_]?\d", raw))
+
+
 def create_studio_app() -> FastAPI:
     app = FastAPI(title="AgenticX Studio Service", version="0.1.0")
     app.add_middleware(
@@ -425,6 +439,11 @@ def create_studio_app() -> FastAPI:
         if payload.model:
             session.model_name = payload.model
 
+        if str(session.provider_name or "").strip().lower() == "minimax" and _minimax_m2_family_no_vision(
+            str(session.model_name or "")
+        ):
+            image_inputs = []
+
         def _resolve_llm():
             return ProviderResolver.resolve(
                 provider_name=session.provider_name,
@@ -725,15 +744,7 @@ def create_studio_app() -> FastAPI:
                         )
                     user_message_content: Any | None = None
                     if image_inputs:
-                        multimodal_text = effective_input
-                        if str(session.provider_name or "").strip().lower() == "minimax":
-                            multimodal_text = (
-                                "【重要】用户图片已作为多模态内容与本消息一并提交，请直接基于视觉输入作答。"
-                                "不要使用 bash_exec/curl/wget 等去下载图片或访问外网图片链接；"
-                                "不要假设必须先抓取链接才能识别图片。\n\n"
-                                f"{effective_input}"
-                            )
-                        content_blocks: list[dict[str, Any]] = [{"type": "text", "text": multimodal_text}]
+                        content_blocks: list[dict[str, Any]] = [{"type": "text", "text": effective_input}]
                         for image in image_inputs:
                             content_blocks.append(
                                 {
