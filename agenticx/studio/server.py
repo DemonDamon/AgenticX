@@ -577,16 +577,23 @@ def create_studio_app() -> FastAPI:
                         max_tool_rounds=_resolve_max_tool_rounds(),
                         meta_leader_display_name=meta_leader_label,
                     )
+                    quoted_content = str(payload.quoted_content or "")
+                    quoted_message_id = str(payload.quoted_message_id or "")
+                    group_id = str(group_payload.get("id", "") or "")
+                    group_name = str(group_payload.get("name", "") or "群聊")
+                    group_members = list(group_payload.get("avatar_ids") or [])
+                    group_routing = str(group_payload.get("routing", "intelligent") or "intelligent")
                     mentioned_ids = expand_mentions_with_meta_leader(
                         str(payload.user_input or ""),
                         list(payload.mentioned_avatar_ids or []),
                         meta_leader_label,
                     )
-                    quoted_content = str(payload.quoted_content or "")
-                    group_id = str(group_payload.get("id", "") or "")
-                    group_name = str(group_payload.get("name", "") or "群聊")
-                    group_members = list(group_payload.get("avatar_ids") or [])
-                    group_routing = str(group_payload.get("routing", "intelligent") or "intelligent")
+                    for tid in router._plain_targets_in_text(
+                        str(payload.user_input or ""),
+                        group_avatar_ids=group_members,
+                    ):
+                        if tid not in mentioned_ids:
+                            mentioned_ids.append(tid)
 
                     targets = router.pick_targets(
                         group_id=group_id,
@@ -616,6 +623,7 @@ def create_studio_app() -> FastAPI:
                         )
                         yield f"data: {json.dumps(typing_evt.model_dump(), ensure_ascii=False)}\n\n"
 
+                    u_display = str(getattr(payload, "user_display_name", None) or "").strip() or None
                     async for reply in router.run_group_turn(
                         base_session=session,
                         group_id=group_id,
@@ -625,7 +633,9 @@ def create_studio_app() -> FastAPI:
                         mentioned_avatar_ids=mentioned_ids,
                         user_input=payload.user_input,
                         quoted_content=quoted_content,
+                        quoted_message_id=quoted_message_id,
                         should_stop=request.is_disconnected,
+                        user_display_name=u_display,
                     ):
                         if await request.is_disconnected():
                             break
@@ -641,6 +651,7 @@ def create_studio_app() -> FastAPI:
                                 "content": reply.content,
                                 "skipped": reply.skipped,
                                 "error": reply.error,
+                                "confirm_request_id": str(getattr(reply, "confirm_request_id", "") or ""),
                             },
                         )
                         yield f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"

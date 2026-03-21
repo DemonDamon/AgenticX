@@ -47,14 +47,24 @@ class GroupChatContext:
             setattr(self.session, "scratchpad", scratchpad)
         return scratchpad
 
-    def append_user(self, text: str) -> None:
+    def append_user(
+        self,
+        text: str,
+        *,
+        sender_name: str = "我",
+        quoted_message_id: str = "",
+        quoted_content: str = "",
+    ) -> None:
+        label = str(sender_name or "").strip() or "我"
         self._history().append(
             {
                 "role": "user",
                 "content": str(text or ""),
                 "sender_id": "user",
-                "sender_name": "我",
+                "sender_name": label,
                 "agent_id": "user",
+                "quoted_message_id": str(quoted_message_id or ""),
+                "quoted_content": str(quoted_content or ""),
             }
         )
 
@@ -100,7 +110,10 @@ class GroupChatContext:
             return "(暂无历史消息)"
         lines: list[str] = []
         for row in rows:
-            prefix = "用户" if row.role == "user" else f"{row.sender_name}({row.sender_id})"
+            if row.role == "user":
+                prefix = row.sender_name or "用户"
+            else:
+                prefix = f"{row.sender_name}({row.sender_id})"
             lines.append(f"- {prefix}: {row.content}")
         return "\n".join(lines)
 
