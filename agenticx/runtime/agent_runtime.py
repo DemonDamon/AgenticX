@@ -444,6 +444,49 @@ def _iter_text_chunks(text: str, chunk_size: int = 16) -> List[str]:
     return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
 
 
+def _is_minimax_chat_setting_error(error: Exception) -> bool:
+    """Return True when MiniMax rejects request chat settings."""
+    text = str(error or "").lower()
+    return (
+        "invalid chat setting" in text
+        or "invalid params" in text and "(2013)" in text
+    )
+
+
+def _merge_consecutive_simple_roles_for_minimax(
+    messages: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge adjacent system/user rows for MiniMax OpenAI-compatible API.
+
+    MiniMax returns error 2013 (invalid chat setting) when the same role
+    appears on consecutive messages (e.g. main system prompt + [compacted]
+    system block from ContextCompactor). Tool-call turns are left unchanged.
+    """
+    merge_roles = frozenset({"system", "user"})
+    out: List[Dict[str, Any]] = []
+    for msg in messages:
+        m = dict(msg)
+        role = str(m.get("role", ""))
+        if m.get("tool_calls"):
+            out.append(m)
+            continue
+        if role not in merge_roles:
+            out.append(m)
+            continue
+        if (
+            out
+            and str(out[-1].get("role", "")) == role
+            and not out[-1].get("tool_calls")
+        ):
+            prev = out[-1]
+            prev["content"] = (
+                str(prev.get("content", "")) + "\n\n" + str(m.get("content", ""))
+            ).strip()
+        else:
+            out.append(m)
+    return out
+
+
 def _extract_inline_tool_call(
     text: str, allowed_tool_names: set[str]
 ) -> Optional[Dict[str, Any]]:
@@ -683,6 +726,8 @@ class AgentRuntime:
             try:
                 messages = await self.hooks.run_before_model(messages, session)
                 messages = _sanitize_context_messages(messages)
+                if provider_name.strip().lower() == "minimax":
+                    messages = _merge_consecutive_simple_roles_for_minimax(messages)
                 response_text = ""
                 tool_calls: List[Dict[str, Any]] = []
                 response: Any
@@ -699,13 +744,22 @@ class AgentRuntime:
 
                         def _run_sync_stream_with_tools() -> None:
                             try:
+                                stream_kwargs: Dict[str, Any] = {
+                                    "tools": list(active_tools),
+                                    "tool_choice": "auto",
+                                    "temperature": 0.2,
+                                    "max_tokens": 8192,
+                                    "timeout": request_timeout_seconds,
+                                }
+                                # MiniMax occasionally rejects advanced chat settings (error 2013).
+                                # Start streaming with conservative parameters to reduce hard failures.
+                                if provider_name.strip().lower() == "minimax":
+                                    stream_kwargs.pop("tool_choice", None)
+                                    stream_kwargs.pop("temperature", None)
+                                    stream_kwargs["max_tokens"] = 4096
                                 for chunk in stream_with_tools(
                                     messages,
-                                    tools=list(active_tools),
-                                    tool_choice="auto",
-                                    temperature=0.2,
-                                    max_tokens=8192,
-                                    timeout=request_timeout_seconds,
+                                    **stream_kwargs,
                                 ):
                                     if stop_stream.is_set():
                                         break
@@ -845,15 +899,50 @@ class AgentRuntime:
                             except Exception:
                                 pass
                 if not used_stream_path:
+                    def _invoke_once_with_fallback() -> Any:
+                        try:
+                            return self.llm.invoke(
+                                messages,
+                                tools=active_tools,
+                                tool_choice="auto",
+                                temperature=0.2,
+                                max_tokens=8192,
+                                timeout=request_timeout_seconds,
+                            )
+                        except Exception as invoke_exc:
+                            provider_lower = provider_name.strip().lower()
+                            if provider_lower == "minimax" and _is_minimax_chat_setting_error(invoke_exc):
+                                logger.warning(
+                                    "MiniMax rejected chat settings; retrying invoke with conservative params",
+                                    exc_info=True,
+                                )
+                                minimax_retries = [
+                                    # Keep tools, but remove advanced settings and lower token budget.
+                                    {
+                                        "tools": active_tools,
+                                        "max_tokens": 4096,
+                                        "timeout": request_timeout_seconds,
+                                    },
+                                    # Some accounts reject max_tokens + tool_choice combos in edge cases.
+                                    {
+                                        "tools": active_tools,
+                                        "timeout": request_timeout_seconds,
+                                    },
+                                ]
+                                last_exc: Exception = invoke_exc
+                                for retry_kwargs in minimax_retries:
+                                    try:
+                                        return self.llm.invoke(messages, **retry_kwargs)
+                                    except Exception as retry_exc:
+                                        last_exc = retry_exc
+                                        if not _is_minimax_chat_setting_error(retry_exc):
+                                            raise
+                                raise last_exc
+                            raise
+
                     invoke_task = asyncio.create_task(
                         asyncio.to_thread(
-                            self.llm.invoke,
-                            messages,
-                            tools=active_tools,
-                            tool_choice="auto",
-                            temperature=0.2,
-                            max_tokens=8192,
-                            timeout=request_timeout_seconds,
+                            _invoke_once_with_fallback,
                         )
                     )
                     wait_started_at = asyncio.get_running_loop().time()

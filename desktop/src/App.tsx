@@ -868,7 +868,7 @@ export function App() {
     context?: Record<string, unknown>
   ): Promise<boolean> =>
     await new Promise<boolean>((resolve) => {
-      if (confirmStrategy === "auto") {
+      if (useAppStore.getState().confirmStrategy === "auto") {
         resolve(true);
         return;
       }
