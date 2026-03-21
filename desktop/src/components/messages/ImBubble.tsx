@@ -187,7 +187,7 @@ export function ImBubble({
                 )}
               </div>
             </div>
-            <div className="mt-1 hidden items-center gap-2 text-[11px] text-text-faint group-hover:flex">
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
               <button type="button" className="hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>复制</button>
               <button type="button" className="hover:text-text-strong" onClick={() => onQuoteMessage?.(message)}>引用</button>
               <button type="button" className="hover:text-text-strong" onClick={() => onFavoriteMessage?.(message)}>收藏</button>
