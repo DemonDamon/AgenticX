@@ -45,6 +45,18 @@ type GroupItem = {
   avatar_ids: string[];
   routing?: string;
 };
+type ForwardedHistoryItem = {
+  sender: string;
+  role: string;
+  content: string;
+  avatar_url?: string;
+  timestamp?: number;
+};
+type ForwardedHistoryCard = {
+  title: string;
+  source_session: string;
+  items: ForwardedHistoryItem[];
+};
 type TaskspaceItem = {
   id: string;
   label: string;
@@ -117,6 +129,8 @@ declare global {
           model?: string;
           quoted_message_id?: string;
           quoted_content?: string;
+          timestamp?: number;
+          forwarded_history?: ForwardedHistoryCard;
         }>;
         error?: string;
       }>;

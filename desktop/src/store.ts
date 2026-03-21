@@ -71,6 +71,7 @@ export type Message = {
   id: string;
   role: MsgRole;
   content: string;
+  timestamp?: number;
   agentId?: string;
   avatarName?: string;
   avatarUrl?: string;
@@ -78,7 +79,22 @@ export type Message = {
   model?: string;
   quotedMessageId?: string;
   quotedContent?: string;
+  forwardedHistory?: ForwardedHistoryCard;
   attachments?: MessageAttachment[];
+};
+
+export type ForwardedHistoryItem = {
+  sender: string;
+  role: string;
+  content: string;
+  avatarUrl?: string;
+  timestamp?: number;
+};
+
+export type ForwardedHistoryCard = {
+  title: string;
+  sourceSession: string;
+  items: ForwardedHistoryItem[];
 };
 
 export type MessageAttachment = {
@@ -175,6 +191,9 @@ type AppState = {
   groups: GroupChat[];
   panes: ChatPane[];
   activePaneId: string;
+  /** After merge-forward, target pane runs one normal /api/chat with this text (cleared when consumed). */
+  forwardAutoReply: { paneId: string; sessionId: string; text: string } | null;
+  setForwardAutoReply: (job: { paneId: string; sessionId: string; text: string } | null) => void;
   setApiBase: (base: string) => void;
   setApiToken: (token: string) => void;
   setSessionId: (id: string) => void;
@@ -204,7 +223,12 @@ type AppState = {
     provider?: string,
     model?: string,
     attachments?: MessageAttachment[],
-    extras?: Partial<Pick<Message, "avatarName" | "avatarUrl" | "quotedMessageId" | "quotedContent">>
+    extras?: Partial<
+      Pick<
+        Message,
+        "avatarName" | "avatarUrl" | "quotedMessageId" | "quotedContent" | "timestamp" | "forwardedHistory"
+      >
+    >
   ) => void;
   updateLastPaneMessage: (paneId: string, content: string) => void;
   clearPaneMessages: (paneId: string) => void;
@@ -225,7 +249,12 @@ type AppState = {
     provider?: string,
     model?: string,
     attachments?: MessageAttachment[],
-    extras?: Partial<Pick<Message, "avatarName" | "avatarUrl" | "quotedMessageId" | "quotedContent">>
+    extras?: Partial<
+      Pick<
+        Message,
+        "avatarName" | "avatarUrl" | "quotedMessageId" | "quotedContent" | "timestamp" | "forwardedHistory"
+      >
+    >
   ) => void;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
   clearMessages: () => void;
@@ -303,6 +332,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   groups: [],
   panes: [makeDefaultPane()],
   activePaneId: "pane-meta",
+  forwardAutoReply: null,
   subAgents: [],
   selectedSubAgent: null,
   codePreview: "",
@@ -335,6 +365,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setAvatarSessions: (avatarSessions) => set({ avatarSessions }),
   setGroups: (groups) => set({ groups }),
   setActivePaneId: (activePaneId) => set({ activePaneId }),
+  setForwardAutoReply: (forwardAutoReply) => set({ forwardAutoReply }),
   addPane: (avatarId, avatarName, sessionId) => {
     const paneId = uid();
     set((state) => ({
@@ -377,7 +408,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               ...pane,
               messages: [
                 ...pane.messages,
-                { id: uid(), role, content, agentId, provider, model, attachments, ...extras },
+                { id: uid(), role, content, timestamp: Date.now(), agentId, provider, model, attachments, ...extras },
               ],
             }
           : pane
@@ -449,7 +480,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     })),
   addMessage: (role, content, agentId, provider, model, attachments, extras) =>
     set((state) => {
-      const nextMessage: Message = { id: uid(), role, content, agentId, provider, model, attachments, ...extras };
+      const nextMessage: Message = {
+        id: uid(),
+        role,
+        content,
+        timestamp: Date.now(),
+        agentId,
+        provider,
+        model,
+        attachments,
+        ...extras,
+      };
       return {
         messages: [...state.messages, nextMessage],
         panes: state.panes.map((pane) =>
