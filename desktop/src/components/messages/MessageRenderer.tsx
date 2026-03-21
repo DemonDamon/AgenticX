@@ -14,6 +14,8 @@ type Props = {
   onRevealPath?: (path: string) => void;
   assistantName?: string;
   assistantAvatarUrl?: string;
+  /** IM 风格下用户气泡旁显示名（默认「我」） */
+  userName?: string;
   onCopyMessage?: (message: Message) => void;
   onQuoteMessage?: (message: Message) => void;
   onFavoriteMessage?: (message: Message) => void;
@@ -21,6 +23,7 @@ type Props = {
   onForwardMessage?: (message: Message) => void;
   selectable?: boolean;
   selected?: boolean;
+  onResolveInlineConfirm?: (confirm: NonNullable<Message["inlineConfirm"]>, approved: boolean) => void;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -38,6 +41,7 @@ export function MessageRenderer({
   onRevealPath,
   assistantName,
   assistantAvatarUrl,
+  userName,
   onCopyMessage,
   onQuoteMessage,
   onFavoriteMessage,
@@ -45,6 +49,7 @@ export function MessageRenderer({
   onForwardMessage,
   selectable,
   selected,
+  onResolveInlineConfirm,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   if (message.role === "user" || message.role === "assistant") {
@@ -56,6 +61,7 @@ export function MessageRenderer({
         badge={assistantBadge}
         assistantName={message.avatarName || assistantName}
         assistantAvatarUrl={message.avatarUrl || assistantAvatarUrl}
+        userName={userName}
         onCopyMessage={onCopyMessage}
         onQuoteMessage={onQuoteMessage}
         onFavoriteMessage={onFavoriteMessage}
@@ -74,19 +80,42 @@ export function MessageRenderer({
         </div>
       );
     }
+    const inlineConfirm = message.inlineConfirm;
+    const inlineConfirmAction =
+      inlineConfirm && onResolveInlineConfirm ? (
+        <div className="mt-1 flex items-center gap-2">
+          <button
+            type="button"
+            className="rounded border border-border bg-surface-hover px-2 py-0.5 text-[11px] text-text-strong hover:opacity-90"
+            onClick={() => onResolveInlineConfirm(inlineConfirm, true)}
+          >
+            同意
+          </button>
+          <button
+            type="button"
+            className="rounded border border-border bg-surface-hover px-2 py-0.5 text-[11px] text-text-strong hover:opacity-90"
+            onClick={() => onResolveInlineConfirm(inlineConfirm, false)}
+          >
+            拒绝
+          </button>
+        </div>
+      ) : null;
     const path = extractPathFromToolResult(message.content);
     return (
       <ToolCallCard
         message={message}
         action={
-          path && onRevealPath ? (
-            <button
-              className="rounded bg-surface-hover px-1.5 py-0.5 text-[10px] text-cyan-300 hover:bg-surface-hover"
-              onClick={() => onRevealPath(path)}
-            >
-              查看此文件
-            </button>
-          ) : null
+          <>
+            {inlineConfirmAction}
+            {path && onRevealPath ? (
+              <button
+                className="rounded bg-surface-hover px-1.5 py-0.5 text-[10px] text-cyan-300 hover:bg-surface-hover"
+                onClick={() => onRevealPath(path)}
+              >
+                查看此文件
+              </button>
+            ) : null}
+          </>
         }
       />
     );

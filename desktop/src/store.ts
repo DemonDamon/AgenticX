@@ -81,6 +81,7 @@ export type Message = {
   quotedContent?: string;
   forwardedHistory?: ForwardedHistoryCard;
   attachments?: MessageAttachment[];
+  inlineConfirm?: PendingConfirm;
 };
 
 export type ForwardedHistoryItem = {
@@ -183,6 +184,8 @@ type AppState = {
   planMode: boolean;
   theme: ThemeMode;
   chatStyle: ChatStyle;
+  /** Shown on user bubbles and sent as group chat context label (empty → 「我」). */
+  userDisplayName: string;
   confirmStrategy: ConfirmStrategy;
   mcpServers: McpServer[];
   avatars: Avatar[];
@@ -206,6 +209,7 @@ type AppState = {
   setPlanMode: (v: boolean) => void;
   setTheme: (theme: ThemeMode) => void;
   setChatStyle: (style: ChatStyle) => void;
+  setUserDisplayName: (name: string) => void;
   setConfirmStrategy: (v: ConfirmStrategy) => void;
   setMcpServers: (servers: McpServer[]) => void;
   setAvatars: (avatars: Avatar[]) => void;
@@ -226,7 +230,13 @@ type AppState = {
     extras?: Partial<
       Pick<
         Message,
-        "avatarName" | "avatarUrl" | "quotedMessageId" | "quotedContent" | "timestamp" | "forwardedHistory"
+        | "avatarName"
+        | "avatarUrl"
+        | "quotedMessageId"
+        | "quotedContent"
+        | "timestamp"
+        | "forwardedHistory"
+        | "inlineConfirm"
       >
     >
   ) => void;
@@ -252,7 +262,13 @@ type AppState = {
     extras?: Partial<
       Pick<
         Message,
-        "avatarName" | "avatarUrl" | "quotedMessageId" | "quotedContent" | "timestamp" | "forwardedHistory"
+        | "avatarName"
+        | "avatarUrl"
+        | "quotedMessageId"
+        | "quotedContent"
+        | "timestamp"
+        | "forwardedHistory"
+        | "inlineConfirm"
       >
     >
   ) => void;
@@ -298,6 +314,7 @@ function makeDefaultPane(): ChatPane {
 }
 
 const CHAT_STYLE_STORAGE_KEY = "agx-chat-style";
+const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
 
 function loadChatStyle(): ChatStyle {
   try {
@@ -307,6 +324,16 @@ function loadChatStyle(): ChatStyle {
     // ignore storage errors
   }
   return "im";
+}
+
+function loadUserDisplayName(): string {
+  try {
+    const saved = window.localStorage.getItem(USER_DISPLAY_NAME_KEY);
+    if (typeof saved === "string") return saved.slice(0, 48);
+  } catch {
+    // ignore storage errors
+  }
+  return "";
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -324,6 +351,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   planMode: false,
   theme: "dark",
   chatStyle: loadChatStyle(),
+  userDisplayName: loadUserDisplayName(),
   confirmStrategy: "semi-auto",
   mcpServers: [],
   avatars: [],
@@ -357,6 +385,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         // ignore storage errors
       }
       return { chatStyle };
+    }),
+  setUserDisplayName: (userDisplayName) =>
+    set(() => {
+      const next = String(userDisplayName ?? "").slice(0, 48);
+      try {
+        if (next.trim()) window.localStorage.setItem(USER_DISPLAY_NAME_KEY, next);
+        else window.localStorage.removeItem(USER_DISPLAY_NAME_KEY);
+      } catch {
+        // ignore storage errors
+      }
+      return { userDisplayName: next };
     }),
   setConfirmStrategy: (confirmStrategy) => set({ confirmStrategy }),
   setMcpServers: (mcpServers) => set({ mcpServers }),
