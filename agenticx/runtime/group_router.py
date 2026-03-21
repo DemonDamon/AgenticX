@@ -24,6 +24,64 @@ from agenticx.runtime.group_context import GroupChatContext
 META_LEADER_AGENT_ID = "__meta__"
 META_LEADER_NAME = "组长"
 
+_META_AT_SUFFIX = r"(?=[\s\u3000\u4e00-\u9fff，。！？、：:；;,.!?\[\]（）()【】\"'「」]|$)"
+
+
+def user_addresses_meta_leader(user_input: str, meta_label: str) -> bool:
+    """True if the user is clearly addressing the group coordinator (not only @id)."""
+    text = (user_input or "").strip()
+    if not text:
+        return False
+    norm = text.replace("＠", "@")
+    low = norm.casefold()
+    labels: list[str] = []
+    ml = str(meta_label or "").strip()
+    if ml:
+        labels.append(ml)
+    for alias in (META_LEADER_NAME, "meta-agent", "meta agent"):
+        if alias and alias not in labels:
+            labels.append(alias)
+    for lab in labels:
+        l = lab.strip().casefold()
+        if not l:
+            continue
+        at_m = re.search("@" + re.escape(l) + _META_AT_SUFFIX, low, flags=re.IGNORECASE)
+        if at_m:
+            return True
+        if low.startswith(l):
+            tail = low[len(l) : len(l) + 1]
+            if not tail:
+                return True
+            if l.isascii() and tail.isascii() and (tail.isalnum() or tail == "_"):
+                continue
+            return True
+        if l.isascii() and len(l) >= 2:
+            if re.search(r"(?<![\w])" + re.escape(l) + r"(?![\w])", low, flags=re.IGNORECASE):
+                return True
+        elif l in low:
+            idx = low.find(l)
+            before = low[idx - 1] if idx > 0 else " "
+            after = low[idx + len(l) : idx + len(l) + 1] if idx >= 0 else ""
+            if before.isalnum() and before.isascii():
+                continue
+            if after and after.isascii() and after.isalnum():
+                continue
+            return True
+    return False
+
+
+def expand_mentions_with_meta_leader(
+    user_input: str,
+    mentioned_avatar_ids: Sequence[str],
+    meta_label: str,
+) -> List[str]:
+    out = [str(x).strip() for x in mentioned_avatar_ids if str(x).strip()]
+    if META_LEADER_AGENT_ID in out:
+        return out
+    if user_addresses_meta_leader(user_input, meta_label):
+        out.append(META_LEADER_AGENT_ID)
+    return out
+
 
 def _group_chat_tools() -> Sequence[Dict[str, Any]]:
     blocked = {"delegate_to_avatar"}
@@ -69,6 +127,17 @@ class GroupChatRouter:
         label = str(meta_leader_display_name or "").strip()
         self._meta_leader_label = label or "Machi"
 
+    @staticmethod
+    def _typing_event(agent_id: str, avatar_name: str) -> GroupReply:
+        return GroupReply(
+            agent_id=agent_id,
+            avatar_name=avatar_name,
+            avatar_url="",
+            content="",
+            skipped=True,
+            event_type="group_typing",
+        )
+
     def pick_targets(
         self,
         *,
@@ -80,9 +149,11 @@ class GroupChatRouter:
     ) -> List[str]:
         valid_members = [str(x).strip() for x in group_avatar_ids if str(x).strip()]
         mention_set = {str(x).strip() for x in mentioned_avatar_ids if str(x).strip()}
-        explicit_targets = [x for x in valid_members if x in mention_set]
-        if explicit_targets:
-            return explicit_targets
+        member_mentions = [x for x in valid_members if x in mention_set]
+        if META_LEADER_AGENT_ID in mention_set:
+            return [META_LEADER_AGENT_ID, *member_mentions]
+        if member_mentions:
+            return member_mentions
         if routing == "intelligent":
             return []
         if routing == "round-robin" and valid_members:
@@ -218,6 +289,7 @@ class GroupChatRouter:
             f"最近群聊上下文:\n{context.render_recent_dialogue()}\n\n"
             f"用户消息:\n{user_input}\n\n"
             "规则:\n"
+            f"- 用户点名组长/项目经理（含称呼「{self._meta_leader_label}」「{META_LEADER_NAME}」、@同名、或 meta-agent）=> meta_direct。\n"
             "- 项目全局进度、跨角色总结问题 => meta_direct。\n"
             "- 明确属于某角色职责 => route_to。\n"
             "- 明显在追问上一位成员 => continue_thread。\n"
@@ -466,7 +538,22 @@ class GroupChatRouter:
         should_stop: Callable[[], Any],
     ) -> AsyncGenerator[GroupReply, None]:
         valid_members = [str(x).strip() for x in group_avatar_ids if str(x).strip()]
-        explicit = [x for x in valid_members if x in {str(i).strip() for i in mentioned_avatar_ids if str(i).strip()}]
+        mention_set = {str(i).strip() for i in mentioned_avatar_ids if str(i).strip()}
+        if META_LEADER_AGENT_ID in mention_set:
+            context.clear_active_thread()
+            yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
+            if await self._should_stop(should_stop):
+                return
+            yield await self._run_meta_project_manager_reply(
+                base_session=base_session,
+                context=context,
+                group_name=group_name,
+                user_input=user_input,
+                quoted_content=quoted_content,
+                extra_instruction="用户点名由你（组长）回答，请直接作答。",
+            )
+            return
+        explicit = [x for x in valid_members if x in mention_set]
         decision = await self._analyze_intent(
             base_session=base_session,
             context=context,
@@ -477,6 +564,9 @@ class GroupChatRouter:
         )
         if decision.action == "meta_direct":
             context.clear_active_thread()
+            yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
+            if await self._should_stop(should_stop):
+                return
             yield await self._run_meta_project_manager_reply(
                 base_session=base_session,
                 context=context,
@@ -498,6 +588,14 @@ class GroupChatRouter:
             primary_targets = primary_targets[:2]
         any_success = False
         for target in primary_targets:
+            if await self._should_stop(should_stop):
+                return
+            if target == META_LEADER_AGENT_ID:
+                ty_name = self._meta_leader_label
+            else:
+                av = self.avatar_registry.get_avatar(target)
+                ty_name = str(getattr(av, "name", "") or target) if av else target
+            yield self._typing_event(target, ty_name)
             if await self._should_stop(should_stop):
                 return
             reply = await self._run_one_target(
@@ -523,6 +621,9 @@ class GroupChatRouter:
             return
         nudge_target = primary_targets[0] if primary_targets else ""
         if not nudge_target:
+            yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
+            if await self._should_stop(should_stop):
+                return
             yield await self._run_meta_project_manager_reply(
                 base_session=base_session,
                 context=context,
@@ -551,6 +652,11 @@ class GroupChatRouter:
         )
         if await self._should_stop(should_stop):
             return
+        nudge_av = self.avatar_registry.get_avatar(nudge_target)
+        nudge_ty = str(getattr(nudge_av, "name", "") or nudge_target) if nudge_av else nudge_target
+        yield self._typing_event(nudge_target, nudge_ty)
+        if await self._should_stop(should_stop):
+            return
         retry_reply = await self._run_one_target(
             base_session=base_session,
             context=context,
@@ -569,6 +675,9 @@ class GroupChatRouter:
                 partner_name=retry_reply.avatar_name,
                 last_topic=user_input[:120],
             )
+            return
+        yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
+        if await self._should_stop(should_stop):
             return
         yield await self._run_meta_project_manager_reply(
             base_session=base_session,
@@ -599,6 +708,11 @@ class GroupChatRouter:
         setattr(base_session, "__group_avatar_ids", list(group_avatar_ids))
         context = GroupChatContext(base_session, max_items=24)
         context.append_user(user_input)
+        resolved_mentions = expand_mentions_with_meta_leader(
+            user_input,
+            mentioned_avatar_ids,
+            self._meta_leader_label,
+        )
         if routing == "intelligent":
             async for reply in self._run_intelligent_turn(
                 base_session=base_session,
@@ -606,7 +720,7 @@ class GroupChatRouter:
                 group_id=group_id,
                 group_name=group_name,
                 group_avatar_ids=group_avatar_ids,
-                mentioned_avatar_ids=mentioned_avatar_ids,
+                mentioned_avatar_ids=resolved_mentions,
                 user_input=user_input,
                 quoted_content=quoted_content,
                 should_stop=should_stop,
@@ -617,13 +731,13 @@ class GroupChatRouter:
             group_id=group_id,
             group_avatar_ids=group_avatar_ids,
             routing=routing,
-            mentioned_avatar_ids=mentioned_avatar_ids,
+            mentioned_avatar_ids=resolved_mentions,
             scratchpad=scratchpad,
         )
         if not targets:
             return
 
-        force_reply_targets = {str(x).strip() for x in mentioned_avatar_ids if str(x).strip()}
+        force_reply_targets = {str(x).strip() for x in resolved_mentions if str(x).strip()}
         tasks = [
             asyncio.create_task(
                 self._run_one_target(
