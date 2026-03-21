@@ -104,7 +104,7 @@ export function ImBubble({
   };
 
   return (
-    <div className="group relative flex items-start gap-2" onContextMenu={openContextMenu}>
+    <div className="group relative flex min-w-0 items-start gap-2" onContextMenu={openContextMenu}>
       {selectable ? (
         <button
           type="button"
@@ -127,9 +127,9 @@ export function ImBubble({
             <Avatar label={displayName} imageUrl={avatarUrl} />
           </div>
           <div className={`flex min-w-0 max-w-[80%] flex-col ${isUser ? "items-end" : "items-start"}`}>
-            <span className="mb-0.5 px-1 text-[11px] text-text-faint">{displayName}</span>
+            <span className="mb-0.5 max-w-full truncate px-1 text-[11px] text-text-faint">{displayName}</span>
             <div
-              className={`relative min-w-0 rounded-xl border px-3 py-2 text-sm ${
+              className={`relative max-w-full min-w-0 overflow-hidden rounded-xl border px-3 py-2 text-sm ${
                 isUser ? "rounded-tr-[4px]" : "rounded-tl-[4px]"
               }`}
               style={bubbleStyle}

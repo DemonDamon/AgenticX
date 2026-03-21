@@ -10,13 +10,16 @@ export function ForwardedHistoryCard({ history, onOpen }: Props) {
   return (
     <button
       type="button"
-      className="w-full rounded-lg border border-border bg-surface-panel/70 px-3 py-2 text-left transition hover:bg-surface-hover"
+      className="box-border w-full min-w-0 max-w-full rounded-lg border border-border bg-surface-panel/70 px-3 py-2 text-left transition hover:bg-surface-hover"
       onClick={onOpen}
     >
-      <div className="truncate text-sm font-medium text-text-strong">{history.title}</div>
+      <div className="break-words text-sm font-medium text-text-strong [overflow-wrap:anywhere]">{history.title}</div>
       <div className="mt-2 space-y-1">
         {preview.map((item, index) => (
-          <div key={`${item.sender}-${index}-${item.content.slice(0, 20)}`} className="truncate text-xs text-text-muted">
+          <div
+            key={`${item.sender}-${index}-${item.content.slice(0, 20)}`}
+            className="break-words text-xs text-text-muted [overflow-wrap:anywhere]"
+          >
             {item.sender}: {item.content}
           </div>
         ))}

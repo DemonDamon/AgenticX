@@ -2520,7 +2520,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           </div>
         </div>
 
-        <div ref={listRef} className="flex-1 overflow-y-auto px-6 py-3">
+        <div ref={listRef} className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-3">
           {!pane.sessionId ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-xs text-text-faint">
               <span className="animate-pulse">正在初始化会话...</span>
@@ -2534,7 +2534,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           ) : visibleMessages.length === 0 ? (
             <div className="flex h-full items-center justify-center text-xs text-text-faint">暂无消息</div>
           ) : (
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2">
               {renderedMessages}
             </div>
           )}
