@@ -518,6 +518,7 @@ class SessionManager:
                 session.context_files[fpath] = fh.read()
 
     def _normalize_messages(self, messages: list[dict]) -> list[dict]:
+        max_data_url = 8_000_000
         normalized: list[dict] = []
         for item in messages:
             role = str(item.get("role", "assistant"))
@@ -528,22 +529,53 @@ class SessionManager:
                 parsed_timestamp = int(raw_timestamp) if raw_timestamp is not None else None
             except (TypeError, ValueError):
                 parsed_timestamp = None
-            normalized.append(
-                {
-                    "id": str(item.get("id", "")),
-                    "role": role,
-                    "content": str(item.get("content", "")),
-                    "agent_id": str(item.get("agent_id", "meta") or "meta"),
-                    "avatar_name": str(item.get("avatar_name", "") or ""),
-                    "avatar_url": str(item.get("avatar_url", "") or ""),
-                    "provider": str(item.get("provider", "") or ""),
-                    "model": str(item.get("model", "") or ""),
-                    "quoted_message_id": str(item.get("quoted_message_id", "") or ""),
-                    "quoted_content": str(item.get("quoted_content", "") or ""),
-                    "timestamp": parsed_timestamp,
-                    "forwarded_history": item.get("forwarded_history"),
-                }
-            )
+            row: dict[str, Any] = {
+                "id": str(item.get("id", "")),
+                "role": role,
+                "content": str(item.get("content", "")),
+                "agent_id": str(item.get("agent_id", "meta") or "meta"),
+                "avatar_name": str(item.get("avatar_name", "") or ""),
+                "avatar_url": str(item.get("avatar_url", "") or ""),
+                "provider": str(item.get("provider", "") or ""),
+                "model": str(item.get("model", "") or ""),
+                "quoted_message_id": str(item.get("quoted_message_id", "") or ""),
+                "quoted_content": str(item.get("quoted_content", "") or ""),
+                "timestamp": parsed_timestamp,
+                "forwarded_history": item.get("forwarded_history"),
+            }
+            raw_atts = item.get("attachments")
+            if isinstance(raw_atts, list) and raw_atts:
+                clean_atts: list[dict[str, Any]] = []
+                for a in raw_atts[:8]:
+                    if not isinstance(a, dict):
+                        continue
+                    du = str(a.get("data_url", "")).strip()
+                    if not du.startswith("data:image/") or len(du) > max_data_url:
+                        continue
+                    mime = str(a.get("mime_type", "") or "").strip()
+                    if not mime and du.startswith("data:"):
+                        semi = du.find(";")
+                        if semi > 5:
+                            mime = du[5:semi]
+                    if not mime:
+                        mime = "image/png"
+                    try:
+                        sz = int(a.get("size", 0) or 0)
+                    except (TypeError, ValueError):
+                        sz = 0
+                    clean_atts.append(
+                        {
+                            "name": str(a.get("name", "") or "").strip() or "image",
+                            "mime_type": mime,
+                            "size": sz,
+                            "data_url": du,
+                        }
+                    )
+                    if len(clean_atts) >= 4:
+                        break
+                if clean_atts:
+                    row["attachments"] = clean_atts
+            normalized.append(row)
         return normalized
 
     def _build_session_summary(self, session: StudioSession) -> str:
