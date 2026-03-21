@@ -7,7 +7,7 @@ type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 const VARIANT_CLASS: Record<Variant, string> = {
-  primary: "bg-cyan-400 text-black hover:bg-cyan-300",
+  primary: "bg-btnPrimary text-btnPrimary-text hover:bg-btnPrimary-hover",
   ghost: "border border-border px-3 py-1.5 text-text-muted hover:bg-surface-hover",
   danger: "bg-rose-500 text-white hover:bg-rose-400",
 };

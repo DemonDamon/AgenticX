@@ -33,6 +33,11 @@ const config: Config = {
           warning: "var(--status-warning)",
           error: "var(--status-error)",
         },
+        btnPrimary: {
+          DEFAULT: "var(--ui-btn-primary-bg)",
+          hover: "var(--ui-btn-primary-bg-hover)",
+          text: "var(--ui-btn-primary-text)",
+        },
       },
       transitionDuration: {
         fast: "var(--ds-dur-fast)",

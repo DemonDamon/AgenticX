@@ -789,7 +789,7 @@ export function SettingsPanel({
             <button className="rounded-md border border-border px-4 py-1.5 text-sm text-text-subtle transition hover:bg-surface-hover" onClick={onClose}>
               取消
             </button>
-            <button className="rounded-md bg-cyan-400 px-4 py-1.5 text-sm font-medium text-black transition hover:bg-cyan-300" onClick={handleSave}>
+            <button className="rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover" onClick={handleSave}>
               保存
             </button>
           </div>
