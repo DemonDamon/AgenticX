@@ -34,7 +34,11 @@ from agenticx.runtime.loop_controller import LoopController
 from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS
 from agenticx.runtime.prompts.meta_agent import build_meta_agent_system_prompt
-from agenticx.runtime.group_router import GroupChatRouter, META_LEADER_AGENT_ID
+from agenticx.runtime.group_router import (
+    META_LEADER_AGENT_ID,
+    GroupChatRouter,
+    expand_mentions_with_meta_leader,
+)
 from agenticx.runtime.team_manager import AgentTeamManager
 from agenticx.studio.protocols import ChatRequest, ConfirmResponse, SessionState, SseEvent
 from agenticx.studio.session_manager import SessionManager
@@ -573,7 +577,11 @@ def create_studio_app() -> FastAPI:
                         max_tool_rounds=_resolve_max_tool_rounds(),
                         meta_leader_display_name=meta_leader_label,
                     )
-                    mentioned_ids = list(payload.mentioned_avatar_ids or [])
+                    mentioned_ids = expand_mentions_with_meta_leader(
+                        str(payload.user_input or ""),
+                        list(payload.mentioned_avatar_ids or []),
+                        meta_leader_label,
+                    )
                     quoted_content = str(payload.quoted_content or "")
                     group_id = str(group_payload.get("id", "") or "")
                     group_name = str(group_payload.get("name", "") or "群聊")
