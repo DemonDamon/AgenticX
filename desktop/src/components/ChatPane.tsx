@@ -10,11 +10,14 @@ import { ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
+import { Toast } from "./ds/Toast";
 import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
+import { isKnownNonVisionChatModel } from "../utils/model-vision";
 
 const NEW_TOPIC_PREF_KEY = "agx:newTopicInherit";
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
 const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
+const VISION_UNSUPPORTED_TOAST = "模型不支持该文件类型";
 const FALLBACK_PANE: ChatPaneState = {
   id: "fallback-pane",
   avatarId: null,
@@ -1126,6 +1129,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     Array<{ sender: string; role: string; content: string; avatar_url?: string; timestamp?: number }>
   >([]);
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
+  const [attachToastOpen, setAttachToastOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [taskspaceAutoRefreshKey, setTaskspaceAutoRefreshKey] = useState(0);
   const [taskspaceWidth, setTaskspaceWidth] = useState(() => {
@@ -1712,6 +1716,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, []);
 
   const parseLocalFile = useCallback((file: File, key: string) => {
+    if (isImageFile(file) && isKnownNonVisionChatModel(activeProvider, activeModel)) {
+      setAttachToastOpen(true);
+      return;
+    }
     setContextFiles((prev) => ({
       ...prev,
       [key]: {
@@ -1799,7 +1807,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         errorText: "不支持的文件格式",
       },
     }));
-  }, []);
+  }, [activeProvider, activeModel]);
 
   const onMicClick = () => {
     if (recording) {
@@ -2662,6 +2670,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 const dt = e.clipboardData;
                 const raw = extractClipboardImageFiles(dt);
                 if (raw.length === 0) return;
+                if (isKnownNonVisionChatModel(activeProvider, activeModel)) {
+                  e.preventDefault();
+                  setAttachToastOpen(true);
+                  return;
+                }
                 e.preventDefault();
                 const files = withClipboardImageNames(raw);
                 const plain = dt?.getData("text/plain") ?? "";
@@ -2726,7 +2739,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   onChange={(e) => {
                     const files = e.target.files;
                     if (!files) return;
+                    let showedVisionToast = false;
                     for (const file of Array.from(files)) {
+                      if (isImageFile(file) && isKnownNonVisionChatModel(activeProvider, activeModel)) {
+                        if (!showedVisionToast) {
+                          setAttachToastOpen(true);
+                          showedVisionToast = true;
+                        }
+                        continue;
+                      }
                       const key = `${file.name}:${file.size}:${file.lastModified}`;
                       parseLocalFile(file, key);
                     }
@@ -2903,6 +2924,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           await executeForward(targetPayload, followUpNote);
           setSelectedMessageIds(new Set());
         }}
+      />
+      <Toast
+        variant="info"
+        open={attachToastOpen}
+        message={VISION_UNSUPPORTED_TOAST}
+        onClose={() => setAttachToastOpen(false)}
+        timeoutMs={3200}
       />
     </div>
   );
