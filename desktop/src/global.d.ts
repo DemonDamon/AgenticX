@@ -79,6 +79,23 @@ type McpStatusResult = {
   error?: string;
 };
 
+type SkillItem = {
+  name: string;
+  description: string;
+  location: string;
+  base_dir: string;
+};
+type SkillListResult = { ok: boolean; items: SkillItem[]; count: number; error?: string };
+type SkillDetailResult = {
+  ok: boolean;
+  name: string;
+  description: string;
+  location: string;
+  content: string;
+  error?: string;
+};
+type SkillRefreshResult = { ok: boolean; count: number; error?: string };
+
 declare global {
   interface Window {
     agenticxDesktop: {
@@ -197,6 +214,10 @@ declare global {
         activeModel?: string;
       }) => Promise<{ ok: boolean; path: string }>;
       nativeSay: (text: string) => Promise<{ ok: boolean; reason?: string }>;
+
+      loadSkills: () => Promise<SkillListResult>;
+      loadSkillDetail: (args: { name: string }) => Promise<SkillDetailResult>;
+      refreshSkills: () => Promise<SkillRefreshResult>;
     };
   }
 }
