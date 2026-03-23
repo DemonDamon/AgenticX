@@ -136,6 +136,54 @@ def upsert_favorite(workspace_dir: Path, entry: dict) -> bool:
     return True
 
 
+def delete_favorite(workspace_dir: Path, message_id: str) -> bool:
+    """Remove entry by message_id. Returns True if deleted."""
+    mid = str(message_id or "").strip()
+    if not mid:
+        return False
+    favorites = load_favorites(workspace_dir)
+    new_list = [x for x in favorites if str(x.get("message_id") or "").strip() != mid]
+    if len(new_list) == len(favorites):
+        return False
+    path = workspace_dir / "favorites.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(new_list, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def update_favorite_tags(workspace_dir: Path, message_id: str, tags: list[str]) -> bool:
+    """Set tags for a favorite by message_id. Returns True if updated."""
+    mid = str(message_id or "").strip()
+    if not mid:
+        return False
+    seen: set[str] = set()
+    norm: list[str] = []
+    for t in tags:
+        s = str(t).strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        norm.append(s)
+    favorites = load_favorites(workspace_dir)
+    updated = False
+    for row in favorites:
+        if str(row.get("message_id") or "").strip() == mid:
+            row["tags"] = norm
+            updated = True
+            break
+    if not updated:
+        return False
+    path = workspace_dir / "favorites.json"
+    try:
+        path.write_text(json.dumps(favorites, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
 def resolve_workspace_dir() -> Path:
     """Resolve workspace path from config with safe fallback."""
     try:

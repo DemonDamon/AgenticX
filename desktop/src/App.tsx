@@ -7,6 +7,9 @@ import { LiteChatView } from "./components/LiteChatView";
 import { PaneManager } from "./components/PaneManager";
 import { SidebarResizer } from "./components/SidebarResizer";
 import { Topbar } from "./components/Topbar";
+import type { ForwardConfirmPayload } from "./components/ForwardPicker";
+import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/session-message-map";
+import type { Message } from "./store";
 import { useAppStore } from "./store";
 import { stopSpeak } from "./voice/tts";
 import { matchKeybinding } from "./core/keybinding-manager";
@@ -932,6 +935,152 @@ export function App() {
     await window.agenticxDesktop.saveConfirmStrategy(strategy);
   };
 
+  const avatars = useAppStore((s) => s.avatars);
+  const groups = useAppStore((s) => s.groups);
+  const addPane = useAppStore((s) => s.addPane);
+  const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
+  const setActivePaneId = useAppStore((s) => s.setActivePaneId);
+  const setPaneMessages = useAppStore((s) => s.setPaneMessages);
+  const setForwardAutoReply = useAppStore((s) => s.setForwardAutoReply);
+
+  const resolveForwardTargetForFavorite = useCallback(
+    async (payload: ForwardConfirmPayload): Promise<{ paneId: string; sessionId: string }> => {
+      const state = useAppStore.getState();
+      if (payload.type === "session") {
+        const sid = payload.sessionId.trim();
+        const p = state.panes.find((item) => (item.sessionId || "").trim() === sid);
+        if (!p) {
+          throw new Error("找不到对应窗格，请从侧栏重新打开该会话后再试");
+        }
+        return { paneId: p.id, sessionId: sid };
+      }
+      if (payload.type === "avatar") {
+        let pane = state.panes.find((item) => item.avatarId === payload.avatarId);
+        if (!pane) {
+          const paneId = addPane(payload.avatarId, payload.displayName, "");
+          setActiveAvatarId(payload.avatarId);
+          const created = await window.agenticxDesktop.createSession({ avatar_id: payload.avatarId });
+          if (!created.ok || !created.session_id) {
+            throw new Error(created.error || "创建分身会话失败");
+          }
+          setPaneSessionId(paneId, created.session_id);
+          return { paneId, sessionId: created.session_id };
+        }
+        let sid = (pane.sessionId || "").trim();
+        if (!sid) {
+          const created = await window.agenticxDesktop.createSession({ avatar_id: payload.avatarId });
+          if (!created.ok || !created.session_id) {
+            throw new Error(created.error || "创建分身会话失败");
+          }
+          setPaneSessionId(pane.id, created.session_id);
+          sid = created.session_id;
+        }
+        setActivePaneId(pane.id);
+        setActiveAvatarId(payload.avatarId);
+        return { paneId: pane.id, sessionId: sid };
+      }
+      const groupAvatarId = `group:${payload.groupId}`;
+      let groupPane = state.panes.find((item) => item.avatarId === groupAvatarId);
+      if (!groupPane) {
+        const paneId = addPane(groupAvatarId, `群聊 · ${payload.displayName}`, "");
+        setActiveAvatarId(null);
+        const created = await window.agenticxDesktop.createSession({
+          avatar_id: groupAvatarId,
+          name: payload.displayName,
+        });
+        if (!created.ok || !created.session_id) {
+          throw new Error(created.error || "创建群聊会话失败");
+        }
+        setPaneSessionId(paneId, created.session_id);
+        return { paneId, sessionId: created.session_id };
+      }
+      let sid = (groupPane.sessionId || "").trim();
+      if (!sid) {
+        const created = await window.agenticxDesktop.createSession({
+          avatar_id: groupAvatarId,
+          name: payload.displayName,
+        });
+        if (!created.ok || !created.session_id) {
+          throw new Error(created.error || "创建群聊会话失败");
+        }
+        setPaneSessionId(groupPane.id, created.session_id);
+        sid = created.session_id;
+      }
+      setActivePaneId(groupPane.id);
+      setActiveAvatarId(null);
+      return { paneId: groupPane.id, sessionId: sid };
+    },
+    [addPane, setActiveAvatarId, setActivePaneId, setPaneSessionId]
+  );
+
+  const handleForwardFavorite = useCallback(
+    async (
+      ctx: { sourceSessionId: string; content: string; role?: string },
+      targetPayload: ForwardConfirmPayload,
+      followUpNote: string
+    ) => {
+      const source = ctx.sourceSessionId.trim();
+      if (!source) throw new Error("这条收藏缺少来源会话，无法转发");
+      const base = apiBase.replace(/\/$/, "");
+      if (!base) throw new Error("未连接 Studio");
+      const follow = followUpNote.trim();
+      const rawRole = (ctx.role || "assistant").trim().toLowerCase();
+      const roleForForward =
+        rawRole === "user" ? "user" : rawRole === "tool" ? "tool" : "assistant";
+      const sender =
+        roleForForward === "user" ? "我" : roleForForward === "tool" ? "工具" : "AI";
+      const { paneId: targetPaneId, sessionId: targetSessionId } =
+        await resolveForwardTargetForFavorite(targetPayload);
+      const resp = await fetch(`${base}/api/messages/forward`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({
+          source_session_id: source,
+          target_session_id: targetSessionId,
+          messages: [{ sender, role: roleForForward, content: ctx.content }],
+        }),
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => "");
+        throw new Error(text.slice(0, 200) || `转发失败 HTTP ${resp.status}`);
+      }
+      setActivePaneId(targetPaneId);
+      const targetPaneMeta = useAppStore.getState().panes.find((p) => p.id === targetPaneId);
+      const aid = targetPaneMeta?.avatarId;
+      if (aid?.startsWith("group:")) {
+        setActiveAvatarId(null);
+      } else {
+        setActiveAvatarId(aid ?? null);
+      }
+      const prompt = follow || "请阅读上一条转发的聊天记录并给出你的回应。";
+      setForwardAutoReply({
+        paneId: targetPaneId,
+        sessionId: targetSessionId,
+        text: prompt,
+      });
+      try {
+        const result = await window.agenticxDesktop.loadSessionMessages(targetSessionId);
+        if (result.ok && Array.isArray(result.messages)) {
+          const mapped: Message[] = result.messages.map((item, index) =>
+            mapLoadedSessionMessage(item as LoadedSessionMessage, targetSessionId, index)
+          );
+          setPaneMessages(targetPaneId, mapped);
+        }
+      } catch {
+        // keep server state; pane may refresh on next poll
+      }
+    },
+    [
+      apiBase,
+      apiToken,
+      resolveForwardTargetForFavorite,
+      setActiveAvatarId,
+      setActivePaneId,
+      setForwardAutoReply,
+      setPaneMessages,
+    ]
+  );
+
   return (
     <div className={`agx-app ${sidebarCollapsed || userMode !== "pro" || !onboardingCompleted || !apiBase ? "sidebar-collapsed" : ""}`}>
       {!onboardingCompleted ? (
@@ -1015,6 +1164,10 @@ export function App() {
         onConfirmStrategyChange={handleConfirmStrategyChange}
         onClose={() => closeSettings()}
         onSave={handleSettingsSave}
+        panes={panes}
+        avatars={avatars}
+        groups={groups}
+        onForwardFavorite={handleForwardFavorite}
       />
     </div>
   );

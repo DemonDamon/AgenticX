@@ -46,9 +46,11 @@ from agenticx.tools.mcp_hub import MCPHub
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.workspace.loader import (
     append_long_term_memory,
+    delete_favorite,
     ensure_workspace,
     load_favorites,
     resolve_workspace_dir,
+    update_favorite_tags,
     upsert_favorite,
 )
 
@@ -1762,6 +1764,31 @@ def create_studio_app() -> FastAPI:
         items_sorted = sorted(items, key=lambda x: str(x.get("saved_at", "") or ""), reverse=True)
         return {"ok": True, "items": items_sorted}
 
+    @app.delete("/api/memory/favorites/{message_id}")
+    async def delete_memory_favorite(
+        message_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        workspace_dir = resolve_workspace_dir()
+        ok = delete_favorite(workspace_dir, message_id)
+        return {"ok": ok}
+
+    @app.patch("/api/memory/favorites/{message_id}/tags")
+    async def patch_memory_favorite_tags(
+        message_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        tags_raw = payload.get("tags")
+        if not isinstance(tags_raw, list):
+            raise HTTPException(status_code=400, detail="tags must be a list")
+        tag_list = [str(x) for x in tags_raw]
+        workspace_dir = resolve_workspace_dir()
+        ok = update_favorite_tags(workspace_dir, message_id, tag_list)
+        return {"ok": ok}
+
     @app.post("/api/memory/save")
     async def save_message_memory(
         payload: dict,
@@ -1794,6 +1821,7 @@ def create_studio_app() -> FastAPI:
             "content": content,
             "saved_at": saved_at,
             "role": role,
+            "tags": [],
         }
         inserted = upsert_favorite(workspace_dir, entry)
         already_saved = not inserted

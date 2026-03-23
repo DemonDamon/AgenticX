@@ -8,8 +8,15 @@ import {
   Bookmark,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
-import type { ChatStyle } from "../store";
+import type { Avatar, ChatPane, ChatStyle, GroupChat } from "../store";
 import { useAppStore } from "../store";
+import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
+
+export type FavoriteForwardContext = {
+  sourceSessionId: string;
+  content: string;
+  role?: string;
+};
 
 const ALL_PROVIDERS = [
   "openai", "anthropic", "volcengine", "bailian",
@@ -65,6 +72,14 @@ type Props = {
     defaultProvider: string;
     providers: Record<string, ProviderEntry>;
   }) => Promise<void>;
+  panes: ChatPane[];
+  avatars: Avatar[];
+  groups: GroupChat[];
+  onForwardFavorite: (
+    ctx: FavoriteForwardContext,
+    payload: ForwardConfirmPayload,
+    note: string
+  ) => Promise<void>;
 };
 
 type ModelHealth = "idle" | "checking" | "healthy" | "error";
@@ -344,12 +359,57 @@ type FavoriteRow = {
   content?: string;
   saved_at?: string;
   role?: string;
+  tags?: string[];
 };
 
-function FavoritesTab({ apiBase, apiToken }: { apiBase: string; apiToken: string }) {
+function FavoritesTab({
+  apiBase,
+  apiToken,
+  sessionId,
+  panes,
+  avatars,
+  groups,
+  onForwardFavorite,
+}: {
+  apiBase: string;
+  apiToken: string;
+  sessionId: string;
+  panes: ChatPane[];
+  avatars: Avatar[];
+  groups: GroupChat[];
+  onForwardFavorite: (
+    ctx: FavoriteForwardContext,
+    payload: ForwardConfirmPayload,
+    note: string
+  ) => Promise<void>;
+}) {
   const [items, setItems] = useState<FavoriteRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [forwardOpen, setForwardOpen] = useState(false);
+  const [forwardCtx, setForwardCtx] = useState<FavoriteForwardContext | null>(null);
+  const [editing, setEditing] = useState<{
+    messageId: string;
+    tags: string[];
+    input: string;
+  } | null>(null);
+  const [tagSaving, setTagSaving] = useState(false);
+
+  const base = apiBase.replace(/\/$/, "");
+
+  const reload = useCallback(async () => {
+    if (!base) return;
+    const r = await fetch(`${base}/api/memory/favorites`, {
+      headers: { "x-agx-desktop-token": apiToken },
+    });
+    const data = (await r.json().catch(() => null)) as { items?: FavoriteRow[]; detail?: string } | null;
+    if (!r.ok) {
+      throw new Error(data?.detail ? String(data.detail) : `HTTP ${r.status}`);
+    }
+    setItems(Array.isArray(data?.items) ? data.items : []);
+  }, [apiToken, base]);
 
   useEffect(() => {
     if (!apiBase.trim()) {
@@ -362,14 +422,7 @@ function FavoritesTab({ apiBase, apiToken }: { apiBase: string; apiToken: string
     setErr("");
     void (async () => {
       try {
-        const r = await fetch(`${apiBase.replace(/\/$/, "")}/api/memory/favorites`, {
-          headers: { "x-agx-desktop-token": apiToken },
-        });
-        const data = (await r.json().catch(() => null)) as { items?: FavoriteRow[]; detail?: string } | null;
-        if (!r.ok) {
-          throw new Error(data?.detail ? String(data.detail) : `HTTP ${r.status}`);
-        }
-        if (!cancelled) setItems(Array.isArray(data?.items) ? data.items : []);
+        await reload();
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
       } finally {
@@ -379,7 +432,50 @@ function FavoritesTab({ apiBase, apiToken }: { apiBase: string; apiToken: string
     return () => {
       cancelled = true;
     };
-  }, [apiBase, apiToken]);
+  }, [apiBase, apiToken, reload]);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
+
+  const patchTags = useCallback(
+    async (messageId: string, tags: string[]) => {
+      if (!base || !messageId.trim()) return;
+      setTagSaving(true);
+      try {
+        const r = await fetch(`${base}/api/memory/favorites/${encodeURIComponent(messageId)}/tags`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "x-agx-desktop-token": apiToken,
+          },
+          body: JSON.stringify({ tags }),
+        });
+        const data = (await r.json().catch(() => null)) as { ok?: boolean; detail?: string } | null;
+        if (!r.ok || !data?.ok) {
+          throw new Error(data?.detail ? String(data.detail) : `HTTP ${r.status}`);
+        }
+        setItems((prev) =>
+          prev.map((row) =>
+            String(row.message_id ?? "").trim() === messageId ? { ...row, tags: [...tags] } : row
+          )
+        );
+        setEditing(null);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        setTagSaving(false);
+      }
+    },
+    [apiToken, base]
+  );
+
+  const finishEditingTags = useCallback(() => {
+    if (!editing || tagSaving) return;
+    void patchTags(editing.messageId, editing.tags);
+  }, [editing, patchTags, tagSaving]);
 
   if (!apiBase.trim()) {
     return <div className="py-8 text-center text-sm text-text-faint">未连接 Studio，无法加载收藏</div>;
@@ -387,7 +483,7 @@ function FavoritesTab({ apiBase, apiToken }: { apiBase: string; apiToken: string
   if (loading) {
     return <div className="py-8 text-center text-sm text-text-faint">加载中…</div>;
   }
-  if (err) {
+  if (err && items.length === 0 && !loading) {
     return <div className="py-8 text-center text-sm text-rose-400">{err}</div>;
   }
   if (items.length === 0) {
@@ -396,29 +492,203 @@ function FavoritesTab({ apiBase, apiToken }: { apiBase: string; apiToken: string
 
   return (
     <div className="space-y-2">
+      {err ? <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">{err}</div> : null}
       <p className="mb-3 text-xs text-text-subtle">
         以下为全局收藏（按保存时间倒序）。同一条消息重复收藏不会重复写入。
       </p>
+      <ForwardPicker
+        open={forwardOpen}
+        currentSessionId={forwardCtx?.sourceSessionId ?? sessionId}
+        panes={panes}
+        avatars={avatars}
+        groups={groups}
+        onClose={() => {
+          setForwardOpen(false);
+          setForwardCtx(null);
+        }}
+        onConfirm={async (payload, note) => {
+          if (!forwardCtx) return;
+          await onForwardFavorite(forwardCtx, payload, note);
+        }}
+      />
       {items.map((row, idx) => {
         const content = String(row.content ?? "").trim() || "（无文本）";
         const savedAt = String(row.saved_at ?? "");
         const sid = String(row.session_id ?? "").trim();
+        const mid = String(row.message_id ?? "").trim();
         let timeLabel = savedAt;
         try {
           if (savedAt) timeLabel = new Date(savedAt).toLocaleString();
         } catch {
           // keep raw
         }
+        const tags = Array.isArray(row.tags)
+          ? row.tags.map((t) => String(t).trim()).filter(Boolean)
+          : [];
+        const isEditing = editing?.messageId === mid;
+
         return (
           <div
-            key={`${row.message_id ?? idx}-${savedAt}`}
+            key={`${mid || idx}-${savedAt}`}
             className="flex gap-3 rounded-lg border border-border bg-surface-card px-3 py-2.5"
           >
             <div className="min-w-0 flex-1">
               <p className="line-clamp-3 whitespace-pre-wrap break-words text-sm text-text-primary">{content}</p>
-              <div className="mt-1 flex flex-wrap gap-x-2 text-[11px] text-text-faint">
-                {sid ? <span>会话 {sid.slice(0, 8)}…</span> : null}
-                {row.role ? <span>{row.role}</span> : null}
+              {!isEditing && tags.length > 0 ? (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {tags.map((t) => (
+                    <span
+                      key={t}
+                      className="rounded-full border border-border bg-surface-panel px-2 py-0.5 text-[11px] text-text-muted"
+                    >
+                      #{t}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {isEditing ? (
+                <div
+                  className="mt-2 space-y-2 rounded-md border border-border bg-surface-panel p-2"
+                  onBlur={(ev) => {
+                    if (!ev.currentTarget.contains(ev.relatedTarget as Node | null)) {
+                      finishEditingTags();
+                    }
+                  }}
+                >
+                  <div className="flex flex-wrap gap-1">
+                    {editing.tags.map((t) => (
+                      <span
+                        key={t}
+                        className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[11px] text-text-muted"
+                      >
+                        {t}
+                        <button
+                          type="button"
+                          className="text-text-faint hover:text-rose-400"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() =>
+                            setEditing((prev) =>
+                              prev && prev.messageId === mid
+                                ? { ...prev, tags: prev.tags.filter((x) => x !== t) }
+                                : prev
+                            )
+                          }
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={editing.input}
+                      onChange={(e) =>
+                        setEditing((prev) => (prev && prev.messageId === mid ? { ...prev, input: e.target.value } : prev))
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter") return;
+                        e.preventDefault();
+                        const next = editing.input.trim();
+                        if (!next) return;
+                        setEditing((prev) => {
+                          if (!prev || prev.messageId !== mid) return prev;
+                          if (prev.tags.includes(next)) return { ...prev, input: "" };
+                          return { ...prev, tags: [...prev.tags, next], input: "" };
+                        });
+                      }}
+                      placeholder="输入新标签后按 Enter"
+                      className="min-w-[8rem] flex-1 rounded border border-border bg-surface-card px-2 py-1 text-xs text-text-primary outline-none focus:border-cyan-500"
+                    />
+                    <button
+                      type="button"
+                      disabled={tagSaving}
+                      className="rounded border border-border px-2 py-1 text-xs text-text-subtle hover:bg-surface-hover disabled:opacity-40"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => void patchTags(mid, editing.tags)}
+                    >
+                      {tagSaving ? "保存中…" : "保存"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                <button
+                  type="button"
+                  className="rounded border border-border px-2 py-0.5 text-text-subtle transition hover:bg-surface-hover"
+                  onClick={async () => {
+                    if (!mid) return;
+                    try {
+                      await navigator.clipboard.writeText(content);
+                      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+                      setCopiedId(mid);
+                      copiedTimerRef.current = setTimeout(() => setCopiedId(null), 1000);
+                    } catch {
+                      setErr("复制失败");
+                    }
+                  }}
+                >
+                  {copiedId === mid ? "已复制" : "复制"}
+                </button>
+                <button
+                  type="button"
+                  disabled={!sid}
+                  className="rounded border border-border px-2 py-0.5 text-text-subtle transition hover:bg-surface-hover disabled:opacity-40"
+                  onClick={() => {
+                    if (!sid) return;
+                    setForwardCtx({
+                      sourceSessionId: sid,
+                      content,
+                      role: row.role,
+                    });
+                    setForwardOpen(true);
+                  }}
+                >
+                  转发
+                </button>
+                <button
+                  type="button"
+                  disabled={!mid}
+                  className="rounded border border-border px-2 py-0.5 text-text-subtle transition hover:bg-surface-hover disabled:opacity-40"
+                  onClick={() =>
+                    setEditing({
+                      messageId: mid,
+                      tags: [...tags],
+                      input: "",
+                    })
+                  }
+                >
+                  编辑标签
+                </button>
+                <button
+                  type="button"
+                  disabled={!mid}
+                  className="rounded border border-rose-500/40 px-2 py-0.5 text-rose-300 transition hover:bg-rose-500/10 disabled:opacity-40"
+                  onClick={() => {
+                    if (!mid || !base) return;
+                    const prev = items;
+                    setItems((list) => list.filter((r) => String(r.message_id ?? "").trim() !== mid));
+                    setErr("");
+                    void (async () => {
+                      try {
+                        const r = await fetch(`${base}/api/memory/favorites/${encodeURIComponent(mid)}`, {
+                          method: "DELETE",
+                          headers: { "x-agx-desktop-token": apiToken },
+                        });
+                        const data = (await r.json().catch(() => null)) as { ok?: boolean; detail?: string } | null;
+                        if (!r.ok || !data?.ok) {
+                          throw new Error(data?.detail ? String(data.detail) : `HTTP ${r.status}`);
+                        }
+                      } catch (e) {
+                        setItems(prev);
+                        setErr(e instanceof Error ? e.message : String(e));
+                      }
+                    })();
+                  }}
+                >
+                  删除
+                </button>
+                {sid ? <span className="text-text-faint">会话 {sid.slice(0, 8)}…</span> : null}
+                {row.role ? <span className="text-text-faint">{row.role}</span> : null}
               </div>
             </div>
             <div className="shrink-0 text-right text-[11px] text-text-subtle tabular-nums">{timeLabel}</div>
@@ -446,6 +716,10 @@ export function SettingsPanel({
   onConfirmStrategyChange,
   onClose,
   onSave,
+  panes,
+  avatars,
+  groups,
+  onForwardFavorite,
 }: Props) {
   const userDisplayName = useAppStore((s) => s.userDisplayName);
   const setUserDisplayName = useAppStore((s) => s.setUserDisplayName);
@@ -898,7 +1172,17 @@ export function SettingsPanel({
               </div>
             )}
 
-            {tab === "favorites" && <FavoritesTab apiBase={apiBase} apiToken={apiToken} />}
+            {tab === "favorites" && (
+              <FavoritesTab
+                apiBase={apiBase}
+                apiToken={apiToken}
+                sessionId={sessionId}
+                panes={panes}
+                avatars={avatars}
+                groups={groups}
+                onForwardFavorite={onForwardFavorite}
+              />
+            )}
           </div>
 
           {/* Footer */}
