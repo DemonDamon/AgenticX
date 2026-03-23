@@ -229,6 +229,7 @@ def _build_memory_recall_context(session: StudioSession) -> str:
     """Query WorkspaceMemoryStore for relevant memories based on recent conversation."""
     try:
         from agenticx.memory.workspace_memory import WorkspaceMemoryStore
+        from agenticx.workspace.loader import load_favorites, resolve_workspace_dir
         store = WorkspaceMemoryStore()
         query_parts: list[str] = []
         for msg in (session.chat_history or [])[-5:]:
@@ -237,23 +238,51 @@ def _build_memory_recall_context(session: StudioSession) -> str:
         if not query_parts:
             return ""
         query = " ".join(query_parts)[:500]
+        query_lower = query.lower()
+        prefer_favorites = any(kw in query_lower for kw in ("收藏", "favorite", "saved"))
+        sections: list[str] = []
+
+        if prefer_favorites:
+            rows = load_favorites(resolve_workspace_dir())
+            if rows:
+                rows_sorted = sorted(rows, key=lambda x: str(x.get("saved_at", "") or ""), reverse=True)
+                seen: set[str] = set()
+                lines = ["## 当前收藏（实时）"]
+                for row in rows_sorted:
+                    content = str(row.get("content", "") or "").strip()
+                    if not content or content in seen:
+                        continue
+                    seen.add(content)
+                    snippet = content[:120].replace("\n", " ")
+                    lines.append(f"- {snippet}")
+                    if len(lines) >= 6:
+                        break
+                if len(lines) > 1:
+                    sections.append("\n".join(lines))
+
         results = store.search_sync(query, limit=5, mode="hybrid")
-        if not results:
-            return ""
         lines = ["## 相关历史记忆（自动召回）"]
         total = 0
+        seen_snippets: set[str] = set()
         for item in results:
             text = str(item.get("text", "")).strip()
             if not text:
                 continue
             snippet = text[:200]
+            # Skip duplicated snippets to avoid repetitive answers.
+            snippet_key = " ".join(snippet.split())
+            if snippet_key in seen_snippets:
+                continue
+            seen_snippets.add(snippet_key)
             if total + len(snippet) > 500:
                 break
             lines.append(f"- {snippet}")
             total += len(snippet)
-        if len(lines) <= 1:
+        if len(lines) > 1:
+            sections.append("\n".join(lines))
+        if not sections:
             return ""
-        return "\n".join(lines) + "\n"
+        return "\n\n".join(sections) + "\n"
     except Exception:
         return ""
 

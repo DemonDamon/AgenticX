@@ -17,14 +17,20 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.delenv("AGX_DESKTOP_TOKEN", raising=False)
 
     seen_msg_ids: set[str] = set()
+    seen_contents: set[str] = set()
 
     def fake_upsert(_ws: object, entry: dict) -> bool:
         mid = str(entry.get("message_id") or "").strip()
+        content = str(entry.get("content") or "").strip()
         if not mid:
             return True
+        if content and content in seen_contents:
+            return False
         if mid in seen_msg_ids:
             return False
         seen_msg_ids.add(mid)
+        if content:
+            seen_contents.add(content)
         return True
 
     monkeypatch.setattr(server_module, "upsert_favorite", fake_upsert)
@@ -185,3 +191,28 @@ def test_get_memory_favorites_sorted(client: TestClient, monkeypatch: pytest.Mon
     data = r.json()
     assert data["ok"] is True
     assert [x["message_id"] for x in data["items"]] == ["2", "1"]
+
+
+def test_delete_favorite_reconciles_memory(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        server_module,
+        "load_favorites",
+        lambda _ws: [{"message_id": "m1", "content": "favorite text", "saved_at": "2026-01-01T00:00:00"}],
+    )
+    monkeypatch.setattr(server_module, "delete_favorite", lambda _ws, mid: mid == "m1")
+    removed_calls: list[str] = []
+
+    def fake_remove(_ws, content: str) -> bool:
+        removed_calls.append(content)
+        return True
+
+    monkeypatch.setattr(server_module, "remove_favorite_memory_note", fake_remove)
+    mock_store = MagicMock()
+    monkeypatch.setattr(server_module, "WorkspaceMemoryStore", MagicMock(return_value=mock_store))
+    r = client.delete("/api/memory/favorites/m1")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["memory_reconciled"] is True
+    assert removed_calls == ["favorite text"]
+    mock_store.index_workspace_sync.assert_called_once()

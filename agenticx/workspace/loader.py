@@ -121,16 +121,56 @@ def upsert_favorite(workspace_dir: Path, entry: dict) -> bool:
     or when the file could not be written.
     """
     message_id = str(entry.get("message_id") or "").strip()
+    content_norm = str(entry.get("content") or "").strip()
     favorites = load_favorites(workspace_dir)
     if message_id:
         for row in favorites:
             if str(row.get("message_id") or "").strip() == message_id:
+                return False
+    if content_norm:
+        for row in favorites:
+            if str(row.get("content") or "").strip() == content_norm:
                 return False
     favorites.append(entry)
     path = workspace_dir / "favorites.json"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(favorites, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def remove_favorite_memory_note(workspace_dir: Path, content: str) -> bool:
+    """Remove matching [用户收藏] note(s) from MEMORY.md by content."""
+    text = str(content or "").strip()
+    if not text:
+        return False
+    memory_path = workspace_dir / "MEMORY.md"
+    if not memory_path.exists() or not memory_path.is_file():
+        return False
+    try:
+        raw = memory_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    target = f"[用户收藏] {text[:500].strip()}"
+    removed = False
+    kept_lines: list[str] = []
+    for line in raw.splitlines():
+        normalized = line.strip()
+        if normalized.startswith("- "):
+            normalized = normalized[2:].strip()
+        if normalized == target:
+            removed = True
+            continue
+        kept_lines.append(line)
+    if not removed:
+        return False
+    new_raw = "\n".join(kept_lines)
+    if raw.endswith("\n"):
+        new_raw += "\n"
+    try:
+        memory_path.write_text(new_raw, encoding="utf-8")
     except OSError:
         return False
     return True
