@@ -7,6 +7,7 @@ AgenticX Sandbox Backends
 - subprocess: 基于子进程的简单隔离（MVP，适合开发测试）
 - microsandbox: 硬件级隔离（推荐，需要 microsandbox 服务）
 - docker: Docker 容器隔离（降级方案）
+- remote: 远端 HTTP 沙箱（典型部署于 K8s）
 """
 
 from typing import Dict, Type, Optional
@@ -75,6 +76,13 @@ try:
     _BACKENDS["docker"] = DockerSandbox
 except ImportError as e:
     logger.debug(f"Docker backend not available: {e}")
+
+try:
+    from .remote import RemoteSandbox
+
+    _BACKENDS["remote"] = RemoteSandbox
+except ImportError as e:
+    logger.debug(f"Remote backend not available: {e}")
 
 
 __all__ = [

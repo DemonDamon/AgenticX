@@ -62,7 +62,7 @@ class SandboxTemplate:
     
     # 后端配置
     backend: str = "auto"
-    """后端选择: auto, subprocess, microsandbox, docker"""
+    """后端选择: auto, subprocess, microsandbox, docker, remote"""
     
     backend_config: Dict[str, Any] = field(default_factory=dict)
     """后端特定配置"""
@@ -223,7 +223,13 @@ class SandboxTemplate:
         if self.timeout_seconds <= 0:
             errors.append("Timeout must be positive")
         
-        if self.backend not in ("auto", "subprocess", "microsandbox", "docker"):
+        if self.backend not in (
+            "auto",
+            "subprocess",
+            "microsandbox",
+            "docker",
+            "remote",
+        ):
             errors.append(f"Invalid backend: {self.backend}")
         
         return errors

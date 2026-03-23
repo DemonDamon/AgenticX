@@ -310,9 +310,9 @@ class MicrosandboxSandbox(SandboxBase):
             duration_ms = (time.time() - start_time) * 1000
             result.duration_ms = duration_ms
             result.language = language
-            
+            self._audit_record("execute", code, result, language=language)
             return result
-            
+
         except asyncio.TimeoutError:
             raise SandboxTimeoutError(
                 f"Execution timed out after {actual_timeout}s",
