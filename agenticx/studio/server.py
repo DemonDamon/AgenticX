@@ -43,7 +43,8 @@ from agenticx.runtime.team_manager import AgentTeamManager
 from agenticx.studio.protocols import ChatRequest, ConfirmResponse, SessionState, SseEvent
 from agenticx.studio.session_manager import SessionManager
 from agenticx.tools.mcp_hub import MCPHub
-from agenticx.workspace.loader import ensure_workspace
+from agenticx.memory.workspace_memory import WorkspaceMemoryStore
+from agenticx.workspace.loader import append_long_term_memory, ensure_workspace, resolve_workspace_dir
 
 logger = logging.getLogger(__name__)
 
@@ -1773,7 +1774,20 @@ def create_studio_app() -> FastAPI:
         })
         scratch["saved_messages"] = records[-200:]
         manager.persist(session_id)
-        return {"ok": True, "saved_count": len(scratch["saved_messages"])}
+        memory_persisted = False
+        try:
+            workspace_dir = resolve_workspace_dir()
+            truncated = content[:500].strip()
+            append_long_term_memory(workspace_dir, f"[用户收藏] {truncated}")
+            WorkspaceMemoryStore().index_workspace_sync(workspace_dir)
+            memory_persisted = True
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "saved_count": len(scratch["saved_messages"]),
+            "memory_persisted": memory_persisted,
+        }
 
     @app.post("/api/messages/forward")
     async def forward_messages(
