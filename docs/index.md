@@ -1,5 +1,9 @@
 # AgenticX
 
+<div align="center" markdown>
+![AgenticX Logo](assets/agenticx-logo.png){ width="600" }
+</div>
+
 **Unified Multi-Agent Framework** — production-ready, scalable, from simple automation to complex multi-agent collaboration.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
