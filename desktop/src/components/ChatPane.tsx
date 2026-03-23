@@ -1497,8 +1497,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, [pane.id, pane.sessionId, pane.taskspacePanelOpen, setActiveTaskspace, openSidePanel]);
 
   const copyMessage = useCallback(async (message: Message) => {
+    const textToCopy = message.content || "";
     try {
-      await navigator.clipboard.writeText(message.content || "");
+      const firstImage = (message.attachments ?? []).find(
+        (attachment) => !!attachment.dataUrl && attachment.mimeType.startsWith("image/")
+      );
+      if (
+        firstImage?.dataUrl &&
+        typeof window.ClipboardItem !== "undefined" &&
+        typeof navigator.clipboard?.write === "function"
+      ) {
+        const imageBlob = await fetch(firstImage.dataUrl).then((resp) => resp.blob());
+        const imageMime = imageBlob.type || firstImage.mimeType || "image/png";
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            [imageMime]: imageBlob,
+            "text/plain": new Blob([textToCopy], { type: "text/plain" }),
+          }),
+        ]);
+        return;
+      }
+      await navigator.clipboard.writeText(textToCopy);
     } catch {
       // ignore clipboard failures
     }
@@ -1696,27 +1715,36 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setForwardPickerOpen(true);
   }, [selectedMessages]);
 
+  const retryUserMessage = useCallback((msg: Message) => {
+    if (msg.role !== "user") return;
+    void sendChatRef.current(msg.content, { retryAttachments: msg.attachments ?? [] });
+  }, []);
+
   const renderedMessages = useMemo(() => (
     <>
-      {visibleMessages.map((message) => (
-        <MessageRenderer
-          key={message.id}
-          message={message}
-          assistantBadge={message.role === "assistant" ? <ModelBadge provider={message.provider} model={message.model} /> : undefined}
-          onRevealPath={(path) => void revealFileInTaskspace(path)}
-          assistantName={paneAvatarMeta.name}
-          assistantAvatarUrl={paneAvatarMeta.url}
-          userName={userBubbleLabel}
-          onCopyMessage={copyMessage}
-          onQuoteMessage={(msg) => setQuotingMessage(msg)}
-          onFavoriteMessage={favoriteMessage}
-          onForwardMessage={forwardOneMessage}
-          onToggleSelectMessage={toggleSelectMessage}
-          onResolveInlineConfirm={(confirm, approved) => void resolveGroupInlineConfirm(confirm, approved)}
-          selectable={selectedMessageIds.size > 0}
-          selected={selectedMessageIds.has(message.id)}
-        />
-      ))}
+      {visibleMessages.map((message) => {
+        const canRetryThisUserMessage = message.role === "user" && !streaming;
+        return (
+          <MessageRenderer
+            key={message.id}
+            message={message}
+            assistantBadge={message.role === "assistant" ? <ModelBadge provider={message.provider} model={message.model} /> : undefined}
+            onRevealPath={(path) => void revealFileInTaskspace(path)}
+            assistantName={paneAvatarMeta.name}
+            assistantAvatarUrl={paneAvatarMeta.url}
+            userName={userBubbleLabel}
+            onCopyMessage={copyMessage}
+            onQuoteMessage={(msg) => setQuotingMessage(msg)}
+            onFavoriteMessage={favoriteMessage}
+            onForwardMessage={forwardOneMessage}
+            onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
+            onToggleSelectMessage={toggleSelectMessage}
+            onResolveInlineConfirm={(confirm, approved) => void resolveGroupInlineConfirm(confirm, approved)}
+            selectable={selectedMessageIds.size > 0}
+            selected={selectedMessageIds.has(message.id)}
+          />
+        );
+      })}
       {Object.entries(groupTyping).map(([agentId, name]) => (
         <ImBubble
           key={`typing-${agentId}`}
@@ -1745,7 +1773,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         )
       ) : null}
     </>
-  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, isGroupPane, paneAvatarMeta, resolveGroupInlineConfirm, revealFileInTaskspace, selectedMessageIds, streamedAssistantText, streaming, streamingModel, toggleSelectMessage, userBubbleLabel, visibleMessages]);
+  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, isGroupPane, paneAvatarMeta, resolveGroupInlineConfirm, revealFileInTaskspace, retryUserMessage, selectedMessageIds, streamedAssistantText, streaming, streamingModel, toggleSelectMessage, userBubbleLabel, visibleMessages]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -1871,21 +1899,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }, 5000);
   };
 
-  const sendChatRef = useRef<(text: string) => Promise<void>>(async () => {});
+  const sendChatRef = useRef<(text: string, options?: { retryAttachments?: MessageAttachment[] }) => Promise<void>>(
+    async () => {}
+  );
 
-  const sendChat = async (userText: string) => {
+  const sendChat = async (userText: string, options?: { retryAttachments?: MessageAttachment[] }) => {
     const text = userText.trim();
-    const hasReadyAttachments = readyAttachments.length > 0;
-    if ((!text && !hasReadyAttachments) || !apiBase || !pane.sessionId) return;
-    if (streaming) return;
-    const requestSessionId = pane.sessionId;
-    const messageText = text || ATTACHMENT_ONLY_USER_PROMPT;
-    const userAttachments: MessageAttachment[] = readyAttachments.map((file) => ({
+    const retryAttachments = options?.retryAttachments;
+    const composerAttachments: MessageAttachment[] = readyAttachments.map((file) => ({
       name: file.name,
       mimeType: file.mimeType,
       size: file.size,
       dataUrl: file.dataUrl,
     }));
+    const userAttachments: MessageAttachment[] =
+      retryAttachments && retryAttachments.length > 0
+        ? retryAttachments.map((item) => ({ ...item }))
+        : composerAttachments;
+    const hasReadyAttachments = userAttachments.length > 0;
+    if ((!text && !hasReadyAttachments) || !apiBase || !pane.sessionId) return;
+    if (streaming) return;
+    const requestSessionId = pane.sessionId;
+    const messageText = text || ATTACHMENT_ONLY_USER_PROMPT;
 
     const selectedIsPaneSubagent =
       !!selectedSubAgent && paneSubAgents.some((item) => item.id === selectedSubAgent);
@@ -1967,12 +2002,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           body.quoted_content = `${quotingMessage.avatarName || quotingMessage.agentId || quotingMessage.role}: ${quotingMessage.content}`;
         }
       }
-      if (attachmentEntries.length > 0) {
-        const imageInputs = readyAttachments
+      if (userAttachments.length > 0) {
+        const imageInputs = userAttachments
           .filter((file) => !!file.dataUrl && file.mimeType.startsWith("image/"))
           .map((file) => ({
             name: file.name,
-            data_url: file.dataUrl,
+            data_url: file.dataUrl as string,
             mime_type: file.mimeType,
             size: file.size,
           }));
@@ -1981,12 +2016,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           body.image_inputs = imageInputs;
         }
         const contextFilePayload: Record<string, string> = {};
-        for (const [, file] of attachmentEntries) {
-          if (file.status !== "ready") continue;
+        for (const file of userAttachments) {
           if (file.dataUrl || file.mimeType.startsWith("image/")) {
             contextFilePayload[file.name] = "[图片文件]";
           } else {
-            contextFilePayload[file.name] = file.content;
+            contextFilePayload[file.name] = `[附件] ${file.name}`;
           }
         }
         if (Object.keys(contextFilePayload).length > 0) {
