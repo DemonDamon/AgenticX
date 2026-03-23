@@ -116,6 +116,38 @@ def test_server_session_lifecycle() -> None:
     assert deleted.status_code == 200
 
 
+def test_delete_selected_session_messages() -> None:
+    app = create_studio_app()
+    client = TestClient(app)
+    session_id = client.get("/api/session").json()["session_id"]
+    managed = app.state.session_manager.get(session_id, touch=False)
+    assert managed is not None
+    managed.studio_session.chat_history = [
+        {"role": "assistant", "content": "a", "timestamp": 1, "agent_id": "meta"},
+        {"role": "assistant", "content": "b", "timestamp": 2, "agent_id": "meta"},
+    ]
+    managed.studio_session.agent_messages = [
+        {"role": "assistant", "content": "a", "timestamp": 1, "agent_id": "meta"},
+        {"role": "assistant", "content": "b", "timestamp": 2, "agent_id": "meta"},
+    ]
+
+    resp = client.post(
+        "/api/session/messages/delete",
+        json={
+            "session_id": session_id,
+            "messages": [
+                {"role": "assistant", "content": "a", "timestamp": 1, "agent_id": "meta"},
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["removed"] == 1
+    assert data["requested"] == 1
+    assert [x["content"] for x in managed.studio_session.chat_history] == ["b"]
+
+
 def test_server_chat_sse_stream(monkeypatch) -> None:
     from agenticx.studio import server as server_module
 

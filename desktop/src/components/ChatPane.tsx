@@ -26,11 +26,25 @@ import {
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
+import { parseReasoningContent } from "./messages/reasoning-parser";
 
 const NEW_TOPIC_PREF_KEY = "agx:newTopicInherit";
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
 const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
 const VISION_UNSUPPORTED_TOAST = "模型不支持该文件类型";
+function resolveQuoteBody(message: Message, selectedText?: string): string {
+  const sel = selectedText?.trim() ?? "";
+  if (sel.length > 0) return sel;
+  if (message.role === "assistant") {
+    const parsed = parseReasoningContent(message.content);
+    if (parsed.hasReasoningTag) {
+      const resp = (parsed.response ?? "").trim();
+      if (resp.length > 0) return resp;
+    }
+  }
+  return message.content;
+}
+
 const FALLBACK_PANE: ChatPaneState = {
   id: "fallback-pane",
   avatarId: null,
@@ -1091,7 +1105,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [atCandidates, setAtCandidates] = useState<AtCandidate[]>([]);
   const [groupTyping, setGroupTyping] = useState<Record<string, string>>({});
   const lastGroupProgressRef = useRef<Record<string, string>>({});
-  const [quotingMessage, setQuotingMessage] = useState<Message | null>(null);
+  const [quoteTarget, setQuoteTarget] = useState<{ message: Message; body: string } | null>(null);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [forwardPickerOpen, setForwardPickerOpen] = useState(false);
   const [pendingForwardMessages, setPendingForwardMessages] = useState<
@@ -1673,6 +1687,38 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setForwardPickerOpen(true);
   }, [selectedMessages]);
 
+  const deleteSelectedMessages = useCallback(async () => {
+    if (selectedMessages.length === 0 || !apiBase || !pane.sessionId) return;
+    const ok = window.confirm(`确认删除已选中的 ${selectedMessages.length} 条消息？`);
+    if (!ok) return;
+    try {
+      const resp = await fetch(`${apiBase}/api/session/messages/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({
+          session_id: pane.sessionId,
+          messages: selectedMessages.map((m) => ({
+            role: m.role,
+            content: m.content,
+            timestamp: m.timestamp,
+            agent_id: m.agentId,
+          })),
+        }),
+      });
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+      const selectedIds = new Set(selectedMessages.map((m) => m.id));
+      setPaneMessages(
+        pane.id,
+        (pane.messages ?? []).filter((m) => !selectedIds.has(m.id))
+      );
+      setSelectedMessageIds(new Set());
+    } catch (err) {
+      console.error("[ChatPane] delete selected messages failed:", err);
+    }
+  }, [apiBase, apiToken, pane.id, pane.messages, pane.sessionId, selectedMessages, setPaneMessages]);
+
   const retryUserMessage = useCallback((msg: Message) => {
     if (msg.role !== "user") return;
     void sendChatRef.current(msg.content, { retryAttachments: msg.attachments ?? [] });
@@ -1692,7 +1738,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             assistantAvatarUrl={paneAvatarMeta.url}
             userName={userBubbleLabel}
             onCopyMessage={copyMessage}
-            onQuoteMessage={(msg) => setQuotingMessage(msg)}
+            onQuoteMessage={(msg, selectedText) =>
+              setQuoteTarget({ message: msg, body: resolveQuoteBody(msg, selectedText) })
+            }
             onFavoriteMessage={favoriteMessage}
             onForwardMessage={forwardOneMessage}
             onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
@@ -1905,10 +1953,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         undefined,
         undefined,
         userAttachments,
-        quotingMessage
+        quoteTarget
           ? {
-              quotedMessageId: quotingMessage.id,
-              quotedContent: `${quotingMessage.avatarName || quotingMessage.agentId || quotingMessage.role}: ${quotingMessage.content.slice(0, 120)}`,
+              quotedMessageId: quoteTarget.message.id,
+              quotedContent: `${quoteTarget.message.avatarName || quoteTarget.message.agentId || quoteTarget.message.role}: ${quoteTarget.body.slice(0, 120)}`,
             }
           : undefined
       );
@@ -1917,7 +1965,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       addPaneMessage(pane.id, "tool", `🗣 发送给 ${targetAgentId}: ${messageText}`, "meta");
     }
     setInput("");
-    setQuotingMessage(null);
+    setQuoteTarget(null);
     // Clear attachments immediately so chips do not linger until the stream ends (finally also clears).
     setContextFiles({});
     setStreaming(true);
@@ -1947,6 +1995,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
     try {
       const body: Record<string, unknown> = { session_id: requestSessionId, user_input: messageText };
+      if (quoteTarget) {
+        body.quoted_message_id = quoteTarget.message.id;
+        body.quoted_content = `${quoteTarget.message.avatarName || quoteTarget.message.agentId || quoteTarget.message.role}: ${quoteTarget.body}`;
+      }
       if (activeProvider) body.provider = activeProvider;
       if (activeModel) body.model = activeModel;
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
@@ -1955,10 +2007,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         body.mentioned_avatar_ids = mentionedAvatarIds;
         body.meta_leader_display_name = metaLeaderDisplayName;
         body.user_display_name = userBubbleLabel;
-        if (quotingMessage) {
-          body.quoted_message_id = quotingMessage.id;
-          body.quoted_content = `${quotingMessage.avatarName || quotingMessage.agentId || quotingMessage.role}: ${quotingMessage.content}`;
-        }
       }
       if (userAttachments.length > 0) {
         const imageInputs = userAttachments
@@ -2763,12 +2811,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               </button>
             </div>
           ) : null}
-          {quotingMessage ? (
+          {quoteTarget ? (
             <div className="mb-1 flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-1 text-xs text-text-muted">
               <span className="truncate">
-                引用 {quotingMessage.avatarName || quotingMessage.agentId || quotingMessage.role}: {quotingMessage.content.slice(0, 80)}
+                引用 {quoteTarget.message.avatarName || quoteTarget.message.agentId || quoteTarget.message.role}:{" "}
+                {quoteTarget.body.slice(0, 80)}
               </span>
-              <button className="rounded px-1 hover:bg-surface-hover" onClick={() => setQuotingMessage(null)}>取消</button>
+              <button className="rounded px-1 hover:bg-surface-hover" onClick={() => setQuoteTarget(null)}>取消</button>
             </div>
           ) : null}
           {selectedMessageIds.size > 0 ? (
@@ -2798,6 +2847,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 }}
               >
                 复制
+              </button>
+              <button className="rounded px-1 hover:bg-surface-hover text-rose-300" onClick={() => void deleteSelectedMessages()}>
+                删除
               </button>
               <button className="rounded px-1 hover:bg-surface-hover" onClick={() => setSelectedMessageIds(new Set())}>取消</button>
             </div>
