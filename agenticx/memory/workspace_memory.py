@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import math
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -36,6 +37,10 @@ class MemoryChunk:
 
 class WorkspaceMemoryStore:
     """SQLite-backed workspace memory index and search."""
+
+    _CHUNK_HEADING_RE = re.compile(r"^#{1,6}\s")
+    _MAX_SECTION_LINES = 60
+    _FALLBACK_CHUNK_LINES = 40
 
     def __init__(
         self,
@@ -223,8 +228,28 @@ class WorkspaceMemoryStore:
     def _chunk_text(self, content: str) -> Iterable[Tuple[int, int, str]]:
         lines = content.splitlines()
         if not lines:
-            return [(1, 1, "")]
-        chunk_size = 40
+            return []
+        heading_indices = [i for i, line in enumerate(lines) if self._CHUNK_HEADING_RE.match(line)]
+        if not heading_indices:
+            return self._chunk_fixed(lines)
+        sections: List[Tuple[int, int]] = []
+        if heading_indices[0] > 0:
+            sections.append((0, heading_indices[0]))
+        for idx, start in enumerate(heading_indices):
+            end = heading_indices[idx + 1] if idx + 1 < len(heading_indices) else len(lines)
+            sections.append((start, end))
+        out: List[Tuple[int, int, str]] = []
+        for start, end in sections:
+            if end - start <= self._MAX_SECTION_LINES:
+                text = "\n".join(lines[start:end]).strip()
+                if text:
+                    out.append((start + 1, end, text))
+            else:
+                out.extend(self._subsplit_section(lines, start, end))
+        return out
+
+    def _chunk_fixed(self, lines: List[str]) -> List[Tuple[int, int, str]]:
+        chunk_size = self._FALLBACK_CHUNK_LINES
         out: List[Tuple[int, int, str]] = []
         for start in range(0, len(lines), chunk_size):
             end = min(len(lines), start + chunk_size)
@@ -232,6 +257,33 @@ class WorkspaceMemoryStore:
             if not text:
                 continue
             out.append((start + 1, end, text))
+        return out
+
+    def _subsplit_section(self, lines: List[str], section_start: int, section_end: int) -> List[Tuple[int, int, str]]:
+        """Split a long markdown section at blank-line boundaries when possible."""
+        max_n = self._MAX_SECTION_LINES
+        out: List[Tuple[int, int, str]] = []
+        i = section_start
+        while i < section_end:
+            limit_excl = min(i + max_n, section_end)
+            if limit_excl >= section_end:
+                text = "\n".join(lines[i:section_end]).strip()
+                if text:
+                    out.append((i + 1, section_end, text))
+                break
+            chunk_end_excl = limit_excl
+            for j in range(limit_excl - 1, i, -1):
+                if not lines[j].strip():
+                    chunk_end_excl = j
+                    break
+            if chunk_end_excl <= i:
+                chunk_end_excl = min(i + max_n, section_end)
+            text = "\n".join(lines[i:chunk_end_excl]).strip()
+            if text:
+                out.append((i + 1, chunk_end_excl, text))
+            i = chunk_end_excl
+            while i < section_end and not lines[i].strip():
+                i += 1
         return out
 
     def _search_fts(self, query: str, limit: int) -> List[Dict[str, Any]]:
