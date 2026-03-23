@@ -6,6 +6,7 @@ import {
   Mail,
   FolderOpen,
   Bookmark,
+  Sparkles,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import type { Avatar, ChatPane, ChatStyle, GroupChat } from "../store";
@@ -36,7 +37,7 @@ type McpServer = {
   command?: string;
 };
 
-type SettingsTab = "general" | "provider" | "mcp" | "email" | "workspace" | "favorites";
+type SettingsTab = "general" | "provider" | "mcp" | "skills" | "email" | "workspace" | "favorites";
 type ConfirmMode = "manual" | "semi-auto" | "auto";
 type EmailPresetId = "qq" | "163" | "gmail" | "outlook" | "custom";
 
@@ -88,6 +89,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "general", label: "通用", icon: Settings2 },
   { id: "provider", label: "模型与 API", icon: Cpu },
   { id: "mcp", label: "MCP 服务", icon: Plug },
+  { id: "skills", label: "技能", icon: Sparkles },
   { id: "email", label: "邮件通知", icon: Mail },
   { id: "workspace", label: "工作区", icon: FolderOpen },
   { id: "favorites", label: "收藏", icon: Bookmark },
@@ -140,6 +142,211 @@ function normalizeEmailSettings(input: unknown): EmailSettingsForm {
     from_email: String(row.from_email ?? ""),
     default_to_email: String(row.default_to_email ?? "bingzhenli@hotmail.com"),
   };
+}
+
+function SkillsTab() {
+  const [items, setItems] = useState<SkillItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [search, setSearch] = useState("");
+  const [detail, setDetail] = useState<{ name: string; content: string } | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErr("");
+    void (async () => {
+      try {
+        const res = await window.agenticxDesktop.loadSkills();
+        if (!cancelled) {
+          if (res.ok) setItems(res.items ?? []);
+          else setErr(res.error ?? "加载失败");
+        }
+      } catch (e) {
+        if (!cancelled) setErr(String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const onRefresh = async () => {
+    setLoading(true);
+    setErr("");
+    setDetail(null);
+    try {
+      await window.agenticxDesktop.refreshSkills();
+      const res = await window.agenticxDesktop.loadSkills();
+      if (res.ok) setItems(res.items ?? []);
+      else setErr(res.error ?? "刷新失败");
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onViewDetail = async (name: string) => {
+    if (detail?.name === name) {
+      setDetail(null);
+      return;
+    }
+    setLoadingDetail(true);
+    try {
+      const res = await window.agenticxDesktop.loadSkillDetail({ name });
+      if (res.ok) setDetail({ name, content: res.content });
+      else setErr(res.error ?? "加载详情失败");
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  const filtered = search.trim()
+    ? items.filter(
+        (s) =>
+          s.name.toLowerCase().includes(search.toLowerCase()) ||
+          s.description.toLowerCase().includes(search.toLowerCase())
+      )
+    : items;
+
+  const projectSkills = filtered.filter((s) => s.location === "project");
+  const globalSkills = filtered.filter((s) => s.location !== "project");
+
+  if (loading) {
+    return <div className="py-8 text-center text-sm text-text-faint">加载技能中...</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="text-sm text-text-subtle">
+        技能（Skills）是注入给 Agent 的领域知识指令，告诉 AI 在特定任务中「怎么做」。
+      </div>
+
+      {/* Search + Refresh */}
+      <div className="flex gap-2">
+        <input
+          className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
+          placeholder="搜索技能名称或描述..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <button
+          className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+          onClick={() => void onRefresh()}
+          disabled={loading}
+        >
+          刷新
+        </button>
+      </div>
+
+      {err && (
+        <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
+          {err}
+        </div>
+      )}
+
+      {items.length === 0 && !err && (
+        <div className="py-6 text-center text-sm text-text-faint">
+          未发现任何技能。<br />
+          <span className="text-xs text-text-subtle">
+            可将 SKILL.md 放置在 .agents/skills/、~/.agents/skills/ 或 .claude/skills/ 等目录。
+          </span>
+        </div>
+      )}
+
+      {/* Detail panel */}
+      {detail && (
+        <div className="rounded-md border border-cyan-500/30 bg-surface-card">
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+            <span className="text-xs font-medium text-cyan-400">{detail.name}</span>
+            <button
+              className="text-xs text-text-faint transition hover:text-text-primary"
+              onClick={() => setDetail(null)}
+            >
+              关闭 ✕
+            </button>
+          </div>
+          <pre className="max-h-64 overflow-y-auto px-3 py-2 text-[11px] leading-relaxed text-text-muted whitespace-pre-wrap break-words">
+            {detail.content}
+          </pre>
+        </div>
+      )}
+      {loadingDetail && (
+        <div className="py-2 text-center text-xs text-text-faint">加载详情...</div>
+      )}
+
+      {/* Skills list grouped by location */}
+      {projectSkills.length > 0 && (
+        <div>
+          <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+            项目技能 ({projectSkills.length})
+          </div>
+          <div className="space-y-1">
+            {projectSkills.map((skill) => (
+              <button
+                key={skill.name}
+                type="button"
+                className={`w-full rounded-md border px-3 py-2 text-left transition ${
+                  detail?.name === skill.name
+                    ? "border-cyan-500/40 bg-cyan-500/10"
+                    : "border-border bg-surface-card hover:bg-surface-hover"
+                }`}
+                onClick={() => void onViewDetail(skill.name)}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
+                  <span className="shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400">
+                    项目
+                  </span>
+                </div>
+                {skill.description && (
+                  <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {globalSkills.length > 0 && (
+        <div>
+          <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+            全局技能 ({globalSkills.length})
+          </div>
+          <div className="space-y-1">
+            {globalSkills.map((skill) => (
+              <button
+                key={skill.name}
+                type="button"
+                className={`w-full rounded-md border px-3 py-2 text-left transition ${
+                  detail?.name === skill.name
+                    ? "border-cyan-500/40 bg-cyan-500/10"
+                    : "border-border bg-surface-card hover:bg-surface-hover"
+                }`}
+                onClick={() => void onViewDetail(skill.name)}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
+                  <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
+                    全局
+                  </span>
+                </div>
+                {skill.description && (
+                  <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function EmailSettingsTab() {
@@ -1155,7 +1362,10 @@ export function SettingsPanel({
               </div>
             )}
 
-            {/* === WORKSPACE TAB === */}
+            {/* === SKILLS TAB === */}
+            {tab === "skills" && <SkillsTab />}
+
+            {/* === EMAIL TAB === */}
             {tab === "email" && <EmailSettingsTab />}
 
             {/* === WORKSPACE TAB === */}
