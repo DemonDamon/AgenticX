@@ -155,4 +155,9 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   saveConfig: async (payload: { provider?: string; model?: string; apiKey?: string; activeProvider?: string; activeModel?: string }) =>
     ipcRenderer.invoke("save-config", payload),
   nativeSay: async (text: string) => ipcRenderer.invoke("native-say", text),
+
+  // Skills
+  loadSkills: async () => ipcRenderer.invoke("load-skills"),
+  loadSkillDetail: async (args: { name: string }) => ipcRenderer.invoke("load-skill-detail", args),
+  refreshSkills: async () => ipcRenderer.invoke("refresh-skills"),
 });
