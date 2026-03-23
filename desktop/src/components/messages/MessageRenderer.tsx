@@ -21,6 +21,7 @@ type Props = {
   onFavoriteMessage?: (message: Message) => void;
   onToggleSelectMessage?: (message: Message) => void;
   onForwardMessage?: (message: Message) => void;
+  onRetryMessage?: (message: Message) => void;
   selectable?: boolean;
   selected?: boolean;
   onResolveInlineConfirm?: (confirm: NonNullable<Message["inlineConfirm"]>, approved: boolean) => void;
@@ -47,6 +48,7 @@ export function MessageRenderer({
   onFavoriteMessage,
   onToggleSelectMessage,
   onForwardMessage,
+  onRetryMessage,
   selectable,
   selected,
   onResolveInlineConfirm,
@@ -67,6 +69,7 @@ export function MessageRenderer({
         onFavoriteMessage={onFavoriteMessage}
         onToggleSelectMessage={onToggleSelectMessage}
         onForwardMessage={onForwardMessage}
+        onRetryMessage={onRetryMessage}
         selectable={selectable}
         selected={selected}
       />

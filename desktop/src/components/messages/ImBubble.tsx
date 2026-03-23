@@ -20,6 +20,7 @@ type Props = {
   onFavoriteMessage?: (message: Message) => void;
   onToggleSelectMessage?: (message: Message) => void;
   onForwardMessage?: (message: Message) => void;
+  onRetryMessage?: (message: Message) => void;
   selectable?: boolean;
   selected?: boolean;
 };
@@ -75,6 +76,7 @@ export function ImBubble({
   onFavoriteMessage,
   onToggleSelectMessage,
   onForwardMessage,
+  onRetryMessage,
   selectable,
   selected,
 }: Props) {
@@ -192,6 +194,9 @@ export function ImBubble({
               <button type="button" className="hover:text-text-strong" onClick={() => onQuoteMessage?.(message)}>引用</button>
               <button type="button" className="hover:text-text-strong" onClick={() => onFavoriteMessage?.(message)}>收藏</button>
               <button type="button" className="hover:text-text-strong" onClick={() => onForwardMessage?.(message)}>转发</button>
+              {onRetryMessage ? (
+                <button type="button" className="hover:text-text-strong" onClick={() => onRetryMessage(message)}>重试</button>
+              ) : null}
               <button type="button" className="hover:text-text-strong" onClick={() => onToggleSelectMessage?.(message)}>多选</button>
             </div>
           </div>
@@ -207,6 +212,9 @@ export function ImBubble({
           <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onQuoteMessage?.(message); }}>引用</button>
           <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onFavoriteMessage?.(message); }}>收藏</button>
           <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onForwardMessage?.(message); }}>转发</button>
+          {onRetryMessage ? (
+            <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onRetryMessage(message); }}>重试</button>
+          ) : null}
           <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onToggleSelectMessage?.(message); }}>多选</button>
         </div>
       ) : null}
