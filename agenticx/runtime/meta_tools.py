@@ -27,6 +27,11 @@ from agenticx.cli.config_manager import ConfigManager
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.runtime.team_manager import AgentTeamManager
+from agenticx.workspace.loader import (
+    append_daily_memory,
+    append_long_term_memory,
+    resolve_workspace_dir,
+)
 
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
@@ -96,12 +101,24 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "memory_append",
-            "description": "Append note to daily memory or long-term MEMORY.md.",
+            "description": (
+                "Persist a fact to workspace memory so it survives across sessions. "
+                "Use 'daily' for transient session outcomes; use 'long_term' for user preferences, "
+                "important URLs, recurring instructions, or anything the user explicitly asks to remember. "
+                "Content should be a concise, self-contained note (not raw conversation text)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "target": {"type": "string", "enum": ["daily", "long_term"]},
-                    "content": {"type": "string"},
+                    "target": {
+                        "type": "string",
+                        "enum": ["daily", "long_term"],
+                        "description": "daily = today's session log; long_term = persistent MEMORY.md anchors.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Concise fact to persist. Include key details (URLs, paths, names).",
+                    },
                 },
                 "required": ["target", "content"],
                 "additionalProperties": False,
@@ -1727,6 +1744,26 @@ async def dispatch_meta_tool_async(
             except Exception:
                 pass
         return json.dumps(result, ensure_ascii=False)
+
+    if name == "memory_append":
+        target = str(arguments.get("target", "daily") or "daily").strip().lower()
+        content = str(arguments.get("content", "")).strip()
+        if not content:
+            return json.dumps({"ok": False, "error": "missing content"}, ensure_ascii=False)
+        workspace_dir = resolve_workspace_dir()
+        if target == "long_term":
+            append_long_term_memory(workspace_dir, content)
+        else:
+            append_daily_memory(workspace_dir, content)
+        try:
+            store = WorkspaceMemoryStore()
+            store.index_workspace_sync(workspace_dir)
+        except Exception:
+            pass
+        return json.dumps(
+            {"ok": True, "target": target, "content": content[:200]},
+            ensure_ascii=False,
+        )
 
     if name == "memory_search":
         query = str(arguments.get("query", "")).strip()
