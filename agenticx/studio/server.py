@@ -49,6 +49,7 @@ from agenticx.workspace.loader import (
     delete_favorite,
     ensure_workspace,
     load_favorites,
+    remove_favorite_memory_note,
     resolve_workspace_dir,
     update_favorite_tags,
     upsert_favorite,
@@ -1771,8 +1772,25 @@ def create_studio_app() -> FastAPI:
     ) -> dict:
         _check_token(x_agx_desktop_token)
         workspace_dir = resolve_workspace_dir()
+        existing = next(
+            (
+                row
+                for row in load_favorites(workspace_dir)
+                if str(row.get("message_id", "") or "").strip() == str(message_id).strip()
+            ),
+            None,
+        )
         ok = delete_favorite(workspace_dir, message_id)
-        return {"ok": ok}
+        memory_reconciled = False
+        if ok and isinstance(existing, dict):
+            try:
+                content = str(existing.get("content", "") or "").strip()
+                if content and remove_favorite_memory_note(workspace_dir, content):
+                    WorkspaceMemoryStore().index_workspace_sync(workspace_dir)
+                    memory_reconciled = True
+            except Exception:
+                pass
+        return {"ok": ok, "memory_reconciled": memory_reconciled}
 
     @app.patch("/api/memory/favorites/{message_id}/tags")
     async def patch_memory_favorite_tags(

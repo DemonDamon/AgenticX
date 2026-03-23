@@ -8,6 +8,7 @@ from pathlib import Path
 from agenticx.workspace.loader import (
     delete_favorite,
     load_favorites,
+    remove_favorite_memory_note,
     update_favorite_tags,
     upsert_favorite,
 )
@@ -55,3 +56,28 @@ def test_update_favorite_tags(tmp_path: Path) -> None:
     assert len(rows) == 1
     assert rows[0].get("tags") == ["a", "b"]
     assert update_favorite_tags(ws, "missing", ["x"]) is False
+
+
+def test_upsert_dedupes_by_content(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    assert upsert_favorite(
+        ws,
+        {"message_id": "m3", "session_id": "s1", "content": "same content", "saved_at": "t1", "role": "user"},
+    )
+    assert not upsert_favorite(
+        ws,
+        {"message_id": "m4", "session_id": "s2", "content": "same content", "saved_at": "t2", "role": "assistant"},
+    )
+
+
+def test_remove_favorite_memory_note(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    mem = ws / "MEMORY.md"
+    mem.write_text("- [用户收藏] keep this\n- [用户收藏] delete this\n- other\n", encoding="utf-8")
+    assert remove_favorite_memory_note(ws, "delete this") is True
+    body = mem.read_text(encoding="utf-8")
+    assert "[用户收藏] delete this" not in body
+    assert "[用户收藏] keep this" in body
+    assert remove_favorite_memory_note(ws, "missing") is False
