@@ -155,6 +155,10 @@ function SkillsTab() {
   const [bundleInstallPath, setBundleInstallPath] = useState("");
   const [bundleBusy, setBundleBusy] = useState(false);
   const [bundleMsg, setBundleMsg] = useState("");
+  const [marketQuery, setMarketQuery] = useState("");
+  const [marketResults, setMarketResults] = useState<RegistrySearchItem[]>([]);
+  const [marketLoading, setMarketLoading] = useState(false);
+  const [marketMsg, setMarketMsg] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -246,6 +250,44 @@ function SkillsTab() {
       setBundleMsg(`卸载失败: ${String(e)}`);
     } finally {
       setBundleBusy(false);
+    }
+  };
+
+  const onMarketSearch = async () => {
+    setMarketLoading(true);
+    setMarketMsg("");
+    try {
+      const res = await window.agenticxDesktop.searchRegistry({ q: marketQuery });
+      if (res.ok) {
+        setMarketResults(res.items ?? []);
+        if ((res.items ?? []).length === 0) setMarketMsg("未找到相关技能");
+      } else {
+        setMarketMsg(res.error ?? "搜索失败");
+        setMarketResults([]);
+      }
+    } catch (e) {
+      setMarketMsg(String(e));
+    } finally {
+      setMarketLoading(false);
+    }
+  };
+
+  const onMarketInstall = async (item: RegistrySearchItem) => {
+    setMarketMsg(`正在安装 "${item.name}"...`);
+    try {
+      const res = await window.agenticxDesktop.installFromRegistry({
+        source: item.source,
+        name: item.name,
+      });
+      if (res.ok) {
+        setMarketMsg(`已安装 "${item.name}"`);
+        const skillsRes = await window.agenticxDesktop.loadSkills();
+        if (skillsRes.ok) setItems(skillsRes.items ?? []);
+      } else {
+        setMarketMsg(`安装失败: ${res.error ?? "未知错误"}`);
+      }
+    } catch (e) {
+      setMarketMsg(String(e));
     }
   };
 
@@ -404,6 +446,69 @@ function SkillsTab() {
           </div>
         </div>
       )}
+
+      {/* === Marketplace Browser === */}
+      <div className="mt-4 border-t border-border pt-4">
+        <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+          浏览市场
+        </div>
+        <div className="flex gap-2">
+          <input
+            className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
+            placeholder="搜索技能名称..."
+            value={marketQuery}
+            onChange={(e) => setMarketQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void onMarketSearch(); }}
+          />
+          <button
+            className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+            onClick={() => void onMarketSearch()}
+            disabled={marketLoading}
+          >
+            {marketLoading ? "搜索中..." : "搜索"}
+          </button>
+        </div>
+        {marketMsg && (
+          <div className={`mt-1.5 text-xs ${marketMsg.includes("失败") || marketMsg.includes("未找到") ? "text-amber-400" : "text-emerald-400"}`}>
+            {marketMsg}
+          </div>
+        )}
+        {marketResults.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {marketResults.map((item) => (
+              <div
+                key={`${item.source}:${item.name}`}
+                className="flex items-start gap-2 rounded-md border border-border bg-surface-card px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-sm font-medium text-text-primary">{item.name}</span>
+                    <span className="shrink-0 rounded-full border border-border px-1.5 text-[10px] text-text-faint">
+                      {item.source}
+                    </span>
+                    {item.source_type === "clawhub" && (
+                      <span className="shrink-0 rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 text-[10px] text-violet-400">
+                        ClawHub
+                      </span>
+                    )}
+                  </div>
+                  {item.description && (
+                    <p className="mt-0.5 line-clamp-2 text-xs text-text-muted">{item.description}</p>
+                  )}
+                  <p className="mt-0.5 text-[10px] text-text-faint">by {item.author} · v{item.version}</p>
+                </div>
+                <button
+                  type="button"
+                  className="shrink-0 rounded border border-cyan-500/30 px-2 py-0.5 text-[10px] text-cyan-400 transition hover:bg-cyan-500/10"
+                  onClick={() => void onMarketInstall(item)}
+                >
+                  安装
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* === Installed Bundles section === */}
       <div className="mt-4 border-t border-border pt-4">

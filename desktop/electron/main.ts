@@ -1328,6 +1328,33 @@ function registerIpc(): void {
       return { ok: false, error: String(err) };
     }
   });
+
+  ipcMain.handle("search-registry", async (_event, args: { q: string }) => {
+    const studioUrl = `http://127.0.0.1:${String(apiPort)}`;
+    try {
+      const params = new URLSearchParams({ q: args.q || "" });
+      const resp = await fetch(`${studioUrl}/api/registry/search?${params.toString()}`, {
+        headers: { "x-agx-desktop-token": apiToken },
+      });
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err), items: [], count: 0 };
+    }
+  });
+
+  ipcMain.handle("install-from-registry", async (_event, args: { source: string; name: string }) => {
+    const studioUrl = `http://127.0.0.1:${String(apiPort)}`;
+    try {
+      const resp = await fetch(`${studioUrl}/api/registry/install`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ source: args.source, name: args.name }),
+      });
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
 }
 
 app.setName("Machi");

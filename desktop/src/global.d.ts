@@ -121,6 +121,18 @@ type BundleInstallResult = {
 };
 type BundleUninstallResult = { ok: boolean; name?: string; error?: string };
 
+type RegistrySearchItem = {
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  source: string;
+  source_type: string;
+  install_hint: string;
+};
+type RegistrySearchResult = { ok: boolean; items: RegistrySearchItem[]; count: number; error?: string };
+type RegistryInstallResult = { ok: boolean; name?: string; installed_path?: string; error?: string };
+
 declare global {
   interface Window {
     agenticxDesktop: {
@@ -247,6 +259,9 @@ declare global {
       loadBundles: () => Promise<BundleListResult>;
       installBundle: (args: { sourcePath: string }) => Promise<BundleInstallResult>;
       uninstallBundle: (args: { name: string }) => Promise<BundleUninstallResult>;
+
+      searchRegistry: (args: { q: string }) => Promise<RegistrySearchResult>;
+      installFromRegistry: (args: { source: string; name: string }) => Promise<RegistryInstallResult>;
     };
   }
 }

@@ -165,4 +165,9 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadBundles: async () => ipcRenderer.invoke("load-bundles"),
   installBundle: async (args: { sourcePath: string }) => ipcRenderer.invoke("install-bundle", args),
   uninstallBundle: async (args: { name: string }) => ipcRenderer.invoke("uninstall-bundle", args),
+
+  // Registry marketplace
+  searchRegistry: async (args: { q: string }) => ipcRenderer.invoke("search-registry", args),
+  installFromRegistry: async (args: { source: string; name: string }) =>
+    ipcRenderer.invoke("install-from-registry", args),
 });
