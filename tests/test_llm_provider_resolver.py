@@ -30,6 +30,17 @@ def test_resolver_uses_zhipu_default_base_url(tmp_path: Path, monkeypatch):
     provider = ProviderResolver.resolve()
     assert isinstance(provider, ZhipuProvider)
     assert provider.base_url == "https://open.bigmodel.cn/api/paas/v4"
+    assert provider.model == "openai/glm-4-plus"
+
+
+def test_zhipu_provider_normalizes_zhipu_prefixed_model():
+    provider = ZhipuProvider.from_config({"model": "zhipu/glm-5", "api_key": "k"})
+    assert provider.model == "openai/glm-5"
+
+
+def test_zhipu_provider_idempotent_openai_prefixed_model():
+    provider = ZhipuProvider.from_config({"model": "openai/glm-5", "api_key": "k"})
+    assert provider.model == "openai/glm-5"
 
 
 def test_resolver_uses_qianfan_default_base_url(tmp_path: Path, monkeypatch):
