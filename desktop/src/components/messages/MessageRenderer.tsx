@@ -18,7 +18,7 @@ type Props = {
   userName?: string;
   onCopyMessage?: (message: Message) => void;
   onQuoteMessage?: (message: Message) => void;
-  onFavoriteMessage?: (message: Message) => void;
+  onFavoriteMessage?: (message: Message, selectedText?: string) => void;
   onToggleSelectMessage?: (message: Message) => void;
   onForwardMessage?: (message: Message) => void;
   onRetryMessage?: (message: Message) => void;

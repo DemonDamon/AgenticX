@@ -25,6 +25,7 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
+import { favoriteStorageMessageId } from "../utils/favorite-selection";
 
 const NEW_TOPIC_PREF_KEY = "agx:newTopicInherit";
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
@@ -1467,16 +1468,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
   }, []);
 
-  const favoriteMessage = useCallback(async (message: Message) => {
+  const favoriteMessage = useCallback(async (message: Message, selectedText?: string) => {
     if (!apiBase || !pane.sessionId) return;
+    const trimmedSel = selectedText?.trim() ?? "";
+    const content = trimmedSel.length > 0 ? trimmedSel : message.content;
+    const messageId = favoriteStorageMessageId(message.id, content, message.content);
     try {
       const res = await fetch(`${apiBase}/api/memory/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
         body: JSON.stringify({
           session_id: pane.sessionId,
-          message_id: message.id,
-          content: message.content,
+          message_id: messageId,
+          content,
           role: message.role,
         }),
       });
