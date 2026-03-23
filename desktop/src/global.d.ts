@@ -96,6 +96,31 @@ type SkillDetailResult = {
 };
 type SkillRefreshResult = { ok: boolean; count: number; error?: string };
 
+type BundleItem = {
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  installed_at: string;
+  source_dir: string;
+  skills: string[];
+  mcp_servers: string[];
+  avatars: string[];
+  memory_templates: string[];
+};
+type BundleListResult = { ok: boolean; items: BundleItem[]; count: number; error?: string };
+type BundleInstallResult = {
+  ok: boolean;
+  name?: string;
+  version?: string;
+  skills_installed?: string[];
+  mcp_servers_installed?: string[];
+  avatars_installed?: string[];
+  memory_templates_installed?: string[];
+  error?: string;
+};
+type BundleUninstallResult = { ok: boolean; name?: string; error?: string };
+
 declare global {
   interface Window {
     agenticxDesktop: {
@@ -218,6 +243,10 @@ declare global {
       loadSkills: () => Promise<SkillListResult>;
       loadSkillDetail: (args: { name: string }) => Promise<SkillDetailResult>;
       refreshSkills: () => Promise<SkillRefreshResult>;
+
+      loadBundles: () => Promise<BundleListResult>;
+      installBundle: (args: { sourcePath: string }) => Promise<BundleInstallResult>;
+      uninstallBundle: (args: { name: string }) => Promise<BundleUninstallResult>;
     };
   }
 }

@@ -160,4 +160,9 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadSkills: async () => ipcRenderer.invoke("load-skills"),
   loadSkillDetail: async (args: { name: string }) => ipcRenderer.invoke("load-skill-detail", args),
   refreshSkills: async () => ipcRenderer.invoke("refresh-skills"),
+
+  // Bundles
+  loadBundles: async () => ipcRenderer.invoke("load-bundles"),
+  installBundle: async (args: { sourcePath: string }) => ipcRenderer.invoke("install-bundle", args),
+  uninstallBundle: async (args: { name: string }) => ipcRenderer.invoke("uninstall-bundle", args),
 });

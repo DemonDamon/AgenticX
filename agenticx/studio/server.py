@@ -2096,4 +2096,70 @@ def create_studio_app() -> FastAPI:
             logger.warning("refresh_skills error: %s", exc)
             return {"ok": False, "count": 0, "error": str(exc)}
 
+    # --- Bundles API ---
+
+    @app.get("/api/bundles")
+    async def list_bundles(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """List all installed AGX Bundles."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.extensions.installer import list_installed_bundles
+
+            bundles = list_installed_bundles()
+            return {"ok": True, "items": [b.to_dict() for b in bundles], "count": len(bundles)}
+        except Exception as exc:
+            logger.warning("list_bundles error: %s", exc)
+            return {"ok": False, "items": [], "count": 0, "error": str(exc)}
+
+    @app.post("/api/bundles/install")
+    async def install_bundle_endpoint(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Install an AGX Bundle from a local directory path."""
+        _check_token(x_agx_desktop_token)
+        source_path = str(payload.get("source_path", "")).strip()
+        if not source_path:
+            raise HTTPException(status_code=400, detail="source_path is required")
+        try:
+            from agenticx.extensions.installer import install_bundle
+
+            result = install_bundle(Path(source_path))
+            if result.success:
+                return {
+                    "ok": True,
+                    "name": result.name,
+                    "version": result.version,
+                    "skills_installed": result.skills_installed,
+                    "mcp_servers_installed": result.mcp_servers_installed,
+                    "avatars_installed": result.avatars_installed,
+                    "memory_templates_installed": result.memory_templates_installed,
+                }
+            return {"ok": False, "error": result.error}
+        except Exception as exc:
+            logger.warning("install_bundle error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.delete("/api/bundles/{name}")
+    async def uninstall_bundle_endpoint(
+        name: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Uninstall an AGX Bundle by name."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.extensions.installer import uninstall_bundle
+
+            ok = uninstall_bundle(name)
+            if not ok:
+                raise HTTPException(status_code=404, detail=f"Bundle '{name}' is not installed")
+            return {"ok": True, "name": name}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("uninstall_bundle error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     return app
