@@ -215,7 +215,7 @@ class SubprocessSandbox(SandboxBase):
                 
                 duration_ms = (time.time() - start_time) * 1000
                 
-                return ExecutionResult(
+                result = ExecutionResult(
                     stdout=stdout.decode("utf-8", errors="replace"),
                     stderr=stderr.decode("utf-8", errors="replace"),
                     exit_code=process.returncode or 0,
@@ -223,7 +223,9 @@ class SubprocessSandbox(SandboxBase):
                     duration_ms=duration_ms,
                     language="python",
                 )
-                
+                self._audit_record("execute", code, result, language="python")
+                return result
+
             except asyncio.TimeoutError:
                 # 超时，终止进程
                 process.kill()
@@ -268,7 +270,7 @@ class SubprocessSandbox(SandboxBase):
             
             duration_ms = (time.time() - start_time) * 1000
             
-            return ExecutionResult(
+            result = ExecutionResult(
                 stdout=stdout.decode("utf-8", errors="replace"),
                 stderr=stderr.decode("utf-8", errors="replace"),
                 exit_code=process.returncode or 0,
@@ -276,7 +278,9 @@ class SubprocessSandbox(SandboxBase):
                 duration_ms=duration_ms,
                 language="shell",
             )
-            
+            self._audit_record("execute", command, result, language="shell")
+            return result
+
         except asyncio.TimeoutError:
             # 超时，终止进程
             process.kill()
@@ -285,7 +289,7 @@ class SubprocessSandbox(SandboxBase):
                 f"Execution timed out after {timeout}s",
                 timeout=timeout,
             )
-    
+
     async def check_health(self) -> HealthStatus:
         """
         检查沙箱健康状态

@@ -1,7 +1,7 @@
 """
 AgenticX Sandbox Module
 
-提供安全的代码执行沙箱系统，支持多后端（subprocess、microsandbox、docker）。
+提供安全的代码执行沙箱系统，支持多后端（subprocess、microsandbox、docker、remote）。
 
 基于 AgentRun-SDK-Python 研究内化，保持厂商中立。
 
@@ -44,6 +44,8 @@ from .template import (
     HIGH_PERFORMANCE_TEMPLATE,
 )
 
+from .audit import AuditEntry, SandboxAuditTrail
+
 from .base import (
     SandboxBase,
     Sandbox,
@@ -79,6 +81,8 @@ __all__ = [
     "Sandbox",
     "SandboxBase",
     "SandboxTemplate",
+    "SandboxAuditTrail",
+    "AuditEntry",
     # execd 客户端
     "ExecdClient",
     "CodeExecutionResult",

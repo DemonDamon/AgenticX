@@ -11,10 +11,14 @@ AgenticX Sandbox Base
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List, TypeVar, Generic, Union
+from typing import TYPE_CHECKING, Optional, Dict, Any, List, TypeVar, Union
 import asyncio
+import os
 import time
 import logging
+
+if TYPE_CHECKING:
+    from agenticx.sandbox.audit import SandboxAuditTrail
 
 from .types import (
     SandboxType,
@@ -53,6 +57,7 @@ class SandboxBase(ABC):
         self,
         sandbox_id: Optional[str] = None,
         template: Optional[SandboxTemplate] = None,
+        audit_trail: Optional["SandboxAuditTrail"] = None,
         **kwargs,
     ):
         """
@@ -61,6 +66,7 @@ class SandboxBase(ABC):
         Args:
             sandbox_id: 沙箱唯一标识，None 则自动生成
             template: 沙箱配置模板
+            audit_trail: Optional JSONL audit trail for execute/run_command logging
             **kwargs: 额外配置参数
         """
         self._sandbox_id = sandbox_id or self._generate_id()
@@ -68,7 +74,28 @@ class SandboxBase(ABC):
         self._status = SandboxStatus.PENDING
         self._created_at: Optional[float] = None
         self._last_activity: Optional[float] = None
+        self._audit_trail = audit_trail
         self._extra_config = kwargs
+
+    def _audit_record(
+        self,
+        operation: str,
+        code: str,
+        result: ExecutionResult,
+        language: str = "",
+    ) -> None:
+        if self._audit_trail is None:
+            return
+        self._audit_trail.record(
+            sandbox_id=self._sandbox_id,
+            operation=operation,
+            code=code,
+            exit_code=result.exit_code,
+            duration_ms=result.duration_ms,
+            backend=self.__class__.__name__,
+            language=language,
+            error=result.stderr if not result.success else "",
+        )
     
     @staticmethod
     def _generate_id() -> str:
@@ -400,20 +427,74 @@ class Sandbox:
     def _select_backend(cls) -> str:
         """
         自动选择最佳后端
-        
-        优先级：microsandbox > docker > subprocess
+
+        优先级：remote > microsandbox > docker > subprocess
+        （可由 ~/.agenticx/config.yaml sandbox.mode 覆盖）
         """
-        # 检查 microsandbox
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            mode = (ConfigManager.load().sandbox.mode or "auto").lower().strip()
+            if mode == "local":
+                return "subprocess"
+            if mode == "docker":
+                if cls._is_docker_available():
+                    return "docker"
+                logger.warning(
+                    "sandbox.mode=docker but Docker unavailable; using subprocess"
+                )
+                return "subprocess"
+            if mode in ("remote", "k8s", "docker+k8s"):
+                if cls._is_remote_available():
+                    return "remote"
+                logger.warning(
+                    "sandbox.mode=remote but remote unreachable; trying docker then subprocess"
+                )
+                if cls._is_docker_available():
+                    return "docker"
+                return "subprocess"
+            if mode == "microsandbox":
+                if cls._is_microsandbox_available():
+                    return "microsandbox"
+                logger.warning(
+                    "sandbox.mode=microsandbox unavailable; trying remote, docker, subprocess"
+                )
+        except Exception:
+            pass
+
+        if cls._is_remote_available():
+            return "remote"
         if cls._is_microsandbox_available():
             return "microsandbox"
-        
-        # 检查 docker
         if cls._is_docker_available():
             return "docker"
-        
-        # 降级到 subprocess
+
         logger.warning("No isolation backend available, using subprocess (less secure)")
         return "subprocess"
+
+    @classmethod
+    def _remote_server_url(cls) -> str:
+        url = os.environ.get("AGX_SANDBOX_REMOTE_URL", "").strip()
+        if url:
+            return url
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            return (ConfigManager.load().sandbox.remote_url or "").strip()
+        except Exception:
+            return ""
+
+    @classmethod
+    def _is_remote_available(cls) -> bool:
+        try:
+            url = cls._remote_server_url()
+            if not url:
+                return False
+            from .backends.remote import is_remote_available
+
+            return is_remote_available(url)
+        except Exception:
+            return False
     
     @classmethod
     def _is_microsandbox_available(cls) -> bool:
@@ -478,6 +559,24 @@ class Sandbox:
                     "Docker backend not available yet",
                     backend="docker"
                 )
-        
+
+        elif backend == "remote":
+            try:
+                from .backends.remote import RemoteSandbox
+
+                server_url = (
+                    kwargs.pop("server_url", None)
+                    or cls._remote_server_url()
+                    or "http://127.0.0.1:5555"
+                )
+                return RemoteSandbox(
+                    template=template, server_url=server_url, **kwargs
+                )
+            except ImportError as e:
+                raise SandboxBackendError(
+                    "Remote backend not available",
+                    backend="remote",
+                ) from e
+
         else:
             raise ValueError(f"Unknown backend: {backend}")

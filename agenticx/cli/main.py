@@ -438,6 +438,78 @@ except Exception:
 
 console = Console()
 
+sandbox_app = typer.Typer(name="sandbox", help="沙箱管理", no_args_is_help=True)
+
+
+@sandbox_app.callback(invoke_without_command=True)
+def sandbox_callback(
+    ctx: typer.Context,
+    help_flag: bool = typer.Option(False, "-h", "--help", help="显示帮助信息"),
+):
+    """沙箱子命令：查看后端可用性与自动选择结果。"""
+    if help_flag or ctx.invoked_subcommand is None:
+        console.print(ctx.get_help())
+        raise typer.Exit()
+
+
+@sandbox_app.command("status")
+def sandbox_status():
+    """显示沙箱后端可用性与当前 auto 选择结果。"""
+    import os
+
+    from agenticx.sandbox.base import Sandbox
+
+    console.print("\n[bold]AgenticX Sandbox Status[/bold]\n")
+
+    table = Table(title="Backend Availability")
+    table.add_column("Mode", style="cyan")
+    table.add_column("Backend", style="green")
+    table.add_column("Available", style="bold")
+    table.add_column("Note")
+
+    table.add_row("Local", "subprocess", "Yes", "进程级隔离，仅限开发")
+
+    docker_ok = Sandbox._is_docker_available()
+    table.add_row(
+        "Docker",
+        "docker",
+        "Yes" if docker_ok else "No",
+        "容器级隔离",
+    )
+
+    remote_ok = Sandbox._is_remote_available()
+    remote_url = os.environ.get("AGX_SANDBOX_REMOTE_URL", "").strip()
+    if not remote_url:
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            remote_url = (ConfigManager.load().sandbox.remote_url or "").strip()
+        except Exception:
+            remote_url = ""
+    remote_note = f"远端: {remote_url}" if remote_url else "远端: (未设置 AGX_SANDBOX_REMOTE_URL / config sandbox.remote_url)"
+    table.add_row(
+        "Docker+K8s",
+        "remote",
+        "Yes" if remote_ok else "No",
+        remote_note,
+    )
+
+    msb_ok = Sandbox._is_microsandbox_available()
+    table.add_row(
+        "MicroVM",
+        "microsandbox",
+        "Yes" if msb_ok else "No",
+        "硬件级隔离 (VM)",
+    )
+
+    console.print(table)
+
+    auto_backend = Sandbox._select_backend()
+    console.print(f"\n[bold]Auto-selected backend:[/bold] {auto_backend}\n")
+
+
+app.add_typer(sandbox_app)
+
 
 @app.command()
 def version():

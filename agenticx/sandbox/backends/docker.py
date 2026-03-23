@@ -331,11 +331,13 @@ class DockerSandbox(SandboxBase):
         actual_timeout = timeout or self._template.timeout_seconds
         
         if language.lower() in ("python", "py"):
-            return await self._execute_python(code, actual_timeout)
+            result = await self._execute_python(code, actual_timeout)
         elif language.lower() in ("shell", "bash", "sh"):
-            return await self._execute_shell(code, actual_timeout)
+            result = await self._execute_shell(code, actual_timeout)
         else:
             raise ValueError(f"Unsupported language: {language}")
+        self._audit_record("execute", code, result, language=language)
+        return result
     
     async def _execute_python(self, code: str, timeout: int) -> ExecutionResult:
         """执行 Python 代码"""
