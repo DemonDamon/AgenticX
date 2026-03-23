@@ -1,5 +1,6 @@
 .idea/
 .cursor/*
+.vscode/
 !.cursor/plans/
 .qoder/
 .trae/
@@ -9,10 +10,14 @@
 .lingma/
 .agenticx/
 .mynotes/
+.myblog/
 
 __pycache__/ 
 **/__pycache__/
 **/.docs/
+
+# MkDocs build output
+site/
 
 *.egg-info/
 dist/
