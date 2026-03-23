@@ -48,19 +48,37 @@ class MemoryHook(AgentHook):
         except Exception:
             logger.debug("MemoryHook.on_agent_end failed silently", exc_info=True)
 
+    _MEMORY_KW = ("记住", "记一下", "remember", "保存", "备忘", "存下来")
+    _OUTCOME_KW = (
+        "已完成", "done", "成功", "已创建", "已配置", "已部署",
+        "覆盖率", "通过", "已修复", "已解决", "结论",
+    )
+    _URL_PREFIXES = ("http://", "https://", "localhost:")
+    _REQUEST_KW = ("请", "帮", "要", "需要", "希望", "如何", "怎么")
+
     def _extract_facts_heuristic(self, chat_history: list[dict]) -> list[str]:
-        """Simple heuristic extraction without LLM call."""
+        """Pattern-based fact extraction from recent conversation."""
         facts: list[str] = []
         for msg in chat_history[-20:]:
             role = str(msg.get("role", ""))
             content = str(msg.get("content", ""))
-            if role == "user" and len(content) > 30:
+            if not content or len(content) < 10:
+                continue
+
+            if role == "user":
                 first_line = content.split("\n")[0].strip()[:200]
-                if any(kw in first_line for kw in ("请", "帮", "要", "需要", "希望", "如何", "怎么")):
-                    facts.append(f"- 用户请求: {first_line}")
-            if role == "assistant" and ("已完成" in content or "done" in content.lower()):
-                snippet = content[:200].replace("\n", " ").strip()
-                facts.append(f"- 完成事项: {snippet}")
+                if any(kw in first_line for kw in self._MEMORY_KW):
+                    facts.append(f"- \u7528\u6237\u8981\u6c42\u8bb0\u4f4f: {first_line}")
+                elif len(content) > 30 and any(kw in first_line for kw in self._REQUEST_KW):
+                    facts.append(f"- \u7528\u6237\u8bf7\u6c42: {first_line}")
+
+            if role == "assistant":
+                first_300 = content[:300].replace("\n", " ").strip()
+                if any(kw in first_300 for kw in self._OUTCOME_KW):
+                    facts.append(f"- \u5b8c\u6210\u4e8b\u9879: {first_300[:200]}")
+                elif any(kw in first_300 for kw in self._URL_PREFIXES):
+                    facts.append(f"- \u5173\u952e\u4fe1\u606f: {first_300[:200]}")
+
         return facts[:MAX_FACTS_PER_SESSION]
 
     def _append_to_memory(self, workspace_dir: Path, facts: list[str]) -> None:
