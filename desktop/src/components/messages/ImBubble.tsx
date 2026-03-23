@@ -8,6 +8,7 @@ import { ReasoningBlock } from "./ReasoningBlock";
 import { parseReasoningContent } from "./reasoning-parser";
 import { ForwardedHistoryCard } from "./ForwardedHistoryCard";
 import { ForwardedHistoryModal } from "./ForwardedHistoryModal";
+import { getContainedSelectionText } from "../../utils/favorite-selection";
 
 type Props = {
   message: Message;
@@ -17,7 +18,7 @@ type Props = {
   userName?: string;
   onCopyMessage?: (message: Message) => void;
   onQuoteMessage?: (message: Message) => void;
-  onFavoriteMessage?: (message: Message) => void;
+  onFavoriteMessage?: (message: Message, selectedText?: string) => void;
   onToggleSelectMessage?: (message: Message) => void;
   onForwardMessage?: (message: Message) => void;
   onRetryMessage?: (message: Message) => void;
@@ -104,6 +105,12 @@ export function ImBubble({
   const [forwardedModalOpen, setForwardedModalOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const msgContentRef = useRef<HTMLDivElement | null>(null);
+
+  const runFavorite = () => {
+    const picked = getContainedSelectionText(msgContentRef.current);
+    onFavoriteMessage?.(message, picked ?? undefined);
+  };
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -163,7 +170,7 @@ export function ImBubble({
                   ))}
                 </div>
               ) : null}
-              <div className="msg-content break-words">
+              <div ref={msgContentRef} className="msg-content break-words">
                 {badge}
                 {message.quotedContent ? (
                   <div className="mb-2 rounded-md border border-border bg-surface-panel/70 px-2 py-1 text-xs text-text-faint">
@@ -192,7 +199,14 @@ export function ImBubble({
             <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
               <button type="button" className="hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>复制</button>
               <button type="button" className="hover:text-text-strong" onClick={() => onQuoteMessage?.(message)}>引用</button>
-              <button type="button" className="hover:text-text-strong" onClick={() => onFavoriteMessage?.(message)}>收藏</button>
+              <button
+                type="button"
+                className="hover:text-text-strong"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={runFavorite}
+              >
+                收藏
+              </button>
               <button type="button" className="hover:text-text-strong" onClick={() => onForwardMessage?.(message)}>转发</button>
               {onRetryMessage ? (
                 <button type="button" className="hover:text-text-strong" onClick={() => onRetryMessage(message)}>重试</button>
@@ -210,7 +224,16 @@ export function ImBubble({
         >
           <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onCopyMessage?.(message); }}>复制</button>
           <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onQuoteMessage?.(message); }}>引用</button>
-          <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onFavoriteMessage?.(message); }}>收藏</button>
+          <button
+            className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setMenuOpen(false);
+              runFavorite();
+            }}
+          >
+            收藏
+          </button>
           <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onForwardMessage?.(message); }}>转发</button>
           {onRetryMessage ? (
             <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onRetryMessage(message); }}>重试</button>

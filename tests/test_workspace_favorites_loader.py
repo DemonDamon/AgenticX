@@ -24,6 +24,21 @@ def test_upsert_dedupes_by_message_id(tmp_path: Path) -> None:
     assert len(rows) == 1
 
 
+def test_upsert_same_message_id_different_content_allowed(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    assert upsert_favorite(
+        ws,
+        {"message_id": "same", "session_id": "s", "content": " excerpt one ", "saved_at": "t1", "role": "assistant"},
+    )
+    assert upsert_favorite(
+        ws,
+        {"message_id": "same", "session_id": "s", "content": "excerpt two", "saved_at": "t2", "role": "assistant"},
+    )
+    rows = load_favorites(ws)
+    assert len(rows) == 2
+
+
 def test_load_favorites_empty_and_corrupt(tmp_path: Path) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()

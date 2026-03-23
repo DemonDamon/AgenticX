@@ -16,21 +16,17 @@ from agenticx.studio.server import create_studio_app
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.delenv("AGX_DESKTOP_TOKEN", raising=False)
 
-    seen_msg_ids: set[str] = set()
-    seen_contents: set[str] = set()
+    seen_pairs: set[tuple[str, str]] = set()
 
     def fake_upsert(_ws: object, entry: dict) -> bool:
         mid = str(entry.get("message_id") or "").strip()
         content = str(entry.get("content") or "").strip()
         if not mid:
             return True
-        if content and content in seen_contents:
+        key = (mid, content)
+        if key in seen_pairs:
             return False
-        if mid in seen_msg_ids:
-            return False
-        seen_msg_ids.add(mid)
-        if content:
-            seen_contents.add(content)
+        seen_pairs.add(key)
         return True
 
     monkeypatch.setattr(server_module, "upsert_favorite", fake_upsert)

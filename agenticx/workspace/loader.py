@@ -123,9 +123,12 @@ def upsert_favorite(workspace_dir: Path, entry: dict) -> bool:
     message_id = str(entry.get("message_id") or "").strip()
     content_norm = str(entry.get("content") or "").strip()
     favorites = load_favorites(workspace_dir)
+    # Duplicate = same (message_id, content), so one chat message can have multiple excerpt favorites.
     if message_id:
         for row in favorites:
-            if str(row.get("message_id") or "").strip() == message_id:
+            r_mid = str(row.get("message_id") or "").strip()
+            r_content = str(row.get("content") or "").strip()
+            if r_mid == message_id and r_content == content_norm:
                 return False
     if content_norm:
         for row in favorites:
