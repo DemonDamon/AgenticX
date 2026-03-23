@@ -151,6 +151,10 @@ function SkillsTab() {
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState<{ name: string; content: string } | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [bundles, setBundles] = useState<BundleItem[]>([]);
+  const [bundleInstallPath, setBundleInstallPath] = useState("");
+  const [bundleBusy, setBundleBusy] = useState(false);
+  const [bundleMsg, setBundleMsg] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -158,10 +162,14 @@ function SkillsTab() {
     setErr("");
     void (async () => {
       try {
-        const res = await window.agenticxDesktop.loadSkills();
+        const [skillsRes, bundlesRes] = await Promise.all([
+          window.agenticxDesktop.loadSkills(),
+          window.agenticxDesktop.loadBundles(),
+        ]);
         if (!cancelled) {
-          if (res.ok) setItems(res.items ?? []);
-          else setErr(res.error ?? "加载失败");
+          if (skillsRes.ok) setItems(skillsRes.items ?? []);
+          else setErr(skillsRes.error ?? "加载技能失败");
+          if (bundlesRes.ok) setBundles(bundlesRes.items ?? []);
         }
       } catch (e) {
         if (!cancelled) setErr(String(e));
@@ -178,15 +186,66 @@ function SkillsTab() {
     setLoading(true);
     setErr("");
     setDetail(null);
+    setBundleMsg("");
     try {
       await window.agenticxDesktop.refreshSkills();
-      const res = await window.agenticxDesktop.loadSkills();
-      if (res.ok) setItems(res.items ?? []);
-      else setErr(res.error ?? "刷新失败");
+      const [skillsRes, bundlesRes] = await Promise.all([
+        window.agenticxDesktop.loadSkills(),
+        window.agenticxDesktop.loadBundles(),
+      ]);
+      if (skillsRes.ok) setItems(skillsRes.items ?? []);
+      else setErr(skillsRes.error ?? "刷新失败");
+      if (bundlesRes.ok) setBundles(bundlesRes.items ?? []);
     } catch (e) {
       setErr(String(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onInstallBundle = async () => {
+    if (!bundleInstallPath.trim()) return;
+    setBundleBusy(true);
+    setBundleMsg("");
+    try {
+      const res = await window.agenticxDesktop.installBundle({ sourcePath: bundleInstallPath.trim() });
+      if (res.ok) {
+        setBundleMsg(`已安装扩展包 "${res.name ?? ""}" v${res.version ?? ""}`);
+        setBundleInstallPath("");
+        // Reload both skills and bundles
+        const [skillsRes, bundlesRes] = await Promise.all([
+          window.agenticxDesktop.loadSkills(),
+          window.agenticxDesktop.loadBundles(),
+        ]);
+        if (skillsRes.ok) setItems(skillsRes.items ?? []);
+        if (bundlesRes.ok) setBundles(bundlesRes.items ?? []);
+      } else {
+        setBundleMsg(`安装失败: ${res.error ?? "未知错误"}`);
+      }
+    } catch (e) {
+      setBundleMsg(`安装失败: ${String(e)}`);
+    } finally {
+      setBundleBusy(false);
+    }
+  };
+
+  const onUninstallBundle = async (name: string) => {
+    setBundleBusy(true);
+    setBundleMsg("");
+    try {
+      const res = await window.agenticxDesktop.uninstallBundle({ name });
+      if (res.ok) {
+        setBundleMsg(`已卸载扩展包 "${name}"`);
+        setBundles((prev) => prev.filter((b) => b.name !== name));
+        const skillsRes = await window.agenticxDesktop.loadSkills();
+        if (skillsRes.ok) setItems(skillsRes.items ?? []);
+      } else {
+        setBundleMsg(`卸载失败: ${res.error ?? "未知错误"}`);
+      }
+    } catch (e) {
+      setBundleMsg(`卸载失败: ${String(e)}`);
+    } finally {
+      setBundleBusy(false);
     }
   };
 
@@ -345,6 +404,95 @@ function SkillsTab() {
           </div>
         </div>
       )}
+
+      {/* === Installed Bundles section === */}
+      <div className="mt-4 border-t border-border pt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+            已安装扩展包 ({bundles.length})
+          </div>
+        </div>
+
+        {/* Install from local path */}
+        <div className="mb-3 flex gap-2">
+          <input
+            className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
+            placeholder="/path/to/my-bundle (包含 agx-bundle.yaml 的目录)"
+            value={bundleInstallPath}
+            onChange={(e) => setBundleInstallPath(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void onInstallBundle(); }}
+          />
+          <button
+            className="shrink-0 rounded-md border border-cyan-500/30 px-3 py-1.5 text-xs text-cyan-400 transition hover:bg-cyan-500/10 disabled:opacity-40"
+            onClick={() => void onInstallBundle()}
+            disabled={bundleBusy || !bundleInstallPath.trim()}
+          >
+            {bundleBusy ? "安装中..." : "安装"}
+          </button>
+        </div>
+        {bundleMsg && (
+          <div className={`mb-2 text-xs ${bundleMsg.includes("失败") ? "text-rose-400" : "text-emerald-400"}`}>
+            {bundleMsg}
+          </div>
+        )}
+
+        {bundles.length === 0 ? (
+          <div className="py-3 text-center text-xs text-text-faint">
+            暂无已安装扩展包。使用上方路径安装 AGX Bundle。
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {bundles.map((bundle) => (
+              <div
+                key={bundle.name}
+                className="rounded-md border border-border bg-surface-card px-3 py-2"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 truncate text-sm font-medium text-text-primary">
+                    {bundle.name}
+                  </span>
+                  <span className="shrink-0 rounded bg-surface-panel px-1.5 text-[10px] text-text-faint">
+                    v{bundle.version}
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded border border-rose-500/30 px-2 py-0.5 text-[10px] text-rose-300 transition hover:bg-rose-500/10 disabled:opacity-40"
+                    disabled={bundleBusy}
+                    onClick={() => void onUninstallBundle(bundle.name)}
+                  >
+                    卸载
+                  </button>
+                </div>
+                {bundle.description && (
+                  <p className="mt-0.5 truncate text-xs text-text-muted">{bundle.description}</p>
+                )}
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {bundle.skills.length > 0 && (
+                    <span className="rounded-full border border-border px-1.5 text-[10px] text-text-faint">
+                      {bundle.skills.length} 个技能
+                    </span>
+                  )}
+                  {bundle.mcp_servers.length > 0 && (
+                    <span className="rounded-full border border-border px-1.5 text-[10px] text-text-faint">
+                      {bundle.mcp_servers.length} 个 MCP
+                    </span>
+                  )}
+                  {bundle.avatars.length > 0 && (
+                    <span className="rounded-full border border-border px-1.5 text-[10px] text-text-faint">
+                      {bundle.avatars.length} 个分身预设
+                    </span>
+                  )}
+                  {bundle.memory_templates.length > 0 && (
+                    <span className="rounded-full border border-border px-1.5 text-[10px] text-text-faint">
+                      {bundle.memory_templates.length} 个记忆模板
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

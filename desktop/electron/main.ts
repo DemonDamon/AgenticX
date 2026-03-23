@@ -1289,6 +1289,45 @@ function registerIpc(): void {
       return { ok: false, error: String(err), count: 0 };
     }
   });
+
+  ipcMain.handle("load-bundles", async () => {
+    const studioUrl = `http://127.0.0.1:${String(apiPort)}`;
+    try {
+      const resp = await fetch(`${studioUrl}/api/bundles`, {
+        headers: { "x-agx-desktop-token": apiToken },
+      });
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err), items: [], count: 0 };
+    }
+  });
+
+  ipcMain.handle("install-bundle", async (_event, args: { sourcePath: string }) => {
+    const studioUrl = `http://127.0.0.1:${String(apiPort)}`;
+    try {
+      const resp = await fetch(`${studioUrl}/api/bundles/install`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ source_path: args.sourcePath }),
+      });
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("uninstall-bundle", async (_event, args: { name: string }) => {
+    const studioUrl = `http://127.0.0.1:${String(apiPort)}`;
+    try {
+      const resp = await fetch(`${studioUrl}/api/bundles/${encodeURIComponent(args.name)}`, {
+        method: "DELETE",
+        headers: { "x-agx-desktop-token": apiToken },
+      });
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
 }
 
 app.setName("Machi");
