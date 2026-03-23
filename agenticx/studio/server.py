@@ -2024,4 +2024,76 @@ def create_studio_app() -> FastAPI:
         manager.persist(target_session_id)
         return {"ok": True, "forwarded": len(normalized_items), "appended_messages": 1}
 
+    # --- Skills API ---
+
+    @app.get("/api/skills")
+    async def list_skills(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """List all available skills with metadata."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.tools.skill_bundle import SkillBundleLoader
+
+            loader = SkillBundleLoader()
+            skills = loader.scan()
+            items = [
+                {
+                    "name": s.name,
+                    "description": s.description,
+                    "location": s.location,
+                    "base_dir": str(s.base_dir),
+                }
+                for s in skills
+            ]
+            return {"ok": True, "items": items, "count": len(items)}
+        except Exception as exc:
+            logger.warning("list_skills error: %s", exc)
+            return {"ok": False, "items": [], "count": 0, "error": str(exc)}
+
+    @app.get("/api/skills/{name}")
+    async def get_skill_detail(
+        name: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Get full SKILL.md content for a skill."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.tools.skill_bundle import SkillBundleLoader
+
+            loader = SkillBundleLoader()
+            loader.scan()
+            content = loader.get_skill_content(name)
+            if content is None:
+                raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+            meta = loader.get_skill(name)
+            return {
+                "ok": True,
+                "name": name,
+                "description": meta.description if meta else "",
+                "location": meta.location if meta else "",
+                "content": content,
+            }
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("get_skill_detail error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/api/skills/refresh")
+    async def refresh_skills(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Force rescan skill directories."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.tools.skill_bundle import SkillBundleLoader
+
+            loader = SkillBundleLoader()
+            skills = loader.refresh()
+            return {"ok": True, "count": len(skills)}
+        except Exception as exc:
+            logger.warning("refresh_skills error: %s", exc)
+            return {"ok": False, "count": 0, "error": str(exc)}
+
     return app
