@@ -5,6 +5,7 @@ import {
   Plug,
   Mail,
   FolderOpen,
+  Bookmark,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import type { ChatStyle } from "../store";
@@ -28,7 +29,7 @@ type McpServer = {
   command?: string;
 };
 
-type SettingsTab = "general" | "provider" | "mcp" | "email" | "workspace";
+type SettingsTab = "general" | "provider" | "mcp" | "email" | "workspace" | "favorites";
 type ConfirmMode = "manual" | "semi-auto" | "auto";
 type EmailPresetId = "qq" | "163" | "gmail" | "outlook" | "custom";
 
@@ -48,6 +49,9 @@ type Props = {
   defaultProvider: string;
   providers: Record<string, ProviderEntry>;
   sessionId: string;
+  /** Studio API base URL (for 收藏列表等需要直连后端的 Tab). */
+  apiBase: string;
+  apiToken: string;
   mcpServers: McpServer[];
   onRefreshMcp: (sessionId?: string) => Promise<void>;
   confirmStrategy: ConfirmMode;
@@ -71,6 +75,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "mcp", label: "MCP 服务", icon: Plug },
   { id: "email", label: "邮件通知", icon: Mail },
   { id: "workspace", label: "工作区", icon: FolderOpen },
+  { id: "favorites", label: "收藏", icon: Bookmark },
 ];
 
 const EMAIL_PRESETS: Array<{
@@ -333,11 +338,104 @@ function EmailSettingsTab() {
   );
 }
 
+type FavoriteRow = {
+  message_id?: string;
+  session_id?: string;
+  content?: string;
+  saved_at?: string;
+  role?: string;
+};
+
+function FavoritesTab({ apiBase, apiToken }: { apiBase: string; apiToken: string }) {
+  const [items, setItems] = useState<FavoriteRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (!apiBase.trim()) {
+      setErr("未连接 Studio，无法加载收藏");
+      setItems([]);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setErr("");
+    void (async () => {
+      try {
+        const r = await fetch(`${apiBase.replace(/\/$/, "")}/api/memory/favorites`, {
+          headers: { "x-agx-desktop-token": apiToken },
+        });
+        const data = (await r.json().catch(() => null)) as { items?: FavoriteRow[]; detail?: string } | null;
+        if (!r.ok) {
+          throw new Error(data?.detail ? String(data.detail) : `HTTP ${r.status}`);
+        }
+        if (!cancelled) setItems(Array.isArray(data?.items) ? data.items : []);
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, apiToken]);
+
+  if (!apiBase.trim()) {
+    return <div className="py-8 text-center text-sm text-text-faint">未连接 Studio，无法加载收藏</div>;
+  }
+  if (loading) {
+    return <div className="py-8 text-center text-sm text-text-faint">加载中…</div>;
+  }
+  if (err) {
+    return <div className="py-8 text-center text-sm text-rose-400">{err}</div>;
+  }
+  if (items.length === 0) {
+    return <div className="py-8 text-center text-sm text-text-faint">暂无收藏</div>;
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="mb-3 text-xs text-text-subtle">
+        以下为全局收藏（按保存时间倒序）。同一条消息重复收藏不会重复写入。
+      </p>
+      {items.map((row, idx) => {
+        const content = String(row.content ?? "").trim() || "（无文本）";
+        const savedAt = String(row.saved_at ?? "");
+        const sid = String(row.session_id ?? "").trim();
+        let timeLabel = savedAt;
+        try {
+          if (savedAt) timeLabel = new Date(savedAt).toLocaleString();
+        } catch {
+          // keep raw
+        }
+        return (
+          <div
+            key={`${row.message_id ?? idx}-${savedAt}`}
+            className="flex gap-3 rounded-lg border border-border bg-surface-card px-3 py-2.5"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="line-clamp-3 whitespace-pre-wrap break-words text-sm text-text-primary">{content}</p>
+              <div className="mt-1 flex flex-wrap gap-x-2 text-[11px] text-text-faint">
+                {sid ? <span>会话 {sid.slice(0, 8)}…</span> : null}
+                {row.role ? <span>{row.role}</span> : null}
+              </div>
+            </div>
+            <div className="shrink-0 text-right text-[11px] text-text-subtle tabular-nums">{timeLabel}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function SettingsPanel({
   open,
   defaultProvider,
   providers,
   sessionId,
+  apiBase,
+  apiToken,
   mcpServers,
   onRefreshMcp,
   confirmStrategy,
@@ -799,6 +897,8 @@ export function SettingsPanel({
                 </div>
               </div>
             )}
+
+            {tab === "favorites" && <FavoritesTab apiBase={apiBase} apiToken={apiToken} />}
           </div>
 
           {/* Footer */}

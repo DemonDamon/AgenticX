@@ -1161,6 +1161,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   >([]);
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
   const [attachToastOpen, setAttachToastOpen] = useState(false);
+  const [favoriteToastOpen, setFavoriteToastOpen] = useState(false);
+  const [favoriteToastMsg, setFavoriteToastMsg] = useState("");
+  useEffect(() => {
+    if (!favoriteToastOpen) return;
+    const t = window.setTimeout(() => setFavoriteToastOpen(false), 1800);
+    return () => window.clearTimeout(t);
+  }, [favoriteToastOpen]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [taskspaceAutoRefreshKey, setTaskspaceAutoRefreshKey] = useState(0);
   const [taskspaceWidth, setTaskspaceWidth] = useState(() => {
@@ -1526,17 +1533,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const favoriteMessage = useCallback(async (message: Message) => {
     if (!apiBase || !pane.sessionId) return;
     try {
-      await fetch(`${apiBase}/api/memory/save`, {
+      const res = await fetch(`${apiBase}/api/memory/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
         body: JSON.stringify({
           session_id: pane.sessionId,
           message_id: message.id,
           content: message.content,
+          role: message.role,
         }),
       });
+      const data = (await res.json().catch(() => null)) as { already_saved?: boolean } | null;
+      if (!res.ok || !data) {
+        setFavoriteToastMsg("收藏失败，请稍后重试");
+        setFavoriteToastOpen(true);
+        return;
+      }
+      setFavoriteToastMsg(data.already_saved ? "已收藏过" : "已收藏");
+      setFavoriteToastOpen(true);
     } catch {
-      // ignore favorite failures in UI
+      setFavoriteToastMsg("收藏失败，请稍后重试");
+      setFavoriteToastOpen(true);
     }
   }, [apiBase, apiToken, pane.sessionId]);
 
@@ -2770,6 +2787,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             timeoutMs={3200}
           />
         </div>
+
+        {/* 收藏 Toast：位于消息列表与输入框之间，水平居中 */}
+        {favoriteToastOpen && (
+          <div className="pointer-events-none flex justify-center px-4 pb-1 pt-1">
+            <div className="rounded-lg border border-border bg-surface-card/95 px-3 py-2 text-xs text-text-primary shadow-lg backdrop-blur-sm">
+              {favoriteToastMsg}
+            </div>
+          </div>
+        )}
 
         <div className="shrink-0 border-t border-border px-4 py-2.5">
           <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">

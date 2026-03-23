@@ -44,7 +44,13 @@ from agenticx.studio.protocols import ChatRequest, ConfirmResponse, SessionState
 from agenticx.studio.session_manager import SessionManager
 from agenticx.tools.mcp_hub import MCPHub
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
-from agenticx.workspace.loader import append_long_term_memory, ensure_workspace, resolve_workspace_dir
+from agenticx.workspace.loader import (
+    append_long_term_memory,
+    ensure_workspace,
+    load_favorites,
+    resolve_workspace_dir,
+    upsert_favorite,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1746,6 +1752,16 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="group not found")
         return {"ok": True}
 
+    @app.get("/api/memory/favorites")
+    async def get_memory_favorites(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        workspace_dir = resolve_workspace_dir()
+        items = load_favorites(workspace_dir)
+        items_sorted = sorted(items, key=lambda x: str(x.get("saved_at", "") or ""), reverse=True)
+        return {"ok": True, "items": items_sorted}
+
     @app.post("/api/memory/save")
     async def save_message_memory(
         payload: dict,
@@ -1755,6 +1771,7 @@ def create_studio_app() -> FastAPI:
         session_id = str(payload.get("session_id", "") or "").strip()
         content = str(payload.get("content", "") or "").strip()
         source_message_id = str(payload.get("message_id", "") or "").strip()
+        role = str(payload.get("role", "") or "").strip() or "unknown"
         if not session_id or not content:
             raise HTTPException(status_code=400, detail="session_id and content are required")
         managed = manager.get(session_id, touch=False)
@@ -1767,26 +1784,41 @@ def create_studio_app() -> FastAPI:
         records = scratch.get("saved_messages")
         if not isinstance(records, list):
             records = []
-        records.append({
+
+        saved_at = datetime.now().isoformat()
+        workspace_dir = resolve_workspace_dir()
+        truncated = content[:500].strip()
+        entry = {
             "message_id": source_message_id,
+            "session_id": session_id,
             "content": content,
-            "saved_at": str(datetime.now().isoformat()),
-        })
-        scratch["saved_messages"] = records[-200:]
-        manager.persist(session_id)
+            "saved_at": saved_at,
+            "role": role,
+        }
+        inserted = upsert_favorite(workspace_dir, entry)
+        already_saved = not inserted
+
         memory_persisted = False
-        try:
-            workspace_dir = resolve_workspace_dir()
-            truncated = content[:500].strip()
-            append_long_term_memory(workspace_dir, f"[用户收藏] {truncated}")
-            WorkspaceMemoryStore().index_workspace_sync(workspace_dir)
-            memory_persisted = True
-        except Exception:
-            pass
+        if inserted:
+            records.append({
+                "message_id": source_message_id,
+                "content": content,
+                "saved_at": str(saved_at),
+            })
+            scratch["saved_messages"] = records[-200:]
+            manager.persist(session_id)
+            try:
+                append_long_term_memory(workspace_dir, f"[用户收藏] {truncated}")
+                WorkspaceMemoryStore().index_workspace_sync(workspace_dir)
+                memory_persisted = True
+            except Exception:
+                pass
+
         return {
             "ok": True,
-            "saved_count": len(scratch["saved_messages"]),
+            "saved_count": len(scratch.get("saved_messages", [])),
             "memory_persisted": memory_persisted,
+            "already_saved": already_saved,
         }
 
     @app.post("/api/messages/forward")
