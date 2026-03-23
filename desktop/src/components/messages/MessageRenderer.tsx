@@ -17,7 +17,7 @@ type Props = {
   /** IM 风格下用户气泡旁显示名（默认「我」） */
   userName?: string;
   onCopyMessage?: (message: Message) => void;
-  onQuoteMessage?: (message: Message) => void;
+  onQuoteMessage?: (message: Message, selectedText?: string) => void;
   onFavoriteMessage?: (message: Message, selectedText?: string) => void;
   onToggleSelectMessage?: (message: Message) => void;
   onForwardMessage?: (message: Message) => void;

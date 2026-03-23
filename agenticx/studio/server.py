@@ -403,6 +403,86 @@ def create_studio_app() -> FastAPI:
         messages = manager.get_messages(session_id)
         return {"ok": True, "messages": messages}
 
+    @app.post("/api/session/messages/delete")
+    async def delete_session_messages(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        session_id = str(payload.get("session_id", "") or "").strip()
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        items = payload.get("messages")
+        if not isinstance(items, list) or not items:
+            raise HTTPException(status_code=400, detail="messages must be a non-empty list")
+
+        targets: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role", "") or "").strip()
+            content = str(item.get("content", "") or "")
+            if not role or not content:
+                continue
+            timestamp_raw = item.get("timestamp")
+            timestamp: int | None
+            try:
+                timestamp = int(timestamp_raw) if timestamp_raw is not None else None
+            except (TypeError, ValueError):
+                timestamp = None
+            targets.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "timestamp": timestamp,
+                    "agent_id": str(item.get("agent_id", "") or "").strip(),
+                }
+            )
+        if not targets:
+            raise HTTPException(status_code=400, detail="no valid messages to delete")
+
+        def _match_row(row: dict[str, Any], target: dict[str, Any]) -> bool:
+            if str(row.get("role", "") or "").strip() != target["role"]:
+                return False
+            if str(row.get("content", "") or "") != target["content"]:
+                return False
+            expected_ts = target.get("timestamp")
+            if expected_ts is not None:
+                try:
+                    row_ts = int(row.get("timestamp")) if row.get("timestamp") is not None else None
+                except (TypeError, ValueError):
+                    row_ts = None
+                if row_ts != expected_ts:
+                    return False
+            expected_agent = str(target.get("agent_id", "") or "").strip()
+            if expected_agent:
+                row_agent = str(row.get("agent_id", "") or "").strip()
+                if row_agent and row_agent != expected_agent:
+                    return False
+            return True
+
+        def _remove_once(rows: list[dict[str, Any]], targets_to_remove: list[dict[str, Any]]) -> int:
+            removed_local = 0
+            for target in targets_to_remove:
+                for idx, row in enumerate(rows):
+                    if _match_row(row, target):
+                        rows.pop(idx)
+                        removed_local += 1
+                        break
+            return removed_local
+
+        session = managed.studio_session
+        removed = 0
+        if isinstance(session.chat_history, list):
+            removed += _remove_once(session.chat_history, targets)
+        if isinstance(session.agent_messages, list):
+            _remove_once(session.agent_messages, targets)
+        manager.persist(session_id)
+        return {"ok": True, "removed": removed, "requested": len(targets)}
+
     @app.post("/api/session/summary")
     async def get_session_summary(
         payload: dict,
@@ -789,6 +869,11 @@ def create_studio_app() -> FastAPI:
                 async def _produce_meta_events() -> None:
                     auto = AutoSolveMode()
                     effective_input = payload.user_input
+                    quoted_content = str(payload.quoted_content or "").strip()
+                    if quoted_content:
+                        # For non-group sessions, explicitly append quoted snippet so model
+                        # can ground "改这句/这段" style follow-up requests.
+                        effective_input = f"{effective_input}\n\n[用户引用内容]\n{quoted_content}"
                     if mode == "auto":
                         enriched = auto.enrich_prompt(payload.user_input)
                         effective_input = (

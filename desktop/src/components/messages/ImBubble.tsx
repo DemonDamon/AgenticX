@@ -17,7 +17,7 @@ type Props = {
   assistantAvatarUrl?: string;
   userName?: string;
   onCopyMessage?: (message: Message) => void;
-  onQuoteMessage?: (message: Message) => void;
+  onQuoteMessage?: (message: Message, selectedText?: string) => void;
   onFavoriteMessage?: (message: Message, selectedText?: string) => void;
   onToggleSelectMessage?: (message: Message) => void;
   onForwardMessage?: (message: Message) => void;
@@ -112,6 +112,11 @@ export function ImBubble({
     onFavoriteMessage?.(message, picked ?? undefined);
   };
 
+  const runQuote = () => {
+    const picked = getContainedSelectionText(msgContentRef.current);
+    onQuoteMessage?.(message, picked ?? undefined);
+  };
+
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (ev: globalThis.MouseEvent) => {
@@ -198,7 +203,14 @@ export function ImBubble({
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
               <button type="button" className="hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>复制</button>
-              <button type="button" className="hover:text-text-strong" onClick={() => onQuoteMessage?.(message)}>引用</button>
+              <button
+                type="button"
+                className="hover:text-text-strong"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={runQuote}
+              >
+                引用
+              </button>
               <button
                 type="button"
                 className="hover:text-text-strong"
@@ -223,7 +235,16 @@ export function ImBubble({
           style={{ left: menuPos.x, top: menuPos.y }}
         >
           <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onCopyMessage?.(message); }}>复制</button>
-          <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onQuoteMessage?.(message); }}>引用</button>
+          <button
+            className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setMenuOpen(false);
+              runQuote();
+            }}
+          >
+            引用
+          </button>
           <button
             className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover"
             onMouseDown={(e) => e.preventDefault()}
