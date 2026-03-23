@@ -174,6 +174,8 @@ class SkillBundleLoader:
         Path.home() / ".agent" / "skills",
         Path("./.claude/skills"),
         Path.home() / ".claude" / "skills",
+        # AGX Bundle install directory — skills installed via `agx bundle install`
+        Path.home() / ".agenticx" / "skills" / "bundles",
         _BUILTIN_SKILLS_DIR,
     ]
     
