@@ -1003,6 +1003,8 @@ export function App() {
         defaultProvider={settings.defaultProvider}
         providers={settings.providers}
         sessionId={sessionId}
+        apiBase={apiBase}
+        apiToken={apiToken}
         mcpServers={mcpServers}
         onRefreshMcp={refreshMcpStatus}
         confirmStrategy={confirmStrategy}

@@ -97,6 +97,45 @@ def append_long_term_memory(workspace_dir: Path, note: str) -> None:
         return
 
 
+def load_favorites(workspace_dir: Path) -> list[dict]:
+    """Load global favorites list from workspace (JSON array of dicts)."""
+    path = workspace_dir / "favorites.json"
+    if not path.exists() or not path.is_file():
+        return []
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+        if not raw:
+            return []
+        data = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if isinstance(data, list):
+        return [x for x in data if isinstance(x, dict)]
+    return []
+
+
+def upsert_favorite(workspace_dir: Path, entry: dict) -> bool:
+    """Append one favorite if not duplicate by non-empty message_id.
+
+    Returns True when a new row was written, False when message_id already exists
+    or when the file could not be written.
+    """
+    message_id = str(entry.get("message_id") or "").strip()
+    favorites = load_favorites(workspace_dir)
+    if message_id:
+        for row in favorites:
+            if str(row.get("message_id") or "").strip() == message_id:
+                return False
+    favorites.append(entry)
+    path = workspace_dir / "favorites.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(favorites, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
 def resolve_workspace_dir() -> Path:
     """Resolve workspace path from config with safe fallback."""
     try:
