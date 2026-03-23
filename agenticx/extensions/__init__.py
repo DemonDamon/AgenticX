@@ -13,6 +13,7 @@ from agenticx.extensions.bundle import (
     BundleParseError,
     parse_bundle_manifest,
 )
+from agenticx.extensions.registry_hub import InstallResult, RegistryHub, SearchResult
 
 __all__ = [
     "BundleManifest",
@@ -22,4 +23,7 @@ __all__ = [
     "BundleMemoryRef",
     "BundleParseError",
     "parse_bundle_manifest",
+    "RegistryHub",
+    "SearchResult",
+    "InstallResult",
 ]
