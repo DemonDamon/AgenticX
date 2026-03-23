@@ -395,6 +395,11 @@ function normalizeStreamText(text: string): string {
   return String(text ?? "").replace(/\s+/g, " ").trim();
 }
 
+function isNearBottom(el: HTMLDivElement, thresholdPx = 96): boolean {
+  const remain = el.scrollHeight - (el.scrollTop + el.clientHeight);
+  return remain <= thresholdPx;
+}
+
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
   const toolName = String(toolNameRaw ?? "tool");
   const resultText = String(resultRaw ?? "");
@@ -1099,6 +1104,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const streamCommittedRef = useRef(false);
   const streamRafRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const autoScrollPinnedRef = useRef(true);
   const imeComposingRef = useRef(false);
   const [atOpen, setAtOpen] = useState(false);
   const [atQuery, setAtQuery] = useState("");
@@ -1139,6 +1145,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     () =>
       (pane?.messages ?? []).filter((item) => {
         if (isGroupPane) return true;
+        if (item.role === "assistant" && isThinkingPlaceholderText(item.content || "")) return false;
         return !item.agentId || item.agentId === "meta";
       }),
     [isGroupPane, pane?.messages]
@@ -1220,8 +1227,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, [hasDelegation, pane?.sessionId, pane?.id, pane?.messages?.length, setPaneMessages]);
 
   useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const updatePinned = () => {
+      autoScrollPinnedRef.current = isNearBottom(el);
+    };
+    updatePinned();
+    el.addEventListener("scroll", updatePinned, { passive: true });
+    return () => el.removeEventListener("scroll", updatePinned);
+  }, [paneId]);
+
+  useEffect(() => {
     requestAnimationFrame(() => {
-      if (listRef.current) {
+      if (listRef.current && autoScrollPinnedRef.current) {
         listRef.current.scrollTop = listRef.current.scrollHeight;
       }
     });
@@ -2212,6 +2230,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             if (payload.type === "token") {
               if (eventAgentId === "meta") {
                 const tokenText = String(payload.data?.text ?? "");
+                if (isThinkingPlaceholderText(tokenText) && !full.trim()) {
+                  // Ignore waiting placeholder tokens to prevent ghost "⏳" answers.
+                  continue;
+                }
                 full += tokenText;
                 cumulativeFull += tokenText;
                 scheduleStreamTextUpdate(full);
@@ -2456,29 +2478,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             if (payload.type === "final") {
               if (eventAgentId === "meta") {
                 const finalText = String(payload.data?.text ?? "");
-                if (finalText) {
-                  if (finalText.startsWith(cumulativeFull)) {
-                    const delta = finalText.slice(cumulativeFull.length);
-                    if (delta) {
-                      full += delta;
-                      cumulativeFull += delta;
-                    }
-                  } else if (finalText.startsWith(full)) {
-                    const delta = finalText.slice(full.length);
-                    if (delta) {
-                      full += delta;
-                      cumulativeFull += delta;
-                    }
-                  } else if (
-                    normalizeStreamText(finalText) !== normalizeStreamText(full) &&
-                    normalizeStreamText(finalText) !== normalizeStreamText(cumulativeFull) &&
-                    !normalizeStreamText(full).includes(normalizeStreamText(finalText)) &&
-                    !normalizeStreamText(cumulativeFull).includes(normalizeStreamText(finalText))
-                  ) {
-                    const merged = full.trim() ? `\n\n${finalText}` : finalText;
-                    full += merged;
-                    cumulativeFull += merged;
-                  }
+                // Final payload is authoritative. Replacing (instead of merging) avoids
+                // duplicate concatenation when token stream shape differs from final text.
+                if (finalText.trim() && !isThinkingPlaceholderText(finalText)) {
+                  full = finalText;
+                  cumulativeFull = finalText;
                 }
                 scheduleStreamTextUpdate(full);
               } else {
