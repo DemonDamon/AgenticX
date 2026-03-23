@@ -86,6 +86,28 @@ class SandboxSettings:
 
 
 @dataclass
+class ExtensionRegistryConfig:
+    """Configuration for a single extension registry source."""
+
+    name: str = ""
+    url: str = ""
+    type: str = "agx"
+
+
+@dataclass
+class ExtensionsConfig:
+    """Extensions ecosystem configuration.
+
+    Attributes:
+        registries: List of registry sources to search and install from.
+        scan_dirs: Extra directories to scan for bundles (path strings, ~ supported).
+    """
+
+    registries: list = field(default_factory=list)
+    scan_dirs: list = field(default_factory=list)
+
+
+@dataclass
 class AgxConfig:
     """Top-level AGX config model."""
 
@@ -95,6 +117,7 @@ class AgxConfig:
     codegen: CodegenConfig = field(default_factory=CodegenConfig)
     sandbox: SandboxSettings = field(default_factory=SandboxSettings)
     workspace_dir: str = "~/.agenticx/workspace"
+    extensions: ExtensionsConfig = field(default_factory=ExtensionsConfig)
 
     def get_provider(self, name: Optional[str] = None) -> ProviderConfig:
         """Get provider config by name or default provider."""

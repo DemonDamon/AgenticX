@@ -2162,4 +2162,46 @@ def create_studio_app() -> FastAPI:
             logger.warning("uninstall_bundle error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    # --- Registry / Marketplace API ---
+
+    @app.get("/api/registry/search")
+    async def registry_search(
+        q: str = "",
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Search across all configured extension registries."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.extensions.registry_hub import RegistryHub
+
+            hub = RegistryHub.from_config()
+            results = hub.search(q)
+            return {"ok": True, "items": [r.to_dict() for r in results], "count": len(results)}
+        except Exception as exc:
+            logger.warning("registry_search error: %s", exc)
+            return {"ok": False, "items": [], "count": 0, "error": str(exc)}
+
+    @app.post("/api/registry/install")
+    async def registry_install(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Install a skill from a specific configured registry source."""
+        _check_token(x_agx_desktop_token)
+        source_name = str(payload.get("source", "")).strip()
+        skill_name = str(payload.get("name", "")).strip()
+        if not source_name or not skill_name:
+            raise HTTPException(status_code=400, detail="source and name are required")
+        try:
+            from agenticx.extensions.registry_hub import RegistryHub
+
+            hub = RegistryHub.from_config()
+            result = hub.install(source_name, skill_name)
+            if result.success:
+                return {"ok": True, "name": result.name, "installed_path": result.installed_path}
+            return {"ok": False, "error": result.error}
+        except Exception as exc:
+            logger.warning("registry_install error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     return app
