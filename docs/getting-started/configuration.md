@@ -78,6 +78,38 @@ Configure LLM providers in config or via environment variables:
 
 Agent identities and memory are stored in `~/.agenticx/workspace/`. Each avatar gets its own subdirectory with session history, memories, and context files.
 
+## Extensions & Skill Marketplace
+
+Configure skill registries and extra scan directories under the `extensions` key:
+
+```yaml
+# ~/.agenticx/config.yaml
+
+extensions:
+  registries:
+    - name: official
+      url: https://registry.agxbuilder.com
+      type: agx          # AgenticX native registry
+    - name: clawhub
+      url: https://www.clawhub.io/api
+      type: clawhub      # ClawHub community skills
+    - name: community
+      url: https://example.com/agx-registry.json
+      type: agx
+  scan_dirs:
+    - ~/.agenticx/bundles
+    - ~/.agenticx/skills/registry
+```
+
+| Field | Description |
+|-------|------------|
+| `registries[].name` | Display name for the source |
+| `registries[].url` | Base URL of the registry API |
+| `registries[].type` | `agx` (native) or `clawhub` |
+| `scan_dirs` | Extra directories scanned for installed bundles |
+
+See the [Extensions Guide](../guides/extensions.md) for full details on Skills, AGX Bundles, and the marketplace.
+
 ## Project-level Config
 
 For per-project settings, create `agenticx.yaml` in your project root:

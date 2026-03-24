@@ -1,0 +1,118 @@
+site_name: AgenticX
+site_description: Unified Multi-Agent Framework — production-ready, scalable, from simple automation to complex multi-agent collaboration.
+site_url: https://docs.agxbuilder.com
+repo_url: https://github.com/DemonDamon/AgenticX
+repo_name: DemonDamon/AgenticX
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  logo: assets/logo.png
+  favicon: assets/favicon.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - toc.follow
+
+plugins:
+  - search:
+      lang: en
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Configuration: getting-started/configuration.md
+  - Core Concepts:
+    - Architecture: concepts/architecture.md
+    - Agent Core: concepts/agent.md
+    - Orchestration: concepts/orchestration.md
+    - Flow & Workflow Engine: concepts/flow.md
+    - Hook System: concepts/hooks.md
+    - Memory System: concepts/memory.md
+    - Tool System: concepts/tools.md
+    - LLM Providers: concepts/llm-providers.md
+  - Guides:
+    - Building Your First Agent: guides/first-agent.md
+    - Multi-Agent Collaboration: guides/multi-agent.md
+    - Avatar & Group Chat: guides/avatar.md
+    - Extensions & Skill Ecosystem: guides/extensions.md
+    - Knowledge & RAG: guides/knowledge.md
+    - Studio Server: guides/studio.md
+    - Observability: guides/observability.md
+    - Security & Sandbox: guides/security.md
+    - Deployment: guides/deployment.md
+  - CLI Reference: cli.md
+  - API Reference:
+    - agenticx.agents: api/agents.md
+    - agenticx.llms: api/llms.md
+    - agenticx.tools: api/tools.md
+    - agenticx.memory: api/memory.md
+    - agenticx.flow: api/flow.md
+  - FAQ: faq.md
+  - Changelog: changelog.md
+  - Roadmap: roadmap.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/DemonDamon/AgenticX
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/agenticx/
+  analytics:
+    provider: google
+    property: G-XXXXXXXXXX
+
+copyright: Copyright &copy; 2024 - 2026 AgenticX
