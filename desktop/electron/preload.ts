@@ -26,6 +26,13 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   getApiBase: async (): Promise<string> => ipcRenderer.invoke("get-api-base"),
   getApiAuthToken: async (): Promise<string> => ipcRenderer.invoke("get-api-auth-token"),
   platform: async (): Promise<string> => ipcRenderer.invoke("get-platform"),
+  getConnectionMode: async (): Promise<"local" | "remote"> => ipcRenderer.invoke("get-connection-mode"),
+  loadRemoteServer: async () =>
+    ipcRenderer.invoke("load-remote-server") as Promise<{ enabled: boolean; url: string; token: string }>,
+  saveRemoteServer: async (payload: { enabled: boolean; url: string; token: string }) =>
+    ipcRenderer.invoke("save-remote-server", payload),
+  testRemoteServer: async (payload: { url: string; token: string }) =>
+    ipcRenderer.invoke("test-remote-server", payload),
   onOpenSettings: (cb: () => void): void => {
     ipcRenderer.on("open-settings", () => cb());
   },

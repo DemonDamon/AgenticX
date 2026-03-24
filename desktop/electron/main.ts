@@ -32,6 +32,17 @@ type ProviderConfig = {
   models?: string[];
 };
 
+type RemoteServerConfig = {
+  enabled?: boolean;
+  url?: string;
+  token?: string;
+};
+
+type ResolvedRemoteConfig = {
+  url: string;
+  token: string;
+};
+
 type AgxConfig = {
   version?: string;
   default_provider?: string;
@@ -41,6 +52,7 @@ type AgxConfig = {
   confirm_strategy?: "manual" | "semi-auto" | "auto";
   active_provider?: string;
   active_model?: string;
+  remote_server?: RemoteServerConfig;
   notifications?: {
     email?: {
       enabled?: boolean;
@@ -203,6 +215,40 @@ let serveProcess: ChildProcess | null = null;
 let isQuitting = false;
 let serveStdoutBuffer = "";
 let serveStderrBuffer = "";
+let remoteConfig: ResolvedRemoteConfig | null = null;
+
+function loadRemoteConfig(): ResolvedRemoteConfig | null {
+  const cfg = loadAgxConfig();
+  const rs = cfg.remote_server;
+  if (!rs?.enabled) return null;
+  const url = (rs.url || "").trim().replace(/\/+$/, "");
+  if (!url) return null;
+  return { url, token: (rs.token || "").trim() };
+}
+
+async function pingRemoteServer(config: ResolvedRemoteConfig, timeoutMs = 10000): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(`${config.url}/api/session`, {
+      headers: { "x-agx-desktop-token": config.token },
+      signal: controller.signal,
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function getStudioUrl(): string {
+  return remoteConfig ? remoteConfig.url : `http://127.0.0.1:${apiPort}`;
+}
+
+function getStudioToken(): string {
+  return remoteConfig ? remoteConfig.token : apiToken;
+}
 
 // Suppress noisy Chromium network diagnostics
 // (e.g. chunked upload stream warnings during aborted renderer requests).
@@ -374,8 +420,8 @@ async function waitServeReady(timeoutMs = 45000): Promise<void> {
   const currentStderr = currentProcess.stderr!;
   const pingReady = async (): Promise<boolean> => {
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/session`, {
-        headers: { "x-agx-desktop-token": apiToken },
+      const resp = await fetch(`${getStudioUrl()}/api/session`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       return resp.ok;
     } catch {
@@ -550,14 +596,60 @@ function createTray(): void {
 }
 
 function registerIpc(): void {
-  ipcMain.handle("get-api-base", async () => `http://127.0.0.1:${apiPort}`);
-  ipcMain.handle("get-api-auth-token", async () => apiToken);
+  ipcMain.handle("get-api-base", async () => getStudioUrl());
+  ipcMain.handle("get-api-auth-token", async () => getStudioToken());
   ipcMain.handle("get-platform", async () => process.platform);
+  ipcMain.handle("get-connection-mode", async () => remoteConfig ? "remote" : "local");
+
+  ipcMain.handle("load-remote-server", async () => {
+    const cfg = loadAgxConfig();
+    const rs = cfg.remote_server;
+    return {
+      enabled: rs?.enabled ?? false,
+      url: rs?.url ?? "",
+      token: rs?.token ?? "",
+    };
+  });
+
+  ipcMain.handle("save-remote-server", async (_event, payload: {
+    enabled: boolean;
+    url: string;
+    token: string;
+  }) => {
+    const cfg = loadAgxConfig();
+    cfg.remote_server = {
+      enabled: payload.enabled,
+      url: (payload.url || "").trim().replace(/\/+$/, ""),
+      token: (payload.token || "").trim(),
+    };
+    saveAgxConfig(cfg);
+    return { ok: true, restart_required: true };
+  });
+
+  ipcMain.handle("test-remote-server", async (_event, payload: {
+    url: string;
+    token: string;
+  }) => {
+    const url = (payload.url || "").trim().replace(/\/+$/, "");
+    if (!url) return { ok: false, error: "URL is required" };
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
+      const resp = await fetch(`${url}/api/session`, {
+        headers: { "x-agx-desktop-token": (payload.token || "").trim() },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      return { ok: resp.ok, status: resp.status };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
 
   ipcMain.handle("list-avatars", async () => {
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/avatars`, {
-        headers: { "x-agx-desktop-token": apiToken },
+      const resp = await fetch(`${getStudioUrl()}/api/avatars`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       if (!resp.ok) return { ok: false, avatars: [] };
       return await resp.json();
@@ -568,9 +660,9 @@ function registerIpc(): void {
 
   ipcMain.handle("create-avatar", async (_event, payload: { name: string; role?: string; avatar_url?: string; system_prompt?: string; created_by?: string }) => {
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/avatars`, {
+      const resp = await fetch(`${getStudioUrl()}/api/avatars`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify(payload),
       });
       if (!resp.ok) {
@@ -586,9 +678,9 @@ function registerIpc(): void {
   ipcMain.handle("update-avatar", async (_event, payload: { id: string; name?: string; role?: string; avatar_url?: string; pinned?: boolean; system_prompt?: string }) => {
     const { id, ...body } = payload;
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/avatars/${encodeURIComponent(id)}`, {
+      const resp = await fetch(`${getStudioUrl()}/api/avatars/${encodeURIComponent(id)}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify(body),
       });
       if (!resp.ok) {
@@ -603,9 +695,9 @@ function registerIpc(): void {
 
   ipcMain.handle("delete-avatar", async (_event, id: string) => {
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/avatars/${encodeURIComponent(id)}`, {
+      const resp = await fetch(`${getStudioUrl()}/api/avatars/${encodeURIComponent(id)}`, {
         method: "DELETE",
-        headers: { "x-agx-desktop-token": apiToken },
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}` };
       return await resp.json();
@@ -617,8 +709,8 @@ function registerIpc(): void {
   ipcMain.handle("list-sessions", async (_event, avatarId?: string) => {
     try {
       const params = avatarId ? `?avatar_id=${encodeURIComponent(avatarId)}` : "";
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions${params}`, {
-        headers: { "x-agx-desktop-token": apiToken },
+      const resp = await fetch(`${getStudioUrl()}/api/sessions${params}`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       if (!resp.ok) return { ok: false, sessions: [] };
       return await resp.json();
@@ -629,9 +721,9 @@ function registerIpc(): void {
 
   ipcMain.handle("create-session", async (_event, payload: { avatar_id?: string; name?: string; inherit_from_session_id?: string }) => {
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions`, {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify(payload),
       });
       if (!resp.ok) {
@@ -646,9 +738,9 @@ function registerIpc(): void {
 
   ipcMain.handle("rename-session", async (_event, payload: { sessionId: string; name: string }) => {
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions/${encodeURIComponent(payload.sessionId)}`, {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(payload.sessionId)}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify({ name: payload.name }),
       });
       if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}` };
@@ -663,10 +755,10 @@ function registerIpc(): void {
     if (!sid) return { ok: false, error: "sessionId is required" };
     try {
       const resp = await fetch(
-        `http://127.0.0.1:${String(apiPort)}/api/session?session_id=${encodeURIComponent(sid)}`,
+        `${getStudioUrl()}/api/session?session_id=${encodeURIComponent(sid)}`,
         {
           method: "DELETE",
-          headers: { "x-agx-desktop-token": apiToken },
+          headers: { "x-agx-desktop-token": getStudioToken() },
         }
       );
       if (!resp.ok) {
@@ -685,9 +777,9 @@ function registerIpc(): void {
       : [];
     if (ids.length === 0) return { ok: true, deleted: [], failed: [] };
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions/batch-delete`, {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/batch-delete`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify({ session_ids: ids }),
       });
       if (!resp.ok) {
@@ -704,9 +796,9 @@ function registerIpc(): void {
     const sid = String(payload?.sessionId || "").trim();
     if (!sid) return { ok: false, error: "sessionId is required" };
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions/${encodeURIComponent(sid)}/pin`, {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/pin`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify({ pinned: !!payload.pinned }),
       });
       if (!resp.ok) {
@@ -723,9 +815,9 @@ function registerIpc(): void {
     const sid = String(payload?.sessionId || "").trim();
     if (!sid) return { ok: false, error: "sessionId is required" };
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions/${encodeURIComponent(sid)}/fork`, {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/fork`, {
         method: "POST",
-        headers: { "x-agx-desktop-token": apiToken },
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
@@ -742,9 +834,9 @@ function registerIpc(): void {
     const avatarId = String(payload?.avatarId || "").trim();
     if (!sid) return { ok: false, error: "sessionId is required" };
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/sessions/archive-before`, {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/archive-before`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify({ session_id: sid, avatar_id: avatarId || undefined }),
       });
       if (!resp.ok) {
@@ -762,9 +854,9 @@ function registerIpc(): void {
     if (!sid) return { ok: false, workspaces: [], error: "sessionId is required" };
     try {
       const resp = await fetch(
-        `http://127.0.0.1:${String(apiPort)}/api/taskspace/workspaces?session_id=${encodeURIComponent(sid)}`,
+        `${getStudioUrl()}/api/taskspace/workspaces?session_id=${encodeURIComponent(sid)}`,
         {
-          headers: { "x-agx-desktop-token": apiToken },
+          headers: { "x-agx-desktop-token": getStudioToken() },
         }
       );
       if (!resp.ok) {
@@ -783,9 +875,9 @@ function registerIpc(): void {
     const label = String(payload?.label || "").trim();
     if (!sid) return { ok: false, error: "sessionId is required" };
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/taskspace/workspaces`, {
+      const resp = await fetch(`${getStudioUrl()}/api/taskspace/workspaces`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify({ session_id: sid, path: dirPath || undefined, label: label || undefined }),
       });
       if (!resp.ok) {
@@ -803,9 +895,9 @@ function registerIpc(): void {
     const taskspaceId = String(payload?.taskspaceId || "").trim();
     if (!sid || !taskspaceId) return { ok: false, error: "sessionId and taskspaceId are required" };
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/taskspace/workspaces`, {
+      const resp = await fetch(`${getStudioUrl()}/api/taskspace/workspaces`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify({ session_id: sid, taskspace_id: taskspaceId }),
       });
       if (!resp.ok) {
@@ -819,6 +911,9 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("choose-directory", async () => {
+    if (remoteConfig) {
+      return { ok: false, error: "远程模式不支持本地目录选择" };
+    }
     const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
     try {
       const result = focused
@@ -840,8 +935,8 @@ function registerIpc(): void {
     if (!sid || !taskspaceId) return { ok: false, files: [], error: "sessionId and taskspaceId are required" };
     try {
       const query = `session_id=${encodeURIComponent(sid)}&taskspace_id=${encodeURIComponent(taskspaceId)}&path=${encodeURIComponent(relPath)}`;
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/taskspace/files?${query}`, {
-        headers: { "x-agx-desktop-token": apiToken },
+      const resp = await fetch(`${getStudioUrl()}/api/taskspace/files?${query}`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
@@ -862,8 +957,8 @@ function registerIpc(): void {
     }
     try {
       const query = `session_id=${encodeURIComponent(sid)}&taskspace_id=${encodeURIComponent(taskspaceId)}&path=${encodeURIComponent(relPath)}`;
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/taskspace/file?${query}`, {
-        headers: { "x-agx-desktop-token": apiToken },
+      const resp = await fetch(`${getStudioUrl()}/api/taskspace/file?${query}`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
@@ -880,9 +975,9 @@ function registerIpc(): void {
     if (!sid) return { ok: false, messages: [], error: "sessionId is required" };
     try {
       const resp = await fetch(
-        `http://127.0.0.1:${String(apiPort)}/api/session/messages?session_id=${encodeURIComponent(sid)}`,
+        `${getStudioUrl()}/api/session/messages?session_id=${encodeURIComponent(sid)}`,
         {
-          headers: { "x-agx-desktop-token": apiToken },
+          headers: { "x-agx-desktop-token": getStudioToken() },
         }
       );
       if (!resp.ok) {
@@ -897,9 +992,9 @@ function registerIpc(): void {
 
   ipcMain.handle("fork-avatar", async (_event, payload: { sessionId: string; name: string; role?: string }) => {
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/avatars/fork`, {
+      const resp = await fetch(`${getStudioUrl()}/api/avatars/fork`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify({ session_id: payload.sessionId, name: payload.name, role: payload.role }),
       });
       if (!resp.ok) {
@@ -914,9 +1009,9 @@ function registerIpc(): void {
 
   ipcMain.handle("generate-avatar", async (_event, payload: { description: string }) => {
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/avatars/generate`, {
+      const resp = await fetch(`${getStudioUrl()}/api/avatars/generate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify(payload),
       });
       if (!resp.ok) {
@@ -931,8 +1026,8 @@ function registerIpc(): void {
 
   ipcMain.handle("list-groups", async () => {
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/groups`, {
-        headers: { "x-agx-desktop-token": apiToken },
+      const resp = await fetch(`${getStudioUrl()}/api/groups`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       if (!resp.ok) return { ok: false, groups: [] };
       return await resp.json();
@@ -943,9 +1038,9 @@ function registerIpc(): void {
 
   ipcMain.handle("create-group", async (_event, payload: { name: string; avatar_ids: string[]; routing?: string }) => {
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/groups`, {
+      const resp = await fetch(`${getStudioUrl()}/api/groups`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify(payload),
       });
       if (!resp.ok) {
@@ -961,9 +1056,9 @@ function registerIpc(): void {
   ipcMain.handle("update-group", async (_event, payload: { id: string; name?: string; avatar_ids?: string[]; routing?: string }) => {
     const { id, ...body } = payload;
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/groups/${encodeURIComponent(id)}`, {
+      const resp = await fetch(`${getStudioUrl()}/api/groups/${encodeURIComponent(id)}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify(body),
       });
       if (!resp.ok) {
@@ -978,9 +1073,9 @@ function registerIpc(): void {
 
   ipcMain.handle("delete-group", async (_event, id: string) => {
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/groups/${encodeURIComponent(id)}`, {
+      const resp = await fetch(`${getStudioUrl()}/api/groups/${encodeURIComponent(id)}`, {
         method: "DELETE",
-        headers: { "x-agx-desktop-token": apiToken },
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}` };
       return await resp.json();
@@ -1027,11 +1122,11 @@ function registerIpc(): void {
     if (!checked.ok) return { ok: false, error: checked.error };
     const toEmail = String(payload?.toEmail ?? checked.config.default_to_email).trim() || checked.config.default_to_email;
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/test-email`, {
+      const resp = await fetch(`${getStudioUrl()}/api/test-email`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-agx-desktop-token": apiToken,
+          "x-agx-desktop-token": getStudioToken(),
         },
         body: JSON.stringify({
           config: checked.config,
@@ -1052,9 +1147,9 @@ function registerIpc(): void {
     if (!sid) return { ok: false, error: "missing sessionId", servers: [] };
     try {
       const resp = await fetch(
-        `http://127.0.0.1:${String(apiPort)}/api/mcp/servers?session_id=${encodeURIComponent(sid)}`,
+        `${getStudioUrl()}/api/mcp/servers?session_id=${encodeURIComponent(sid)}`,
         {
-          headers: { "x-agx-desktop-token": apiToken },
+          headers: { "x-agx-desktop-token": getStudioToken() },
         }
       );
       if (!resp.ok) {
@@ -1072,11 +1167,11 @@ function registerIpc(): void {
     const sourcePath = String(payload?.sourcePath || "").trim();
     if (!sid || !sourcePath) return { ok: false, error: "sessionId and sourcePath are required" };
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/mcp/import`, {
+      const resp = await fetch(`${getStudioUrl()}/api/mcp/import`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-agx-desktop-token": apiToken,
+          "x-agx-desktop-token": getStudioToken(),
         },
         body: JSON.stringify({ session_id: sid, source_path: sourcePath }),
       });
@@ -1095,11 +1190,11 @@ function registerIpc(): void {
     const name = String(payload?.name || "").trim();
     if (!sid || !name) return { ok: false, error: "sessionId and name are required" };
     try {
-      const resp = await fetch(`http://127.0.0.1:${String(apiPort)}/api/mcp/connect`, {
+      const resp = await fetch(`${getStudioUrl()}/api/mcp/connect`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-agx-desktop-token": apiToken,
+          "x-agx-desktop-token": getStudioToken(),
         },
         body: JSON.stringify({ session_id: sid, name }),
       });
@@ -1301,10 +1396,10 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("load-skills", async () => {
-    const studioUrl = `http://127.0.0.1:${String(apiPort)}`;
+    const studioUrl = getStudioUrl();
     try {
       const resp = await fetch(`${studioUrl}/api/skills`, {
-        headers: { "x-agx-desktop-token": apiToken },
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       return await resp.json();
     } catch (err) {
@@ -1313,10 +1408,10 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("load-skill-detail", async (_event, args: { name: string }) => {
-    const studioUrl = `http://127.0.0.1:${String(apiPort)}`;
+    const studioUrl = getStudioUrl();
     try {
       const resp = await fetch(`${studioUrl}/api/skills/${encodeURIComponent(args.name)}`, {
-        headers: { "x-agx-desktop-token": apiToken },
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       return await resp.json();
     } catch (err) {
@@ -1325,11 +1420,11 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("refresh-skills", async () => {
-    const studioUrl = `http://127.0.0.1:${String(apiPort)}`;
+    const studioUrl = getStudioUrl();
     try {
       const resp = await fetch(`${studioUrl}/api/skills/refresh`, {
         method: "POST",
-        headers: { "x-agx-desktop-token": apiToken },
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       return await resp.json();
     } catch (err) {
@@ -1338,10 +1433,10 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("load-bundles", async () => {
-    const studioUrl = `http://127.0.0.1:${String(apiPort)}`;
+    const studioUrl = getStudioUrl();
     try {
       const resp = await fetch(`${studioUrl}/api/bundles`, {
-        headers: { "x-agx-desktop-token": apiToken },
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       return await resp.json();
     } catch (err) {
@@ -1350,11 +1445,11 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("install-bundle", async (_event, args: { sourcePath: string }) => {
-    const studioUrl = `http://127.0.0.1:${String(apiPort)}`;
+    const studioUrl = getStudioUrl();
     try {
       const resp = await fetch(`${studioUrl}/api/bundles/install`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify({ source_path: args.sourcePath }),
       });
       return await resp.json();
@@ -1364,11 +1459,11 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("uninstall-bundle", async (_event, args: { name: string }) => {
-    const studioUrl = `http://127.0.0.1:${String(apiPort)}`;
+    const studioUrl = getStudioUrl();
     try {
       const resp = await fetch(`${studioUrl}/api/bundles/${encodeURIComponent(args.name)}`, {
         method: "DELETE",
-        headers: { "x-agx-desktop-token": apiToken },
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       return await resp.json();
     } catch (err) {
@@ -1377,11 +1472,11 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("search-registry", async (_event, args: { q: string }) => {
-    const studioUrl = `http://127.0.0.1:${String(apiPort)}`;
+    const studioUrl = getStudioUrl();
     try {
       const params = new URLSearchParams({ q: args.q || "" });
       const resp = await fetch(`${studioUrl}/api/registry/search?${params.toString()}`, {
-        headers: { "x-agx-desktop-token": apiToken },
+        headers: { "x-agx-desktop-token": getStudioToken() },
       });
       return await resp.json();
     } catch (err) {
@@ -1390,11 +1485,11 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("install-from-registry", async (_event, args: { source: string; name: string }) => {
-    const studioUrl = `http://127.0.0.1:${String(apiPort)}`;
+    const studioUrl = getStudioUrl();
     try {
       const resp = await fetch(`${studioUrl}/api/registry/install`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify({ source: args.source, name: args.name }),
       });
       return await resp.json();
@@ -1418,44 +1513,80 @@ app.whenReady().then(async () => {
       }
     }
 
-    const agxOk = await checkAgxCli();
-    if (!agxOk) {
-      const installDocsUrl = "https://www.agxbuilder.com/docs/getting-started/installation";
-      const { response } = await dialog.showMessageBox({
-        type: "warning",
-        title: "缺少 agx 命令行工具",
-        message: "Machi 需要 agx CLI 才能启动",
-        detail: [
-          "未检测到 agx 命令，请先在终端运行以下命令安装：",
-          "",
-          "  curl -sSL https://raw.githubusercontent.com/agenticx/agenticx/main/install.sh | bash",
-          "",
-          "或者通过 pip 安装：",
-          "",
-          "  pip install agenticx",
-          "",
-          "安装完成后重新打开 Machi。",
-        ].join("\n"),
-        buttons: ["查看安装说明", "退出"],
-        defaultId: 0,
-        cancelId: 1,
-      });
-      if (response === 0) {
-        void shell.openExternal(installDocsUrl);
+    remoteConfig = loadRemoteConfig();
+
+    if (remoteConfig) {
+      const ok = await pingRemoteServer(remoteConfig);
+      if (!ok) {
+        const { response } = await dialog.showMessageBox({
+          type: "warning",
+          title: "无法连接远程服务器",
+          message: `无法连接到 ${remoteConfig.url}`,
+          detail: [
+            "请检查：",
+            "1. 云主机上 agx serve 是否已启动",
+            "2. URL 和端口是否正确",
+            "3. 防火墙是否放行",
+            "4. Token 是否匹配",
+          ].join("\n"),
+          buttons: ["重试", "退出"],
+          defaultId: 0,
+          cancelId: 1,
+        });
+        if (response === 0) {
+          const retryOk = await pingRemoteServer(remoteConfig);
+          if (!retryOk) {
+            app.quit();
+            return;
+          }
+        } else {
+          app.quit();
+          return;
+        }
       }
-      app.quit();
-      return;
+    } else {
+      const agxOk = await checkAgxCli();
+      if (!agxOk) {
+        const installDocsUrl = "https://www.agxbuilder.com/docs/getting-started/installation";
+        const { response } = await dialog.showMessageBox({
+          type: "warning",
+          title: "缺少 agx 命令行工具",
+          message: "Machi 需要 agx CLI 才能启动",
+          detail: [
+            "未检测到 agx 命令，请先在终端运行以下命令安装：",
+            "",
+            "  curl -sSL https://raw.githubusercontent.com/agenticx/agenticx/main/install.sh | bash",
+            "",
+            "或者通过 pip 安装：",
+            "",
+            "  pip install agenticx",
+            "",
+            "安装完成后重新打开 Machi。",
+          ].join("\n"),
+          buttons: ["查看安装说明", "退出"],
+          defaultId: 0,
+          cancelId: 1,
+        });
+        if (response === 0) {
+          void shell.openExternal(installDocsUrl);
+        }
+        app.quit();
+        return;
+      }
+
+      await startStudioServe();
+      await waitServeReady();
     }
 
     registerIpc();
-    await startStudioServe();
-    await waitServeReady();
     createWindow();
     createTray();
   } catch (error) {
     await dialog.showErrorBox(
       "Machi 启动失败",
-      `无法启动本地服务，请检查 agx 是否可用。\n\n${String(error)}`
+      remoteConfig
+        ? `无法连接远程服务器。\n\n${String(error)}`
+        : `无法启动本地服务，请检查 agx 是否可用。\n\n${String(error)}`
     );
     app.quit();
   }
