@@ -57,6 +57,9 @@ cookies.txt
 **/*.pkl
 .claude/
 
+# PyInstaller packaging venv (local backend bundle builds)
+packaging/.venv-packaging/
+
 docs/.private/
 
 # Temporary planning files

@@ -28,6 +28,7 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "@playwright/test": "^1.51.1",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.13.14",

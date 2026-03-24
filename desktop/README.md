@@ -4,6 +4,8 @@
 
 ## 安装步骤（用户版）
 
+> **远程模式说明（可选）**：在 `~/.agenticx/config.yaml` 中配置 `remote_server` 并启用后，可连接远程 `agx serve`，无需本机安装 Python/agx。详见仓库内 `.cursor/plans/2026-03-24-desktop-remote-backend.plan.md`。
+
 ### Step 1 — 下载正确的安装包
 
 | 机型 | 下载文件 |
@@ -14,9 +16,15 @@
 **如何判断我的 Mac 是哪种芯片？**  
 点击左上角苹果菜单 → 关于本机，查看"芯片"一栏。
 
-### Step 2 — 安装 agx CLI（首次使用必须）
+### Step 2 — 本地后端（二选一）
 
-Machi 需要 `agx` 命令行工具来运行本地 AI 服务。打开终端，运行：
+**方式 A — 官方 DMG 自包含版（推荐）**  
+
+使用通过 `packaging/build_dmg.sh` 打出的安装包时，应用内已嵌入 `agx-server`（PyInstaller），**无需**再安装 Python 或 `agx` CLI。若你从源码目录执行 `npm run build:mac:*` 且未先放入 `bundled-backend/<arch>/agx-server`，则仍需要方式 B。
+
+**方式 B — 自行安装 agx CLI**
+
+若未使用自包含 DMG，Machi 需要 `agx` 命令行工具来运行本地 AI 服务。打开终端，运行：
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/agenticx/agenticx/main/install.sh | bash
@@ -75,7 +83,35 @@ npm run dev
 
 ## 打包
 
-分架构单独打包（推荐）：
+### 自包含 DMG（内嵌 Python 后端，用户无需安装 agx）
+
+在仓库根目录执行（需 Python ≥3.10、Node 20；首次会创建 `packaging/.venv-packaging`）：
+
+```bash
+# Apple Silicon
+./packaging/build_dmg.sh arm64
+
+# Intel Mac（需在 x64 runner 或 Rosetta 环境构建 x64 后端）
+./packaging/build_dmg.sh x64
+
+# Universal：先分别构建 arm64 与 x64 后端，再 lipo 合并
+./packaging/build_dmg.sh universal
+```
+
+跳过重新打包 Python、仅复用已有 `packaging/dist/<arch>/agx-server`：
+
+```bash
+SKIP_BACKEND=1 ./packaging/build_dmg.sh arm64
+```
+
+产物在 `desktop/release/` 下的 `.dmg` / `.zip`。
+
+**可选：签名与公证**（分发给别人时建议配置）  
+在构建环境中设置 `APPLE_ID`、`APPLE_ID_PASSWORD`（App 专用密码）、`APPLE_TEAM_ID`，以及 `CSC_LINK` / `CSC_KEY_PASSWORD`（Developer ID 证书）。未设置时脚本会跳过公证（`desktop/scripts/mac/notarize.js` 会打印 skip）。
+
+### 仅 Electron 壳（不含内嵌后端）
+
+分架构单独打包（需本机已安装 `agx`）：
 
 ```bash
 cd desktop
