@@ -10,6 +10,14 @@ import {
   Tray
 } from "electron";
 import { spawn, ChildProcess, execFile } from "node:child_process";
+
+// Before app.ready: mitigate Chromium paint corruption (smearing/ghosting) on
+// some Windows + NVIDIA (or hybrid GPU) stacks.
+// Policy: disable GPU by default on Windows; AGX_DISABLE_GPU=1 also forces it on other OSes.
+if (process.platform === "win32" || process.env.AGX_DISABLE_GPU === "1") {
+  app.commandLine.appendSwitch("disable-gpu");
+  app.disableHardwareAcceleration();
+}
 import path from "node:path";
 import net from "node:net";
 import os from "node:os";
