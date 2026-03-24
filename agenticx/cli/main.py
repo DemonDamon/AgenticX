@@ -536,6 +536,7 @@ def serve(
     port: int = typer.Option(8000, "--port", "-p", help="监听端口"),
     host: str = typer.Option("0.0.0.0", "--host", help="监听地址"),
     reload: bool = typer.Option(False, "--reload", help="开发模式热重载"),
+    token: str = typer.Option("", "--token", "-t", help="Desktop 认证 token (覆盖 AGX_DESKTOP_TOKEN)"),
 ):
     """启动 Studio FastAPI 服务（SSE 事件流）"""
     _suppress_macos_dock_icon()
@@ -546,10 +547,19 @@ def serve(
         console.print(f"[bold red]错误:[/bold red] 缺少依赖，请安装: pip install agenticx\n{e}")
         raise typer.Exit(1)
 
-    app = create_studio_app()
+    if token:
+        os.environ["AGX_DESKTOP_TOKEN"] = token
+
+    effective_token = os.environ.get("AGX_DESKTOP_TOKEN", "").strip()
+    app_inst = create_studio_app()
     console.print(f"[bold green]AgenticX Studio Server[/bold green] http://{host}:{port}")
+    if effective_token:
+        masked = effective_token[:8] + "*" * max(0, len(effective_token) - 8)
+        console.print(f"  Token: {masked}")
+    else:
+        console.print("  [yellow]Warning: no token set, API is unauthenticated[/yellow]")
     console.print("  GET /api/session, POST /api/chat, POST /api/confirm, GET /api/artifacts")
-    uvicorn.run(app, host=host, port=port, reload=reload)
+    uvicorn.run(app_inst, host=host, port=port, reload=reload)
 
 
 @app.command()
