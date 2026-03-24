@@ -1967,4 +1967,44 @@ async def dispatch_meta_tool_async(
         )
         return json.dumps(payload, ensure_ascii=False)
 
+    # --- Task scheduler tools (Dispatch-inspired background tasks) ---
+    if name in ("schedule_task", "list_scheduled_tasks", "cancel_scheduled_task"):
+        from agenticx.runtime.task_scheduler import TaskScheduler
+        scheduler: TaskScheduler = getattr(session, "_task_scheduler", None)  # type: ignore[assignment]
+        if scheduler is None:
+            scheduler = TaskScheduler()
+            if session is not None:
+                setattr(session, "_task_scheduler", scheduler)
+
+        if name == "schedule_task":
+            task_name = str(arguments.get("name", "")).strip()
+            instruction = str(arguments.get("instruction", "")).strip()
+            if not task_name or not instruction:
+                return json.dumps({"ok": False, "error": "name and instruction are required"}, ensure_ascii=False)
+
+            async def _background_handler(ctx: dict) -> str:
+                return f"Background task '{ctx.get('name', '')}' executed with instruction: {ctx.get('instruction', '')}"
+
+            task_id = await scheduler.schedule(
+                name=task_name,
+                handler=_background_handler,
+                context={"name": task_name, "instruction": instruction},
+            )
+            return json.dumps({"ok": True, "task_id": task_id, "name": task_name, "status": "running"}, ensure_ascii=False)
+
+        if name == "list_scheduled_tasks":
+            tasks = scheduler.list_tasks()
+            items = [
+                {"task_id": t.task_id, "name": t.name, "status": t.status.value, "error": t.error}
+                for t in tasks
+            ]
+            return json.dumps({"ok": True, "tasks": items}, ensure_ascii=False)
+
+        if name == "cancel_scheduled_task":
+            task_id = str(arguments.get("task_id", "")).strip()
+            if not task_id:
+                return json.dumps({"ok": False, "error": "task_id is required"}, ensure_ascii=False)
+            cancelled = scheduler.cancel_task(task_id)
+            return json.dumps({"ok": cancelled, "task_id": task_id}, ensure_ascii=False)
+
     return json.dumps({"ok": False, "error": f"unknown meta tool: {name}"}, ensure_ascii=False)

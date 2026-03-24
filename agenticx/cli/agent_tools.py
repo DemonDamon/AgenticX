@@ -433,6 +433,43 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_task",
+            "description": "Schedule a background task to run asynchronously. The task will execute even while the user is not actively chatting.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Human-readable task name"},
+                    "instruction": {"type": "string", "description": "Task instructions for the agent to execute"},
+                },
+                "required": ["name", "instruction"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_scheduled_tasks",
+            "description": "List all background/scheduled tasks and their status.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_scheduled_task",
+            "description": "Cancel a background task by task_id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "ID of the task to cancel"},
+                },
+                "required": ["task_id"],
+            },
+        },
+    },
 ]
 
 META_TOOL_NAMES = {
@@ -446,6 +483,9 @@ META_TOOL_NAMES = {
     "list_mcps",
     "send_bug_report_email",
     "update_email_config",
+    "schedule_task",
+    "list_scheduled_tasks",
+    "cancel_scheduled_task",
 }
 
 
@@ -1540,6 +1580,18 @@ async def dispatch_tool_async(
             "To request approval, directly call the real tool (e.g. bash_exec); "
             "runtime will emit confirm_required and wait for UI confirmation."
         )
+    # --- Fallback chain: try resolving via registered ToolFallbackChain ---
+    _fallback_chain = getattr(session, "_fallback_chain", None)
+    if _fallback_chain is not None:
+        try:
+            from agenticx.tools.fallback_chain import ToolFallbackChain
+            if isinstance(_fallback_chain, ToolFallbackChain):
+                _fb_result = await _fallback_chain.execute(name, **arguments)
+                return _fb_result.output
+        except Exception as _fb_exc:
+            logging.getLogger(__name__).debug(
+                "Fallback chain could not resolve '%s': %s", name, _fb_exc,
+            )
     return f"ERROR: unknown tool '{name}'"
 
 
