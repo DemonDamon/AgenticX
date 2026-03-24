@@ -19,7 +19,7 @@ import fnmatch
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -122,14 +122,23 @@ class ToolPolicyStack:
         self,
         layers: Optional[List[ToolPolicyLayer]] = None,
         default_allow: bool = False,
+        category_policy: Optional["CategoryPolicy"] = None,
     ) -> None:
         self._layers: List[ToolPolicyLayer] = layers or []
         self._default_allow = default_allow
+        self._category_policy = category_policy
 
     # -- core API -------------------------------------------------------------
 
     def is_allowed(self, tool_name: str) -> bool:
         """Return ``True`` if *tool_name* passes through all policy layers."""
+        # Category-level deny takes precedence
+        if self._category_policy is not None and self._category_policy.is_category_denied(
+            tool_name
+        ):
+            logger.debug("Tool '%s' DENIED by category policy", tool_name)
+            return False
+
         # Pass 1: any DENY → blocked
         for layer in self._layers:
             result = layer.evaluate(tool_name)
@@ -155,6 +164,12 @@ class ToolPolicyStack:
         ToolPolicyDeniedError
             If the tool is not allowed.
         """
+        # Category-level deny takes precedence
+        if self._category_policy is not None and self._category_policy.is_category_denied(
+            tool_name
+        ):
+            raise ToolPolicyDeniedError(tool_name, "<category-deny>")
+
         # Find the denying layer (for error message)
         for layer in self._layers:
             result = layer.evaluate(tool_name)
@@ -188,3 +203,45 @@ class ToolPolicyStack:
             self._layers.append(layer)
         else:
             self._layers.insert(index, layer)
+
+
+@dataclass
+class CategoryPolicy:
+    """Category-based tool access control.
+
+    Maps tool name patterns to categories, then applies category-level
+    deny lists. Supports first-access approval tracking.
+
+    Attributes:
+        tool_categories: Mapping of fnmatch patterns to category names.
+        denied_categories: Set of category names that are always blocked.
+        require_first_access_approval: If True, flag tools on first access.
+    """
+
+    tool_categories: Dict[str, str] = field(default_factory=dict)
+    denied_categories: set = field(default_factory=set)
+    require_first_access_approval: bool = False
+    _approved_tools: set = field(default_factory=set, repr=False)
+
+    def get_category(self, tool_name: str) -> Optional[str]:
+        """Return the category for a tool, or None if uncategorized."""
+        for pattern, category in self.tool_categories.items():
+            if fnmatch.fnmatch(tool_name, pattern):
+                return category
+        return None
+
+    def is_category_denied(self, tool_name: str) -> bool:
+        """Return True if the tool belongs to a denied category."""
+        cat = self.get_category(tool_name)
+        return cat is not None and cat in self.denied_categories
+
+    def is_first_access(self, tool_name: str) -> bool:
+        """Return True if this tool has not been approved before."""
+        if not self.require_first_access_approval:
+            return False
+        return tool_name not in self._approved_tools
+
+    def mark_approved(self, tool_name: str) -> None:
+        """Mark a tool as approved (no longer triggers first-access)."""
+        self._approved_tools.add(tool_name)
+

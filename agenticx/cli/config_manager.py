@@ -86,6 +86,19 @@ class SandboxSettings:
 
 
 @dataclass
+class ComputerUseSettings:
+    """Computer Use capability settings (inspired by Claude Computer Use)."""
+
+    enabled: bool = False
+    max_fallback_level: str = "computer_use"
+    desktop_backend: str = "pyautogui"
+    denied_categories: list = field(default_factory=lambda: ["financial", "credentials"])
+    require_first_access_approval: bool = True
+    scheduler_enabled: bool = True
+    scheduler_max_concurrent: int = 5
+
+
+@dataclass
 class ExtensionRegistryConfig:
     """Configuration for a single extension registry source."""
 
@@ -118,6 +131,7 @@ class AgxConfig:
     sandbox: SandboxSettings = field(default_factory=SandboxSettings)
     workspace_dir: str = "~/.agenticx/workspace"
     extensions: ExtensionsConfig = field(default_factory=ExtensionsConfig)
+    computer_use: ComputerUseSettings = field(default_factory=ComputerUseSettings)
 
     def get_provider(self, name: Optional[str] = None) -> ProviderConfig:
         """Get provider config by name or default provider."""
@@ -227,6 +241,10 @@ class ConfigManager:
         if not isinstance(sandbox_raw, dict):
             sandbox_raw = {}
 
+        cu_raw = merged.get("computer_use", {}) or {}
+        if not isinstance(cu_raw, dict):
+            cu_raw = {}
+
         config = AgxConfig(
             version=str(merged.get("version", "1")),
             default_provider=str(merged.get("default_provider", "openai")).lower(),
@@ -242,6 +260,15 @@ class ConfigManager:
                 audit_log_dir=str(sandbox_raw.get("audit_log_dir", "") or ""),
             ),
             workspace_dir=workspace_dir,
+            computer_use=ComputerUseSettings(
+                enabled=bool(cu_raw.get("enabled", False)),
+                max_fallback_level=str(cu_raw.get("max_fallback_level", "computer_use")),
+                desktop_backend=str(cu_raw.get("desktop_backend", "pyautogui")),
+                denied_categories=list(cu_raw.get("denied_categories", ["financial", "credentials"])),
+                require_first_access_approval=bool(cu_raw.get("require_first_access_approval", True)),
+                scheduler_enabled=bool(cu_raw.get("scheduler_enabled", True)),
+                scheduler_max_concurrent=int(cu_raw.get("scheduler_max_concurrent", 5)),
+            ),
         )
         return cls._env_fallback(config)
 
