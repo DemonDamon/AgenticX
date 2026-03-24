@@ -3,7 +3,7 @@ name: agenticx-deployer
 description: Guide for deploying AgenticX agents to production including Docker containerization, Kubernetes orchestration, Volcengine AgentKit cloud deployment, and API server setup. Use when the user wants to deploy agents, containerize applications, set up Kubernetes, configure cloud deployment, or run the AgenticX API server in production.
 metadata:
   author: AgenticX
-  version: "0.3.2"
+  version: "0.3.3"
 ---
 
 # AgenticX Deployer
