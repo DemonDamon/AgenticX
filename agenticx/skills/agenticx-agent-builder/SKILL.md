@@ -3,7 +3,7 @@ name: agenticx-agent-builder
 description: Guide for creating and configuring AgenticX agents with roles, goals, tools, LLM providers, and execution strategies. Use when the user wants to create agents, assign tools to agents, configure LLM backends, set up agent execution, or build multi-agent systems.
 metadata:
   author: AgenticX
-  version: "0.3.3"
+  version: "0.3.4"
 ---
 
 # AgenticX Agent Builder
