@@ -50,27 +50,24 @@ class BailianProvider(BaseLLMProvider):
             logger.debug(f"为模型 {request_params.get('model')} 设置 enable_thinking=false")
         
         url = f"{self.base_url}/chat/completions"
-        
-        # 禁用代理以避免连接问题
-        proxies = {
-            'http': None,
-            'https': None
-        }
-        
-        # 重试逻辑
+
+        # Disable env proxies (HTTP(S)_PROXY, ALL_PROXY). Passing proxies={http: None,
+        # https: None} does NOT work: merge_setting drops None keys, then ALL_PROXY
+        # is merged via setdefault into proxies["all"], forcing SOCKSHTTPSConnectionPool.
         max_retries = self.max_retries or 3
         last_error = None
         
         for attempt in range(max_retries + 1):
             try:
-                response = requests.post(
-                    url,
-                    headers=headers,
-                    json=request_params,
-                    timeout=self.timeout,
-                    proxies=proxies,
-                    verify=True  # 保持SSL验证
-                )
+                with requests.Session() as session:
+                    session.trust_env = False
+                    response = session.post(
+                        url,
+                        headers=headers,
+                        json=request_params,
+                        timeout=self.timeout,
+                        verify=True,
+                    )
                 
                 # 检查状态码
                 if response.status_code == 200:
@@ -145,7 +142,7 @@ class BailianProvider(BaseLLMProvider):
         request_params["enable_thinking"] = False
         logger.debug(f"为模型 {request_params.get('model')} 设置 enable_thinking=false (异步原生请求)")
         
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(trust_env=False) as session:
             async with session.post(
                 f"{self.base_url}/chat/completions",
                 headers=headers,
@@ -470,68 +467,68 @@ class BailianProvider(BaseLLMProvider):
         request_params["enable_thinking"] = False
 
         url = f"{self.base_url}/chat/completions"
-        proxies = {"http": None, "https": None}
         timeout = kwargs.get("timeout", self.timeout)
         last_finish_reason = ""
 
-        with requests.post(
-            url,
-            headers=headers,
-            json=request_params,
-            timeout=timeout,
-            stream=True,
-            proxies=proxies,
-            verify=True,
-        ) as response:
-            if response.status_code != 200:
-                error_text = response.text[:1000] if response.text else "No error details"
-                raise Exception(f"HTTP {response.status_code}: {error_text}")
-            for raw_line in response.iter_lines(decode_unicode=True):
-                if not raw_line:
-                    continue
-                line = str(raw_line).strip()
-                if not line.startswith("data:"):
-                    continue
-                payload_text = line[5:].strip()
-                if not payload_text or payload_text == "[DONE]":
-                    continue
-                try:
-                    payload = json.loads(payload_text)
-                except Exception:
-                    continue
-                choices = payload.get("choices") if isinstance(payload, dict) else None
-                if not choices:
-                    continue
-                choice = choices[0] if isinstance(choices[0], dict) else {}
-                finish_reason = choice.get("finish_reason")
-                if isinstance(finish_reason, str) and finish_reason:
-                    last_finish_reason = finish_reason
-                delta = choice.get("delta")
-                if not isinstance(delta, dict):
-                    continue
-                content = delta.get("content")
-                if isinstance(content, str) and content:
-                    yield {"type": "content", "text": content}
-                tool_calls = delta.get("tool_calls")
-                if isinstance(tool_calls, list):
-                    for tc in tool_calls:
-                        if not isinstance(tc, dict):
-                            continue
-                        idx_raw = tc.get("index", 0)
-                        try:
-                            tool_index = int(idx_raw)
-                        except (TypeError, ValueError):
-                            tool_index = 0
-                        fn_obj = tc.get("function")
-                        fn = fn_obj if isinstance(fn_obj, dict) else {}
-                        fn_args = fn.get("arguments", "")
-                        yield {
-                            "type": "tool_call_delta",
-                            "tool_index": tool_index,
-                            "tool_call_id": str(tc.get("id", "") or ""),
-                            "tool_name": str(fn.get("name", "") or ""),
-                            "arguments_delta": "" if fn_args is None else str(fn_args),
-                        }
+        with requests.Session() as session:
+            session.trust_env = False
+            with session.post(
+                url,
+                headers=headers,
+                json=request_params,
+                timeout=timeout,
+                stream=True,
+                verify=True,
+            ) as response:
+                if response.status_code != 200:
+                    error_text = response.text[:1000] if response.text else "No error details"
+                    raise Exception(f"HTTP {response.status_code}: {error_text}")
+                for raw_line in response.iter_lines(decode_unicode=True):
+                    if not raw_line:
+                        continue
+                    line = str(raw_line).strip()
+                    if not line.startswith("data:"):
+                        continue
+                    payload_text = line[5:].strip()
+                    if not payload_text or payload_text == "[DONE]":
+                        continue
+                    try:
+                        payload = json.loads(payload_text)
+                    except Exception:
+                        continue
+                    choices = payload.get("choices") if isinstance(payload, dict) else None
+                    if not choices:
+                        continue
+                    choice = choices[0] if isinstance(choices[0], dict) else {}
+                    finish_reason = choice.get("finish_reason")
+                    if isinstance(finish_reason, str) and finish_reason:
+                        last_finish_reason = finish_reason
+                    delta = choice.get("delta")
+                    if not isinstance(delta, dict):
+                        continue
+                    content = delta.get("content")
+                    if isinstance(content, str) and content:
+                        yield {"type": "content", "text": content}
+                    tool_calls = delta.get("tool_calls")
+                    if isinstance(tool_calls, list):
+                        for tc in tool_calls:
+                            if not isinstance(tc, dict):
+                                continue
+                            idx_raw = tc.get("index", 0)
+                            try:
+                                tool_index = int(idx_raw)
+                            except (TypeError, ValueError):
+                                tool_index = 0
+                            fn_obj = tc.get("function")
+                            fn = fn_obj if isinstance(fn_obj, dict) else {}
+                            fn_args = fn.get("arguments", "")
+                            yield {
+                                "type": "tool_call_delta",
+                                "tool_index": tool_index,
+                                "tool_call_id": str(tc.get("id", "") or ""),
+                                "tool_name": str(fn.get("name", "") or ""),
+                                "arguments_delta": "" if fn_args is None else str(fn_args),
+                            }
         yield {"type": "done", "finish_reason": last_finish_reason}
     
     async def astream(self, prompt: Union[str, List[Dict]], **kwargs):  # type: ignore
