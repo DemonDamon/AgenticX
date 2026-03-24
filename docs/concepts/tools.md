@@ -146,6 +146,41 @@ Skills follow the Anthropic-style `SKILL.md` layout with YAML front matter. **`S
 !!! note "“SkillBundle” vs loader"
     The codebase centers on `SkillBundleLoader` and `SkillMetadata`; there is no separate `SkillBundle` class. Conceptually a “bundle” is the loaded set of skills from configured search paths.
 
+## AGX Bundle
+
+An AGX Bundle (`agenticx.extensions`) is a distributable package that combines skills, MCP server configs, avatar presets, and memory templates into a single directory identified by an `agx-bundle.yaml` manifest.
+
+```
+my-bundle/
+├── agx-bundle.yaml
+├── skills/my-skill/SKILL.md
+├── mcp/web-crawler.json
+├── avatars/researcher.yaml
+└── memory/research-workflow.md
+```
+
+**Key components**
+
+| Module | Role |
+|--------|------|
+| `agenticx.extensions.bundle` | Parses `agx-bundle.yaml` → `BundleManifest` with path safety validation |
+| `agenticx.extensions.installer` | `install_bundle()`, `uninstall_bundle()`, `list_installed_bundles()` |
+| `agenticx.extensions.registry_hub` | `RegistryHub` — aggregated search + install across multiple registry sources |
+
+**Install example**
+
+```python
+from pathlib import Path
+from agenticx.extensions.installer import install_bundle
+
+result = install_bundle(Path("./my-bundle"))
+print(result.skills_installed, result.mcp_servers_installed)
+```
+
+Installed skills land in `~/.agenticx/skills/bundles/<name>/` and are picked up automatically by `SkillBundleLoader`.
+
+See the [Extensions & Skill Ecosystem guide](../guides/extensions.md) for the full workflow including Desktop GUI, marketplace search, and registry configuration.
+
 ## Tool executor
 
 `ToolExecutor` (`agenticx.tools.executor`) is the shared execution pipeline for `BaseTool` instances.
