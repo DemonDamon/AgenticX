@@ -19,8 +19,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import os
 import sys
-import resource
 import subprocess
+
+try:
+    import resource as _posix_resource
+except ImportError:  # Windows: no POSIX resource limits module
+    _posix_resource = None
 import tempfile
 import json
 
@@ -181,8 +185,11 @@ class ResourceMonitor:
             process = psutil.Process()
             return process.memory_info().rss
         except ImportError:
-            # Fallback for systems without psutil
-            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
+            if _posix_resource is not None:
+                return (
+                    _posix_resource.getrusage(_posix_resource.RUSAGE_SELF).ru_maxrss * 1024
+                )
+            return 0
 
 
 class SandboxedEnvironment:
@@ -222,18 +229,31 @@ class SandboxedEnvironment:
     
     def _setup_resource_limits(self):
         """Set up resource limits."""
+        if _posix_resource is None:
+            self._logger.debug(
+                "POSIX setrlimit unavailable (e.g. Windows); "
+                "memory/CPU caps rely on ResourceMonitor only."
+            )
+            return
         try:
             # Memory limit
             memory_bytes = self.config.max_memory_mb * 1024 * 1024
-            resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
-            
+            _posix_resource.setrlimit(
+                _posix_resource.RLIMIT_AS, (memory_bytes, memory_bytes)
+            )
+
             # CPU time limit
-            resource.setrlimit(resource.RLIMIT_CPU, (int(self.config.max_cpu_time), int(self.config.max_cpu_time)))
-            
+            _posix_resource.setrlimit(
+                _posix_resource.RLIMIT_CPU,
+                (int(self.config.max_cpu_time), int(self.config.max_cpu_time)),
+            )
+
             # File descriptor limit
-            resource.setrlimit(resource.RLIMIT_NOFILE, (1024, 1024))
-            
-        except (resource.error, ValueError) as e:
+            _posix_resource.setrlimit(
+                _posix_resource.RLIMIT_NOFILE, (1024, 1024)
+            )
+
+        except (_posix_resource.error, ValueError) as e:
             self._logger.warning(f"Failed to set resource limits: {e}")
     
     def execute_code(self, code: str, globals_dict: Optional[Dict[str, Any]] = None) -> Any:
