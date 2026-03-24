@@ -77,9 +77,19 @@ def _minimax_m2_family_no_vision(model_name: str) -> bool:
 
 def create_studio_app() -> FastAPI:
     app = FastAPI(title="AgenticX Studio Service", version="0.1.0")
+    default_origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "null",
+        "app://.",
+        "file://",
+    ]
+    extra = os.getenv("AGX_CORS_ORIGINS", "").strip()
+    if extra:
+        default_origins.extend([o.strip() for o in extra.split(",") if o.strip()])
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "null"],
+        allow_origins=default_origins,
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
