@@ -10,8 +10,10 @@ export function PaneDivider({ onDrag }: Props) {
 
   return (
     <div
-      className="group relative w-1 shrink-0 cursor-col-resize bg-transparent"
+      className="group relative flex w-2 shrink-0 cursor-col-resize justify-center bg-transparent touch-none"
       onMouseDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
         draggingRef.current = true;
         lastXRef.current = event.clientX;
         const onMove = (moveEvent: MouseEvent) => {

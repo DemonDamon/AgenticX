@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { Taskspace } from "../store";
+import { createResizeRafScheduler } from "../utils/resize-raf";
 import Prism from "prismjs";
 import "prismjs/components/prism-bash";
 import "prismjs/components/prism-json";
@@ -156,14 +157,18 @@ export function TaskspacePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRefreshKey, sessionId]);
 
-  useEffect(() => {
-    if (!panelRef.current) return;
+  useLayoutEffect(() => {
     const element = panelRef.current;
+    if (!element) return;
     const syncHeight = () => setPanelHeight(element.clientHeight);
+    const { schedule, cancel } = createResizeRafScheduler(syncHeight);
     syncHeight();
-    const observer = new ResizeObserver(syncHeight);
+    const observer = new ResizeObserver(schedule);
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      cancel();
+      observer.disconnect();
+    };
   }, []);
 
   useEffect(() => {
@@ -264,6 +269,7 @@ export function TaskspacePanel({
 
   const startResizePreview = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
+    event.stopPropagation();
     const startY = event.clientY;
     const startHeight = previewHeight;
     const maxHeight = panelHeight ? Math.floor(panelHeight * 0.75) : 520;
@@ -432,11 +438,11 @@ export function TaskspacePanel({
         {!loading && activeTaskspace ? renderDir(activeTaskspace.id, ".", 0) : null}
       </div>
       <div
-        className="group relative shrink-0 cursor-row-resize px-2"
+        className="group relative min-h-[14px] shrink-0 cursor-row-resize px-2 py-2 touch-none"
         onMouseDown={startResizePreview}
         title="拖拽调整代码预览高度"
       >
-        <div className="h-[2px] bg-cyan-500/35 transition group-hover:bg-cyan-400/90" />
+        <div className="pointer-events-none absolute left-2 right-2 top-1/2 h-[2px] -translate-y-1/2 bg-cyan-500/35 transition group-hover:bg-cyan-400/90" />
         <div className="pointer-events-none absolute left-1/2 top-1/2 h-2 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-400/70 bg-surface-panel shadow-[0_0_10px_rgba(34,211,238,0.25)]" />
       </div>
       <div className="flex shrink-0 flex-col px-2 py-2" style={{ height: previewHeight }}>
