@@ -7,6 +7,7 @@ import {
   FolderOpen,
   Bookmark,
   Sparkles,
+  Globe,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import type { Avatar, ChatPane, ChatStyle, GroupChat } from "../store";
@@ -37,7 +38,7 @@ type McpServer = {
   command?: string;
 };
 
-type SettingsTab = "general" | "provider" | "mcp" | "skills" | "email" | "workspace" | "favorites";
+type SettingsTab = "general" | "provider" | "mcp" | "skills" | "email" | "workspace" | "favorites" | "server";
 type ConfirmMode = "manual" | "semi-auto" | "auto";
 type EmailPresetId = "qq" | "163" | "gmail" | "outlook" | "custom";
 
@@ -93,6 +94,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "email", label: "邮件通知", icon: Mail },
   { id: "workspace", label: "工作区", icon: FolderOpen },
   { id: "favorites", label: "收藏", icon: Bookmark },
+  { id: "server", label: "服务器连接", icon: Globe },
 ];
 
 const EMAIL_PRESETS: Array<{
@@ -1198,6 +1200,13 @@ export function SettingsPanel({
   const [mcpBusy, setMcpBusy] = useState(false);
   const [mcpMessage, setMcpMessage] = useState("");
 
+  const [serverMode, setServerMode] = useState<"local" | "remote">("local");
+  const [serverUrl, setServerUrl] = useState("");
+  const [serverToken, setServerToken] = useState("");
+  const [serverTestStatus, setServerTestStatus] = useState<"idle" | "testing" | "ok" | "fail">("idle");
+  const [serverTestError, setServerTestError] = useState("");
+  const [serverShowToken, setServerShowToken] = useState(false);
+
   useEffect(() => {
     // Reset the guard when dialog is closed.
     if (!open) {
@@ -1234,6 +1243,13 @@ export function SettingsPanel({
     setShowModelPanel(false);
     setMcpImportPath("~/.cursor/mcp.json");
     setMcpMessage("");
+    setServerTestStatus("idle");
+    setServerTestError("");
+    void window.agenticxDesktop.loadRemoteServer().then((rs) => {
+      setServerMode(rs.enabled ? "remote" : "local");
+      setServerUrl(rs.url || "");
+      setServerToken(rs.token || "");
+    });
     if (sessionId) void onRefreshMcp(sessionId);
   }, [open, providers, defaultProvider, sessionId, onRefreshMcp]);
 
@@ -1645,6 +1661,124 @@ export function SettingsPanel({
                 groups={groups}
                 onForwardFavorite={onForwardFavorite}
               />
+            )}
+
+            {tab === "server" && (
+              <div className="space-y-4">
+                <Panel title="连接模式">
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 text-sm text-text-subtle cursor-pointer">
+                      <input
+                        type="radio"
+                        name="server-mode"
+                        checked={serverMode === "local"}
+                        onChange={() => setServerMode("local")}
+                        className="accent-[var(--ui-btn-primary-bg)]"
+                      />
+                      本地 (默认)
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-text-subtle cursor-pointer">
+                      <input
+                        type="radio"
+                        name="server-mode"
+                        checked={serverMode === "remote"}
+                        onChange={() => setServerMode("remote")}
+                        className="accent-[var(--ui-btn-primary-bg)]"
+                      />
+                      远程服务器
+                    </label>
+                  </div>
+                  <p className="mt-2 text-xs text-text-faint">
+                    本地模式自动启动 agx serve；远程模式连接云主机上已部署的 agx serve 后端。
+                  </p>
+                </Panel>
+
+                <Panel title="远程服务器配置">
+                  <fieldset disabled={serverMode === "local"} className={serverMode === "local" ? "opacity-50" : ""}>
+                    <label className="block text-sm text-text-muted">
+                      服务器 URL
+                      <input
+                        className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                        placeholder="https://your-server:8080"
+                        value={serverUrl}
+                        onChange={(e) => setServerUrl(e.target.value)}
+                      />
+                    </label>
+                    <label className="mt-3 block text-sm text-text-muted">
+                      认证 Token
+                      <div className="relative mt-1">
+                        <input
+                          className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 pr-16 text-sm text-text-subtle"
+                          type={serverShowToken ? "text" : "password"}
+                          placeholder="与服务端 AGX_DESKTOP_TOKEN 一致"
+                          value={serverToken}
+                          onChange={(e) => setServerToken(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
+                          onClick={() => setServerShowToken(!serverShowToken)}
+                        >
+                          {serverShowToken ? "隐藏" : "显示"}
+                        </button>
+                      </div>
+                    </label>
+                    <div className="mt-3 flex items-center gap-3">
+                      <button
+                        type="button"
+                        className="rounded-md border border-border px-3 py-1.5 text-sm text-text-subtle hover:bg-surface-hover disabled:opacity-50"
+                        disabled={!serverUrl.trim() || serverTestStatus === "testing"}
+                        onClick={async () => {
+                          setServerTestStatus("testing");
+                          setServerTestError("");
+                          try {
+                            const res = await window.agenticxDesktop.testRemoteServer({
+                              url: serverUrl.trim().replace(/\/+$/, ""),
+                              token: serverToken.trim(),
+                            });
+                            setServerTestStatus(res.ok ? "ok" : "fail");
+                            if (!res.ok) setServerTestError(res.error || `HTTP ${res.status}`);
+                          } catch (err) {
+                            setServerTestStatus("fail");
+                            setServerTestError(String(err));
+                          }
+                        }}
+                      >
+                        {serverTestStatus === "testing" ? "测试中..." : "测试连接"}
+                      </button>
+                      {serverTestStatus === "ok" && (
+                        <span className="text-sm text-green-500">连接成功</span>
+                      )}
+                      {serverTestStatus === "fail" && (
+                        <span className="text-sm text-red-400" title={serverTestError}>连接失败</span>
+                      )}
+                    </div>
+                  </fieldset>
+                </Panel>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    className="rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+                    onClick={async () => {
+                      await window.agenticxDesktop.saveRemoteServer({
+                        enabled: serverMode === "remote",
+                        url: serverUrl.trim().replace(/\/+$/, ""),
+                        token: serverToken.trim(),
+                      });
+                      alert("服务器连接配置已保存。切换模式需要重启 Machi 才能生效。");
+                    }}
+                  >
+                    保存服务器配置
+                  </button>
+                </div>
+
+                <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle space-y-1">
+                  <p>远程部署参考：</p>
+                  <p>1. 在云主机上安装 agenticx: <code className="text-text-muted">pip install agenticx</code></p>
+                  <p>2. 启动服务: <code className="text-text-muted">agx serve --host 0.0.0.0 --port 8080 --token YOUR_TOKEN</code></p>
+                  <p>3. 确保防火墙放行对应端口，生产环境建议配置 HTTPS (Nginx 反向代理)。</p>
+                </div>
+              </div>
             )}
           </div>
 

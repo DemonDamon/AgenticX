@@ -140,6 +140,10 @@ declare global {
       getApiBase: () => Promise<string>;
       getApiAuthToken: () => Promise<string>;
       platform: () => Promise<string>;
+      getConnectionMode: () => Promise<"local" | "remote">;
+      loadRemoteServer: () => Promise<{ enabled: boolean; url: string; token: string }>;
+      saveRemoteServer: (payload: { enabled: boolean; url: string; token: string }) => Promise<{ ok: boolean; restart_required?: boolean }>;
+      testRemoteServer: (payload: { url: string; token: string }) => Promise<{ ok: boolean; status?: number; error?: string }>;
       onOpenSettings: (cb: () => void) => void;
 
       listAvatars: () => Promise<{ ok: boolean; avatars: AvatarItem[] }>;
