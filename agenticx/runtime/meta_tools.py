@@ -36,6 +36,22 @@ from agenticx.workspace.loader import (
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
 
+# Set each /api/chat turn by Studio from ChatRequest.meta_leader_display_name (default Machi).
+META_LEADER_LABEL_SCRATCH_KEY = "__meta_leader_display_name__"
+_DEFAULT_META_PRODUCT_LABEL = "Machi"
+
+
+def _meta_display_name_for_delegation(session: Any, scratchpad: Dict[str, Any]) -> str:
+    direct = str(getattr(session, "meta_leader_display_name", None) or "").strip()
+    if direct:
+        return direct
+    raw = scratchpad.get(META_LEADER_LABEL_SCRATCH_KEY)
+    if isinstance(raw, str):
+        s = raw.strip()
+        if s:
+            return s
+    return _DEFAULT_META_PRODUCT_LABEL
+
 
 _META_ONLY_TOOLS: List[Dict[str, Any]] = [
     {
@@ -1142,6 +1158,7 @@ async def _run_delegation_in_avatar_session(
     meta_team_manager: Optional[AgentTeamManager] = None,
     fallback_provider: Optional[str] = None,
     fallback_model: Optional[str] = None,
+    meta_display_name: str = _DEFAULT_META_PRODUCT_LABEL,
 ) -> None:
     from agenticx.runtime.agent_runtime import AgentRuntime
     from agenticx.runtime.events import EventType, RuntimeEvent
@@ -1215,7 +1232,7 @@ async def _run_delegation_in_avatar_session(
     if workspace_hint:
         delegation_system_prompt += f"\n## 工作目录\n- {workspace_hint}\n"
 
-    delegated_input = f"[委派任务] 来自 Meta-Agent:\n{task}"
+    delegated_input = f"[委派任务] 来自「{meta_display_name}」:\n{task}"
     final_text = ""
     error_text = ""
     status = "running"
@@ -1836,6 +1853,7 @@ async def dispatch_meta_tool_async(
         cancel_event = asyncio.Event()
         meta_provider = str(getattr(session, "provider_name", "") or "").strip()
         meta_model = str(getattr(session, "model_name", "") or "").strip()
+        meta_display_name = _meta_display_name_for_delegation(session, scratchpad)
 
         async def _delegation_wrapper() -> None:
             try:
@@ -1850,6 +1868,7 @@ async def dispatch_meta_tool_async(
                     meta_team_manager=team_manager,
                     fallback_provider=meta_provider,
                     fallback_model=meta_model,
+                    meta_display_name=meta_display_name,
                 )
             except Exception as exc:
                 _meta_log.error(
