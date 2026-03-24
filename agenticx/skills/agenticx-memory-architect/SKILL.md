@@ -3,7 +3,7 @@ name: agenticx-memory-architect
 description: Guide for setting up and using the AgenticX memory system including Mem0 integration, long-term memory, context management, and memory-enhanced agents. Use when the user wants to add memory to agents, persist conversation history, build memory-aware workflows, or integrate with Mem0 for long-term recall.
 metadata:
   author: AgenticX
-  version: "0.3.3"
+  version: "0.3.4"
 ---
 
 # AgenticX Memory Architect
