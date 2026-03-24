@@ -252,24 +252,61 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
   ];
 }
 
+function pathListSeparator(): string {
+  return process.platform === "win32" ? ";" : ":";
+}
+
 function buildAugmentedPath(): string {
   const home = os.homedir();
-  const extraPaths = [
-    "/opt/miniconda3/bin",
-    "/opt/miniconda3/condabin",
-    `${home}/miniconda3/bin`,
-    `${home}/opt/miniconda3/bin`,
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    `${home}/.local/bin`,
-    `${home}/bin`,
-  ].join(":");
-  return `${extraPaths}:${process.env.PATH ?? "/usr/bin:/bin"}`;
+  const sep = pathListSeparator();
+  const basePath =
+    process.env.PATH ?? (process.platform === "win32" ? "" : "/usr/bin:/bin");
+
+  let extraPaths: string[];
+  if (process.platform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA || "";
+    extraPaths = [
+      path.join(home, "miniconda3", "Scripts"),
+      path.join(home, "miniconda3", "condabin"),
+      path.join(home, "anaconda3", "Scripts"),
+      path.join(home, "mambaforge", "Scripts"),
+      path.join(home, "micromamba", "bin"),
+      localAppData ? path.join(localAppData, "miniconda3", "Scripts") : "",
+      localAppData ? path.join(localAppData, "anaconda3", "Scripts") : "",
+      path.join(home, "scoop", "shims"),
+    ].filter(Boolean);
+  } else {
+    extraPaths = [
+      "/opt/miniconda3/bin",
+      "/opt/miniconda3/condabin",
+      `${home}/miniconda3/bin`,
+      `${home}/opt/miniconda3/bin`,
+      "/opt/homebrew/bin",
+      "/usr/local/bin",
+      `${home}/.local/bin`,
+      `${home}/bin`,
+    ];
+  }
+  const prefix = extraPaths.join(sep);
+  return prefix ? `${prefix}${sep}${basePath}` : basePath;
+}
+
+/**
+ * Spawn `agx` without a login shell.
+ * macOS: `zsh -l -c` runs `/etc/zprofile` → `path_helper` rebuilds PATH and drops
+ * conda/venv paths inherited from the parent Electron process, so `agx` vanishes.
+ * Windows: `cmd /c` is unnecessary; Node resolves `agx`/`agx.cmd` from PATH.
+ */
+function spawnAgx(
+  args: string[],
+  options: { cwd?: string; stdio: ("ignore" | "pipe")[]; env: NodeJS.ProcessEnv }
+): ChildProcess {
+  return spawn("agx", args, { ...options, shell: false });
 }
 
 async function checkAgxCli(): Promise<boolean> {
   return new Promise((resolve) => {
-    const proc = spawn("/bin/zsh", ["-l", "-c", "agx --version"], {
+    const proc = spawnAgx(["--version"], {
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, PATH: buildAugmentedPath() },
     });
@@ -289,21 +326,23 @@ async function checkAgxCli(): Promise<boolean> {
 
 async function startStudioServe(): Promise<void> {
   apiPort = await pickFreePort();
-  const cmd = `agx serve --host 127.0.0.1 --port ${String(apiPort)}`;
   const desktopHome = os.homedir();
   const augmentedPath = buildAugmentedPath();
 
-  serveProcess = spawn("/bin/zsh", ["-l", "-c", cmd], {
-    cwd: desktopHome,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      PATH: augmentedPath,
-      AGX_DESKTOP_TOKEN: apiToken,
-      AGX_WORKSPACE_ROOT: desktopHome,
-      AGX_DESKTOP_UNRESTRICTED_FS: "1",
+  serveProcess = spawnAgx(
+    ["serve", "--host", "127.0.0.1", "--port", String(apiPort)],
+    {
+      cwd: desktopHome,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        PATH: augmentedPath,
+        AGX_DESKTOP_TOKEN: apiToken,
+        AGX_WORKSPACE_ROOT: desktopHome,
+        AGX_DESKTOP_UNRESTRICTED_FS: "1",
+      }
     }
-  });
+  );
   serveStdoutBuffer = "";
   serveStderrBuffer = "";
   if (serveProcess.stdout) {
@@ -1373,7 +1412,7 @@ app.whenReady().then(async () => {
 
     const agxOk = await checkAgxCli();
     if (!agxOk) {
-      const installDocsUrl = "https://github.com/agenticx/agenticx#installation";
+      const installDocsUrl = "https://www.agxbuilder.com/docs/getting-started/installation";
       const { response } = await dialog.showMessageBox({
         type: "warning",
         title: "缺少 agx 命令行工具",
