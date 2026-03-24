@@ -26,6 +26,7 @@ import {
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
+import { createResizeRafScheduler } from "../utils/resize-raf";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 
 const NEW_TOPIC_PREF_KEY = "agx:newTopicInherit";
@@ -647,10 +648,14 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
     if (!panelRef.current) return;
     const target = panelRef.current;
     const update = () => setPanelWidth(target.clientWidth);
+    const { schedule, cancel } = createResizeRafScheduler(update);
     update();
-    const observer = new ResizeObserver(() => update());
+    const observer = new ResizeObserver(schedule);
     observer.observe(target);
-    return () => observer.disconnect();
+    return () => {
+      cancel();
+      observer.disconnect();
+    };
   }, []);
 
   const avatarById = useMemo(() => {
@@ -1255,10 +1260,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!paneRef.current) return;
     const target = paneRef.current;
     const update = () => setPaneWidth(target.clientWidth);
+    const { schedule, cancel } = createResizeRafScheduler(update);
     update();
-    const observer = new ResizeObserver(() => update());
+    const observer = new ResizeObserver(schedule);
     observer.observe(target);
-    return () => observer.disconnect();
+    return () => {
+      cancel();
+      observer.disconnect();
+    };
   }, []);
 
   const openDelegatedAvatarSession = async (agentId: string): Promise<boolean> => {

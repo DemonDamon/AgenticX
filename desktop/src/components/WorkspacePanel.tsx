@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import Prism from "prismjs";
 import "prismjs/components/prism-bash";
@@ -8,6 +8,7 @@ import "prismjs/components/prism-python";
 import "prismjs/components/prism-typescript";
 import "prismjs/themes/prism-tomorrow.css";
 import type { SubAgent, Taskspace } from "../store";
+import { createResizeRafScheduler } from "../utils/resize-raf";
 import { SubAgentCard } from "./SubAgentCard";
 
 type TaskspaceFile = {
@@ -199,14 +200,18 @@ export function WorkspacePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRefreshKey, sessionId]);
 
-  useEffect(() => {
-    if (!panelRef.current) return;
+  useLayoutEffect(() => {
     const element = panelRef.current;
+    if (!element) return;
     const syncHeight = () => setPanelHeight(element.clientHeight);
+    const { schedule, cancel } = createResizeRafScheduler(syncHeight);
     syncHeight();
-    const observer = new ResizeObserver(syncHeight);
+    const observer = new ResizeObserver(schedule);
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      cancel();
+      observer.disconnect();
+    };
   }, []);
 
   const addTaskspace = async (pathValue: string, labelValue: string) => {
@@ -301,6 +306,7 @@ export function WorkspacePanel({
 
   const startResizeSpawns = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
+    event.stopPropagation();
     spawnsUserResized.current = true;
     const startY = event.clientY;
     const startHeight = safeSpawnsHeight;
@@ -469,13 +475,16 @@ export function WorkspacePanel({
       </div>
 
       <div
-        className="group relative shrink-0 cursor-row-resize px-2"
+        className="group relative min-h-[14px] shrink-0 cursor-row-resize px-2 py-2 touch-none"
         onMouseDown={startResizeSpawns}
         title="拖拽调整 Spawns 区域高度"
       >
-        <div className="h-px transition" style={{ background: "var(--ui-accent-divider)" }} />
         <div
-          className="pointer-events-none absolute left-1/2 top-1/2 h-1.5 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90"
+          className="pointer-events-none absolute left-2 right-2 top-1/2 h-px -translate-y-1/2 transition"
+          style={{ background: "var(--ui-accent-divider)" }}
+        />
+        <div
+          className="pointer-events-none absolute left-1/2 top-1/2 h-2 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90"
           style={{ borderColor: "var(--ui-accent-divider-hover)" }}
         />
       </div>
