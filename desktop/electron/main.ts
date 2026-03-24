@@ -460,6 +460,7 @@ function stopStudioServe(): void {
 }
 
 function createWindow(): void {
+  const vibrancyEnabled = process.env.AGX_ENABLE_VIBRANCY === "1";
   mainWindow = new BrowserWindow({
     width: 900,
     height: 700,
@@ -468,8 +469,7 @@ function createWindow(): void {
     alwaysOnTop: false,
     skipTaskbar: false,
     titleBarStyle: "hiddenInset",
-    vibrancy: "under-window",
-    visualEffectState: "followWindow",
+    ...(vibrancyEnabled ? { vibrancy: "under-window" as const, visualEffectState: "followWindow" as const } : {}),
     backgroundColor: "#00000000",
     roundedCorners: true,
     trafficLightPosition: { x: 14, y: 14 },
