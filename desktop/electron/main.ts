@@ -358,6 +358,31 @@ function spawnAgx(
   return spawn("agx", args, { ...options, shell: false });
 }
 
+/** Packaged macOS app: embedded PyInstaller binary under Resources/backend/agx-server */
+function resolveBundledBackend(): string | null {
+  if (!app.isPackaged || process.platform !== "darwin") {
+    return null;
+  }
+  const binary = path.join(process.resourcesPath, "backend", "agx-server");
+  if (fs.existsSync(binary)) {
+    return binary;
+  }
+  return null;
+}
+
+function spawnBundledServer(
+  binaryPath: string,
+  args: string[],
+  options: { cwd?: string; stdio: ("ignore" | "pipe")[]; env: NodeJS.ProcessEnv }
+): ChildProcess {
+  try {
+    fs.chmodSync(binaryPath, 0o755);
+  } catch {
+    /* noop */
+  }
+  return spawn(binaryPath, args, { ...options, shell: false });
+}
+
 async function checkAgxCli(): Promise<boolean> {
   return new Promise((resolve) => {
     const proc = spawnAgx(["--version"], {
@@ -382,21 +407,28 @@ async function startStudioServe(): Promise<void> {
   apiPort = await pickFreePort();
   const desktopHome = os.homedir();
   const augmentedPath = buildAugmentedPath();
+  const bundledPath = resolveBundledBackend();
 
-  serveProcess = spawnAgx(
-    ["serve", "--host", "127.0.0.1", "--port", String(apiPort)],
-    {
-      cwd: desktopHome,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        PATH: augmentedPath,
-        AGX_DESKTOP_TOKEN: apiToken,
-        AGX_WORKSPACE_ROOT: desktopHome,
-        AGX_DESKTOP_UNRESTRICTED_FS: "1",
-      }
-    }
-  );
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PATH: augmentedPath,
+    AGX_DESKTOP_TOKEN: apiToken,
+    AGX_WORKSPACE_ROOT: desktopHome,
+    AGX_DESKTOP_UNRESTRICTED_FS: "1",
+  };
+
+  if (bundledPath) {
+    serveProcess = spawnBundledServer(
+      bundledPath,
+      ["--host", "127.0.0.1", "--port", String(apiPort)],
+      { cwd: desktopHome, stdio: ["ignore", "pipe", "pipe"], env }
+    );
+  } else {
+    serveProcess = spawnAgx(
+      ["serve", "--host", "127.0.0.1", "--port", String(apiPort)],
+      { cwd: desktopHome, stdio: ["ignore", "pipe", "pipe"], env }
+    );
+  }
   serveStdoutBuffer = "";
   serveStderrBuffer = "";
   if (serveProcess.stdout) {
@@ -1545,33 +1577,36 @@ app.whenReady().then(async () => {
         }
       }
     } else {
-      const agxOk = await checkAgxCli();
-      if (!agxOk) {
-        const installDocsUrl = "https://www.agxbuilder.com/docs/getting-started/installation";
-        const { response } = await dialog.showMessageBox({
-          type: "warning",
-          title: "缺少 agx 命令行工具",
-          message: "Machi 需要 agx CLI 才能启动",
-          detail: [
-            "未检测到 agx 命令，请先在终端运行以下命令安装：",
-            "",
-            "  curl -sSL https://raw.githubusercontent.com/agenticx/agenticx/main/install.sh | bash",
-            "",
-            "或者通过 pip 安装：",
-            "",
-            "  pip install agenticx",
-            "",
-            "安装完成后重新打开 Machi。",
-          ].join("\n"),
-          buttons: ["查看安装说明", "退出"],
-          defaultId: 0,
-          cancelId: 1,
-        });
-        if (response === 0) {
-          void shell.openExternal(installDocsUrl);
+      const bundledPath = resolveBundledBackend();
+      if (!bundledPath) {
+        const agxOk = await checkAgxCli();
+        if (!agxOk) {
+          const installDocsUrl = "https://www.agxbuilder.com/docs/getting-started/installation";
+          const { response } = await dialog.showMessageBox({
+            type: "warning",
+            title: "缺少 agx 命令行工具",
+            message: "Machi 需要本地 agx CLI 或内嵌后端才能启动",
+            detail: [
+              "当前为开发/未打包构建，且未检测到 agx 命令。可选：",
+              "",
+              "1) 安装 agx（终端）：",
+              "   pip install agenticx",
+              "   或见官方安装脚本说明",
+              "",
+              "2) 在「设置」中启用远程服务器模式，连接已部署的 agx serve",
+              "",
+              "3) 发布版 DMG：使用 packaging/build_dmg.sh 构建后会内嵌 agx-server",
+            ].join("\n"),
+            buttons: ["查看安装说明", "退出"],
+            defaultId: 0,
+            cancelId: 1,
+          });
+          if (response === 0) {
+            void shell.openExternal(installDocsUrl);
+          }
+          app.quit();
+          return;
         }
-        app.quit();
-        return;
       }
 
       await startStudioServe();

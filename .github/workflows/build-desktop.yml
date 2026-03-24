@@ -1,0 +1,109 @@
+# Build Machi Desktop (macOS) with bundled agx-server; upload DMG/ZIP artifacts.
+# Optional secrets: CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_ID_PASSWORD, APPLE_TEAM_ID
+
+name: Build Desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "macOS architecture (tag push always builds arm64 + x64)"
+        required: true
+        default: arm64
+        type: choice
+        options:
+          - arm64
+          - x64
+          - universal
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64
+          - os: macos-13
+            arch: x64
+          - os: macos-14
+            arch: universal
+    if: |
+      (github.event_name == 'push' && matrix.arch != 'universal') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.arch == matrix.arch)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build agx-server (single arch)
+        if: matrix.arch != 'universal'
+        run: packaging/build_backend.sh ${{ matrix.arch }}
+
+      - name: Build agx-server (arm64 + x64 for lipo)
+        if: matrix.arch == 'universal'
+        run: |
+          packaging/build_backend.sh arm64
+          packaging/build_backend.sh x64
+
+      - name: Stage bundled backend (arm64 / x64)
+        if: matrix.arch != 'universal'
+        run: |
+          mkdir -p "desktop/bundled-backend/${{ matrix.arch }}"
+          cp "packaging/dist/${{ matrix.arch }}/agx-server" "desktop/bundled-backend/${{ matrix.arch }}/agx-server"
+          chmod +x "desktop/bundled-backend/${{ matrix.arch }}/agx-server"
+
+      - name: Stage bundled backend (universal)
+        if: matrix.arch == 'universal'
+        run: |
+          mkdir -p desktop/bundled-backend/universal
+          lipo -create packaging/dist/arm64/agx-server packaging/dist/x64/agx-server -output desktop/bundled-backend/universal/agx-server
+          chmod +x desktop/bundled-backend/universal/agx-server
+
+      - name: Install desktop deps
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build renderer + main
+        working-directory: desktop
+        run: npm run build
+
+      - name: Package (electron-builder, arm64 / x64)
+        if: matrix.arch != 'universal'
+        working-directory: desktop
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: npx electron-builder --mac --${{ matrix.arch }}
+
+      - name: Package (electron-builder, universal)
+        if: matrix.arch == 'universal'
+        working-directory: desktop
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: npx electron-builder --mac universal
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: machi-${{ matrix.arch }}
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
