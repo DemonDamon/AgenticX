@@ -32,7 +32,7 @@ from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.loop_controller import LoopController
 from agenticx.cli.agent_tools import STUDIO_TOOLS
-from agenticx.runtime.meta_tools import META_AGENT_TOOLS
+from agenticx.runtime.meta_tools import META_AGENT_TOOLS, META_LEADER_LABEL_SCRATCH_KEY
 from agenticx.runtime.prompts.meta_agent import build_meta_agent_system_prompt
 from agenticx.runtime.group_router import (
     META_LEADER_AGENT_ID,
@@ -661,6 +661,8 @@ def create_studio_app() -> FastAPI:
                         model=model or session.model_name,
                     )
                     meta_leader_label = str(getattr(payload, "meta_leader_display_name", None) or "").strip() or "Machi"
+                    if isinstance(session.scratchpad, dict):
+                        session.scratchpad[META_LEADER_LABEL_SCRATCH_KEY] = meta_leader_label
                     router = GroupChatRouter(
                         avatar_registry=avatar_registry,
                         llm_factory=llm_factory,
@@ -867,6 +869,9 @@ def create_studio_app() -> FastAPI:
             meta_done = False
             try:
                 async def _produce_meta_events() -> None:
+                    _meta_label = str(getattr(payload, "meta_leader_display_name", None) or "").strip() or "Machi"
+                    if isinstance(session.scratchpad, dict):
+                        session.scratchpad[META_LEADER_LABEL_SCRATCH_KEY] = _meta_label
                     auto = AutoSolveMode()
                     effective_input = payload.user_input
                     quoted_content = str(payload.quoted_content or "").strip()
