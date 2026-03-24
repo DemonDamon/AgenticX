@@ -24,7 +24,7 @@ body,
   width: 100vw;
   background: var(--surface-base);
   color: var(--text-primary);
-  transition: grid-template-columns var(--ds-dur-slow) var(--ds-ease-out);
+  /* Avoid transitioning grid tracks: during OS window resize it fights layout and feels "laggy". */
   overflow: hidden;
 }
 
@@ -40,9 +40,38 @@ body,
   background: rgba(14, 14, 18, 0.96);
 }
 
+.agx-app.window-resizing,
+.agx-app.window-resizing * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* During OS-level window resize, temporarily disable expensive blur composition. */
+.agx-app.window-resizing *,
+.agx-app.window-resizing .agx-topbar {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.agx-app.startup-optimizing,
+.agx-app.startup-optimizing * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Cold start phase: reduce expensive compositing to improve first interaction latency. */
+.agx-app.startup-optimizing *,
+.agx-app.startup-optimizing .agx-topbar {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 .agx-app.is-resizing,
 .agx-app.is-resizing * {
   transition: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  cursor: col-resize !important;
 }
 
 .agx-sidebar-shell {

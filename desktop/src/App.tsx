@@ -168,6 +168,9 @@ export function App() {
   const sessionInitDoneRef = useRef(false);
   const workspaceHydratedRef = useRef(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [windowResizing, setWindowResizing] = useState(false);
+  const [startupOptimizing, setStartupOptimizing] = useState(true);
+  const windowResizeTimerRef = useRef<number | null>(null);
   const subAgentsRef = useRef(subAgents);
   const subAgentSessionRef = useRef<Record<string, string>>({});
   const staleMissCountRef = useRef<Record<string, number>>({});
@@ -820,6 +823,34 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
+    const onWindowResize = () => {
+      setWindowResizing(true);
+      if (windowResizeTimerRef.current !== null) {
+        window.clearTimeout(windowResizeTimerRef.current);
+      }
+      windowResizeTimerRef.current = window.setTimeout(() => {
+        setWindowResizing(false);
+        windowResizeTimerRef.current = null;
+      }, 140);
+    };
+    window.addEventListener("resize", onWindowResize, { passive: true });
+    return () => {
+      window.removeEventListener("resize", onWindowResize);
+      if (windowResizeTimerRef.current !== null) {
+        window.clearTimeout(windowResizeTimerRef.current);
+        windowResizeTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setStartupOptimizing(false);
+    }, 8000);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       if (isEditableTarget(event.target)) return;
@@ -1082,7 +1113,11 @@ export function App() {
   );
 
   return (
-    <div className={`agx-app ${sidebarCollapsed || userMode !== "pro" || !onboardingCompleted || !apiBase ? "sidebar-collapsed" : ""}`}>
+    <div
+      className={`agx-app ${
+        sidebarCollapsed || userMode !== "pro" || !onboardingCompleted || !apiBase ? "sidebar-collapsed" : ""
+      } ${windowResizing ? "window-resizing" : ""} ${startupOptimizing ? "startup-optimizing" : ""}`}
+    >
       {!onboardingCompleted ? (
         <OnboardingView onSelectMode={(mode) => void handleSelectMode(mode)} />
       ) : apiBase ? (
