@@ -390,11 +390,31 @@ function spawnBundledServer(
   return spawn(binaryPath, args, { ...options, shell: false });
 }
 
+function findAgxBinaryOnPath(augmentedPath: string): string | null {
+  const dirs = augmentedPath.split(pathListSeparator());
+  const names = process.platform === "win32" ? ["agx.exe", "agx.cmd", "agx"] : ["agx"];
+  for (const dir of dirs) {
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK);
+        return candidate;
+      } catch { /* not here */ }
+    }
+  }
+  return null;
+}
+
 async function checkAgxCli(): Promise<boolean> {
+  const augmentedPath = buildAugmentedPath();
+
+  const binaryPath = findAgxBinaryOnPath(augmentedPath);
+  if (!binaryPath) return false;
+
   return new Promise((resolve) => {
     const proc = spawnAgx(["--version"], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, PATH: buildAugmentedPath() },
+      env: { ...process.env, PATH: augmentedPath },
     });
     let resolved = false;
     const done = (ok: boolean) => {
@@ -404,7 +424,7 @@ async function checkAgxCli(): Promise<boolean> {
       try { proc.kill(); } catch { /* noop */ }
       resolve(ok);
     };
-    const timer = setTimeout(() => done(false), 8000);
+    const timer = setTimeout(() => done(false), 30_000);
     proc.on("close", (code) => done(code === 0));
     proc.on("error", () => done(false));
   });
@@ -549,6 +569,40 @@ function stopStudioServe(): void {
     serveProcess = null;
     serveStdoutBuffer = "";
     serveStderrBuffer = "";
+  }
+}
+
+type TerminalSession = {
+  pty: import("node-pty").IPty;
+  wc: Electron.WebContents;
+};
+
+const terminalSessions = new Map<string, TerminalSession>();
+
+function requireNodePty(): typeof import("node-pty") | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require("node-pty") as typeof import("node-pty");
+  } catch (err) {
+    console.error("[terminal] failed to load node-pty:", err);
+    return null;
+  }
+}
+
+function killTerminalSession(id: string): void {
+  const sess = terminalSessions.get(id);
+  if (!sess) return;
+  try {
+    sess.pty.kill();
+  } catch {
+    // noop
+  }
+  terminalSessions.delete(id);
+}
+
+function killAllTerminalSessions(): void {
+  for (const id of [...terminalSessions.keys()]) {
+    killTerminalSession(id);
   }
 }
 
@@ -1536,6 +1590,82 @@ function registerIpc(): void {
       return { ok: false, error: String(err) };
     }
   });
+
+  ipcMain.handle(
+    "terminal-spawn",
+    async (event, payload: { id: string; cwd: string; cols?: number; rows?: number }) => {
+      const ptyMod = requireNodePty();
+      if (!ptyMod) return { ok: false as const, error: "node-pty unavailable" };
+      const cwd = (payload.cwd || "").trim();
+      if (!cwd || !fs.existsSync(cwd)) {
+        return { ok: false as const, error: "invalid cwd" };
+      }
+      const id = (payload.id || "").trim();
+      if (!id) return { ok: false as const, error: "missing id" };
+      if (terminalSessions.has(id)) {
+        killTerminalSession(id);
+      }
+      const cols = Math.max(40, Math.min(300, Number(payload.cols) || 80));
+      const rows = Math.max(10, Math.min(200, Number(payload.rows) || 24));
+      const wc = event.sender;
+      const shell = process.platform === "win32" ? "powershell.exe" : process.env.SHELL || "/bin/bash";
+      const shellArgs = process.platform === "win32" ? ["-NoLogo"] : [];
+      try {
+        const ptyProcess = ptyMod.spawn(shell, shellArgs, {
+          name: "xterm-256color",
+          cols,
+          rows,
+          cwd,
+          env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
+        });
+        terminalSessions.set(id, { pty: ptyProcess, wc });
+        ptyProcess.onData((data) => {
+          if (!wc.isDestroyed()) {
+            wc.send("terminal-data", { id, data });
+          }
+        });
+        ptyProcess.onExit(() => {
+          terminalSessions.delete(id);
+          if (!wc.isDestroyed()) {
+            wc.send("terminal-exit", { id });
+          }
+        });
+        return { ok: true as const, id };
+      } catch (err) {
+        return { ok: false as const, error: String(err) };
+      }
+    }
+  );
+
+  ipcMain.handle("terminal-write", (_event, payload: { id: string; data: string }) => {
+    const sess = terminalSessions.get(payload.id);
+    if (!sess) return { ok: false };
+    try {
+      sess.pty.write(payload.data);
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle("terminal-resize", (_event, payload: { id: string; cols: number; rows: number }) => {
+    const sess = terminalSessions.get(payload.id);
+    if (!sess) return { ok: false };
+    try {
+      sess.pty.resize(
+        Math.max(2, Math.min(300, Math.floor(payload.cols))),
+        Math.max(2, Math.min(200, Math.floor(payload.rows)))
+      );
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle("terminal-kill", (_event, id: string) => {
+    killTerminalSession((id || "").trim());
+    return { ok: true };
+  });
 }
 
 app.setName("Machi");
@@ -1645,5 +1775,6 @@ app.on("activate", () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+  killAllTerminalSessions();
   stopStudioServe();
 });
