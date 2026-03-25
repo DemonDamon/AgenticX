@@ -27,6 +27,9 @@ type PersistedPaneState = {
   membersPanelOpen: boolean;
   sidePanelTab: "workspace" | "members";
   activeTaskspaceId: string | null;
+  spawnsColumnOpen?: boolean;
+  spawnsColumnSuppressAuto?: boolean;
+  spawnsColumnBaselineIds?: string[];
 };
 
 type PersistedWorkspaceState = {
@@ -82,6 +85,10 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
       const id = String(row.id ?? "").trim();
       const avatarName = String(row.avatarName ?? "").trim();
       if (!id || !avatarName) return null;
+      const baselineRaw = row.spawnsColumnBaselineIds;
+      const baselineIds = Array.isArray(baselineRaw)
+        ? baselineRaw.map((x) => String(x)).filter((x) => x.length > 0)
+        : [];
       return {
         id,
         avatarId: row.avatarId == null ? null : String(row.avatarId),
@@ -93,6 +100,10 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         membersPanelOpen: Boolean(row.membersPanelOpen),
         sidePanelTab: row.sidePanelTab === "members" ? ("members" as const) : ("workspace" as const),
         activeTaskspaceId: row.activeTaskspaceId == null ? null : String(row.activeTaskspaceId),
+        spawnsColumnOpen: typeof row.spawnsColumnOpen === "boolean" ? row.spawnsColumnOpen : undefined,
+        spawnsColumnSuppressAuto:
+          typeof row.spawnsColumnSuppressAuto === "boolean" ? row.spawnsColumnSuppressAuto : undefined,
+        spawnsColumnBaselineIds: baselineIds.length > 0 ? baselineIds : undefined,
       };
     })
     .filter((item): item is PersistedPaneState => !!item);
@@ -293,6 +304,11 @@ export function App() {
                 messages: [],
                 membersPanelOpen: pane.membersPanelOpen ?? false,
                 sidePanelTab: pane.sidePanelTab ?? "workspace",
+                spawnsColumnOpen: pane.spawnsColumnOpen ?? false,
+                spawnsColumnSuppressAuto: pane.spawnsColumnSuppressAuto ?? false,
+                spawnsColumnBaselineIds: pane.spawnsColumnBaselineIds ?? [],
+                terminalTabs: [],
+                activeTerminalTabId: null,
               })),
               activePaneId: nextActivePaneId,
             });
@@ -378,6 +394,9 @@ export function App() {
         membersPanelOpen: pane.membersPanelOpen,
         sidePanelTab: pane.sidePanelTab,
         activeTaskspaceId: pane.activeTaskspaceId,
+        spawnsColumnOpen: pane.spawnsColumnOpen,
+        spawnsColumnSuppressAuto: pane.spawnsColumnSuppressAuto,
+        spawnsColumnBaselineIds: pane.spawnsColumnBaselineIds,
       })),
     };
     try {

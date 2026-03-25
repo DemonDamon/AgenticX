@@ -266,6 +266,18 @@ declare global {
 
       searchRegistry: (args: { q: string }) => Promise<RegistrySearchResult>;
       installFromRegistry: (args: { source: string; name: string }) => Promise<RegistryInstallResult>;
+
+      terminalSpawn: (payload: {
+        id: string;
+        cwd: string;
+        cols?: number;
+        rows?: number;
+      }) => Promise<{ ok: boolean; id?: string; error?: string }>;
+      terminalWrite: (payload: { id: string; data: string }) => Promise<{ ok: boolean }>;
+      terminalResize: (payload: { id: string; cols: number; rows: number }) => Promise<{ ok: boolean }>;
+      terminalKill: (id: string) => Promise<{ ok: boolean }>;
+      onTerminalData: (cb: (payload: { id: string; data: string }) => void) => () => void;
+      onTerminalExit: (cb: (payload: { id: string }) => void) => () => void;
     };
   }
 }
