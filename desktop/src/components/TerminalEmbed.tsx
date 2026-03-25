@@ -15,10 +15,19 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
   const [spawnError, setSpawnError] = useState<string | null>(null);
   // Increment to force re-spawn
   const [spawnGen, setSpawnGen] = useState(0);
+  // Track whether spawn has completed successfully at least once this mount
+  const spawnedRef = useRef(false);
+  // Timer for debouncing exit signal
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const restart = useCallback(() => {
+    if (exitTimerRef.current) {
+      clearTimeout(exitTimerRef.current);
+      exitTimerRef.current = null;
+    }
     setExited(false);
     setSpawnError(null);
+    spawnedRef.current = false;
     setSpawnGen((g) => g + 1);
   }, []);
 
@@ -28,6 +37,7 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
 
     setExited(false);
     setSpawnError(null);
+    spawnedRef.current = false;
 
     const term = new Terminal({
       cursorBlink: true,
@@ -64,9 +74,19 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
       if (payload.id !== tabId) return;
       term.write(payload.data);
     });
+
     const offExit = window.agenticxDesktop.onTerminalExit((payload) => {
       if (payload.id !== tabId) return;
-      if (!disposed) setExited(true);
+      if (disposed) return;
+      // Only show the exit overlay if spawn had already succeeded.
+      // This prevents a stale exit event (from a previous session being killed)
+      // from immediately showing the overlay right after mount.
+      if (!spawnedRef.current) return;
+      // Debounce: ignore spurious exit events fired within 300ms
+      if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+      exitTimerRef.current = setTimeout(() => {
+        if (!disposed) setExited(true);
+      }, 300);
     });
 
     const dSub = term.onData((data) => {
@@ -86,6 +106,7 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
         setSpawnError(res.error ?? "unknown error");
         return;
       }
+      spawnedRef.current = true;
       scheduleFit();
       void window.agenticxDesktop.terminalResize({
         id: tabId,
@@ -96,6 +117,10 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
 
     return () => {
       disposed = true;
+      if (exitTimerRef.current) {
+        clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = null;
+      }
       ro.disconnect();
       offData();
       offExit();
