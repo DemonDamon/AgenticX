@@ -8,6 +8,14 @@ type Props = {
   cwd: string;
 };
 
+function newPtySessionId(tabId: string): string {
+  const suffix =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+  return `${tabId}:${suffix}`;
+}
+
 export function TerminalEmbed({ tabId, cwd }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -34,6 +42,10 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+
+    // Unique id per effect run so kill/exit from a previous session never matches
+    // this listener (fixes Strict Mode + parent re-render races).
+    const ptySessionId = newPtySessionId(tabId);
 
     setExited(false);
     setSpawnError(null);
@@ -63,7 +75,7 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
     const ro = new ResizeObserver(() => {
       scheduleFit();
       void window.agenticxDesktop.terminalResize({
-        id: tabId,
+        id: ptySessionId,
         cols: term.cols,
         rows: term.rows,
       });
@@ -71,12 +83,12 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
     ro.observe(el);
 
     const offData = window.agenticxDesktop.onTerminalData((payload) => {
-      if (payload.id !== tabId) return;
+      if (payload.id !== ptySessionId) return;
       term.write(payload.data);
     });
 
     const offExit = window.agenticxDesktop.onTerminalExit((payload) => {
-      if (payload.id !== tabId) return;
+      if (payload.id !== ptySessionId) return;
       if (disposed) return;
       // Only show the exit overlay if spawn had already succeeded.
       // This prevents a stale exit event (from a previous session being killed)
@@ -90,13 +102,13 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
     });
 
     const dSub = term.onData((data) => {
-      void window.agenticxDesktop.terminalWrite({ id: tabId, data });
+      void window.agenticxDesktop.terminalWrite({ id: ptySessionId, data });
     });
 
     void (async () => {
       scheduleFit();
       const res = await window.agenticxDesktop.terminalSpawn({
-        id: tabId,
+        id: ptySessionId,
         cwd,
         cols: term.cols,
         rows: term.rows,
@@ -109,7 +121,7 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
       spawnedRef.current = true;
       scheduleFit();
       void window.agenticxDesktop.terminalResize({
-        id: tabId,
+        id: ptySessionId,
         cols: term.cols,
         rows: term.rows,
       });
@@ -125,7 +137,7 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
       offData();
       offExit();
       dSub.dispose();
-      void window.agenticxDesktop.terminalKill(tabId);
+      void window.agenticxDesktop.terminalKill(ptySessionId);
       term.dispose();
       termRef.current = null;
     };
