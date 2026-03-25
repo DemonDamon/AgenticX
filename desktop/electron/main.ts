@@ -1608,15 +1608,34 @@ function registerIpc(): void {
       const cols = Math.max(40, Math.min(300, Number(payload.cols) || 80));
       const rows = Math.max(10, Math.min(200, Number(payload.rows) || 24));
       const wc = event.sender;
-      const shell = process.platform === "win32" ? "powershell.exe" : process.env.SHELL || "/bin/bash";
-      const shellArgs = process.platform === "win32" ? ["-NoLogo"] : [];
+
+      let shellPath: string;
+      let shellArgs: string[];
+      if (process.platform === "win32") {
+        shellPath = "powershell.exe";
+        shellArgs = ["-NoLogo"];
+      } else {
+        // Prefer the user's login shell; fall back to zsh then bash.
+        // Use -i (interactive) so PS1 / rcfiles load, but avoid -l (login)
+        // which re-runs /etc/zprofile and can clobber PATH or call `exit`.
+        const candidate = process.env.SHELL || "";
+        shellPath = (candidate && fs.existsSync(candidate)) ? candidate
+          : (fs.existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/bash");
+        shellArgs = ["-i"];
+      }
+
       try {
-        const ptyProcess = ptyMod.spawn(shell, shellArgs, {
+        const ptyProcess = ptyMod.spawn(shellPath, shellArgs, {
           name: "xterm-256color",
           cols,
           rows,
           cwd,
-          env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
+          env: (() => {
+            // Prevent any rc-file from reading a stale PS1/ENV that calls exit
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { BASH_ENV: _ignored, ...rest } = process.env;
+            return { ...rest, TERM: "xterm-256color" } as Record<string, string>;
+          })(),
         });
         terminalSessions.set(id, { pty: ptyProcess, wc });
         ptyProcess.onData((data) => {
