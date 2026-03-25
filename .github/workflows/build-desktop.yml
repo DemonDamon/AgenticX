@@ -66,7 +66,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-        run: npx electron-builder --mac --${{ matrix.arch }}
+        run: npx electron-builder --mac --${{ matrix.arch }} --publish never
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -117,7 +117,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-        run: npx electron-builder --mac --${{ env.ARCH }}
+        run: npx electron-builder --mac --${{ env.ARCH }} --publish never
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
