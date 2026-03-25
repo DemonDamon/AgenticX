@@ -37,6 +37,10 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Python 3.12 removed stdlib distutils; node-gyp (node-pty rebuild) still imports it.
+      - name: Install setuptools for node-gyp
+        run: python3 -m pip install --upgrade pip setuptools
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -84,6 +88,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install setuptools for node-gyp
+        run: python3 -m pip install --upgrade pip setuptools
 
       - uses: actions/setup-node@v4
         with:
