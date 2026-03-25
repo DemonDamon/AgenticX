@@ -7,14 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       arch:
-        description: "macOS architecture (tag push always builds arm64 + x64)"
+        description: "macOS architecture to build (arm64 = Apple Silicon, x64 = Intel)"
         required: true
         default: arm64
         type: choice
         options:
           - arm64
           - x64
-          - universal
   push:
     tags:
       - "v*"
@@ -93,29 +92,14 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Build agx-server (single arch)
-        if: env.ARCH != 'universal'
+      - name: Build agx-server
         run: packaging/build_backend.sh "${{ env.ARCH }}"
 
-      - name: Build agx-server (arm64 + x64 for lipo)
-        if: env.ARCH == 'universal'
-        run: |
-          packaging/build_backend.sh arm64
-          packaging/build_backend.sh x64
-
-      - name: Stage bundled backend (arm64 / x64)
-        if: env.ARCH != 'universal'
+      - name: Stage bundled backend
         run: |
           mkdir -p "desktop/bundled-backend/${{ env.ARCH }}"
           cp "packaging/dist/${{ env.ARCH }}/agx-server" "desktop/bundled-backend/${{ env.ARCH }}/agx-server"
           chmod +x "desktop/bundled-backend/${{ env.ARCH }}/agx-server"
-
-      - name: Stage bundled backend (universal)
-        if: env.ARCH == 'universal'
-        run: |
-          mkdir -p desktop/bundled-backend/universal
-          lipo -create packaging/dist/arm64/agx-server packaging/dist/x64/agx-server -output desktop/bundled-backend/universal/agx-server
-          chmod +x desktop/bundled-backend/universal/agx-server
 
       - name: Install desktop deps
         working-directory: desktop
@@ -125,8 +109,7 @@ jobs:
         working-directory: desktop
         run: npm run build
 
-      - name: Package (electron-builder, arm64 / x64)
-        if: env.ARCH != 'universal'
+      - name: Package (electron-builder)
         working-directory: desktop
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -135,17 +118,6 @@ jobs:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: npx electron-builder --mac --${{ env.ARCH }}
-
-      - name: Package (electron-builder, universal)
-        if: env.ARCH == 'universal'
-        working-directory: desktop
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-        run: npx electron-builder --mac universal
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
