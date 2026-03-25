@@ -20,10 +20,7 @@ mac:
         - x64
   icon: assets/icon.icns
   category: public.app-category.developer-tools
-  hardenedRuntime: true
   gatekeeperAssess: false
-  entitlements: scripts/mac/entitlements.mac.plist
-  entitlementsInherit: scripts/mac/entitlements.mac.plist
   extraResources:
     - from: bundled-backend/${arch}
       to: backend
