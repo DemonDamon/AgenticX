@@ -113,6 +113,50 @@ def test_team_manager_concurrency_and_cancel(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_subagent_spawn_clamps_low_run_timeout(monkeypatch) -> None:
+    monkeypatch.delenv("AGX_SUBAGENT_MIN_RUN_TIMEOUT_SECONDS", raising=False)
+
+    async def _run() -> None:
+        manager = AgentTeamManager(
+            llm_factory=lambda: _QuickTextLLM(),
+            base_session=StudioSession(),
+        )
+        result = await manager.spawn_subagent(
+            name="T",
+            role="worker",
+            task="task",
+            run_timeout_seconds=300,
+        )
+        assert result["ok"] is True
+        ctx = manager._agents[result["agent_id"]]
+        assert ctx.run_timeout_seconds == 600
+        await manager.cancel_subagent(result["agent_id"])
+
+    asyncio.run(_run())
+
+
+def test_subagent_spawn_respects_low_timeout_when_floor_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("AGX_SUBAGENT_MIN_RUN_TIMEOUT_SECONDS", "0")
+
+    async def _run() -> None:
+        manager = AgentTeamManager(
+            llm_factory=lambda: _QuickTextLLM(),
+            base_session=StudioSession(),
+        )
+        result = await manager.spawn_subagent(
+            name="T",
+            role="worker",
+            task="task",
+            run_timeout_seconds=300,
+        )
+        assert result["ok"] is True
+        ctx = manager._agents[result["agent_id"]]
+        assert ctx.run_timeout_seconds == 300
+        await manager.cancel_subagent(result["agent_id"])
+
+    asyncio.run(_run())
+
+
 def test_team_manager_falls_back_on_invalid_tool_allowlist() -> None:
     async def _run() -> None:
         manager = AgentTeamManager(

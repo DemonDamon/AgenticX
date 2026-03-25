@@ -52,6 +52,26 @@ def _resolve_max_tool_rounds() -> int:
     return max(10, min(120, value))
 
 
+def _resolve_subagent_min_run_timeout_seconds() -> int:
+    """Minimum wall-clock timeout for a sub-agent run (seconds).
+
+    Meta-agents often pass 300s for ``run_timeout_seconds``, which is too low for
+    multi-round tool use plus confirm gates. Set ``AGX_SUBAGENT_MIN_RUN_TIMEOUT_SECONDS=0``
+    to disable clamping.
+    """
+    raw = str(os.getenv("AGX_SUBAGENT_MIN_RUN_TIMEOUT_SECONDS", "")).strip()
+    if raw == "0":
+        return 0
+    if raw:
+        try:
+            parsed = int(raw)
+            if parsed >= 60:
+                return min(parsed, 86400)
+        except ValueError:
+            pass
+    return 600
+
+
 class SubAgentStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -435,6 +455,13 @@ class AgentTeamManager:
             if resolved_cleanup not in {"keep", "delete"}:
                 resolved_cleanup = "keep"
             resolved_timeout = int(run_timeout_seconds or self.spawn_config.run_timeout_seconds or 0)
+            timeout_floor = _resolve_subagent_min_run_timeout_seconds()
+            if timeout_floor > 0:
+                cfg_default = int(self.spawn_config.run_timeout_seconds or 600)
+                if resolved_timeout <= 0:
+                    resolved_timeout = max(cfg_default, timeout_floor)
+                else:
+                    resolved_timeout = max(resolved_timeout, timeout_floor)
             attached_payload: Dict[str, str] = {}
             if attachments:
                 for item in attachments[:20]:

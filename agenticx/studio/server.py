@@ -90,6 +90,21 @@ def _minimax_m2_family_no_vision(model_name: str) -> bool:
     return bool(re.match(r"^m2[.\-_]?\d", raw))
 
 
+def _zhipu_glm5_family_no_vision(model_name: str) -> bool:
+    """GLM-5 chat SKUs on BigModel v4 reject multimodal message parts (image_url).
+
+    Vision-capable ids typically include 4v/5v, vl, or vision; those must stay allowed.
+    """
+    raw = str(model_name or "").strip().lower()
+    if not raw:
+        return False
+    if "/" in raw:
+        raw = raw.rsplit("/", 1)[-1]
+    if "vl" in raw or "vision" in raw or "4v" in raw or "5v" in raw:
+        return False
+    return raw == "glm-5" or raw.startswith("glm-5-")
+
+
 def create_studio_app() -> FastAPI:
     app = FastAPI(title="AgenticX Studio Service", version="0.1.0")
     default_origins = [
@@ -591,6 +606,10 @@ def create_studio_app() -> FastAPI:
             session.model_name = payload.model
 
         if str(session.provider_name or "").strip().lower() == "minimax" and _minimax_m2_family_no_vision(
+            str(session.model_name or "")
+        ):
+            image_inputs = []
+        if str(session.provider_name or "").strip().lower() == "zhipu" and _zhipu_glm5_family_no_vision(
             str(session.model_name or "")
         ):
             image_inputs = []
