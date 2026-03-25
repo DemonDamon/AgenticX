@@ -571,6 +571,19 @@ def _build_progress_signature(session: StudioSession) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+_CONFIRMATION_SPAM_KEYWORDS = frozenset(
+    {"TODO", "FINAL", "COMPLETED", "ULTIMATE", "ABSOLUTE", "REPORT", "SUMMARY"}
+)
+
+
+def _confirmation_spam_score_for_path(path: str) -> int:
+    """Count keyword hits in basename; 2+ suggests meta/status filename spam."""
+    if not path:
+        return 0
+    basename = os.path.basename(path).upper()
+    return sum(1 for kw in _CONFIRMATION_SPAM_KEYWORDS if kw in basename)
+
+
 def _extract_written_paths_from_result(result: str) -> List[str]:
     if not isinstance(result, str) or not result:
         return []
@@ -682,6 +695,8 @@ class AgentRuntime:
         last_status_query_had_rows = False
         executed_tool_names: List[str] = []
         disk_write_paths: set[str] = set()
+        write_path_counts: Dict[str, int] = {}
+        confirmation_spam_count = 0
         rounds_without_todo = 0
         invoke_timeout_seconds = _resolve_llm_invoke_timeout_seconds(session)
         heartbeat_timeout_seconds = _resolve_llm_heartbeat_timeout_seconds(session)
@@ -718,6 +733,30 @@ class AgentRuntime:
                     data=checkpoint,
                     agent_id=agent_id,
                 )
+                recent_tools = (
+                    executed_tool_names[-32:]
+                    if len(executed_tool_names) > 32
+                    else list(executed_tool_names)
+                )
+                file_write_heavy = sum(1 for n in recent_tools if n in ("file_write", "file_edit"))
+                unique_recent = set(recent_tools)
+                is_stalling = file_write_heavy > 5 and len(unique_recent) <= 2
+                if is_stalling and recent_tools:
+                    task_hint = str(user_input or "")[:800]
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                f"<checkpoint round={round_idx - 1}>"
+                                f"WARNING: {file_write_heavy} of your last {len(recent_tools)} tool calls "
+                                "were file writes/edits. You appear to be creating status/confirmation files "
+                                "instead of performing the actual task. STOP creating files and focus on "
+                                f"your delegated_task: {task_hint}. "
+                                "If the task is done, output your final answer as text."
+                                "</checkpoint>"
+                            ),
+                        },
+                    )
             if len(session.agent_messages) > synced_session_message_count:
                 messages.extend(
                     _sanitize_context_messages(session.agent_messages[synced_session_message_count:])
@@ -1470,6 +1509,26 @@ class AgentRuntime:
                     rounds_without_todo += 1
                 executed_tool_names.append(tool_name)
                 after_progress = _build_progress_signature(session)
+                written_paths_for_progress: List[str] = []
+                if tool_name in {"file_write", "file_edit"} and isinstance(result, str):
+                    written_paths_for_progress = _extract_written_paths_from_result(result)
+                    for path in written_paths_for_progress:
+                        write_path_counts[path] = write_path_counts.get(path, 0) + 1
+                        disk_write_paths.add(path)
+                if agent_id != "meta" and tool_name in {"file_write", "file_edit"} and isinstance(
+                    result, str
+                ):
+                    for path in written_paths_for_progress:
+                        if _confirmation_spam_score_for_path(path) >= 2:
+                            confirmation_spam_count += 1
+                    if confirmation_spam_count >= 3:
+                        spam_msg = "Detected confirmation file spam. Terminating subagent."
+                        yield RuntimeEvent(
+                            type=EventType.ERROR.value,
+                            data={"text": spam_msg, "detector": "confirmation_spam"},
+                            agent_id=agent_id,
+                        )
+                        return
                 file_write_progress = (
                     tool_name in {"file_write", "file_edit"}
                     and isinstance(result, str)
@@ -1478,12 +1537,12 @@ class AgentRuntime:
                         or "OK: edited " in result
                     )
                 )
-                if tool_name in {"file_write", "file_edit"} and isinstance(result, str):
-                    for path in _extract_written_paths_from_result(result):
-                        disk_write_paths.add(path)
-                disk_write_progress = (
-                    len(disk_write_paths) > before_disk_write_count
-                )
+                if file_write_progress and written_paths_for_progress:
+                    for p in written_paths_for_progress:
+                        if write_path_counts.get(p, 0) > 2:
+                            file_write_progress = False
+                            break
+                disk_write_progress = len(disk_write_paths) > before_disk_write_count
                 PROGRESS_TOOLS = {
                     "todo_write", "scratchpad_write", "bash_exec",
                     "file_read", "list_files", "file_search", "grep_search",

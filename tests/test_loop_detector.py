@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Tests for LoopDetector."""
+"""Tests for LoopDetector and anti-futility helpers.
+
+Author: Damon Li
+"""
 
 from __future__ import annotations
 
+from agenticx.runtime.agent_runtime import _confirmation_spam_score_for_path
 from agenticx.runtime.loop_detector import LoopDetector
 
 
@@ -33,3 +37,19 @@ def test_loop_detector_no_progress_critical() -> None:
     result = detector.check()
     assert result is not None
     assert result.level == "critical"
+
+
+def test_loop_detector_tool_saturation_detected() -> None:
+    """Many file_write calls with different args but mostly no real progress."""
+    detector = LoopDetector(warning_threshold=4, critical_threshold=6)
+    marks = [False, False, True, False, False, False]
+    for i, hp in enumerate(marks):
+        detector.record_call("file_write", f'{{"path":"p{i}"}}', has_progress=hp)
+    result = detector.check()
+    assert result is not None
+    assert result.detector == "tool_saturation"
+
+
+def test_confirmation_spam_score_for_path() -> None:
+    assert _confirmation_spam_score_for_path("/tmp/TODO_FINAL.md") >= 2
+    assert _confirmation_spam_score_for_path("/tmp/README.md") == 0
