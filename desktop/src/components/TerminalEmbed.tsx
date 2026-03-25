@@ -2,11 +2,106 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import { useAppStore, type ThemeMode } from "../store";
 
 type Props = {
   tabId: string;
   cwd: string;
 };
+
+/** Read the computed background color of the nearest ancestor with a solid bg. */
+function samplePanelBg(el: HTMLElement): string {
+  const style = getComputedStyle(el);
+  const bg = style.backgroundColor;
+  if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") {
+    return bg;
+  }
+  if (el.parentElement) {
+    return samplePanelBg(el.parentElement);
+  }
+  return "#0a0e14";
+}
+
+/** Convert any CSS color string to a #rrggbb hex. */
+function toHex(cssColor: string): string {
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) return cssColor;
+  ctx.fillStyle = cssColor;
+  return ctx.fillStyle;
+}
+
+function getTerminalAnsi(theme: ThemeMode) {
+  if (theme === "light") {
+    return {
+      foreground: "#1e293b",
+      cursor: "#334155",
+      cursorAccent: "#f8fafc",
+      selectionBackground: "rgba(30, 41, 59, 0.22)",
+      black: "#1e293b",
+      red: "#dc2626",
+      green: "#16a34a",
+      yellow: "#ca8a04",
+      blue: "#2563eb",
+      magenta: "#9333ea",
+      cyan: "#0891b2",
+      white: "#e2e8f0",
+      brightBlack: "#64748b",
+      brightRed: "#ef4444",
+      brightGreen: "#22c55e",
+      brightYellow: "#eab308",
+      brightBlue: "#3b82f6",
+      brightMagenta: "#a855f7",
+      brightCyan: "#06b6d4",
+      brightWhite: "#0f172a",
+    };
+  }
+  if (theme === "dim") {
+    return {
+      foreground: "#d9dce1",
+      cursor: "#b8c0cc",
+      cursorAccent: "#12161f",
+      selectionBackground: "rgba(217, 220, 225, 0.18)",
+      black: "#0b0f16",
+      red: "#f87171",
+      green: "#4ade80",
+      yellow: "#fbbf24",
+      blue: "#60a5fa",
+      magenta: "#c084fc",
+      cyan: "#22d3ee",
+      white: "#cbd5e1",
+      brightBlack: "#64748b",
+      brightRed: "#fb7185",
+      brightGreen: "#86efac",
+      brightYellow: "#fcd34d",
+      brightBlue: "#93c5fd",
+      brightMagenta: "#d8b4fe",
+      brightCyan: "#67e8f9",
+      brightWhite: "#f8fafc",
+    };
+  }
+  return {
+    foreground: "#e4e4e7",
+    cursor: "#a1a1aa",
+    cursorAccent: "#0a0e14",
+    selectionBackground: "rgba(228, 228, 231, 0.16)",
+    black: "#0a0b0f",
+    red: "#f87171",
+    green: "#4ade80",
+    yellow: "#fbbf24",
+    blue: "#60a5fa",
+    magenta: "#c084fc",
+    cyan: "#22d3ee",
+    white: "#d4d4d8",
+    brightBlack: "#71717a",
+    brightRed: "#fb7185",
+    brightGreen: "#86efac",
+    brightYellow: "#fcd34d",
+    brightBlue: "#93c5fd",
+    brightMagenta: "#d8b4fe",
+    brightCyan: "#67e8f9",
+    brightWhite: "#fafafa",
+  };
+}
 
 function newPtySessionId(tabId: string): string {
   const suffix =
@@ -19,6 +114,7 @@ function newPtySessionId(tabId: string): string {
 export function TerminalEmbed({ tabId, cwd }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
+  const themeMode = useAppStore((s) => s.theme);
   const [exited, setExited] = useState(false);
   const [spawnError, setSpawnError] = useState<string | null>(null);
   // Increment to force re-spawn
@@ -51,15 +147,12 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
     setSpawnError(null);
     spawnedRef.current = false;
 
+    const panelBg = toHex(samplePanelBg(el));
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 12,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-      theme: {
-        background: "#0f1014",
-        foreground: "#e4e4e7",
-        cursor: "#a1a1aa",
-      },
+      theme: { background: panelBg, ...getTerminalAnsi(themeMode) },
     });
     termRef.current = term;
     const fit = new FitAddon();
@@ -145,12 +238,18 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, cwd, spawnGen]);
 
+  useEffect(() => {
+    if (!termRef.current || !containerRef.current) return;
+    const panelBg = toHex(samplePanelBg(containerRef.current));
+    termRef.current.options.theme = { background: panelBg, ...getTerminalAnsi(themeMode) };
+  }, [themeMode]);
+
   return (
     <div className="relative h-full min-h-0 w-full overflow-hidden">
       <div ref={containerRef} className="h-full min-h-0 w-full overflow-hidden px-1 py-1" />
       {(exited || spawnError) && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#0f1014]/90">
-          <span className="text-xs text-yellow-400">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-card backdrop-blur-sm">
+          <span className="text-xs text-status-warning">
             {spawnError ? `无法启动终端：${spawnError}` : "终端已退出"}
           </span>
           <button
