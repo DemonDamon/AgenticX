@@ -26,6 +26,7 @@ from agenticx.runtime.confirm import ConfirmGate
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.hooks import HookRegistry
 from agenticx.runtime.loop_detector import LoopDetector
+from agenticx.runtime.usage_metadata import usage_metadata_from_llm_response
 
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
@@ -1077,7 +1078,11 @@ class AgentRuntime:
                 if not _is_system_trigger:
                     session.chat_history.append({"role": "assistant", "content": final_text})
                 await self.hooks.run_on_agent_end(final_text, session)
-                yield RuntimeEvent(type=EventType.FINAL.value, data={"text": final_text}, agent_id=agent_id)
+                _um = usage_metadata_from_llm_response(response)
+                _final_data: dict[str, Any] = {"text": final_text}
+                if _um:
+                    _final_data["usage_metadata"] = _um
+                yield RuntimeEvent(type=EventType.FINAL.value, data=_final_data, agent_id=agent_id)
                 return
 
             assistant_tool_message = {
