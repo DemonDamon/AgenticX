@@ -20,11 +20,14 @@ isProject: false
 
 ## Implementation map
 
-| Item | Path |
-|------|------|
-| Guardrails | `agenticx/tools/guardrails/{__init__,provider,builtin,hook}.py` |
-| Usage extract | `agenticx/runtime/usage_metadata.py` |
-| FINAL + usage | `agenticx/runtime/agent_runtime.py` |
-| MCP wrapper | `agenticx/tools/remote.py` |
-| SSE | `agenticx/studio/server.py` — `_runtime_event_to_sse_lines` |
-| Tests | `tests/test_smoke_deerflow_*.py` |
+
+| Item          | Path                                                            |
+| ------------- | --------------------------------------------------------------- |
+| Guardrails    | `agenticx/tools/guardrails/{__init__,provider,builtin,hook}.py` |
+| Usage extract | `agenticx/runtime/usage_metadata.py`                            |
+| FINAL + usage | `agenticx/runtime/agent_runtime.py`                             |
+| MCP wrapper   | `agenticx/tools/remote.py`                                      |
+| SSE           | `agenticx/studio/server.py` — `_runtime_event_to_sse_lines`     |
+| Tests         | `tests/test_smoke_deerflow_*.py`                                |
+
+
