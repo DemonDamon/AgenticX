@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Machi - AgenticX Desktop",
+  "author": "DemonDamon",
   "productName": "Machi",
   "main": "dist-electron/main.js",
   "scripts": {
