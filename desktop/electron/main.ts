@@ -1596,10 +1596,9 @@ function registerIpc(): void {
     async (event, payload: { id: string; cwd: string; cols?: number; rows?: number }) => {
       const ptyMod = requireNodePty();
       if (!ptyMod) return { ok: false as const, error: "node-pty unavailable" };
-      const cwd = (payload.cwd || "").trim();
-      if (!cwd || !fs.existsSync(cwd)) {
-        return { ok: false as const, error: "invalid cwd" };
-      }
+      // Fall back to home dir if the requested cwd no longer exists
+      const rawCwd = (payload.cwd || "").trim();
+      const cwd = (rawCwd && fs.existsSync(rawCwd)) ? rawCwd : os.homedir();
       const id = (payload.id || "").trim();
       if (!id) return { ok: false as const, error: "missing id" };
       if (terminalSessions.has(id)) {

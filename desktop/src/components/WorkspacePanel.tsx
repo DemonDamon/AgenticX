@@ -7,9 +7,11 @@ import "prismjs/components/prism-markdown";
 import "prismjs/components/prism-python";
 import "prismjs/components/prism-typescript";
 import "prismjs/themes/prism-tomorrow.css";
-import type { SubAgent, Taskspace } from "../store";
+import type { Taskspace } from "../store";
+import { useAppStore } from "../store";
 import { createResizeRafScheduler } from "../utils/resize-raf";
-import { SubAgentCard } from "./SubAgentCard";
+import { ContextMenu } from "./ContextMenu";
+import { TerminalEmbed } from "./TerminalEmbed";
 
 type TaskspaceFile = {
   name: string;
@@ -27,19 +29,15 @@ type FilePreview = {
 };
 
 type Props = {
+  paneId: string;
   sessionId: string;
   activeTaskspaceId: string | null;
   onActiveTaskspaceChange: (taskspaceId: string | null) => void;
   onPickFileForReference?: (path: string) => void;
   autoRefreshKey?: number;
-  subAgents: SubAgent[];
-  selectedSubAgent: string | null;
-  onCancel: (agentId: string) => void;
-  onRetry: (agentId: string) => void;
-  onChat: (agentId: string) => void;
-  onSelect: (agentId: string) => void;
-  onConfirmResolve?: (agentId: string, approved: boolean) => void;
 };
+
+type CtxTarget = { x: number; y: number; taskspace: Taskspace };
 
 function detectLanguage(path: string): string {
   const lower = path.toLowerCase();
@@ -57,19 +55,19 @@ function nodeKey(taskspaceId: string, relPath: string): string {
 }
 
 export function WorkspacePanel({
+  paneId,
   sessionId,
   activeTaskspaceId,
   onActiveTaskspaceChange,
   onPickFileForReference,
   autoRefreshKey,
-  subAgents,
-  selectedSubAgent,
-  onCancel,
-  onRetry,
-  onChat,
-  onSelect,
-  onConfirmResolve,
 }: Props) {
+  const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
+  const removePaneTerminalTab = useAppStore((s) => s.removePaneTerminalTab);
+  const setActivePaneTerminalTab = useAppStore((s) => s.setActivePaneTerminalTab);
+  const terminalTabs = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.terminalTabs ?? []);
+  const activeTerminalTabId = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.activeTerminalTabId ?? null);
+
   const [taskspaces, setTaskspaces] = useState<Taskspace[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState("");
@@ -81,30 +79,30 @@ export function WorkspacePanel({
   const [newPath, setNewPath] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [adding, setAdding] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<CtxTarget | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [panelHeight, setPanelHeight] = useState(0);
-  const [spawnsHeight, setSpawnsHeight] = useState(0);
-  const spawnsUserResized = useRef(false);
+  const [terminalAreaHeight, setTerminalAreaHeight] = useState(0);
+  const terminalUserResized = useRef(false);
 
   const activeTaskspace = useMemo(
     () => taskspaces.find((item) => item.id === activeTaskspaceId) ?? taskspaces[0] ?? null,
     [taskspaces, activeTaskspaceId]
   );
 
-  const maxSpawnsHeight = panelHeight > 0 ? Math.floor(panelHeight * 0.7) : 520;
-  const minSpawnsHeight = 140;
-  const safeSpawnsHeight = Math.max(minSpawnsHeight, Math.min(maxSpawnsHeight, spawnsHeight));
+  const maxTerminalHeight = panelHeight > 0 ? Math.floor(panelHeight * 0.7) : 520;
+  const minTerminalHeight = 140;
+  const safeTerminalHeight = Math.max(minTerminalHeight, Math.min(maxTerminalHeight, terminalAreaHeight));
 
   useEffect(() => {
     if (panelHeight <= 0) return;
-    if (!spawnsUserResized.current) {
-      // Keep default near visual 1:1 before user manually drags.
-      const initial = Math.floor(panelHeight * 0.56);
-      setSpawnsHeight(Math.max(minSpawnsHeight, Math.min(maxSpawnsHeight, initial)));
+    if (!terminalUserResized.current) {
+      const initial = Math.floor(panelHeight * 0.42);
+      setTerminalAreaHeight(Math.max(minTerminalHeight, Math.min(maxTerminalHeight, initial)));
     } else {
-      setSpawnsHeight((prev) => Math.max(minSpawnsHeight, Math.min(maxSpawnsHeight, prev)));
+      setTerminalAreaHeight((prev) => Math.max(minTerminalHeight, Math.min(maxTerminalHeight, prev)));
     }
-  }, [panelHeight, maxSpawnsHeight]);
+  }, [panelHeight, maxTerminalHeight]);
 
   const highlightedCode = useMemo(() => {
     if (!filePreview) return "";
@@ -244,6 +242,16 @@ export function WorkspacePanel({
     await loadTaskspaces();
   };
 
+  const openTerminalForPath = (absPath: string, labelHint?: string) => {
+    const p = (absPath || "").trim();
+    if (!p) {
+      setErrorText("无法打开终端：目录路径无效");
+      return;
+    }
+    setErrorText("");
+    addPaneTerminalTab(paneId, p, labelHint);
+  };
+
   const chooseDirectoryForTaskspace = async () => {
     try {
       const picker = window.agenticxDesktop.chooseDirectory;
@@ -304,16 +312,16 @@ export function WorkspacePanel({
     setExpandedDirs(next);
   };
 
-  const startResizeSpawns = (event: ReactMouseEvent<HTMLDivElement>) => {
+  const startResizeTerminal = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    spawnsUserResized.current = true;
+    terminalUserResized.current = true;
     const startY = event.clientY;
-    const startHeight = safeSpawnsHeight;
+    const startHeight = safeTerminalHeight;
     const onMove = (moveEvent: MouseEvent) => {
       const delta = startY - moveEvent.clientY;
-      const next = Math.max(minSpawnsHeight, Math.min(maxSpawnsHeight, startHeight + delta));
-      setSpawnsHeight(next);
+      const next = Math.max(minTerminalHeight, Math.min(maxTerminalHeight, startHeight + delta));
+      setTerminalAreaHeight(next);
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
@@ -371,6 +379,17 @@ export function WorkspacePanel({
     });
   };
 
+  const activeTab = terminalTabs.find((t) => t.id === activeTerminalTabId) ?? terminalTabs[0] ?? null;
+
+  const addSameCwdTerminal = () => {
+    const cwd = (activeTaskspace?.path ?? "").trim();
+    if (!cwd) {
+      setErrorText("请先选择工作区或添加带目录的工作区");
+      return;
+    }
+    addPaneTerminalTab(paneId, cwd, activeTaskspace?.label);
+  };
+
   return (
     <div ref={panelRef} className="relative flex h-full min-h-0 w-full flex-col bg-surface-card">
       <div className="flex min-h-0 flex-1 flex-col">
@@ -382,16 +401,20 @@ export function WorkspacePanel({
                 className={`shrink-0 rounded px-2 py-1 text-xs transition ${
                   item.id === activeTaskspace?.id
                     ? "text-text-strong"
-                    : "text-text-subtle hover:text-text-primary hover:bg-surface-hover"
+                    : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
                 }`}
-                style={item.id === activeTaskspace?.id ? {
-                  background: "var(--ui-accent-surface)",
-                  color: "var(--ui-accent-text)",
-                } : {}}
+                style={
+                  item.id === activeTaskspace?.id
+                    ? {
+                        background: "var(--ui-accent-surface)",
+                        color: "var(--ui-accent-text)",
+                      }
+                    : {}
+                }
                 onClick={() => onActiveTaskspaceChange(item.id)}
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  void removeTaskspace(item.id);
+                  setCtxMenu({ x: e.clientX, y: e.clientY, taskspace: item });
                 }}
                 title={item.path}
               >
@@ -456,7 +479,7 @@ export function WorkspacePanel({
                   取消
                 </button>
                 <button
-                  className="rounded px-2 py-1 text-[11px] disabled:opacity-50 transition"
+                  className="rounded px-2 py-1 text-[11px] transition disabled:opacity-50"
                   style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
                   disabled={adding}
                   onClick={() => void addTaskspace(newPath, newLabel)}
@@ -476,8 +499,8 @@ export function WorkspacePanel({
 
       <div
         className="group relative min-h-[14px] shrink-0 cursor-row-resize px-2 py-2 touch-none"
-        onMouseDown={startResizeSpawns}
-        title="拖拽调整 Spawns 区域高度"
+        onMouseDown={startResizeTerminal}
+        title="拖拽调整终端区域高度"
       >
         <div
           className="pointer-events-none absolute left-2 right-2 top-1/2 h-px -translate-y-1/2 transition"
@@ -489,32 +512,76 @@ export function WorkspacePanel({
         />
       </div>
 
-      <div className="shrink-0 overflow-y-auto px-2 py-2" style={{ height: safeSpawnsHeight }}>
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs text-text-subtle">Spawns ({subAgents.length})</span>
-          <span className="text-[10px] text-text-faint">仅当前会话</span>
-        </div>
-        {subAgents.length === 0 ? (
-          <div className="rounded-md border border-border bg-surface-card px-2 py-3 text-xs text-text-faint">
-            当前工作区还没有派生子智能体
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {subAgents.map((subAgent) => (
-              <SubAgentCard
-                key={subAgent.id}
-                subAgent={subAgent}
-                selected={selectedSubAgent === subAgent.id}
-                onCancel={onCancel}
-                onRetry={onRetry}
-                onChat={onChat}
-                onSelect={onSelect}
-                onConfirmResolve={onConfirmResolve}
-              />
+      <div className="flex min-h-0 shrink-0 flex-col border-t border-border" style={{ height: safeTerminalHeight }}>
+        <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
+          <span className="text-[10px] text-text-faint">终端</span>
+          <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+            {terminalTabs.map((tab) => (
+              <div key={tab.id} className="flex shrink-0 items-center gap-0.5">
+                <button
+                  type="button"
+                  className={`rounded px-2 py-0.5 text-[11px] transition ${
+                    tab.id === activeTerminalTabId
+                      ? "bg-surface-hover text-text-strong"
+                      : "text-text-subtle hover:bg-surface-hover"
+                  }`}
+                  onClick={() => setActivePaneTerminalTab(paneId, tab.id)}
+                  title={tab.cwd}
+                >
+                  {tab.label}
+                </button>
+                <button
+                  type="button"
+                  className="rounded px-1 py-0.5 text-[10px] text-text-faint hover:bg-surface-hover hover:text-rose-300"
+                  onClick={() => removePaneTerminalTab(paneId, tab.id)}
+                  title="关闭终端"
+                >
+                  ×
+                </button>
+              </div>
             ))}
           </div>
-        )}
+          <button
+            type="button"
+            className="shrink-0 rounded bg-surface-hover px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
+            onClick={addSameCwdTerminal}
+            title="在当前工作区目录下新开终端"
+          >
+            +
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 bg-[#0f1014]">
+          {activeTab ? (
+            <TerminalEmbed key={activeTab.id} tabId={activeTab.id} cwd={activeTab.cwd} />
+          ) : (
+            <div className="flex h-full items-center justify-center px-2 text-center text-[11px] text-text-faint">
+              右键工作区标签选择「在此目录下打开终端」，或点击 + 使用当前工作区目录
+            </div>
+          )}
+        </div>
       </div>
+
+      <ContextMenu
+        open={!!ctxMenu}
+        x={ctxMenu?.x ?? 0}
+        y={ctxMenu?.y ?? 0}
+        onClose={() => setCtxMenu(null)}
+        items={
+          ctxMenu
+            ? [
+                {
+                  label: "在此目录下打开终端",
+                  onSelect: () => openTerminalForPath(ctxMenu.taskspace.path, ctxMenu.taskspace.label),
+                },
+                {
+                  label: "移除工作区",
+                  danger: true,
+                  onSelect: () => void removeTaskspace(ctxMenu.taskspace.id),
+                },
+              ]
+            : []
+        }
+      />
 
       {filePreview ? (
         <div className="absolute inset-2 z-30 flex min-h-0 flex-col rounded-lg border border-border-strong bg-surface-panel shadow-2xl backdrop-blur-xl">
