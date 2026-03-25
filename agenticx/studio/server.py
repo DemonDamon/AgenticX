@@ -58,6 +58,21 @@ from agenticx.workspace.loader import (
 logger = logging.getLogger(__name__)
 
 
+def _runtime_event_to_sse_lines(event: RuntimeEvent) -> list[str]:
+    """Serialize RuntimeEvent to SSE data line(s); emit token_usage after final when usage present."""
+    event_data = dict(event.data)
+    event_data.setdefault("agent_id", event.agent_id)
+    usage_meta = None
+    if event.type == EventType.FINAL.value:
+        usage_meta = event_data.pop("usage_metadata", None)
+    sse = SseEvent(type=event.type, data=event_data)
+    lines = [f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"]
+    if event.type == EventType.FINAL.value and usage_meta:
+        tu = SseEvent(type="token_usage", data=usage_meta)
+        lines.append(f"data: {json.dumps(tu.model_dump(), ensure_ascii=False)}\n\n")
+    return lines
+
+
 def _minimax_m2_family_no_vision(model_name: str) -> bool:
     """MiniMax M2 chat line does not accept image/audio input (vendor docs).
 
@@ -642,10 +657,8 @@ def create_studio_app() -> FastAPI:
                             if ctx and ctx.status.value not in ("running", "pending"):
                                 break
                             continue
-                        event_data = dict(event.data)
-                        event_data.setdefault("agent_id", event.agent_id)
-                        sse = SseEvent(type=event.type, data=event_data)
-                        yield f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"
+                        for line in _runtime_event_to_sse_lines(event):
+                            yield line
                         if event.type in terminal_types:
                             break
                 except Exception as exc:
@@ -948,14 +961,12 @@ def create_studio_app() -> FastAPI:
                     elif event is None:
                         meta_done = True
                     else:
-                        event_data = dict(event.data)
-                        event_data.setdefault("agent_id", event.agent_id)
                         if event.agent_id == "meta" and event.type == EventType.TOOL_RESULT.value:
                             _flush_taskspace_hint(payload.session_id, session)
-                        sse = SseEvent(type=event.type, data=event_data)
                         if event.type in ("subagent_started", "subagent_completed", "subagent_error"):
                             logger.info("[sse] yielding %s agent=%s", event.type, event.agent_id)
-                        yield f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"
+                        for line in _runtime_event_to_sse_lines(event):
+                            yield line
                     if not meta_done:
                         continue
                     # Do not block the main chat stream on background sub-agent execution.
@@ -1036,12 +1047,10 @@ def create_studio_app() -> FastAPI:
                 ):
                     if await request.is_disconnected():
                         break
-                    data = dict(event.data)
-                    data.setdefault("agent_id", event.agent_id)
                     if event.agent_id == "meta" and event.type == EventType.TOOL_RESULT.value:
                         _flush_taskspace_hint(session_id, session)
-                    sse = SseEvent(type=event.type, data=data)
-                    yield f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"
+                    for line in _runtime_event_to_sse_lines(event):
+                        yield line
             except Exception as exc:
                 err = SseEvent(type="error", data={"text": f"Loop runtime error: {exc}"})
                 yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"

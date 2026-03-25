@@ -4,6 +4,8 @@ RemoteTool: 用于连接 MCP (Model Context Protocol) 服务的通用远程工�
 from __future__ import annotations  # 启用延迟类型注解
 
 import asyncio
+import atexit
+import concurrent.futures
 import json
 import logging
 import os
@@ -14,6 +16,45 @@ from pydantic import BaseModel, Field, create_model  # type: ignore
 from .base import BaseTool, ToolError
 
 logger = logging.getLogger(__name__)
+
+# Thread pool for sync invocation of async MCP-style coroutines inside a running event loop.
+# Pattern from bytedance/deer-flow (MIT): backend/packages/harness/deerflow/mcp/tools.py
+_MCP_SYNC_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=10,
+    thread_name_prefix="agx-mcp-sync-tool",
+)
+atexit.register(lambda: _MCP_SYNC_EXECUTOR.shutdown(wait=False))
+
+
+def make_sync_mcp_wrapper(async_func: Any, tool_name: str) -> Any:
+    """Return a sync callable that runs async_func(*args, **kwargs) safely.
+
+    If called from a thread with a running event loop, runs the coroutine in
+    a worker thread via asyncio.run to avoid nested loop errors.
+    """
+
+    def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        try:
+            coro = async_func(*args, **kwargs)
+            if loop is not None and loop.is_running():
+                future = _MCP_SYNC_EXECUTOR.submit(asyncio.run, coro)
+                return future.result()
+            return asyncio.run(coro)
+        except Exception as e:
+            logger.error(
+                "MCP tool '%s' sync invocation failed: %s",
+                tool_name,
+                e,
+                exc_info=True,
+            )
+            raise
+
+    return sync_wrapper
+
 
 class MCPServerConfig(BaseModel):
     name: str
