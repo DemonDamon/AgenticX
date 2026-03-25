@@ -18,6 +18,13 @@ function minimaxM2TextOnlySlug(slug: string): boolean {
   return false;
 }
 
+/** Zhipu GLM-5 line: text chat only on paas v4; multimodal parts return 400. */
+function zhipuGlm5TextOnlySlug(slug: string): boolean {
+  const s = slug.toLowerCase();
+  if (/vl|vision|4v|5v/.test(s)) return false;
+  return s === "glm-5" || s.startsWith("glm-5-");
+}
+
 /**
  * Returns true if we are confident the current model does not accept image input.
  * Empty model id → false (do not block).
@@ -32,5 +39,6 @@ export function isKnownNonVisionChatModel(provider: string, model: string): bool
 
   if (KNOWN_TEXT_ONLY_RE.test(combined) || KNOWN_TEXT_ONLY_RE.test(modelLower)) return true;
   if (p === "minimax" && minimaxM2TextOnlySlug(slug)) return true;
+  if (p === "zhipu" && zhipuGlm5TextOnlySlug(slug)) return true;
   return false;
 }

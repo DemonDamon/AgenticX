@@ -154,7 +154,14 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
                     "task": {"type": "string", "description": "Detailed delegated task for this sub-agent."},
                     "mode": {"type": "string", "enum": ["run", "session"]},
                     "cleanup": {"type": "string", "enum": ["keep", "delete"]},
-                    "run_timeout_seconds": {"type": "integer"},
+                    "run_timeout_seconds": {
+                        "type": "integer",
+                        "description": (
+                            "Wall-clock cap for the whole sub-agent run. "
+                            "Use 900–1800 for multi-step coding + bash + file tools; "
+                            "values below the runtime floor are raised automatically (default floor 600s, env AGX_SUBAGENT_MIN_RUN_TIMEOUT_SECONDS)."
+                        ),
+                    },
                     "provider": {"type": "string", "description": "Optional provider override for this sub-agent."},
                     "model": {"type": "string", "description": "Optional model override for this sub-agent."},
                     "workspace_dir": {"type": "string", "description": "Optional workspace override for this sub-agent."},
