@@ -330,7 +330,12 @@ function buildAugmentedPath(): string {
       path.join(home, "scoop", "shims"),
     ].filter(Boolean);
   } else {
+    // macOS pip --user installs to ~/Library/Python/X.Y/bin; enumerate common versions
+    const pyUserBins = ["3.13", "3.12", "3.11", "3.10", "3.9"].map(
+      (v) => `${home}/Library/Python/${v}/bin`
+    );
     extraPaths = [
+      ...pyUserBins,
       "/opt/miniconda3/bin",
       "/opt/miniconda3/condabin",
       `${home}/miniconda3/bin`,
@@ -338,6 +343,8 @@ function buildAugmentedPath(): string {
       "/opt/homebrew/bin",
       "/usr/local/bin",
       `${home}/.local/bin`,
+      `${home}/.pyenv/shims`,
+      `${home}/.rye/shims`,
       `${home}/bin`,
     ];
   }
