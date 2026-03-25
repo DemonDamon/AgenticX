@@ -606,6 +606,15 @@ function killAllTerminalSessions(): void {
   }
 }
 
+/** Escape minimal HTML for inline error pages (load failures). */
+function escapeHtmlText(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function createWindow(): void {
   const vibrancyEnabled = process.env.AGX_ENABLE_VIBRANCY === "1";
   mainWindow = new BrowserWindow({
@@ -613,6 +622,7 @@ function createWindow(): void {
     height: 700,
     minWidth: 680,
     minHeight: 480,
+    show: false,
     alwaysOnTop: false,
     skipTaskbar: false,
     titleBarStyle: "hiddenInset",
@@ -624,19 +634,45 @@ function createWindow(): void {
       preload: path.join(__dirname, "preload.js")
     }
   });
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
+  });
   if (app.isPackaged) {
     const indexPath = path.join(__dirname, "..", "dist", "index.html");
-    void mainWindow.loadFile(indexPath).catch(() => {});
+    void mainWindow.loadFile(indexPath).catch((err) => {
+      const detail = escapeHtmlText(String(err));
+      void mainWindow
+        ?.loadURL(
+          `data:text/html;charset=utf-8,${encodeURIComponent(
+            `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:SF Pro Text,PingFang SC,sans-serif;background:#14141c;color:rgba(255,255,255,.7);padding:1.5rem;box-sizing:border-box;-webkit-app-region:drag"><div style="text-align:center;max-width:36rem"><h3 style="margin:0">无法加载 Machi 界面</h3><p style="margin-top:.75rem;font-size:.85rem;opacity:.85;white-space:pre-wrap;word-break:break-all">${detail}</p><p style="margin-top:.5rem;font-size:.8rem;opacity:.6">请重新安装应用或从源码构建。</p></div></body></html>`
+          )}`
+        )
+        .then(() => {
+          mainWindow?.show();
+        });
+    });
   } else {
     const devUrl = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
     void mainWindow.loadURL(devUrl).catch(() => {
       const distFallback = path.join(__dirname, "..", "dist", "index.html");
       if (fs.existsSync(distFallback)) {
-        mainWindow?.loadFile(distFallback).catch(() => {});
+        void mainWindow?.loadFile(distFallback).catch(() => {
+          void mainWindow
+            ?.loadURL(
+              `data:text/html;charset=utf-8,${encodeURIComponent(
+                `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:SF Pro Text,PingFang SC,sans-serif;background:#14141c;color:rgba(255,255,255,.7);-webkit-app-region:drag"><div style="text-align:center"><h3 style="margin:0">无法连接到开发服务器</h3><p style="margin-top:.5rem;font-size:.85rem;opacity:.6">请确保已运行 <code>npm run dev</code></p></div></body></html>`
+              )}`
+            )
+            .then(() => {
+              mainWindow?.show();
+            });
+        });
       } else {
-        mainWindow?.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
+        void mainWindow?.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
           `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:SF Pro Text,PingFang SC,sans-serif;background:#14141c;color:rgba(255,255,255,.7);-webkit-app-region:drag"><div style="text-align:center"><h3 style="margin:0">无法连接到开发服务器</h3><p style="margin-top:.5rem;font-size:.85rem;opacity:.6">请确保已运行 <code>npm run dev</code></p></div></body></html>`
-        )}`).catch(() => {});
+        )}`).then(() => {
+          mainWindow?.show();
+        });
       }
     });
   }
@@ -1686,113 +1722,128 @@ function registerIpc(): void {
   });
 }
 
-app.setName("Machi");
-
-app.whenReady().then(async () => {
-  try {
-    Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate()));
-    if (process.platform === "darwin") {
-      const iconPath = app.isPackaged
-        ? path.join(process.resourcesPath, "assets", "icon.png")
-        : path.resolve(process.cwd(), "assets", "icon.png");
-      if (fs.existsSync(iconPath)) {
-        app.dock.setIcon(iconPath);
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
       }
+      mainWindow.show();
+      mainWindow.focus();
     }
+  });
 
-    remoteConfig = loadRemoteConfig();
+  app.setName("Machi");
 
-    if (remoteConfig) {
-      const ok = await pingRemoteServer(remoteConfig);
-      if (!ok) {
-        const { response } = await dialog.showMessageBox({
-          type: "warning",
-          title: "无法连接远程服务器",
-          message: `无法连接到 ${remoteConfig.url}`,
-          detail: [
-            "请检查：",
-            "1. 云主机上 agx serve 是否已启动",
-            "2. URL 和端口是否正确",
-            "3. 防火墙是否放行",
-            "4. Token 是否匹配",
-          ].join("\n"),
-          buttons: ["重试", "退出"],
-          defaultId: 0,
-          cancelId: 1,
-        });
-        if (response === 0) {
-          const retryOk = await pingRemoteServer(remoteConfig);
-          if (!retryOk) {
-            app.quit();
-            return;
-          }
-        } else {
-          app.quit();
-          return;
+  app.whenReady().then(async () => {
+    try {
+      Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate()));
+      if (process.platform === "darwin") {
+        const iconPath = app.isPackaged
+          ? path.join(process.resourcesPath, "assets", "icon.png")
+          : path.resolve(process.cwd(), "assets", "icon.png");
+        if (fs.existsSync(iconPath)) {
+          app.dock.setIcon(iconPath);
         }
       }
-    } else {
-      const bundledPath = resolveBundledBackend();
-      if (!bundledPath) {
-        const agxOk = await checkAgxCli();
-        if (!agxOk) {
-          const installDocsUrl = "https://www.agxbuilder.com/docs/getting-started/installation";
+
+      remoteConfig = loadRemoteConfig();
+
+      if (remoteConfig) {
+        const ok = await pingRemoteServer(remoteConfig);
+        if (!ok) {
           const { response } = await dialog.showMessageBox({
             type: "warning",
-            title: "缺少 agx 命令行工具",
-            message: "Machi 需要本地 agx CLI 或内嵌后端才能启动",
+            title: "无法连接远程服务器",
+            message: `无法连接到 ${remoteConfig.url}`,
             detail: [
-              "当前为开发/未打包构建，且未检测到 agx 命令。可选：",
-              "",
-              "1) 安装 agx（终端）：",
-              "   pip install agenticx",
-              "   或见官方安装脚本说明",
-              "",
-              "2) 在「设置」中启用远程服务器模式，连接已部署的 agx serve",
-              "",
-              "3) 发布版 DMG：使用 packaging/build_dmg.sh 构建后会内嵌 agx-server",
+              "请检查：",
+              "1. 云主机上 agx serve 是否已启动",
+              "2. URL 和端口是否正确",
+              "3. 防火墙是否放行",
+              "4. Token 是否匹配",
             ].join("\n"),
-            buttons: ["查看安装说明", "退出"],
+            buttons: ["重试", "退出"],
             defaultId: 0,
             cancelId: 1,
           });
           if (response === 0) {
-            void shell.openExternal(installDocsUrl);
+            const retryOk = await pingRemoteServer(remoteConfig);
+            if (!retryOk) {
+              app.quit();
+              return;
+            }
+          } else {
+            app.quit();
+            return;
           }
-          app.quit();
-          return;
         }
+      } else {
+        const bundledPath = resolveBundledBackend();
+        if (!bundledPath) {
+          const agxOk = await checkAgxCli();
+          if (!agxOk) {
+            const installDocsUrl = "https://www.agxbuilder.com/docs/getting-started/installation";
+            const { response } = await dialog.showMessageBox({
+              type: "warning",
+              title: "缺少 agx 命令行工具",
+              message: "Machi 需要本地 agx CLI 或内嵌后端才能启动",
+              detail: [
+                "当前为开发/未打包构建，且未检测到 agx 命令。可选：",
+                "",
+                "1) 安装 agx（终端）：",
+                "   pip install agenticx",
+                "   或见官方安装脚本说明",
+                "",
+                "2) 在「设置」中启用远程服务器模式，连接已部署的 agx serve",
+                "",
+                "3) 发布版 DMG：使用 packaging/build_dmg.sh 构建后会内嵌 agx-server",
+              ].join("\n"),
+              buttons: ["查看安装说明", "退出"],
+              defaultId: 0,
+              cancelId: 1,
+            });
+            if (response === 0) {
+              void shell.openExternal(installDocsUrl);
+            }
+            app.quit();
+            return;
+          }
+        }
+
+        await startStudioServe();
+        await waitServeReady();
       }
 
-      await startStudioServe();
-      await waitServeReady();
+      registerIpc();
+      createWindow();
+      createTray();
+    } catch (error) {
+      await dialog.showErrorBox(
+        "Machi 启动失败",
+        remoteConfig
+          ? `无法连接远程服务器。\n\n${String(error)}`
+          : `无法启动本地服务，请检查 agx 是否可用。\n\n${String(error)}`
+      );
+      app.quit();
     }
+  });
 
-    registerIpc();
-    createWindow();
-    createTray();
-  } catch (error) {
-    await dialog.showErrorBox(
-      "Machi 启动失败",
-      remoteConfig
-        ? `无法连接远程服务器。\n\n${String(error)}`
-        : `无法启动本地服务，请检查 agx 是否可用。\n\n${String(error)}`
-    );
-    app.quit();
-  }
-});
+  app.on("activate", () => {
+    if (!mainWindow) {
+      createWindow();
+      return;
+    }
+    mainWindow.show();
+    mainWindow.focus();
+  });
 
-app.on("activate", () => {
-  if (!mainWindow) {
-    createWindow();
-    return;
-  }
-  mainWindow.show();
-  mainWindow.focus();
-});
-
-app.on("before-quit", () => {
-  isQuitting = true;
-  killAllTerminalSessions();
-  stopStudioServe();
-});
+  app.on("before-quit", () => {
+    isQuitting = true;
+    killAllTerminalSessions();
+    stopStudioServe();
+  });
+}
