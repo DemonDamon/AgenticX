@@ -550,7 +550,7 @@ export function WorkspacePanel({
             +
           </button>
         </div>
-        <div className="min-h-0 flex-1 bg-[#0f1014]">
+        <div className="min-h-0 flex-1 bg-surface-card">
           {activeTab ? (
             <TerminalEmbed key={activeTab.id} tabId={activeTab.id} cwd={activeTab.cwd} />
           ) : (

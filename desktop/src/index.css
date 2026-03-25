@@ -113,3 +113,8 @@ body {
   line-height: 1.45;
   tab-size: 2;
 }
+
+/* xterm default stylesheet forces viewport to #000; let canvas + parent surface show through */
+.xterm .xterm-viewport {
+  background-color: transparent !important;
+}
