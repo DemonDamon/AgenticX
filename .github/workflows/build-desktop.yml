@@ -61,12 +61,8 @@ jobs:
       - name: Package (electron-builder, arm64 / x64)
         working-directory: desktop
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' && 'true' || 'false' }}
+          DEBUG: electron-builder
+          CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npx electron-builder --mac --${{ matrix.arch }} --publish never
 
       - name: Upload artifacts
@@ -110,15 +106,22 @@ jobs:
         working-directory: desktop
         run: npm run build
 
+      - name: Pre-flight check
+        working-directory: desktop
+        run: |
+          echo "=== bundled-backend ==="
+          ls -lR bundled-backend/ || echo "bundled-backend missing!"
+          echo "=== dist + dist-electron ==="
+          ls dist/ | head -10
+          ls dist-electron/ | head -10
+          echo "=== package.json author ==="
+          node -e "console.log(require('./package.json').author)"
+
       - name: Package (electron-builder)
         working-directory: desktop
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' && 'true' || 'false' }}
+          DEBUG: electron-builder
+          CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npx electron-builder --mac --${{ env.ARCH }} --publish never
 
       - name: Upload artifacts
