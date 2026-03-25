@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Tool loop detection utilities for AgentRuntime."""
+"""Tool loop detection utilities for AgentRuntime.
+
+Author: Damon Li
+"""
 
 from __future__ import annotations
 
@@ -45,7 +48,12 @@ class LoopDetector:
         self._progress_marks.append(bool(has_progress))
 
     def check(self) -> Optional[LoopCheckResult]:
-        for detector in (self._detect_generic_repeat, self._detect_ping_pong, self._detect_no_progress):
+        for detector in (
+            self._detect_generic_repeat,
+            self._detect_ping_pong,
+            self._detect_no_progress,
+            self._detect_tool_saturation,
+        ):
             result = detector()
             if result is not None:
                 return result
@@ -118,3 +126,33 @@ class LoopDetector:
             detector="no_progress",
             message=f"连续 {streak} 次工具调用未观察到进展（artifacts/scratchpad 未变化）。",
         )
+
+    def _detect_tool_saturation(self) -> Optional[LoopCheckResult]:
+        """Detect one tool dominating recent calls with little recorded progress."""
+        if len(self._calls) < self.warning_threshold:
+            return None
+        tail = list(self._calls)[-self.critical_threshold :]
+        progress_tail = list(self._progress_marks)[-self.critical_threshold :]
+        if len(tail) != len(progress_tail):
+            return None
+        tool_counts: Dict[str, int] = {}
+        for name, _ in tail:
+            tool_counts[name] = tool_counts.get(name, 0) + 1
+        for tool_name, count in tool_counts.items():
+            if count < self.warning_threshold:
+                continue
+            tool_indices = [i for i, (n, _) in enumerate(tail) if n == tool_name]
+            no_progress_count = sum(
+                1 for i in tool_indices if i < len(progress_tail) and not progress_tail[i]
+            )
+            if no_progress_count >= self.warning_threshold:
+                level = self._classify(no_progress_count)
+                return LoopCheckResult(
+                    stuck=True,
+                    level=level,
+                    detector="tool_saturation",
+                    message=(
+                        f"工具 {tool_name} 在近期窗口内调用 {count} 次，其中 {no_progress_count} 次未观察到有效进展。"
+                    ),
+                )
+        return None
