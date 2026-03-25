@@ -558,7 +558,54 @@ graph TD
 
 ## 致谢
 
-AgenticX 在架构与实现上受益于诸多优秀开源项目；我们在 [`research/codedeepresearch/`](research/codedeepresearch/) 中整理、研读的上游与镜像仓库为团队提供了重要灵感与参考。谨向这些项目的作者与社区致以感谢（按目录名字母序）：**A2A**、**AgentCPM-GUI**、**CLI-Anything**、**ClawTeam**、**CodexMonitor**、**Khazix Skills**（`Khazix-Skills`）、**MAI-UI**、**MobiAgent**、**MobileAgent**、**OpenSandbox**、**SWE-agent**、**Serverless Devs**（`Serverless-Devs`）、**ADK Python**（`adk-python`）、**ag-ui**、**AgentKit SDK**（`agentkit-sdk-python`）、**AgentRun SDK**（`agentrun-sdk-python`）、**AgentScope**、**Agno**、**Camel**、**Cherry Studio**、**Claude Code**（`claudecode`）、**CrewAI**、**DeepWiki Open**（`deepwiki-open`）、**Deer Flow**（`deer-flow`）、**Eigent**、**Iron Claw**（`ironclaw`）、**JoyAgent / JD Genie**（`joyagent-jdgenie`）、**Lobe Icons**（`lobe-icons`）、**LoongSuite Python Agent**（`loongsuite-python-agent`）、**Microsandbox**、**Model Context Protocol**（`modelcontextprotocol`）、**NVIDIA NemoClaw**（`nvidia-nemoclaw`）、**OpenClaw**（`openclaw`）、**OpenClaw Tmux Claude Code**（`openclaw-tmux-claude-code`）、**OpenShell**（`openshell`）、**OpenSkills**（`openskills`）、**OWL**（`owl`）、**Pydantic AI**（`pydantic-ai`）、**RAG**（`rag`）、**Refly**、**Skills**（`skills`）、**Spring AI**（`spring-ai`）、**VE ADK**（`veadk-python`）与 **ZeroBoot**（`zeroboot`）。
+AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们深度研读了以下这些项目的架构设计与源码实现，它们在智能体编排、工具调用、记忆系统、沙箱安全、桌面端 UX 等各个维度为我们提供了宝贵的灵感与参考。在此，向每一位为这些项目付出心血的作者、贡献者和社区成员，致以最诚挚的感谢。
+
+| 项目 | 仓库 | 给予我们的启发 |
+|------|------|----------------|
+| **A2A** | [a2aproject/A2A](https://github.com/a2aproject/A2A) | Agent 间通信协议设计 |
+| **AgentCPM-GUI** | [OpenBMB/AgentCPM-GUI](https://github.com/OpenBMB/AgentCPM-GUI) | 紧凑型 GUI 动作 Schema 与 RFT 训练 |
+| **ADK Python** | [google/adk-python](https://github.com/google/adk-python) | 智能体生命周期与 Runner 抽象 |
+| **ag-ui** | [ag-ui-protocol/ag-ui](https://github.com/ag-ui-protocol/ag-ui) | Agent–UI 流式通信协议 |
+| **AgentKit SDK** | [volcengine/agentkit-sdk-python](https://github.com/volcengine/agentkit-sdk-python) | 智能体部署与 Skill 打包 |
+| **AgentRun SDK** | [Serverless-Devs/agentrun-sdk-python](https://github.com/Serverless-Devs/agentrun-sdk-python) | Serverless 智能体运行时模式 |
+| **AgentScope** | [agentscope-ai/agentscope](https://github.com/agentscope-ai/agentscope) | 多智能体通信与流水线设计 |
+| **Agno** | [agno-agi/agno](https://github.com/agno-agi/agno) | 轻量级智能体框架设计 |
+| **Camel** | [camel-ai/camel](https://github.com/camel-ai/camel) | 角色扮演智能体与社会模拟 |
+| **Cherry Studio** | [CherryHQ/cherry-studio](https://github.com/CherryHQ/cherry-studio) | 桌面端 UX、MCP 集成与 Skill 系统 |
+| **Claude Code** | [anthropics/claude-code](https://github.com/anthropics/claude-code) | 智能体 CLI UX 与插件架构 |
+| **CLI-Anything** | [HKUDS/CLI-Anything](https://github.com/HKUDS/CLI-Anything) | CLI 原生智能体测试框架 |
+| **ClawTeam** | [HKUDS/ClawTeam](https://github.com/HKUDS/ClawTeam) | 多智能体团队协作机制 |
+| **CodexMonitor** | [Dimillian/CodexMonitor](https://github.com/Dimillian/CodexMonitor) | 桌面监控面板与 Tauri 应用模式 |
+| **CrewAI** | [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI) | Crew 编排、Flow 工作流与记忆系统 |
+| **DeepWiki Open** | [AsyncFuncAI/deepwiki-open](https://github.com/AsyncFuncAI/deepwiki-open) | 仓库级知识索引 |
+| **Deer Flow** | [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | 深度研究工作流与 Skill 测试框架 |
+| **Eigent** | [eigent-ai/eigent](https://github.com/eigent-ai/eigent) | 多智能体 Workforce 与 SSE 事件规范 |
+| **Iron Claw** | [nearai/ironclaw](https://github.com/nearai/ironclaw) | 智能体评测与基准测试框架 |
+| **JoyAgent / JD Genie** | [jd-opensource/joyagent-jdgenie](https://github.com/jd-opensource/joyagent-jdgenie) | 企业级智能体编排 |
+| **Khazix Skills** | [KKKKhazix/Khazix-Skills](https://github.com/KKKKhazix/Khazix-Skills) | Skill 模块结构与打包 |
+| **Lobe Icons** | [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons) | AI 提供商图标设计规范 |
+| **LoongSuite Python Agent** | [alibaba/loongsuite-python-agent](https://github.com/alibaba/loongsuite-python-agent) | OpenTelemetry GenAI 可观测性埋点 |
+| **MAI-UI** | [Tongyi-MAI/MAI-UI](https://github.com/Tongyi-MAI/MAI-UI) | 端云协同与 GUI Grounding |
+| **Microsandbox** | [zerocore-ai/microsandbox](https://github.com/zerocore-ai/microsandbox) | 轻量级沙箱代码执行 |
+| **MobiAgent** | [IPADS-SAI/MobiAgent](https://github.com/IPADS-SAI/MobiAgent) | 移动端多阶段规划 |
+| **MobileAgent** | [X-PLUG/MobileAgent](https://github.com/X-PLUG/MobileAgent) | 多智能体移动 GUI 自动化 |
+| **Model Context Protocol** | [modelcontextprotocol/modelcontextprotocol](https://github.com/modelcontextprotocol/modelcontextprotocol) | LLM 工具/资源标准化协议 |
+| **NVIDIA NemoClaw** | [NVIDIA/NemoClaw](https://github.com/NVIDIA/NemoClaw) | GPU 加速智能体插件系统 |
+| **OpenClaw** | [openclaw/openclaw](https://github.com/openclaw/openclaw) | 开放式桌面智能体平台与扩展生态 |
+| **OpenSandbox** | [alibaba/OpenSandbox](https://github.com/alibaba/OpenSandbox) | 容器化代码沙箱 |
+| **OpenShell** | [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Rust 高性能安全智能体 Shell |
+| **OpenSkills** | [numman-ali/openskills](https://github.com/numman-ali/openskills) | Skill 注册中心与发现机制 |
+| **OWL** | [camel-ai/owl](https://github.com/camel-ai/owl) | 具身多智能体协作 |
+| **Pydantic AI** | [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai) | 类型安全智能体与评测框架 |
+| **Refly** | [refly-ai/refly](https://github.com/refly-ai/refly) | AI 原生知识画布 UX |
+| **Serverless Devs** | [Serverless-Devs/Serverless-Devs](https://github.com/Serverless-Devs/Serverless-Devs) | Serverless 智能体部署工具链 |
+| **Skills** | [anthropics/skills](https://github.com/anthropics/skills) | Skill 定义格式与生命周期 |
+| **Spring AI** | [spring-projects/spring-ai](https://github.com/spring-projects/spring-ai) | 企业级 AI 抽象与集成模式 |
+| **SWE-agent** | [SWE-agent/SWE-agent](https://github.com/SWE-agent/SWE-agent) | 软件工程智能体与 ACR 修复循环 |
+| **VE ADK** | [volcengine/veadk-python](https://github.com/volcengine/veadk-python) | Skills 系统与云原生 A2A |
+| **ZeroBoot** | [zerobootdev/zeroboot](https://github.com/zerobootdev/zeroboot) | 零配置智能体引导启动 |
+
+这些项目都在以开源的方式推动 AI 智能体生态向前，感谢你们的慷慨共享，AgenticX 团队因你们的工作而受益匪浅。
 
 ---
 

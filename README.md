@@ -559,7 +559,54 @@ This project is licensed under the GNU Affero General Public License v3.0 (AGPL-
 
 ## Acknowledgments
 
-Many ideas and reference points in AgenticX come from outstanding open-source work we study under [`research/codedeepresearch/`](research/codedeepresearch/). Thank you to the authors and communities behind those projects, including (alphabetical by folder name): **A2A**, **AgentCPM-GUI**, **CLI-Anything**, **ClawTeam**, **CodexMonitor**, **Khazix Skills** (`Khazix-Skills`), **MAI-UI**, **MobiAgent**, **MobileAgent**, **OpenSandbox**, **SWE-agent**, **Serverless Devs** (`Serverless-Devs`), **ADK Python** (`adk-python`), **ag-ui**, **AgentKit SDK** (`agentkit-sdk-python`), **AgentRun SDK** (`agentrun-sdk-python`), **AgentScope**, **Agno**, **Camel**, **Cherry Studio**, **Claude Code** (`claudecode`), **CrewAI**, **DeepWiki Open** (`deepwiki-open`), **Deer Flow** (`deer-flow`), **Eigent**, **Iron Claw** (`ironclaw`), **JoyAgent / JD Genie** (`joyagent-jdgenie`), **Lobe Icons** (`lobe-icons`), **LoongSuite Python Agent** (`loongsuite-python-agent`), **Microsandbox**, **Model Context Protocol** (`modelcontextprotocol`), **NVIDIA NemoClaw** (`nvidia-nemoclaw`), **OpenClaw** (`openclaw`), **OpenClaw Tmux Claude Code** (`openclaw-tmux-claude-code`), **OpenShell** (`openshell`), **OpenSkills** (`openskills`), **OWL** (`owl`), **Pydantic AI** (`pydantic-ai`), **RAG** (`rag`), **Refly**, **Skills** (`skills`), **Spring AI** (`spring-ai`), **VE ADK** (`veadk-python`), and **ZeroBoot** (`zeroboot`).
+AgenticX would not exist in its current form without the inspiration, architectural ideas, and engineering wisdom we drew from the open-source community. We have studied the following projects in depth, and we are genuinely grateful to every author, contributor, and community behind them.
+
+| Project | Repository | What we learned |
+|---------|-----------|-----------------|
+| **A2A** | [a2aproject/A2A](https://github.com/a2aproject/A2A) | Agent-to-Agent protocol design |
+| **AgentCPM-GUI** | [OpenBMB/AgentCPM-GUI](https://github.com/OpenBMB/AgentCPM-GUI) | Compact GUI action schema & RFT training |
+| **ADK Python** | [google/adk-python](https://github.com/google/adk-python) | Agent lifecycle, runner abstractions |
+| **ag-ui** | [ag-ui-protocol/ag-ui](https://github.com/ag-ui-protocol/ag-ui) | Agent–UI streaming protocol |
+| **AgentKit SDK** | [volcengine/agentkit-sdk-python](https://github.com/volcengine/agentkit-sdk-python) | Agent deployment & skill packaging |
+| **AgentRun SDK** | [Serverless-Devs/agentrun-sdk-python](https://github.com/Serverless-Devs/agentrun-sdk-python) | Serverless agent runtime patterns |
+| **AgentScope** | [agentscope-ai/agentscope](https://github.com/agentscope-ai/agentscope) | Multi-agent communication & pipeline |
+| **Agno** | [agno-agi/agno](https://github.com/agno-agi/agno) | Lightweight agent framework design |
+| **Camel** | [camel-ai/camel](https://github.com/camel-ai/camel) | Role-playing agents & society simulation |
+| **Cherry Studio** | [CherryHQ/cherry-studio](https://github.com/CherryHQ/cherry-studio) | Desktop UX, MCP integration, skill system |
+| **Claude Code** | [anthropics/claude-code](https://github.com/anthropics/claude-code) | Agentic CLI UX & plugin architecture |
+| **CLI-Anything** | [HKUDS/CLI-Anything](https://github.com/HKUDS/CLI-Anything) | CLI-native agent harness |
+| **ClawTeam** | [HKUDS/ClawTeam](https://github.com/HKUDS/ClawTeam) | Multi-agent team coordination |
+| **CodexMonitor** | [Dimillian/CodexMonitor](https://github.com/Dimillian/CodexMonitor) | Desktop monitoring & Tauri app patterns |
+| **CrewAI** | [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI) | Crew orchestration, flow & memory system |
+| **DeepWiki Open** | [AsyncFuncAI/deepwiki-open](https://github.com/AsyncFuncAI/deepwiki-open) | Repository-level knowledge indexing |
+| **Deer Flow** | [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | Deep research workflow & skill harness |
+| **Eigent** | [eigent-ai/eigent](https://github.com/eigent-ai/eigent) | Multi-agent workforce & SSE event spec |
+| **Iron Claw** | [nearai/ironclaw](https://github.com/nearai/ironclaw) | Agent evaluation & benchmark harness |
+| **JoyAgent / JD Genie** | [jd-opensource/joyagent-jdgenie](https://github.com/jd-opensource/joyagent-jdgenie) | Enterprise agent orchestration |
+| **Khazix Skills** | [KKKKhazix/Khazix-Skills](https://github.com/KKKKhazix/Khazix-Skills) | Skill module structure & packaging |
+| **Lobe Icons** | [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons) | AI provider icon design system |
+| **LoongSuite Python Agent** | [alibaba/loongsuite-python-agent](https://github.com/alibaba/loongsuite-python-agent) | OpenTelemetry GenAI instrumentation |
+| **MAI-UI** | [Tongyi-MAI/MAI-UI](https://github.com/Tongyi-MAI/MAI-UI) | Device-cloud collaboration & GUI grounding |
+| **Microsandbox** | [zerocore-ai/microsandbox](https://github.com/zerocore-ai/microsandbox) | Lightweight sandboxed code execution |
+| **MobiAgent** | [IPADS-SAI/MobiAgent](https://github.com/IPADS-SAI/MobiAgent) | Mobile multi-stage planning |
+| **MobileAgent** | [X-PLUG/MobileAgent](https://github.com/X-PLUG/MobileAgent) | Multi-agent mobile GUI automation |
+| **Model Context Protocol** | [modelcontextprotocol/modelcontextprotocol](https://github.com/modelcontextprotocol/modelcontextprotocol) | Standardized LLM tool/resource protocol |
+| **NVIDIA NemoClaw** | [NVIDIA/NemoClaw](https://github.com/NVIDIA/NemoClaw) | GPU-accelerated agent plugin system |
+| **OpenClaw** | [openclaw/openclaw](https://github.com/openclaw/openclaw) | Open desktop agent platform & extensions |
+| **OpenSandbox** | [alibaba/OpenSandbox](https://github.com/alibaba/OpenSandbox) | Container-based code sandbox |
+| **OpenShell** | [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Rust-based secure agent shell |
+| **OpenSkills** | [numman-ali/openskills](https://github.com/numman-ali/openskills) | Skill registry & discovery |
+| **OWL** | [camel-ai/owl](https://github.com/camel-ai/owl) | Embodied multi-agent collaboration |
+| **Pydantic AI** | [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai) | Type-safe agent & eval framework |
+| **Refly** | [refly-ai/refly](https://github.com/refly-ai/refly) | AI-native knowledge canvas UX |
+| **Serverless Devs** | [Serverless-Devs/Serverless-Devs](https://github.com/Serverless-Devs/Serverless-Devs) | Serverless agent deployment toolchain |
+| **Skills** | [anthropics/skills](https://github.com/anthropics/skills) | Skill definition format & lifecycle |
+| **Spring AI** | [spring-projects/spring-ai](https://github.com/spring-projects/spring-ai) | Enterprise AI abstraction patterns |
+| **SWE-agent** | [SWE-agent/SWE-agent](https://github.com/SWE-agent/SWE-agent) | Software engineering agent & ACR loop |
+| **VE ADK** | [volcengine/veadk-python](https://github.com/volcengine/veadk-python) | Skills system & cloud-native A2A |
+| **ZeroBoot** | [zerobootdev/zeroboot](https://github.com/zerobootdev/zeroboot) | Zero-config agent bootstrapping |
+
+Thank you for building in the open. Your work has been a constant source of insight and motivation for the AgenticX team.
 
 ---
 
