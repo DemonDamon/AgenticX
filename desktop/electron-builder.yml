@@ -7,7 +7,7 @@ files:
   - dist-electron/**/*
 extraResources:
   - assets/**/*
-afterSign: scripts/mac/notarize.js
+# afterSign: scripts/mac/notarize.js  # 公证在本地签名时启用；CI 无 Apple 证书时跳过
 mac:
   target:
     - target: dmg
