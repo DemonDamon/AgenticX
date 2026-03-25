@@ -177,4 +177,22 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   searchRegistry: async (args: { q: string }) => ipcRenderer.invoke("search-registry", args),
   installFromRegistry: async (args: { source: string; name: string }) =>
     ipcRenderer.invoke("install-from-registry", args),
+
+  terminalSpawn: async (payload: { id: string; cwd: string; cols?: number; rows?: number }) =>
+    ipcRenderer.invoke("terminal-spawn", payload) as Promise<{ ok: boolean; id?: string; error?: string }>,
+  terminalWrite: async (payload: { id: string; data: string }) =>
+    ipcRenderer.invoke("terminal-write", payload) as Promise<{ ok: boolean }>,
+  terminalResize: async (payload: { id: string; cols: number; rows: number }) =>
+    ipcRenderer.invoke("terminal-resize", payload) as Promise<{ ok: boolean }>,
+  terminalKill: async (id: string) => ipcRenderer.invoke("terminal-kill", id) as Promise<{ ok: boolean }>,
+  onTerminalData: (cb: (payload: { id: string; data: string }) => void): (() => void) => {
+    const handler = (_e: unknown, payload: { id: string; data: string }) => cb(payload);
+    ipcRenderer.on("terminal-data", handler);
+    return () => ipcRenderer.removeListener("terminal-data", handler);
+  },
+  onTerminalExit: (cb: (payload: { id: string }) => void): (() => void) => {
+    const handler = (_e: unknown, payload: { id: string }) => cb(payload);
+    ipcRenderer.on("terminal-exit", handler);
+    return () => ipcRenderer.removeListener("terminal-exit", handler);
+  },
 });

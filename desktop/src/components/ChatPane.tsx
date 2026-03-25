@@ -11,6 +11,7 @@ import {
 import { startRecording, stopRecording } from "../voice/stt";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { WorkspacePanel } from "./WorkspacePanel";
+import { SpawnsColumn } from "./SpawnsColumn";
 import { MessageRenderer } from "./messages/MessageRenderer";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ImBubble } from "./messages/ImBubble";
@@ -58,6 +59,11 @@ const FALLBACK_PANE: ChatPaneState = {
   membersPanelOpen: false,
   sidePanelTab: "workspace",
   activeTaskspaceId: null,
+  spawnsColumnOpen: false,
+  spawnsColumnSuppressAuto: false,
+  spawnsColumnBaselineIds: [],
+  terminalTabs: [],
+  activeTerminalTabId: null,
 };
 
 function NewTopicButton({ onNewTopic }: { onNewTopic: (inherit: boolean) => void }) {
@@ -533,6 +539,7 @@ function buildToolCallLivePreview(toolNameRaw: unknown, argsRaw: unknown): strin
 }
 
 const TASKSPACE_WIDTH_STORAGE_KEY = "agenticx:taskspace-panel-width";
+const SPAWNS_WIDTH_STORAGE_KEY = "agenticx:spawns-column-width";
 const TEXT_ATTACHMENT_LIMIT = 32000;
 
 type AttachedFileStatus = "parsing" | "ready" | "error";
@@ -1060,6 +1067,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneContextInherited = useAppStore((s) => s.setPaneContextInherited);
+  const setSpawnsColumnOpen = useAppStore((s) => s.setSpawnsColumnOpen);
+  const dismissSpawnsColumn = useAppStore((s) => s.dismissSpawnsColumn);
+  const clearSpawnsColumnSuppress = useAppStore((s) => s.clearSpawnsColumnSuppress);
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
   const activeProvider = useAppStore((s) => s.activeProvider);
@@ -1143,6 +1153,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
     return 340;
   });
+  const [spawnsWidth, setSpawnsWidth] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(SPAWNS_WIDTH_STORAGE_KEY);
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    } catch {
+      // ignore storage access failures
+    }
+    return 300;
+  });
   const paneRef = useRef<HTMLDivElement | null>(null);
   const [paneWidth, setPaneWidth] = useState(0);
 
@@ -1160,6 +1180,42 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!sid) return [];
     return subAgents.filter((item) => (item.sessionId ?? "").trim() === sid);
   }, [pane?.sessionId, subAgents]);
+  const paneSubAgentIdsKey = useMemo(
+    () =>
+      paneSubAgents
+        .map((s) => s.id)
+        .sort()
+        .join("\0"),
+    [paneSubAgents]
+  );
+
+  useEffect(() => {
+    if (paneSubAgents.length === 0) {
+      if (pane.spawnsColumnOpen) setSpawnsColumnOpen(pane.id, false);
+      return;
+    }
+    const baseline = new Set(pane.spawnsColumnBaselineIds ?? []);
+    if (pane.spawnsColumnSuppressAuto) {
+      const hasNew = paneSubAgents.some((s) => !baseline.has(s.id));
+      if (hasNew) {
+        clearSpawnsColumnSuppress(pane.id);
+        setSpawnsColumnOpen(pane.id, true);
+      }
+      return;
+    }
+    if (!pane.spawnsColumnOpen) {
+      setSpawnsColumnOpen(pane.id, true);
+    }
+  }, [
+    pane.id,
+    pane.spawnsColumnOpen,
+    pane.spawnsColumnSuppressAuto,
+    pane.spawnsColumnBaselineIds,
+    paneSubAgentIdsKey,
+    paneSubAgents.length,
+    clearSpawnsColumnSuppress,
+    setSpawnsColumnOpen,
+  ]);
   const attachmentEntries = useMemo(() => Object.entries(contextFiles), [contextFiles]);
   const readyAttachments = useMemo(
     () => attachmentEntries.filter(([, file]) => file.status === "ready").map(([, file]) => file),
@@ -2576,10 +2632,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const maxTaskspaceWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.4)) : 480;
   const minTaskspaceWidth = 220;
+  const maxSpawnsWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.42)) : 420;
+  const minSpawnsWidth = 220;
 
   useEffect(() => {
     setTaskspaceWidth((prev) => Math.min(maxTaskspaceWidth, Math.max(minTaskspaceWidth, prev)));
   }, [maxTaskspaceWidth]);
+
+  useEffect(() => {
+    setSpawnsWidth((prev) => Math.min(maxSpawnsWidth, Math.max(minSpawnsWidth, prev)));
+  }, [maxSpawnsWidth]);
 
 
   useEffect(() => {
@@ -2590,6 +2652,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
   }, [taskspaceWidth]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SPAWNS_WIDTH_STORAGE_KEY, String(spawnsWidth));
+    } catch {
+      // ignore storage access failures
+    }
+  }, [spawnsWidth]);
+
 
   const startResizeTaskspace = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -2599,6 +2669,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const delta = startX - moveEvent.clientX;
       const next = Math.max(minTaskspaceWidth, Math.min(maxTaskspaceWidth, startWidth + delta));
       setTaskspaceWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const startResizeSpawns = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = spawnsWidth;
+    const onMove = (moveEvent: MouseEvent) => {
+      const delta = startX - moveEvent.clientX;
+      const next = Math.max(minSpawnsWidth, Math.min(maxSpawnsWidth, startWidth + delta));
+      setSpawnsWidth(next);
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
@@ -2742,6 +2829,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             >
               工作区
             </button>
+            {paneSubAgents.length > 0 ? (
+              <button
+                className={`rounded px-2 py-0.5 text-[11px] transition ${
+                  pane.spawnsColumnOpen
+                    ? "bg-surface-card-strong text-text-strong"
+                    : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
+                }`}
+                onClick={() => {
+                  if (pane.spawnsColumnOpen) {
+                    dismissSpawnsColumn(
+                      pane.id,
+                      paneSubAgents.map((s) => s.id)
+                    );
+                  } else {
+                    setSpawnsColumnOpen(pane.id, true);
+                  }
+                }}
+                title={pane.spawnsColumnOpen ? "收起 Spawns 列" : "打开 Spawns 列"}
+              >
+                Spawns
+              </button>
+            ) : null}
             <button
               className="rounded px-2 py-0.5 text-[11px] text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
               onClick={() => togglePaneHistory(pane.id)}
@@ -3090,6 +3199,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               </div>
               <div className="min-h-0 flex-1">
                 <WorkspacePanel
+                  paneId={pane.id}
                   sessionId={pane.sessionId}
                   activeTaskspaceId={pane.activeTaskspaceId}
                   onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
@@ -3099,26 +3209,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     void addContextFile(pane.activeTaskspaceId, path);
                     setInput((prev) => `${prev}${prev.endsWith(" ") || !prev ? "" : " "}@${path.split("/").pop() || path} `);
                   }}
-                  subAgents={paneSubAgents}
-                  selectedSubAgent={selectedSubAgent}
-                  onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
-                  onRetry={(agentId) => void retryPaneSubAgent(agentId)}
-                  onChat={(agentId) => {
-                    const sub = paneSubAgents.find((item) => item.id === agentId);
-                    const isDelegation = agentId.startsWith("dlg-") || !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
-                    if (isDelegation) {
-                      void openDelegatedAvatarSession(agentId);
-                      return;
-                    }
-                    setSelectedSubAgent(agentId);
-                  }}
-                  onSelect={(agentId) => setSelectedSubAgent(agentId)}
-                  onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
                 />
               </div>
             </div>
           ) : (
             <WorkspacePanel
+              paneId={pane.id}
               sessionId={pane.sessionId}
               activeTaskspaceId={pane.activeTaskspaceId}
               onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
@@ -3128,24 +3224,31 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 void addContextFile(pane.activeTaskspaceId, path);
                 setInput((prev) => `${prev}${prev.endsWith(" ") || !prev ? "" : " "}@${path.split("/").pop() || path} `);
               }}
-              subAgents={paneSubAgents}
-              selectedSubAgent={selectedSubAgent}
-              onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
-              onRetry={(agentId) => void retryPaneSubAgent(agentId)}
-              onChat={(agentId) => {
-                const sub = paneSubAgents.find((item) => item.id === agentId);
-                const isDelegation = agentId.startsWith("dlg-") || !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
-                if (isDelegation) {
-                  void openDelegatedAvatarSession(agentId);
-                  return;
-                }
-                setSelectedSubAgent(agentId);
-              }}
-              onSelect={(agentId) => setSelectedSubAgent(agentId)}
-              onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
             />
           )}
         </div>
+      ) : null}
+      {pane.spawnsColumnOpen ? (
+        <SpawnsColumn
+          width={spawnsWidth}
+          subAgents={paneSubAgents}
+          selectedSubAgent={selectedSubAgent}
+          onResizeStart={startResizeSpawns}
+          onClose={() => dismissSpawnsColumn(pane.id, paneSubAgents.map((s) => s.id))}
+          onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
+          onRetry={(agentId) => void retryPaneSubAgent(agentId)}
+          onChat={(agentId) => {
+            const sub = paneSubAgents.find((item) => item.id === agentId);
+            const isDelegation = agentId.startsWith("dlg-") || !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
+            if (isDelegation) {
+              void openDelegatedAvatarSession(agentId);
+              return;
+            }
+            setSelectedSubAgent(agentId);
+          }}
+          onSelect={(agentId) => setSelectedSubAgent(agentId)}
+          onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
+        />
       ) : null}
       <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}`}>
         <SessionHistoryPanel pane={pane} />

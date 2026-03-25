@@ -52,6 +52,12 @@ export type GroupChat = {
 
 export type SidePanelTab = "workspace" | "members";
 
+export type PaneTerminalTab = {
+  id: string;
+  cwd: string;
+  label: string;
+};
+
 export type ChatPane = {
   id: string;
   avatarId: string | null;
@@ -65,6 +71,15 @@ export type ChatPane = {
   /** Legacy persisted field; no longer used for visibility control. */
   sidePanelTab: SidePanelTab;
   activeTaskspaceId: string | null;
+  /** Right column: Spawns list (independent from workspace panel). */
+  spawnsColumnOpen: boolean;
+  /** After user closes Spawns column: suppress auto-open until a new sub-agent id appears. */
+  spawnsColumnSuppressAuto: boolean;
+  /** Sub-agent ids snapshot when user dismissed the column (for detecting "new spawn"). */
+  spawnsColumnBaselineIds: string[];
+  /** Embedded terminals in workspace panel (bottom). */
+  terminalTabs: PaneTerminalTab[];
+  activeTerminalTabId: string | null;
 };
 
 export type Message = {
@@ -252,6 +267,12 @@ type AppState = {
   openSidePanel: (paneId: string, tab: SidePanelTab) => void;
   setActiveTaskspace: (paneId: string, taskspaceId: string | null) => void;
   setPaneContextInherited: (paneId: string, inherited: boolean) => void;
+  setSpawnsColumnOpen: (paneId: string, open: boolean) => void;
+  dismissSpawnsColumn: (paneId: string, baselineSubAgentIds: string[]) => void;
+  clearSpawnsColumnSuppress: (paneId: string) => void;
+  addPaneTerminalTab: (paneId: string, cwd: string, labelHint?: string) => void;
+  removePaneTerminalTab: (paneId: string, tabId: string) => void;
+  setActivePaneTerminalTab: (paneId: string, tabId: string | null) => void;
   addMessage: (
     role: MsgRole,
     content: string,
@@ -310,6 +331,11 @@ function makeDefaultPane(): ChatPane {
     membersPanelOpen: false,
     sidePanelTab: "workspace",
     activeTaskspaceId: null,
+    spawnsColumnOpen: false,
+    spawnsColumnSuppressAuto: false,
+    spawnsColumnBaselineIds: [],
+    terminalTabs: [],
+    activeTerminalTabId: null,
   };
 }
 
@@ -422,6 +448,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           membersPanelOpen: false,
           sidePanelTab: "workspace",
           activeTaskspaceId: null,
+          spawnsColumnOpen: false,
+          spawnsColumnSuppressAuto: false,
+          spawnsColumnBaselineIds: [],
+          terminalTabs: [],
+          activeTerminalTabId: null,
         },
       ],
       activePaneId: paneId,
@@ -516,6 +547,79 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPaneContextInherited: (paneId, inherited) =>
     set((state) => ({
       panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, contextInherited: inherited } : pane)),
+    })),
+  setSpawnsColumnOpen: (paneId, open) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              spawnsColumnOpen: open,
+              ...(open ? { spawnsColumnSuppressAuto: false, spawnsColumnBaselineIds: [] } : {}),
+            }
+          : pane
+      ),
+    })),
+  dismissSpawnsColumn: (paneId, baselineSubAgentIds) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              spawnsColumnOpen: false,
+              spawnsColumnSuppressAuto: true,
+              spawnsColumnBaselineIds: [...baselineSubAgentIds],
+            }
+          : pane
+      ),
+    })),
+  clearSpawnsColumnSuppress: (paneId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? { ...pane, spawnsColumnSuppressAuto: false, spawnsColumnBaselineIds: [] }
+          : pane
+      ),
+    })),
+  addPaneTerminalTab: (paneId, cwd, labelHint) =>
+    set((state) => {
+      const pane = state.panes.find((p) => p.id === paneId);
+      if (!pane) return state;
+      const trimmed = (cwd || "").trim();
+      if (!trimmed) return state;
+      const baseRaw = (labelHint ?? "").trim() || trimmed.split(/[/\\]/).filter(Boolean).pop() || "terminal";
+      const sameCwd = pane.terminalTabs.filter((t) => t.cwd === trimmed).length;
+      const label = sameCwd === 0 ? baseRaw : `${baseRaw} (#${sameCwd + 1})`;
+      const id = uid();
+      return {
+        panes: state.panes.map((p) =>
+          p.id === paneId
+            ? {
+                ...p,
+                terminalTabs: [...p.terminalTabs, { id, cwd: trimmed, label }],
+                activeTerminalTabId: id,
+              }
+            : p
+        ),
+      };
+    }),
+  removePaneTerminalTab: (paneId, tabId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const nextTabs = pane.terminalTabs.filter((t) => t.id !== tabId);
+        let nextActive = pane.activeTerminalTabId;
+        if (nextActive === tabId) {
+          nextActive = nextTabs[nextTabs.length - 1]?.id ?? null;
+        }
+        return { ...pane, terminalTabs: nextTabs, activeTerminalTabId: nextActive };
+      }),
+    })),
+  setActivePaneTerminalTab: (paneId, tabId) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, activeTerminalTabId: tabId } : pane
+      ),
     })),
   addMessage: (role, content, agentId, provider, model, attachments, extras) =>
     set((state) => {
