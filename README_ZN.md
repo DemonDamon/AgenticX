@@ -556,6 +556,10 @@ graph TD
 
 [![Star History Chart](https://api.star-history.com/svg?repos=DemonDamon/AgenticX&type=Date)](https://star-history.com/#DemonDamon/AgenticX&Date)
 
+## 致谢
+
+AgenticX 在架构与实现上受益于诸多优秀开源项目；我们在 [`research/codedeepresearch/`](research/codedeepresearch/) 中整理、研读的上游与镜像仓库为团队提供了重要灵感与参考。谨向这些项目的作者与社区致以感谢（按目录名字母序）：**A2A**、**AgentCPM-GUI**、**CLI-Anything**、**ClawTeam**、**CodexMonitor**、**Khazix Skills**（`Khazix-Skills`）、**MAI-UI**、**MobiAgent**、**MobileAgent**、**OpenSandbox**、**SWE-agent**、**Serverless Devs**（`Serverless-Devs`）、**ADK Python**（`adk-python`）、**ag-ui**、**AgentKit SDK**（`agentkit-sdk-python`）、**AgentRun SDK**（`agentrun-sdk-python`）、**AgentScope**、**Agno**、**Camel**、**Cherry Studio**、**Claude Code**（`claudecode`）、**CrewAI**、**DeepWiki Open**（`deepwiki-open`）、**Deer Flow**（`deer-flow`）、**Eigent**、**Iron Claw**（`ironclaw`）、**JoyAgent / JD Genie**（`joyagent-jdgenie`）、**Lobe Icons**（`lobe-icons`）、**LoongSuite Python Agent**（`loongsuite-python-agent`）、**Microsandbox**、**Model Context Protocol**（`modelcontextprotocol`）、**NVIDIA NemoClaw**（`nvidia-nemoclaw`）、**OpenClaw**（`openclaw`）、**OpenClaw Tmux Claude Code**（`openclaw-tmux-claude-code`）、**OpenShell**（`openshell`）、**OpenSkills**（`openskills`）、**OWL**（`owl`）、**Pydantic AI**（`pydantic-ai`）、**RAG**（`rag`）、**Refly**、**Skills**（`skills`）、**Spring AI**（`spring-ai`）、**VE ADK**（`veadk-python`）与 **ZeroBoot**（`zeroboot`）。
+
 ---
 
 <div align="center">

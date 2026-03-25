@@ -557,6 +557,10 @@ This project is licensed under the GNU Affero General Public License v3.0 (AGPL-
 
 [![Star History Chart](https://api.star-history.com/svg?repos=DemonDamon/AgenticX&type=Date)](https://star-history.com/#DemonDamon/AgenticX&Date)
 
+## Acknowledgments
+
+Many ideas and reference points in AgenticX come from outstanding open-source work we study under [`research/codedeepresearch/`](research/codedeepresearch/). Thank you to the authors and communities behind those projects, including (alphabetical by folder name): **A2A**, **AgentCPM-GUI**, **CLI-Anything**, **ClawTeam**, **CodexMonitor**, **Khazix Skills** (`Khazix-Skills`), **MAI-UI**, **MobiAgent**, **MobileAgent**, **OpenSandbox**, **SWE-agent**, **Serverless Devs** (`Serverless-Devs`), **ADK Python** (`adk-python`), **ag-ui**, **AgentKit SDK** (`agentkit-sdk-python`), **AgentRun SDK** (`agentrun-sdk-python`), **AgentScope**, **Agno**, **Camel**, **Cherry Studio**, **Claude Code** (`claudecode`), **CrewAI**, **DeepWiki Open** (`deepwiki-open`), **Deer Flow** (`deer-flow`), **Eigent**, **Iron Claw** (`ironclaw`), **JoyAgent / JD Genie** (`joyagent-jdgenie`), **Lobe Icons** (`lobe-icons`), **LoongSuite Python Agent** (`loongsuite-python-agent`), **Microsandbox**, **Model Context Protocol** (`modelcontextprotocol`), **NVIDIA NemoClaw** (`nvidia-nemoclaw`), **OpenClaw** (`openclaw`), **OpenClaw Tmux Claude Code** (`openclaw-tmux-claude-code`), **OpenShell** (`openshell`), **OpenSkills** (`openskills`), **OWL** (`owl`), **Pydantic AI** (`pydantic-ai`), **RAG** (`rag`), **Refly**, **Skills** (`skills`), **Spring AI** (`spring-ai`), **VE ADK** (`veadk-python`), and **ZeroBoot** (`zeroboot`).
+
 ---
 
 <div align="center">
