@@ -21,6 +21,12 @@
 
 ---
 
+## Security advisory
+
+**LiteLLM (PyPI):** Malicious releases **`litellm` 1.82.7 and 1.82.8** were removed from PyPI after reports that they could **exfiltrate API keys**. If you ever installed either version, **uninstall** them, **rotate any credentials** that may have been exposed, and **upgrade** to a release the upstream project and PyPI list as safe (for example **1.82.9+**, per current upstream guidance). Check your environment with `pip show litellm`.
+
+---
+
 ## Vision
 
 **AgenticX** aims to create a unified, scalable, production-ready multi-agent application development framework, empowering developers to build everything from simple automation assistants to complex collaborative intelligent agent systems.
