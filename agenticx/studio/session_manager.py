@@ -26,6 +26,25 @@ EventEmitter = Callable[[Any], Awaitable[None]]
 SummarySink = Callable[[str, SubAgentContext], Awaitable[None]]
 
 
+def normalize_session_avatar_binding(avatar_id: Optional[str]) -> Optional[str]:
+    """Collapse empty string to None so meta vs avatar-bound sessions compare consistently."""
+    s = (avatar_id or "").strip()
+    return s or None
+
+
+def managed_session_binding_matches_avatar_query(
+    managed: "ManagedSession",
+    *,
+    query_avatar_id: Optional[str],
+) -> bool:
+    """Enforce session isolation: Meta panes omit avatar_id (expect unbound); avatar panes must match."""
+    stored = normalize_session_avatar_binding(managed.avatar_id)
+    q = normalize_session_avatar_binding(query_avatar_id)
+    if q is None:
+        return stored is None
+    return stored == q
+
+
 @dataclass
 class ManagedSession:
     session_id: str
@@ -123,12 +142,32 @@ class SessionManager:
         self._persist_session_state(session_id, managed.studio_session)
         return True
 
+    @staticmethod
+    def _close_mcp_hub_sync(managed: ManagedSession) -> None:
+        hub = getattr(managed.studio_session, "mcp_hub", None)
+        if hub is None:
+            return
+        try:
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is not None and loop.is_running():
+                loop.create_task(hub.close())
+            else:
+                asyncio.run(hub.close())
+        except Exception:
+            pass
+
     def delete(self, session_id: str) -> bool:
         sid = str(session_id or "").strip()
         existed_in_persistence = self._session_exists_in_persistence(sid)
         managed = self._sessions.pop(sid, None)
-        if managed is not None and managed.team_manager is not None:
-            managed.team_manager.shutdown_now()
+        if managed is not None:
+            if managed.team_manager is not None:
+                managed.team_manager.shutdown_now()
+            self._close_mcp_hub_sync(managed)
         purged = self._purge_session_state(sid)
         if managed is not None and not existed_in_persistence:
             return True
@@ -378,6 +417,7 @@ class SessionManager:
             self._persist_session_state(sid, managed.studio_session)
             if managed.team_manager is not None:
                 managed.team_manager.shutdown_now()
+            self._close_mcp_hub_sync(managed)
 
     def _restore_persisted_state(self, session_id: str, session: StudioSession) -> None:
         try:
@@ -413,13 +453,26 @@ class SessionManager:
             metadata = {}
         if not isinstance(metadata, dict):
             return
-        session_name = str(metadata.get("session_name", "")).strip()
-        if session_name:
-            managed.session_name = session_name
+        raw_name = metadata.get("session_name")
+        if raw_name is not None:
+            session_name = str(raw_name).strip()
+            if session_name and session_name != "None":
+                managed.session_name = session_name
         managed.created_at = self._to_float(metadata.get("created_at"), managed.created_at)
         managed.pinned = bool(metadata.get("pinned", False))
         managed.archived = bool(metadata.get("archived", False))
         managed.taskspaces = self._sanitize_taskspaces(session_id, metadata.get("taskspaces"))
+
+        if "avatar_id" in metadata:
+            raw_av = metadata.get("avatar_id")
+            managed.avatar_id = (
+                None if raw_av is None else normalize_session_avatar_binding(str(raw_av))
+            )
+        if "avatar_name" in metadata:
+            raw_name = metadata.get("avatar_name")
+            managed.avatar_name = (
+                None if raw_name is None else (str(raw_name).strip() or None)
+            )
 
     def _persist_session_state(self, session_id: str, session: StudioSession) -> None:
         try:
@@ -617,11 +670,18 @@ class SessionManager:
             return fallback
         return parsed
 
+    @staticmethod
+    def _sanitize_session_name(raw: Any) -> str | None:
+        if raw is None:
+            return None
+        s = str(raw).strip()
+        if not s or s == "None":
+            return None
+        return s
+
     def _list_persisted_sessions(self) -> list[dict]:
         rows: list[dict] = []
         try:
-            # Load full history; previous hard cap (1000) caused "ghost" sessions
-            # to appear after bulk delete because older records surfaced next.
             latest = self._session_store._list_latest_sessions_sync(limit=0)
         except Exception:
             latest = []
@@ -632,6 +692,13 @@ class SessionManager:
             metadata = item.get("metadata", {})
             if not isinstance(metadata, dict):
                 metadata = {}
+            chat_count = 0
+            try:
+                chat_count = int(metadata.get("chat_messages", 0))
+            except (TypeError, ValueError):
+                pass
+            if chat_count <= 0:
+                continue
             created_at = self._to_float(metadata.get("created_at"), self._iso_to_epoch(item.get("created_at")))
             updated_at = self._to_float(metadata.get("updated_at"), self._iso_to_epoch(item.get("created_at")))
             rows.append(
@@ -639,7 +706,7 @@ class SessionManager:
                     "session_id": sid,
                     "avatar_id": metadata.get("avatar_id"),
                     "avatar_name": metadata.get("avatar_name"),
-                    "session_name": metadata.get("session_name"),
+                    "session_name": self._sanitize_session_name(metadata.get("session_name")),
                     "updated_at": updated_at,
                     "created_at": created_at,
                     "pinned": bool(metadata.get("pinned", False)),
@@ -657,6 +724,12 @@ class SessionManager:
                     continue
                 messages_path = child / "messages.json"
                 if not messages_path.exists():
+                    continue
+                try:
+                    content = messages_path.read_text(encoding="utf-8").strip()
+                    if not content or content == "[]":
+                        continue
+                except Exception:
                     continue
                 mtime = float(messages_path.stat().st_mtime)
                 rows.append(
@@ -728,13 +801,34 @@ class SessionManager:
     def _ensure_default_taskspace(self, managed: ManagedSession) -> None:
         if managed.taskspaces:
             return
+        session_ws = getattr(managed.studio_session, "workspace_dir", None)
+        default_path = (
+            session_ws
+            if session_ws and str(session_ws).strip()
+            else self._resolve_taskspace_root(managed.session_id, None)
+        )
+        resolved = Path(default_path).resolve(strict=False)
+        resolved.mkdir(parents=True, exist_ok=True)
         managed.taskspaces = [
             {
                 "id": "default",
                 "label": "默认工作区",
-                "path": self._resolve_taskspace_root(managed.session_id, None),
+                "path": str(resolved),
             }
         ]
+
+    def rebind_default_taskspace_to_workspace(self, managed: ManagedSession) -> None:
+        """Re-point the 'default' taskspace to the session's workspace_dir (call after workspace_dir is set)."""
+        ws = getattr(managed.studio_session, "workspace_dir", None)
+        if not ws or not str(ws).strip():
+            return
+        resolved = str(Path(ws).resolve(strict=False))
+        for ts in managed.taskspaces:
+            if ts.get("id") == "default":
+                if ts["path"] != resolved:
+                    Path(resolved).mkdir(parents=True, exist_ok=True)
+                    ts["path"] = resolved
+                return
 
     def _resolve_taskspace_root(self, session_id: str, path: str | None) -> str:
         if path and str(path).strip():

@@ -746,6 +746,22 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           try {
             const payload = JSON.parse(line.slice(6));
             const eventAgentId = payload.data?.agent_id ?? "meta";
+            if (payload.type === "tool_progress") {
+              if (!isCurrentRequest()) continue;
+              const name = String(payload.data?.name ?? "tool");
+              const sec = Number(payload.data?.elapsed_seconds ?? 0);
+              const waitLabel = Number.isFinite(sec)
+                ? `⏳ ${name} 执行中…（已等待 ${sec}s）`
+                : `⏳ ${name} 执行中…`;
+              if (eventAgentId === "meta") {
+                setStreamedAssistantText(waitLabel);
+              } else {
+                updateSubAgent(eventAgentId, {
+                  currentAction: Number.isFinite(sec) ? `${name} 执行中… (${sec}s)` : `${name} 执行中…`,
+                });
+              }
+              continue;
+            }
             if (payload.type === "token") {
               if (eventAgentId !== "meta") { addSubAgentEvent(eventAgentId, { type: "token", content: "生成中..." }); continue; }
               const tokenText = String(payload.data?.text ?? "");

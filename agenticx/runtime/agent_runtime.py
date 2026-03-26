@@ -1469,6 +1469,12 @@ class AgentRuntime:
                         )
                     )
 
+                # Long-running tools (e.g. mcp_call → browser_navigate) block here with no LLM chunks;
+                # emit periodic TOOL_PROGRESS so Desktop SSE stays alive and users see liveness.
+                _tool_wait_loop = asyncio.get_running_loop()
+                _tool_exec_wait_started = _tool_wait_loop.time()
+                _next_tool_progress_at = _tool_exec_wait_started + 0.8
+
                 while True:
                     if await _check_should_stop():
                         dispatch_task.cancel()
@@ -1488,6 +1494,18 @@ class AgentRuntime:
                             agent_id=agent_id,
                         )
                     except asyncio.TimeoutError:
+                        _now = _tool_wait_loop.time()
+                        if not dispatch_task.done() and _now >= _next_tool_progress_at:
+                            yield RuntimeEvent(
+                                type=EventType.TOOL_PROGRESS.value,
+                                data={
+                                    "name": tool_name,
+                                    "tool_call_id": tool_call_id,
+                                    "elapsed_seconds": round(_now - _tool_exec_wait_started, 1),
+                                },
+                                agent_id=agent_id,
+                            )
+                            _next_tool_progress_at = _now + 2.0
                         continue
 
                 try:

@@ -313,9 +313,15 @@ class ConfigManager:
 
     @classmethod
     def get_value(cls, key: str) -> Any:
-        """Get a dotted key from merged config."""
-        merged = asdict(cls.load())
-        return cls._get_nested(merged, key)
+        """Get a dotted key from merged global+project YAML.
+
+        Uses raw YAML merge so keys not modeled on ``AgxConfig`` (e.g. ``mcp.*``,
+        ``runtime.*``, ``notifications.*``) are still readable.
+        """
+        global_data = cls._load_yaml(cls.GLOBAL_CONFIG_PATH)
+        project_data = cls._load_yaml(cls.PROJECT_CONFIG_PATH)
+        merged_raw = cls._deep_merge(global_data, project_data)
+        return cls._get_nested(merged_raw, key)
 
     @classmethod
     def masked_config(cls) -> Dict[str, Any]:

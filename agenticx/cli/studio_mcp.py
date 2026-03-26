@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import subprocess
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING, Tuple
 
@@ -28,6 +29,33 @@ logger = logging.getLogger(__name__)
 # mcp_call_tool_async failure messages (agent/UI); keep bounded to avoid context blow-up.
 _MCP_CALL_ERR_MAX_LEN = 2000
 _MCP_CALL_ERR_PREFIX = "ERROR: mcp_call:"
+
+# LLM 常把「列出 MCP 工具」误写成不存在的 tool_name；若路由里无同名真实工具则返回目录而非 ERROR。
+_MCP_VIRTUAL_TOOL_LIST_ALIASES: frozenset[str] = frozenset(
+    {
+        "list_tools",
+        "list_tools_mcp",
+        "mcp_list_tools",
+        "tools/list",
+        "mcp/tools/list",
+    }
+)
+
+
+def _virtual_mcp_tool_directory(hub: "MCPHub") -> str:
+    """Human-readable listing of routed names for mistaken list_tools calls."""
+    by_server: Dict[str, List[str]] = defaultdict(list)
+    for routed_name, route in hub._tool_routing.items():
+        by_server[route.client.server_config.name].append(routed_name)
+    lines = [
+        "（提示）`list_tools` 不是已连接 MCP 上的工具名；以下为当前可用的 `mcp_call.tool_name`（按服务器分组）。",
+        "也可调用 `list_mcps` 查看 `mcp_tool_names`。浏览器页签请用 `browser_list_tabs` 等实际名称。",
+        "",
+    ]
+    for srv in sorted(by_server.keys()):
+        names = ", ".join(sorted(by_server[srv]))
+        lines.append(f"- {srv}: {names}")
+    return "\n".join(lines)
 
 
 def _format_mcp_call_error(detail: str) -> str:
@@ -68,6 +96,120 @@ _DEFAULT_BROWSER_USE_MCP_ENTRY: Dict[str, Any] = {
 def agenticx_home_mcp_path() -> Path:
     """Canonical MCP config path under ~/.agenticx."""
     return Path.home() / ".agenticx" / "mcp.json"
+
+
+def _normalize_extra_search_path_strings(paths: Any) -> List[str]:
+    out: List[str] = []
+    if isinstance(paths, list):
+        for item in paths:
+            s = str(item).strip()
+            if s:
+                out.append(s)
+    elif isinstance(paths, str) and paths.strip():
+        out.append(paths.strip())
+    return out
+
+
+def get_mcp_extra_search_paths_config() -> List[str]:
+    """User-configured extra ``mcp.json`` paths (beyond ``~/.agenticx/mcp.json``)."""
+    from agenticx.cli.config_manager import ConfigManager
+
+    raw = ConfigManager.get_value("mcp.extra_search_paths")
+    return _normalize_extra_search_path_strings(raw)
+
+
+def set_mcp_extra_search_paths_config(paths: List[str]) -> None:
+    """Persist extra search paths; skips duplicates and the canonical agenticx file."""
+    from agenticx.cli.config_manager import ConfigManager
+
+    cleaned: List[str] = []
+    seen: set[str] = set()
+    try:
+        home_mcp = str(agenticx_home_mcp_path().expanduser().resolve(strict=False))
+    except Exception:
+        home_mcp = str(agenticx_home_mcp_path().expanduser())
+    for p in paths:
+        s = str(p).strip()
+        if not s:
+            continue
+        try:
+            expanded = str(Path(s).expanduser().resolve(strict=False))
+        except Exception:
+            expanded = str(Path(s).expanduser())
+        if expanded == home_mcp:
+            continue
+        if expanded in seen:
+            continue
+        seen.add(expanded)
+        cleaned.append(s)
+    ConfigManager.set_value("mcp.extra_search_paths", cleaned)
+
+
+def append_mcp_auto_connect_name(name: str) -> None:
+    """Remember server name for MCP auto-reconnect on new sessions."""
+    from agenticx.cli.config_manager import ConfigManager
+
+    key = str(name or "").strip()
+    if not key:
+        return
+    cur = ConfigManager.get_value("mcp.auto_connect")
+    names: List[str] = []
+    if isinstance(cur, list):
+        names = [str(x).strip() for x in cur if str(x).strip()]
+    elif isinstance(cur, str) and cur.strip():
+        lowered = cur.strip().lower()
+        if lowered in {"", "none", "off", "false", "0"}:
+            names = []
+        elif lowered == "all":
+            ConfigManager.set_value("mcp.auto_connect", [key])
+            return
+        else:
+            names = [cur.strip()]
+    if key not in names:
+        names.append(key)
+    ConfigManager.set_value("mcp.auto_connect", names)
+
+
+def remove_mcp_auto_connect_name(name: str) -> None:
+    from agenticx.cli.config_manager import ConfigManager
+
+    key = str(name or "").strip()
+    if not key:
+        return
+    cur = ConfigManager.get_value("mcp.auto_connect")
+    names: List[str] = []
+    if isinstance(cur, list):
+        names = [str(x).strip() for x in cur if str(x).strip()]
+    elif isinstance(cur, str) and cur.strip():
+        lowered = cur.strip().lower()
+        if lowered not in {"", "none", "off", "false", "0", "all"}:
+            names = [cur.strip()]
+    names = [n for n in names if n != key]
+    ConfigManager.set_value("mcp.auto_connect", names)
+
+
+def all_mcp_config_search_paths() -> List[Path]:
+    """Ordered MCP JSON paths: agenticx home, user extras, then default fallbacks."""
+    seen: Set[str] = set()
+    ordered: List[Path] = []
+
+    def _add(path: Path) -> None:
+        try:
+            p = path.expanduser()
+            k = str(p.resolve(strict=False))
+        except Exception:
+            k = str(path.expanduser())
+        if k in seen:
+            return
+        seen.add(k)
+        ordered.append(path.expanduser())
+
+    _add(agenticx_home_mcp_path())
+    for s in get_mcp_extra_search_paths_config():
+        _add(Path(s))
+    _add(Path(".cursor/mcp.json"))
+    _add(Path.home() / ".cursor" / "mcp.json")
+    return ordered
 
 
 def ensure_default_agenticx_mcp_json() -> bool:
@@ -186,15 +328,6 @@ def preflight_browser_use_install(*, echo: bool = True) -> Tuple[bool, str]:
     return True, "ok"
 
 
-def _default_mcp_search_paths() -> List[Path]:
-    """Return default MCP config search paths by priority."""
-    return [
-        Path.home() / ".agenticx" / "mcp.json",
-        Path(".cursor/mcp.json"),
-        Path.home() / ".cursor" / "mcp.json",
-    ]
-
-
 def _serialize_server_config(cfg: "MCPServerConfig") -> Dict[str, Any]:
     """Serialize MCPServerConfig to JSON-compatible dict."""
     data: Dict[str, Any] = {
@@ -220,8 +353,9 @@ def load_available_servers() -> Dict[str, "MCPServerConfig"]:
 
     Searches with priority:
     1) ~/.agenticx/mcp.json
-    2) project .cursor/mcp.json
-    3) ~/.cursor/mcp.json
+    2) Paths in ``mcp.extra_search_paths`` (``~/.agenticx/config.yaml``)
+    3) project .cursor/mcp.json
+    4) ~/.cursor/mcp.json
 
     Merges all discovered files. Existing names keep higher-priority entry.
     Ensures ~/.agenticx/mcp.json exists and contains a default ``browser-use`` entry (merge if needed).
@@ -232,7 +366,7 @@ def load_available_servers() -> Dict[str, "MCPServerConfig"]:
     ensure_default_agenticx_mcp_json()
 
     configs: Dict[str, "MCPServerConfig"] = {}
-    for path in _default_mcp_search_paths():
+    for path in all_mcp_config_search_paths():
         if path.exists():
             try:
                 loaded = load_mcp_config(str(path))
@@ -447,6 +581,30 @@ def auto_connect_servers(
         return future.result(timeout=900)
 
 
+async def mcp_disconnect_async(
+    hub: "MCPHub",
+    _configs: Dict[str, "MCPServerConfig"],
+    connected: Set[str],
+    name: str,
+) -> Tuple[bool, str]:
+    """Disconnect one MCP server (async, for Studio / FastAPI)."""
+    if name not in connected:
+        return True, ""
+    to_remove = None
+    for client in hub.clients:
+        if client.server_config.name == name:
+            to_remove = client
+            break
+    if to_remove is None:
+        connected.discard(name)
+        return True, ""
+    try:
+        await _mcp_disconnect_async(hub, connected, name, to_remove)
+    except Exception as exc:
+        return False, str(exc)
+    return True, ""
+
+
 async def _mcp_disconnect_async(
     hub: "MCPHub",
     connected: Set[str],
@@ -549,6 +707,12 @@ async def mcp_call_tool_async(
         return msg
 
     if tool_name not in hub._tool_routing:
+        alias = tool_name.strip().lower()
+        if alias in _MCP_VIRTUAL_TOOL_LIST_ALIASES:
+            text = _virtual_mcp_tool_directory(hub)
+            if echo:
+                console.print(f"[cyan]{text}[/cyan]")
+            return text
         keys = sorted(hub._tool_routing.keys())
         available = ", ".join(keys)
         if len(available) > 1600:

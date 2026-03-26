@@ -116,6 +116,36 @@ def test_server_session_lifecycle() -> None:
     assert deleted.status_code == 200
 
 
+def test_get_session_avatar_query_does_not_reuse_meta_session() -> None:
+    """Regression: same session_id must not serve both Meta and avatar panes (chat/memory leak)."""
+    app = create_studio_app()
+    client = TestClient(app)
+    meta_sid = client.get("/api/session").json()["session_id"]
+    r = client.get(
+        "/api/session",
+        params={"session_id": meta_sid, "avatar_id": "synthetic-avatar-binding-test"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["session_id"] != meta_sid
+    assert body.get("avatar_id") == "synthetic-avatar-binding-test"
+
+
+def test_get_session_meta_query_does_not_reuse_avatar_session() -> None:
+    app = create_studio_app()
+    client = TestClient(app)
+    created = client.post(
+        "/api/sessions",
+        json={"avatar_id": "synthetic-avatar-binding-test-2"},
+    )
+    assert created.status_code == 200
+    avatar_sid = created.json()["session_id"]
+    r = client.get("/api/session", params={"session_id": avatar_sid})
+    assert r.status_code == 200
+    assert r.json()["session_id"] != avatar_sid
+    assert not r.json().get("avatar_id")
+
+
 def test_delete_selected_session_messages() -> None:
     app = create_studio_app()
     client = TestClient(app)

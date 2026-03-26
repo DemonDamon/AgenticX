@@ -174,6 +174,39 @@ def test_team_manager_falls_back_on_invalid_tool_allowlist() -> None:
     asyncio.run(_run())
 
 
+def test_collect_global_statuses_does_not_leak_across_sessions() -> None:
+    """Regression: Desktop / meta prompt must not show other sessions' spawns."""
+
+    async def _run() -> None:
+        m_a = AgentTeamManager(
+            llm_factory=lambda: _QuickTextLLM(),
+            base_session=StudioSession(),
+            owner_session_id="sess-alpha",
+        )
+        m_b = AgentTeamManager(
+            llm_factory=lambda: _QuickTextLLM(),
+            base_session=StudioSession(),
+            owner_session_id="sess-beta",
+        )
+        ra = await m_a.spawn_subagent(name="AlphaBot", role="worker", task="t1")
+        rb = await m_b.spawn_subagent(name="BetaBot", role="worker", task="t2")
+        assert ra["ok"] is True
+        assert rb["ok"] is True
+        await _wait_until(lambda: len(m_a._tasks) == 0 and len(m_b._tasks) == 0)
+        alpha_rows = AgentTeamManager.collect_global_statuses(session_id="sess-alpha")
+        beta_rows = AgentTeamManager.collect_global_statuses(session_id="sess-beta")
+        alpha_names = {str(r.get("name", "")) for r in alpha_rows}
+        beta_names = {str(r.get("name", "")) for r in beta_rows}
+        assert "AlphaBot" in alpha_names
+        assert "BetaBot" not in alpha_names
+        assert "BetaBot" in beta_names
+        assert "AlphaBot" not in beta_names
+        m_a.shutdown_now()
+        m_b.shutdown_now()
+
+    asyncio.run(_run())
+
+
 def test_team_manager_shutdown_now_clears_tasks(monkeypatch) -> None:
     from agenticx.runtime import agent_runtime as runtime_module
 

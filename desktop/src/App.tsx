@@ -283,12 +283,24 @@ export function App() {
         const saved = normalizePersistedWorkspaceState(parsed);
         if (saved) {
           const hydratedPanes: PersistedPaneState[] = [];
+          const claimedSessionIds = new Set<string>();
           for (const pane of saved.panes) {
             try {
+              let wantedSid = (pane.sessionId || "").trim() || undefined;
+              if (wantedSid && claimedSessionIds.has(wantedSid)) {
+                console.warn(
+                  "[App init] duplicate sessionId %s across panes — forcing new session for pane %s (avatar=%s)",
+                  wantedSid,
+                  pane.id,
+                  pane.avatarId,
+                );
+                wantedSid = undefined;
+              }
               const sid = await requestSession(base, token, {
-                sessionId: pane.sessionId || undefined,
+                sessionId: wantedSid,
                 avatarId: pane.avatarId,
               });
+              claimedSessionIds.add(sid);
               hydratedPanes.push({ ...pane, sessionId: sid });
             } catch (err) {
               console.error("[App init] restore pane failed:", pane.id, err);

@@ -77,6 +77,47 @@ def _workspace_root() -> Path:
     return Path.cwd().resolve()
 
 
+def _session_workspace_roots(session: Optional[StudioSession]) -> List[Path]:
+    """Ordered filesystem roots for this session (taskspaces, then avatar workspace, then env/cwd)."""
+    roots: List[Path] = []
+    seen: set[str] = set()
+
+    def _add_path_str(raw: str) -> None:
+        text = (raw or "").strip()
+        if not text:
+            return
+        try:
+            candidate = Path(text).expanduser().resolve(strict=False)
+        except Exception:
+            return
+        key = str(candidate)
+        if key in seen:
+            return
+        seen.add(key)
+        roots.append(candidate)
+
+    if session is not None:
+        taskspaces = getattr(session, "taskspaces", None)
+        if isinstance(taskspaces, list):
+            for item in taskspaces:
+                if isinstance(item, dict):
+                    _add_path_str(str(item.get("path", "")))
+        _add_path_str(str(getattr(session, "workspace_dir", "") or ""))
+
+    _add_path_str(str(_workspace_root()))
+    if not roots:
+        roots.append(Path.cwd().resolve(strict=False))
+    return roots
+
+
+def _is_path_under_root(candidate: Path, root: Path) -> bool:
+    try:
+        candidate.resolve(strict=False).relative_to(root.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
+
+
 def _desktop_unrestricted_fs_enabled() -> bool:
     value = os.getenv("AGX_DESKTOP_UNRESTRICTED_FS", "").strip().lower()
     return value in {"1", "true", "yes", "on"}
@@ -577,19 +618,39 @@ def _command_touches_protected_config(command: str, parts: List[str]) -> bool:
     return False
 
 
-def _resolve_workspace_path(path_arg: str) -> Path:
-    workspace = _workspace_root()
+def _resolve_workspace_path(
+    path_arg: str,
+    session: Optional[StudioSession] = None,
+    *,
+    pick_existing: bool = False,
+) -> Path:
     raw_path = _path_from_arg(path_arg)
+    if _desktop_unrestricted_fs_enabled():
+        if raw_path.is_absolute():
+            return raw_path.resolve(strict=False)
+        return (_workspace_root() / raw_path).resolve(strict=False)
+
+    roots = _session_workspace_roots(session)
+
     if raw_path.is_absolute():
         resolved = raw_path.resolve(strict=False)
-    else:
-        resolved = (workspace / raw_path).resolve(strict=False)
-    if _desktop_unrestricted_fs_enabled():
-        return resolved
-    try:
-        resolved.relative_to(workspace)
-    except ValueError as exc:
-        raise ValueError(f"path escapes workspace: {resolved}") from exc
+        for root in roots:
+            if _is_path_under_root(resolved, root):
+                return resolved
+        raise ValueError(f"path escapes workspace: {resolved}")
+
+    if pick_existing:
+        for root in roots:
+            candidate = (root / raw_path).resolve(strict=False)
+            if not _is_path_under_root(candidate, root):
+                continue
+            if candidate.exists():
+                return candidate
+
+    primary = roots[0]
+    resolved = (primary / raw_path).resolve(strict=False)
+    if not _is_path_under_root(resolved, primary):
+        raise ValueError(f"path escapes workspace: {resolved}")
     return resolved
 
 
@@ -671,13 +732,16 @@ def _extract_guarded_paths(command_name: str, parts: List[str]) -> List[str]:
     return []
 
 
-def _ensure_paths_within_workspace(paths: List[str]) -> Optional[str]:
-    """Validate all path arguments stay within workspace root."""
+def _ensure_paths_within_workspace(
+    paths: List[str],
+    session: Optional[StudioSession] = None,
+) -> Optional[str]:
+    """Validate all path arguments stay within session workspace roots."""
     for path_arg in paths:
         if path_arg == "-":
             continue
         try:
-            _resolve_workspace_path(path_arg)
+            _resolve_workspace_path(path_arg, session, pick_existing=True)
         except ValueError as exc:
             return f"ERROR: {exc}"
     return None
@@ -758,6 +822,7 @@ def _extract_python_script_arg(parts: List[str]) -> Optional[str]:
 
 async def _tool_bash_exec(
     arguments: Dict[str, Any],
+    session: Optional[StudioSession] = None,
     *,
     confirm_gate: ConfirmGate,
     emit_event: Optional[Any] = None,
@@ -770,7 +835,7 @@ async def _tool_bash_exec(
     cwd_arg = arguments.get("cwd")
     if cwd_arg:
         try:
-            cwd = _resolve_workspace_path(str(cwd_arg))
+            cwd = _resolve_workspace_path(str(cwd_arg), session)
         except ValueError as exc:
             return f"ERROR: {exc}"
     else:
@@ -787,7 +852,7 @@ async def _tool_bash_exec(
     if command_name == "cd":
         target = str(parts[1]) if len(parts) > 1 else "~"
         try:
-            resolved = _resolve_workspace_path(target)
+            resolved = _resolve_workspace_path(target, session)
         except ValueError as exc:
             return f"ERROR: {exc}"
         if not resolved.exists() or not resolved.is_dir():
@@ -818,7 +883,7 @@ async def _tool_bash_exec(
 
     if command_name in PATH_GUARDED_READ_COMMANDS:
         guarded_paths = _extract_guarded_paths(command_name, parts)
-        validation_error = _ensure_paths_within_workspace(guarded_paths)
+        validation_error = _ensure_paths_within_workspace(guarded_paths, session)
         if validation_error:
             return validation_error
 
@@ -826,7 +891,7 @@ async def _tool_bash_exec(
         python_script = _extract_python_script_arg(parts)
         if python_script and python_script != "-":
             try:
-                _resolve_workspace_path(python_script)
+                _resolve_workspace_path(python_script, session, pick_existing=True)
             except ValueError as exc:
                 return f"ERROR: {exc}"
 
@@ -908,9 +973,9 @@ async def _tool_bash_exec(
     )
 
 
-def _tool_file_read(arguments: Dict[str, Any]) -> str:
+def _tool_file_read(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
     try:
-        path = _resolve_workspace_path(str(arguments.get("path", "")))
+        path = _resolve_workspace_path(str(arguments.get("path", "")), session, pick_existing=True)
     except ValueError as exc:
         return f"ERROR: {exc}"
     if not path.exists():
@@ -960,7 +1025,7 @@ async def _tool_file_write(
             "You must provide file content, e.g. file_write(path='/Users/.../file.py', content='...')"
         )
     try:
-        path = _resolve_workspace_path(raw_path)
+        path = _resolve_workspace_path(raw_path, session)
     except ValueError as exc:
         return f"ERROR: {exc}"
     if _is_protected_config_path(path):
@@ -1000,12 +1065,13 @@ async def _tool_file_write(
 
 async def _tool_file_edit(
     arguments: Dict[str, Any],
+    session: Optional[StudioSession] = None,
     *,
     confirm_gate: ConfirmGate,
     emit_event: Optional[Any] = None,
 ) -> str:
     try:
-        path = _resolve_workspace_path(str(arguments.get("path", "")))
+        path = _resolve_workspace_path(str(arguments.get("path", "")), session, pick_existing=True)
     except ValueError as exc:
         return f"ERROR: {exc}"
     if _is_protected_config_path(path):
@@ -1086,7 +1152,7 @@ async def _tool_codegen(
     output_path_raw = str(arguments.get("output_path", "")).strip()
     if output_path_raw:
         try:
-            output_path = _resolve_workspace_path(output_path_raw)
+            output_path = _resolve_workspace_path(output_path_raw, session)
         except ValueError as exc:
             return f"ERROR: invalid output_path: {exc}"
     else:
@@ -1094,7 +1160,7 @@ async def _tool_codegen(
         # on the inferred destination to prevent writing to unexpected locations.
         inferred = infer_output_path(target=target, description=description)
         try:
-            output_path = _resolve_workspace_path(str(inferred))
+            output_path = _resolve_workspace_path(str(inferred), session)
         except ValueError as exc:
             return f"ERROR: inferred output path invalid: {exc}"
         should_confirm = isinstance(confirm_gate, AsyncConfirmGate) or sys.stdin.isatty()
@@ -1145,6 +1211,95 @@ def _tool_mcp_connect(arguments: Dict[str, Any], session: StudioSession) -> str:
     return f"ERROR: connect failed: {d}" if d else "ERROR: connect failed"
 
 
+_SCREENSHOT_TOOL_NAMES = frozenset({
+    "browser_screenshot", "screenshot", "take_screenshot",
+    "browser_take_screenshot", "computer_screenshot",
+})
+
+
+def _is_non_vision_model(session: StudioSession) -> bool:
+    provider = str(getattr(session, "provider_name", "") or "").strip().lower()
+    model = str(getattr(session, "model_name", "") or "").strip().lower()
+    if not model:
+        return False
+    from agenticx.studio.server import (
+        _minimax_m2_family_no_vision,
+        _zhipu_glm5_family_no_vision,
+    )
+    if provider == "minimax" and _minimax_m2_family_no_vision(model):
+        return True
+    if provider == "zhipu" and _zhipu_glm5_family_no_vision(model):
+        return True
+    return False
+
+
+_SCREENSHOT_NON_VISION_HINT = (
+    "\n\n⚠️ 当前模型不支持图片识别，无法查看截图内容。"
+    "请改用以下文本工具获取页面信息：\n"
+    "- browser_get_state：获取页面 URL、标题和可交互元素列表\n"
+    "- browser_extract_content(query='...')：按查询提取页面文本内容\n"
+    "- browser_get_html：获取页面 HTML 源码\n"
+    "请勿再次调用 browser_screenshot。"
+)
+
+
+_MCP_REPEAT_GUARD_KEY = "__mcp_repeat_guard__"
+_MCP_REPEAT_GUARDED_TOOLS = frozenset({"browser_type", "browser_navigate"})
+
+
+def _mcp_action_signature(tool_name: str, args_obj: Dict[str, Any]) -> str | None:
+    if tool_name == "browser_type":
+        index = args_obj.get("index")
+        text = str(args_obj.get("text", "")).strip()
+        if index is None or not text:
+            return None
+        return f"browser_type::{index}::{text}"
+    if tool_name == "browser_navigate":
+        url = str(args_obj.get("url", "")).strip()
+        if not url:
+            return None
+        return f"browser_navigate::{url}"
+    return None
+
+
+def _check_mcp_repeat_guard(session: StudioSession, tool_name: str, args_obj: Dict[str, Any]) -> str | None:
+    scratchpad = getattr(session, "scratchpad", None)
+    if not isinstance(scratchpad, dict):
+        session.scratchpad = {}
+        scratchpad = session.scratchpad
+
+    if tool_name not in _MCP_REPEAT_GUARDED_TOOLS:
+        scratchpad.pop(_MCP_REPEAT_GUARD_KEY, None)
+        return None
+
+    sig = _mcp_action_signature(tool_name, args_obj)
+    if not sig:
+        scratchpad.pop(_MCP_REPEAT_GUARD_KEY, None)
+        return None
+
+    raw_state = scratchpad.get(_MCP_REPEAT_GUARD_KEY)
+    state = raw_state if isinstance(raw_state, dict) else {}
+    prev_sig = str(state.get("sig", "")).strip()
+    prev_count = int(state.get("count", 0) or 0)
+    count = prev_count + 1 if prev_sig == sig else 1
+    scratchpad[_MCP_REPEAT_GUARD_KEY] = {"sig": sig, "count": count}
+
+    if count < 3:
+        return None
+
+    if tool_name == "browser_type":
+        return (
+            "ERROR: repeated browser_type detected (same index/text called >=3 times). "
+            "Do not type again. Next action must be one of: "
+            "1) browser_click on the search/submit button, or "
+            "2) browser_get_state to refresh interactive elements."
+        )
+    return (
+        "ERROR: repeated browser_navigate detected (same url called >=3 times). "
+        "Do not navigate again. Next action must be browser_get_state or browser_click."
+    )
+
+
 async def _tool_mcp_call_async(arguments: Dict[str, Any], session: StudioSession) -> str:
     if session.mcp_hub is None:
         return "ERROR: no MCP hub connected"
@@ -1154,12 +1309,21 @@ async def _tool_mcp_call_async(arguments: Dict[str, Any], session: StudioSession
     args_obj = arguments.get("arguments", {})
     if not isinstance(args_obj, dict):
         return "ERROR: arguments must be an object"
-    return await mcp_call_tool_async(
+    repeat_guard_error = _check_mcp_repeat_guard(session, tool_name, args_obj)
+    if repeat_guard_error:
+        return repeat_guard_error
+    if tool_name in _SCREENSHOT_TOOL_NAMES and _is_non_vision_model(session):
+        return (
+            f'{{"size_bytes": 0, "viewport": {{}}, "skipped": true}}'
+            + _SCREENSHOT_NON_VISION_HINT
+        )
+    result = await mcp_call_tool_async(
         session.mcp_hub,
         tool_name,
         json.dumps(args_obj, ensure_ascii=False),
         echo=False,
     )
+    return result
 
 
 def _tool_mcp_import(arguments: Dict[str, Any], session: StudioSession) -> str:
@@ -1310,10 +1474,10 @@ def _tool_ask_user(arguments: Dict[str, Any], *, service_mode: bool = False) -> 
     return answer or "(empty)"
 
 
-def _tool_list_files(arguments: Dict[str, Any]) -> str:
+def _tool_list_files(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
     path_arg = str(arguments.get("path", "."))
     try:
-        root = _resolve_workspace_path(path_arg)
+        root = _resolve_workspace_path(path_arg, session, pick_existing=True)
     except ValueError as exc:
         return f"ERROR: {exc}"
     recursive = bool(arguments.get("recursive", False))
@@ -1376,22 +1540,8 @@ def _resolve_lsp_settings() -> tuple[bool, float]:
 
 
 def _infer_lsp_workspace_root(session: StudioSession) -> str:
-    # Prefer the first taskspace path when available.
-    try:
-        taskspaces = getattr(session, "taskspaces", None)
-        if isinstance(taskspaces, list) and taskspaces:
-            root = str(taskspaces[0].get("path", "")).strip()
-            if root:
-                return str(Path(root).expanduser().resolve(strict=False))
-    except Exception:
-        pass
-    try:
-        workspace_dir = str(getattr(session, "workspace_dir", "") or "").strip()
-        if workspace_dir:
-            return str(Path(workspace_dir).expanduser().resolve(strict=False))
-    except Exception:
-        pass
-    return str(_workspace_root())
+    roots = _session_workspace_roots(session)
+    return str(roots[0]) if roots else str(_workspace_root())
 
 
 async def _dispatch_lsp_tool(name: str, arguments: Dict[str, Any], session: StudioSession) -> str:
@@ -1549,13 +1699,13 @@ async def dispatch_tool_async(
                 session=session,
             )
         if name == "bash_exec":
-            return await _tool_bash_exec(arguments, confirm_gate=gate, emit_event=event_callback)
+            return await _tool_bash_exec(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "file_read":
-            return _tool_file_read(arguments)
+            return _tool_file_read(arguments, session)
         if name == "file_write":
             return await _tool_file_write(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "file_edit":
-            return await _tool_file_edit(arguments, confirm_gate=gate, emit_event=event_callback)
+            return await _tool_file_edit(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "codegen":
             return await _tool_codegen(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "mcp_connect":
@@ -1581,7 +1731,7 @@ async def dispatch_tool_async(
         if name == "ask_user":
             return _tool_ask_user(arguments, service_mode=isinstance(gate, AsyncConfirmGate))
         if name == "list_files":
-            return _tool_list_files(arguments)
+            return _tool_list_files(arguments, session)
         if name.startswith("lsp_"):
             return await _dispatch_lsp_tool(name, arguments, session)
     except Exception as exc:

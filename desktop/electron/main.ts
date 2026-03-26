@@ -1392,6 +1392,65 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("get-mcp-settings", async () => {
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/mcp/settings`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("put-mcp-settings", async (_event, payload: { extraSearchPaths: string[] }) => {
+    const paths = Array.isArray(payload?.extraSearchPaths) ? payload.extraSearchPaths : [];
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/mcp/settings`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "x-agx-desktop-token": getStudioToken(),
+        },
+        body: JSON.stringify({ extra_search_paths: paths }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("disconnect-mcp", async (_event, payload: { sessionId: string; name: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    const name = String(payload?.name || "").trim();
+    if (!sid || !name) return { ok: false, error: "sessionId and name are required" };
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/mcp/disconnect`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-agx-desktop-token": getStudioToken(),
+        },
+        body: JSON.stringify({ session_id: sid, name }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("save-user-mode", async (_event, mode: "pro" | "lite") => {
     const cfg = loadAgxConfig();
     cfg.user_mode = mode;

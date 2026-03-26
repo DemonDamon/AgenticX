@@ -26,12 +26,17 @@ from agenticx.avatar.group_chat import GroupChatRegistry
 from agenticx.avatar.registry import AvatarRegistry
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.cli.studio_mcp import (
+    append_mcp_auto_connect_name,
     auto_connect_servers,
     auto_connect_servers_async,
+    get_mcp_extra_search_paths_config,
     import_mcp_config,
     load_available_servers,
     mcp_connect,
     mcp_connect_async,
+    mcp_disconnect_async,
+    remove_mcp_auto_connect_name,
+    set_mcp_extra_search_paths_config,
 )
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.runtime import AgentRuntime
@@ -48,7 +53,10 @@ from agenticx.runtime.group_router import (
 )
 from agenticx.runtime.team_manager import AgentTeamManager
 from agenticx.studio.protocols import ChatRequest, ConfirmResponse, SessionState, SseEvent
-from agenticx.studio.session_manager import SessionManager
+from agenticx.studio.session_manager import (
+    SessionManager,
+    managed_session_binding_matches_avatar_query,
+)
 from agenticx.tools.mcp_hub import MCPHub
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.workspace.loader import (
@@ -229,6 +237,21 @@ def create_studio_app() -> FastAPI:
             return names
         return []
 
+    def _effective_auto_connect_names_for_session(
+        auto_connect_names: list[str] | None,
+        *,
+        mcp_configs: dict[str, Any],
+    ) -> list[str] | None:
+        """Scope auto-connect list by session type.
+
+        To avoid spawning many browser-use processes (one per session/pane),
+        never auto-connect browser-use by default.
+        Sessions can still connect browser-use manually when needed.
+        """
+        if auto_connect_names is None:
+            return [name for name in mcp_configs.keys() if name != "browser-use"]
+        return [name for name in auto_connect_names if name != "browser-use"]
+
     def _flush_taskspace_hint(session_id: str, session_obj: Any) -> bool:
         scratchpad = getattr(session_obj, "scratchpad", None)
         if not isinstance(scratchpad, dict):
@@ -382,19 +405,41 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.warning("Workspace bootstrap skipped: %s", exc)
         manager.cleanup_expired()
-        managed = manager.get(session_id, touch=False) if session_id else None
+        requested_sid = (session_id or "").strip() or None
+        managed = manager.get(requested_sid, touch=False) if requested_sid else None
+        if managed is not None and not managed_session_binding_matches_avatar_query(
+            managed,
+            query_avatar_id=avatar_id,
+        ):
+            logger.warning(
+                "[session] avatar binding mismatch sid=%s query_avatar=%r stored_avatar=%r; creating new session",
+                requested_sid,
+                avatar_id,
+                getattr(managed, "avatar_id", None),
+            )
+            managed = None
+            requested_sid = None
         if managed is not None:
             logger.info("[session] reused existing sid=%s", managed.session_id)
         if managed is None:
             avatar_cfg = avatar_registry.get_avatar(avatar_id) if avatar_id else None
             effective_provider = (avatar_cfg.default_provider if avatar_cfg and avatar_cfg.default_provider else provider)
             effective_model = (avatar_cfg.default_model if avatar_cfg and avatar_cfg.default_model else model)
-            managed = manager.create(provider=effective_provider, model=effective_model, session_id=session_id)
-            logger.info("[session] CREATED new sid=%s (requested=%s)", managed.session_id, session_id)
+            managed = manager.create(
+                provider=effective_provider,
+                model=effective_model,
+                session_id=requested_sid,
+            )
+            logger.info(
+                "[session] CREATED new sid=%s (requested=%s)",
+                managed.session_id,
+                requested_sid,
+            )
             if avatar_cfg and avatar_cfg.workspace_dir:
                 managed.studio_session.workspace_dir = avatar_cfg.workspace_dir
             else:
                 managed.studio_session.workspace_dir = os.getenv("AGX_WORKSPACE_ROOT", "").strip() or os.getcwd()
+            manager.rebind_default_taskspace_to_workspace(managed)
             managed.avatar_id = avatar_id or None
             managed.avatar_name = avatar_cfg.name if avatar_cfg else None
             try:
@@ -403,14 +448,18 @@ def create_studio_app() -> FastAPI:
                 logger.warning("Failed to load MCP server configs: %s", exc)
                 managed.studio_session.mcp_configs = {}
             auto_connect_names = _resolve_mcp_auto_connect_setting()
-            if managed.studio_session.mcp_configs and auto_connect_names != []:
+            scoped_auto_connect_names = _effective_auto_connect_names_for_session(
+                auto_connect_names,
+                mcp_configs=managed.studio_session.mcp_configs,
+            )
+            if managed.studio_session.mcp_configs and scoped_auto_connect_names != []:
                 managed.studio_session.mcp_hub = MCPHub(clients=[], auto_mode=False)
                 try:
                     await auto_connect_servers_async(
                         managed.studio_session.mcp_hub,
                         managed.studio_session.mcp_configs,
                         managed.studio_session.connected_servers,
-                        auto_connect_names,
+                        scoped_auto_connect_names,
                     )
                 except Exception as exc:
                     logger.warning("MCP auto-connect failed: %s", exc)
@@ -904,6 +953,23 @@ def create_studio_app() -> FastAPI:
                 "- 回复使用中文，简洁务实。\n"
                 "- 优先动手执行，不要反复确认。\n"
                 "- 边做边汇报，每完成一步简要说明。\n"
+                "- 连续 2 次工具调用失败或返回相同结果后，必须切换策略，禁止重复同一操作。\n"
+            )
+            prompt += (
+                "\n## 浏览器操作指南（browser-use MCP）\n"
+                "操作网页时严格遵循以下流程，每步都必须调用工具，禁止空转：\n"
+                "1. **导航**：`mcp_call(tool_name='browser_navigate', arguments={url:'...'})` — 每个 URL 只导航一次。\n"
+                "2. **感知页面**：导航后立即调用 `mcp_call(tool_name='browser_get_state', arguments={})` 获取可交互元素列表。"
+                "结果包含 `interactive_elements` 数组，每个元素有 `index`（用于点击）、`tag`、`text`、`href`。\n"
+                "3. **点击元素**：找到目标元素的 `index`，调用 `mcp_call(tool_name='browser_click', arguments={index: N})`。\n"
+                "4. **提取内容**：需要读取页面文字时用 `mcp_call(tool_name='browser_extract_content', arguments={query:'要找的内容'})`。\n"
+                "5. **输入文字**：用 `mcp_call(tool_name='browser_type', arguments={index: N, text:'...'})`。\n"
+                "6. **循环**：点击/输入后，重新调用 `browser_get_state` 感知新页面状态，再决定下一步。\n\n"
+                "**关键禁忌**：\n"
+                "- 禁止对同一 URL 重复调用 `browser_navigate`。\n"
+                "- 禁止连续多次调用 `browser_screenshot`（非视觉模型看不到图片）。\n"
+                "- 导航后必须调用 `browser_get_state`，不要凭猜测操作。\n"
+                "- 每一步都要推进任务：导航→感知→点击→感知→点击…直到完成。\n"
             )
             if ws:
                 prompt += f"\n## 工作目录\n- {ws}\n"
@@ -1346,6 +1412,72 @@ def create_studio_app() -> FastAPI:
                 status_code=400,
                 detail=(detail.strip() or f"failed to connect MCP server: {name}"),
             )
+        try:
+            append_mcp_auto_connect_name(name)
+        except Exception as exc:
+            logger.warning("MCP auto_connect persist failed: %s", exc)
+        return {"ok": True, "name": name}
+
+    @app.get("/api/mcp/settings")
+    async def get_mcp_settings(x_agx_desktop_token: str | None = Header(default=None)) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        extra = list(get_mcp_extra_search_paths_config())
+        ac_raw: Any = ConfigManager.get_value("mcp.auto_connect")
+        auto_list: list[str] = []
+        if isinstance(ac_raw, list):
+            auto_list = [str(x).strip() for x in ac_raw if str(x).strip()]
+        elif isinstance(ac_raw, str) and ac_raw.strip() and ac_raw.strip().lower() != "all":
+            auto_list = [ac_raw.strip()]
+        return {
+            "ok": True,
+            "extra_search_paths": extra,
+            "auto_connect": auto_list,
+        }
+
+    @app.put("/api/mcp/settings")
+    async def put_mcp_settings(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        extra = payload.get("extra_search_paths")
+        if extra is not None:
+            if not isinstance(extra, list):
+                raise HTTPException(status_code=400, detail="extra_search_paths must be a list")
+            set_mcp_extra_search_paths_config([str(x) for x in extra])
+        return {
+            "ok": True,
+            "extra_search_paths": list(get_mcp_extra_search_paths_config()),
+        }
+
+    @app.post("/api/mcp/disconnect")
+    async def disconnect_mcp_server(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        session_id = str(payload.get("session_id", "")).strip()
+        name = str(payload.get("name", "")).strip()
+        if not session_id or not name:
+            raise HTTPException(status_code=400, detail="session_id and name are required")
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        sess = managed.studio_session
+        if sess.mcp_hub is None:
+            sess.connected_servers.discard(name)
+            try:
+                remove_mcp_auto_connect_name(name)
+            except Exception as exc:
+                logger.warning("MCP auto_connect remove failed: %s", exc)
+            return {"ok": True, "name": name}
+        okd, err = await mcp_disconnect_async(sess.mcp_hub, sess.mcp_configs, sess.connected_servers, name)
+        if not okd:
+            raise HTTPException(status_code=400, detail=err.strip() or f"disconnect failed: {name}")
+        try:
+            remove_mcp_auto_connect_name(name)
+        except Exception as exc:
+            logger.warning("MCP auto_connect remove failed: %s", exc)
         return {"ok": True, "name": name}
 
     @app.post("/api/test-email")
@@ -1503,6 +1635,7 @@ def create_studio_app() -> FastAPI:
             managed.studio_session.workspace_dir = avatar_cfg.workspace_dir
         else:
             managed.studio_session.workspace_dir = os.getenv("AGX_WORKSPACE_ROOT", "").strip() or os.getcwd()
+        manager.rebind_default_taskspace_to_workspace(managed)
         managed.avatar_id = avatar_id
         managed.avatar_name = avatar_cfg.name if avatar_cfg else None
         managed.session_name = session_name
@@ -1521,6 +1654,22 @@ def create_studio_app() -> FastAPI:
             managed.studio_session.mcp_configs = load_available_servers()
         except Exception:
             managed.studio_session.mcp_configs = {}
+        auto_connect_names = _resolve_mcp_auto_connect_setting()
+        scoped_auto_connect_names = _effective_auto_connect_names_for_session(
+            auto_connect_names,
+            mcp_configs=managed.studio_session.mcp_configs,
+        )
+        if managed.studio_session.mcp_configs and scoped_auto_connect_names != []:
+            managed.studio_session.mcp_hub = MCPHub(clients=[], auto_mode=False)
+            try:
+                await auto_connect_servers_async(
+                    managed.studio_session.mcp_hub,
+                    managed.studio_session.mcp_configs,
+                    managed.studio_session.connected_servers,
+                    scoped_auto_connect_names,
+                )
+            except Exception as exc:
+                logger.warning("MCP auto-connect failed for new session %s: %s", managed.session_id, exc)
         return {
             "ok": True,
             "session_id": managed.session_id,

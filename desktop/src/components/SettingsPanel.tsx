@@ -8,6 +8,8 @@ import {
   Bookmark,
   Sparkles,
   Globe,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import type { Avatar, ChatPane, ChatStyle, GroupChat } from "../store";
@@ -37,6 +39,8 @@ type McpServer = {
   connected: boolean;
   command?: string;
 };
+
+const MCP_PRIMARY_CONFIG_PATH = "~/.agenticx/mcp.json";
 
 type SettingsTab = "general" | "provider" | "mcp" | "skills" | "email" | "workspace" | "favorites" | "server";
 type ConfirmMode = "manual" | "semi-auto" | "auto";
@@ -1298,7 +1302,8 @@ export function SettingsPanel({
   const [fetchingModels, setFetchingModels] = useState(false);
   const [showModelPanel, setShowModelPanel] = useState(false);
   const [newModelInput, setNewModelInput] = useState("");
-  const [mcpImportPath, setMcpImportPath] = useState("~/.cursor/mcp.json");
+  const [mcpExtraPaths, setMcpExtraPaths] = useState<string[]>([]);
+  const [mcpAutoConnectHint, setMcpAutoConnectHint] = useState<string[]>([]);
   const [mcpBusy, setMcpBusy] = useState(false);
   const [mcpMessage, setMcpMessage] = useState("");
 
@@ -1343,7 +1348,6 @@ export function SettingsPanel({
     setKeyError({});
     setModelHealthMap({});
     setShowModelPanel(false);
-    setMcpImportPath("~/.cursor/mcp.json");
     setMcpMessage("");
     setServerTestStatus("idle");
     setServerTestError("");
@@ -1354,6 +1358,41 @@ export function SettingsPanel({
     });
     if (sessionId) void onRefreshMcp(sessionId);
   }, [open, providers, defaultProvider, sessionId, onRefreshMcp]);
+
+  useEffect(() => {
+    if (!open || tab !== "mcp") return;
+    void window.agenticxDesktop.getMcpSettings().then((r) => {
+      if (r.ok && Array.isArray(r.extra_search_paths)) {
+        setMcpExtraPaths([...r.extra_search_paths]);
+      }
+      if (r.ok && Array.isArray(r.auto_connect)) {
+        setMcpAutoConnectHint([...r.auto_connect]);
+      }
+    });
+  }, [open, tab]);
+
+  const persistMcpExtraPaths = useCallback(
+    async (next: string[]) => {
+      const cleaned = next.map((x) => x.trim()).filter(Boolean);
+      setMcpBusy(true);
+      setMcpMessage("");
+      try {
+        const r = await window.agenticxDesktop.putMcpSettings({ extraSearchPaths: cleaned });
+        if (r.ok) {
+          setMcpExtraPaths(cleaned);
+          setMcpMessage("已保存 MCP 配置路径");
+          if (sessionId) await onRefreshMcp(sessionId);
+        } else {
+          setMcpMessage(`保存路径失败: ${r.error ?? "未知错误"}`);
+        }
+      } catch (err) {
+        setMcpMessage(`保存路径失败: ${String(err)}`);
+      } finally {
+        setMcpBusy(false);
+      }
+    },
+    [sessionId, onRefreshMcp]
+  );
 
   const current = useMemo(() => draft[active] ?? { apiKey: "", baseUrl: "", model: "", models: [] }, [draft, active]);
 
@@ -1407,25 +1446,6 @@ export function SettingsPanel({
     onClose();
   };
 
-  const handleImportMcp = async () => {
-    if (!sessionId || !mcpImportPath.trim()) return;
-    setMcpBusy(true);
-    setMcpMessage("");
-    try {
-      const result = await window.agenticxDesktop.importMcpConfig({ sessionId, sourcePath: mcpImportPath.trim() });
-      if (result.ok) {
-        await onRefreshMcp(sessionId);
-        setMcpMessage(`导入成功: imported=${String(result.total_imported ?? 0)}, total=${String(result.total_servers ?? 0)}`);
-      } else {
-        setMcpMessage(`导入失败: ${result.error ?? "未知错误"}`);
-      }
-    } catch (err) {
-      setMcpMessage(`导入失败: ${String(err)}`);
-    } finally {
-      setMcpBusy(false);
-    }
-  };
-
   const handleConnectMcp = async (name: string) => {
     if (!sessionId) return;
     setMcpBusy(true);
@@ -1434,12 +1454,39 @@ export function SettingsPanel({
       const result = await window.agenticxDesktop.connectMcp({ sessionId, name });
       if (result.ok) {
         await onRefreshMcp(sessionId);
-        setMcpMessage(`连接成功: ${name}`);
+        const hint = await window.agenticxDesktop.getMcpSettings();
+        if (hint.ok && Array.isArray(hint.auto_connect)) {
+          setMcpAutoConnectHint([...hint.auto_connect]);
+        }
+        setMcpMessage(`已连接 ${name}；下次启动 Machi 将自动重连此项。`);
       } else {
         setMcpMessage(`连接失败: ${result.error ?? "未知错误"}`);
       }
     } catch (err) {
       setMcpMessage(`连接失败: ${String(err)}`);
+    } finally {
+      setMcpBusy(false);
+    }
+  };
+
+  const handleDisconnectMcp = async (name: string) => {
+    if (!sessionId) return;
+    setMcpBusy(true);
+    setMcpMessage("");
+    try {
+      const result = await window.agenticxDesktop.disconnectMcp({ sessionId, name });
+      if (result.ok) {
+        await onRefreshMcp(sessionId);
+        const hint = await window.agenticxDesktop.getMcpSettings();
+        if (hint.ok && Array.isArray(hint.auto_connect)) {
+          setMcpAutoConnectHint([...hint.auto_connect]);
+        }
+        setMcpMessage(`已断开 ${name}，且不再自动连接。`);
+      } else {
+        setMcpMessage(`断开失败: ${result.error ?? "未知错误"}`);
+      }
+    } catch (err) {
+      setMcpMessage(`断开失败: ${String(err)}`);
     } finally {
       setMcpBusy(false);
     }
@@ -1687,40 +1734,91 @@ export function SettingsPanel({
                 <div className="text-sm text-text-subtle">
                   MCP（模型上下文协议）服务为 Agent 扩展外部工具 — 文件系统、数据库、网页搜索等。
                 </div>
-                <div className="flex gap-2">
-                  <input
-                    className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
-                    value={mcpImportPath}
-                    onChange={(e) => setMcpImportPath(e.target.value)}
-                    placeholder="外部 mcp.json 路径，例如 ~/.cursor/mcp.json"
-                  />
+                <div className="space-y-2">
+                  <div className="text-xs text-text-faint">
+                    配置路径（按顺序合并；同名服务以先出现的为准）。主路径固定；点 + 添加其他 mcp.json（如 Cursor、OpenClaw）。
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      readOnly
+                      className="flex-1 cursor-not-allowed rounded-md border border-border bg-surface-panel/60 px-2 py-1.5 text-sm text-text-muted"
+                      value={MCP_PRIMARY_CONFIG_PATH}
+                      aria-label="主 MCP 配置路径"
+                    />
+                    <span className="shrink-0 self-center text-[10px] text-text-faint">主配置</span>
+                  </div>
+                  {mcpExtraPaths.map((row, idx) => (
+                    <div key={`mcp-path-${idx}`} className="flex gap-2">
+                      <input
+                        className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
+                        value={row}
+                        placeholder="例如 ~/.cursor/mcp.json"
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setMcpExtraPaths((prev) => prev.map((p, i) => (i === idx ? v : p)));
+                        }}
+                        onBlur={(e) => {
+                          const v = e.target.value;
+                          const next = mcpExtraPaths.map((p, i) => (i === idx ? v : p));
+                          void persistMcpExtraPaths(next);
+                        }}
+                        disabled={mcpBusy}
+                      />
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-md border border-border p-2 text-text-subtle transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
+                        title="移除此路径"
+                        disabled={mcpBusy}
+                        onClick={() => {
+                          const next = mcpExtraPaths.filter((_, i) => i !== idx);
+                          setMcpExtraPaths(next);
+                          void persistMcpExtraPaths(next);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden />
+                      </button>
+                    </div>
+                  ))}
                   <button
-                    className="shrink-0 rounded-md border border-cyan-500/30 px-3 py-1.5 text-xs text-cyan-400 transition hover:bg-cyan-500/10 disabled:opacity-40"
-                    onClick={handleImportMcp}
-                    disabled={mcpBusy || !sessionId || !mcpImportPath.trim()}
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+                    disabled={mcpBusy}
+                    onClick={() => setMcpExtraPaths((prev) => [...prev, ""])}
                   >
-                    导入
-                  </button>
-                  <button
-                    className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-                    onClick={() => void onRefreshMcp(sessionId)}
-                    disabled={!sessionId || mcpBusy}
-                  >
-                    刷新
+                    <Plus className="h-3.5 w-3.5" aria-hidden />
+                    添加配置路径
                   </button>
                 </div>
+                {mcpAutoConnectHint.length > 0 ? (
+                  <div className="text-xs text-text-faint">
+                    下次启动将自动连接：
+                    <span className="text-text-subtle">{mcpAutoConnectHint.join("、")}</span>
+                  </div>
+                ) : null}
                 {mcpMessage && <div className="text-xs text-text-subtle">{mcpMessage}</div>}
                 <div className="space-y-1.5">
                   {mcpServers.length === 0 ? (
-                    <div className="py-6 text-center text-sm text-text-faint">尚未配置 MCP 服务。点击"导入"连接你的第一个 MCP 工具提供方。</div>
+                    <div className="py-6 text-center text-sm text-text-faint">
+                      尚未发现 MCP 服务。请确认主配置或附加路径中的 mcp.json 有效。
+                    </div>
                   ) : (
                     mcpServers.map((server) => (
                       <div key={server.name} className="flex items-center gap-2 rounded-md border border-border bg-surface-card px-3 py-2">
                         <span className={`h-2 w-2 shrink-0 rounded-full ${server.connected ? "bg-emerald-400" : "bg-surface-hover"}`} />
                         <span className="flex-1 truncate text-sm text-text-muted">{server.name}</span>
                         <span className="max-w-[220px] truncate text-[10px] text-text-faint">{server.command ?? ""}</span>
-                        {!server.connected && (
+                        {server.connected ? (
                           <button
+                            type="button"
+                            className="shrink-0 rounded border border-border px-2 py-0.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+                            onClick={() => void handleDisconnectMcp(server.name)}
+                            disabled={mcpBusy || !sessionId}
+                          >
+                            断开
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
                             className="shrink-0 rounded border border-border px-2 py-0.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
                             onClick={() => void handleConnectMcp(server.name)}
                             disabled={mcpBusy || !sessionId}
