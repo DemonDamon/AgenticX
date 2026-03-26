@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import type { Message } from "../../store";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { parseReasoningContent } from "./reasoning-parser";
+import { chatMarkdownComponents } from "./markdown-components";
 
 type Props = {
   message: Message;
@@ -39,7 +40,11 @@ export function CleanBlock({ message, badge }: Props) {
         ) : !isUser && !isStreaming && parsed?.reasoning ? (
           <ReasoningBlock text={parsed.reasoning} />
         ) : null}
-        {hasBody ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyText}</ReactMarkdown> : null}
+        {hasBody ? (
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={chatMarkdownComponents}>
+            {bodyText}
+          </ReactMarkdown>
+        ) : null}
       </div>
     </div>
   );

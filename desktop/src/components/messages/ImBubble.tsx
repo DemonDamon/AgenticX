@@ -9,6 +9,7 @@ import { parseReasoningContent } from "./reasoning-parser";
 import { ForwardedHistoryCard } from "./ForwardedHistoryCard";
 import { ForwardedHistoryModal } from "./ForwardedHistoryModal";
 import { getContainedSelectionText } from "../../utils/favorite-selection";
+import { chatMarkdownComponents } from "./markdown-components";
 
 type Props = {
   message: Message;
@@ -196,7 +197,11 @@ export function ImBubble({
                     ) : !isUser && !isStreaming && parsed?.reasoning ? (
                       <ReasoningBlock text={parsed.reasoning} />
                     ) : null}
-                    {hasBody ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyText}</ReactMarkdown> : null}
+                    {hasBody ? (
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={chatMarkdownComponents}>
+                        {bodyText}
+                      </ReactMarkdown>
+                    ) : null}
                   </>
                 )}
               </div>
