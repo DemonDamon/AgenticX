@@ -22,6 +22,7 @@
     "@xterm/xterm": "^6.0.0",
     "js-yaml": "^4.1.1",
     "lucide-react": "^0.577.0",
+    "mermaid": "^11.13.0",
     "node-pty": "^1.1.0",
     "prismjs": "^1.29.0",
     "react": "^18.3.1",
