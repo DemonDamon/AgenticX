@@ -117,6 +117,8 @@ pip install "agenticx[all]"         # Everything
 
 > **Tip**: The core package includes only ~27 lightweight dependencies and installs in seconds. Heavy dependencies (torch, pandas, etc.) are optional extras - install only what you need.
 
+> **Browser automation**: To run [browser-use](https://github.com/browser-use/browser-use) as an MCP server from AgenticX (`mcp_connect` / `mcp_call`), see [examples/browser-use-mcp.md](examples/browser-use-mcp.md).
+
 #### Option 2: Install from Source (Development)
 
 ```bash

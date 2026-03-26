@@ -303,34 +303,67 @@ def mcp_show_tools(hub: "MCPHub") -> None:
     console.print(table)
 
 
-def mcp_call_tool(hub: "MCPHub", tool_name: str, args_json: str) -> Optional[str]:
-    """Call an MCP tool and print the result. Returns result string or None."""
+async def mcp_call_tool_async(
+    hub: "MCPHub",
+    tool_name: str,
+    args_json: str,
+    *,
+    echo: bool = True,
+) -> Optional[str]:
+    """Call an MCP tool via the hub. Use from async contexts (Studio agent loop, Desktop).
+
+    Args:
+        hub: Connected MCP hub with discovered tools.
+        tool_name: Routed tool name as shown in ``hub._tool_routing``.
+        args_json: JSON object string for tool arguments.
+        echo: If True, print status and result to the Rich console (REPL). If False, only return.
+    """
     if not hub._tool_routing:
-        console.print("[yellow]暂无已连接的 MCP 工具。[/yellow]")
+        if echo:
+            console.print("[yellow]暂无已连接的 MCP 工具。[/yellow]")
         return None
 
     if tool_name not in hub._tool_routing:
-        console.print(f"[red]工具 '{tool_name}' 不存在。[/red]")
-        available = ", ".join(hub._tool_routing.keys())
-        console.print(f"[dim]可用工具: {available}[/dim]")
+        if echo:
+            console.print(f"[red]工具 '{tool_name}' 不存在。[/red]")
+            available = ", ".join(hub._tool_routing.keys())
+            console.print(f"[dim]可用工具: {available}[/dim]")
         return None
 
     try:
         arguments = json.loads(args_json) if args_json.strip() else {}
     except json.JSONDecodeError as exc:
-        console.print(f"[red]参数 JSON 解析失败:[/red] {exc}")
+        if echo:
+            console.print(f"[red]参数 JSON 解析失败:[/red] {exc}")
         return None
 
     try:
-        raw_result = asyncio.run(hub.call_tool(tool_name, arguments))
+        raw_result = await hub.call_tool(tool_name, arguments)
         result_text = hub.extract_tool_result(tool_name, raw_result)
     except Exception as exc:
-        console.print(f"[red]工具调用失败:[/red] {exc}")
+        if echo:
+            console.print(f"[red]工具调用失败:[/red] {exc}")
         return None
 
     result_str = str(result_text)
-    console.print(f"[green]结果:[/green]\n{result_str}")
+    if echo:
+        console.print(f"[green]结果:[/green]\n{result_str}")
     return result_str
+
+
+def mcp_call_tool(hub: "MCPHub", tool_name: str, args_json: str) -> Optional[str]:
+    """Call an MCP tool from a synchronous context (e.g. Studio REPL).
+
+    Must not be used when an asyncio event loop is already running; use
+    ``await mcp_call_tool_async(...)`` instead.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(mcp_call_tool_async(hub, tool_name, args_json, echo=True))
+    raise RuntimeError(
+        "mcp_call_tool() cannot run inside an active event loop; use await mcp_call_tool_async() instead."
+    )
 
 
 def build_mcp_tools_context(hub: "MCPHub") -> str:
