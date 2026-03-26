@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
+import shutil
+import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING, Tuple
 
 from rich.console import Console
 from rich.table import Table
@@ -19,6 +23,135 @@ if TYPE_CHECKING:
     from agenticx.tools.remote_v2 import MCPServerConfig
 
 console = Console()
+logger = logging.getLogger(__name__)
+
+# Shipped default for first-time Machi / agx users (no secrets on disk; env inherits os.environ).
+_DEFAULT_BROWSER_USE_MCP_ENTRY: Dict[str, Any] = {
+    "command": "uvx",
+    "args": ["browser-use[cli]", "--mcp"],
+    "timeout": 600.0,
+}
+
+
+def agenticx_home_mcp_path() -> Path:
+    """Canonical MCP config path under ~/.agenticx."""
+    return Path.home() / ".agenticx" / "mcp.json"
+
+
+def ensure_default_agenticx_mcp_json() -> bool:
+    """Ensure ~/.agenticx/mcp.json contains a default ``browser-use`` MCP server.
+
+    - If the file is missing: creates it with only ``browser-use``.
+    - If the file exists but has no ``browser-use`` entry (common: user only uses
+      ``~/.cursor/mcp.json``): **merges** in the default entry without removing others.
+    - Never replaces an existing ``browser-use`` block.
+
+    Returns True if a new file was created or updated.
+    """
+    target = agenticx_home_mcp_path()
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+
+    entry = dict(_DEFAULT_BROWSER_USE_MCP_ENTRY)
+
+    if not target.exists():
+        try:
+            target.write_text(
+                json.dumps({"browser-use": entry}, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            return False
+        return True
+
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("skip browser-use merge: cannot read %s: %s", target, exc)
+        return False
+
+    if not isinstance(raw, dict):
+        return False
+
+    changed = False
+    if "mcpServers" in raw and isinstance(raw["mcpServers"], dict):
+        servers = raw["mcpServers"]
+        if "browser-use" not in servers:
+            servers["browser-use"] = entry
+            changed = True
+    else:
+        if "browser-use" not in raw:
+            raw["browser-use"] = entry
+            changed = True
+
+    if not changed:
+        return False
+
+    try:
+        target.write_text(
+            json.dumps(raw, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        return False
+    return True
+
+
+def _is_stock_browser_use_mcp_config(cfg: "MCPServerConfig") -> bool:
+    """True when config matches the bundled uvx + browser-use[cli] --mcp entry."""
+    if str(cfg.command).strip() != "uvx":
+        return False
+    args = [str(a) for a in (getattr(cfg, "args", None) or [])]
+    joined = " ".join(args)
+    return "browser-use" in joined and "--mcp" in joined
+
+
+def preflight_browser_use_install(*, echo: bool = True) -> Tuple[bool, str]:
+    """Run ``uvx browser-use install`` (Playwright/Chromium). No manual JSON edits.
+
+    Returns (True, message) on success; (False, error) if ``uvx`` is missing or install fails.
+    """
+    uvx = shutil.which("uvx")
+    if not uvx:
+        msg = (
+            "未找到 uvx。请安装 uv 后重试：https://docs.astral.sh/uv/getting-started/installation/"
+        )
+        if echo:
+            console.print(f"[red]{msg}[/red]")
+        logger.warning("browser-use preflight: %s", msg)
+        return False, msg
+    if echo:
+        console.print("[dim]正在安装 browser-use 浏览器依赖（uvx browser-use install，首次可能较慢）…[/dim]")
+    logger.info("browser-use preflight: running `%s browser-use install`", uvx)
+    try:
+        result = subprocess.run(
+            [uvx, "browser-use", "install"],
+            capture_output=True,
+            text=True,
+            timeout=900.0,
+            env=os.environ.copy(),
+        )
+    except subprocess.TimeoutExpired:
+        msg = "browser-use install 超时（>900s）"
+        if echo:
+            console.print(f"[red]{msg}[/red]")
+        logger.warning("browser-use preflight: %s", msg)
+        return False, msg
+
+    tail = ((result.stderr or "") + (result.stdout or ""))[-2000:]
+    if result.returncode != 0:
+        msg = f"browser-use install 失败 (exit {result.returncode}): {tail}"
+        if echo:
+            console.print(f"[red]{msg}[/red]")
+        logger.warning("browser-use preflight: %s", msg)
+        return False, msg
+
+    if echo:
+        console.print("[green]browser-use 浏览器依赖已就绪[/green]")
+    logger.info("browser-use preflight: install ok")
+    return True, "ok"
 
 
 def _default_mcp_search_paths() -> List[Path]:
@@ -59,9 +192,12 @@ def load_available_servers() -> Dict[str, "MCPServerConfig"]:
     3) ~/.cursor/mcp.json
 
     Merges all discovered files. Existing names keep higher-priority entry.
+    Ensures ~/.agenticx/mcp.json exists and contains a default ``browser-use`` entry (merge if needed).
     Returns empty dict if no config found.
     """
     from agenticx.tools.remote import load_mcp_config
+
+    ensure_default_agenticx_mcp_json()
 
     configs: Dict[str, "MCPServerConfig"] = {}
     for path in _default_mcp_search_paths():
@@ -178,22 +314,31 @@ def mcp_connect(
     configs: Dict[str, "MCPServerConfig"],
     connected: Set[str],
     name: str,
-) -> bool:
+) -> Tuple[bool, str]:
     """Connect to an MCP server and discover its tools.
 
-    Returns True on success.
+    Returns (True, \"\") on success, or (False, error_message).
     """
     if name in connected:
         console.print(f"[yellow]{name} 已经连接。[/yellow]")
-        return True
+        return True, ""
     if name not in configs:
         console.print(f"[red]MCP server '{name}' 未在配置中找到。[/red]")
         console.print(f"[dim]可用: {', '.join(configs.keys()) or '(无)'}[/dim]")
-        return False
+        return False, f"MCP server '{name}' not in config; available: {', '.join(configs.keys()) or '(none)'}"
 
     from agenticx.tools.remote_v2 import MCPClientV2
 
     cfg = configs[name]
+    if name == "browser-use" and _is_stock_browser_use_mcp_config(cfg):
+        ok_install, err = preflight_browser_use_install(echo=True)
+        if not ok_install:
+            console.print(
+                "[dim]提示：仍可在 ~/.agenticx/mcp.json 中改用自定义 command/args；"
+                "或安装 uv 后再次点击连接。[/dim]"
+            )
+            return False, err
+
     client = MCPClientV2(cfg)
     hub.clients.append(client)
 
@@ -202,7 +347,7 @@ def mcp_connect(
     except Exception as exc:
         console.print(f"[red]连接 {name} 失败:[/red] {exc}")
         hub.clients.remove(client)
-        return False
+        return False, str(exc)
 
     connected.add(name)
     # Show discovered tools for this server
@@ -216,7 +361,7 @@ def mcp_connect(
         route = hub._tool_routing.get(tool_info.name)
         if route and route.client is client:
             console.print(f"  [cyan]{tool_info.name}[/cyan] — {tool_info.description[:60]}")
-    return True
+    return True, ""
 
 
 def auto_connect_servers(
@@ -234,7 +379,8 @@ def auto_connect_servers(
         candidates = [name for name in auto_connect_list if name in configs]
     results: Dict[str, bool] = {}
     for name in candidates:
-        results[name] = mcp_connect(hub, configs, connected, name)
+        ok, _detail = mcp_connect(hub, configs, connected, name)
+        results[name] = ok
     return results
 
 

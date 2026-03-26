@@ -1138,8 +1138,11 @@ def _tool_mcp_connect(arguments: Dict[str, Any], session: StudioSession) -> str:
         from agenticx.tools.mcp_hub import MCPHub
 
         session.mcp_hub = MCPHub(clients=[], auto_mode=False)
-    ok = mcp_connect(session.mcp_hub, session.mcp_configs, session.connected_servers, name)
-    return "OK" if ok else "ERROR: connect failed"
+    ok, detail = mcp_connect(session.mcp_hub, session.mcp_configs, session.connected_servers, name)
+    if ok:
+        return "OK"
+    d = (detail or "").strip()
+    return f"ERROR: connect failed: {d}" if d else "ERROR: connect failed"
 
 
 async def _tool_mcp_call_async(arguments: Dict[str, Any], session: StudioSession) -> str:
