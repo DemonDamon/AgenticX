@@ -1154,13 +1154,12 @@ async def _tool_mcp_call_async(arguments: Dict[str, Any], session: StudioSession
     args_obj = arguments.get("arguments", {})
     if not isinstance(args_obj, dict):
         return "ERROR: arguments must be an object"
-    result = await mcp_call_tool_async(
+    return await mcp_call_tool_async(
         session.mcp_hub,
         tool_name,
         json.dumps(args_obj, ensure_ascii=False),
         echo=False,
     )
-    return result if result is not None else "ERROR: mcp_call failed"
 
 
 def _tool_mcp_import(arguments: Dict[str, Any], session: StudioSession) -> str:
