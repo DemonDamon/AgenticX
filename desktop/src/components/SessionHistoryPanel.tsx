@@ -12,6 +12,7 @@ function timeAgo(ts: number): string {
 
 type Props = {
   pane: ChatPane;
+  onClose?: () => void;
 };
 
 type SessionRow = {
@@ -82,7 +83,7 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
   return sortSessionRows(rows);
 }
 
-export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: Props) {
+export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onClose }: Props) {
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const addPane = useAppStore((s) => s.addPane);
@@ -501,47 +502,68 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane }: P
     <div className="h-full w-[220px] shrink-0 border-l border-border bg-surface-card">
       <div className="border-b border-border px-3 py-2 text-xs text-text-subtle">
         <div className="flex items-center justify-between gap-2">
-          <span>{title} · 历史会话</span>
-          {!selectMode ? (
-            <button
-              className="rounded border border-border px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
-              onClick={() => {
-                setSelectMode(true);
-                setContextMenu(null);
-              }}
-            >
-              选择
-            </button>
-          ) : (
-            <div className="flex items-center gap-1">
+          <span className="flex items-center gap-1.5">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0" title={title}>
+              <path d="M2.5 3C2.5 2.17 3.17 1.5 4 1.5H12C12.83 1.5 13.5 2.17 13.5 3V9C13.5 9.83 12.83 10.5 12 10.5H9L6.5 13V10.5H4C3.17 10.5 2.5 9.83 2.5 9V3Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+              <path d="M5 5H11M5 7.5H9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+            </svg>
+          </span>
+          <div className="flex items-center gap-1">
+            {!selectMode ? (
               <button
-                className="rounded border border-border px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
-                onClick={toggleSelectAll}
-                disabled={batchDeleting}
-                title="全选或取消全选"
-              >
-                {selectedSessionIds.length >= sessions.length && sessions.length > 0 ? "取消全选" : "全选"}
-              </button>
-              <button
-                className="rounded border border-red-500/50 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/10 disabled:opacity-50"
-                onClick={() => void deleteSelectedSessions()}
-                disabled={batchDeleting || selectedSessionIds.length === 0}
-                title={selectedSessionIds.length > 0 ? `删除 ${selectedSessionIds.length} 个会话` : "先勾选会话"}
-              >
-                {batchDeleting ? "删除中..." : `删除${selectedSessionIds.length > 0 ? ` (${selectedSessionIds.length})` : ""}`}
-              </button>
-              <button
-                className="rounded border border-border px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
+                className="rounded border border-border px-1.5 py-0.5 text-text-muted hover:bg-surface-hover"
                 onClick={() => {
-                  setSelectMode(false);
-                  setSelectedSessionIds([]);
+                  setSelectMode(true);
+                  setContextMenu(null);
                 }}
-                disabled={batchDeleting}
+                title="多选会话"
               >
-                取消
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+                  <rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+                  <path d="M9 4.5H14M9 11.5H14" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                </svg>
               </button>
-            </div>
-          )}
+            ) : (
+              <>
+                <button
+                  className="rounded border border-border px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
+                  onClick={toggleSelectAll}
+                  disabled={batchDeleting}
+                  title="全选或取消全选"
+                >
+                  {selectedSessionIds.length >= sessions.length && sessions.length > 0 ? "取消全选" : "全选"}
+                </button>
+                <button
+                  className="rounded border border-red-500/50 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                  onClick={() => void deleteSelectedSessions()}
+                  disabled={batchDeleting || selectedSessionIds.length === 0}
+                  title={selectedSessionIds.length > 0 ? `删除 ${selectedSessionIds.length} 个会话` : "先勾选会话"}
+                >
+                  {batchDeleting ? "删除中..." : `删除${selectedSessionIds.length > 0 ? ` (${selectedSessionIds.length})` : ""}`}
+                </button>
+                <button
+                  className="rounded border border-border px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
+                  onClick={() => {
+                    setSelectMode(false);
+                    setSelectedSessionIds([]);
+                  }}
+                  disabled={batchDeleting}
+                >
+                  取消
+                </button>
+              </>
+            )}
+            {onClose ? (
+              <button
+                className="rounded px-1.5 py-0.5 text-[11px] text-text-faint hover:bg-surface-hover hover:text-text-muted"
+                onClick={onClose}
+                title="关闭历史会话"
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
       <div className="max-h-[calc(100%-35px)] overflow-y-auto px-2 py-2">

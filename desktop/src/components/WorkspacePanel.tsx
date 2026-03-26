@@ -35,6 +35,7 @@ type Props = {
   onActiveTaskspaceChange: (taskspaceId: string | null) => void;
   onPickFileForReference?: (path: string) => void;
   autoRefreshKey?: number;
+  onClose?: () => void;
 };
 
 type CtxTarget = { x: number; y: number; taskspace: Taskspace };
@@ -61,6 +62,7 @@ export function WorkspacePanel({
   onActiveTaskspaceChange,
   onPickFileForReference,
   autoRefreshKey,
+  onClose,
 }: Props) {
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const removePaneTerminalTab = useAppStore((s) => s.removePaneTerminalTab);
@@ -416,9 +418,11 @@ export function WorkspacePanel({
                   e.preventDefault();
                   setCtxMenu({ x: e.clientX, y: e.clientY, taskspace: item });
                 }}
-                title={item.path}
+                title={`${item.label}${item.path ? `\n${item.path}` : ""}`}
               >
-                {item.label}
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
+                  <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6.38L7.88 4.5H12.5C13.33 4.5 14 5.17 14 6V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+                </svg>
               </button>
             ))}
           </div>
@@ -430,7 +434,9 @@ export function WorkspacePanel({
             }}
             title="刷新工作区列表与目录"
           >
-            刷新
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5c1.6 0 3.04.68 4.06 1.76L14 2.5V6h-3.5l1.44-1.44A4 4 0 1 0 12 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </button>
           <button
             className="rounded bg-surface-hover px-2 py-1 text-xs text-text-muted hover:bg-surface-hover"
@@ -442,6 +448,15 @@ export function WorkspacePanel({
           >
             +
           </button>
+          {onClose ? (
+            <button
+              className="rounded px-1.5 py-1 text-xs text-text-faint hover:bg-surface-hover hover:text-text-muted"
+              onClick={onClose}
+              title="关闭工作区面板"
+            >
+              ×
+            </button>
+          ) : null}
           {showAddForm ? (
             <div className="absolute right-2 top-10 z-10 w-[280px] rounded-md border border-border bg-surface-panel p-2 shadow-2xl">
               <div className="mb-1 text-[11px] text-text-subtle">新增工作区</div>
@@ -458,7 +473,10 @@ export function WorkspacePanel({
                   onClick={() => void chooseDirectoryForTaskspace()}
                   title="从系统目录中选择"
                 >
-                  选择目录...
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: "inline", marginRight: 4 }}>
+                    <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6.38L7.88 4.5H12.5C13.33 4.5 14 5.17 14 6V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+                  </svg>
+                  选择目录
                 </button>
               </div>
               <input

@@ -1247,8 +1247,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     let active = true;
     const poll = async () => {
       if (!active) return;
+      const currentSid = pane.sessionId;
+      if (!currentSid) return;
+      const otherPaneHasSameSid = panes.some(
+        (p) => p.id !== pane.id && p.sessionId === currentSid
+      );
+      if (otherPaneHasSameSid) {
+        console.warn("[ChatPane] poll skipped — session %s is shared with another pane", currentSid);
+        return;
+      }
       try {
-        const result = await window.agenticxDesktop.loadSessionMessages(pane.sessionId);
+        const result = await window.agenticxDesktop.loadSessionMessages(currentSid);
         if (!active) return;
         if (result.ok && Array.isArray(result.messages) && result.messages.length > 0) {
           if (result.messages.length <= lastPollCountRef.current) return;
@@ -1285,7 +1294,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       active = false;
       window.clearInterval(timer);
     };
-  }, [hasDelegation, pane?.sessionId, pane?.id, pane?.messages?.length, setPaneMessages]);
+  }, [hasDelegation, pane?.sessionId, pane?.id, pane?.messages?.length, panes, setPaneMessages]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -2008,6 +2017,31 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     const hasReadyAttachments = userAttachments.length > 0;
     if ((!text && !hasReadyAttachments) || !apiBase || !pane.sessionId) return;
     if (streaming) return;
+
+    const otherPanesWithSameSession = panes.filter(
+      (p) => p.id !== pane.id && p.sessionId === pane.sessionId
+    );
+    if (otherPanesWithSameSession.length > 0) {
+      console.warn(
+        "[ChatPane] session collision detected: pane %s shares session %s with %d other pane(s); creating isolated session",
+        pane.id,
+        pane.sessionId,
+        otherPanesWithSameSession.length,
+      );
+      try {
+        const avatarId =
+          pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
+        const created = await window.agenticxDesktop.createSession({ avatar_id: avatarId });
+        if (created.ok && created.session_id) {
+          setPaneSessionId(pane.id, created.session_id);
+          addPaneMessage(pane.id, "tool", "⚠️ 检测到会话冲突，已自动切换到独立会话。", "meta");
+        }
+      } catch (err) {
+        console.error("[ChatPane] failed to create isolated session:", err);
+      }
+      return;
+    }
+
     const requestSessionId = pane.sessionId;
     const messageText = text || ATTACHMENT_ONLY_USER_PROMPT;
 
@@ -2292,6 +2326,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               });
               continue;
             }
+            if (payload.type === "tool_progress") {
+              const name = String(payload.data?.name ?? "tool");
+              const sec = Number(payload.data?.elapsed_seconds ?? 0);
+              const waitLabel = Number.isFinite(sec)
+                ? `⏳ ${name} 执行中…（已等待 ${sec}s）`
+                : `⏳ ${name} 执行中…`;
+              if (eventAgentId === "meta") {
+                setStreamedAssistantText(waitLabel);
+              } else {
+                updateSubAgent(eventAgentId, {
+                  currentAction: Number.isFinite(sec) ? `${name} 执行中… (${sec}s)` : `${name} 执行中…`,
+                });
+              }
+              continue;
+            }
             if (payload.type === "token") {
               if (eventAgentId === "meta") {
                 const tokenText = String(payload.data?.text ?? "");
@@ -2450,7 +2499,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   provider: payload.data?.provider ?? undefined,
                   model: payload.data?.model ?? undefined,
                   task: payload.data?.task ?? "",
-                  sessionId: isDelegation ? (requestSessionId || undefined) : (avatarSessionId || requestSessionId || undefined),
+                  sessionId: avatarSessionId || requestSessionId || undefined,
                 });
                 updateSubAgent(subId, {
                   status: "running",
@@ -2827,7 +2876,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onClick={() => cycleSidePanel(pane.id, "workspace")}
               title="切换工作区面板"
             >
-              工作区
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6.38L7.88 4.5H12.5C13.33 4.5 14 5.17 14 6V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+              </svg>
             </button>
             {paneSubAgents.length > 0 ? (
               <button
@@ -2848,22 +2899,38 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 }}
                 title={pane.spawnsColumnOpen ? "收起 Spawns 列" : "打开 Spawns 列"}
               >
-                Spawns
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="3" y="6" width="10" height="7" rx="2" stroke="currentColor" strokeWidth="1.3"/>
+                  <path d="M6 6V4.5A2 2 0 0 1 10 4.5V6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                  <circle cx="5.5" cy="9.5" r="0.8" fill="currentColor"/>
+                  <circle cx="10.5" cy="9.5" r="0.8" fill="currentColor"/>
+                  <path d="M1.5 8.5V10.5M14.5 8.5V10.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                  <path d="M6 12h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                </svg>
               </button>
             ) : null}
             <button
-              className="rounded px-2 py-0.5 text-[11px] text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
+              className={`rounded px-2 py-0.5 text-[11px] transition ${
+                pane.historyOpen
+                  ? "bg-surface-card-strong text-text-strong"
+                  : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
+              }`}
               onClick={() => togglePaneHistory(pane.id)}
               title="切换历史面板"
             >
-              历史
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M2.5 3C2.5 2.17 3.17 1.5 4 1.5H12C12.83 1.5 13.5 2.17 13.5 3V9C13.5 9.83 12.83 10.5 12 10.5H9L6.5 13V10.5H4C3.17 10.5 2.5 9.83 2.5 9V3Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+                <path d="M5 5H11M5 7.5H9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+              </svg>
             </button>
             <button
               className="rounded px-2 py-0.5 text-[11px] text-text-faint transition hover:bg-surface-hover hover:text-status-error"
               onClick={() => removePane(pane.id)}
               title="关闭窗格"
             >
-              关闭
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
             </button>
           </div>
         </div>
@@ -3204,6 +3271,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   activeTaskspaceId={pane.activeTaskspaceId}
                   onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
                   autoRefreshKey={taskspaceAutoRefreshKey}
+                  onClose={() => cycleSidePanel(pane.id, "workspace")}
                   onPickFileForReference={(path) => {
                     if (!pane.activeTaskspaceId) return;
                     void addContextFile(pane.activeTaskspaceId, path);
@@ -3219,6 +3287,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               activeTaskspaceId={pane.activeTaskspaceId}
               onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
               autoRefreshKey={taskspaceAutoRefreshKey}
+              onClose={() => cycleSidePanel(pane.id, "workspace")}
               onPickFileForReference={(path) => {
                 if (!pane.activeTaskspaceId) return;
                 void addContextFile(pane.activeTaskspaceId, path);
@@ -3231,6 +3300,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       {pane.spawnsColumnOpen ? (
         <SpawnsColumn
           width={spawnsWidth}
+          sessionId={pane.sessionId || undefined}
           subAgents={paneSubAgents}
           selectedSubAgent={selectedSubAgent}
           onResizeStart={startResizeSpawns}
@@ -3251,7 +3321,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         />
       ) : null}
       <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}`}>
-        <SessionHistoryPanel pane={pane} />
+        <SessionHistoryPanel pane={pane} onClose={() => togglePaneHistory(pane.id)} />
       </HistoryPanelBoundary>
       <ForwardPicker
         open={forwardPickerOpen}
