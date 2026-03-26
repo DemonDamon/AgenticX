@@ -1333,9 +1333,12 @@ def create_studio_app() -> FastAPI:
         sess = managed.studio_session
         if sess.mcp_hub is None:
             sess.mcp_hub = MCPHub(clients=[], auto_mode=False)
-        ok = mcp_connect(sess.mcp_hub, sess.mcp_configs, sess.connected_servers, name)
+        ok, detail = mcp_connect(sess.mcp_hub, sess.mcp_configs, sess.connected_servers, name)
         if not ok:
-            raise HTTPException(status_code=400, detail=f"failed to connect MCP server: {name}")
+            raise HTTPException(
+                status_code=400,
+                detail=(detail.strip() or f"failed to connect MCP server: {name}"),
+            )
         return {"ok": True, "name": name}
 
     @app.post("/api/test-email")
