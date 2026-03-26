@@ -25,7 +25,14 @@ from fastapi.responses import StreamingResponse
 from agenticx.avatar.group_chat import GroupChatRegistry
 from agenticx.avatar.registry import AvatarRegistry
 from agenticx.cli.config_manager import ConfigManager
-from agenticx.cli.studio_mcp import auto_connect_servers, import_mcp_config, load_available_servers, mcp_connect
+from agenticx.cli.studio_mcp import (
+    auto_connect_servers,
+    auto_connect_servers_async,
+    import_mcp_config,
+    load_available_servers,
+    mcp_connect,
+    mcp_connect_async,
+)
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.runtime import AgentRuntime
 from agenticx.runtime.auto_solve import AutoSolveMode
@@ -399,7 +406,7 @@ def create_studio_app() -> FastAPI:
             if managed.studio_session.mcp_configs and auto_connect_names != []:
                 managed.studio_session.mcp_hub = MCPHub(clients=[], auto_mode=False)
                 try:
-                    auto_connect_servers(
+                    await auto_connect_servers_async(
                         managed.studio_session.mcp_hub,
                         managed.studio_session.mcp_configs,
                         managed.studio_session.connected_servers,
@@ -1333,7 +1340,7 @@ def create_studio_app() -> FastAPI:
         sess = managed.studio_session
         if sess.mcp_hub is None:
             sess.mcp_hub = MCPHub(clients=[], auto_mode=False)
-        ok, detail = mcp_connect(sess.mcp_hub, sess.mcp_configs, sess.connected_servers, name)
+        ok, detail = await mcp_connect_async(sess.mcp_hub, sess.mcp_configs, sess.connected_servers, name)
         if not ok:
             raise HTTPException(
                 status_code=400,

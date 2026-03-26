@@ -309,13 +309,13 @@ def mcp_list_servers(
     console.print(table)
 
 
-def mcp_connect(
+async def mcp_connect_async(
     hub: "MCPHub",
     configs: Dict[str, "MCPServerConfig"],
     connected: Set[str],
     name: str,
 ) -> Tuple[bool, str]:
-    """Connect to an MCP server and discover its tools.
+    """Connect to an MCP server (async). Safe to call from FastAPI / running event loop.
 
     Returns (True, \"\") on success, or (False, error_message).
     """
@@ -343,19 +343,13 @@ def mcp_connect(
     hub.clients.append(client)
 
     try:
-        tools = asyncio.run(hub.discover_all_tools())
+        tools = await hub.discover_all_tools()
     except Exception as exc:
         console.print(f"[red]连接 {name} 失败:[/red] {exc}")
         hub.clients.remove(client)
         return False, str(exc)
 
     connected.add(name)
-    # Show discovered tools for this server
-    server_tools = [t for t in tools if any(
-        r.client is client for r in hub._tool_routing.values()
-        if r.tool_info.name == t.name or hub._tool_routing.get(t.name, None) and hub._tool_routing[t.name].client is client
-    )]
-    # Simpler approach: just show newly merged tools
     console.print(f"[green]已连接 {name}[/green]，发现 {len(hub._merged_tools)} 个工具：")
     for tool_info in hub._merged_tools:
         route = hub._tool_routing.get(tool_info.name)
@@ -364,13 +358,33 @@ def mcp_connect(
     return True, ""
 
 
-def auto_connect_servers(
+def mcp_connect(
+    hub: "MCPHub",
+    configs: Dict[str, "MCPServerConfig"],
+    connected: Set[str],
+    name: str,
+) -> Tuple[bool, str]:
+    """Connect to an MCP server (sync wrapper). Falls back to async if loop is running.
+
+    Returns (True, \"\") on success, or (False, error_message).
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(mcp_connect_async(hub, configs, connected, name))
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, mcp_connect_async(hub, configs, connected, name))
+        return future.result(timeout=900)
+
+
+async def auto_connect_servers_async(
     hub: "MCPHub",
     configs: Dict[str, "MCPServerConfig"],
     connected: Set[str],
     auto_connect_list: Optional[List[str]] = None,
 ) -> Dict[str, bool]:
-    """Auto-connect MCP servers and return per-server result."""
+    """Auto-connect MCP servers (async). Safe from FastAPI / running event loops."""
     if not configs:
         return {}
     if auto_connect_list is None:
@@ -379,9 +393,44 @@ def auto_connect_servers(
         candidates = [name for name in auto_connect_list if name in configs]
     results: Dict[str, bool] = {}
     for name in candidates:
-        ok, _detail = mcp_connect(hub, configs, connected, name)
+        ok, _detail = await mcp_connect_async(hub, configs, connected, name)
         results[name] = ok
     return results
+
+
+def auto_connect_servers(
+    hub: "MCPHub",
+    configs: Dict[str, "MCPServerConfig"],
+    connected: Set[str],
+    auto_connect_list: Optional[List[str]] = None,
+) -> Dict[str, bool]:
+    """Auto-connect MCP servers (sync wrapper)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(auto_connect_servers_async(hub, configs, connected, auto_connect_list))
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, auto_connect_servers_async(hub, configs, connected, auto_connect_list))
+        return future.result(timeout=900)
+
+
+async def _mcp_disconnect_async(
+    hub: "MCPHub",
+    connected: Set[str],
+    name: str,
+    to_remove: Any,
+) -> None:
+    try:
+        await to_remove.close()
+    except Exception:
+        pass
+    hub.clients.remove(to_remove)
+    try:
+        await hub.discover_all_tools()
+    except Exception:
+        pass
+    connected.discard(name)
 
 
 def mcp_disconnect(
@@ -395,7 +444,6 @@ def mcp_disconnect(
         console.print(f"[yellow]{name} 未连接。[/yellow]")
         return False
 
-    # Find and remove matching client
     to_remove = None
     for client in hub.clients:
         if client.server_config.name == name:
@@ -406,18 +454,14 @@ def mcp_disconnect(
         return True
 
     try:
-        asyncio.run(to_remove.close())
-    except Exception:
-        pass
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(_mcp_disconnect_async(hub, connected, name, to_remove))
+    else:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(asyncio.run, _mcp_disconnect_async(hub, connected, name, to_remove)).result(timeout=60)
 
-    hub.clients.remove(to_remove)
-    # Rebuild routing
-    try:
-        asyncio.run(hub.discover_all_tools())
-    except Exception:
-        pass
-
-    connected.discard(name)
     console.print(f"[green]已断开 {name}[/green]")
     return True
 
