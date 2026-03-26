@@ -447,7 +447,7 @@ _studio_tool_names = {
 }
 _meta_only_names = {
     t.get("function", {}).get("name") for t in _META_ONLY_TOOLS if isinstance(t, dict)
-}
+} - _studio_tool_names
 META_AGENT_TOOLS: List[Dict[str, Any]] = list(STUDIO_TOOLS) + [
     t for t in _META_ONLY_TOOLS
     if t.get("function", {}).get("name") not in _studio_tool_names

@@ -87,6 +87,33 @@ def test_get_lazy_restores_persisted_session(tmp_path: Path) -> None:
     assert len(loaded.studio_session.chat_history) == 1
 
 
+def test_restore_managed_metadata_restores_avatar_binding(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    sid = "avatar-restore-session-id"
+    managed = manager.create(session_id=sid)
+    managed.avatar_id = "avatar-restore-test"
+    managed.avatar_name = "Restore A"
+    managed.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "hello"},
+    ]
+    assert manager.persist(sid) is True
+
+    fresh = SessionManager()
+    fresh._session_store = store
+    fresh._sessions_root = str(sessions_root)
+
+    loaded = fresh.get(sid, touch=False)
+    assert loaded is not None
+    assert loaded.avatar_id == "avatar-restore-test"
+    assert loaded.avatar_name == "Restore A"
+
+
 def test_taskspace_apis_can_lazy_restore_session(tmp_path: Path) -> None:
     store = SessionStore(tmp_path / "sessions.sqlite")
     sessions_root = tmp_path / "sessions"
@@ -149,9 +176,32 @@ def test_list_sessions_not_capped_to_one_thousand(tmp_path: Path) -> None:
         store._save_session_summary_sync(
             sid,
             "summary",
-            {"session_name": f"s-{idx}", "updated_at": float(idx + 1), "created_at": float(idx + 1)},
+            {"session_name": f"s-{idx}", "updated_at": float(idx + 1), "created_at": float(idx + 1), "chat_messages": 1},
         )
 
     listed = manager.list_sessions()
     ids = {row["session_id"] for row in listed}
     assert len(ids) >= total
+
+
+def test_list_sessions_excludes_empty_persisted_sessions(tmp_path: Path) -> None:
+    """Persisted sessions with 0 chat messages should not appear in the listing."""
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    manager = SessionManager()
+    manager._session_store = store
+
+    store._save_session_summary_sync(
+        "empty-session",
+        "summary",
+        {"session_name": "empty", "chat_messages": 0, "updated_at": 1.0, "created_at": 1.0},
+    )
+    store._save_session_summary_sync(
+        "real-session",
+        "summary",
+        {"session_name": "real", "chat_messages": 3, "updated_at": 2.0, "created_at": 2.0},
+    )
+
+    listed = manager.list_sessions()
+    ids = {row["session_id"] for row in listed}
+    assert "real-session" in ids
+    assert "empty-session" not in ids

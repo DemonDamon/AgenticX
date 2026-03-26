@@ -71,6 +71,33 @@ async def test_mcp_call_unknown_tool_lists_available() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mcp_call_list_tools_alias_returns_directory_not_error() -> None:
+    client = _FakeClient(
+        "browser-use",
+        [_tool("browser_navigate"), _tool("browser_list_tabs")],
+    )
+    hub = MCPHub(clients=[client], auto_mode=False)
+    await hub.discover_all_tools()
+
+    out = await mcp_call_tool_async(hub, "list_tools", "{}", echo=False)
+    assert not out.startswith("ERROR: mcp_call:")
+    assert "browser_navigate" in out
+    assert "browser_list_tabs" in out
+    assert "browser-use" in out
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_real_list_tools_routed_name_not_shadowed() -> None:
+    client = _FakeClient("demo", [_tool("list_tools")])
+    hub = MCPHub(clients=[client], auto_mode=False)
+    await hub.discover_all_tools()
+
+    out = await mcp_call_tool_async(hub, "list_tools", "{}", echo=False)
+    assert "ERROR: mcp_call:" not in out
+    assert "list_tools" in out
+
+
+@pytest.mark.asyncio
 async def test_mcp_call_invalid_json() -> None:
     client = _FakeClient("demo", [_tool("ping")])
     hub = MCPHub(clients=[client], auto_mode=False)

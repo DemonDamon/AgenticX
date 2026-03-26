@@ -24,7 +24,7 @@ def test_dispatch_tool_routes_file_read(monkeypatch) -> None:
     session = StudioSession()
     called = {"value": False}
 
-    def _fake_file_read(arguments):
+    def _fake_file_read(arguments, session=None):
         called["value"] = True
         assert arguments["path"] == "README.md"
         return "ok"
@@ -280,6 +280,25 @@ def test_workspace_boundary_blocks_outside_file_read(monkeypatch, tmp_path: Path
 
     result = agent_tools.dispatch_tool("file_read", {"path": "../outside.txt"}, StudioSession())
     assert result.startswith("ERROR: path escapes workspace:")
+
+
+def test_file_read_resolves_relative_path_across_taskspaces(monkeypatch, tmp_path: Path) -> None:
+    default_root = tmp_path / "default"
+    project_root = tmp_path / "cs542"
+    default_root.mkdir()
+    project_root.mkdir()
+    target = project_root / "hw1_solutions.md"
+    target.write_text("solution body", encoding="utf-8")
+    monkeypatch.chdir(default_root)
+
+    session = StudioSession()
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(default_root)},
+        {"id": "ts-cs542", "label": "cs542", "path": str(project_root)},
+    ]
+
+    result = agent_tools.dispatch_tool("file_read", {"path": "hw1_solutions.md"}, session)
+    assert "solution body" in result
 
 
 def test_workspace_boundary_blocks_outside_file_write(monkeypatch, tmp_path: Path) -> None:

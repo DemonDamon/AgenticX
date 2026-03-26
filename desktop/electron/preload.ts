@@ -111,8 +111,13 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadMcpStatus: async (sessionId: string) => ipcRenderer.invoke("load-mcp-status", sessionId),
   importMcpConfig: async (payload: { sessionId: string; sourcePath: string }) =>
     ipcRenderer.invoke("import-mcp-config", payload),
+  getMcpSettings: async () => ipcRenderer.invoke("get-mcp-settings"),
+  putMcpSettings: async (payload: { extraSearchPaths: string[] }) =>
+    ipcRenderer.invoke("put-mcp-settings", payload),
   connectMcp: async (payload: { sessionId: string; name: string }) =>
     ipcRenderer.invoke("connect-mcp", payload),
+  disconnectMcp: async (payload: { sessionId: string; name: string }) =>
+    ipcRenderer.invoke("disconnect-mcp", payload),
   saveUserMode: async (mode: "pro" | "lite") => ipcRenderer.invoke("save-user-mode", mode),
   saveOnboardingCompleted: async (completed: boolean) =>
     ipcRenderer.invoke("save-onboarding-completed", completed),

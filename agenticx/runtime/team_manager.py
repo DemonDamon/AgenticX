@@ -160,11 +160,20 @@ class AgentTeamManager:
         self._archive_limit = 200
 
     @classmethod
-    def collect_global_statuses(cls, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Collect merged statuses across all managers as a fallback.
+    def collect_global_statuses(
+        cls,
+        session_id: Optional[str] = None,
+        *,
+        allow_cross_session_fallback: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Collect merged statuses across registered managers.
 
-        When session_id is given, first tries same-session managers; if no
-        results found, widens to ALL managers (cross-session).
+        When ``session_id`` is set, only managers with matching
+        ``owner_session_id`` are merged (strict session isolation for Desktop).
+
+        If ``allow_cross_session_fallback`` is True and the restricted pass
+        returns nothing, merges from **all** managers (debug / legacy only;
+        breaks multi-pane isolation and must not be default).
         """
         merged: Dict[str, Dict[str, Any]] = {}
         stale_ids: List[str] = []
@@ -200,8 +209,11 @@ class AgentTeamManager:
                             merged[aid] = item
 
         _merge_from_managers(restrict_sid=sid)
-        if not merged and sid is not None:
-            _log.info("[collect_global] no results for session %s, widening to all managers", sid)
+        if not merged and sid is not None and allow_cross_session_fallback:
+            _log.warning(
+                "[collect_global] cross-session fallback enabled; widening past session %s",
+                sid,
+            )
             _merge_from_managers(restrict_sid=None)
         for manager_id in stale_ids:
             cls._registry.pop(manager_id, None)

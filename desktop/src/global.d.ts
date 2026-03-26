@@ -218,7 +218,19 @@ declare global {
         total_servers?: number;
         error?: string;
       }>;
+      getMcpSettings: () => Promise<{
+        ok: boolean;
+        extra_search_paths?: string[];
+        auto_connect?: string[];
+        error?: string;
+      }>;
+      putMcpSettings: (payload: { extraSearchPaths: string[] }) => Promise<{
+        ok: boolean;
+        extra_search_paths?: string[];
+        error?: string;
+      }>;
       connectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
+      disconnectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       saveUserMode: (mode: "pro" | "lite") => Promise<{ ok: boolean }>;
       saveOnboardingCompleted: (completed: boolean) => Promise<{ ok: boolean }>;
       saveConfirmStrategy: (strategy: "manual" | "semi-auto" | "auto") => Promise<{ ok: boolean }>;
