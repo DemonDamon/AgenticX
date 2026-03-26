@@ -1202,7 +1202,9 @@ function ComputerUseGeneralPanel() {
         return;
       }
       setEnabled(next);
-      setMessage("已写入 ~/.agenticx/config.yaml，重启本地 agx 后生效。");
+      setMessage(
+        "已保存到本机配置。请完全退出 Machi 后重新打开（勿仅关闭窗口）；内置助手会随应用一起重启并加载新设置。若使用「设置 → 服务器连接」中的远程模式，请在服务器环境同步该配置并重启远端服务。"
+      );
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "保存失败。");
       setEnabled(!next);
@@ -1222,7 +1224,8 @@ function ComputerUseGeneralPanel() {
   return (
     <Panel title="Computer Use（桌面操控）">
       <p className="mb-3 text-xs text-text-faint">
-        对应配置文件中的 <code className="text-text-subtle">computer_use.enabled</code>。开启后由 agx 后端按该开关加载桌面级能力；若对话里仍看不到相关工具，请确认已使用会读取该配置的 agx 版本并完成接线。
+        写入本机 <code className="text-text-subtle">~/.agenticx/config.yaml</code> 中的{" "}
+        <code className="text-text-subtle">computer_use.enabled</code>。开启后由 Machi 随应用启动的内置助手读取该开关并尝试加载桌面级能力。若对话里仍看不到相关工具，请确认已安装包含该能力的 Machi 版本；修改后需完全退出并重新打开 Machi（远程模式见保存成功后的说明）。
       </p>
       <label className="flex cursor-pointer items-center gap-2 text-sm text-text-subtle">
         <input
@@ -1236,7 +1239,7 @@ function ComputerUseGeneralPanel() {
       </label>
       {message ? (
         <div
-          className={`mt-2 text-xs ${message.includes("已写入") ? "text-text-muted" : "text-rose-400"}`}
+          className={`mt-2 text-xs ${message.startsWith("已保存到本机配置") ? "text-text-muted" : "text-rose-400"}`}
         >
           {message}
         </div>
