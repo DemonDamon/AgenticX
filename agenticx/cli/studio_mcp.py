@@ -25,6 +25,17 @@ if TYPE_CHECKING:
 console = Console()
 logger = logging.getLogger(__name__)
 
+# mcp_call_tool_async failure messages (agent/UI); keep bounded to avoid context blow-up.
+_MCP_CALL_ERR_MAX_LEN = 2000
+_MCP_CALL_ERR_PREFIX = "ERROR: mcp_call:"
+
+
+def _format_mcp_call_error(detail: str) -> str:
+    d = (detail or "").strip()
+    if len(d) > _MCP_CALL_ERR_MAX_LEN:
+        d = d[: _MCP_CALL_ERR_MAX_LEN - 3] + "..."
+    return f"{_MCP_CALL_ERR_PREFIX} {d}"
+
 # Shipped default for first-time Machi / agx users (no secrets on disk; env inherits os.environ).
 _DEFAULT_BROWSER_USE_MCP_ENTRY: Dict[str, Any] = {
     "command": "uvx",
@@ -499,8 +510,10 @@ async def mcp_call_tool_async(
     args_json: str,
     *,
     echo: bool = True,
-) -> Optional[str]:
+) -> str:
     """Call an MCP tool via the hub. Use from async contexts (Studio agent loop, Desktop).
+
+    On failure returns a string starting with ``ERROR: mcp_call:`` (never silent ``None``).
 
     Args:
         hub: Connected MCP hub with discovered tools.
@@ -509,31 +522,43 @@ async def mcp_call_tool_async(
         echo: If True, print status and result to the Rich console (REPL). If False, only return.
     """
     if not hub._tool_routing:
+        msg = _format_mcp_call_error("no MCP tools connected")
         if echo:
             console.print("[yellow]暂无已连接的 MCP 工具。[/yellow]")
-        return None
+        return msg
 
     if tool_name not in hub._tool_routing:
+        keys = sorted(hub._tool_routing.keys())
+        available = ", ".join(keys)
+        if len(available) > 1600:
+            available = available[:1597] + "..."
+        detail = f"tool {tool_name!r} not connected"
+        if available:
+            detail += f"; available: {available}"
+        else:
+            detail += "; available: (none)"
+        msg = _format_mcp_call_error(detail)
         if echo:
             console.print(f"[red]工具 '{tool_name}' 不存在。[/red]")
-            available = ", ".join(hub._tool_routing.keys())
-            console.print(f"[dim]可用工具: {available}[/dim]")
-        return None
+            console.print(f"[dim]可用工具: {available or '(无)'}[/dim]")
+        return msg
 
     try:
         arguments = json.loads(args_json) if args_json.strip() else {}
     except json.JSONDecodeError as exc:
+        msg = _format_mcp_call_error(f"invalid arguments JSON: {exc}")
         if echo:
             console.print(f"[red]参数 JSON 解析失败:[/red] {exc}")
-        return None
+        return msg
 
     try:
         raw_result = await hub.call_tool(tool_name, arguments)
         result_text = hub.extract_tool_result(tool_name, raw_result)
     except Exception as exc:
+        msg = _format_mcp_call_error(f"{type(exc).__name__}: {exc}")
         if echo:
             console.print(f"[red]工具调用失败:[/red] {exc}")
-        return None
+        return msg
 
     result_str = str(result_text)
     if echo:
@@ -541,7 +566,7 @@ async def mcp_call_tool_async(
     return result_str
 
 
-def mcp_call_tool(hub: "MCPHub", tool_name: str, args_json: str) -> Optional[str]:
+def mcp_call_tool(hub: "MCPHub", tool_name: str, args_json: str) -> str:
     """Call an MCP tool from a synchronous context (e.g. Studio REPL).
 
     Must not be used when an asyncio event loop is already running; use
