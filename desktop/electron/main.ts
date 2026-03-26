@@ -737,11 +737,34 @@ function createTray(): void {
   tray.setToolTip("Machi");
 }
 
-function registerIpc(): void {
+/**
+ * Register IPC handlers that must be available before agx serve starts.
+ * The renderer may invoke these immediately on load (before the backend is ready),
+ * so they need to be registered as early as possible in app.whenReady().
+ */
+function registerEarlyIpc(): void {
   ipcMain.handle("get-api-base", async () => getStudioUrl());
   ipcMain.handle("get-api-auth-token", async () => getStudioToken());
   ipcMain.handle("get-platform", async () => process.platform);
   ipcMain.handle("get-connection-mode", async () => remoteConfig ? "remote" : "local");
+
+  ipcMain.handle("load-config", async () => {
+    const cfg = loadAgxConfig();
+    return {
+      defaultProvider: cfg.default_provider ?? "",
+      providers: cfg.providers ?? {},
+      userMode: cfg.user_mode ?? "pro",
+      onboardingCompleted: cfg.onboarding_completed ?? false,
+      confirmStrategy: cfg.confirm_strategy ?? "semi-auto",
+      activeProvider: cfg.active_provider ?? "",
+      activeModel: cfg.active_model ?? "",
+    };
+  });
+}
+
+function registerIpc(): void {
+  // get-api-base, get-api-auth-token, get-platform, get-connection-mode, load-config
+  // are registered early in registerEarlyIpc() — skip here to avoid duplicate handler errors.
 
   ipcMain.handle("load-remote-server", async () => {
     const cfg = loadAgxConfig();
@@ -1224,19 +1247,6 @@ function registerIpc(): void {
     } catch (err) {
       return { ok: false, error: String(err) };
     }
-  });
-
-  ipcMain.handle("load-config", async () => {
-    const cfg = loadAgxConfig();
-    return {
-      defaultProvider: cfg.default_provider ?? "",
-      providers: cfg.providers ?? {},
-      userMode: cfg.user_mode ?? "pro",
-      onboardingCompleted: cfg.onboarding_completed ?? false,
-      confirmStrategy: cfg.confirm_strategy ?? "semi-auto",
-      activeProvider: cfg.active_provider ?? "",
-      activeModel: cfg.active_model ?? "",
-    };
   });
 
   ipcMain.handle("load-email-config", async () => {
@@ -1794,6 +1804,10 @@ if (!gotTheLock) {
           app.dock.setIcon(iconPath);
         }
       }
+
+      // Register basic IPC handlers immediately so the renderer never hits
+      // "No handler registered" errors during the agx serve startup delay.
+      registerEarlyIpc();
 
       remoteConfig = loadRemoteConfig();
 

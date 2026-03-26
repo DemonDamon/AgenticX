@@ -181,6 +181,7 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [windowResizing, setWindowResizing] = useState(false);
   const [startupOptimizing, setStartupOptimizing] = useState(true);
+  const [configLoaded, setConfigLoaded] = useState(false);
   const windowResizeTimerRef = useRef<number | null>(null);
   const subAgentsRef = useRef(subAgents);
   const subAgentSessionRef = useRef<Record<string, string>>({});
@@ -352,6 +353,7 @@ export function App() {
       const loadedMode = cfg.userMode === "lite" ? "lite" : "pro";
       setUserMode(loadedMode);
       setOnboardingCompleted(Boolean(cfg.onboardingCompleted));
+      setConfigLoaded(true);
       const loadedConfirmStrategy =
         loadedMode === "lite" ? "manual" : (cfg.confirmStrategy ?? "semi-auto");
       setConfirmStrategy(loadedConfirmStrategy);
@@ -1137,7 +1139,7 @@ export function App() {
         sidebarCollapsed || userMode !== "pro" || !onboardingCompleted || !apiBase ? "sidebar-collapsed" : ""
       } ${windowResizing ? "window-resizing" : ""} ${startupOptimizing ? "startup-optimizing" : ""}`}
     >
-      {!onboardingCompleted ? (
+      {!configLoaded ? null : !onboardingCompleted ? (
         <OnboardingView onSelectMode={(mode) => void handleSelectMode(mode)} />
       ) : apiBase ? (
         <>
