@@ -607,7 +607,10 @@ def build_mcp_tools_context(hub: "MCPHub") -> str:
     if not hub._merged_tools:
         return ""
     parts = ["=== 可用的 MCP 工具 ===\n"]
-    parts.append("以下是用户已连接的 MCP 工具，生成的代码应当使用这些工具：\n")
+    parts.append(
+        "以下是用户已连接的 MCP 工具；`mcp_call` 的 `tool_name` 必须与下列名称**完全一致**。"
+        "不存在名为 `list_tools` 的 MCP 工具；查看已连接服务与能力请用会话工具 `list_mcps`。\n"
+    )
     for tool_info in hub._merged_tools:
         route = hub._tool_routing.get(tool_info.name)
         source = route.client.server_config.name if route else "unknown"

@@ -99,10 +99,28 @@ class MCPClientV2:
         self._session: Optional[ClientSession] = None
         self._exit_stack: Optional[AsyncExitStack] = None
         self._session_lock = anyio.Lock()
+        # Serialize stdio MCP RPCs; concurrent call_tool/list_tools on one client breaks the stream.
+        self._stdio_lock = anyio.Lock()
         self._tools_cache: Optional[List[MCPToolInfo]] = None
         self._initialized = False
         self._closed = False
-    
+
+    async def _reset_mcp_connection_unlocked(self) -> None:
+        """Tear down stdio stack and session. Caller must hold ``_session_lock``."""
+        if self._exit_stack is not None:
+            try:
+                await self._exit_stack.aclose()
+            except Exception as ex:
+                logger.warning(
+                    "MCP transport reset (%s): %s",
+                    self.server_config.name,
+                    ex,
+                )
+            self._exit_stack = None
+        self._session = None
+        self._initialized = False
+        self._tools_cache = None
+
     async def _ensure_session(self) -> ClientSession:
         """确保会话已初始化（线程安全）"""
         async with self._session_lock:
@@ -116,8 +134,8 @@ class MCPClientV2:
     
     async def __aenter__(self):
         """异步上下文管理器入口（用于保持会话打开）"""
-        # 在进入时创建会话（exit_stack 会在整个上下文期间保持打开）
-        await self._ensure_session()
+        async with self._stdio_lock:
+            await self._ensure_session()
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -197,27 +215,28 @@ class MCPClientV2:
         """自动发现 MCP 服务器提供的所有工具"""
         if self._tools_cache is not None:
             return self._tools_cache
-        
-        session = await self._ensure_session()
-        
-        # 请求工具列表
-        result = await session.list_tools()
-        
-        tools = []
-        for tool in result.tools:
-            tool_info = MCPToolInfo(
-                name=tool.name,
-                description=tool.description or "",
-                inputSchema=tool.inputSchema,
-                outputSchema=tool.outputSchema,
-            )
-            tools.append(tool_info)
-            logger.debug(f"Discovered tool: {tool_info.name}")
-        
-        logger.info(f"Discovered {len(tools)} tools from server '{self.server_config.name}'")
-        self._tools_cache = tools
-        return tools
-    
+
+        async with self._stdio_lock:
+            if self._tools_cache is not None:
+                return self._tools_cache
+            session = await self._ensure_session()
+            result = await session.list_tools()
+
+            tools = []
+            for tool in result.tools:
+                tool_info = MCPToolInfo(
+                    name=tool.name,
+                    description=tool.description or "",
+                    inputSchema=tool.inputSchema,
+                    outputSchema=tool.outputSchema,
+                )
+                tools.append(tool_info)
+                logger.debug(f"Discovered tool: {tool_info.name}")
+
+            logger.info(f"Discovered {len(tools)} tools from server '{self.server_config.name}'")
+            self._tools_cache = tools
+            return tools
+
     async def call_tool(
         self,
         name: str,
@@ -233,21 +252,20 @@ class MCPClientV2:
         Returns:
             CallToolResult: 工具执行结果
         """
-        session = await self._ensure_session()
-        
-        try:
-            result = await session.call_tool(
-                name=name,
-                arguments=arguments or {},
-            )
-            return result
-        except Exception as e:
-            logger.error(f"Tool call failed: {name}, error: {e}")
-            # 会话可能已断开，清除状态以便重连
-            self._session = None
-            self._initialized = False
-            raise ToolError(f"Tool call failed: {e}", name) from e
-    
+        async with self._stdio_lock:
+            session = await self._ensure_session()
+            try:
+                result = await session.call_tool(
+                    name=name,
+                    arguments=arguments or {},
+                )
+                return result
+            except Exception as e:
+                logger.error(f"Tool call failed: {name}, error: {e}")
+                async with self._session_lock:
+                    await self._reset_mcp_connection_unlocked()
+                raise ToolError(f"Tool call failed: {e}", name) from e
+
     def _create_pydantic_model_from_schema(
         self,
         schema: Dict[str, Any],
@@ -454,23 +472,13 @@ class MCPClientV2:
     
     async def close(self) -> None:
         """关闭会话（清理资源）"""
-        async with self._session_lock:
-            if self._closed:
-                return
-            
-            self._closed = True
-            
-            # 关闭 exit stack（会自动关闭所有 context）
-            if self._exit_stack is not None:
-                try:
-                    await self._exit_stack.aclose()
-                except Exception as e:
-                    logger.warning(f"Error closing exit stack: {e}")
-            
-            self._session = None
-            self._exit_stack = None
-            self._initialized = False
-            self._tools_cache = None
+        async with self._stdio_lock:
+            async with self._session_lock:
+                if self._closed:
+                    return
+
+                self._closed = True
+                await self._reset_mcp_connection_unlocked()
             logger.info(f"Closed MCP session for server: {self.server_config.name}")
 
 
