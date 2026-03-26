@@ -14,10 +14,11 @@ MCP Client V2: 基于官方 SDK 的持久化会话实现
 """
 from __future__ import annotations
 
+import errno
 import logging
 import os
 from contextlib import AsyncExitStack
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, Dict, List, Optional, Set, Type, Union
 
 import anyio  # type: ignore
 from pydantic import BaseModel, Field  # type: ignore
@@ -40,6 +41,33 @@ if TYPE_CHECKING:
     from ..llms.base import BaseLLMProvider
 
 logger = logging.getLogger(__name__)
+
+# stdio / stream failures where a full transport reset + one retry often recovers.
+_RECOVERABLE_TRANSPORT_TYPE_NAMES = frozenset(
+    {"ClosedResourceError", "BrokenResourceError", "EndOfStream"}
+)
+
+
+def _is_recoverable_mcp_transport_error(exc: BaseException) -> bool:
+    cur: Optional[BaseException] = exc
+    seen: Set[int] = set()
+    while cur is not None and len(seen) < 8:
+        oid = id(cur)
+        if oid in seen:
+            break
+        seen.add(oid)
+        if type(cur).__name__ in _RECOVERABLE_TRANSPORT_TYPE_NAMES:
+            return True
+        if isinstance(cur, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return True
+        if isinstance(cur, OSError) and getattr(cur, "errno", None) in (
+            errno.EPIPE,
+            errno.ECONNRESET,
+            errno.ENOTCONN,
+        ):
+            return True
+        cur = cur.__cause__
+    return False
 
 
 class MCPServerConfig(BaseModel):
@@ -253,18 +281,35 @@ class MCPClientV2:
             CallToolResult: 工具执行结果
         """
         async with self._stdio_lock:
-            session = await self._ensure_session()
-            try:
-                result = await session.call_tool(
-                    name=name,
-                    arguments=arguments or {},
-                )
-                return result
-            except Exception as e:
-                logger.error(f"Tool call failed: {name}, error: {e}")
-                async with self._session_lock:
-                    await self._reset_mcp_connection_unlocked()
-                raise ToolError(f"Tool call failed: {e}", name) from e
+            last_exc: Optional[BaseException] = None
+            for attempt in range(2):
+                session = await self._ensure_session()
+                try:
+                    return await session.call_tool(
+                        name=name,
+                        arguments=arguments or {},
+                    )
+                except Exception as e:
+                    last_exc = e
+                    logger.error(
+                        "Tool call failed: %s (attempt %s/%s): %s",
+                        name,
+                        attempt + 1,
+                        2,
+                        e,
+                    )
+                    async with self._session_lock:
+                        await self._reset_mcp_connection_unlocked()
+                    if attempt == 0 and _is_recoverable_mcp_transport_error(e):
+                        logger.info(
+                            "MCP %s: retrying tool %s after transport reset",
+                            self.server_config.name,
+                            name,
+                        )
+                        continue
+                    break
+            assert last_exc is not None
+            raise ToolError(f"Tool call failed: {last_exc}", name) from last_exc
 
     def _create_pydantic_model_from_schema(
         self,

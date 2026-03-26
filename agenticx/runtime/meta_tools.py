@@ -678,6 +678,31 @@ def _list_skills_payload() -> Dict[str, Any]:
     }
 
 
+def _mcp_tool_names_by_server(session: "StudioSession") -> Dict[str, List[str]]:
+    """Routed tool names per MCP server (for mcp_call), only for connected servers."""
+    hub = getattr(session, "mcp_hub", None)
+    if hub is None or not getattr(hub, "_tool_routing", None):
+        return {}
+    connected = (
+        session.connected_servers
+        if isinstance(session.connected_servers, set)
+        else set(session.connected_servers or [])
+    )
+    by_server: Dict[str, List[str]] = {}
+    routing = hub._tool_routing
+    for routed_name, route in routing.items():
+        try:
+            srv = route.client.server_config.name
+        except Exception:
+            continue
+        if srv not in connected:
+            continue
+        by_server.setdefault(str(srv), []).append(str(routed_name))
+    for srv in by_server:
+        by_server[srv] = sorted(set(by_server[srv]))
+    return by_server
+
+
 def _list_mcps_payload(session: Optional["StudioSession"]) -> Dict[str, Any]:
     if session is None:
         return {"ok": True, "count": 0, "connected_count": 0, "servers": []}
@@ -688,22 +713,28 @@ def _list_mcps_payload(session: Optional["StudioSession"]) -> Dict[str, Any]:
         if isinstance(session.connected_servers, set)
         else set(session.connected_servers or [])
     )
+    tools_by_server = _mcp_tool_names_by_server(session)
     servers: List[Dict[str, Any]] = []
     for name, cfg in sorted(configs.items()):
         command = str(getattr(cfg, "command", "") or "")
-        servers.append(
-            {
-                "name": str(name),
-                "connected": name in connected,
-                "command": command,
-            }
-        )
+        row: Dict[str, Any] = {
+            "name": str(name),
+            "connected": name in connected,
+            "command": command,
+        }
+        if name in tools_by_server:
+            row["mcp_tool_names"] = tools_by_server[name]
+        servers.append(row)
 
     return {
         "ok": True,
         "count": len(servers),
         "connected_count": sum(1 for row in servers if row.get("connected")),
         "servers": servers,
+        "hint": (
+            "对每个已连接服务器，`mcp_tool_names` 为可用 `mcp_call.tool_name`；"
+            "勿编造 list_pages、browse_to、list_tools 等名称。"
+        ),
     }
 
 
