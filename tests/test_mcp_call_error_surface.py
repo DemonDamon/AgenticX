@@ -38,6 +38,14 @@ class _FakeClientCallRaises(_FakeClient):
         raise RuntimeError("persistent_context not supported here")
 
 
+class _FakeClientChainedError(_FakeClient):
+    async def call_tool(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            raise ValueError("socksio package is not installed")
+        except ValueError as inner:
+            raise RuntimeError("Tool call failed") from inner
+
+
 def _tool(name: str, description: str = "") -> MCPToolInfo:
     return MCPToolInfo(name=name, description=description or name, inputSchema={"type": "object"})
 
@@ -71,6 +79,19 @@ async def test_mcp_call_invalid_json() -> None:
     out = await mcp_call_tool_async(hub, "ping", "not-json", echo=False)
     assert out.startswith("ERROR: mcp_call:")
     assert "invalid arguments JSON" in out
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_surfaces_exception_cause_chain() -> None:
+    client = _FakeClientChainedError("demo", [_tool("ping")])
+    hub = MCPHub(clients=[client], auto_mode=False)
+    await hub.discover_all_tools()
+
+    out = await mcp_call_tool_async(hub, "ping", "{}", echo=False)
+    assert out.startswith("ERROR: mcp_call:")
+    assert "RuntimeError" in out
+    assert "ValueError" in out
+    assert "socksio" in out
 
 
 @pytest.mark.asyncio

@@ -204,13 +204,13 @@ class MCPHub:
     def extract_tool_result(self, routed_name: str, result: Any) -> Any:
         """Normalize MCP CallToolResult payloads to tool output."""
         if hasattr(result, "isError") and getattr(result, "isError"):
-            error_msg = "Unknown error"
             content_blocks = getattr(result, "content", None) or []
+            texts: List[str] = []
             for block in content_blocks:
                 text_value = getattr(block, "text", None)
-                if isinstance(text_value, str) and text_value:
-                    error_msg = text_value
-                    break
+                if isinstance(text_value, str) and text_value.strip():
+                    texts.append(text_value.strip())
+            error_msg = "\n".join(texts) if texts else "Unknown error"
             raise ToolError(f"Remote tool execution failed: {error_msg}", routed_name)
 
         content_blocks = getattr(result, "content", None) or []
