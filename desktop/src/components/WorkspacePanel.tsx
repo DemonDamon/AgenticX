@@ -418,11 +418,14 @@ export function WorkspacePanel({
                   e.preventDefault();
                   setCtxMenu({ x: e.clientX, y: e.clientY, taskspace: item });
                 }}
-                title={`${item.label}${item.path ? `\n${item.path}` : ""}`}
+                title={item.id === "default" ? (item.path || item.label) : undefined}
               >
-                <svg width="11" height="11" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
-                  <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6.38L7.88 4.5H12.5C13.33 4.5 14 5.17 14 6V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
-                </svg>
+                <span className="flex items-center gap-1">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0 opacity-70">
+                    <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6.38L7.88 4.5H12.5C13.33 4.5 14 5.17 14 6V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+                  </svg>
+                  {item.id !== "default" && item.label}
+                </span>
               </button>
             ))}
           </div>
