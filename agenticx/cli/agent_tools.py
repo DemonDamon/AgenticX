@@ -21,7 +21,12 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.cli.codegen_engine import CodeGenEngine, infer_output_path, write_generated_file
-from agenticx.cli.studio_mcp import import_mcp_config, load_available_servers, mcp_call_tool, mcp_connect
+from agenticx.cli.studio_mcp import (
+    import_mcp_config,
+    load_available_servers,
+    mcp_call_tool_async,
+    mcp_connect,
+)
 from agenticx.cli.studio_skill import get_all_skill_summaries, skill_use as studio_skill_use
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
@@ -1137,7 +1142,7 @@ def _tool_mcp_connect(arguments: Dict[str, Any], session: StudioSession) -> str:
     return "OK" if ok else "ERROR: connect failed"
 
 
-def _tool_mcp_call(arguments: Dict[str, Any], session: StudioSession) -> str:
+async def _tool_mcp_call_async(arguments: Dict[str, Any], session: StudioSession) -> str:
     if session.mcp_hub is None:
         return "ERROR: no MCP hub connected"
     tool_name = str(arguments.get("tool_name", "")).strip()
@@ -1146,7 +1151,12 @@ def _tool_mcp_call(arguments: Dict[str, Any], session: StudioSession) -> str:
     args_obj = arguments.get("arguments", {})
     if not isinstance(args_obj, dict):
         return "ERROR: arguments must be an object"
-    result = mcp_call_tool(session.mcp_hub, tool_name, json.dumps(args_obj, ensure_ascii=False))
+    result = await mcp_call_tool_async(
+        session.mcp_hub,
+        tool_name,
+        json.dumps(args_obj, ensure_ascii=False),
+        echo=False,
+    )
     return result if result is not None else "ERROR: mcp_call failed"
 
 
@@ -1549,7 +1559,7 @@ async def dispatch_tool_async(
         if name == "mcp_connect":
             return _tool_mcp_connect(arguments, session)
         if name == "mcp_call":
-            return _tool_mcp_call(arguments, session)
+            return await _tool_mcp_call_async(arguments, session)
         if name == "mcp_import":
             return _tool_mcp_import(arguments, session)
         if name == "skill_use":
