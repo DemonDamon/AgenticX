@@ -36,6 +36,27 @@ def _format_mcp_call_error(detail: str) -> str:
         d = d[: _MCP_CALL_ERR_MAX_LEN - 3] + "..."
     return f"{_MCP_CALL_ERR_PREFIX} {d}"
 
+
+def _exception_detail_for_mcp_call(exc: BaseException, *, max_chain: int = 4) -> str:
+    """Walk ``__cause__`` so nested errors (e.g. ToolError from httpx) stay visible."""
+    parts: List[str] = []
+    cur: Optional[BaseException] = exc
+    seen_ids: Set[int] = set()
+    for _ in range(max_chain):
+        if cur is None:
+            break
+        oid = id(cur)
+        if oid in seen_ids:
+            break
+        seen_ids.add(oid)
+        msg = str(cur).strip()
+        if not msg:
+            msg = repr(cur)
+        parts.append(f"{type(cur).__name__}: {msg}")
+        cur = cur.__cause__
+    return " | ".join(parts)
+
+
 # Shipped default for first-time Machi / agx users (no secrets on disk; env inherits os.environ).
 _DEFAULT_BROWSER_USE_MCP_ENTRY: Dict[str, Any] = {
     "command": "uvx",
@@ -555,7 +576,7 @@ async def mcp_call_tool_async(
         raw_result = await hub.call_tool(tool_name, arguments)
         result_text = hub.extract_tool_result(tool_name, raw_result)
     except Exception as exc:
-        msg = _format_mcp_call_error(f"{type(exc).__name__}: {exc}")
+        msg = _format_mcp_call_error(_exception_detail_for_mcp_call(exc))
         if echo:
             console.print(f"[red]工具调用失败:[/red] {exc}")
         return msg

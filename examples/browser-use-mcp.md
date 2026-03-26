@@ -33,6 +33,28 @@ Notes:
 - **Inner LLM**: The MCP tool `retry_with_browser_use_agent` starts browser-use’s own agent, which by default uses **`OPENAI_API_KEY`** (see upstream `browser_use/mcp/server.py`). For other providers, configure browser-use via its config file or env as in [browser-use docs](https://github.com/browser-use/browser-use).
 - **Headed browser**: Set browser-use profile / env so Chromium runs non-headless if you want a visible window (see upstream `BrowserProfile` / CLI `--headed` patterns).
 
+### SOCKS proxy / `socksio` / `httpx[socks]`
+
+If `mcp_call` returns an error like **`Using SOCKS proxy, but the 'socksio' package is not installed`**, your shell (or `agx serve`) is passing **`ALL_PROXY` / `HTTP_PROXY`** with a **socks** URL into the browser-use subprocess. The isolated `uvx` env does not include SOCKS extras by default.
+
+Pick one:
+
+1. **Install SOCKS support into the env that runs browser-use** (e.g. a venv where you `pip install 'browser-use[cli]' 'httpx[socks]'` and point `mcp.json` `command` to that interpreter instead of plain `uvx`), **or**
+2. **Stop forcing SOCKS for that MCP only** — in `~/.agenticx/mcp.json` under `browser-use`, add an `env` block that clears proxy variables for the subprocess (only if you do **not** need a proxy to reach the target sites):
+
+```json
+"env": {
+  "ALL_PROXY": "",
+  "all_proxy": "",
+  "HTTP_PROXY": "",
+  "http_proxy": "",
+  "HTTPS_PROXY": "",
+  "https_proxy": ""
+}
+```
+
+Use real tool names from `list_mcps` / discovered tools (e.g. `browser_navigate`, `retry_with_browser_use_agent`). There is no `browse_to` or `list_tools` on the stock browser-use MCP.
+
 ## 2. Workflow in chat
 
 1. Ensure the server appears in config (`mcp_import` from another `mcp.json` if needed).
