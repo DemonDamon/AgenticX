@@ -1161,6 +1161,105 @@ function FavoritesTab({
   );
 }
 
+/** Computer Use toggle: lives under 通用 (general), not 工作区. */
+function ComputerUseGeneralPanel() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let disposed = false;
+    const load = async () => {
+      setLoading(true);
+      setMessage("");
+      try {
+        const result = await window.agenticxDesktop.loadComputerUseConfig();
+        if (!disposed && result?.ok && result.config) {
+          setEnabled(Boolean(result.config.enabled));
+        }
+      } catch {
+        if (!disposed) setMessage("读取 Computer Use 配置失败。");
+      } finally {
+        if (!disposed) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const persist = async (next: boolean) => {
+    setSaving(true);
+    setMessage("");
+    try {
+      const result = await window.agenticxDesktop.saveComputerUseConfig({ enabled: next });
+      if (!result?.ok) {
+        const detail = result?.error ? String(result.error) : "保存失败。";
+        setMessage(detail);
+        setEnabled(!next);
+        return;
+      }
+      setEnabled(next);
+      setMessage("已写入 ~/.agenticx/config.yaml，重启本地 agx 后生效。");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "保存失败。");
+      setEnabled(!next);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Panel title="Computer Use（桌面操控）">
+        <div className="py-2 text-sm text-text-faint">加载中…</div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="Computer Use（桌面操控）">
+      <p className="mb-3 text-xs text-text-faint">
+        对应配置文件中的 <code className="text-text-subtle">computer_use.enabled</code>。开启后由 agx 后端按该开关加载桌面级能力；若对话里仍看不到相关工具，请确认已使用会读取该配置的 agx 版本并完成接线。
+      </p>
+      <label className="flex cursor-pointer items-center gap-2 text-sm text-text-subtle">
+        <input
+          type="checkbox"
+          className="h-4 w-4 accent-[var(--ui-btn-primary-bg)]"
+          checked={enabled}
+          disabled={saving}
+          onChange={(e) => void persist(e.target.checked)}
+        />
+        启用 Computer Use（桌面级截屏 / 键鼠等，需权限与依赖）
+      </label>
+      {message ? (
+        <div
+          className={`mt-2 text-xs ${message.includes("已写入") ? "text-text-muted" : "text-rose-400"}`}
+        >
+          {message}
+        </div>
+      ) : null}
+    </Panel>
+  );
+}
+
+function WorkspaceSettingsTab() {
+  return (
+    <div className="space-y-4">
+      <label className="block text-sm text-text-muted">
+        默认工作区目录
+        <input className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle" value="~/.agenticx/workspace" readOnly />
+        <span className="mt-1 block text-xs text-text-faint">修改工作区目录请编辑 ~/.agenticx/config.yaml 中的 workspace_dir 字段</span>
+      </label>
+      <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
+        每个分身拥有独立工作区，位于 ~/.agenticx/avatars/&lt;id&gt;/workspace。
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPanel({
   open,
   defaultProvider,
@@ -1453,6 +1552,7 @@ export function SettingsPanel({
                         : "默认全部自动执行，不再询问（高风险）。"}
                   </div>
                 </Panel>
+                <ComputerUseGeneralPanel />
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
                   当前版本：AgenticX Desktop v0.2.0
                 </div>
@@ -1639,18 +1739,7 @@ export function SettingsPanel({
             {tab === "email" && <EmailSettingsTab />}
 
             {/* === WORKSPACE TAB === */}
-            {tab === "workspace" && (
-              <div className="space-y-4">
-                <label className="block text-sm text-text-muted">
-                  默认工作区目录
-                  <input className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle" value="~/.agenticx/workspace" readOnly />
-                  <span className="mt-1 block text-xs text-text-faint">修改工作区目录请编辑 ~/.agenticx/config.yaml 中的 workspace_dir 字段</span>
-                </label>
-                <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
-                  每个分身拥有独立工作区，位于 ~/.agenticx/avatars/&lt;id&gt;/workspace。
-                </div>
-              </div>
-            )}
+            {tab === "workspace" && <WorkspaceSettingsTab />}
 
             {tab === "favorites" && (
               <FavoritesTab

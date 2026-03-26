@@ -30,6 +30,10 @@ type EmailConfig = {
   from_email: string;
   default_to_email: string;
 };
+
+type ComputerUseConfig = {
+  enabled: boolean;
+};
 type AvatarItem = {
   id: string;
   name: string;
@@ -202,6 +206,8 @@ declare global {
       deleteGroup: (id: string) => Promise<{ ok: boolean; error?: string }>;
 
       loadConfig: () => Promise<LoadConfigResult>;
+      loadComputerUseConfig: () => Promise<{ ok: boolean; config?: ComputerUseConfig; error?: string }>;
+      saveComputerUseConfig: (payload: ComputerUseConfig) => Promise<{ ok: boolean; error?: string }>;
       loadEmailConfig: () => Promise<{ ok: boolean; config: EmailConfig; error?: string }>;
       loadMcpStatus: (sessionId: string) => Promise<McpStatusResult>;
       importMcpConfig: (payload: { sessionId: string; sourcePath: string }) => Promise<{
