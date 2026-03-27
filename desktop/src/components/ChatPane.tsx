@@ -806,8 +806,8 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
               onClick={onClose}
               title="关闭成员面板"
             >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 8H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
               </svg>
             </button>
           )}

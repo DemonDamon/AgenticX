@@ -13,6 +13,7 @@ function timeAgo(ts: number): string {
 type Props = {
   pane: ChatPane;
   onClose?: () => void;
+  tintColor?: string;
 };
 
 type SessionRow = {
@@ -83,7 +84,7 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
   return sortSessionRows(rows);
 }
 
-export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onClose }: Props) {
+export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onClose, tintColor }: Props) {
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const addPane = useAppStore((s) => s.addPane);
@@ -499,7 +500,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   };
 
   return (
-    <div className="h-full w-[220px] shrink-0 border-l border-border bg-surface-card">
+    <div className="h-full w-[220px] shrink-0 border-l border-border bg-surface-card" style={tintColor ? { backgroundColor: tintColor } : undefined}>
       <div className="border-b border-border px-3 py-2 text-xs text-text-subtle">
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5">
@@ -560,7 +561,9 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 onClick={onClose}
                 title="关闭历史会话"
               >
-                ×
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M3 8H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                </svg>
               </button>
             ) : null}
           </div>
