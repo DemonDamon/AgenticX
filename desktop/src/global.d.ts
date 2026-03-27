@@ -65,6 +65,10 @@ type ToolInstallProgress = {
   install_command?: string;
 };
 
+type ToolsPolicy = {
+  tools_enabled: Record<string, boolean>;
+};
+
 type GroupItem = {
   id: string;
   name: string;
@@ -192,6 +196,8 @@ declare global {
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       deleteAvatar: (id: string) => Promise<{ ok: boolean; error?: string }>;
       getToolsStatus: () => Promise<{ ok: boolean; tools: ToolStatusItem[]; error?: string }>;
+      getToolsPolicy: () => Promise<{ ok: boolean; tools_enabled: Record<string, boolean>; error?: string }>;
+      saveToolsPolicy: (payload: ToolsPolicy) => Promise<{ ok: boolean; tools_enabled?: Record<string, boolean>; error?: string }>;
       installTool: (payload: { requestId: string; toolId: string }) => Promise<{ ok: boolean; error?: string }>;
       onToolInstallProgress: (cb: (payload: ToolInstallProgress) => void) => () => void;
 
