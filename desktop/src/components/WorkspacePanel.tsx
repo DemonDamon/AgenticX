@@ -397,90 +397,95 @@ export function WorkspacePanel({
   return (
     <div ref={panelRef} className="relative flex h-full min-h-0 w-full flex-col bg-surface-card" style={tintColor ? { backgroundColor: tintColor } : undefined}>
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="relative flex items-center gap-1 border-b border-border px-2 py-2">
-          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-            {taskspaces.map((item) => (
-              <button
-                key={item.id}
-                className={`shrink-0 rounded px-2 py-1 text-xs transition ${
-                  item.id === activeTaskspace?.id
-                    ? "text-text-strong"
-                    : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
-                }`}
-                style={
-                  item.id === activeTaskspace?.id
-                    ? {
-                        background: "var(--ui-accent-surface)",
-                        color: "var(--ui-accent-text)",
-                      }
-                    : {}
-                }
-                onClick={() => onActiveTaskspaceChange(item.id)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setCtxMenu({ x: e.clientX, y: e.clientY, taskspace: item });
-                }}
-                title={item.id === "default" ? (item.path || item.label) : undefined}
-              >
-                <span className="flex items-center gap-1">
-                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0 opacity-70">
-                    <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6.38L7.88 4.5H12.5C13.33 4.5 14 5.17 14 6V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
-                  </svg>
-                  {item.id !== "default" && item.label}
-                </span>
-              </button>
-            ))}
-          </div>
-          <button
-            className="rounded bg-surface-hover px-2 py-1 text-xs text-text-muted hover:bg-surface-hover"
-            onClick={() => {
-              setErrorText("");
-              void refreshListAndActiveTaskspace();
-            }}
-            title="刷新工作区列表与目录"
-          >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5c1.6 0 3.04.68 4.06 1.76L14 2.5V6h-3.5l1.44-1.44A4 4 0 1 0 12 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
-          <button
-            className="rounded bg-surface-hover px-2 py-1 text-xs text-text-muted hover:bg-surface-hover"
-            onClick={() => {
-              setShowAddForm((prev) => !prev);
-              setErrorText("");
-            }}
-            title="新增工作区"
-          >
-            +
-          </button>
-          {onClose ? (
+        <div className="flex flex-col border-b border-border">
+          <div className="flex items-center gap-1 px-2 py-2">
+            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+              {taskspaces.map((item) => (
+                <button
+                  key={item.id}
+                  className={`shrink-0 rounded px-2 py-1 text-xs transition ${
+                    item.id === activeTaskspace?.id
+                      ? "text-text-strong"
+                      : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
+                  }`}
+                  style={
+                    item.id === activeTaskspace?.id
+                      ? {
+                          background: "var(--ui-accent-surface)",
+                          color: "var(--ui-accent-text)",
+                        }
+                      : {}
+                  }
+                  onClick={() => onActiveTaskspaceChange(item.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setCtxMenu({ x: e.clientX, y: e.clientY, taskspace: item });
+                  }}
+                  title={item.id === "default" ? (item.path || item.label) : undefined}
+                >
+                  <span className="flex items-center gap-1">
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0 opacity-70">
+                      <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6.38L7.88 4.5H12.5C13.33 4.5 14 5.17 14 6V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+                    </svg>
+                    {item.id !== "default" && item.label}
+                  </span>
+                </button>
+              ))}
+            </div>
             <button
-              className="rounded px-1.5 py-1 text-xs text-text-faint hover:bg-surface-hover hover:text-text-muted"
-              onClick={onClose}
-              title="关闭工作区面板"
+              className="flex h-[26px] w-[26px] items-center justify-center rounded bg-surface-hover text-text-muted hover:bg-surface-hover"
+              onClick={() => {
+                setErrorText("");
+                void refreshListAndActiveTaskspace();
+              }}
+              title="刷新工作区列表与目录"
             >
-              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M3 8H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5c1.6 0 3.04.68 4.06 1.76L14 2.5V6h-3.5l1.44-1.44A4 4 0 1 0 12 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
-          ) : null}
+            <button
+              className={`flex h-[26px] w-[26px] items-center justify-center rounded text-sm text-text-muted transition ${showAddForm ? "bg-surface-active" : "bg-surface-hover hover:bg-surface-hover"}`}
+              onClick={() => {
+                setShowAddForm((prev) => !prev);
+                setErrorText("");
+              }}
+              title="新增工作区"
+            >
+              +
+            </button>
+            {onClose ? (
+              <button
+                className="flex h-[26px] w-[26px] items-center justify-center rounded text-text-faint hover:bg-surface-hover hover:text-text-muted"
+                onClick={onClose}
+                title="关闭工作区面板"
+              >
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M3 8H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                </svg>
+              </button>
+            ) : null}
+          </div>
           {showAddForm ? (
-            <div className="absolute right-2 top-10 z-10 w-[280px] rounded-md border border-border bg-surface-panel p-2 shadow-2xl">
-              <div className="mb-1 text-[11px] text-text-subtle">新增工作区</div>
+            <div
+              className="border-t border-border px-3 py-2"
+              style={tintColor ? { backgroundColor: tintColor } : undefined}
+            >
+              <div className="mb-2 text-[11px] font-medium text-text-subtle">新增工作区</div>
               <input
                 value={newPath}
                 onChange={(e) => setNewPath(e.target.value)}
                 placeholder="目录绝对路径（可留空用默认）"
-                className="mb-1 w-full rounded border border-border bg-surface-panel px-2 py-1 text-[11px] text-text-primary outline-none focus:border-border-strong"
+                className="mb-1.5 w-full rounded border border-border bg-surface-hover px-2 py-1.5 text-[11px] text-text-primary outline-none focus:border-border-strong"
               />
-              <div className="mb-1 flex justify-end">
+              <div className="mb-1.5 flex justify-end">
                 <button
                   type="button"
-                  className="rounded border border-border px-2 py-1 text-[11px] text-text-muted hover:bg-surface-hover"
+                  className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] text-text-muted hover:bg-surface-hover"
                   onClick={() => void chooseDirectoryForTaskspace()}
                   title="从系统目录中选择"
                 >
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ display: "inline", marginRight: 4 }}>
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6.38L7.88 4.5H12.5C13.33 4.5 14 5.17 14 6V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
                   </svg>
                   选择目录
@@ -490,9 +495,9 @@ export function WorkspacePanel({
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
                 placeholder="显示名称（可选）"
-                className="mb-2 w-full rounded border border-border bg-surface-panel px-2 py-1 text-[11px] text-text-primary outline-none focus:border-border-strong"
+                className="mb-2 w-full rounded border border-border bg-surface-hover px-2 py-1.5 text-[11px] text-text-primary outline-none focus:border-border-strong"
               />
-              <div className="flex items-center justify-end gap-1">
+              <div className="flex items-center justify-end gap-1.5">
                 <button
                   className="rounded px-2 py-1 text-[11px] text-text-subtle hover:bg-surface-hover"
                   onClick={() => {
