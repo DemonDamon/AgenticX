@@ -636,11 +636,13 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
   groupId,
   avatarList,
   metaLeaderLabel,
+  onClose,
 }: {
   groupId: string;
   avatarList: Avatar[];
   /** Meta-Agent pane title; shown as group coordinator in member grid. */
   metaLeaderLabel: string;
+  onClose?: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [mode, setMode] = useState<"browse" | "add" | "remove">("browse");
@@ -787,15 +789,29 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
   };
 
   return (
-    <div ref={panelRef} className="flex h-full min-h-0 flex-col bg-surface-card">
+    <div ref={panelRef} className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-card">
       <div className="shrink-0 space-y-2 border-b border-border px-3 py-2">
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索群成员"
-          className="w-full rounded-lg border border-border bg-surface-panel px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-faint focus:border-border-strong"
-        />
+        <div className="flex items-center gap-1">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索群成员"
+            className="min-w-0 flex-1 rounded-lg border border-border bg-surface-panel px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-faint focus:border-border-strong"
+          />
+          {onClose && (
+            <button
+              type="button"
+              className="shrink-0 rounded px-1.5 py-1.5 text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
+              onClick={onClose}
+              title="关闭成员面板"
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+            </button>
+          )}
+        </div>
         {errorText ? <p className="text-[10px] text-rose-300">{errorText}</p> : null}
         {mode === "remove" ? (
           <div className="flex items-center justify-between">
@@ -2878,7 +2894,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
   }
 
-  const paneTint = avatarTintBg(pane.avatarId);
+  const paneTint = (() => {
+    if (!pane.avatarId) return undefined;
+    if (pane.avatarId.startsWith("group:")) {
+      const rawId = pane.avatarId.slice(6);
+      const idx = groups.findIndex((g) => g.id === rawId);
+      if (idx >= 0) {
+        // reuse GROUP_TINT colors in same order as groupColorByIndex
+        const GROUP_TINT_LIST = [
+          "rgba(99,102,241,0.07)",   // indigo
+          "rgba(20,184,166,0.07)",   // teal
+          "rgba(236,72,153,0.07)",   // pink
+          "rgba(132,204,22,0.07)",   // lime
+          "rgba(239,68,68,0.07)",    // red
+          "rgba(59,130,246,0.07)",   // blue
+          "rgba(234,179,8,0.07)",    // yellow
+          "rgba(168,85,247,0.07)",   // purple
+        ];
+        return GROUP_TINT_LIST[idx % GROUP_TINT_LIST.length];
+      }
+    }
+    return avatarTintBg(pane.avatarId);
+  })();
 
   return (
     <div
@@ -2887,7 +2924,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       style={paneTint ? { backgroundColor: paneTint } : undefined}
       onMouseDown={onFocus}
     >
-      <div className="flex h-full min-w-0 flex-1 flex-col">
+      <div className="flex h-full min-w-0 flex-1 flex-col" style={{ minWidth: 280 }}>
         <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
           <div className="min-w-0">
             <div className="truncate text-sm font-medium text-text-strong">{pane.avatarName}</div>
@@ -3029,15 +3066,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         )}
 
         <div className="shrink-0 border-t border-border px-4 py-2.5">
-          <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
-            <span className="rounded border border-border bg-surface-card px-2 py-0.5">
-              Context Files: {attachmentEntries.length}
+          <div className="mb-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-text-faint">
+            <span className="shrink-0 rounded border border-border bg-surface-card px-2 py-0.5">
+              Context: {attachmentEntries.length}
             </span>
-            <span className="rounded border border-border bg-surface-card px-2 py-0.5">
-              Session: {pane.sessionId ? `${pane.sessionId.slice(0, 8)}...` : "-"}
+            <span className="shrink-0 truncate rounded border border-border bg-surface-card px-2 py-0.5" style={{ maxWidth: "45%" }}>
+              {pane.sessionId ? `${pane.sessionId.slice(0, 8)}…` : "-"}
             </span>
             {activeProvider && activeModel ? (
-              <span className="rounded border border-border bg-surface-card px-2 py-0.5">
+              <span className="min-w-0 truncate rounded border border-border bg-surface-card px-2 py-0.5" style={{ maxWidth: "55%" }} title={`${activeProvider}/${activeModel}`}>
                 {activeProvider}/{activeModel}
               </span>
             ) : null}
@@ -3194,8 +3231,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               placeholder="发消息..."
               className="block min-h-[40px] w-full resize-none bg-transparent px-4 pb-0 pt-3 text-sm text-text-primary outline-none placeholder:text-text-faint"
             />
-            <div className="flex items-center justify-between px-2 pb-2 pt-1">
-              <div className="flex items-center gap-0.5">
+            <div className="flex min-w-0 items-center justify-between gap-1 px-2 pb-2 pt-1">
+              <div className="flex min-w-0 items-center gap-0.5 overflow-hidden">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -3299,7 +3336,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       </div>
 
       {isGroupPane && pane.membersPanelOpen ? (
-        <div className="relative h-full shrink-0 border-l border-border" style={{ width: taskspaceWidth }}>
+        <div className="relative h-full shrink-0 overflow-hidden border-l border-border" style={{ width: taskspaceWidth }}>
           <div
             className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
             onMouseDown={startResizeTaskspace}
@@ -3312,11 +3349,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             groupId={groupChatId}
             avatarList={avatars}
             metaLeaderLabel={metaLeaderDisplayName}
+            onClose={() => cycleSidePanel(pane.id, "members")}
           />
         </div>
       ) : null}
       {workspacePanelOpen ? (
-        <div className="relative h-full shrink-0 border-l border-border" style={{ width: taskspaceWidth }}>
+        <div className="relative h-full shrink-0 overflow-hidden border-l border-border" style={{ width: taskspaceWidth }}>
           <div
             className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
             onMouseDown={startResizeTaskspace}
@@ -3366,7 +3404,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         />
       ) : null}
       <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}`}>
-        <SessionHistoryPanel pane={pane} onClose={() => togglePaneHistory(pane.id)} />
+        <SessionHistoryPanel pane={pane} onClose={() => togglePaneHistory(pane.id)} tintColor={paneTint} />
       </HistoryPanelBoundary>
       <ForwardPicker
         open={forwardPickerOpen}
