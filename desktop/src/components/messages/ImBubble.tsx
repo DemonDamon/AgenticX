@@ -154,15 +154,15 @@ export function ImBubble({
         </button>
       ) : null}
       <div className={`flex min-w-0 flex-1 gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
-        <div className={`flex min-w-0 gap-2 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
+        <div className={`flex min-w-0 flex-1 gap-2 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
           <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
             <Avatar label={displayName} imageUrl={avatarUrl} />
           </div>
-          <div className={`flex min-w-0 flex-col ${isUser ? "items-end" : "items-start"}`} style={{ maxWidth: "min(80%, 900px)" }}>
+          <div className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}`} style={{ maxWidth: isUser ? "min(80%, 700px)" : "min(92%, 960px)" }}>
             <span className="mb-0.5 max-w-full truncate px-1 text-[11px] text-text-faint">{displayName}</span>
             <div
-              className={`relative max-w-full min-w-0 overflow-x-auto overflow-y-visible rounded-xl border px-3 py-2 text-sm ${
-                isUser ? "rounded-tr-[4px]" : "rounded-tl-[4px]"
+              className={`relative min-w-0 overflow-x-auto overflow-y-visible rounded-xl border px-3 py-2 text-sm ${
+                isUser ? "max-w-full rounded-tr-[4px]" : "w-full rounded-tl-[4px]"
               }`}
               style={bubbleStyle}
             >
