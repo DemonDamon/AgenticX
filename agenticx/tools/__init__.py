@@ -54,6 +54,7 @@ from .tool_context import ToolContext, LlmRequest
 from .openapi_toolset import OpenAPIToolset, RestApiTool
 from .unified_document import UnifiedDocumentTool
 from .document_routers import DocumentRouter, create_default_router
+from .adapters.liteparse import LiteParseAdapter
 
 # Sandbox tools (OpenSandbox-inspired)
 from .sandbox_tools import (
@@ -123,6 +124,7 @@ __all__ = [
     "UnifiedDocumentTool",
     "DocumentRouter",
     "create_default_router",
+    "LiteParseAdapter",
     # Sandbox tools (OpenSandbox-inspired)
     "SandboxFileTool",
     "SandboxCommandTool",

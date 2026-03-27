@@ -9,6 +9,7 @@ from .pipeline import PipelineAdapter
 from .vlm_client import VLMHttpClientAdapter
 from .utils import PageRangeParser
 from .mineru import MinerUAdapter, BackendType, ParseResult
+from .liteparse import LiteParseAdapter
 
 __all__ = [
     "DocumentAdapter",
@@ -19,4 +20,5 @@ __all__ = [
     "MinerUAdapter",
     "BackendType",
     "ParseResult",
+    "LiteParseAdapter",
 ]
