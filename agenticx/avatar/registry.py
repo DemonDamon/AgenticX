@@ -51,6 +51,7 @@ class AvatarConfig:
     default_provider: str = ""
     default_model: str = ""
     pinned: bool = False
+    tools_enabled: Dict[str, bool] = field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
 
@@ -126,6 +127,7 @@ class AvatarRegistry:
         created_by: str = "manual",
         default_provider: str = "",
         default_model: str = "",
+        tools_enabled: Optional[Dict[str, bool]] = None,
     ) -> AvatarConfig:
         """Create a new avatar with isolated workspace."""
         avatar_id = uuid.uuid4().hex[:12]
@@ -141,6 +143,7 @@ class AvatarRegistry:
             created_by=created_by,
             default_provider=default_provider,
             default_model=default_model,
+            tools_enabled=dict(tools_enabled or {}),
             created_at=now,
             updated_at=now,
         )

@@ -41,6 +41,28 @@ type AvatarItem = {
   avatar_url?: string;
   pinned?: boolean;
   created_by?: string;
+  tools_enabled?: Record<string, boolean>;
+};
+
+type ToolStatusItem = {
+  id: string;
+  name: string;
+  description: string;
+  installed: boolean;
+  version?: string;
+  install_command?: string;
+  auto_installable?: boolean;
+};
+
+type ToolInstallProgress = {
+  requestId: string;
+  tool_id: string;
+  phase: string;
+  percent: number;
+  message: string;
+  installed?: boolean;
+  version?: string;
+  install_command?: string;
 };
 
 type GroupItem = {
@@ -151,9 +173,27 @@ declare global {
       onOpenSettings: (cb: () => void) => void;
 
       listAvatars: () => Promise<{ ok: boolean; avatars: AvatarItem[] }>;
-      createAvatar: (payload: { name: string; role?: string; avatar_url?: string; system_prompt?: string; created_by?: string }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
-      updateAvatar: (payload: { id: string; name?: string; role?: string; avatar_url?: string; pinned?: boolean; system_prompt?: string }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
+      createAvatar: (payload: {
+        name: string;
+        role?: string;
+        avatar_url?: string;
+        system_prompt?: string;
+        created_by?: string;
+        tools_enabled?: Record<string, boolean>;
+      }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
+      updateAvatar: (payload: {
+        id: string;
+        name?: string;
+        role?: string;
+        avatar_url?: string;
+        pinned?: boolean;
+        system_prompt?: string;
+        tools_enabled?: Record<string, boolean>;
+      }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       deleteAvatar: (id: string) => Promise<{ ok: boolean; error?: string }>;
+      getToolsStatus: () => Promise<{ ok: boolean; tools: ToolStatusItem[]; error?: string }>;
+      installTool: (payload: { requestId: string; toolId: string }) => Promise<{ ok: boolean; error?: string }>;
+      onToolInstallProgress: (cb: (payload: ToolInstallProgress) => void) => () => void;
 
       listSessions: (avatarId?: string) => Promise<{ ok: boolean; sessions: Array<{ session_id: string; avatar_id: string | null; avatar_name?: string | null; session_name: string | null; updated_at: number; created_at?: number; pinned?: boolean; archived?: boolean }> }>;
       createSession: (payload: { avatar_id?: string; name?: string; inherit_from_session_id?: string }) => Promise<{ ok: boolean; session_id?: string; inherited?: boolean; error?: string }>;

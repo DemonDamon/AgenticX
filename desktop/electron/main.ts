@@ -823,7 +823,14 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("create-avatar", async (_event, payload: { name: string; role?: string; avatar_url?: string; system_prompt?: string; created_by?: string }) => {
+  ipcMain.handle("create-avatar", async (_event, payload: {
+    name: string;
+    role?: string;
+    avatar_url?: string;
+    system_prompt?: string;
+    created_by?: string;
+    tools_enabled?: Record<string, boolean>;
+  }) => {
     try {
       const resp = await fetch(`${getStudioUrl()}/api/avatars`, {
         method: "POST",
@@ -840,7 +847,15 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("update-avatar", async (_event, payload: { id: string; name?: string; role?: string; avatar_url?: string; pinned?: boolean; system_prompt?: string }) => {
+  ipcMain.handle("update-avatar", async (_event, payload: {
+    id: string;
+    name?: string;
+    role?: string;
+    avatar_url?: string;
+    pinned?: boolean;
+    system_prompt?: string;
+    tools_enabled?: Record<string, boolean>;
+  }) => {
     const { id, ...body } = payload;
     try {
       const resp = await fetch(`${getStudioUrl()}/api/avatars/${encodeURIComponent(id)}`, {
@@ -867,6 +882,111 @@ function registerIpc(): void {
       if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}` };
       return await resp.json();
     } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("get-tools-status", async () => {
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/tools/status`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, tools: [], error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, tools: [], error: String(err) };
+    }
+  });
+
+  ipcMain.handle("install-tool", async (event, payload: { requestId: string; toolId: string }) => {
+    const requestId = String(payload?.requestId || "").trim();
+    const toolId = String(payload?.toolId || "").trim();
+    if (!requestId) return { ok: false, error: "requestId is required" };
+    if (!toolId) return { ok: false, error: "toolId is required" };
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/tools/install`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-agx-desktop-token": getStudioToken(),
+        },
+        body: JSON.stringify({ tool_id: toolId }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        event.sender.send("tool-install-progress", {
+          requestId,
+          tool_id: toolId,
+          phase: "error",
+          percent: 0,
+          message: `HTTP ${resp.status}: ${body.slice(0, 300)}`,
+        });
+        return { ok: false, error: `HTTP ${resp.status}` };
+      }
+      if (!resp.body) {
+        event.sender.send("tool-install-progress", {
+          requestId,
+          tool_id: toolId,
+          phase: "error",
+          percent: 0,
+          message: "Empty stream body",
+        });
+        return { ok: false, error: "Empty stream body" };
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+
+      const flushChunk = (rawChunk: string) => {
+        const lines = rawChunk.split("\n");
+        let eventName = "message";
+        const dataLines: string[] = [];
+        for (const line of lines) {
+          if (line.startsWith("event:")) eventName = line.slice(6).trim();
+          if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+        }
+        if (eventName !== "progress" || dataLines.length === 0) return;
+        const jsonText = dataLines.join("\n");
+        try {
+          const payloadData = JSON.parse(jsonText) as Record<string, unknown>;
+          event.sender.send("tool-install-progress", {
+            requestId,
+            ...payloadData,
+          });
+        } catch (err) {
+          event.sender.send("tool-install-progress", {
+            requestId,
+            tool_id: toolId,
+            phase: "error",
+            percent: 0,
+            message: `Failed to parse install stream: ${String(err)}`,
+          });
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const chunk of chunks) flushChunk(chunk);
+      }
+      const tail = buffer.trim();
+      if (tail) flushChunk(tail);
+      return { ok: true };
+    } catch (err) {
+      event.sender.send("tool-install-progress", {
+        requestId,
+        tool_id: toolId,
+        phase: "error",
+        percent: 0,
+        message: String(err),
+      });
       return { ok: false, error: String(err) };
     }
   });

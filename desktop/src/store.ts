@@ -25,6 +25,7 @@ export type Avatar = {
   avatarUrl: string;
   pinned: boolean;
   createdBy: string;
+  toolsEnabled?: Record<string, boolean>;
 };
 
 export type SessionItem = {

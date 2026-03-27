@@ -38,11 +38,52 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   },
 
   listAvatars: async () => ipcRenderer.invoke("list-avatars"),
-  createAvatar: async (payload: { name: string; role?: string; avatar_url?: string; system_prompt?: string; created_by?: string }) =>
+  createAvatar: async (payload: {
+    name: string;
+    role?: string;
+    avatar_url?: string;
+    system_prompt?: string;
+    created_by?: string;
+    tools_enabled?: Record<string, boolean>;
+  }) =>
     ipcRenderer.invoke("create-avatar", payload),
-  updateAvatar: async (payload: { id: string; name?: string; role?: string; avatar_url?: string; pinned?: boolean; system_prompt?: string }) =>
+  updateAvatar: async (payload: {
+    id: string;
+    name?: string;
+    role?: string;
+    avatar_url?: string;
+    pinned?: boolean;
+    system_prompt?: string;
+    tools_enabled?: Record<string, boolean>;
+  }) =>
     ipcRenderer.invoke("update-avatar", payload),
   deleteAvatar: async (id: string) => ipcRenderer.invoke("delete-avatar", id),
+  getToolsStatus: async () => ipcRenderer.invoke("get-tools-status"),
+  installTool: async (payload: { requestId: string; toolId: string }) =>
+    ipcRenderer.invoke("install-tool", payload),
+  onToolInstallProgress: (cb: (payload: {
+    requestId: string;
+    tool_id: string;
+    phase: string;
+    percent: number;
+    message: string;
+    installed?: boolean;
+    version?: string;
+    install_command?: string;
+  }) => void): (() => void) => {
+    const handler = (_event: unknown, payload: {
+      requestId: string;
+      tool_id: string;
+      phase: string;
+      percent: number;
+      message: string;
+      installed?: boolean;
+      version?: string;
+      install_command?: string;
+    }) => cb(payload);
+    ipcRenderer.on("tool-install-progress", handler);
+    return () => ipcRenderer.removeListener("tool-install-progress", handler);
+  },
 
   listSessions: async (avatarId?: string) => ipcRenderer.invoke("list-sessions", avatarId),
   createSession: async (payload: { avatar_id?: string; name?: string; inherit_from_session_id?: string }) =>
