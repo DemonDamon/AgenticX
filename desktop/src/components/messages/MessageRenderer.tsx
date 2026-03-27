@@ -107,6 +107,10 @@ export function MessageRenderer({
     return (
       <ToolCallCard
         message={message}
+        forceExpand={!!inlineConfirm}
+        selectable={selectable}
+        selected={selected}
+        onToggleSelectMessage={onToggleSelectMessage}
         action={
           <>
             {inlineConfirmAction}
