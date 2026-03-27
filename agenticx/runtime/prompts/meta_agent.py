@@ -304,6 +304,27 @@ def _build_taskspaces_context(taskspaces: list[dict[str, str]] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
+MAX_CONTEXT_FILE_CHARS = 4000
+
+
+def _build_context_files_block(session: StudioSession) -> str:
+    """Serialize context_files into the system prompt so the model sees file paths and contents."""
+    cf = session.context_files
+    if not cf:
+        return "- context_files: (none)\n"
+    parts = [f"- context_files 数量: {len(cf)}\n\n### 用户引用的文件（context_files）\n"]
+    for fpath, content in cf.items():
+        preview = str(content or "")
+        if len(preview) > MAX_CONTEXT_FILE_CHARS:
+            preview = preview[:MAX_CONTEXT_FILE_CHARS] + "\n...(truncated)"
+        parts.append(f"--- {fpath} ---\n{preview}")
+    parts.append(
+        "\n提示：上述文件路径为绝对路径，可直接用于 file_read 等工具调用。"
+        "若用户在消息中 @某文件名，请优先使用此处列出的完整路径。\n"
+    )
+    return "\n\n".join(parts)
+
+
 def _build_lsp_context() -> str:
     return (
         "## 代码智能工具（LSP）\n"
@@ -488,5 +509,5 @@ def build_meta_agent_system_prompt(
         "## 当前会话上下文\n"
         f"- provider: {session.provider_name or 'default'}\n"
         f"- model: {session.model_name or 'default'}\n"
-        f"- 已注入 context_files 数量: {len(session.context_files)}\n"
+        f"{_build_context_files_block(session)}"
     )

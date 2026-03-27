@@ -2053,6 +2053,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const sendChat = async (userText: string, options?: { retryAttachments?: MessageAttachment[] }) => {
     const text = userText.trim();
     const retryAttachments = options?.retryAttachments;
+    const readyEntries = attachmentEntries.filter(([, file]) => file.status === "ready");
     const composerAttachments: MessageAttachment[] = readyAttachments.map((file) => ({
       name: file.name,
       mimeType: file.mimeType,
@@ -2188,11 +2189,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           body.image_inputs = imageInputs;
         }
         const contextFilePayload: Record<string, string> = {};
-        for (const file of userAttachments) {
-          if (file.dataUrl || file.mimeType.startsWith("image/")) {
-            contextFilePayload[file.name] = "[图片文件]";
-          } else {
-            contextFilePayload[file.name] = `[附件] ${file.name}`;
+        if (readyEntries.length > 0) {
+          for (const [filePath, file] of readyEntries) {
+            if (file.dataUrl || file.mimeType.startsWith("image/")) {
+              contextFilePayload[filePath] = "[图片文件]";
+            } else if (file.content) {
+              contextFilePayload[filePath] = file.content;
+            } else {
+              contextFilePayload[filePath] = `[附件] ${file.name}`;
+            }
+          }
+        } else {
+          for (const file of userAttachments) {
+            if (file.dataUrl || file.mimeType.startsWith("image/")) {
+              contextFilePayload[file.name] = "[图片文件]";
+            } else {
+              contextFilePayload[file.name] = `[附件] ${file.name}`;
+            }
           }
         }
         if (Object.keys(contextFilePayload).length > 0) {
