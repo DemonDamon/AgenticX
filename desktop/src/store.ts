@@ -81,6 +81,8 @@ export type ChatPane = {
   /** Embedded terminals in workspace panel (bottom). */
   terminalTabs: PaneTerminalTab[];
   activeTerminalTabId: string | null;
+  /** Cumulative token usage for the current session (resets on new session). */
+  sessionTokens: { input: number; output: number };
 };
 
 export type Message = {
@@ -274,6 +276,7 @@ type AppState = {
   addPaneTerminalTab: (paneId: string, cwd: string, labelHint?: string) => void;
   removePaneTerminalTab: (paneId: string, tabId: string) => void;
   setActivePaneTerminalTab: (paneId: string, tabId: string | null) => void;
+  accumulatePaneTokens: (paneId: string, input: number, output: number) => void;
   addMessage: (
     role: MsgRole,
     content: string,
@@ -337,6 +340,7 @@ function makeDefaultPane(): ChatPane {
     spawnsColumnBaselineIds: [],
     terminalTabs: [],
     activeTerminalTabId: null,
+    sessionTokens: { input: 0, output: 0 },
   };
 }
 
@@ -497,7 +501,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     })),
   clearPaneMessages: (paneId) =>
     set((state) => ({
-      panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, messages: [] } : pane)),
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, messages: [], sessionTokens: { input: 0, output: 0 } } : pane
+      ),
+    })),
+  accumulatePaneTokens: (paneId, input, output) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              sessionTokens: {
+                input: (pane.sessionTokens?.input ?? 0) + input,
+                output: (pane.sessionTokens?.output ?? 0) + output,
+              },
+            }
+          : pane
+      ),
     })),
   setPaneSessionId: (paneId, sessionId) =>
     set((state) => ({
