@@ -90,4 +90,11 @@ export const chatMarkdownComponents: Partial<Components> = {
     }
     return <pre {...rest}>{children}</pre>;
   },
+  table({ children, ...rest }) {
+    return (
+      <div className="overflow-x-auto">
+        <table {...rest}>{children}</table>
+      </div>
+    );
+  },
 };
