@@ -1,12 +1,26 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  onCreate: (data: { name: string; role: string; systemPrompt: string }) => Promise<void>;
+  onCreate: (data: {
+    name: string;
+    role: string;
+    systemPrompt: string;
+    toolsEnabled: Record<string, boolean>;
+  }) => Promise<void>;
 };
 
 type Mode = "manual" | "ai";
+type ToolItem = { id: string; name: string; description: string };
+
+const DEFAULT_TOOLS: ToolItem[] = [
+  { id: "liteparse", name: "LiteParse", description: "轻量 PDF/Office 文档解析" },
+  { id: "mineru", name: "MinerU", description: "深度文档解析" },
+  { id: "libreoffice", name: "LibreOffice", description: "Office 格式转换依赖" },
+  { id: "imagemagick", name: "ImageMagick", description: "图像转换依赖" },
+];
 
 export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
   const [mode, setMode] = useState<Mode>("manual");
@@ -16,6 +30,38 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [aiError, setAiError] = useState("");
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [tools, setTools] = useState<ToolItem[]>(DEFAULT_TOOLS);
+  const [toolsEnabled, setToolsEnabled] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!open) return;
+    let disposed = false;
+    void (async () => {
+      try {
+        const result = await window.agenticxDesktop.getToolsStatus();
+        if (!disposed && result?.ok && Array.isArray(result.tools) && result.tools.length > 0) {
+          setTools(
+            result.tools.map((item) => ({
+              id: String(item.id),
+              name: String(item.name),
+              description: String(item.description || ""),
+            }))
+          );
+        }
+      } catch {
+        // Keep default tools when loading status fails.
+      }
+    })();
+    return () => {
+      disposed = true;
+    };
+  }, [open]);
+
+  const customizedCount = useMemo(
+    () => Object.keys(toolsEnabled).filter((key) => toolsEnabled[key] !== undefined).length,
+    [toolsEnabled]
+  );
 
   if (!open) return null;
 
@@ -23,10 +69,17 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
     if (!name.trim()) return;
     setBusy(true);
     try {
-      await onCreate({ name: name.trim(), role: role.trim(), systemPrompt: systemPrompt.trim() });
+      await onCreate({
+        name: name.trim(),
+        role: role.trim(),
+        systemPrompt: systemPrompt.trim(),
+        toolsEnabled: { ...toolsEnabled },
+      });
       setName("");
       setRole("");
       setSystemPrompt("");
+      setToolsEnabled({});
+      setToolsOpen(false);
       onClose();
     } finally {
       setBusy(false);
@@ -58,6 +111,8 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
     setSystemPrompt("");
     setDescription("");
     setAiError("");
+    setToolsEnabled({});
+    setToolsOpen(false);
     onClose();
   };
 
@@ -115,6 +170,71 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
                   placeholder="自定义角色行为指令..."
                 />
               </label>
+
+              <div className="rounded-md border border-border bg-surface-card">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-text-muted transition hover:bg-surface-hover"
+                  onClick={() => setToolsOpen((prev) => !prev)}
+                >
+                  <span>
+                    工具权限（{customizedCount > 0 ? `已自定义 ${customizedCount} 项` : "继承全局默认"}）
+                  </span>
+                  {toolsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                </button>
+
+                {toolsOpen && (
+                  <div className="space-y-2 border-t border-border px-3 py-3">
+                    {tools.map((tool) => {
+                      const inherited = !(tool.id in toolsEnabled);
+                      const enabled = inherited ? false : Boolean(toolsEnabled[tool.id]);
+                      return (
+                        <div
+                          key={tool.id}
+                          className="rounded-md border border-border bg-surface-panel px-2.5 py-2"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm text-text-primary">{tool.name}</div>
+                              <div className="truncate text-xs text-text-faint">{tool.description}</div>
+                            </div>
+                            <button
+                              type="button"
+                              className={`inline-flex min-w-[70px] items-center justify-center rounded border px-2 py-0.5 text-xs transition ${
+                                inherited
+                                  ? "border-border text-text-faint"
+                                  : enabled
+                                    ? "border-cyan-500/40 bg-cyan-500/15 text-cyan-400"
+                                    : "border-border-strong bg-surface-hover text-text-muted"
+                              }`}
+                              onClick={() => {
+                                setToolsEnabled((prev) => {
+                                  const next = { ...prev };
+                                  if (!(tool.id in next)) next[tool.id] = true;
+                                  else next[tool.id] = !next[tool.id];
+                                  return next;
+                                });
+                              }}
+                            >
+                              {inherited ? "继承" : enabled ? "启用" : "禁用"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        className="rounded border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover"
+                        onClick={() => setToolsEnabled({})}
+                        disabled={customizedCount === 0}
+                      >
+                        重置为全局默认
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
@@ -124,7 +244,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
                 取消
               </button>
               <button
-                className="rounded-md bg-cyan-400 px-4 py-1.5 text-sm font-medium text-black transition hover:bg-cyan-300 disabled:opacity-40"
+                className="rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
                 disabled={busy || !name.trim()}
                 onClick={handleCreate}
               >

@@ -10,6 +10,8 @@ import {
   Globe,
   Plus,
   Trash2,
+  Wrench,
+  Loader2,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import type { Avatar, ChatPane, ChatStyle, GroupChat } from "../store";
@@ -42,7 +44,7 @@ type McpServer = {
 
 const MCP_PRIMARY_CONFIG_PATH = "~/.agenticx/mcp.json";
 
-type SettingsTab = "general" | "provider" | "mcp" | "skills" | "email" | "workspace" | "favorites" | "server";
+type SettingsTab = "general" | "provider" | "mcp" | "tools" | "skills" | "email" | "workspace" | "favorites" | "server";
 type ConfirmMode = "manual" | "semi-auto" | "auto";
 type EmailPresetId = "qq" | "163" | "gmail" | "outlook" | "custom";
 
@@ -55,6 +57,49 @@ type EmailSettingsForm = {
   smtp_use_tls: boolean;
   from_email: string;
   default_to_email: string;
+};
+
+type ToolStatusItem = {
+  id: string;
+  name: string;
+  description: string;
+  installed: boolean;
+  version?: string;
+  install_command?: string;
+  auto_installable?: boolean;
+};
+
+type ToolInstallState = {
+  requestId: string;
+  percent: number;
+  phase: string;
+  message: string;
+  error?: string;
+};
+
+type SkillItem = {
+  name: string;
+  description: string;
+  location: string;
+};
+
+type BundleItem = {
+  name: string;
+  version: string;
+  description: string;
+  skills: string[];
+  mcp_servers: string[];
+  avatars: string[];
+  memory_templates: string[];
+};
+
+type RegistrySearchItem = {
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  source: string;
+  source_type: string;
 };
 
 type Props = {
@@ -94,6 +139,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "general", label: "通用", icon: Settings2 },
   { id: "provider", label: "模型与 API", icon: Cpu },
   { id: "mcp", label: "MCP 服务", icon: Plug },
+  { id: "tools", label: "工具", icon: Wrench },
   { id: "skills", label: "技能", icon: Sparkles },
   { id: "email", label: "邮件通知", icon: Mail },
   { id: "workspace", label: "工作区", icon: FolderOpen },
@@ -148,6 +194,186 @@ function normalizeEmailSettings(input: unknown): EmailSettingsForm {
     from_email: String(row.from_email ?? ""),
     default_to_email: String(row.default_to_email ?? "bingzhenli@hotmail.com"),
   };
+}
+
+function ToolsTab() {
+  const [tools, setTools] = useState<ToolStatusItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [installing, setInstalling] = useState<Record<string, ToolInstallState>>({});
+
+  const loadTools = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await window.agenticxDesktop.getToolsStatus();
+      if (result?.ok) {
+        setTools(Array.isArray(result.tools) ? result.tools : []);
+      } else {
+        setError(result?.error ?? "加载工具状态失败");
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadTools();
+  }, [loadTools]);
+
+  useEffect(() => {
+    const dispose = window.agenticxDesktop.onToolInstallProgress((event) => {
+      setInstalling((prev) => {
+        const targetToolId =
+          event.tool_id ||
+          Object.keys(prev).find((key) => prev[key].requestId === event.requestId) ||
+          "";
+        if (!targetToolId) return prev;
+        const current = prev[targetToolId];
+        if (!current || current.requestId !== event.requestId) return prev;
+        const next: ToolInstallState = {
+          ...current,
+          percent: Number.isFinite(event.percent) ? event.percent : current.percent,
+          phase: event.phase || current.phase,
+          message: event.message || current.message,
+          error: event.phase === "error" ? event.message || "安装失败" : undefined,
+        };
+        return { ...prev, [targetToolId]: next };
+      });
+
+      if (event.phase === "done") {
+        void loadTools();
+      }
+    });
+    return dispose;
+  }, [loadTools]);
+
+  const startInstall = async (tool: ToolStatusItem) => {
+    if (!tool.auto_installable) {
+      const command = tool.install_command || "请参考官方文档安装";
+      setInstalling((prev) => ({
+        ...prev,
+        [tool.id]: {
+          requestId: `manual-${tool.id}`,
+          percent: 0,
+          phase: "manual_required",
+          message: command,
+        },
+      }));
+      return;
+    }
+    const requestId = `${tool.id}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    setInstalling((prev) => ({
+      ...prev,
+      [tool.id]: {
+        requestId,
+        percent: 0,
+        phase: "starting",
+        message: `开始安装 ${tool.name}...`,
+      },
+    }));
+    const result = await window.agenticxDesktop.installTool({ requestId, toolId: tool.id });
+    if (!result?.ok) {
+      setInstalling((prev) => ({
+        ...prev,
+        [tool.id]: {
+          requestId,
+          percent: 0,
+          phase: "error",
+          message: result?.error || "安装失败",
+          error: result?.error || "安装失败",
+        },
+      }));
+    }
+  };
+
+  if (loading) return <div className="py-8 text-center text-sm text-text-faint">加载工具状态中...</div>;
+
+  return (
+    <div className="space-y-3">
+      <div className="text-sm text-text-subtle">
+        管理文档解析相关工具状态。全局安装一次后，所有分身共享；分身侧只控制是否允许使用。
+      </div>
+      {error ? (
+        <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
+          {error}
+        </div>
+      ) : null}
+      <div className="space-y-2">
+        {tools.map((tool) => {
+          const installState = installing[tool.id];
+          const isInstalling = Boolean(installState) && !["done", "error", "manual_required"].includes(installState.phase);
+          const isManual = installState?.phase === "manual_required";
+          const badge = tool.installed
+            ? "已安装"
+            : isInstalling
+              ? "安装中"
+              : isManual
+                ? "需手动安装"
+                : "未安装";
+          const badgeClass = tool.installed
+            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+            : isInstalling
+              ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+              : isManual
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                : "border-border bg-surface-panel text-text-faint";
+          return (
+            <div key={tool.id} className="rounded-md border border-border bg-surface-card p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium text-text-primary">{tool.name}</span>
+                    <span className={`shrink-0 rounded-full border px-1.5 text-[10px] ${badgeClass}`}>
+                      {badge}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-xs text-text-muted">{tool.description}</div>
+                  {tool.installed && tool.version ? (
+                    <div className="mt-0.5 text-[11px] text-text-faint">版本: {tool.version}</div>
+                  ) : null}
+                </div>
+                {!tool.installed ? (
+                  <button
+                    type="button"
+                    className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+                    onClick={() => void startInstall(tool)}
+                    disabled={isInstalling}
+                  >
+                    {tool.auto_installable ? "安装" : "查看安装指南"}
+                  </button>
+                ) : null}
+              </div>
+              {installState ? (
+                <div className="mt-2">
+                  <div className="mb-1 flex items-center gap-2 text-xs text-text-subtle">
+                    {isInstalling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    <span>{installState.message}</span>
+                    {!tool.installed ? <span>{Math.max(0, Math.min(100, installState.percent))}%</span> : null}
+                  </div>
+                  {!tool.installed ? (
+                    <div className="h-1.5 w-full overflow-hidden rounded bg-surface-panel">
+                      <div
+                        className={`h-full ${
+                          installState.phase === "error" ? "bg-rose-400" : installState.phase === "done" ? "bg-emerald-400" : "bg-cyan-400"
+                        }`}
+                        style={{ width: `${Math.max(0, Math.min(100, installState.percent))}%` }}
+                      />
+                    </div>
+                  ) : null}
+                  {installState.error ? (
+                    <div className="mt-1 text-xs text-rose-300">{installState.error}</div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function SkillsTab() {
@@ -1832,6 +2058,9 @@ export function SettingsPanel({
                 </div>
               </div>
             )}
+
+            {/* === SKILLS TAB === */}
+            {tab === "tools" && <ToolsTab />}
 
             {/* === SKILLS TAB === */}
             {tab === "skills" && <SkillsTab />}

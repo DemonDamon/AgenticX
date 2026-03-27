@@ -6,12 +6,16 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import asyncio
 import copy
+import importlib.util
 import json
 import logging
 import os
 import re
+import shutil
 import smtplib
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -284,6 +288,110 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=403, detail="desktop token required for MCP admin APIs")
         if x_agx_desktop_token != desktop_token:
             raise HTTPException(status_code=401, detail="invalid desktop token")
+
+    def _tool_install_hint(tool_id: str) -> str:
+        platform = os.uname().sysname.lower() if hasattr(os, "uname") else ""
+        if tool_id == "libreoffice":
+            if "darwin" in platform:
+                return "brew install --cask libreoffice"
+            if "linux" in platform:
+                return "sudo apt install -y libreoffice"
+            if "windows" in platform:
+                return "choco install libreoffice-fresh"
+            return "Please install LibreOffice from official website."
+        if tool_id == "imagemagick":
+            if "darwin" in platform:
+                return "brew install imagemagick"
+            if "linux" in platform:
+                return "sudo apt install -y imagemagick"
+            if "windows" in platform:
+                return "choco install imagemagick"
+            return "Please install ImageMagick from official website."
+        return ""
+
+    def _extract_semver(text: str) -> str:
+        match = re.search(r"(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)", text)
+        return match.group(1) if match else ""
+
+    def _get_command_version(command: str, args: list[str] | None = None) -> str:
+        executable = shutil.which(command)
+        if not executable:
+            return ""
+        try:
+            result = subprocess.run(
+                [executable, *(args or ["--version"])],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                check=False,
+            )
+            text = "\n".join([result.stdout or "", result.stderr or ""]).strip()
+            return _extract_semver(text)
+        except Exception:
+            return ""
+
+    def _liteparse_command() -> str:
+        return "liteparse.cmd" if os.name == "nt" else "liteparse"
+
+    def _tool_status(tool_id: str) -> dict[str, Any]:
+        if tool_id == "liteparse":
+            cmd = _liteparse_command()
+            installed = shutil.which(cmd) is not None
+            return {
+                "id": "liteparse",
+                "name": "LiteParse",
+                "description": "轻量 PDF/Office 文档解析",
+                "installed": installed,
+                "version": _get_command_version(cmd) if installed else "",
+                "install_command": "npm i -g @llamaindex/liteparse",
+                "auto_installable": True,
+            }
+        if tool_id == "mineru":
+            installed = importlib.util.find_spec("magic_pdf") is not None
+            return {
+                "id": "mineru",
+                "name": "MinerU",
+                "description": "深度文档解析",
+                "installed": installed,
+                "version": "",
+                "install_command": "pip install magic-pdf",
+                "auto_installable": False,
+            }
+        if tool_id == "libreoffice":
+            installed = shutil.which("soffice") is not None
+            return {
+                "id": "libreoffice",
+                "name": "LibreOffice",
+                "description": "Office 格式转换依赖",
+                "installed": installed,
+                "version": _get_command_version("soffice") if installed else "",
+                "install_command": _tool_install_hint("libreoffice"),
+                "auto_installable": False,
+            }
+        if tool_id == "imagemagick":
+            installed = shutil.which("magick") is not None or shutil.which("convert") is not None
+            version = _get_command_version("magick") if shutil.which("magick") else _get_command_version("convert")
+            return {
+                "id": "imagemagick",
+                "name": "ImageMagick",
+                "description": "图像转换依赖",
+                "installed": installed,
+                "version": version if installed else "",
+                "install_command": _tool_install_hint("imagemagick"),
+                "auto_installable": False,
+            }
+        raise ValueError(f"unsupported tool id: {tool_id}")
+
+    def _all_tools_status() -> list[dict[str, Any]]:
+        return [
+            _tool_status("liteparse"),
+            _tool_status("mineru"),
+            _tool_status("libreoffice"),
+            _tool_status("imagemagick"),
+        ]
+
+    def _sse_event(event: str, data: dict[str, Any]) -> str:
+        return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     def _normalize_email_config(payload: dict[str, Any]) -> dict[str, Any]:
         def _parse_bool(value: Any, *, field: str) -> bool:
@@ -1537,6 +1645,151 @@ def create_studio_app() -> FastAPI:
         masked["smtp_password"] = _mask_secret(str(masked.get("smtp_password", "")))
         return {"ok": True, "message": "测试邮件发送成功。", "to_email": to_email, "config": masked}
 
+    @app.get("/api/tools/status")
+    async def get_tools_status(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        return {"ok": True, "tools": _all_tools_status()}
+
+    @app.post("/api/tools/install")
+    async def install_tool(
+        payload: dict,
+        request: Request,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> StreamingResponse:
+        _check_token(x_agx_desktop_token)
+        tool_id = str(payload.get("tool_id", "")).strip().lower()
+        if not tool_id:
+            raise HTTPException(status_code=400, detail="tool_id is required")
+        if tool_id not in {"liteparse", "libreoffice", "imagemagick"}:
+            raise HTTPException(status_code=400, detail=f"unsupported tool_id: {tool_id}")
+
+        async def _install_stream() -> AsyncGenerator[str, None]:
+            if tool_id in {"libreoffice", "imagemagick"}:
+                hint = _tool_install_hint(tool_id)
+                yield _sse_event(
+                    "progress",
+                    {
+                        "tool_id": tool_id,
+                        "phase": "manual_required",
+                        "percent": 0,
+                        "message": "该工具需手动安装，请按提示命令执行。",
+                        "install_command": hint,
+                    },
+                )
+                yield _sse_event(
+                    "progress",
+                    {
+                        "tool_id": tool_id,
+                        "phase": "done",
+                        "percent": 100,
+                        "message": "已返回安装指南。",
+                    },
+                )
+                return
+
+            npm_executable = shutil.which("npm")
+            if not npm_executable:
+                yield _sse_event(
+                    "progress",
+                    {
+                        "tool_id": tool_id,
+                        "phase": "error",
+                        "percent": 0,
+                        "message": "未检测到 npm，请先安装 Node.js。",
+                    },
+                )
+                return
+
+            yield _sse_event(
+                "progress",
+                {
+                    "tool_id": tool_id,
+                    "phase": "starting",
+                    "percent": 5,
+                    "message": "准备安装 LiteParse...",
+                },
+            )
+
+            process = await asyncio.create_subprocess_exec(
+                npm_executable,
+                "i",
+                "-g",
+                "@llamaindex/liteparse",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            assert process.stdout is not None
+            percent = 10
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        process.terminate()
+                        break
+                    line = await process.stdout.readline()
+                    if not line:
+                        break
+                    text = line.decode("utf-8", errors="ignore").strip()
+                    if not text:
+                        continue
+                    match = re.search(r"(\d{1,3})%", text)
+                    if match:
+                        parsed = int(match.group(1))
+                        percent = max(percent, min(95, parsed))
+                    else:
+                        percent = min(95, percent + 5)
+                    yield _sse_event(
+                        "progress",
+                        {
+                            "tool_id": tool_id,
+                            "phase": "installing",
+                            "percent": percent,
+                            "message": text[:500],
+                        },
+                    )
+                code = await process.wait()
+            except Exception as exc:
+                yield _sse_event(
+                    "progress",
+                    {
+                        "tool_id": tool_id,
+                        "phase": "error",
+                        "percent": percent,
+                        "message": f"安装失败: {exc}",
+                    },
+                )
+                return
+
+            if code != 0:
+                yield _sse_event(
+                    "progress",
+                    {
+                        "tool_id": tool_id,
+                        "phase": "error",
+                        "percent": percent,
+                        "message": f"安装失败，退出码 {code}",
+                    },
+                )
+                return
+
+            status = _tool_status("liteparse")
+            version = str(status.get("version", "") or "").strip()
+            success_message = f"LiteParse {version} installed".strip() if version else "LiteParse installed"
+            yield _sse_event(
+                "progress",
+                {
+                    "tool_id": tool_id,
+                    "phase": "done",
+                    "percent": 100,
+                    "message": success_message,
+                    "installed": bool(status.get("installed")),
+                    "version": version,
+                },
+            )
+
+        return StreamingResponse(_install_stream(), media_type="text/event-stream")
+
     # --- Avatar CRUD ---
 
     @app.get("/api/avatars")
@@ -1559,6 +1812,14 @@ def create_studio_app() -> FastAPI:
         name = str(payload.get("name", "")).strip()
         if not name:
             raise HTTPException(status_code=400, detail="name is required")
+        raw_tools_enabled = payload.get("tools_enabled")
+        tools_enabled: dict[str, bool] = {}
+        if isinstance(raw_tools_enabled, dict):
+            tools_enabled = {
+                str(key): bool(value)
+                for key, value in raw_tools_enabled.items()
+                if str(key).strip()
+            }
         config = avatar_registry.create_avatar(
             name=name,
             role=str(payload.get("role", "")).strip(),
@@ -1567,6 +1828,7 @@ def create_studio_app() -> FastAPI:
             created_by=str(payload.get("created_by", "manual")).strip(),
             default_provider=str(payload.get("default_provider", "")).strip(),
             default_model=str(payload.get("default_model", "")).strip(),
+            tools_enabled=tools_enabled,
         )
         return {"ok": True, "avatar": config.to_dict()}
 

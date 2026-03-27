@@ -51,6 +51,7 @@ export function AvatarSidebar() {
           avatarUrl: a.avatar_url ?? "",
           pinned: Boolean(a.pinned),
           createdBy: a.created_by ?? "manual",
+          toolsEnabled: a.tools_enabled ?? {},
         }))
       );
     }
@@ -111,11 +112,17 @@ export function AvatarSidebar() {
     };
   }, [groupContextMenu]);
 
-  const handleCreate = async (data: { name: string; role: string; systemPrompt: string }) => {
+  const handleCreate = async (data: {
+    name: string;
+    role: string;
+    systemPrompt: string;
+    toolsEnabled: Record<string, boolean>;
+  }) => {
     await window.agenticxDesktop.createAvatar({
       name: data.name,
       role: data.role,
       system_prompt: data.systemPrompt,
+      tools_enabled: data.toolsEnabled,
     });
     await refreshAvatars();
   };
