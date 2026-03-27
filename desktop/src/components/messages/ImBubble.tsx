@@ -176,7 +176,7 @@ export function ImBubble({
                   ))}
                 </div>
               ) : null}
-              <div ref={msgContentRef} className="msg-content break-words">
+              <div ref={msgContentRef} className="msg-content min-w-0 overflow-hidden break-words">
                 {badge}
                 {message.quotedContent ? (
                   <div className="mb-2 rounded-md border border-border bg-surface-panel/70 px-2 py-1 text-xs text-text-faint">
