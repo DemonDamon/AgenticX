@@ -31,6 +31,8 @@ def usage_metadata_from_llm_response(response: Any) -> dict[str, int] | None:
             return None
         if pt == 0 and ct == 0 and tt == 0:
             return None
+        if tt == 0 and (pt > 0 or ct > 0):
+            tt = pt + ct
         return {
             "input_tokens": pt,
             "output_tokens": ct,
@@ -51,6 +53,8 @@ def usage_metadata_from_llm_response(response: Any) -> dict[str, int] | None:
         return None
     if pt == 0 and ct == 0 and tt == 0:
         return None
+    if tt == 0 and (pt > 0 or ct > 0):
+        tt = pt + ct
     return {
         "input_tokens": pt,
         "output_tokens": ct,

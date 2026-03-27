@@ -65,6 +65,7 @@ const FALLBACK_PANE: ChatPaneState = {
   spawnsColumnBaselineIds: [],
   terminalTabs: [],
   activeTerminalTabId: null,
+  sessionTokens: { input: 0, output: 0 },
 };
 
 function NewTopicButton({ onNewTopic }: { onNewTopic: (inherit: boolean) => void }) {
@@ -2652,6 +2653,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 addSubAgentEvent(eventAgentId, { type: "final", content: payload.data?.text ?? "" });
               }
             }
+            if (payload.type === "token_usage") {
+              const inp = Number(payload.data?.input_tokens ?? 0);
+              const out = Number(payload.data?.output_tokens ?? 0);
+              if (inp > 0 || out > 0) {
+                useAppStore.getState().accumulatePaneTokens(pane.id, inp, out);
+              }
+            }
             if (payload.type === "error") {
               addPaneMessage(pane.id, "tool", `❌ ${payload.data?.text ?? "未知错误"}`, "meta");
             }
@@ -3067,9 +3075,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
         <div className="shrink-0 border-t border-border px-4 py-2.5">
           <div className="mb-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-text-faint">
-            <span className="shrink-0 rounded border border-border bg-surface-card px-2 py-0.5">
-              Context: {attachmentEntries.length}
-            </span>
+            {(() => {
+              const tkIn = pane.sessionTokens?.input ?? 0;
+              const tkOut = pane.sessionTokens?.output ?? 0;
+              const tkTotal = tkIn + tkOut;
+              return (
+                <span
+                  className="shrink-0 rounded border border-border bg-surface-card px-2 py-0.5"
+                  title={tkTotal > 0
+                    ? `↑ ${tkIn.toLocaleString()} input  ↓ ${tkOut.toLocaleString()} output`
+                    : "本次会话累计 token 消耗"}
+                >
+                  {tkTotal > 0 ? `${(tkTotal / 1000).toFixed(1)}k tokens` : "0 tokens"}
+                </span>
+              );
+            })()}
             <span className="shrink-0 truncate rounded border border-border bg-surface-card px-2 py-0.5" style={{ maxWidth: "45%" }}>
               {pane.sessionId ? `${pane.sessionId.slice(0, 8)}…` : "-"}
             </span>

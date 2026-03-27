@@ -247,22 +247,56 @@ class LiteLLMProvider(BaseLLMProvider):
 
     def _parse_response(self, response) -> LLMResponse:
         """Parses a LiteLLM ModelResponse into an AgenticX LLMResponse."""
+        import logging as _logging
+        _logging.getLogger(__name__).debug(
+            "[litellm] raw usage: %r  hidden_params: %r",
+            getattr(response, "usage", None),
+            getattr(response, "_hidden_params", None),
+        )
         usage = response.usage or {}
-        
-        # 处理 usage 可能是字典或对象的情况
+
+        # Handle usage as dict or object.
         if isinstance(usage, dict):
-            prompt_tokens = usage.get("prompt_tokens", 0)
-            completion_tokens = usage.get("completion_tokens", 0)
-            total_tokens = usage.get("total_tokens", 0)
+            prompt_tokens = int(usage.get("prompt_tokens") or 0)
+            completion_tokens = int(usage.get("completion_tokens") or 0)
+            total_tokens = int(usage.get("total_tokens") or 0)
         else:
-            prompt_tokens = getattr(usage, "prompt_tokens", 0)
-            completion_tokens = getattr(usage, "completion_tokens", 0)
-            total_tokens = getattr(usage, "total_tokens", 0)
-            
+            prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+            completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+            total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+
+        # Some providers (e.g. MiniMax via openai-compat) put usage inside
+        # _hidden_params or the raw response dict; fall back to those when the
+        # primary usage fields are all zero.
+        if prompt_tokens == 0 and completion_tokens == 0:
+            hidden = getattr(response, "_hidden_params", None) or {}
+            raw_usage: dict = {}
+            if isinstance(hidden, dict):
+                raw_usage = hidden.get("usage") or hidden.get("original_response_usage") or {}
+            if not raw_usage:
+                # Try model_extra or __dict__ path
+                for _attr in ("model_extra", "__dict__"):
+                    _d = getattr(response, _attr, None)
+                    if isinstance(_d, dict) and "usage" in _d:
+                        raw_usage = _d["usage"] or {}
+                        break
+            if raw_usage:
+                if isinstance(raw_usage, dict):
+                    prompt_tokens = int(raw_usage.get("prompt_tokens") or 0)
+                    completion_tokens = int(raw_usage.get("completion_tokens") or 0)
+                    total_tokens = int(raw_usage.get("total_tokens") or 0)
+                else:
+                    prompt_tokens = int(getattr(raw_usage, "prompt_tokens", 0) or 0)
+                    completion_tokens = int(getattr(raw_usage, "completion_tokens", 0) or 0)
+                    total_tokens = int(getattr(raw_usage, "total_tokens", 0) or 0)
+
+        if total_tokens == 0 and (prompt_tokens > 0 or completion_tokens > 0):
+            total_tokens = prompt_tokens + completion_tokens
+
         token_usage = TokenUsage(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            total_tokens=total_tokens
+            total_tokens=total_tokens,
         )
 
         choices = [
