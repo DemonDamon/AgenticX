@@ -58,41 +58,50 @@ export function ToolCallCard({
         </button>
       )}
 
-      <div
-        className={`min-w-0 flex-1 overflow-hidden rounded-lg border bg-surface-card text-xs text-text-muted transition ${
-          selected ? "border-cyan-500/60" : "border-border"
-        }`}
-      >
-        {/* 折叠头部，始终可见 */}
-        <button
-          type="button"
-          className="flex w-full items-center gap-1.5 px-3 py-2 text-left hover:bg-surface-hover transition-colors"
-          onClick={() => setExpanded((v) => !v)}
-          disabled={!hasDetail}
-        >
-          <Wrench className="h-3.5 w-3.5 shrink-0 text-text-subtle" />
-          <span className="flex-1 truncate text-[11px] font-medium text-text-subtle">{summary}</span>
-          {hasDetail && (
-            expanded
-              ? <ChevronDown className="h-3 w-3 shrink-0 text-text-muted" />
-              : <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" />
-          )}
-        </button>
+      {/* 与 ImBubble 保持一致的对齐骨架 */}
+      <div className="flex min-w-0 flex-1 justify-start gap-2">
+        <div className="flex min-w-0 flex-1 flex-row gap-2">
+          <div className="flex h-8 w-8 shrink-0" aria-hidden />
+          <div className="flex min-w-0 flex-1 flex-col items-start" style={{ maxWidth: "min(92%, 960px)" }}>
+            <div
+              className={`w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-xs text-text-muted transition ${
+                selected ? "border-cyan-500/60" : "border-border"
+              }`}
+            >
+              {/* 折叠头部，始终可见 */}
+              <button
+                type="button"
+                className="flex w-full items-center gap-1.5 px-3 py-2 text-left transition-colors hover:bg-surface-hover"
+                onClick={() => setExpanded((v) => !v)}
+                disabled={!hasDetail}
+              >
+                <Wrench className="h-3.5 w-3.5 shrink-0 text-text-subtle" />
+                <span className="flex-1 truncate text-[11px] font-medium text-text-subtle">{summary}</span>
+                {hasDetail &&
+                  (expanded ? (
+                    <ChevronDown className="h-3 w-3 shrink-0 text-text-muted" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" />
+                  ))}
+              </button>
 
-        {/* 展开内容 */}
-        {expanded && (
-          <div className="border-t border-border px-3 pb-2 pt-1.5 space-y-1">
-            <span className="break-all whitespace-pre-wrap">{message.content}</span>
-            {action}
-          </div>
-        )}
+              {/* 展开内容 */}
+              {expanded && (
+                <div className="space-y-1 border-t border-border px-3 pb-2 pt-1.5">
+                  <span className="break-all whitespace-pre-wrap">{message.content}</span>
+                  {action}
+                </div>
+              )}
 
-        {/* forceExpand 时 action 始终在外部显示（如确认按钮） */}
-        {!expanded && forceExpand && action && (
-          <div className="border-t border-border px-3 pb-2 pt-1.5">
-            {action}
+              {/* forceExpand 时 action 始终在外部显示（如确认按钮） */}
+              {!expanded && forceExpand && action && (
+                <div className="border-t border-border px-3 pb-2 pt-1.5">
+                  {action}
+                </div>
+              )}
+            </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
