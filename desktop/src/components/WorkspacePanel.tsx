@@ -36,6 +36,7 @@ type Props = {
   onPickFileForReference?: (path: string) => void;
   autoRefreshKey?: number;
   onClose?: () => void;
+  tintColor?: string;
 };
 
 type CtxTarget = { x: number; y: number; taskspace: Taskspace };
@@ -63,6 +64,7 @@ export function WorkspacePanel({
   onPickFileForReference,
   autoRefreshKey,
   onClose,
+  tintColor,
 }: Props) {
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const removePaneTerminalTab = useAppStore((s) => s.removePaneTerminalTab);
@@ -345,22 +347,22 @@ export function WorkspacePanel({
         return (
           <div key={item.path}>
             <button
-              className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs text-text-muted hover:bg-surface-hover"
+              className="flex w-full min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left text-xs text-text-muted hover:bg-surface-hover"
               style={{ paddingLeft }}
               onClick={() => void toggleDir(taskspaceId, item.path)}
               title={item.path}
             >
-              <span className="inline-block w-3 text-center">{isExpanded ? "▾" : "▸"}</span>
-              <span>{item.name}/</span>
+              <span className="inline-block w-3 shrink-0 text-center">{isExpanded ? "▾" : "▸"}</span>
+              <span className="min-w-0 truncate">{item.name}/</span>
             </button>
             {isExpanded ? renderDir(taskspaceId, item.path, depth + 1) : null}
           </div>
         );
       }
       return (
-        <div key={item.path} className="flex items-center gap-1">
+        <div key={item.path} className="flex min-w-0 items-center gap-1">
           <button
-            className={`flex-1 rounded px-1 py-0.5 text-left text-xs transition hover:bg-surface-hover ${
+            className={`min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-xs transition hover:bg-surface-hover ${
               selectedFilePath === item.path ? "text-text-strong" : "text-text-subtle"
             }`}
             style={{ paddingLeft }}
@@ -393,7 +395,7 @@ export function WorkspacePanel({
   };
 
   return (
-    <div ref={panelRef} className="relative flex h-full min-h-0 w-full flex-col bg-surface-card">
+    <div ref={panelRef} className="relative flex h-full min-h-0 w-full flex-col bg-surface-card" style={tintColor ? { backgroundColor: tintColor } : undefined}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="relative flex items-center gap-1 border-b border-border px-2 py-2">
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
@@ -541,7 +543,7 @@ export function WorkspacePanel({
               <div key={tab.id} className="flex shrink-0 items-center gap-0.5">
                 <button
                   type="button"
-                  className={`rounded px-2 py-0.5 text-[11px] transition ${
+                  className={`max-w-[120px] truncate rounded px-2 py-0.5 text-[11px] transition ${
                     tab.id === activeTerminalTabId
                       ? "bg-surface-hover text-text-strong"
                       : "text-text-subtle hover:bg-surface-hover"
@@ -575,8 +577,8 @@ export function WorkspacePanel({
           {activeTab ? (
             <TerminalEmbed key={activeTab.id} tabId={activeTab.id} cwd={activeTab.cwd} />
           ) : (
-            <div className="flex h-full items-center justify-center px-2 text-center text-[11px] text-text-faint">
-              右键工作区标签选择「在此目录下打开终端」，或点击 + 使用当前工作区目录
+            <div className="flex h-full items-center justify-center overflow-hidden px-3 text-center text-[11px] leading-relaxed text-text-faint">
+              <span className="break-words">右键工作区标签选择「在此目录下打开终端」，或点击 + 使用当前工作区目录</span>
             </div>
           )}
         </div>
