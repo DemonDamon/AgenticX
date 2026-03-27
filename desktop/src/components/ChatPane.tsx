@@ -28,6 +28,7 @@ import {
 } from "../utils/session-message-map";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
+import { avatarTintBg } from "../utils/avatar-color";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 
 const NEW_TOPIC_PREF_KEY = "agx:newTopicInherit";
@@ -2846,10 +2847,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
   }
 
+  const paneTint = avatarTintBg(pane.avatarId);
+
   return (
     <div
       ref={paneRef}
       className="flex h-full min-w-0 flex-1"
+      style={paneTint ? { backgroundColor: paneTint } : undefined}
       onMouseDown={onFocus}
     >
       <div className="flex h-full min-w-0 flex-1 flex-col">
@@ -2867,6 +2871,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             </div>
           </div>
           <div className="no-drag flex items-center gap-1">
+            {isGroupPane && (
+              <button
+                className={`rounded px-2 py-0.5 text-[11px] transition ${
+                  pane.membersPanelOpen
+                    ? "bg-surface-card-strong text-text-strong"
+                    : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
+                }`}
+                onClick={() => cycleSidePanel(pane.id, "members")}
+                title="切换群成员面板"
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="6" cy="5" r="2.2" stroke="currentColor" strokeWidth="1.3"/>
+                  <path d="M2 13c0-2.21 1.79-4 4-4s4 1.79 4 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                  <circle cx="11.5" cy="5.5" r="1.7" stroke="currentColor" strokeWidth="1.2"/>
+                  <path d="M13.5 13c0-1.66-1-3-2.5-3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                </svg>
+              </button>
+            )}
             <button
               className={`rounded px-2 py-0.5 text-[11px] transition ${
                 workspacePanelOpen
@@ -3245,6 +3267,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         </div>
       </div>
 
+      {isGroupPane && pane.membersPanelOpen ? (
+        <div className="relative h-full shrink-0 border-l border-border" style={{ width: taskspaceWidth }}>
+          <div
+            className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+            onMouseDown={startResizeTaskspace}
+            title="拖拽调整面板宽度"
+          >
+            <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
+            <div className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90" style={{ borderColor: "var(--ui-accent-divider-hover)" }} />
+          </div>
+          <GroupMembersSidePanel
+            groupId={groupChatId}
+            avatarList={avatars}
+            metaLeaderLabel={metaLeaderDisplayName}
+          />
+        </div>
+      ) : null}
       {workspacePanelOpen ? (
         <div className="relative h-full shrink-0 border-l border-border" style={{ width: taskspaceWidth }}>
           <div
@@ -3255,46 +3294,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
             <div className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90" style={{ borderColor: "var(--ui-accent-divider-hover)" }} />
           </div>
-          {isGroupPane ? (
-            <div className="flex h-full min-h-0 flex-col">
-              <div className="h-[260px] shrink-0 border-b border-border">
-                <GroupMembersSidePanel
-                  groupId={groupChatId}
-                  avatarList={avatars}
-                  metaLeaderLabel={metaLeaderDisplayName}
-                />
-              </div>
-              <div className="min-h-0 flex-1">
-                <WorkspacePanel
-                  paneId={pane.id}
-                  sessionId={pane.sessionId}
-                  activeTaskspaceId={pane.activeTaskspaceId}
-                  onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
-                  autoRefreshKey={taskspaceAutoRefreshKey}
-                  onClose={() => cycleSidePanel(pane.id, "workspace")}
-                  onPickFileForReference={(path) => {
-                    if (!pane.activeTaskspaceId) return;
-                    void addContextFile(pane.activeTaskspaceId, path);
-                    setInput((prev) => `${prev}${prev.endsWith(" ") || !prev ? "" : " "}@${path.split("/").pop() || path} `);
-                  }}
-                />
-              </div>
-            </div>
-          ) : (
-            <WorkspacePanel
-              paneId={pane.id}
-              sessionId={pane.sessionId}
-              activeTaskspaceId={pane.activeTaskspaceId}
-              onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
-              autoRefreshKey={taskspaceAutoRefreshKey}
-              onClose={() => cycleSidePanel(pane.id, "workspace")}
-              onPickFileForReference={(path) => {
-                if (!pane.activeTaskspaceId) return;
-                void addContextFile(pane.activeTaskspaceId, path);
-                setInput((prev) => `${prev}${prev.endsWith(" ") || !prev ? "" : " "}@${path.split("/").pop() || path} `);
-              }}
-            />
-          )}
+          <WorkspacePanel
+            paneId={pane.id}
+            sessionId={pane.sessionId}
+            activeTaskspaceId={pane.activeTaskspaceId}
+            onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
+            autoRefreshKey={taskspaceAutoRefreshKey}
+            onClose={() => cycleSidePanel(pane.id, "workspace")}
+            onPickFileForReference={(path) => {
+              if (!pane.activeTaskspaceId) return;
+              void addContextFile(pane.activeTaskspaceId, path);
+              setInput((prev) => `${prev}${prev.endsWith(" ") || !prev ? "" : " "}@${path.split("/").pop() || path} `);
+            }}
+          />
         </div>
       ) : null}
       {pane.spawnsColumnOpen ? (
