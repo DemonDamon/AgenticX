@@ -16,6 +16,10 @@
 """
 
 import os
+import asyncio
+import shutil
+import tempfile
+import threading
 import logging
 from typing import Tuple, Optional, Dict, Any
 from pathlib import Path
@@ -23,6 +27,8 @@ from pydantic import BaseModel, Field  # type: ignore
 
 from .base import BaseTool
 from .document_routers import DocumentRouter, create_default_router
+from agenticx.tools.adapters.liteparse import LiteParseAdapter
+from agenticx.tools.adapters.mineru import MinerUAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -127,17 +133,71 @@ class UnifiedDocumentTool(BaseTool):
     
     def _process_document(self, path: str) -> Tuple[bool, str]:
         """处理文档文件（PDF, DOCX, PPTX）"""
-        # 占位实现：返回文件信息
-        # 实际实现应该使用文档解析工具（如 UnstructuredIO 或 MinerU）
         try:
-            if os.path.exists(path):
-                file_size = os.path.getsize(path)
-                ext = Path(path).suffix.lower()
-                return True, f"Document file ({ext}): {path} (size: {file_size} bytes). Document extraction not implemented yet."
-            else:
+            file_path = Path(path)
+            if not file_path.exists():
                 return False, f"Document file not found: {path}"
+
+            # Level 1: LiteParse (lightweight local parser)
+            if LiteParseAdapter.is_available():
+                try:
+                    liteparse = LiteParseAdapter(config={"debug": False})
+                    text = self._run_async(liteparse.parse_to_text(file_path))
+                    if text.strip():
+                        return True, text
+                except Exception as exc:
+                    logger.warning("LiteParse parsing failed, fallback to MinerU: %s", exc)
+
+            # Level 2: MinerU (heavy parser path)
+            try:
+                mineru = MinerUAdapter(backend_type="pipeline", debug=False)
+                output_dir = Path(tempfile.mkdtemp(prefix="agenticx_mineru_"))
+                try:
+                    result = self._run_async(
+                        mineru.parse_document(
+                            input_path=str(file_path),
+                            output_dir=str(output_dir),
+                        )
+                    )
+                    markdown_files = result.artifacts.get("markdown_files", []) if result and result.artifacts else []
+                    if markdown_files:
+                        markdown_path = output_dir / markdown_files[0]
+                        if markdown_path.exists():
+                            content = markdown_path.read_text(encoding="utf-8", errors="ignore")
+                            if content.strip():
+                                return True, content
+                finally:
+                    shutil.rmtree(output_dir, ignore_errors=True)
+            except Exception as exc:
+                logger.warning("MinerU parsing failed, fallback to generic text reader: %s", exc)
+
+            # Level 3: basic text fallback
+            return self._process_generic(path)
         except Exception as e:
             return False, f"Failed to process document: {e}"
+
+    def _run_async(self, coro):
+        """Run async coroutine from sync context safely."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+
+        result: Dict[str, Any] = {}
+        error: Dict[str, BaseException] = {}
+
+        def _runner() -> None:
+            try:
+                result["value"] = asyncio.run(coro)
+            except BaseException as exc:
+                error["value"] = exc
+
+        thread = threading.Thread(target=_runner, daemon=True)
+        thread.start()
+        thread.join()
+        if "value" in error:
+            raise error["value"]
+        return result.get("value")
     
     def _process_generic(self, path: str) -> Tuple[bool, str]:
         """通用文件处理器（降级）"""
