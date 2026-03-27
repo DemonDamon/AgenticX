@@ -3,6 +3,7 @@ import { Settings } from "lucide-react";
 import { useAppStore, type Avatar, type GroupChat } from "../store";
 import { avatarBgClass, groupColorByIndex } from "../utils/avatar-color";
 import { AvatarCreateDialog } from "./AvatarCreateDialog";
+import { AvatarToolPermissionDialog } from "./AvatarToolPermissionDialog";
 
 function avatarInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -14,7 +15,10 @@ function avatarColor(id: string): string {
   return avatarBgClass(id);
 }
 
-type ContextMenuState = { x: number; y: number; avatarId: string } | null;
+type ContextMenuState =
+  | { x: number; y: number; target: "avatar"; avatarId: string }
+  | { x: number; y: number; target: "machi" }
+  | null;
 type GroupContextMenuState = { x: number; y: number; groupId: string } | null;
 
 export function AvatarSidebar() {
@@ -36,6 +40,12 @@ export function AvatarSidebar() {
   const [groupEditTarget, setGroupEditTarget] = useState<GroupChat | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [groupContextMenu, setGroupContextMenu] = useState<GroupContextMenuState>(null);
+  const [permissionDialog, setPermissionDialog] = useState<
+    | { mode: "avatar"; avatarId: string; title: string }
+    | { mode: "machi-global"; title: string }
+    | null
+  >(null);
+  const [machiToolsEnabled, setMachiToolsEnabled] = useState<Record<string, boolean>>({});
   const menuRef = useRef<HTMLDivElement>(null);
   const groupMenuRef = useRef<HTMLDivElement>(null);
   const openingRef = useRef(false);
@@ -189,22 +199,39 @@ export function AvatarSidebar() {
 
   const handleContextAction = async (action: string) => {
     if (!contextMenu) return;
-    const id = contextMenu.avatarId;
+    const avatarId = contextMenu.target === "avatar" ? contextMenu.avatarId : "";
+    const target = contextMenu.target;
     setContextMenu(null);
-    if (action === "pin") {
-      const avatar = avatars.find((a) => a.id === id);
-      if (avatar) {
-        await window.agenticxDesktop.updateAvatar({ id, pinned: !avatar.pinned });
-        await refreshAvatars();
+    if (target === "avatar") {
+      if (action === "pin") {
+        const avatar = avatars.find((a) => a.id === avatarId);
+        if (avatar) {
+          await window.agenticxDesktop.updateAvatar({ id: avatarId, pinned: !avatar.pinned });
+          await refreshAvatars();
+        }
+      } else if (action === "tools") {
+        const avatar = avatars.find((a) => a.id === avatarId);
+        setPermissionDialog({
+          mode: "avatar",
+          avatarId,
+          title: `${avatar?.name ?? "分身"} · 工具权限`,
+        });
+      } else if (action === "delete") {
+        panes.filter((item) => item.avatarId === avatarId).forEach((item) => removePane(item.id));
+        if (activeAvatarId === avatarId) setActiveAvatarId(null);
+        setAvatars(avatars.filter((a) => a.id !== avatarId));
+        void (async () => {
+          await window.agenticxDesktop.deleteAvatar(avatarId);
+          await refreshAvatars();
+        })();
       }
-    } else if (action === "delete") {
-      panes.filter((item) => item.avatarId === id).forEach((item) => removePane(item.id));
-      if (activeAvatarId === id) setActiveAvatarId(null);
-      setAvatars(avatars.filter((a) => a.id !== id));
-      void (async () => {
-        await window.agenticxDesktop.deleteAvatar(id);
-        await refreshAvatars();
-      })();
+      return;
+    }
+
+    if (target === "machi" && action === "tools") {
+      const policy = await window.agenticxDesktop.getToolsPolicy();
+      setMachiToolsEnabled(policy?.ok ? policy.tools_enabled ?? {} : {});
+      setPermissionDialog({ mode: "machi-global", title: "Machi · 工具权限（全局）" });
     }
   };
 
@@ -251,6 +278,11 @@ export function AvatarSidebar() {
               : "border-transparent text-text-muted hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
           }`}
           onClick={() => void openOrFocusPane(null, "Machi")}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setGroupContextMenu(null);
+            setContextMenu({ x: e.clientX, y: e.clientY, target: "machi" });
+          }}
         >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 text-xs font-bold text-white">
             M
@@ -293,7 +325,7 @@ export function AvatarSidebar() {
                   onContextMenu={(e) => {
                     e.preventDefault();
                     setGroupContextMenu(null);
-                    setContextMenu({ x: e.clientX, y: e.clientY, avatarId: avatar.id });
+                    setContextMenu({ x: e.clientX, y: e.clientY, target: "avatar", avatarId: avatar.id });
                   }}
                 >
                   {avatar.avatarUrl ? (
@@ -404,8 +436,18 @@ export function AvatarSidebar() {
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           {[
-            { id: "pin", label: avatars.find((a) => a.id === contextMenu.avatarId)?.pinned ? "取消置顶" : "置顶" },
-            { id: "delete", label: "删除" },
+            ...(contextMenu.target === "avatar"
+              ? [
+                  {
+                    id: "pin",
+                    label: avatars.find((a) => a.id === contextMenu.avatarId)?.pinned
+                      ? "取消置顶"
+                      : "置顶",
+                  },
+                  { id: "tools", label: "工具权限" },
+                  { id: "delete", label: "删除" },
+                ]
+              : [{ id: "tools", label: "工具权限（全局）" }]),
           ].map((item) => (
             <button
               key={item.id}
@@ -445,6 +487,32 @@ export function AvatarSidebar() {
         }}
         onCreate={handleCreate}
       />
+      {permissionDialog && (
+        <AvatarToolPermissionDialog
+          open={Boolean(permissionDialog)}
+          mode={permissionDialog.mode}
+          title={permissionDialog.title}
+          initialToolsEnabled={
+            permissionDialog.mode === "avatar"
+              ? avatars.find((a) => a.id === permissionDialog.avatarId)?.toolsEnabled ?? {}
+              : machiToolsEnabled
+          }
+          onClose={() => setPermissionDialog(null)}
+          onSave={async (next) => {
+            if (permissionDialog.mode === "avatar") {
+              await window.agenticxDesktop.updateAvatar({
+                id: permissionDialog.avatarId,
+                tools_enabled: next,
+              });
+              await refreshAvatars();
+              return;
+            }
+            const result = await window.agenticxDesktop.saveToolsPolicy({ tools_enabled: next });
+            if (!result?.ok) throw new Error(result?.error || "保存全局工具权限失败");
+            setMachiToolsEnabled(next);
+          }}
+        />
+      )}
 
       {groupCreateOpen && (
         <GroupEditorInline

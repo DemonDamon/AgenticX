@@ -59,6 +59,9 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("update-avatar", payload),
   deleteAvatar: async (id: string) => ipcRenderer.invoke("delete-avatar", id),
   getToolsStatus: async () => ipcRenderer.invoke("get-tools-status"),
+  getToolsPolicy: async () => ipcRenderer.invoke("get-tools-policy"),
+  saveToolsPolicy: async (payload: { tools_enabled: Record<string, boolean> }) =>
+    ipcRenderer.invoke("save-tools-policy", payload),
   installTool: async (payload: { requestId: string; toolId: string }) =>
     ipcRenderer.invoke("install-tool", payload),
   onToolInstallProgress: (cb: (payload: {

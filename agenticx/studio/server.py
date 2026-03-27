@@ -390,6 +390,48 @@ def create_studio_app() -> FastAPI:
             _tool_status("imagemagick"),
         ]
 
+    def _sanitize_tools_enabled(raw: Any) -> dict[str, bool]:
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            str(key): bool(value)
+            for key, value in raw.items()
+            if str(key).strip()
+        }
+
+    def _load_global_tools_policy() -> dict[str, bool]:
+        try:
+            raw = ConfigManager.get_value("tools_enabled")
+        except Exception:
+            raw = {}
+        return _sanitize_tools_enabled(raw)
+
+    def _save_global_tools_policy(tools_enabled: dict[str, bool]) -> None:
+        ConfigManager.set_value("tools_enabled", _sanitize_tools_enabled(tools_enabled), scope="global")
+
+    def _filter_tools_by_policy(
+        tools: list[dict[str, Any]],
+        *,
+        avatar_tools_enabled: dict[str, bool] | None = None,
+        global_tools_enabled: dict[str, bool] | None = None,
+    ) -> list[dict[str, Any]]:
+        avatar_policy = avatar_tools_enabled or {}
+        global_policy = global_tools_enabled or {}
+        filtered: list[dict[str, Any]] = []
+        for tool in tools:
+            tool_name = str(tool.get("function", {}).get("name", "")).strip()
+            if not tool_name:
+                continue
+            if tool_name in avatar_policy:
+                allowed = bool(avatar_policy[tool_name])
+            elif tool_name in global_policy:
+                allowed = bool(global_policy[tool_name])
+            else:
+                allowed = True
+            if allowed:
+                filtered.append(tool)
+        return filtered
+
     def _sse_event(event: str, data: dict[str, Any]) -> str:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -1027,6 +1069,8 @@ def create_studio_app() -> FastAPI:
                 managed.get_confirm_gate("meta"),
             )
         avatar_context: dict[str, str] | None = None
+        avatar_tools_enabled: dict[str, bool] = {}
+        global_tools_enabled = _load_global_tools_policy()
         active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
         is_avatar_session = bool(active_avatar_id and not active_avatar_id.startswith("group:"))
         if is_avatar_session:
@@ -1037,6 +1081,7 @@ def create_studio_app() -> FastAPI:
                     "role": avatar_cfg.role or "",
                     "system_prompt": avatar_cfg.system_prompt or "",
                 }
+                avatar_tools_enabled = _sanitize_tools_enabled(avatar_cfg.tools_enabled)
 
         def _build_avatar_direct_prompt() -> str:
             if avatar_context is None:
@@ -1083,9 +1128,14 @@ def create_studio_app() -> FastAPI:
                 prompt += f"\n## 工作目录\n- {ws}\n"
             return prompt
 
-        effective_tools: list = list(META_AGENT_TOOLS) if not is_avatar_session else [
+        effective_tools_source: list = list(META_AGENT_TOOLS) if not is_avatar_session else [
             t for t in META_AGENT_TOOLS if t.get("function", {}).get("name") != "delegate_to_avatar"
         ]
+        effective_tools: list = _filter_tools_by_policy(
+            effective_tools_source,
+            avatar_tools_enabled=avatar_tools_enabled,
+            global_tools_enabled=global_tools_enabled,
+        )
 
         async def _event_stream() -> AsyncGenerator[str, None]:
             runtime_task: "asyncio.Task[None] | None" = None
@@ -1227,7 +1277,17 @@ def create_studio_app() -> FastAPI:
 
         loop_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
         loop_is_avatar = bool(loop_avatar_id and not loop_avatar_id.startswith("group:"))
-        loop_tools: list = list(STUDIO_TOOLS) if loop_is_avatar else list(META_AGENT_TOOLS)
+        loop_avatar_tools_enabled: dict[str, bool] = {}
+        if loop_is_avatar:
+            loop_avatar_cfg = avatar_registry.get_avatar(loop_avatar_id)
+            if loop_avatar_cfg is not None:
+                loop_avatar_tools_enabled = _sanitize_tools_enabled(loop_avatar_cfg.tools_enabled)
+        loop_tools_source: list = list(STUDIO_TOOLS) if loop_is_avatar else list(META_AGENT_TOOLS)
+        loop_tools: list = _filter_tools_by_policy(
+            loop_tools_source,
+            avatar_tools_enabled=loop_avatar_tools_enabled,
+            global_tools_enabled=_load_global_tools_policy(),
+        )
         loop_sys_prompt = build_meta_agent_system_prompt(
             session,
             mode="interactive",
@@ -1652,6 +1712,23 @@ def create_studio_app() -> FastAPI:
         _check_token(x_agx_desktop_token)
         return {"ok": True, "tools": _all_tools_status()}
 
+    @app.get("/api/tools/policy")
+    async def get_tools_policy(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        return {"ok": True, "tools_enabled": _load_global_tools_policy()}
+
+    @app.put("/api/tools/policy")
+    async def save_tools_policy(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        tools_enabled = _sanitize_tools_enabled(payload.get("tools_enabled"))
+        _save_global_tools_policy(tools_enabled)
+        return {"ok": True, "tools_enabled": tools_enabled}
+
     @app.post("/api/tools/install")
     async def install_tool(
         payload: dict,
@@ -1839,6 +1916,9 @@ def create_studio_app() -> FastAPI:
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
+        if "tools_enabled" in payload:
+            payload = dict(payload)
+            payload["tools_enabled"] = _sanitize_tools_enabled(payload.get("tools_enabled"))
         updated = avatar_registry.update_avatar(avatar_id, payload)
         if updated is None:
             raise HTTPException(status_code=404, detail="avatar not found")

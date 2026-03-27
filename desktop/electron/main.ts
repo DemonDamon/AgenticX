@@ -901,6 +901,41 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("get-tools-policy", async () => {
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/tools/policy`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, tools_enabled: {}, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, tools_enabled: {}, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("save-tools-policy", async (_event, payload: { tools_enabled?: Record<string, boolean> }) => {
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/tools/policy`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "x-agx-desktop-token": getStudioToken(),
+        },
+        body: JSON.stringify({ tools_enabled: payload?.tools_enabled ?? {} }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("install-tool", async (event, payload: { requestId: string; toolId: string }) => {
     const requestId = String(payload?.requestId || "").trim();
     const toolId = String(payload?.toolId || "").trim();
