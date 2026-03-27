@@ -1614,6 +1614,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     });
   }, []);
 
+  const selectUpTo = useCallback((targetMessage: Message) => {
+    setSelectedMessageIds((prev) => {
+      if (prev.size === 0) return new Set([targetMessage.id]);
+      let lastSelectedIdx = -1;
+      for (let i = visibleMessages.length - 1; i >= 0; i--) {
+        if (prev.has(visibleMessages[i].id)) { lastSelectedIdx = i; break; }
+      }
+      const targetIdx = visibleMessages.findIndex((m) => m.id === targetMessage.id);
+      if (targetIdx < 0) return prev;
+      if (lastSelectedIdx < 0) return new Set([targetMessage.id]);
+      const lo = Math.min(lastSelectedIdx, targetIdx);
+      const hi = Math.max(lastSelectedIdx, targetIdx);
+      const next = new Set(prev);
+      for (let i = lo; i <= hi; i++) next.add(visibleMessages[i].id);
+      return next;
+    });
+  }, [visibleMessages]);
+
   const selectedMessages = useMemo(
     () => visibleMessages.filter((m) => selectedMessageIds.has(m.id)),
     [visibleMessages, selectedMessageIds]
@@ -1821,27 +1839,40 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     <>
       {visibleMessages.map((message) => {
         const canRetryThisUserMessage = message.role === "user" && !streaming;
+        const isSelecting = selectedMessageIds.size > 0;
+        const isSelected = selectedMessageIds.has(message.id);
         return (
-          <MessageRenderer
-            key={message.id}
-            message={message}
-            assistantBadge={message.role === "assistant" ? <ModelBadge provider={message.provider} model={message.model} /> : undefined}
-            onRevealPath={(path) => void revealFileInTaskspace(path)}
-            assistantName={paneAvatarMeta.name}
-            assistantAvatarUrl={paneAvatarMeta.url}
-            userName={userBubbleLabel}
-            onCopyMessage={copyMessage}
-            onQuoteMessage={(msg, selectedText) =>
-              setQuoteTarget({ message: msg, body: resolveQuoteBody(msg, selectedText) })
-            }
-            onFavoriteMessage={favoriteMessage}
-            onForwardMessage={forwardOneMessage}
-            onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
-            onToggleSelectMessage={toggleSelectMessage}
-            onResolveInlineConfirm={(confirm, approved) => void resolveGroupInlineConfirm(confirm, approved)}
-            selectable={selectedMessageIds.size > 0}
-            selected={selectedMessageIds.has(message.id)}
-          />
+          <div key={message.id} className="group/sel relative">
+            {/* 「↓ 选择到这里」按钮：多选模式 + 未选中时显示 */}
+            {isSelecting && !isSelected && (
+              <button
+                type="button"
+                className="absolute -top-1 left-0 z-10 flex items-center gap-1 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[10px] text-text-muted shadow-sm opacity-0 transition-opacity group-hover/sel:opacity-100 hover:!opacity-100 hover:bg-surface-hover hover:text-text-strong"
+                onClick={() => selectUpTo(message)}
+              >
+                ↓ 选择到这里
+              </button>
+            )}
+            <MessageRenderer
+              message={message}
+              assistantBadge={message.role === "assistant" ? <ModelBadge provider={message.provider} model={message.model} /> : undefined}
+              onRevealPath={(path) => void revealFileInTaskspace(path)}
+              assistantName={paneAvatarMeta.name}
+              assistantAvatarUrl={paneAvatarMeta.url}
+              userName={userBubbleLabel}
+              onCopyMessage={copyMessage}
+              onQuoteMessage={(msg, selectedText) =>
+                setQuoteTarget({ message: msg, body: resolveQuoteBody(msg, selectedText) })
+              }
+              onFavoriteMessage={favoriteMessage}
+              onForwardMessage={forwardOneMessage}
+              onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
+              onToggleSelectMessage={toggleSelectMessage}
+              onResolveInlineConfirm={(confirm, approved) => void resolveGroupInlineConfirm(confirm, approved)}
+              selectable={isSelecting}
+              selected={isSelected}
+            />
+          </div>
         );
       })}
       {Object.entries(groupTyping).map(([agentId, name]) => (
@@ -1872,7 +1903,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         )
       ) : null}
     </>
-  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, isGroupPane, paneAvatarMeta, resolveGroupInlineConfirm, revealFileInTaskspace, retryUserMessage, selectedMessageIds, streamedAssistantText, streaming, streamingModel, toggleSelectMessage, userBubbleLabel, visibleMessages]);
+  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, isGroupPane, paneAvatarMeta, resolveGroupInlineConfirm, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, streamedAssistantText, streaming, streamingModel, toggleSelectMessage, userBubbleLabel, visibleMessages]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -3301,6 +3332,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
             autoRefreshKey={taskspaceAutoRefreshKey}
             onClose={() => cycleSidePanel(pane.id, "workspace")}
+            tintColor={paneTint}
             onPickFileForReference={(path) => {
               if (!pane.activeTaskspaceId) return;
               void addContextFile(pane.activeTaskspaceId, path);
@@ -3330,6 +3362,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           }}
           onSelect={(agentId) => setSelectedSubAgent(agentId)}
           onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
+          tintColor={paneTint}
         />
       ) : null}
       <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}`}>
