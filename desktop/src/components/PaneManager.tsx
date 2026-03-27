@@ -64,7 +64,7 @@ export function PaneManager({ onOpenConfirm }: Props) {
 
   if (paneCount <= 2) {
     return (
-      <div ref={containerRef} className="flex h-full min-w-0 flex-1 overflow-hidden">
+      <div ref={containerRef} className="flex h-full min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
         {panes.map((pane, index) => {
           const widthPercent =
             paneCount === 1 ? 100 : (sizes[pane.id] ?? 100 / Math.max(1, paneCount));
@@ -72,8 +72,8 @@ export function PaneManager({ onOpenConfirm }: Props) {
           const rightPaneId = orderedPaneIds[index + 1];
           const isFocused = activePaneId === pane.id;
           return (
-            <div key={pane.id} className="flex h-full min-w-0" style={{ width: `${widthPercent}%` }}>
-              <div className={`flex h-full min-w-0 flex-1 ${isFocused && isMulti ? "bg-[rgba(255,255,255,0.015)]" : ""}`}>
+            <div key={pane.id} className="flex h-full min-w-0 overflow-hidden" style={{ width: `${widthPercent}%`, minWidth: isMulti ? 320 : undefined }}>
+              <div className={`flex h-full min-w-0 flex-1 overflow-hidden ${isFocused && isMulti ? "bg-[rgba(255,255,255,0.015)]" : ""}`}>
                 <ChatPane
                   paneId={pane.id}
                   focused={isFocused}
