@@ -158,10 +158,10 @@ export function ImBubble({
           <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
             <Avatar label={displayName} imageUrl={avatarUrl} />
           </div>
-          <div className={`flex min-w-0 max-w-[80%] flex-col ${isUser ? "items-end" : "items-start"}`}>
+          <div className={`flex min-w-0 flex-col ${isUser ? "items-end" : "items-start"}`} style={{ maxWidth: "min(80%, 900px)" }}>
             <span className="mb-0.5 max-w-full truncate px-1 text-[11px] text-text-faint">{displayName}</span>
             <div
-              className={`relative max-w-full min-w-0 overflow-hidden rounded-xl border px-3 py-2 text-sm ${
+              className={`relative max-w-full min-w-0 overflow-x-auto overflow-y-visible rounded-xl border px-3 py-2 text-sm ${
                 isUser ? "rounded-tr-[4px]" : "rounded-tl-[4px]"
               }`}
               style={bubbleStyle}
@@ -176,7 +176,7 @@ export function ImBubble({
                   ))}
                 </div>
               ) : null}
-              <div ref={msgContentRef} className="msg-content min-w-0 overflow-hidden break-words">
+              <div ref={msgContentRef} className="msg-content min-w-0 break-words">
                 {badge}
                 {message.quotedContent ? (
                   <div className="mb-2 rounded-md border border-border bg-surface-panel/70 px-2 py-1 text-xs text-text-faint">
