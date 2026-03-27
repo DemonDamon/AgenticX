@@ -459,7 +459,9 @@ export function WorkspacePanel({
               onClick={onClose}
               title="关闭工作区面板"
             >
-              ×
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 8H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+              </svg>
             </button>
           ) : null}
           {showAddForm ? (

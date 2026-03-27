@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Settings } from "lucide-react";
 import { useAppStore, type Avatar, type GroupChat } from "../store";
+import { avatarBgClass, groupColorByIndex } from "../utils/avatar-color";
 import { AvatarCreateDialog } from "./AvatarCreateDialog";
 
 function avatarInitials(name: string): string {
@@ -9,15 +10,8 @@ function avatarInitials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
-const PALETTE = [
-  "bg-cyan-600", "bg-violet-600", "bg-rose-600", "bg-amber-600",
-  "bg-emerald-600", "bg-fuchsia-600", "bg-sky-600", "bg-orange-600",
-];
-
 function avatarColor(id: string): string {
-  let hash = 0;
-  for (const ch of id) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
-  return PALETTE[Math.abs(hash) % PALETTE.length];
+  return avatarBgClass(id);
 }
 
 type ContextMenuState = { x: number; y: number; avatarId: string } | null;
@@ -336,12 +330,13 @@ export function AvatarSidebar() {
             </button>
           </div>
           <div className="overflow-y-auto pb-2">
-            {groups.map((group) => {
+            {groups.map((group, groupIndex) => {
               const groupAvatarId = `group:${group.id}`;
               const hasPane = panes.some((item) => item.avatarId === groupAvatarId);
               const isActive = panes.some(
                 (item) => item.avatarId === groupAvatarId && item.id === activePaneId
               );
+              const { iconBg, dotColor } = groupColorByIndex(groupIndex);
               return (
                 <button
                   key={group.id}
@@ -357,13 +352,16 @@ export function AvatarSidebar() {
                     setGroupContextMenu({ x: e.clientX, y: e.clientY, groupId: group.id });
                   }}
                 >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-600/60 text-[10px] font-bold text-white">
-                    G
+                  <div
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-[10px] font-bold text-white"
+                    style={{ backgroundColor: iconBg }}
+                  >
+                    {group.name.slice(0, 1).toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1">
                       <div className="truncate text-xs">{group.name}</div>
-                      {hasPane && <span className="h-1.5 w-1.5 rounded-full bg-violet-300" />}
+                      {hasPane && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: dotColor }} />}
                     </div>
                     <div className="truncate text-[10px] text-text-faint">
                       {group.avatarIds.length} avatars ·{" "}
