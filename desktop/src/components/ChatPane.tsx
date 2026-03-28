@@ -1,5 +1,6 @@
-import { Component, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
+import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react";
+import { createPortal } from "react-dom";
 import {
   useAppStore,
   type Avatar,
@@ -68,66 +69,125 @@ const FALLBACK_PANE: ChatPaneState = {
   sessionTokens: { input: 0, output: 0 },
 };
 
-function NewTopicButton({ onNewTopic }: { onNewTopic: (inherit: boolean) => void }) {
-  const [open, setOpen] = useState(false);
+function NewTopicSplitButton({ onNewTopic }: { onNewTopic: (inherit: boolean) => void }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const [inherit, setInherit] = useState(() => {
-    try { return localStorage.getItem(NEW_TOPIC_PREF_KEY) === "1"; } catch { return false; }
+    try {
+      return localStorage.getItem(NEW_TOPIC_PREF_KEY) === "1";
+    } catch {
+      return false;
+    }
   });
-  const ref = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
+
+  const updateMenuPos = useCallback(() => {
+    const el = anchorRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setMenuPos({ left: r.left, top: r.top });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    updateMenuPos();
+    const onScroll = () => updateMenuPos();
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [menuOpen, updateMenuPos]);
 
   useEffect(() => {
-    if (!open) return;
-    const close = (e: globalThis.MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
     };
-    window.addEventListener("mousedown", close);
-    return () => window.removeEventListener("mousedown", close);
-  }, [open]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
 
   const pick = (val: boolean) => {
     setInherit(val);
-    try { localStorage.setItem(NEW_TOPIC_PREF_KEY, val ? "1" : "0"); } catch { /* noop */ }
-    setOpen(false);
+    try {
+      localStorage.setItem(NEW_TOPIC_PREF_KEY, val ? "1" : "0");
+    } catch {
+      /* noop */
+    }
+    setMenuOpen(false);
     onNewTopic(val);
   };
 
   return (
-    <div ref={ref} className="relative flex shrink-0">
-      <button
-        className="h-9 rounded-l-lg border border-r-0 border-border px-2.5 text-xs text-text-muted transition hover:bg-surface-hover"
-        onClick={() => onNewTopic(inherit)}
-        title={inherit ? "新对话（继承上下文）" : "新对话（全新开始）"}
-      >
-        新对话
-      </button>
-      <button
-        className="h-9 rounded-r-lg border border-border px-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-        onClick={() => setOpen((prev) => !prev)}
-        title="切换默认模式"
-      >
-        ▾
-      </button>
-      {open ? (
-        <div className="absolute bottom-full left-0 z-50 mb-1 min-w-[170px] rounded-md border border-border bg-surface-panel p-1 shadow-2xl backdrop-blur-xl">
-          <button
-            className="flex w-full items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
-            onClick={() => pick(false)}
-          >
-            <span className="w-4 text-center text-cyan-400">{inherit ? "" : "✓"}</span>
-            <span>全新对话</span>
-            <span className="ml-auto text-[10px] text-text-faint">不继承</span>
-          </button>
-          <button
-            className="flex w-full items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
-            onClick={() => pick(true)}
-          >
-            <span className="w-4 text-center text-cyan-400">{inherit ? "✓" : ""}</span>
-            <span>继承上下文</span>
-            <span className="ml-auto text-[10px] text-text-faint">携带摘要</span>
-          </button>
-        </div>
-      ) : null}
-    </div>
+    <>
+      <div ref={anchorRef} className="relative flex shrink-0">
+        <button
+          type="button"
+          className="h-7 rounded-l-lg border border-r-0 border-border px-2 text-[12px] text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+          onClick={() => onNewTopic(inherit)}
+          title={inherit ? "新对话（继承上下文）" : "新对话（全新开始）"}
+        >
+          新对话
+        </button>
+        <button
+          type="button"
+          className="h-7 rounded-r-lg border border-border px-1 text-[12px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpen((v) => !v);
+          }}
+          title="选择默认模式"
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+        >
+          ▾
+        </button>
+      </div>
+      {menuOpen && menuPos
+        ? createPortal(
+            <>
+              <div
+                className="fixed inset-0 z-[199]"
+                aria-hidden
+                onMouseDown={() => setMenuOpen(false)}
+              />
+              <div
+                role="menu"
+                className="fixed z-[200] min-w-[170px] rounded-md border border-border bg-surface-panel p-1 shadow-2xl backdrop-blur-xl"
+                style={{
+                  left: menuPos.left,
+                  top: menuPos.top,
+                  transform: "translateY(calc(-100% - 6px))",
+                }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+                  onClick={() => pick(false)}
+                >
+                  <span className="w-4 text-center text-cyan-400">{inherit ? "" : "✓"}</span>
+                  <span>全新对话</span>
+                  <span className="ml-auto text-[10px] text-text-faint">不继承</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+                  onClick={() => pick(true)}
+                >
+                  <span className="w-4 text-center text-cyan-400">{inherit ? "✓" : ""}</span>
+                  <span>继承上下文</span>
+                  <span className="ml-auto text-[10px] text-text-faint">携带摘要</span>
+                </button>
+              </div>
+            </>,
+            document.body
+          )
+        : null}
+    </>
   );
 }
 
@@ -343,16 +403,27 @@ function ActionCircleButton({ hasInput, streaming, recording, onSend, onMic, onS
 
 function AttachmentChip({ file, onRemove }: { file: AttachedFile; onRemove: () => void }) {
   const isImage = !!file.dataUrl || file.mimeType.startsWith("image/");
+  const isReferenceToken = !!file.referenceToken;
   return (
-    <div className="inline-flex max-w-[260px] items-center gap-2 rounded-lg border border-border bg-surface-panel px-2 py-1 text-xs">
+    <div
+      className={`inline-flex max-w-[360px] items-center gap-2 rounded-lg border px-2 py-1 text-xs ${
+        isReferenceToken
+          ? "border-sky-500/40 bg-sky-500/15 text-sky-100"
+          : "border-border bg-surface-panel text-text-muted"
+      }`}
+    >
       {isImage && file.dataUrl ? (
         <img src={file.dataUrl} alt={file.name} className="h-8 w-8 shrink-0 rounded object-cover" />
+      ) : isReferenceToken ? (
+        <span className="text-sm">↘</span>
       ) : (
         <span className="text-sm text-text-faint">{file.status === "error" ? "⚠️" : "📄"}</span>
       )}
       <div className="min-w-0">
-        <div className="truncate text-text-muted">{file.name}</div>
-        {file.status === "parsing" ? (
+        <div className={`truncate ${isReferenceToken ? "text-sky-100" : "text-text-muted"}`}>{file.name}</div>
+        {isReferenceToken ? (
+          <div className="text-[10px] text-sky-200/80">@ 文件引用</div>
+        ) : file.status === "parsing" ? (
           <div className="text-[10px] text-text-faint animate-pulse">解析中...</div>
         ) : file.status === "error" ? (
           <div className="text-[10px] text-status-error">{file.errorText || "解析失败"}</div>
@@ -361,7 +432,11 @@ function AttachmentChip({ file, onRemove }: { file: AttachedFile; onRemove: () =
         )}
       </div>
       <button
-        className="shrink-0 rounded px-1 text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+        className={`shrink-0 rounded px-1 transition ${
+          isReferenceToken
+            ? "text-sky-200/80 hover:bg-sky-500/20 hover:text-sky-100"
+            : "text-text-faint hover:bg-surface-hover hover:text-text-muted"
+        }`}
         onClick={onRemove}
         title="移除附件"
       >
@@ -554,6 +629,8 @@ type AttachedFile = {
   content: string;
   dataUrl?: string;
   errorText?: string;
+  sourcePath?: string;
+  referenceToken?: boolean;
 };
 
 function isImageFile(file: File): boolean {
@@ -1154,6 +1231,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [attachToastOpen, setAttachToastOpen] = useState(false);
   const [favoriteToastOpen, setFavoriteToastOpen] = useState(false);
   const [favoriteToastMsg, setFavoriteToastMsg] = useState("");
+  const composerRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!favoriteToastOpen) return;
     const t = window.setTimeout(() => setFavoriteToastOpen(false), 1800);
@@ -1235,8 +1313,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setSpawnsColumnOpen,
   ]);
   const attachmentEntries = useMemo(() => Object.entries(contextFiles), [contextFiles]);
+  const visibleAttachmentEntries = useMemo(
+    () => attachmentEntries.filter(([, file]) => !file.referenceToken),
+    [attachmentEntries]
+  );
   const readyAttachments = useMemo(
-    () => attachmentEntries.filter(([, file]) => file.status === "ready").map(([, file]) => file),
+    () =>
+      attachmentEntries
+        .filter(([, file]) => file.status === "ready")
+        .map(([sourcePath, file]) => ({ ...file, sourcePath: file.sourcePath || sourcePath })),
     [attachmentEntries]
   );
 
@@ -1476,26 +1561,139 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setAtCandidates([...avatarCandidates, ...filteredFolders, ...filteredFiles].slice(0, 24));
   };
 
-  const addContextFile = async (taskspaceId: string, relPath: string) => {
-    if (!pane.sessionId || !relPath) return;
+  const updateAtStateFromText = useCallback(
+    (value: string) => {
+      const match = value.match(/(?:^|\s)@([^\s@]*)$/);
+      if (match) {
+        const query = match[1] ?? "";
+        setAtOpen(true);
+        setAtQuery(query);
+        void searchAtCandidates(query);
+      } else {
+        setAtOpen(false);
+        setAtQuery("");
+      }
+    },
+    [searchAtCandidates]
+  );
+
+  const extractComposerText = useCallback((): string => {
+    const el = composerRef.current;
+    if (!el) return "";
+    // Keep visual token text clean (without "@"), but serialize it as "@name" for routing.
+    const clone = el.cloneNode(true) as HTMLDivElement;
+    const tokenNodes = clone.querySelectorAll<HTMLElement>("[data-ref-token='1']");
+    for (const node of tokenNodes) {
+      const name = String(node.dataset.refName || node.textContent || "").trim();
+      node.textContent = name ? `@${name}` : "";
+    }
+    return (clone.innerText || "").replace(/\u00a0/g, " ");
+  }, []);
+
+  const focusComposerEnd = useCallback(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.focus();
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, []);
+
+  const createFileRefToken = useCallback((name: string) => {
+    const token = document.createElement("span");
+    token.setAttribute("contenteditable", "false");
+    token.setAttribute("data-ref-token", "1");
+    token.setAttribute("data-ref-name", name);
+    token.className =
+      "mx-0.5 inline-flex items-center rounded-md border border-[#6a9dff90] bg-[#244766cc] px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2] text-[#e6f0ff]";
+    token.textContent = name;
+    return token;
+  }, []);
+
+  const setComposerText = useCallback(
+    (value: string, options?: { tokenNames?: string[] }) => {
+      const el = composerRef.current;
+      if (!el) {
+        setInput(value);
+        updateAtStateFromText(value);
+        return;
+      }
+      const tokenNames = new Set<string>();
+      for (const [, file] of Object.entries(contextFiles)) {
+        if (file.referenceToken && file.name) tokenNames.add(file.name);
+      }
+      for (const name of options?.tokenNames ?? []) {
+        if (name) tokenNames.add(name);
+      }
+      el.innerHTML = "";
+      const tokenNamesByLength = Array.from(tokenNames).sort((a, b) => b.length - a.length);
+      let cursor = 0;
+      let textBuffer = "";
+      while (cursor < value.length) {
+        if (value[cursor] !== "@") {
+          textBuffer += value[cursor];
+          cursor += 1;
+          continue;
+        }
+        const rest = value.slice(cursor + 1);
+        const matched = tokenNamesByLength.find((name) => {
+          if (!rest.startsWith(name)) return false;
+          const tail = rest.slice(name.length, name.length + 1);
+          return tail.length === 0 || /\s/.test(tail);
+        });
+        if (!matched) {
+          textBuffer += value[cursor];
+          cursor += 1;
+          continue;
+        }
+        if (textBuffer) {
+          el.appendChild(document.createTextNode(textBuffer));
+          textBuffer = "";
+        }
+        el.appendChild(createFileRefToken(matched));
+        cursor += matched.length + 1;
+      }
+      if (textBuffer) {
+        el.appendChild(document.createTextNode(textBuffer));
+      }
+      setInput(value);
+      updateAtStateFromText(value);
+      focusComposerEnd();
+    },
+    [contextFiles, createFileRefToken, focusComposerEnd, updateAtStateFromText]
+  );
+
+  const addContextFile = async (
+    taskspaceId: string,
+    relPath: string,
+    options?: { referenceToken?: boolean }
+  ): Promise<string | null> => {
+    if (!pane.sessionId || !relPath) return null;
     const fileResp = await window.agenticxDesktop.readTaskspaceFile({
       sessionId: pane.sessionId,
       taskspaceId,
       path: relPath,
     });
-    if (!fileResp.ok || typeof fileResp.content !== "string") return;
+    if (!fileResp.ok || typeof fileResp.content !== "string") return null;
     const key = String(fileResp.absolute_path || relPath);
     const content = (fileResp.content ?? "").slice(0, TEXT_ATTACHMENT_LIMIT);
     setContextFiles((prev) => ({
       ...prev,
       [key]: {
-        name: key.split("/").pop() || key,
+        name: key.split(/[\\/]/).pop() || key,
         size: content.length,
         mimeType: "text/plain",
         status: "ready",
         content,
+        sourcePath: key,
+        referenceToken: !!options?.referenceToken,
       },
     }));
+    return key;
   };
 
   const addTaskspaceAliasReference = async (taskspaceId: string, alias: string, absolutePath: string) => {
@@ -2052,18 +2250,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const sendChat = async (userText: string, options?: { retryAttachments?: MessageAttachment[] }) => {
     const text = userText.trim();
+    const messageText = text || ATTACHMENT_ONLY_USER_PROMPT;
     const retryAttachments = options?.retryAttachments;
     const readyEntries = attachmentEntries.filter(([, file]) => file.status === "ready");
+    const readyEntryMap = new Map(readyEntries);
     const composerAttachments: MessageAttachment[] = readyAttachments.map((file) => ({
       name: file.name,
       mimeType: file.mimeType,
       size: file.size,
       dataUrl: file.dataUrl,
+      sourcePath: file.sourcePath,
+      referenceToken: file.referenceToken,
     }));
-    const userAttachments: MessageAttachment[] =
+    const rawUserAttachments: MessageAttachment[] =
       retryAttachments && retryAttachments.length > 0
         ? retryAttachments.map((item) => ({ ...item }))
         : composerAttachments;
+    const userAttachments: MessageAttachment[] = rawUserAttachments.filter((item) => {
+      if (!item.referenceToken) return true;
+      const name = String(item.name || "").trim();
+      if (!name) return true;
+      return messageText.includes(`@${name}`);
+    });
     const hasReadyAttachments = userAttachments.length > 0;
     if ((!text && !hasReadyAttachments) || !apiBase || !pane.sessionId) return;
     if (streaming) return;
@@ -2093,8 +2301,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
 
     const requestSessionId = pane.sessionId;
-    const messageText = text || ATTACHMENT_ONLY_USER_PROMPT;
-
     const selectedIsPaneSubagent =
       !!selectedSubAgent && paneSubAgents.some((item) => item.id === selectedSubAgent);
     const targetAgentId = selectedIsPaneSubagent ? selectedSubAgent : "meta";
@@ -2131,7 +2337,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       addSubAgentEvent(targetAgentId, { type: "user", content: messageText });
       addPaneMessage(pane.id, "tool", `🗣 发送给 ${targetAgentId}: ${messageText}`, "meta");
     }
-    setInput("");
+    setComposerText("");
     setQuoteTarget(null);
     // Clear attachments immediately so chips do not linger until the stream ends (finally also clears).
     setContextFiles({});
@@ -2189,23 +2395,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           body.image_inputs = imageInputs;
         }
         const contextFilePayload: Record<string, string> = {};
-        if (readyEntries.length > 0) {
-          for (const [filePath, file] of readyEntries) {
-            if (file.dataUrl || file.mimeType.startsWith("image/")) {
-              contextFilePayload[filePath] = "[图片文件]";
-            } else if (file.content) {
-              contextFilePayload[filePath] = file.content;
-            } else {
-              contextFilePayload[filePath] = `[附件] ${file.name}`;
-            }
-          }
-        } else {
-          for (const file of userAttachments) {
-            if (file.dataUrl || file.mimeType.startsWith("image/")) {
-              contextFilePayload[file.name] = "[图片文件]";
-            } else {
-              contextFilePayload[file.name] = `[附件] ${file.name}`;
-            }
+        for (const file of userAttachments) {
+          const key = String(file.sourcePath || file.name || "").trim();
+          if (!key) continue;
+          const ready = readyEntryMap.get(key);
+          const isImage = !!file.dataUrl || file.mimeType.startsWith("image/") || !!ready?.dataUrl || ready?.mimeType.startsWith("image/");
+          if (isImage) {
+            contextFilePayload[key] = "[图片文件]";
+          } else if (ready?.content) {
+            contextFilePayload[key] = ready.content;
+          } else {
+            contextFilePayload[key] = `[附件] ${file.name}`;
           }
         }
         if (Object.keys(contextFilePayload).length > 0) {
@@ -3166,29 +3366,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               <button className="rounded px-1 hover:bg-surface-hover" onClick={() => setSelectedMessageIds(new Set())}>取消</button>
             </div>
           ) : null}
-          <div className="rounded-2xl border border-border bg-surface-card transition-colors focus-within:border-border-strong">
-            {attachmentEntries.length > 0 ? (
+          <div className="relative rounded-2xl border border-border bg-surface-card transition-colors focus-within:border-border-strong">
+            {visibleAttachmentEntries.length > 0 ? (
               <div className="flex flex-wrap gap-1.5 px-3 pt-3">
-                {attachmentEntries.map(([key, file]) => (
+                {visibleAttachmentEntries.map(([key, file]) => (
                   <AttachmentChip key={key} file={file} onRemove={() => removeAttachment(key)} />
                 ))}
               </div>
             ) : null}
-            <textarea
-              value={input}
-              onChange={(e) => {
-                const value = e.target.value;
+            <div
+              ref={composerRef}
+              contentEditable
+              suppressContentEditableWarning
+              onInput={() => {
+                const value = extractComposerText();
                 setInput(value);
-                const match = value.match(/(?:^|\s)@([^\s@]*)$/);
-                if (match) {
-                  const query = match[1] ?? "";
-                  setAtOpen(true);
-                  setAtQuery(query);
-                  void searchAtCandidates(query);
-                } else {
-                  setAtOpen(false);
-                  setAtQuery("");
-                }
+                updateAtStateFromText(value);
               }}
               onCompositionStart={() => {
                 imeComposingRef.current = true;
@@ -3204,6 +3397,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onPaste={(e) => {
                 const dt = e.clipboardData;
                 const raw = extractClipboardImageFiles(dt);
+                const plain = dt?.getData("text/plain") ?? "";
                 if (raw.length === 0) return;
                 if (isKnownNonVisionChatModel(activeProvider, activeModel)) {
                   e.preventDefault();
@@ -3212,14 +3406,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 }
                 e.preventDefault();
                 const files = withClipboardImageNames(raw);
-                const plain = dt?.getData("text/plain") ?? "";
                 if (plain) {
-                  setInput((prev) => {
-                    const next = plain.replace(/\r\n/g, "\n");
-                    if (!prev) return next;
-                    const sep = prev.endsWith("\n") || next.startsWith("\n") ? "" : "\n";
-                    return `${prev}${sep}${next}`;
-                  });
+                  document.execCommand("insertText", false, plain.replace(/\r\n/g, "\n"));
+                  const value = extractComposerText();
+                  setInput(value);
+                  updateAtStateFromText(value);
                 }
                 for (const file of files) {
                   const key = `${file.name}:${file.size}:${file.lastModified}`;
@@ -3242,30 +3433,41 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   if (atOpen && atCandidates.length > 0) {
                     e.preventDefault();
                     const first = atCandidates[0];
-                    const mention = `@${first.label} `;
-                    setInput((prev) => prev.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`));
                     setAtOpen(false);
                     setAtQuery("");
                     if (first.kind === "avatar") {
+                      const mention = `@${first.label} `;
+                      const base = extractComposerText();
+                      const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
+                      setComposerText(next);
                       return;
                     }
                     if (first.kind === "taskspace") {
+                      const mention = `@${first.label} `;
+                      const base = extractComposerText();
+                      const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
+                      setComposerText(next);
                       void addTaskspaceAliasReference(first.taskspaceId, first.alias, first.path);
                     } else {
-                      void addContextFile(first.taskspaceId, first.path);
+                      const mention = `@${first.label} `;
+                      const base = extractComposerText();
+                      const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
+                      setComposerText(next, { tokenNames: [first.label] });
+                      void addContextFile(first.taskspaceId, first.path, { referenceToken: true });
                     }
                     return;
                   }
                   e.preventDefault();
-                  void sendChat(input);
+                  void sendChat(extractComposerText());
                 }
               }}
-              rows={input.includes("\n") ? 2 : 1}
-              placeholder="发消息..."
-              className="block min-h-[40px] w-full resize-none bg-transparent px-4 pb-0 pt-3 text-sm text-text-primary outline-none placeholder:text-text-faint"
+              className="block max-h-[220px] min-h-[40px] w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-0 pt-3 text-sm text-text-primary outline-none"
             />
+            {input.trim().length === 0 ? (
+              <div className="pointer-events-none absolute left-4 top-3 text-sm text-text-faint">发消息...</div>
+            ) : null}
             <div className="flex min-w-0 items-center justify-between gap-1 px-2 pb-2 pt-1">
-              <div className="flex min-w-0 items-center gap-0.5 overflow-hidden">
+              <div className="flex min-w-0 items-center gap-0.5">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -3298,7 +3500,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
                   </svg>
                 </button>
-                <NewTopicButton onNewTopic={createNewTopic} />
+                <NewTopicSplitButton onNewTopic={createNewTopic} />
                 <button
                   className="flex h-7 items-center gap-1 rounded-lg px-2 text-[12px] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
                   title="更多"
@@ -3316,7 +3518,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 hasInput={!!pane.sessionId && (!!input.trim() || readyAttachments.length > 0)}
                 streaming={streaming}
                 recording={recording}
-                onSend={() => void sendChat(input)}
+                onSend={() => void sendChat(extractComposerText())}
                 onMic={onMicClick}
                 onStop={() => abortRef.current?.abort()}
               />
@@ -3338,17 +3540,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     }
                     className="block w-full rounded px-2 py-1 text-left text-[11px] text-text-muted hover:bg-surface-hover"
                     onClick={() => {
-                      const mention = `@${item.label} `;
-                      setInput((prev) => prev.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`));
                       setAtOpen(false);
                       setAtQuery("");
                       if (item.kind === "avatar") {
+                        const mention = `@${item.label} `;
+                        const base = extractComposerText();
+                        const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
+                        setComposerText(next);
                         return;
                       }
                       if (item.kind === "taskspace") {
+                        const mention = `@${item.label} `;
+                        const base = extractComposerText();
+                        const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
+                        setComposerText(next);
                         void addTaskspaceAliasReference(item.taskspaceId, item.alias, item.path);
                       } else {
-                        void addContextFile(item.taskspaceId, item.path);
+                        const mention = `@${item.label} `;
+                        const base = extractComposerText();
+                        const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
+                        setComposerText(next, { tokenNames: [item.label] });
+                        void addContextFile(item.taskspaceId, item.path, { referenceToken: true });
                       }
                     }}
                   >
@@ -3406,8 +3618,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             tintColor={paneTint}
             onPickFileForReference={(path) => {
               if (!pane.activeTaskspaceId) return;
-              void addContextFile(pane.activeTaskspaceId, path);
-              setInput((prev) => `${prev}${prev.endsWith(" ") || !prev ? "" : " "}@${path.split("/").pop() || path} `);
+              void addContextFile(pane.activeTaskspaceId, path, { referenceToken: true });
+              const fileName = path.split(/[\\/]/).pop() || path;
+              const mention = `@${fileName}`;
+              const base = extractComposerText();
+              const trimmed = base.trimEnd();
+              const sep = !trimmed || /\s$/.test(base) ? "" : " ";
+              const next = `${base}${sep}${mention} `;
+              setComposerText(next, { tokenNames: [fileName] });
             }}
           />
         </div>

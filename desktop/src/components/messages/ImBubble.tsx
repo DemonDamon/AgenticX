@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Message } from "../../store";
+import type { Message, MessageAttachment } from "../../store";
 import { AttachmentCard } from "./AttachmentCard";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { parseReasoningContent } from "./reasoning-parser";
@@ -26,6 +26,55 @@ type Props = {
   selectable?: boolean;
   selected?: boolean;
 };
+
+function renderUserTextWithReferenceTokens(
+  text: string,
+  referenceAttachments: MessageAttachment[]
+): ReactNode {
+  if (!referenceAttachments.length) return text;
+  const names = Array.from(
+    new Set(
+      referenceAttachments
+        .map((att) => String(att.name || "").trim())
+        .filter((name) => name.length > 0)
+    )
+  ).sort((a, b) => b.length - a.length);
+  if (!names.length) return text;
+  const chunks: ReactNode[] = [];
+  let cursor = 0;
+  let key = 0;
+  while (cursor < text.length) {
+    const atIndex = text.indexOf("@", cursor);
+    if (atIndex < 0) {
+      chunks.push(text.slice(cursor));
+      break;
+    }
+    if (atIndex > cursor) {
+      chunks.push(text.slice(cursor, atIndex));
+    }
+    const rest = text.slice(atIndex + 1);
+    const matched = names.find((name) => {
+      if (!rest.startsWith(name)) return false;
+      const tail = rest.slice(name.length, name.length + 1);
+      return tail.length === 0 || /\s/.test(tail);
+    });
+    if (!matched) {
+      chunks.push("@");
+      cursor = atIndex + 1;
+      continue;
+    }
+    chunks.push(
+      <span
+        key={`ref-token-${key++}`}
+        className="mx-0.5 inline-flex items-center rounded-md border border-[#6a9dff90] bg-[#244766cc] px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2] text-[#e6f0ff]"
+      >
+        {matched}
+      </span>
+    );
+    cursor = atIndex + matched.length + 1;
+  }
+  return chunks;
+}
 
 /** Cycling 1→3 dots for group-chat typing rows (name shown in header only). */
 function TypingDots() {
@@ -90,6 +139,12 @@ export function ImBubble({
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
   const hasThinkTag = parsed?.hasReasoningTag ?? false;
   const bodyText = !isUser && hasThinkTag ? (parsed?.response ?? "") : message.content;
+  const referenceAttachments = isUser
+    ? (message.attachments ?? []).filter((attachment) => !!attachment.referenceToken)
+    : [];
+  const displayAttachments = isUser
+    ? (message.attachments ?? []).filter((attachment) => !attachment.referenceToken)
+    : [];
   const hasBody = !!bodyText?.trim();
   const bubbleStyle: CSSProperties = isUser
     ? {
@@ -166,9 +221,9 @@ export function ImBubble({
               }`}
               style={bubbleStyle}
             >
-              {isUser && message.attachments && message.attachments.length > 0 ? (
+              {isUser && displayAttachments.length > 0 ? (
                 <div className="mb-2 flex flex-wrap gap-2">
-                  {message.attachments.map((attachment) => (
+                  {displayAttachments.map((attachment) => (
                     <AttachmentCard
                       key={`${attachment.name}:${attachment.size}:${attachment.mimeType}`}
                       attachment={attachment}
@@ -198,9 +253,15 @@ export function ImBubble({
                       <ReasoningBlock text={parsed.reasoning} />
                     ) : null}
                     {hasBody ? (
+                      isUser && referenceAttachments.length > 0 ? (
+                        <div className="whitespace-pre-wrap break-words">
+                          {renderUserTextWithReferenceTokens(bodyText, referenceAttachments)}
+                        </div>
+                      ) : (
                       <ReactMarkdown remarkPlugins={[remarkGfm]} components={chatMarkdownComponents}>
                         {bodyText}
                       </ReactMarkdown>
+                      )
                     ) : null}
                   </>
                 )}

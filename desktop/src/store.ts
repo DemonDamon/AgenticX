@@ -121,6 +121,8 @@ export type MessageAttachment = {
   mimeType: string;
   size: number;
   dataUrl?: string;
+  sourcePath?: string;
+  referenceToken?: boolean;
 };
 
 export type SubAgentEvent = {
