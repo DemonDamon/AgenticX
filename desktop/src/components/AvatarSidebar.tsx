@@ -272,10 +272,10 @@ export function AvatarSidebar() {
         <div className="drag-region h-[38px] shrink-0" />
         {/* Meta-Agent entry */}
         <button
-          className={`mx-2 mb-1 flex items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left transition-all ${
+          className={`mx-2 mb-1 flex items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition-all ${
             activeAvatarId === null
-              ? "border-border-strong bg-surface-card text-text-strong"
-              : "border-transparent text-text-muted hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
+              ? "bg-surface-card text-text-strong"
+              : "text-text-muted hover:bg-surface-card hover:text-text-strong"
           }`}
           onClick={() => void openOrFocusPane(null, "Machi")}
           onContextMenu={(e) => {
@@ -316,10 +316,10 @@ export function AvatarSidebar() {
             return (
               <div key={avatar.id}>
                 <button
-                  className={`mx-2 flex w-[calc(100%-16px)] items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left transition-all ${
+                  className={`mx-2 flex w-[calc(100%-16px)] items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition-all ${
                     isActive
-                      ? "border-border-strong bg-surface-card text-text-strong"
-                      : "border-transparent text-text-muted hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
+                      ? "bg-surface-card text-text-strong"
+                      : "text-text-muted hover:bg-surface-card hover:text-text-strong"
                   }`}
                   onClick={() => void openOrFocusPane(avatar.id, avatar.name)}
                   onContextMenu={(e) => {
@@ -379,10 +379,10 @@ export function AvatarSidebar() {
               return (
                 <button
                   key={group.id}
-                  className={`mx-2 flex w-[calc(100%-16px)] items-center gap-2 rounded-[10px] border px-2.5 py-1.5 text-left transition-all ${
+                  className={`mx-2 flex w-[calc(100%-16px)] items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left transition-all ${
                     isActive
-                      ? "border-border-strong bg-surface-card text-text-strong"
-                      : "border-transparent text-text-muted hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
+                      ? "bg-surface-card text-text-strong"
+                      : "text-text-muted hover:bg-surface-card hover:text-text-strong"
                   }`}
                   onClick={() => void openOrFocusGroupPane(group)}
                   onContextMenu={(e) => {
