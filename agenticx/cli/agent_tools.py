@@ -417,6 +417,28 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "liteparse",
+            "description": (
+                "Parse a document file (PDF, DOCX, PPTX, XLSX, images) and return "
+                "extracted text. Uses LiteParse if installed, falls back to MinerU "
+                "or plain text reader automatically."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute or workspace-relative path to the document.",
+                    },
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "lsp_goto_definition",
             "description": "Jump to symbol definition at given file position.",
             "parameters": {
@@ -1506,6 +1528,27 @@ def _tool_list_files(arguments: Dict[str, Any], session: Optional[StudioSession]
     return "\n".join(lines) if lines else "(empty directory)"
 
 
+async def _tool_liteparse(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
+    """Parse one document via UnifiedDocumentTool fallback chain."""
+    raw_path = str(arguments.get("path", "")).strip()
+    if not raw_path:
+        return "ERROR: missing required parameter 'path'."
+    try:
+        path = _resolve_workspace_path(raw_path, session, pick_existing=True)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+    if not path.exists():
+        return f"ERROR: file not found: {path}"
+
+    from agenticx.tools.unified_document import UnifiedDocumentTool
+
+    tool = UnifiedDocumentTool()
+    success, content = tool.execute(str(path))
+    if success:
+        return content
+    return f"ERROR: document parsing failed: {content}"
+
+
 def _resolve_lsp_settings() -> tuple[bool, float]:
     try:
         global_data = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH)
@@ -1732,6 +1775,8 @@ async def dispatch_tool_async(
             return _tool_ask_user(arguments, service_mode=isinstance(gate, AsyncConfirmGate))
         if name == "list_files":
             return _tool_list_files(arguments, session)
+        if name == "liteparse":
+            return await _tool_liteparse(arguments, session)
         if name.startswith("lsp_"):
             return await _dispatch_lsp_tool(name, arguments, session)
     except Exception as exc:
