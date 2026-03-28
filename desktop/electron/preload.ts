@@ -151,6 +151,12 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadComputerUseConfig: async () => ipcRenderer.invoke("load-computer-use-config"),
   saveComputerUseConfig: async (payload: { enabled: boolean }) =>
     ipcRenderer.invoke("save-computer-use-config", payload),
+  loadTrinityConfig: async () => ipcRenderer.invoke("load-trinity-config"),
+  saveTrinityConfig: async (payload: {
+    skill_protocol: boolean;
+    session_summary: boolean;
+    learning_enabled: boolean;
+  }) => ipcRenderer.invoke("save-trinity-config", payload),
   loadEmailConfig: async () => ipcRenderer.invoke("load-email-config"),
   loadMcpStatus: async (sessionId: string) => ipcRenderer.invoke("load-mcp-status", sessionId),
   importMcpConfig: async (payload: { sessionId: string; sourcePath: string }) =>

@@ -77,6 +77,12 @@ type ToolInstallState = {
   error?: string;
 };
 
+type TrinityConfigForm = {
+  skill_protocol: boolean;
+  session_summary: boolean;
+  learning_enabled: boolean;
+};
+
 type SkillItem = {
   name: string;
   description: string;
@@ -1478,6 +1484,133 @@ function ComputerUseGeneralPanel() {
   );
 }
 
+function AgentHarnessTrinityPanel() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<TrinityConfigForm>({
+    skill_protocol: true,
+    session_summary: false,
+    learning_enabled: false,
+  });
+  const [message, setMessage] = useState("");
+  const [lastSaved, setLastSaved] = useState<TrinityConfigForm>({
+    skill_protocol: true,
+    session_summary: false,
+    learning_enabled: false,
+  });
+
+  useEffect(() => {
+    let disposed = false;
+    const load = async () => {
+      setLoading(true);
+      setMessage("");
+      try {
+        const result = await window.agenticxDesktop.loadTrinityConfig();
+        if (!disposed && result?.ok && result.config) {
+          const loaded = {
+            skill_protocol: Boolean(result.config.skill_protocol),
+            session_summary: Boolean(result.config.session_summary),
+            learning_enabled: Boolean(result.config.learning_enabled),
+          };
+          setForm(loaded);
+          setLastSaved(loaded);
+        } else if (!disposed) {
+          setMessage(result?.error ? String(result.error) : "读取 Agent Harness Trinity 配置失败。");
+        }
+      } catch {
+        if (!disposed) setMessage("读取 Agent Harness Trinity 配置失败。");
+      } finally {
+        if (!disposed) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const update = useCallback(async (patch: Partial<TrinityConfigForm>) => {
+    const next = { ...form, ...patch };
+    setForm(next);
+    setSaving(true);
+    setMessage("");
+    try {
+      const result = await window.agenticxDesktop.saveTrinityConfig(next);
+      if (!result?.ok) {
+        setForm(lastSaved);
+        setMessage(result?.error ? String(result.error) : "保存失败。");
+        return;
+      }
+      setLastSaved(next);
+      setMessage(
+        "已保存到本机配置。请完全退出 Machi 后重新打开（勿仅关闭窗口）；本地后端会在启动时读取这些开关。若使用远程模式，请在服务器环境同步配置并重启远端服务。"
+      );
+    } catch (e) {
+      setForm(lastSaved);
+      setMessage(e instanceof Error ? e.message : "保存失败。");
+    } finally {
+      setSaving(false);
+    }
+  }, [form, lastSaved]);
+
+  if (loading) {
+    return (
+      <Panel title="Agent Harness Trinity">
+        <div className="py-2 text-sm text-text-faint">加载中…</div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="Agent Harness Trinity">
+      <p className="mb-3 text-xs text-text-faint">
+        写入本机 <code className="text-text-subtle">~/.agenticx/config.yaml</code> 的{" "}
+        <code className="text-text-subtle">agent_harness_trinity</code> 段，并在本地后端启动时映射为{" "}
+        <code className="text-text-subtle">AGX_SKILL_PROTOCOL</code>、{" "}
+        <code className="text-text-subtle">AGX_SESSION_SUMMARY</code>、{" "}
+        <code className="text-text-subtle">AGX_LEARNING_ENABLED</code>。
+      </p>
+      <div className="space-y-2 text-sm text-text-subtle">
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-[var(--ui-btn-primary-bg)]"
+            checked={form.skill_protocol}
+            disabled={saving}
+            onChange={(e) => void update({ skill_protocol: e.target.checked })}
+          />
+          启用 Skill-First Protocol（AGX_SKILL_PROTOCOL）
+        </label>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-[var(--ui-btn-primary-bg)]"
+            checked={form.session_summary}
+            disabled={saving}
+            onChange={(e) => void update({ session_summary: e.target.checked })}
+          />
+          启用 Session Summary Continuity（AGX_SESSION_SUMMARY）
+        </label>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-[var(--ui-btn-primary-bg)]"
+            checked={form.learning_enabled}
+            disabled={saving}
+            onChange={(e) => void update({ learning_enabled: e.target.checked })}
+          />
+          启用 Observation Learning（AGX_LEARNING_ENABLED）
+        </label>
+      </div>
+      {message ? (
+        <div className={`mt-2 text-xs ${message.startsWith("已保存到本机配置") ? "text-text-muted" : "text-rose-400"}`}>
+          {message}
+        </div>
+      ) : null}
+    </Panel>
+  );
+}
+
 function WorkspaceSettingsTab() {
   return (
     <div className="space-y-4">
@@ -1829,6 +1962,7 @@ export function SettingsPanel({
                   </div>
                 </Panel>
                 <ComputerUseGeneralPanel />
+                <AgentHarnessTrinityPanel />
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
                   当前版本：AgenticX Desktop v0.2.0
                 </div>
