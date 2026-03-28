@@ -34,6 +34,11 @@ type EmailConfig = {
 type ComputerUseConfig = {
   enabled: boolean;
 };
+type TrinityConfig = {
+  skill_protocol: boolean;
+  session_summary: boolean;
+  learning_enabled: boolean;
+};
 type AvatarItem = {
   id: string;
   name: string;
@@ -254,6 +259,8 @@ declare global {
       loadConfig: () => Promise<LoadConfigResult>;
       loadComputerUseConfig: () => Promise<{ ok: boolean; config?: ComputerUseConfig; error?: string }>;
       saveComputerUseConfig: (payload: ComputerUseConfig) => Promise<{ ok: boolean; error?: string }>;
+      loadTrinityConfig: () => Promise<{ ok: boolean; config?: TrinityConfig; error?: string }>;
+      saveTrinityConfig: (payload: TrinityConfig) => Promise<{ ok: boolean; error?: string }>;
       loadEmailConfig: () => Promise<{ ok: boolean; config: EmailConfig; error?: string }>;
       loadMcpStatus: (sessionId: string) => Promise<McpStatusResult>;
       importMcpConfig: (payload: { sessionId: string; sourcePath: string }) => Promise<{

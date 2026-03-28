@@ -66,6 +66,11 @@ type AgxConfig = {
     };
   };
   computer_use?: Record<string, unknown>;
+  agent_harness_trinity?: {
+    skill_protocol?: boolean;
+    session_summary?: boolean;
+    learning_enabled?: boolean;
+  };
 };
 
 type EmailConfig = {
@@ -77,6 +82,12 @@ type EmailConfig = {
   smtp_use_tls: boolean;
   from_email: string;
   default_to_email: string;
+};
+
+type TrinityConfig = {
+  skill_protocol: boolean;
+  session_summary: boolean;
+  learning_enabled: boolean;
 };
 
 const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
@@ -100,6 +111,12 @@ const DEFAULT_EMAIL_CONFIG: EmailConfig = {
   smtp_use_tls: true,
   from_email: "",
   default_to_email: "bingzhenli@hotmail.com",
+};
+const TRINITY_CONFIG_KEYS = new Set(["skill_protocol", "session_summary", "learning_enabled"]);
+const DEFAULT_TRINITY_CONFIG: TrinityConfig = {
+  skill_protocol: true,
+  session_summary: false,
+  learning_enabled: false,
 };
 
 const KNOWN_BASE_URLS: Record<string, string> = {
@@ -174,6 +191,27 @@ function loadComputerUseEnabled(cfg: AgxConfig): boolean {
   return false;
 }
 
+function parseBooleanLoose(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const lowered = value.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(lowered)) return true;
+    if (["false", "0", "no", "off"].includes(lowered)) return false;
+  }
+  return fallback;
+}
+
+function loadTrinityConfig(cfg: AgxConfig): TrinityConfig {
+  const raw = (cfg as Record<string, unknown>).agent_harness_trinity;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...DEFAULT_TRINITY_CONFIG };
+  const row = raw as Record<string, unknown>;
+  return {
+    skill_protocol: parseBooleanLoose(row.skill_protocol, DEFAULT_TRINITY_CONFIG.skill_protocol),
+    session_summary: parseBooleanLoose(row.session_summary, DEFAULT_TRINITY_CONFIG.session_summary),
+    learning_enabled: parseBooleanLoose(row.learning_enabled, DEFAULT_TRINITY_CONFIG.learning_enabled),
+  };
+}
+
 function validateEmailConfigPayload(input: unknown): { ok: true; config: EmailConfig } | { ok: false; error: string } {
   if (!input || typeof input !== "object") return { ok: false, error: "invalid payload: object required" };
   const payload = input as Record<string, unknown>;
@@ -218,6 +256,34 @@ function intValue(raw: unknown, field: string): number {
   const parsed = Number(raw);
   if (!Number.isInteger(parsed)) throw new Error(`${field} must be integer`);
   return parsed;
+}
+
+function validateTrinityConfigPayload(input: unknown): { ok: true; config: TrinityConfig } | { ok: false; error: string } {
+  if (!input || typeof input !== "object") return { ok: false, error: "invalid payload: object required" };
+  const payload = input as Record<string, unknown>;
+  for (const key of Object.keys(payload)) {
+    if (!TRINITY_CONFIG_KEYS.has(key)) {
+      return { ok: false, error: `invalid field: ${key}` };
+    }
+  }
+  let skillProtocol: boolean;
+  let sessionSummary: boolean;
+  let learningEnabled: boolean;
+  try {
+    skillProtocol = parseBooleanStrict(payload.skill_protocol, "skill_protocol");
+    sessionSummary = parseBooleanStrict(payload.session_summary, "session_summary");
+    learningEnabled = parseBooleanStrict(payload.learning_enabled, "learning_enabled");
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+  return {
+    ok: true,
+    config: {
+      skill_protocol: skillProtocol,
+      session_summary: sessionSummary,
+      learning_enabled: learningEnabled,
+    },
+  };
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -448,6 +514,8 @@ async function startStudioServe(): Promise<void> {
   const desktopHome = os.homedir();
   const augmentedPath = buildAugmentedPath();
   const bundledPath = resolveBundledBackend();
+  const cfg = loadAgxConfig();
+  const trinity = loadTrinityConfig(cfg);
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -455,6 +523,9 @@ async function startStudioServe(): Promise<void> {
     AGX_DESKTOP_TOKEN: apiToken,
     AGX_WORKSPACE_ROOT: desktopHome,
     AGX_DESKTOP_UNRESTRICTED_FS: "1",
+    AGX_SKILL_PROTOCOL: trinity.skill_protocol ? "true" : "false",
+    AGX_SESSION_SUMMARY: trinity.session_summary ? "true" : "false",
+    AGX_LEARNING_ENABLED: trinity.learning_enabled ? "true" : "false",
   };
 
   if (bundledPath) {
@@ -1414,6 +1485,11 @@ function registerIpc(): void {
     return { ok: true, config: { enabled: loadComputerUseEnabled(cfg) } };
   });
 
+  ipcMain.handle("load-trinity-config", async () => {
+    const cfg = loadAgxConfig();
+    return { ok: true, config: loadTrinityConfig(cfg) };
+  });
+
   ipcMain.handle("save-computer-use-config", async (_event, payload: unknown) => {
     if (!payload || typeof payload !== "object") return { ok: false, error: "invalid payload: object required" };
     const p = payload as { enabled?: unknown };
@@ -1438,6 +1514,20 @@ function registerIpc(): void {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[save-computer-use-config]", err);
       return { ok: false, error: msg || "config_write_failed" };
+    }
+  });
+
+  ipcMain.handle("save-trinity-config", async (_event, payload: unknown) => {
+    const checked = validateTrinityConfigPayload(payload);
+    if (!checked.ok) return { ok: false, error: checked.error };
+    try {
+      const cfg = loadAgxConfig();
+      const root = cfg as Record<string, unknown>;
+      root.agent_harness_trinity = { ...checked.config };
+      saveAgxConfig(cfg);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
     }
   });
 
