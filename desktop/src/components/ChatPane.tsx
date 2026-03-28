@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { createPortal } from "react-dom";
+import { GitBranch, Sparkles } from "lucide-react";
 import {
   useAppStore,
   type Avatar,
@@ -19,6 +19,7 @@ import { ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
+import { HoverTip } from "./ds/HoverTip";
 import { Toast } from "./ds/Toast";
 import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
 import { isKnownNonVisionChatModel } from "../utils/model-vision";
@@ -32,7 +33,6 @@ import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 
-const NEW_TOPIC_PREF_KEY = "agx:newTopicInherit";
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
 const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
 const VISION_UNSUPPORTED_TOAST = "模型不支持该文件类型";
@@ -69,125 +69,32 @@ const FALLBACK_PANE: ChatPaneState = {
   sessionTokens: { input: 0, output: 0 },
 };
 
-function NewTopicSplitButton({ onNewTopic }: { onNewTopic: (inherit: boolean) => void }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [inherit, setInherit] = useState(() => {
-    try {
-      return localStorage.getItem(NEW_TOPIC_PREF_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
-  const anchorRef = useRef<HTMLDivElement>(null);
-  const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
-
-  const updateMenuPos = useCallback(() => {
-    const el = anchorRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setMenuPos({ left: r.left, top: r.top });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!menuOpen) return;
-    updateMenuPos();
-    const onScroll = () => updateMenuPos();
-    window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", onScroll);
-    return () => {
-      window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", onScroll);
-    };
-  }, [menuOpen, updateMenuPos]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [menuOpen]);
-
-  const pick = (val: boolean) => {
-    setInherit(val);
-    try {
-      localStorage.setItem(NEW_TOPIC_PREF_KEY, val ? "1" : "0");
-    } catch {
-      /* noop */
-    }
-    setMenuOpen(false);
-    onNewTopic(val);
-  };
-
+function NewTopicIconButtons({ onNewTopic }: { onNewTopic: (inherit: boolean) => void }) {
+  const iconBtn =
+    "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-faint transition hover:bg-surface-hover hover:text-text-muted";
   return (
-    <>
-      <div ref={anchorRef} className="relative flex shrink-0">
+    <div className="flex shrink-0 items-center gap-0.5">
+      <HoverTip label="全新对话 · 不继承上下文">
         <button
           type="button"
-          className="h-7 rounded-l-lg border border-r-0 border-border px-2 text-[12px] text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-          onClick={() => onNewTopic(inherit)}
-          title={inherit ? "新对话（继承上下文）" : "新对话（全新开始）"}
+          className={iconBtn}
+          aria-label="全新对话，不继承上下文"
+          onClick={() => onNewTopic(false)}
         >
-          新对话
+          <Sparkles className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
         </button>
+      </HoverTip>
+      <HoverTip label="新对话 · 继承上下文（携带摘要）">
         <button
           type="button"
-          className="h-7 rounded-r-lg border border-border px-1 text-[12px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-          onClick={(e) => {
-            e.stopPropagation();
-            setMenuOpen((v) => !v);
-          }}
-          title="选择默认模式"
-          aria-expanded={menuOpen}
-          aria-haspopup="menu"
+          className={iconBtn}
+          aria-label="新对话，继承上下文"
+          onClick={() => onNewTopic(true)}
         >
-          ▾
+          <GitBranch className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
         </button>
-      </div>
-      {menuOpen && menuPos
-        ? createPortal(
-            <>
-              <div
-                className="fixed inset-0 z-[199]"
-                aria-hidden
-                onMouseDown={() => setMenuOpen(false)}
-              />
-              <div
-                role="menu"
-                className="fixed z-[200] min-w-[170px] rounded-md border border-border bg-surface-panel p-1 shadow-2xl backdrop-blur-xl"
-                style={{
-                  left: menuPos.left,
-                  top: menuPos.top,
-                  transform: "translateY(calc(-100% - 6px))",
-                }}
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex w-full items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
-                  onClick={() => pick(false)}
-                >
-                  <span className="w-4 text-center text-cyan-400">{inherit ? "" : "✓"}</span>
-                  <span>全新对话</span>
-                  <span className="ml-auto text-[10px] text-text-faint">不继承</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex w-full items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
-                  onClick={() => pick(true)}
-                >
-                  <span className="w-4 text-center text-cyan-400">{inherit ? "✓" : ""}</span>
-                  <span>继承上下文</span>
-                  <span className="ml-auto text-[10px] text-text-faint">携带摘要</span>
-                </button>
-              </div>
-            </>,
-            document.body
-          )
-        : null}
-    </>
+      </HoverTip>
+    </div>
   );
 }
 
@@ -3532,7 +3439,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
                   </svg>
                 </button>
-                <NewTopicSplitButton onNewTopic={createNewTopic} />
+                <NewTopicIconButtons onNewTopic={createNewTopic} />
                 <button
                   className="flex h-7 items-center gap-1 rounded-lg px-2 text-[12px] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
                   title="更多"

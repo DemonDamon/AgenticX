@@ -115,6 +115,7 @@ class SessionManager:
         )
         self._restore_managed_metadata(sid, managed)
         self._ensure_default_taskspace(managed)
+        self._sync_taskspaces_with_global(managed)
         self._sessions[sid] = managed
         return managed
 
@@ -300,6 +301,7 @@ class SessionManager:
         if managed is None:
             return []
         self._ensure_default_taskspace(managed)
+        self._sync_taskspaces_with_global(managed)
         return [dict(item) for item in managed.taskspaces]
 
     def add_taskspace(
@@ -312,11 +314,19 @@ class SessionManager:
         managed = self.get(session_id, touch=False)
         if managed is None:
             raise KeyError("session not found")
-        resolved_path = self._resolve_taskspace_root(session_id, path)
+        self._ensure_default_taskspace(managed)
+        self._sync_taskspaces_with_global(managed)
+        default_taskspace = self._get_taskspace(managed, "default")
+        resolved_path = (
+            self._resolve_taskspace_path(path)
+            if path and str(path).strip()
+            else str(Path(default_taskspace["path"]).resolve(strict=False))
+        )
         for item in managed.taskspaces:
             if item.get("path") == resolved_path:
                 return dict(item)
-        if len(managed.taskspaces) >= self.max_taskspaces:
+        globals_rows = self._load_global_taskspaces()
+        if len(globals_rows) >= max(0, self.max_taskspaces - 1):
             raise ValueError(f"taskspace limit reached ({self.max_taskspaces})")
         clean_label = (label or "").strip() or Path(resolved_path).name or "taskspace"
         taskspace = {
@@ -324,22 +334,30 @@ class SessionManager:
             "label": clean_label,
             "path": resolved_path,
         }
-        managed.taskspaces.append(taskspace)
-        managed.updated_at = time.time()
-        self._persist_session_state(session_id, managed.studio_session)
+        globals_rows.append(taskspace)
+        self._save_global_taskspaces(globals_rows)
+        self._sync_all_sessions_from_global()
+        for sid, each in self._sessions.items():
+            each.updated_at = time.time()
+            self._persist_session_state(sid, each.studio_session)
         return dict(taskspace)
 
     def remove_taskspace(self, session_id: str, taskspace_id: str) -> bool:
         managed = self.get(session_id, touch=False)
         if managed is None:
             return False
-        before = len(managed.taskspaces)
-        managed.taskspaces = [item for item in managed.taskspaces if item.get("id") != taskspace_id]
-        if len(managed.taskspaces) == before:
+        if str(taskspace_id).strip() == "default":
             return False
-        self._ensure_default_taskspace(managed)
-        managed.updated_at = time.time()
-        self._persist_session_state(session_id, managed.studio_session)
+        globals_rows = self._load_global_taskspaces()
+        before = len(globals_rows)
+        globals_rows = [item for item in globals_rows if item.get("id") != taskspace_id]
+        if len(globals_rows) == before:
+            return False
+        self._save_global_taskspaces(globals_rows)
+        self._sync_all_sessions_from_global()
+        for sid, each in self._sessions.items():
+            each.updated_at = time.time()
+            self._persist_session_state(sid, each.studio_session)
         return True
 
     def list_taskspace_files(
@@ -351,6 +369,8 @@ class SessionManager:
         managed = self.get(session_id, touch=False)
         if managed is None:
             raise KeyError("session not found")
+        self._ensure_default_taskspace(managed)
+        self._sync_taskspaces_with_global(managed)
         taskspace = self._get_taskspace(managed, taskspace_id)
         if taskspace is None:
             raise KeyError("taskspace not found")
@@ -381,6 +401,8 @@ class SessionManager:
         managed = self.get(session_id, touch=False)
         if managed is None:
             raise KeyError("session not found")
+        self._ensure_default_taskspace(managed)
+        self._sync_taskspaces_with_global(managed)
         taskspace = self._get_taskspace(managed, taskspace_id)
         if taskspace is None:
             raise KeyError("taskspace not found")
@@ -799,8 +821,11 @@ class SessionManager:
             return time.time()
 
     def _ensure_default_taskspace(self, managed: ManagedSession) -> None:
-        if managed.taskspaces:
-            return
+        for existing in managed.taskspaces:
+            if existing.get("id") == "default" and existing.get("path"):
+                existing["path"] = str(Path(existing["path"]).resolve(strict=False))
+                existing["label"] = existing.get("label") or "默认工作区"
+                return
         session_ws = getattr(managed.studio_session, "workspace_dir", None)
         default_path = (
             session_ws
@@ -809,13 +834,97 @@ class SessionManager:
         )
         resolved = Path(default_path).resolve(strict=False)
         resolved.mkdir(parents=True, exist_ok=True)
-        managed.taskspaces = [
-            {
-                "id": "default",
-                "label": "默认工作区",
-                "path": str(resolved),
-            }
-        ]
+        managed.taskspaces = [{
+            "id": "default",
+            "label": "默认工作区",
+            "path": str(resolved),
+        }] + [item for item in managed.taskspaces if item.get("id") != "default"]
+
+    def _sync_taskspaces_with_global(self, managed: ManagedSession) -> None:
+        self._ensure_default_taskspace(managed)
+        globals_rows = self._load_global_taskspaces()
+        default_item = self._get_taskspace(managed, "default")
+        if default_item is None:
+            return
+        merged: list[dict[str, str]] = [dict(default_item)]
+        seen_paths: set[str] = {default_item["path"]}
+        for row in globals_rows:
+            path = str(row.get("path", "")).strip()
+            if not path or path in seen_paths:
+                continue
+            merged.append(
+                {
+                    "id": str(row.get("id", "")).strip(),
+                    "label": str(row.get("label", "")).strip() or Path(path).name or "taskspace",
+                    "path": path,
+                }
+            )
+            seen_paths.add(path)
+            if len(merged) >= self.max_taskspaces:
+                break
+        managed.taskspaces = merged
+
+    def _sync_all_sessions_from_global(self) -> None:
+        for managed in self._sessions.values():
+            self._sync_taskspaces_with_global(managed)
+
+    def _global_taskspaces_path(self) -> str:
+        return os.path.join(self._taskspaces_root, "global_workspaces.json")
+
+    def _load_global_taskspaces(self) -> list[dict[str, str]]:
+        path = self._global_taskspaces_path()
+        if not os.path.exists(path):
+            return []
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except Exception:
+            return []
+        if not isinstance(payload, list):
+            return []
+        rows: list[dict[str, str]] = []
+        seen_paths: set[str] = set()
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            taskspace_id = str(item.get("id", "")).strip()
+            raw_path = str(item.get("path", "")).strip()
+            if not taskspace_id or not raw_path:
+                continue
+            resolved_path = self._resolve_taskspace_path(raw_path)
+            if resolved_path in seen_paths:
+                continue
+            rows.append(
+                {
+                    "id": taskspace_id,
+                    "label": str(item.get("label", "")).strip() or Path(resolved_path).name or "taskspace",
+                    "path": resolved_path,
+                }
+            )
+            seen_paths.add(resolved_path)
+            if len(rows) >= max(0, self.max_taskspaces - 1):
+                break
+        return rows
+
+    def _save_global_taskspaces(self, rows: list[dict[str, str]]) -> None:
+        path = self._global_taskspaces_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(rows, fh, ensure_ascii=False, indent=2)
+
+    def _resolve_taskspace_path(self, path: str) -> str:
+        root = Path(str(path).strip()).expanduser()
+        resolved = root.resolve(strict=False)
+        resolved.mkdir(parents=True, exist_ok=True)
+        return str(resolved)
+
+    def _resolve_taskspace_root(self, session_id: str, path: str | None) -> str:
+        if path and str(path).strip():
+            return self._resolve_taskspace_path(path)
+        root = Path(self._taskspaces_root) / session_id / "default"
+        resolved = root.resolve(strict=False)
+        resolved.mkdir(parents=True, exist_ok=True)
+        return str(resolved)
 
     def rebind_default_taskspace_to_workspace(self, managed: ManagedSession) -> None:
         """Re-point the 'default' taskspace to the session's workspace_dir (call after workspace_dir is set)."""
@@ -829,15 +938,6 @@ class SessionManager:
                     Path(resolved).mkdir(parents=True, exist_ok=True)
                     ts["path"] = resolved
                 return
-
-    def _resolve_taskspace_root(self, session_id: str, path: str | None) -> str:
-        if path and str(path).strip():
-            root = Path(str(path).strip()).expanduser()
-        else:
-            root = Path(self._taskspaces_root) / session_id / "default"
-        resolved = root.resolve(strict=False)
-        resolved.mkdir(parents=True, exist_ok=True)
-        return str(resolved)
 
     def _sanitize_taskspaces(self, session_id: str, payload: Any) -> list[dict[str, str]]:
         rows: list[dict[str, str]] = []
