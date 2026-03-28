@@ -1232,6 +1232,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [favoriteToastOpen, setFavoriteToastOpen] = useState(false);
   const [favoriteToastMsg, setFavoriteToastMsg] = useState("");
   const composerRef = useRef<HTMLDivElement | null>(null);
+  const [composerExpanded, setComposerExpanded] = useState(false);
   useEffect(() => {
     if (!favoriteToastOpen) return;
     const t = window.setTimeout(() => setFavoriteToastOpen(false), 1800);
@@ -3374,6 +3375,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 ))}
               </div>
             ) : null}
+            <div className="pointer-events-none absolute right-3 top-2 z-10 flex items-center gap-2">
+              {composerExpanded ? (
+                <span className="text-xs text-text-faint">↩ 键可用于换行</span>
+              ) : null}
+              <button
+                type="button"
+                className="pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-xl text-text-faint/55 outline-none transition hover:bg-surface-hover hover:text-text-strong focus:outline-none focus-visible:bg-surface-hover focus-visible:text-text-strong"
+                aria-label={composerExpanded ? "收起输入区" : "展开输入区"}
+                title={composerExpanded ? "收起输入区（Enter 发送）" : "展开输入区（Enter 换行）"}
+                onClick={() => setComposerExpanded((prev) => !prev)}
+              >
+                {composerExpanded ? (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]">
+                    <path d="M9 5H5v4M15 5h4v4M5 15v4h4M19 15v4h-4" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]">
+                    <path d="M15 5h4v4M9 5H5v4M5 15v4h4M19 15v4h-4" />
+                  </svg>
+                )}
+              </button>
+            </div>
             <div
               ref={composerRef}
               contentEditable
@@ -3457,11 +3480,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     }
                     return;
                   }
+                  if (composerExpanded) {
+                    if (e.metaKey || e.ctrlKey) {
+                      e.preventDefault();
+                      void sendChat(extractComposerText());
+                    }
+                    return;
+                  }
                   e.preventDefault();
                   void sendChat(extractComposerText());
                 }
               }}
-              className="block max-h-[220px] min-h-[40px] w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-0 pt-3 text-sm text-text-primary outline-none"
+              className={`block w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-0 pt-3 text-sm text-text-primary outline-none ${
+                composerExpanded ? "max-h-[62vh] min-h-[260px] pr-40" : "max-h-[220px] min-h-[40px] pr-4"
+              }`}
             />
             {input.trim().length === 0 ? (
               <div className="pointer-events-none absolute left-4 top-3 text-sm text-text-faint">发消息...</div>
