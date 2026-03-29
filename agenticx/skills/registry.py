@@ -83,6 +83,7 @@ class RegistrySkillEntry:
     name: str
     version: str
     description: str
+    skill_type: str = "flexible"
     gate: Dict[str, Any] = field(default_factory=dict)
     author: str = "unknown"
     created_at: str = field(default_factory=_now_iso)
@@ -94,6 +95,7 @@ class RegistrySkillEntry:
             "name": self.name,
             "version": self.version,
             "description": self.description,
+            "skill_type": self.skill_type,
             "gate": self.gate,
             "author": self.author,
             "created_at": self.created_at,
@@ -107,6 +109,7 @@ class RegistrySkillEntry:
             name=str(data.get("name", "")),
             version=str(data.get("version", "0.1.0")),
             description=str(data.get("description", "")),
+            skill_type=str(data.get("skill_type", "flexible")),
             gate=dict(data.get("gate", {}) or {}),
             author=str(data.get("author", "unknown")),
             created_at=str(data.get("created_at", _now_iso())),
@@ -227,6 +230,7 @@ class RegistrySkillEntryModel(BaseModel):
     name: str = Field(min_length=1)
     version: str = Field(default="0.1.0", min_length=1)
     description: str = Field(default="")
+    skill_type: str = Field(default="flexible")
     gate: Dict[str, Any] = Field(default_factory=dict)
     author: str = Field(default="unknown")
     created_at: str = Field(default_factory=_now_iso)
@@ -238,6 +242,7 @@ class RegistrySkillEntryModel(BaseModel):
             name=self.name,
             version=self.version,
             description=self.description,
+            skill_type=self.skill_type,
             gate=self.gate,
             author=self.author,
             created_at=self.created_at,
@@ -364,6 +369,7 @@ class SkillRegistryClient:
             name=name,
             version=str(frontmatter.get("version", "0.1.0")),
             description=str(frontmatter.get("description", "")),
+            skill_type=str(frontmatter.get("skill_type", "flexible")),
             gate=dict(
                 (
                     (frontmatter.get("metadata", {}) or {})

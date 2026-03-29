@@ -6,10 +6,14 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import os
+import time
+from pathlib import Path
 from typing import Any
 
 from agenticx.cli.studio import StudioSession
 from agenticx.cli.studio_skill import get_all_skill_summaries
+from agenticx.skills.meta_skill import MetaSkillInjector
 from agenticx.workspace.loader import load_workspace_context
 
 
@@ -17,11 +21,12 @@ MAX_WORKSPACE_BLOCK_CHARS = 1800
 MAX_WORKSPACE_TOTAL_CHARS = 6000
 
 
-def _build_skills_context() -> str:
-    try:
-        skills = get_all_skill_summaries()
-    except Exception:
-        skills = []
+def _build_skills_context(skills: list[dict[str, Any]] | None = None) -> str:
+    if skills is None:
+        try:
+            skills = get_all_skill_summaries()
+        except Exception:
+            skills = []
     if not skills:
         return "### Skills（共 0 个）\n- (未发现可用 skills)\n"
     lines = [f"### Skills（共 {len(skills)} 个）"]
@@ -287,6 +292,29 @@ def _build_memory_recall_context(session: StudioSession) -> str:
         return ""
 
 
+def _build_session_summary_context(session: StudioSession, max_age_days: int = 7) -> str:
+    flag = os.getenv("AGX_SESSION_SUMMARY", "false").strip().lower()
+    if flag not in {"1", "true", "on", "yes"}:
+        return ""
+    sessions_dir = Path.home() / ".agenticx" / "workspace" / "sessions"
+    if not sessions_dir.exists():
+        return ""
+    session_files = sorted(sessions_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
+    now = time.time()
+    for file_path in session_files:
+        try:
+            if now - file_path.stat().st_mtime > max_age_days * 86400:
+                continue
+            content = file_path.read_text(encoding="utf-8").strip()
+        except Exception:
+            continue
+        if not content:
+            continue
+        preview = content[:2000]
+        return f"## Previous Session Summary\n{preview}\n"
+    return ""
+
+
 def _build_taskspaces_context(taskspaces: list[dict[str, str]] | None) -> str:
     if not taskspaces:
         return ""
@@ -351,10 +379,15 @@ def build_meta_agent_system_prompt(
     avatar_context: dict[str, str] | None = None,
     group_chat: dict[str, Any] | None = None,
 ) -> str:
+    try:
+        skill_summaries = get_all_skill_summaries()
+    except Exception:
+        skill_summaries = []
     workspace_context = _build_workspace_context_block()
     memory_recall = _build_memory_recall_context(session)
     active_subagents = _build_active_subagents_context(session)
-    skills_context = _build_skills_context()
+    session_summary = _build_session_summary_context(session)
+    skills_context = _build_skills_context(skill_summaries)
     mcp_context = _build_mcps_context(session)
     group_allowed: set[str] | None = None
     group_name = ""
@@ -407,7 +440,7 @@ def build_meta_agent_system_prompt(
         if group_allowed is not None
         else ""
     )
-    return (
+    base_prompt = (
         f"{workspace_context}\n"
         f"{avatar_block}"
         f"{group_block}"
@@ -505,9 +538,11 @@ def build_meta_agent_system_prompt(
         f"{lsp_context}"
         f"{active_subagents}"
         f"{memory_recall}"
+        f"{session_summary}"
         f"{taskspaces_context}"
         "## 当前会话上下文\n"
         f"- provider: {session.provider_name or 'default'}\n"
         f"- model: {session.model_name or 'default'}\n"
         f"{_build_context_files_block(session)}"
     )
+    return MetaSkillInjector().inject(base_prompt, skill_summaries)

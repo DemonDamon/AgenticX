@@ -40,6 +40,20 @@ if TYPE_CHECKING:
 META_LEADER_LABEL_SCRATCH_KEY = "__meta_leader_display_name__"
 _DEFAULT_META_PRODUCT_LABEL = "Machi"
 
+TASK_CATEGORIES: Dict[str, str] = {
+    "visual": "Visual/UI/frontend focused tasks",
+    "deep": "Deep research or long-horizon execution tasks",
+    "quick": "Simple, single-file, low-complexity tasks",
+    "architect": "System design and architecture decision tasks",
+}
+
+CATEGORY_MODEL_HINTS: Dict[str, List[str]] = {
+    "visual": ["vision", "vl", "4o", "sonnet", "gemini"],
+    "deep": ["opus", "o1", "deepseek", "r1", "reason"],
+    "quick": ["haiku", "mini", "flash", "small", "lite"],
+    "architect": ["opus", "o1", "gpt-5", "reason", "architect"],
+}
+
 
 def _meta_display_name_for_delegation(session: Any, scratchpad: Dict[str, Any]) -> str:
     direct = str(getattr(session, "meta_leader_display_name", None) or "").strip()
@@ -51,6 +65,49 @@ def _meta_display_name_for_delegation(session: Any, scratchpad: Dict[str, Any]) 
         if s:
             return s
     return _DEFAULT_META_PRODUCT_LABEL
+
+
+def _clone_taskspaces(session: Any) -> list[dict[str, Any]]:
+    taskspaces = getattr(session, "taskspaces", None)
+    if not isinstance(taskspaces, list):
+        return []
+    cloned: list[dict[str, Any]] = []
+    for item in taskspaces:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path", "")).strip()
+        if not path:
+            continue
+        cloned.append(dict(item))
+    return cloned
+
+
+def _collect_path_hints(session: Any) -> list[str]:
+    hints: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: str) -> None:
+        text = str(raw or "").strip()
+        if not text:
+            return
+        try:
+            resolved = str(Path(text).expanduser().resolve(strict=False))
+        except Exception:
+            resolved = text
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        hints.append(resolved)
+
+    for item in _clone_taskspaces(session):
+        _add(item.get("path", ""))
+
+    context_files = getattr(session, "context_files", None)
+    if isinstance(context_files, dict):
+        for raw_path in context_files.keys():
+            _add(str(raw_path))
+
+    return hints
 
 
 _META_ONLY_TOOLS: List[Dict[str, Any]] = [
@@ -152,6 +209,11 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
                     "name": {"type": "string", "description": "Sub-agent display name."},
                     "role": {"type": "string", "description": "Sub-agent role, e.g. coder/researcher/tester."},
                     "task": {"type": "string", "description": "Detailed delegated task for this sub-agent."},
+                    "category": {
+                        "type": "string",
+                        "enum": ["visual", "deep", "quick", "architect"],
+                        "description": "Optional task category used for model routing when provider/model are omitted.",
+                    },
                     "mode": {"type": "string", "enum": ["run", "session"]},
                     "cleanup": {"type": "string", "enum": ["keep", "delete"]},
                     "run_timeout_seconds": {
@@ -393,6 +455,11 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "avatar_id": {"type": "string", "description": "Target avatar ID."},
                     "task": {"type": "string", "description": "Task description for the avatar."},
+                    "category": {
+                        "type": "string",
+                        "enum": ["visual", "deep", "quick", "architect"],
+                        "description": "Optional task category hint for selecting fallback model.",
+                    },
                 },
                 "required": ["avatar_id", "task"],
                 "additionalProperties": False,
@@ -750,6 +817,55 @@ def _model_capability_score(provider: str, model: str) -> int:
         if token in text:
             score -= 7
     return max(10, min(100, score))
+
+
+def _resolve_model_for_category(
+    *,
+    category: str,
+    session: Optional["StudioSession"] = None,
+) -> Dict[str, str]:
+    """Resolve provider/model using category hints from configured candidates."""
+    category_key = str(category or "deep").strip().lower()
+    hints = CATEGORY_MODEL_HINTS.get(category_key, [])
+    if not hints:
+        return {"provider": "", "model": ""}
+    candidates: List[Dict[str, str]] = []
+    try:
+        cfg = ConfigManager.load()
+        providers = cfg.providers if isinstance(cfg.providers, dict) else {}
+        for provider_name, provider_cfg in providers.items():
+            if not isinstance(provider_cfg, dict):
+                continue
+            model_name = str(provider_cfg.get("model", "")).strip()
+            if not model_name:
+                continue
+            candidates.append({"provider": str(provider_name).strip(), "model": model_name})
+    except Exception:
+        candidates = []
+
+    current_provider = str(getattr(session, "provider_name", "") or "").strip()
+    current_model = str(getattr(session, "model_name", "") or "").strip()
+    if current_provider and current_model:
+        exists = any(
+            item["provider"] == current_provider and item["model"] == current_model
+            for item in candidates
+        )
+        if not exists:
+            candidates.append({"provider": current_provider, "model": current_model})
+
+    best: Dict[str, str] = {"provider": "", "model": ""}
+    best_score = -1
+    for item in candidates:
+        text = f"{item['provider']}/{item['model']}".lower()
+        hint_score = sum(1 for hint in hints if hint in text)
+        if hint_score <= 0:
+            continue
+        capability = _model_capability_score(item["provider"], item["model"])
+        score = hint_score * 100 + capability
+        if score > best_score:
+            best_score = score
+            best = item
+    return best
 
 
 def _read_email_config() -> Dict[str, Any]:
@@ -1197,6 +1313,7 @@ async def _run_delegation_in_avatar_session(
     fallback_provider: Optional[str] = None,
     fallback_model: Optional[str] = None,
     meta_display_name: str = _DEFAULT_META_PRODUCT_LABEL,
+    source_session: Optional[Any] = None,
 ) -> None:
     from agenticx.runtime.agent_runtime import AgentRuntime
     from agenticx.runtime.events import EventType, RuntimeEvent
@@ -1208,6 +1325,34 @@ async def _run_delegation_in_avatar_session(
     workspace_dir = str(getattr(avatar_config, "workspace_dir", "") or "").strip()
     if workspace_dir:
         avatar_session.workspace_dir = workspace_dir
+    parent_taskspaces = _clone_taskspaces(source_session)
+    if parent_taskspaces:
+        setattr(avatar_session, "taskspaces", parent_taskspaces)
+    if workspace_dir and isinstance(getattr(avatar_session, "taskspaces", None), list):
+        workspace_dir_resolved = str(Path(workspace_dir).expanduser().resolve(strict=False))
+        has_workspace = False
+        for item in avatar_session.taskspaces:
+            if not isinstance(item, dict):
+                continue
+            item_path = str(item.get("path", "")).strip()
+            if not item_path:
+                continue
+            try:
+                item_path = str(Path(item_path).expanduser().resolve(strict=False))
+            except Exception:
+                pass
+            if item_path == workspace_dir_resolved:
+                has_workspace = True
+                break
+        if not has_workspace:
+            avatar_session.taskspaces.append(
+                {"id": "avatar-workspace", "label": "avatar-workspace", "path": workspace_dir_resolved}
+            )
+    if isinstance(getattr(avatar_session, "taskspaces", None), list):
+        avatar_managed.taskspaces = list(avatar_session.taskspaces)
+    parent_context_files = getattr(source_session, "context_files", None)
+    if isinstance(parent_context_files, dict) and parent_context_files:
+        avatar_session.context_files.update(dict(parent_context_files))
 
     provider_name = (
         str(getattr(avatar_config, "default_provider", "") or "").strip()
@@ -1271,6 +1416,14 @@ async def _run_delegation_in_avatar_session(
         delegation_system_prompt += f"\n## 工作目录\n- {workspace_hint}\n"
 
     delegated_input = f"[委派任务] 来自「{meta_display_name}」:\n{task}"
+    path_hints = _collect_path_hints(source_session)
+    if path_hints:
+        hint_lines = "\n".join(f"- {path}" for path in path_hints[:20])
+        delegated_input += (
+            "\n\n[可用绝对路径提示]\n"
+            "用户可能通过 @ 引用了文件。若需要读文件，请优先使用下列绝对路径或其子路径，不要退回到分身默认目录猜测路径：\n"
+            f"{hint_lines}"
+        )
     final_text = ""
     error_text = ""
     status = "running"
@@ -1517,6 +1670,13 @@ async def dispatch_meta_tool_async(
                 timeout_value = int(raw_timeout)
             except Exception:
                 timeout_value = None
+        category = str(arguments.get("category", "deep") or "deep").strip().lower()
+        requested_provider = str(arguments.get("provider", "")).strip()
+        requested_model = str(arguments.get("model", "")).strip()
+        if not requested_provider and not requested_model:
+            routed = _resolve_model_for_category(category=category, session=session)
+            requested_provider = routed.get("provider", "")
+            requested_model = routed.get("model", "")
         result = await team_manager.spawn_subagent(
             name=str(arguments.get("name", "")).strip(),
             role=str(arguments.get("role", "")).strip(),
@@ -1528,8 +1688,8 @@ async def dispatch_meta_tool_async(
             cleanup=str(arguments.get("cleanup", "")).strip() or None,
             run_timeout_seconds=timeout_value,
             attachments=arguments.get("attachments") if isinstance(arguments.get("attachments"), list) else None,
-            provider=str(arguments.get("provider", "")).strip() or None,
-            model=str(arguments.get("model", "")).strip() or None,
+            provider=requested_provider or None,
+            model=requested_model or None,
             workspace_dir=str(arguments.get("workspace_dir", "")).strip() or None,
             system_prompt=str(arguments.get("system_prompt", "")).strip() or None,
         )
@@ -1891,6 +2051,12 @@ async def dispatch_meta_tool_async(
         cancel_event = asyncio.Event()
         meta_provider = str(getattr(session, "provider_name", "") or "").strip()
         meta_model = str(getattr(session, "model_name", "") or "").strip()
+        if "category" in arguments:
+            category = str(arguments.get("category", "deep") or "deep").strip().lower()
+            routed = _resolve_model_for_category(category=category, session=session)
+            if routed.get("provider") and routed.get("model"):
+                meta_provider = str(routed.get("provider", "")).strip()
+                meta_model = str(routed.get("model", "")).strip()
         meta_display_name = _meta_display_name_for_delegation(session, scratchpad)
 
         async def _delegation_wrapper() -> None:
@@ -1907,6 +2073,7 @@ async def dispatch_meta_tool_async(
                     fallback_provider=meta_provider,
                     fallback_model=meta_model,
                     meta_display_name=meta_display_name,
+                    source_session=session,
                 )
             except Exception as exc:
                 _meta_log.error(
