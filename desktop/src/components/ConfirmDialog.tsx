@@ -53,7 +53,7 @@ export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, on
               onChange={() => setPolicy("ask-every-time")}
               className="h-4 w-4 border-border bg-surface-panel accent-emerald-500"
             />
-            Ask Every Time（仅本次允许）
+            每次询问（仅本次允许）
           </label>
           <label className="mb-1 flex cursor-pointer items-center gap-2">
             <input
@@ -63,7 +63,7 @@ export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, on
               onChange={() => setPolicy("use-allowlist")}
               className="h-4 w-4 border-border bg-surface-panel accent-emerald-500"
             />
-            Use Allowlist（本会话允许同类）
+            白名单放行（本会话允许同类）
           </label>
           <label className="flex cursor-pointer items-center gap-2">
             <input
@@ -73,7 +73,7 @@ export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, on
               onChange={() => setPolicy("run-everything")}
               className="h-4 w-4 border-border bg-surface-panel accent-amber-500"
             />
-            Run Everything（本会话不再询问）
+            全部自动执行（本会话不再询问）
           </label>
         </div>
     </Modal>

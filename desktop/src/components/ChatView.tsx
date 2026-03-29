@@ -39,9 +39,9 @@ const statusDot: Record<string, string> = {
 };
 
 const confirmModeLabel: Record<string, string> = {
-  manual: "Ask Every Time",
-  "semi-auto": "Use Allowlist",
-  auto: "Run Everything",
+  manual: "每次询问",
+  "semi-auto": "白名单放行",
+  auto: "全部自动执行",
 };
 
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
