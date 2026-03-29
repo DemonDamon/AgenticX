@@ -389,3 +389,47 @@ def test_todo_write_updates_session_state() -> None:
     )
     assert "[x] A" in result
     assert "[>] B <- doing B" in result
+
+
+def test_liteparse_returns_error_when_adapter_fails(monkeypatch, tmp_path: Path) -> None:
+    doc_path = tmp_path / "doc.pdf"
+    doc_path.write_text("dummy", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    class _FakeLiteParseAdapter:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def parse_to_text(self, file_path: Path) -> str:
+            raise RuntimeError("parse failed")
+
+    monkeypatch.setattr("agenticx.tools.adapters.liteparse.LiteParseAdapter", _FakeLiteParseAdapter)
+
+    result = agent_tools.dispatch_tool("liteparse", {"path": "doc.pdf"}, StudioSession())
+    assert result.startswith("ERROR: liteparse parsing failed:")
+
+
+def test_liteparse_returns_extracted_text(monkeypatch, tmp_path: Path) -> None:
+    doc_path = tmp_path / "doc.pdf"
+    doc_path.write_text("dummy", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    class _FakeLiteParseAdapter:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def parse_to_text(self, file_path: Path) -> str:
+            return "parsed result"
+
+    monkeypatch.setattr("agenticx.tools.adapters.liteparse.LiteParseAdapter", _FakeLiteParseAdapter)
+
+    result = agent_tools.dispatch_tool("liteparse", {"path": "doc.pdf"}, StudioSession())
+    assert result == "parsed result"

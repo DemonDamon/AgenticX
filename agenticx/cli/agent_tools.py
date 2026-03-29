@@ -419,9 +419,8 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "liteparse",
             "description": (
-                "Parse a document file (PDF, DOCX, PPTX, XLSX, images) and return "
-                "extracted text. Uses LiteParse if installed, falls back to MinerU "
-                "or plain text reader automatically."
+                "Parse a document file (PDF, DOCX, PPTX, XLSX, images) via LiteParse "
+                "and return extracted text."
             ),
             "parameters": {
                 "type": "object",
@@ -1529,7 +1528,7 @@ def _tool_list_files(arguments: Dict[str, Any], session: Optional[StudioSession]
 
 
 async def _tool_liteparse(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
-    """Parse one document via UnifiedDocumentTool fallback chain."""
+    """Parse one document strictly via LiteParse adapter."""
     raw_path = str(arguments.get("path", "")).strip()
     if not raw_path:
         return "ERROR: missing required parameter 'path'."
@@ -1539,14 +1538,26 @@ async def _tool_liteparse(arguments: Dict[str, Any], session: Optional[StudioSes
         return f"ERROR: {exc}"
     if not path.exists():
         return f"ERROR: file not found: {path}"
+    if path.is_dir():
+        return f"ERROR: expected a file path, got directory: {path}"
 
-    from agenticx.tools.unified_document import UnifiedDocumentTool
+    from agenticx.tools.adapters.liteparse import LiteParseAdapter
 
-    tool = UnifiedDocumentTool()
-    success, content = tool.execute(str(path))
-    if success:
-        return content
-    return f"ERROR: document parsing failed: {content}"
+    if not LiteParseAdapter.is_available():
+        return (
+            "ERROR: liteparse CLI is not available. "
+            "Install with: npm i -g @llamaindex/liteparse"
+        )
+
+    try:
+        adapter = LiteParseAdapter(config={"debug": False})
+        content = await adapter.parse_to_text(path)
+    except Exception as exc:
+        return f"ERROR: liteparse parsing failed: {exc}"
+
+    if not content.strip():
+        return "ERROR: liteparse returned empty content."
+    return content
 
 
 def _resolve_lsp_settings() -> tuple[bool, float]:

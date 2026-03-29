@@ -79,3 +79,30 @@ async def test_parse_to_text_returns_markdown_content(tmp_path: Path, monkeypatc
     monkeypatch.setattr(adapter, "parse", fake_parse)
     text = await adapter.parse_to_text(source)
     assert text == "parsed content"
+
+
+@pytest.mark.asyncio
+async def test_parse_extracts_text_from_pages_when_top_text_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """parse() should merge page texts when top-level text is absent."""
+    source = tmp_path / "sample.pdf"
+    source.write_text("dummy", encoding="utf-8")
+
+    adapter = LiteParseAdapter()
+
+    async def fake_run(_file_path: Path):
+        return {
+            "pages": [
+                {"page": 1, "text": "page one"},
+                {"page": 2, "text": "page two"},
+            ]
+        }
+
+    monkeypatch.setattr(adapter, "_run_liteparse_parse", fake_run)
+
+    artifacts = await adapter.parse(file_path=source, output_dir=tmp_path / "out")
+    assert artifacts.markdown_file is not None
+    merged = artifacts.markdown_file.read_text(encoding="utf-8")
+    assert "page one" in merged
+    assert "page two" in merged
