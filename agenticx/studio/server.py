@@ -1162,12 +1162,16 @@ def create_studio_app() -> FastAPI:
                     if is_avatar_session:
                         sys_prompt = _build_avatar_direct_prompt()
                     else:
+                        _u_nickname = str(getattr(payload, "user_nickname", None) or "").strip()
+                        _u_preference = str(getattr(payload, "user_preference", None) or "").strip()
                         sys_prompt = build_meta_agent_system_prompt(
                             session,
                             mode=mode,
                             taskspaces=managed.taskspaces,
                             avatar_context=avatar_context,
                             group_chat=_meta_group_chat_payload(managed),
+                            user_nickname=_u_nickname,
+                            user_preference=_u_preference,
                         )
                     user_message_content: Any | None = None
                     history_user_attachments: list[dict[str, Any]] | None = None

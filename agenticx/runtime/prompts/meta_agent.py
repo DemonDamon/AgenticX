@@ -371,6 +371,19 @@ def _build_lsp_context() -> str:
     )
 
 
+def _build_user_profile_block(nickname: str, preference: str) -> str:
+    """Build a user profile block injected at the end of every system prompt."""
+    parts = ["## 用户档案（请严格遵守）"]
+    if nickname:
+        parts.append(f"- 用户称呼：{nickname}（在对话中请称呼用户为此名，禁止省略）")
+    if preference:
+        pref_trimmed = preference.strip()[:500]
+        parts.append(f"- 用户偏好与风格：\n{pref_trimmed}")
+    if len(parts) == 1:
+        return ""
+    return "\n".join(parts) + "\n\n"
+
+
 def build_meta_agent_system_prompt(
     session: StudioSession,
     *,
@@ -378,6 +391,8 @@ def build_meta_agent_system_prompt(
     taskspaces: list[dict[str, str]] | None = None,
     avatar_context: dict[str, str] | None = None,
     group_chat: dict[str, Any] | None = None,
+    user_nickname: str = "",
+    user_preference: str = "",
 ) -> str:
     try:
         skill_summaries = get_all_skill_summaries()
@@ -544,5 +559,6 @@ def build_meta_agent_system_prompt(
         f"- provider: {session.provider_name or 'default'}\n"
         f"- model: {session.model_name or 'default'}\n"
         f"{_build_context_files_block(session)}"
+        f"{_build_user_profile_block(user_nickname, user_preference)}"
     )
     return MetaSkillInjector().inject(base_prompt, skill_summaries)

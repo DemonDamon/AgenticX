@@ -205,8 +205,10 @@ type AppState = {
   planMode: boolean;
   theme: ThemeMode;
   chatStyle: ChatStyle;
-  /** Shown on user bubbles and sent as group chat context label (empty → 「我」). */
-  userDisplayName: string;
+  /** Global user nickname shown on all bubbles and sent as context label (empty → 「我」). */
+  userNickname: string;
+  /** Free-text user preference/style injected into every agent system prompt. Max 500 chars. */
+  userPreference: string;
   confirmStrategy: ConfirmStrategy;
   mcpServers: McpServer[];
   avatars: Avatar[];
@@ -230,7 +232,8 @@ type AppState = {
   setPlanMode: (v: boolean) => void;
   setTheme: (theme: ThemeMode) => void;
   setChatStyle: (style: ChatStyle) => void;
-  setUserDisplayName: (name: string) => void;
+  setUserNickname: (name: string) => void;
+  setUserPreference: (pref: string) => void;
   setConfirmStrategy: (v: ConfirmStrategy) => void;
   setMcpServers: (servers: McpServer[]) => void;
   setAvatars: (avatars: Avatar[]) => void;
@@ -350,6 +353,7 @@ function makeDefaultPane(): ChatPane {
 
 const CHAT_STYLE_STORAGE_KEY = "agx-chat-style";
 const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
+const USER_PREFERENCE_KEY = "agx-user-preference";
 
 function loadChatStyle(): ChatStyle {
   try {
@@ -361,10 +365,20 @@ function loadChatStyle(): ChatStyle {
   return "im";
 }
 
-function loadUserDisplayName(): string {
+function loadUserNickname(): string {
   try {
     const saved = window.localStorage.getItem(USER_DISPLAY_NAME_KEY);
     if (typeof saved === "string") return saved.slice(0, 48);
+  } catch {
+    // ignore storage errors
+  }
+  return "";
+}
+
+function loadUserPreference(): string {
+  try {
+    const saved = window.localStorage.getItem(USER_PREFERENCE_KEY);
+    if (typeof saved === "string") return saved.slice(0, 500);
   } catch {
     // ignore storage errors
   }
@@ -386,7 +400,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   planMode: false,
   theme: "dark",
   chatStyle: loadChatStyle(),
-  userDisplayName: loadUserDisplayName(),
+  userNickname: loadUserNickname(),
+  userPreference: loadUserPreference(),
   confirmStrategy: "semi-auto",
   mcpServers: [],
   avatars: [],
@@ -421,16 +436,27 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { chatStyle };
     }),
-  setUserDisplayName: (userDisplayName) =>
+  setUserNickname: (name) =>
     set(() => {
-      const next = String(userDisplayName ?? "").slice(0, 48);
+      const next = String(name ?? "").slice(0, 48);
       try {
         if (next.trim()) window.localStorage.setItem(USER_DISPLAY_NAME_KEY, next);
         else window.localStorage.removeItem(USER_DISPLAY_NAME_KEY);
       } catch {
         // ignore storage errors
       }
-      return { userDisplayName: next };
+      return { userNickname: next };
+    }),
+  setUserPreference: (pref) =>
+    set(() => {
+      const next = String(pref ?? "").slice(0, 500);
+      try {
+        if (next.trim()) window.localStorage.setItem(USER_PREFERENCE_KEY, next);
+        else window.localStorage.removeItem(USER_PREFERENCE_KEY);
+      } catch {
+        // ignore storage errors
+      }
+      return { userPreference: next };
     }),
   setConfirmStrategy: (confirmStrategy) => set({ confirmStrategy }),
   setMcpServers: (mcpServers) => set({ mcpServers }),

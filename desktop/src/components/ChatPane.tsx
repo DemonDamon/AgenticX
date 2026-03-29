@@ -1087,8 +1087,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const avatars = useAppStore((s) => s.avatars);
   const groups = useAppStore((s) => s.groups);
   const chatStyle = useAppStore((s) => s.chatStyle);
-  const userDisplayName = useAppStore((s) => s.userDisplayName);
-  const userBubbleLabel = useMemo(() => userDisplayName.trim() || "我", [userDisplayName]);
+  const userNickname = useAppStore((s) => s.userNickname);
+  const userPreference = useAppStore((s) => s.userPreference);
+  const userBubbleLabel = useMemo(() => userNickname.trim() || "我", [userNickname]);
   const isGroupPane = Boolean(pane?.avatarId?.startsWith("group:"));
   const groupChatId = isGroupPane && pane?.avatarId ? pane.avatarId.slice("group:".length) : "";
   const activeGroup = useMemo(
@@ -2291,6 +2292,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         body.meta_leader_display_name = metaLeaderDisplayName;
         body.user_display_name = userBubbleLabel;
       }
+      if (userBubbleLabel && userBubbleLabel !== "我") body.user_nickname = userBubbleLabel;
+      if (userPreference.trim()) body.user_preference = userPreference.trim();
       if (userAttachments.length > 0) {
         const imageInputs = userAttachments
           .filter((file) => !!file.dataUrl && file.mimeType.startsWith("image/"))
