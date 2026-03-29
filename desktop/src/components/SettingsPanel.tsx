@@ -1397,7 +1397,7 @@ function FavoritesTab({
   );
 }
 
-/** Computer Use toggle: lives under 通用 (general), not 工作区. */
+/** 桌面操控开关：在「通用」Tab，不在工作区。 */
 function ComputerUseGeneralPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1415,7 +1415,7 @@ function ComputerUseGeneralPanel() {
           setEnabled(Boolean(result.config.enabled));
         }
       } catch {
-        if (!disposed) setMessage("读取 Computer Use 配置失败。");
+        if (!disposed) setMessage("读取桌面操控配置失败。");
       } finally {
         if (!disposed) setLoading(false);
       }
@@ -1451,14 +1451,14 @@ function ComputerUseGeneralPanel() {
 
   if (loading) {
     return (
-      <Panel title="Computer Use（桌面操控）">
+      <Panel title="桌面操控">
         <div className="py-2 text-sm text-text-faint">加载中…</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="Computer Use（桌面操控）">
+    <Panel title="桌面操控">
       <p className="mb-3 text-xs text-text-faint">
         写入本机 <code className="text-text-subtle">~/.agenticx/config.yaml</code> 中的{" "}
         <code className="text-text-subtle">computer_use.enabled</code>。开启后由 Machi 随应用启动的内置助手读取该开关并尝试加载桌面级能力。若对话里仍看不到相关工具，请确认已安装包含该能力的 Machi 版本；修改后需完全退出并重新打开 Machi（远程模式见保存成功后的说明）。
@@ -1471,7 +1471,7 @@ function ComputerUseGeneralPanel() {
           disabled={saving}
           onChange={(e) => void persist(e.target.checked)}
         />
-        启用 Computer Use（桌面级截屏 / 键鼠等，需权限与依赖）
+        启用桌面操控（桌面级截屏 / 键鼠等，需权限与依赖）
       </label>
       {message ? (
         <div
@@ -1515,10 +1515,10 @@ function AgentHarnessTrinityPanel() {
           setForm(loaded);
           setLastSaved(loaded);
         } else if (!disposed) {
-          setMessage(result?.error ? String(result.error) : "读取 Agent Harness Trinity 配置失败。");
+          setMessage(result?.error ? String(result.error) : "读取智能体三件套配置失败。");
         }
       } catch {
-        if (!disposed) setMessage("读取 Agent Harness Trinity 配置失败。");
+        if (!disposed) setMessage("读取智能体三件套配置失败。");
       } finally {
         if (!disposed) setLoading(false);
       }
@@ -1555,14 +1555,14 @@ function AgentHarnessTrinityPanel() {
 
   if (loading) {
     return (
-      <Panel title="Agent Harness Trinity">
+      <Panel title="智能体三件套">
         <div className="py-2 text-sm text-text-faint">加载中…</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="Agent Harness Trinity">
+    <Panel title="智能体三件套">
       <p className="mb-3 text-xs text-text-faint">
         写入本机 <code className="text-text-subtle">~/.agenticx/config.yaml</code> 的{" "}
         <code className="text-text-subtle">agent_harness_trinity</code> 段，并在本地后端启动时映射为{" "}
@@ -1579,7 +1579,7 @@ function AgentHarnessTrinityPanel() {
             disabled={saving}
             onChange={(e) => void update({ skill_protocol: e.target.checked })}
           />
-          启用 Skill-First Protocol（AGX_SKILL_PROTOCOL）
+          启用技能优先协议（AGX_SKILL_PROTOCOL）
         </label>
         <label className="flex cursor-pointer items-center gap-2">
           <input
@@ -1589,7 +1589,7 @@ function AgentHarnessTrinityPanel() {
             disabled={saving}
             onChange={(e) => void update({ session_summary: e.target.checked })}
           />
-          启用 Session Summary Continuity（AGX_SESSION_SUMMARY）
+          启用会话摘要延续（AGX_SESSION_SUMMARY）
         </label>
         <label className="flex cursor-pointer items-center gap-2">
           <input
@@ -1599,7 +1599,7 @@ function AgentHarnessTrinityPanel() {
             disabled={saving}
             onChange={(e) => void update({ learning_enabled: e.target.checked })}
           />
-          启用 Observation Learning（AGX_LEARNING_ENABLED）
+          启用观察式学习（AGX_LEARNING_ENABLED）
         </label>
       </div>
       {message ? (
@@ -1902,7 +1902,7 @@ export function SettingsPanel({
             {/* === GENERAL TAB === */}
             {tab === "general" && (
               <div className="space-y-4">
-                <Panel title="Display">
+                <Panel title="显示">
                   <label className="block text-sm text-text-muted">
                     主题
                     <select
@@ -1910,9 +1910,9 @@ export function SettingsPanel({
                       value={theme}
                       onChange={(e) => onThemeChange(e.target.value as "dark" | "light" | "dim")}
                     >
-                      <option value="dark">Dark</option>
-                      <option value="dim">Dim</option>
-                      <option value="light">Light</option>
+                      <option value="dark">深色</option>
+                      <option value="dim">暗灰</option>
+                      <option value="light">浅色</option>
                     </select>
                   </label>
                   <label className="mt-3 block text-sm text-text-muted">
@@ -1942,16 +1942,16 @@ export function SettingsPanel({
                     分身回复时会按此名称识别「人类提问者」；勿无故 @ 组长，除非需要协调。
                   </p>
                 </Panel>
-                <Panel title="Permissions">
+                <Panel title="权限">
                   <div className="mb-2 text-sm font-medium text-text-primary">工具执行权限模式</div>
                   <select
                     className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
                     value={confirmStrategy}
                     onChange={(e) => void onConfirmStrategyChange(e.target.value as ConfirmMode)}
                   >
-                    <option value="manual">Ask Every Time</option>
-                    <option value="semi-auto">Use Allowlist</option>
-                    <option value="auto">Run Everything</option>
+                    <option value="manual">每次询问</option>
+                    <option value="semi-auto">白名单放行</option>
+                    <option value="auto">全部自动执行</option>
                   </select>
                   <div className="mt-2 text-xs text-text-subtle">
                     {confirmStrategy === "manual"
