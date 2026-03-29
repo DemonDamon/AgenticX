@@ -156,6 +156,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     skill_protocol: boolean;
     session_summary: boolean;
     learning_enabled: boolean;
+    skill_manage_enabled: boolean;
   }) => ipcRenderer.invoke("save-trinity-config", payload),
   loadEmailConfig: async () => ipcRenderer.invoke("load-email-config"),
   loadMcpStatus: async (sessionId: string) => ipcRenderer.invoke("load-mcp-status", sessionId),

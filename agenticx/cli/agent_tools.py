@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import uuid
@@ -29,7 +30,9 @@ from agenticx.cli.studio_mcp import (
 )
 from agenticx.cli.studio_skill import get_all_skill_summaries, skill_use as studio_skill_use
 from agenticx.llms.provider_resolver import ProviderResolver
+from agenticx.memory.session_store import SessionStore
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
+from agenticx.skills.guard import scan_skill, should_allow
 from agenticx.runtime.confirm import AsyncConfirmGate, ConfirmGate, SyncConfirmGate
 from agenticx.workspace.loader import (
     append_daily_memory,
@@ -309,6 +312,32 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "skill_manage",
+            "description": "Create, patch, or delete agent-created skills under ~/.agenticx/skills/agent-created/.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "patch", "delete"],
+                        "description": "Operation to perform.",
+                    },
+                    "name": {"type": "string", "description": "Skill directory name (no path separators)."},
+                    "content": {
+                        "type": "string",
+                        "description": "Full SKILL.md body for create.",
+                    },
+                    "old_string": {"type": "string", "description": "Substring to replace (patch)."},
+                    "new_string": {"type": "string", "description": "Replacement text (patch)."},
+                },
+                "required": ["action", "name"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "todo_write",
             "description": "Update structured task list for current agent session.",
             "parameters": {
@@ -394,6 +423,35 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "limit": {"type": "integer"},
                 },
                 "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "session_search",
+            "description": (
+                "Search past conversation sessions by keyword. "
+                "Returns matching message excerpts grouped by session."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search keywords (FTS5 syntax supported). Empty returns recent sessions.",
+                    },
+                    "role_filter": {
+                        "type": "string",
+                        "description": "Comma-separated roles to filter: user,assistant,tool,system",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max sessions to return (1-5, default 3).",
+                    },
+                },
+                "required": [],
                 "additionalProperties": False,
             },
         },
@@ -1485,6 +1543,157 @@ def _tool_memory_search(arguments: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _skill_manage_enabled() -> bool:
+    v = os.environ.get("AGX_SKILL_MANAGE", "0").strip().lower()
+    if v in {"1", "true", "yes", "on"}:
+        return True
+    if os.environ.get("AGX_CONFIRM_STRATEGY", "").strip().lower() == "auto":
+        return True
+    return False
+
+
+def _safe_skill_dir_name(name: str) -> Optional[str]:
+    n = str(name or "").strip()
+    if not n or "/" in n or "\\" in n or n.startswith(".") or ".." in n:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", n):
+        return None
+    return n
+
+
+def _agent_created_skill_root() -> Path:
+    return Path.home() / ".agenticx" / "skills" / "agent-created"
+
+
+def _tool_session_search(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
+    _ = session
+    from agenticx.memory.session_store import session_fts_enabled
+
+    store = SessionStore()
+    raw_q = str(arguments.get("query", "") or "").strip()
+    role_raw = str(arguments.get("role_filter", "") or "").strip()
+    role_parts = [x.strip().lower() for x in role_raw.split(",") if x.strip()] if role_raw else None
+    lim = int(arguments.get("limit", 3) or 3)
+    lim = max(1, min(lim, 5))
+
+    if not raw_q:
+        rows = store._list_latest_sessions_sync(lim)
+        sessions = [
+            {
+                "session_id": r["session_id"],
+                "created_at": r["created_at"],
+                "metadata": r["metadata"],
+            }
+            for r in rows
+        ]
+        return json.dumps({"mode": "recent", "sessions": sessions}, ensure_ascii=False)
+
+    if not session_fts_enabled():
+        return json.dumps({"mode": "search", "sessions": []}, ensure_ascii=False)
+
+    hits = store._search_session_messages_sync(raw_q, role_parts, limit=500)
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for h in hits:
+        sid = h["session_id"]
+        if sid not in groups:
+            if len(groups) >= lim:
+                continue
+            groups[sid] = []
+        groups[sid].append(h)
+
+    def _truncate_hits(items: List[Dict[str, Any]], max_chars: int = 10_000) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        total = 0
+        for it in items:
+            frag = json.dumps(it, ensure_ascii=False)
+            if total + len(frag) > max_chars and out:
+                break
+            out.append(it)
+            total += len(frag) + 1
+        return out
+
+    sessions_out = [{"session_id": sid, "hits": _truncate_hits(items)} for sid, items in groups.items()]
+    return json.dumps({"mode": "search", "sessions": sessions_out}, ensure_ascii=False)
+
+
+def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
+    _ = session
+    if not _skill_manage_enabled():
+        return (
+            "ERROR: skill_manage is disabled. Set AGX_SKILL_MANAGE=1 "
+            "or AGX_CONFIRM_STRATEGY=auto (Run Everything hook)."
+        )
+    action = str(arguments.get("action", "") or "").strip().lower()
+    name = _safe_skill_dir_name(str(arguments.get("name", "") or ""))
+    if name is None:
+        return "ERROR: invalid skill name"
+    root = _agent_created_skill_root().expanduser().resolve(strict=False)
+    skill_dir = (root / name).resolve(strict=False)
+    try:
+        skill_dir.relative_to(root)
+    except ValueError:
+        return "ERROR: skill path outside agent-created root"
+
+    if action == "create":
+        content = str(arguments.get("content", "") or "")
+        if not content.strip():
+            return "ERROR: content is required for create"
+        if skill_dir.exists():
+            return "ERROR: skill already exists"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        skill_md = skill_dir / "SKILL.md"
+        try:
+            skill_md.write_text(content, encoding="utf-8")
+            result = scan_skill(skill_dir, source="agent-created")
+            ok, reason = should_allow(result, "agent-created")
+            if not ok:
+                shutil.rmtree(skill_dir, ignore_errors=True)
+                return f"ERROR: guard rejected create ({reason})"
+        except OSError as exc:
+            shutil.rmtree(skill_dir, ignore_errors=True)
+            return f"ERROR: {exc}"
+        return json.dumps({"ok": True, "action": "create", "path": str(skill_md)}, ensure_ascii=False)
+
+    if action == "patch":
+        old_s = str(arguments.get("old_string", ""))
+        new_s = str(arguments.get("new_string", ""))
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.is_file():
+            return "ERROR: SKILL.md not found"
+        try:
+            original = skill_md.read_text(encoding="utf-8")
+        except OSError as exc:
+            return f"ERROR: read failed: {exc}"
+        if old_s not in original:
+            return "ERROR: old_string not found in SKILL.md"
+        if original.count(old_s) != 1:
+            return "ERROR: old_string must match exactly once"
+        updated = original.replace(old_s, new_s, 1)
+        backup = original
+        try:
+            skill_md.write_text(updated, encoding="utf-8")
+            result = scan_skill(skill_dir, source="agent-created")
+            ok, reason = should_allow(result, "agent-created")
+            if not ok:
+                skill_md.write_text(backup, encoding="utf-8")
+                return f"ERROR: guard rejected patch ({reason})"
+        except OSError as exc:
+            skill_md.write_text(backup, encoding="utf-8")
+            return f"ERROR: {exc}"
+        return json.dumps({"ok": True, "action": "patch", "path": str(skill_md)}, ensure_ascii=False)
+
+    if action == "delete":
+        if not skill_dir.exists():
+            return json.dumps({"ok": True, "action": "delete", "removed": False}, ensure_ascii=False)
+        try:
+            shutil.rmtree(skill_dir)
+        except OSError as exc:
+            return f"ERROR: delete failed: {exc}"
+        return json.dumps({"ok": True, "action": "delete", "removed": True}, ensure_ascii=False)
+
+    return "ERROR: unknown action"
+
+
 def _tool_ask_user(arguments: Dict[str, Any], *, service_mode: bool = False) -> str:
     if service_mode:
         return "ERROR: ask_user is not supported in service mode; use confirm_required flow."
@@ -1772,6 +1981,8 @@ async def dispatch_tool_async(
             return _tool_skill_use(arguments, session)
         if name == "skill_list":
             return _tool_skill_list()
+        if name == "skill_manage":
+            return _tool_skill_manage(arguments, session)
         if name == "todo_write":
             return _tool_todo_write(arguments, session)
         if name == "scratchpad_write":
@@ -1782,6 +1993,8 @@ async def dispatch_tool_async(
             return await _tool_memory_append(arguments, confirm_gate=gate, emit_event=event_callback)
         if name == "memory_search":
             return _tool_memory_search(arguments)
+        if name == "session_search":
+            return _tool_session_search(arguments, session)
         if name == "ask_user":
             return _tool_ask_user(arguments, service_mode=isinstance(gate, AsyncConfirmGate))
         if name == "list_files":
