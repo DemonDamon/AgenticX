@@ -1,7 +1,19 @@
-import { useEffect, useRef, useState } from "react";
-import { useAppStore } from "../store";
+import {
+  DndContext,
+  DragOverlay,
+  type DragEndEvent,
+  type DragStartEvent,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { SortableContext, rectSortingStrategy } from "@dnd-kit/sortable";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useAppStore, type ChatPane as ChatPaneState } from "../store";
 import { ChatPane } from "./ChatPane";
 import { PaneDivider } from "./PaneDivider";
+import { SortablePaneWrapper } from "./SortablePaneWrapper";
 
 type Props = {
   onOpenConfirm: (
@@ -20,26 +32,50 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+function PaneDragOverlayPreview({ pane }: { pane: ChatPaneState }) {
+  const sessionSnippet = pane.sessionId ? `${pane.sessionId.slice(0, 8)}…` : "-";
+  return (
+    <div
+      className="flex min-h-[40px] min-w-[200px] max-w-md cursor-grabbing flex-col justify-center rounded-lg border border-border bg-surface-card/95 px-4 py-2 shadow-lg shadow-black/40 backdrop-blur-sm"
+      style={{ width: "min(100%, 360px)" }}
+    >
+      <div className="truncate text-sm font-medium text-text-strong">{pane.avatarName}</div>
+      <div className="truncate text-[10px] text-text-faint">session: {sessionSnippet}</div>
+    </div>
+  );
+}
+
 export function PaneManager({ onOpenConfirm }: Props) {
   const panes = useAppStore((s) => s.panes);
   const activePaneId = useAppStore((s) => s.activePaneId);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
+  const reorderPanes = useAppStore((s) => s.reorderPanes);
 
   const paneCount = panes.length;
   const rows = Math.ceil(paneCount / COLUMNS);
 
-  // colSizes[rowIndex] = [leftPct, rightPct] for each row
   const [colSizes, setColSizes] = useState<number[][]>(() =>
     Array.from({ length: rows }, () => [50, 50])
   );
-  // rowSizes = [row0Pct, row1Pct, ...]
   const [rowSizes, setRowSizes] = useState<number[]>(() =>
     Array.from({ length: rows }, () => 100 / rows)
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
 
-  // Re-init sizes when pane count changes
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    })
+  );
+
+  const resetLayoutSizes = useCallback((count: number) => {
+    const r = Math.ceil(count / COLUMNS);
+    setColSizes(Array.from({ length: r }, () => [50, 50]));
+    setRowSizes(Array.from({ length: r }, () => 100 / r));
+  }, []);
+
   useEffect(() => {
     const newRows = Math.ceil(paneCount / COLUMNS);
     setColSizes((prev) =>
@@ -79,50 +115,84 @@ export function PaneManager({ onOpenConfirm }: Props) {
     });
   };
 
-  const isMulti = paneCount >= 2;
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveDragId(String(event.active.id));
+  };
 
-  // Single-column layout for 1–2 panes (original behaviour)
-  if (paneCount <= 2) {
-    return (
-      <div ref={containerRef} className="flex h-full min-w-0 flex-1 overflow-hidden">
-        {panes.map((pane, index) => {
-          const widthPct =
-            paneCount === 1
-              ? 100
-              : colSizes[0]?.[index] ?? 100 / paneCount;
-          const isLast = index === panes.length - 1;
-          const isFocused = activePaneId === pane.id;
+  const clearDrag = () => setActiveDragId(null);
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    clearDrag();
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const fromIndex = panes.findIndex((p) => p.id === active.id);
+    const toIndex = panes.findIndex((p) => p.id === over.id);
+    if (fromIndex < 0 || toIndex < 0) return;
+    reorderPanes(fromIndex, toIndex);
+    resetLayoutSizes(paneCount);
+  };
+
+  const isMulti = paneCount >= 2;
+  const paneIds = panes.map((p) => p.id);
+  const activeDragPane = activeDragId ? panes.find((p) => p.id === activeDragId) : undefined;
+
+  const layoutTwoOrFewer = (
+    <div ref={containerRef} className="flex h-full min-w-0 flex-1 overflow-hidden">
+      {panes.map((pane, index) => {
+        const widthPct =
+          paneCount === 1 ? 100 : colSizes[0]?.[index] ?? 100 / paneCount;
+        const isLast = index === panes.length - 1;
+        const isFocused = activePaneId === pane.id;
+        const outerStyle = {
+          width: `${widthPct}%`,
+          minWidth: isMulti ? 320 : undefined,
+        } as const;
+
+        const inner = (
+          <>
+            <div
+              className={`flex h-full min-w-0 flex-1 overflow-hidden ${isFocused && isMulti ? "bg-[rgba(255,255,255,0.015)]" : ""}`}
+            >
+              <ChatPane
+                paneId={pane.id}
+                focused={isFocused}
+                onFocus={() => setActivePaneId(pane.id)}
+                onOpenConfirm={onOpenConfirm}
+              />
+            </div>
+            {!isLast && paneCount === 2 ? (
+              <PaneDivider direction="horizontal" onDrag={(delta) => handleColDrag(0, delta)} />
+            ) : null}
+          </>
+        );
+
+        if (paneCount < 2) {
           return (
             <div
               key={pane.id}
               className="flex h-full min-w-0 overflow-hidden"
-              style={{ width: `${widthPct}%`, minWidth: isMulti ? 320 : undefined }}
+              style={outerStyle}
             >
-              <div
-                className={`flex h-full min-w-0 flex-1 overflow-hidden ${isFocused && isMulti ? "bg-[rgba(255,255,255,0.015)]" : ""}`}
-              >
-                <ChatPane
-                  paneId={pane.id}
-                  focused={isFocused}
-                  onFocus={() => setActivePaneId(pane.id)}
-                  onOpenConfirm={onOpenConfirm}
-                />
-              </div>
-              {!isLast && paneCount === 2 ? (
-                <PaneDivider
-                  direction="horizontal"
-                  onDrag={(delta) => handleColDrag(0, delta)}
-                />
-              ) : null}
+              {inner}
             </div>
           );
-        })}
-      </div>
-    );
-  }
+        }
 
-  // Multi-pane: flex column of rows, each row is a flex row of panes
-  return (
+        return (
+          <SortablePaneWrapper
+            key={pane.id}
+            id={pane.id}
+            className="flex h-full min-w-0 overflow-hidden"
+            style={outerStyle}
+          >
+            {inner}
+          </SortablePaneWrapper>
+        );
+      })}
+    </div>
+  );
+
+  const layoutMultiRow = (
     <div ref={containerRef} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       {Array.from({ length: rows }, (_, rowIndex) => {
         const rowPanes = panes.slice(rowIndex * COLUMNS, rowIndex * COLUMNS + COLUMNS);
@@ -130,8 +200,11 @@ export function PaneManager({ onOpenConfirm }: Props) {
         const isLastRow = rowIndex === rows - 1;
 
         return (
-          <div key={rowIndex} className="flex min-h-0 min-w-0 flex-col" style={{ height: `${rowHeightPct}%` }}>
-            {/* Row content */}
+          <div
+            key={rowIndex}
+            className="flex min-h-0 min-w-0 flex-col"
+            style={{ height: `${rowHeightPct}%` }}
+          >
             <div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
               {rowPanes.map((pane, colIndex) => {
                 const colPcts = colSizes[rowIndex] ?? [50, 50];
@@ -139,11 +212,17 @@ export function PaneManager({ onOpenConfirm }: Props) {
                 const isLastCol = colIndex === rowPanes.length - 1;
                 const isFocused = activePaneId === pane.id;
 
+                const outerStyle = {
+                  width: `${widthPct}%`,
+                  minWidth: 240,
+                } as const;
+
                 return (
-                  <div
+                  <SortablePaneWrapper
                     key={pane.id}
+                    id={pane.id}
                     className="flex h-full min-w-0 overflow-hidden"
-                    style={{ width: `${widthPct}%`, minWidth: 240 }}
+                    style={outerStyle}
                   >
                     <div
                       className={`flex h-full min-w-0 flex-1 overflow-hidden ${isFocused ? "bg-[rgba(255,255,255,0.015)]" : ""}`}
@@ -155,19 +234,17 @@ export function PaneManager({ onOpenConfirm }: Props) {
                         onOpenConfirm={onOpenConfirm}
                       />
                     </div>
-                    {/* Horizontal (column) divider between cols in same row */}
                     {!isLastCol && rowPanes.length === 2 ? (
                       <PaneDivider
                         direction="horizontal"
                         onDrag={(delta) => handleColDrag(rowIndex, delta)}
                       />
                     ) : null}
-                  </div>
+                  </SortablePaneWrapper>
                 );
               })}
             </div>
 
-            {/* Vertical (row) divider between rows */}
             {!isLastRow ? (
               <PaneDivider
                 direction="vertical"
@@ -178,5 +255,44 @@ export function PaneManager({ onOpenConfirm }: Props) {
         );
       })}
     </div>
+  );
+
+  if (paneCount <= 2) {
+    if (paneCount < 2) {
+      return layoutTwoOrFewer;
+    }
+    return (
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={clearDrag}
+      >
+        <SortableContext items={paneIds} strategy={rectSortingStrategy}>
+          {layoutTwoOrFewer}
+        </SortableContext>
+        <DragOverlay dropAnimation={{ duration: 200, easing: "cubic-bezier(0.25,1,0.5,1)" }}>
+          {activeDragPane ? <PaneDragOverlayPreview pane={activeDragPane} /> : null}
+        </DragOverlay>
+      </DndContext>
+    );
+  }
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={clearDrag}
+    >
+      <SortableContext items={paneIds} strategy={rectSortingStrategy}>
+        {layoutMultiRow}
+      </SortableContext>
+      <DragOverlay dropAnimation={{ duration: 200, easing: "cubic-bezier(0.25,1,0.5,1)" }}>
+        {activeDragPane ? <PaneDragOverlayPreview pane={activeDragPane} /> : null}
+      </DragOverlay>
+    </DndContext>
   );
 }

@@ -1,3 +1,4 @@
+import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
 
 export type UiStatus = "idle" | "listening" | "processing";
@@ -239,6 +240,7 @@ type AppState = {
   setActivePaneId: (id: string) => void;
   addPane: (avatarId: string | null, avatarName: string, sessionId: string) => string;
   removePane: (paneId: string) => void;
+  reorderPanes: (fromIndex: number, toIndex: number) => void;
   addPaneMessage: (
     paneId: string,
     role: MsgRole,
@@ -460,6 +462,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           spawnsColumnBaselineIds: [],
           terminalTabs: [],
           activeTerminalTabId: null,
+          sessionTokens: { input: 0, output: 0 },
         },
       ],
       activePaneId: paneId,
@@ -476,6 +479,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? nextPanes[Math.max(0, nextPanes.length - 1)]?.id ?? nextPanes[0].id
           : state.activePaneId;
       return { panes: nextPanes, activePaneId: nextActive };
+    }),
+  reorderPanes: (fromIndex, toIndex) =>
+    set((state) => {
+      if (fromIndex === toIndex) return state;
+      const n = state.panes.length;
+      if (fromIndex < 0 || toIndex < 0 || fromIndex >= n || toIndex >= n) return state;
+      return { panes: arrayMove(state.panes, fromIndex, toIndex) };
     }),
   addPaneMessage: (paneId, role, content, agentId, provider, model, attachments, extras) =>
     set((state) => ({

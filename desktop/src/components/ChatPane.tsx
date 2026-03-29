@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { GitBranch, Sparkles } from "lucide-react";
+import { GitBranch, GripVertical, Sparkles } from "lucide-react";
 import {
   useAppStore,
   type Avatar,
@@ -32,6 +32,7 @@ import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
 import { parseReasoningContent } from "./messages/reasoning-parser";
+import { usePaneSortableHandle } from "./pane-sortable-context";
 
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
 const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
@@ -1051,6 +1052,7 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
 
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
+  const paneSortableListeners = usePaneSortableHandle();
   const panes = useAppStore((s) => s.panes);
   const metaLeaderDisplayName = useMemo(() => {
     const mp = panes.find((p) => p.avatarId === null);
@@ -3055,19 +3057,34 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     >
       <div className="flex h-full min-w-0 flex-1 flex-col" style={{ minWidth: 280 }}>
         <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
-          <div className="min-w-0">
-            <div className="truncate text-sm font-medium text-text-strong">{pane.avatarName}</div>
-            <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">
-              <span>session: {pane.sessionId ? pane.sessionId.slice(0, 8) + "…" : "-"}</span>
-              {visibleMessages.length > 0 && (
-                <span className="rounded bg-surface-card px-1 text-text-subtle">{visibleMessages.length} 条</span>
-              )}
-              {pane.contextInherited && (
-                <span className="rounded bg-emerald-500/20 px-1 text-emerald-400">已继承</span>
-              )}
+          <div
+            className={`flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden ${
+              paneSortableListeners ? "cursor-grab touch-none active:cursor-grabbing" : ""
+            }`}
+            {...(paneSortableListeners ?? {})}
+            title={paneSortableListeners ? "拖拽以调整窗格顺序" : undefined}
+          >
+            {paneSortableListeners ? (
+              <GripVertical
+                className="h-4 w-4 shrink-0 text-text-faint opacity-50 hover:opacity-90"
+                strokeWidth={1.8}
+                aria-hidden
+              />
+            ) : null}
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium text-text-strong">{pane.avatarName}</div>
+              <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">
+                <span>session: {pane.sessionId ? pane.sessionId.slice(0, 8) + "…" : "-"}</span>
+                {visibleMessages.length > 0 && (
+                  <span className="rounded bg-surface-card px-1 text-text-subtle">{visibleMessages.length} 条</span>
+                )}
+                {pane.contextInherited && (
+                  <span className="rounded bg-emerald-500/20 px-1 text-emerald-400">已继承</span>
+                )}
+              </div>
             </div>
           </div>
-          <div className="no-drag flex items-center gap-1">
+          <div className="no-drag flex shrink-0 items-center gap-1">
             {isGroupPane && (
               <button
                 className={`rounded px-2 py-0.5 text-[11px] transition ${
