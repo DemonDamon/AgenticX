@@ -6,7 +6,9 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
 import shutil
 import time
@@ -16,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, Optional
+
+_log = logging.getLogger(__name__)
 
 from agenticx.cli.studio import StudioSession
 from agenticx.memory.session_store import SessionStore
@@ -98,6 +102,26 @@ class SessionManager:
         self._sessions_root = os.path.join(os.path.expanduser("~"), ".agenticx", "sessions")
         self._taskspaces_root = os.path.join(os.path.expanduser("~"), ".agenticx", "taskspaces")
         self.max_taskspaces = 5
+        self._schedule_fts_backfill()
+
+    def _schedule_fts_backfill(self) -> None:
+        """Fire-and-forget: index historical messages.json files on first startup."""
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            return
+        if loop.is_running():
+            loop.create_task(self._run_fts_backfill())
+
+    async def _run_fts_backfill(self) -> None:
+        try:
+            result = await self._session_store.backfill_from_sessions_root(
+                self._sessions_root, overwrite=False
+            )
+            if result.get("indexed", 0) > 0:
+                _log.info("[session_fts] backfill: %s", result)
+        except Exception as exc:
+            _log.debug("[session_fts] backfill error (non-fatal): %s", exc)
 
     def create(
         self,
@@ -519,6 +543,7 @@ class SessionManager:
             }
             self._session_store._save_session_summary_sync(session_id, summary, metadata)
             self._save_messages_snapshot(session_id, session.chat_history or [])
+            self._session_store._index_session_messages_sync(session_id, session.chat_history or [])
             self._save_agent_messages_snapshot(session_id, getattr(session, "agent_messages", None) or [])
             self._save_context_refs(session_id, session)
         except Exception:

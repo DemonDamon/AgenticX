@@ -81,6 +81,7 @@ type TrinityConfigForm = {
   skill_protocol: boolean;
   session_summary: boolean;
   learning_enabled: boolean;
+  skill_manage_enabled: boolean;
 };
 
 type SkillItem = {
@@ -1484,20 +1485,19 @@ function ComputerUseGeneralPanel() {
   );
 }
 
-function AgentHarnessTrinityPanel() {
+const TRINITY_DEFAULTS: TrinityConfigForm = {
+  skill_protocol: true,
+  session_summary: false,
+  learning_enabled: false,
+  skill_manage_enabled: false,
+};
+
+function useTrinityConfig() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<TrinityConfigForm>({
-    skill_protocol: true,
-    session_summary: false,
-    learning_enabled: false,
-  });
+  const [form, setForm] = useState<TrinityConfigForm>({ ...TRINITY_DEFAULTS });
   const [message, setMessage] = useState("");
-  const [lastSaved, setLastSaved] = useState<TrinityConfigForm>({
-    skill_protocol: true,
-    session_summary: false,
-    learning_enabled: false,
-  });
+  const [lastSaved, setLastSaved] = useState<TrinityConfigForm>({ ...TRINITY_DEFAULTS });
 
   useEffect(() => {
     let disposed = false;
@@ -1507,26 +1507,25 @@ function AgentHarnessTrinityPanel() {
       try {
         const result = await window.agenticxDesktop.loadTrinityConfig();
         if (!disposed && result?.ok && result.config) {
-          const loaded = {
+          const loaded: TrinityConfigForm = {
             skill_protocol: Boolean(result.config.skill_protocol),
             session_summary: Boolean(result.config.session_summary),
             learning_enabled: Boolean(result.config.learning_enabled),
+            skill_manage_enabled: Boolean(result.config.skill_manage_enabled),
           };
           setForm(loaded);
           setLastSaved(loaded);
         } else if (!disposed) {
-          setMessage(result?.error ? String(result.error) : "读取智能体三件套配置失败。");
+          setMessage(result?.error ? String(result.error) : "读取配置失败。");
         }
       } catch {
-        if (!disposed) setMessage("读取智能体三件套配置失败。");
+        if (!disposed) setMessage("读取配置失败。");
       } finally {
         if (!disposed) setLoading(false);
       }
     };
     void load();
-    return () => {
-      disposed = true;
-    };
+    return () => { disposed = true; };
   }, []);
 
   const update = useCallback(async (patch: Partial<TrinityConfigForm>) => {
@@ -1542,9 +1541,7 @@ function AgentHarnessTrinityPanel() {
         return;
       }
       setLastSaved(next);
-      setMessage(
-        "已保存到本机配置。请完全退出 Machi 后重新打开（勿仅关闭窗口）；本地后端会在启动时读取这些开关。若使用远程模式，请在服务器环境同步配置并重启远端服务。"
-      );
+      setMessage("已保存。完全退出 Machi 后重新打开生效。");
     } catch (e) {
       setForm(lastSaved);
       setMessage(e instanceof Error ? e.message : "保存失败。");
@@ -1553,22 +1550,24 @@ function AgentHarnessTrinityPanel() {
     }
   }, [form, lastSaved]);
 
+  return { loading, saving, form, message, update };
+}
+
+function SkillAdvancedPanel() {
+  const { loading, saving, form, message, update } = useTrinityConfig();
+
   if (loading) {
     return (
-      <Panel title="智能体三件套">
+      <Panel title="技能高级设置">
         <div className="py-2 text-sm text-text-faint">加载中…</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="智能体三件套">
+    <Panel title="技能高级设置">
       <p className="mb-3 text-xs text-text-faint">
-        写入本机 <code className="text-text-subtle">~/.agenticx/config.yaml</code> 的{" "}
-        <code className="text-text-subtle">agent_harness_trinity</code> 段，并在本地后端启动时映射为{" "}
-        <code className="text-text-subtle">AGX_SKILL_PROTOCOL</code>、{" "}
-        <code className="text-text-subtle">AGX_SESSION_SUMMARY</code>、{" "}
-        <code className="text-text-subtle">AGX_LEARNING_ENABLED</code>。
+        写入 <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
       </p>
       <div className="space-y-2 text-sm text-text-subtle">
         <label className="flex cursor-pointer items-center gap-2">
@@ -1579,8 +1578,47 @@ function AgentHarnessTrinityPanel() {
             disabled={saving}
             onChange={(e) => void update({ skill_protocol: e.target.checked })}
           />
-          启用技能优先协议（AGX_SKILL_PROTOCOL）
+          启用技能优先协议
+          <span className="text-[11px] text-text-faint">agent 优先调用匹配的技能指令</span>
         </label>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-[var(--ui-btn-primary-bg)]"
+            checked={form.skill_manage_enabled}
+            disabled={saving}
+            onChange={(e) => void update({ skill_manage_enabled: e.target.checked })}
+          />
+          允许动态管理技能
+          <span className="text-[11px] text-text-faint">agent 可创建、修改、删除技能</span>
+        </label>
+      </div>
+      {message ? (
+        <div className={`mt-2 text-xs ${message.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}>
+          {message}
+        </div>
+      ) : null}
+    </Panel>
+  );
+}
+
+function SessionMemoryPanel() {
+  const { loading, saving, form, message, update } = useTrinityConfig();
+
+  if (loading) {
+    return (
+      <Panel title="会话与记忆">
+        <div className="py-2 text-sm text-text-faint">加载中…</div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="会话与记忆">
+      <p className="mb-3 text-xs text-text-faint">
+        写入 <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
+      </p>
+      <div className="space-y-2 text-sm text-text-subtle">
         <label className="flex cursor-pointer items-center gap-2">
           <input
             type="checkbox"
@@ -1589,7 +1627,8 @@ function AgentHarnessTrinityPanel() {
             disabled={saving}
             onChange={(e) => void update({ session_summary: e.target.checked })}
           />
-          启用会话摘要延续（AGX_SESSION_SUMMARY）
+          启用会话摘要延续
+          <span className="text-[11px] text-text-faint">新会话可继承前次摘要上下文</span>
         </label>
         <label className="flex cursor-pointer items-center gap-2">
           <input
@@ -1599,11 +1638,12 @@ function AgentHarnessTrinityPanel() {
             disabled={saving}
             onChange={(e) => void update({ learning_enabled: e.target.checked })}
           />
-          启用观察式学习（AGX_LEARNING_ENABLED）
+          启用观察式学习
+          <span className="text-[11px] text-text-faint">agent 自动沉淀高频操作为可复用知识</span>
         </label>
       </div>
       {message ? (
-        <div className={`mt-2 text-xs ${message.startsWith("已保存到本机配置") ? "text-text-muted" : "text-rose-400"}`}>
+        <div className={`mt-2 text-xs ${message.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}>
           {message}
         </div>
       ) : null}
@@ -1980,7 +2020,7 @@ export function SettingsPanel({
                   </div>
                 </Panel>
                 <ComputerUseGeneralPanel />
-                <AgentHarnessTrinityPanel />
+                <SessionMemoryPanel />
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
                   当前版本：AgenticX Desktop v0.2.0
                 </div>
@@ -2215,7 +2255,12 @@ export function SettingsPanel({
             {tab === "tools" && <ToolsTab />}
 
             {/* === SKILLS TAB === */}
-            {tab === "skills" && <SkillsTab />}
+            {tab === "skills" && (
+              <div className="space-y-4">
+                <SkillsTab />
+                <SkillAdvancedPanel />
+              </div>
+            )}
 
             {/* === EMAIL TAB === */}
             {tab === "email" && <EmailSettingsTab />}

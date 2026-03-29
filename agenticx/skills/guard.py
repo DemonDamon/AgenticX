@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Lightweight regex scan for agent-created skill content (Hermes-aligned).
+
+Author: Damon Li
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Literal
+
+ScanVerdict = Literal["safe", "caution", "dangerous"]
+
+
+@dataclass
+class ScanFinding:
+    severity: ScanVerdict
+    pattern_name: str
+    matched_text: str
+    file_path: str
+    line_number: int
+
+
+@dataclass
+class ScanResult:
+    verdict: ScanVerdict
+    findings: list[ScanFinding] = field(default_factory=list)
+
+
+TRUST_POLICY: dict[str, tuple[str, str, str]] = {
+    "agent-created": ("allow", "allow", "block"),
+    "community": ("allow", "allow", "block"),
+    "builtin": ("allow", "allow", "allow"),
+}
+
+_PATTERN_DEFS: list[tuple[str, ScanVerdict, re.Pattern[str]]] = [
+    ("exfiltration_curl", "dangerous", re.compile(r"curl.*\$", re.IGNORECASE)),
+    ("exfiltration_wget", "dangerous", re.compile(r"wget.*\$", re.IGNORECASE)),
+    ("exfiltration_fetch_env", "dangerous", re.compile(r"fetch.*env", re.IGNORECASE)),
+    ("credential_ssh", "dangerous", re.compile(r"~/.ssh")),
+    ("credential_dotenv", "caution", re.compile(r"\.env\b")),
+    ("credential_word", "caution", re.compile(r"credentials", re.IGNORECASE)),
+    ("prompt_ignore_previous", "dangerous", re.compile(r"ignore\s+previous", re.IGNORECASE)),
+    ("prompt_system", "dangerous", re.compile(r"system\s+prompt", re.IGNORECASE)),
+    ("prompt_system_tag", "dangerous", re.compile(r"<system>", re.IGNORECASE)),
+    ("destructive_rm", "dangerous", re.compile(r"rm\s+-rf\s+/")),
+    ("destructive_chmod", "dangerous", re.compile(r"chmod\s+777")),
+    ("destructive_sql", "dangerous", re.compile(r"DROP\s+TABLE", re.IGNORECASE)),
+]
+
+
+def _verdict_rank(v: ScanVerdict) -> int:
+    return {"safe": 0, "caution": 1, "dangerous": 2}[v]
+
+
+def _merge_verdict(findings: list[ScanFinding]) -> ScanVerdict:
+    if not findings:
+        return "safe"
+    best: ScanVerdict = "safe"
+    for f in findings:
+        if _verdict_rank(f.severity) > _verdict_rank(best):
+            best = f.severity
+    return best
+
+
+def scan_skill(skill_dir: Path, *, source: str = "agent-created") -> ScanResult:
+    """Scan ``SKILL.md`` under ``skill_dir`` (if present). Empty / missing file → safe."""
+    _ = source  # reserved for trust-variant scans
+    skill_dir = Path(skill_dir).expanduser().resolve(strict=False)
+    path = skill_dir / "SKILL.md"
+    if not path.is_file():
+        return ScanResult(verdict="safe", findings=[])
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ScanResult(verdict="safe", findings=[])
+    findings: list[ScanFinding] = []
+    rel = str(path)
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for pname, severity, rx in _PATTERN_DEFS:
+            m = rx.search(line)
+            if m:
+                findings.append(
+                    ScanFinding(
+                        severity=severity,
+                        pattern_name=pname,
+                        matched_text=m.group(0)[:200],
+                        file_path=rel,
+                        line_number=line_no,
+                    )
+                )
+    return ScanResult(verdict=_merge_verdict(findings), findings=findings)
+
+
+def should_allow(result: ScanResult, source: str) -> tuple[bool, str]:
+    policy = TRUST_POLICY.get(source, TRUST_POLICY["agent-created"])
+    safe_a, caution_a, danger_a = policy
+    if result.verdict == "dangerous":
+        if danger_a == "block":
+            return False, "blocked: dangerous patterns in skill content"
+        return True, "allowed: dangerous (policy permits)"
+    if result.verdict == "caution":
+        if caution_a == "block":
+            return False, "blocked: caution-level patterns"
+        return True, "allowed: caution"
+    if safe_a == "block":
+        return False, "blocked: policy"
+    return True, "allowed: safe"

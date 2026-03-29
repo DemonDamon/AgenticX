@@ -38,6 +38,7 @@ type TrinityConfig = {
   skill_protocol: boolean;
   session_summary: boolean;
   learning_enabled: boolean;
+  skill_manage_enabled: boolean;
 };
 type AvatarItem = {
   id: string;

@@ -88,6 +88,7 @@ type TrinityConfig = {
   skill_protocol: boolean;
   session_summary: boolean;
   learning_enabled: boolean;
+  skill_manage_enabled: boolean;
 };
 
 const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
@@ -112,11 +113,12 @@ const DEFAULT_EMAIL_CONFIG: EmailConfig = {
   from_email: "",
   default_to_email: "bingzhenli@hotmail.com",
 };
-const TRINITY_CONFIG_KEYS = new Set(["skill_protocol", "session_summary", "learning_enabled"]);
+const TRINITY_CONFIG_KEYS = new Set(["skill_protocol", "session_summary", "learning_enabled", "skill_manage_enabled"]);
 const DEFAULT_TRINITY_CONFIG: TrinityConfig = {
   skill_protocol: true,
   session_summary: false,
   learning_enabled: false,
+  skill_manage_enabled: false,
 };
 
 const KNOWN_BASE_URLS: Record<string, string> = {
@@ -209,6 +211,7 @@ function loadTrinityConfig(cfg: AgxConfig): TrinityConfig {
     skill_protocol: parseBooleanLoose(row.skill_protocol, DEFAULT_TRINITY_CONFIG.skill_protocol),
     session_summary: parseBooleanLoose(row.session_summary, DEFAULT_TRINITY_CONFIG.session_summary),
     learning_enabled: parseBooleanLoose(row.learning_enabled, DEFAULT_TRINITY_CONFIG.learning_enabled),
+    skill_manage_enabled: parseBooleanLoose(row.skill_manage_enabled, DEFAULT_TRINITY_CONFIG.skill_manage_enabled),
   };
 }
 
@@ -269,10 +272,12 @@ function validateTrinityConfigPayload(input: unknown): { ok: true; config: Trini
   let skillProtocol: boolean;
   let sessionSummary: boolean;
   let learningEnabled: boolean;
+  let skillManageEnabled: boolean;
   try {
     skillProtocol = parseBooleanStrict(payload.skill_protocol, "skill_protocol");
     sessionSummary = parseBooleanStrict(payload.session_summary, "session_summary");
     learningEnabled = parseBooleanStrict(payload.learning_enabled, "learning_enabled");
+    skillManageEnabled = parseBooleanStrict(payload.skill_manage_enabled, "skill_manage_enabled");
   } catch (err) {
     return { ok: false, error: String(err) };
   }
@@ -282,6 +287,7 @@ function validateTrinityConfigPayload(input: unknown): { ok: true; config: Trini
       skill_protocol: skillProtocol,
       session_summary: sessionSummary,
       learning_enabled: learningEnabled,
+      skill_manage_enabled: skillManageEnabled,
     },
   };
 }
@@ -526,6 +532,7 @@ async function startStudioServe(): Promise<void> {
     AGX_SKILL_PROTOCOL: trinity.skill_protocol ? "true" : "false",
     AGX_SESSION_SUMMARY: trinity.session_summary ? "true" : "false",
     AGX_LEARNING_ENABLED: trinity.learning_enabled ? "true" : "false",
+    AGX_SKILL_MANAGE: trinity.skill_manage_enabled ? "1" : "0",
   };
 
   if (bundledPath) {
