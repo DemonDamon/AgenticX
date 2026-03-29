@@ -119,7 +119,7 @@ class LiteParseAdapter(DocumentAdapter):
         actual_output_dir = self._prepare_output_dir(output_dir, task_id)
 
         liteparse_json = await self._run_liteparse_parse(file_path)
-        text_content = liteparse_json.get("text", "")
+        text_content = self._extract_text_content(liteparse_json)
         page_count = len(liteparse_json.get("pages", []))
 
         markdown_file = actual_output_dir / f"{file_path.stem}.md"
@@ -146,6 +146,30 @@ class LiteParseAdapter(DocumentAdapter):
             errors=[],
             warnings=[],
         )
+
+    @staticmethod
+    def _extract_text_content(liteparse_json: Dict[str, Any]) -> str:
+        """Extract text from LiteParse JSON payload.
+
+        LiteParse may return text in two shapes:
+        1) {"text": "...", "pages": [...]}
+        2) {"pages": [{"text": "..."}, ...]}
+        """
+        top_text = liteparse_json.get("text")
+        if isinstance(top_text, str) and top_text.strip():
+            return top_text
+
+        pages = liteparse_json.get("pages")
+        if not isinstance(pages, list):
+            return ""
+
+        page_texts: List[str] = []
+        for page in pages:
+            if isinstance(page, dict):
+                text = page.get("text")
+                if isinstance(text, str) and text:
+                    page_texts.append(text)
+        return "\n\n".join(page_texts)
 
     async def parse_to_text(self, file_path: Path) -> str:
         """Parse document and return merged plain text."""
