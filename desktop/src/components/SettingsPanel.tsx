@@ -1648,8 +1648,10 @@ export function SettingsPanel({
   groups,
   onForwardFavorite,
 }: Props) {
-  const userDisplayName = useAppStore((s) => s.userDisplayName);
-  const setUserDisplayName = useAppStore((s) => s.setUserDisplayName);
+  const userNickname = useAppStore((s) => s.userNickname);
+  const setUserNickname = useAppStore((s) => s.setUserNickname);
+  const userPreference = useAppStore((s) => s.userPreference);
+  const setUserPreference = useAppStore((s) => s.setUserPreference);
   const initializedForOpenRef = useRef(false);
   const [tab, setTab] = useState<SettingsTab>("general");
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
@@ -1927,19 +1929,35 @@ export function SettingsPanel({
                       <option value="clean">Clean 风格（极简分隔块）</option>
                     </select>
                   </label>
-                  <label className="mt-3 block text-sm text-text-muted">
-                    群内显示名称
+                </Panel>
+                <Panel title="我的档案">
+                  <label className="block text-sm text-text-muted">
+                    我的称呼（用于所有对话）
                     <input
                       type="text"
                       className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
-                      value={userDisplayName}
-                      onChange={(e) => setUserDisplayName(e.target.value)}
-                      placeholder="留空则显示「我」，并参与群聊上下文标注"
+                      value={userNickname}
+                      onChange={(e) => setUserNickname(e.target.value)}
+                      placeholder="留空则显示「我」"
                       maxLength={48}
                     />
                   </label>
                   <p className="mt-1 text-[11px] text-text-subtle">
-                    分身回复时会按此名称识别「人类提问者」；勿无故 @ 组长，除非需要协调。
+                    在单聊与群聊中均以此称呼标注你的身份，分身会称呼你此名。
+                  </p>
+                  <label className="mt-4 block text-sm text-text-muted">
+                    个人偏好与风格
+                    <textarea
+                      className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
+                      rows={4}
+                      value={userPreference}
+                      onChange={(e) => setUserPreference(e.target.value)}
+                      placeholder={"例：我不喜欢绕弯子，请直接给结论；偏好表格而非长段落；遇到歧义先问我再执行。"}
+                      maxLength={500}
+                    />
+                  </label>
+                  <p className="mt-1 text-[11px] text-text-subtle">
+                    {`${userPreference.length}/500 字。此偏好会注入到每次对话的系统提示中，对所有 agent 生效。`}
                   </p>
                 </Panel>
                 <Panel title="权限">
