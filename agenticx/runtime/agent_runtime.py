@@ -638,6 +638,16 @@ class AgentRuntime:
             self.hooks.register(MemoryHook(), priority=-10)
         except Exception:
             pass
+        try:
+            from agenticx.runtime.hooks.session_summary_hook import SessionSummaryHook
+            self.hooks.register(SessionSummaryHook(), priority=-20)
+        except Exception:
+            pass
+        try:
+            from agenticx.learning.observer import ObservationHook
+            self.hooks.register(ObservationHook(), priority=-30)
+        except Exception:
+            pass
 
     async def run_turn(
         self,
