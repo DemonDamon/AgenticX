@@ -537,6 +537,11 @@ def serve(
     host: str = typer.Option("0.0.0.0", "--host", help="监听地址"),
     reload: bool = typer.Option(False, "--reload", help="开发模式热重载"),
     token: str = typer.Option("", "--token", "-t", help="Desktop 认证 token (覆盖 AGX_DESKTOP_TOKEN)"),
+    gateway: bool = typer.Option(
+        False,
+        "--gateway",
+        help="启用 IM 远程指令网关客户端（需 ~/.agenticx/config.yaml 中 gateway 配置）",
+    ),
 ):
     """启动 Studio FastAPI 服务（SSE 事件流）"""
     _suppress_macos_dock_icon()
@@ -550,6 +555,12 @@ def serve(
     if token:
         os.environ["AGX_DESKTOP_TOKEN"] = token
 
+    publish_host = "127.0.0.1" if host in ("0.0.0.0", "::", "[::]") else host
+    os.environ["AGX_SERVE_PORT"] = str(port)
+    os.environ["AGX_SERVE_HOST"] = publish_host
+    if gateway:
+        os.environ["AGX_GATEWAY_ENABLED"] = "true"
+
     effective_token = os.environ.get("AGX_DESKTOP_TOKEN", "").strip()
     app_inst = create_studio_app()
     console.print(f"[bold green]AgenticX Studio Server[/bold green] http://{host}:{port}")
@@ -558,8 +569,37 @@ def serve(
         console.print(f"  Token: {masked}")
     else:
         console.print("  [yellow]Warning: no token set, API is unauthenticated[/yellow]")
+    if gateway or os.getenv("AGX_GATEWAY_ENABLED", "").strip().lower() in ("1", "true", "yes"):
+        console.print("  [cyan]IM Gateway client:[/cyan] enabled (see ~/.agenticx/config.yaml gateway.*)")
     console.print("  GET /api/session, POST /api/chat, POST /api/confirm, GET /api/artifacts")
     uvicorn.run(app_inst, host=host, port=port, reload=reload)
+
+
+@app.command("gateway")
+def gateway_serve(
+    config: str = typer.Option(
+        "gateway_config.yaml",
+        "--config",
+        "-c",
+        help="网关服务 YAML 配置路径",
+    ),
+):
+    """启动 IM Webhook 网关（飞书/企微/钉钉回调与设备 WebSocket 中继）。"""
+    _suppress_macos_dock_icon()
+    try:
+        from pathlib import Path
+
+        from agenticx.gateway.app import run_gateway_server
+    except ImportError as e:
+        console.print(f"[bold red]错误:[/bold red] 无法加载网关模块: {e}")
+        raise typer.Exit(1)
+    cfg_path = Path(config).expanduser()
+    if not cfg_path.is_file():
+        console.print(
+            f"[yellow]提示:[/yellow] 未找到 {cfg_path}，将使用默认空配置。"
+            " 请参考 docs/gateway/im-remote-gateway-setup.md 创建配置。"
+        )
+    run_gateway_server(cfg_path)
 
 
 @app.command()
