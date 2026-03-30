@@ -194,12 +194,17 @@ function PaneModelPicker() {
                 return (
                   <button
                     key={`${opt.provider}:${opt.model}`}
-                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-surface-hover hover:text-text-strong ${
-                      isActive ? "text-cyan-300 bg-cyan-500/10" : "text-text-muted"
+                    type="button"
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:font-bold ${
+                      isActive ? "text-text-strong" : "text-text-muted"
                     }`}
                     onClick={() => handleSelect(opt.provider, opt.model)}
                   >
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${isActive ? "bg-cyan-400" : "bg-surface-hover"}`} />
+                    <span
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                        isActive ? "bg-emerald-500" : "bg-surface-hover"
+                      }`}
+                    />
                     <span className="truncate">{opt.label}</span>
                   </button>
                 );

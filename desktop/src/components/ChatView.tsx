@@ -1418,10 +1418,11 @@ function ModelPickerDropdown({ onSelect, onClose }: { onSelect: (p: string, m: s
       {options.map((opt) => (
         <button
           key={`${opt.provider}:${opt.model}`}
-          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-muted transition hover:bg-cyan-500/10 hover:text-text-strong"
+          type="button"
+          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-muted transition hover:font-bold hover:text-text-strong"
           onClick={() => { onSelect(opt.provider, opt.model); onClose(); }}
         >
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400" />
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
           <span className="truncate">{opt.label}</span>
         </button>
       ))}

@@ -100,6 +100,18 @@ const GROUP_DOT: Record<GroupPaletteKey, string> = {
   purple:  "rgb(216,180,254)",
 };
 
+/** Sidebar「已开窗格」小圆点 — 与同分身头像 `avatarBgClass` 色系一致 */
+const AVATAR_DOT: Record<AvatarPaletteKey, string> = {
+  cyan:    "rgb(34, 211, 238)",
+  violet:  "rgb(167, 139, 250)",
+  rose:    "rgb(251, 113, 133)",
+  amber:   "rgb(251, 191, 36)",
+  emerald: "rgb(52, 211, 153)",
+  fuchsia: "rgb(232, 121, 249)",
+  sky:     "rgb(56, 189, 248)",
+  orange:  "rgb(251, 146, 60)",
+};
+
 // ── Public helpers ────────────────────────────────────────────────────────────
 
 /** Transparent background tint for pane — works for both avatar and group ids */
@@ -117,6 +129,11 @@ export function groupIconBg(id: string): string {
 /** Dot / indicator color for group hasPane indicator */
 export function groupDotColor(id: string): string {
   return GROUP_DOT[groupColorKey(id)];
+}
+
+/** Dot color for avatar hasPane indicator — matches `avatarColorKey(id)` */
+export function avatarDotColor(id: string): string {
+  return AVATAR_DOT[avatarColorKey(id)];
 }
 
 export function avatarTintBorder(id: string | null | undefined): string | undefined {
