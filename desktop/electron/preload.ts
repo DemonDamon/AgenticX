@@ -173,6 +173,12 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     learning_enabled: boolean;
     skill_manage_enabled: boolean;
   }) => ipcRenderer.invoke("save-trinity-config", payload),
+  loadAutomationConfig: async () => ipcRenderer.invoke("load-automation-config"),
+  saveAutomationConfig: async (payload: { prevent_sleep: boolean }) =>
+    ipcRenderer.invoke("save-automation-config", payload),
+  loadSkillInstallPolicy: async () => ipcRenderer.invoke("load-skill-install-policy"),
+  saveSkillInstallPolicy: async (payload: { non_high_risk_auto_install: boolean }) =>
+    ipcRenderer.invoke("save-skill-install-policy", payload),
   loadEmailConfig: async () => ipcRenderer.invoke("load-email-config"),
   loadMcpStatus: async (sessionId: string) => ipcRenderer.invoke("load-mcp-status", sessionId),
   importMcpConfig: async (payload: { sessionId: string; sourcePath: string }) =>
@@ -244,13 +250,25 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
 
   // Bundles
   loadBundles: async () => ipcRenderer.invoke("load-bundles"),
-  installBundle: async (args: { sourcePath: string }) => ipcRenderer.invoke("install-bundle", args),
+  installBundle: async (args: {
+    sourcePath: string;
+    acknowledgeHighRisk?: boolean;
+    confirmNonHighRisk?: boolean;
+  }) => ipcRenderer.invoke("install-bundle", args),
+  installBundlePreview: async (args: { sourcePath: string }) =>
+    ipcRenderer.invoke("install-bundle-preview", args),
   uninstallBundle: async (args: { name: string }) => ipcRenderer.invoke("uninstall-bundle", args),
 
   // Registry marketplace
   searchRegistry: async (args: { q: string }) => ipcRenderer.invoke("search-registry", args),
-  installFromRegistry: async (args: { source: string; name: string }) =>
-    ipcRenderer.invoke("install-from-registry", args),
+  installFromRegistry: async (args: {
+    source: string;
+    name: string;
+    acknowledgeHighRisk?: boolean;
+    confirmNonHighRisk?: boolean;
+  }) => ipcRenderer.invoke("install-from-registry", args),
+  installFromRegistryPreview: async (args: { source: string; name: string }) =>
+    ipcRenderer.invoke("install-from-registry-preview", args),
 
   terminalSpawn: async (payload: { id: string; cwd: string; cols?: number; rows?: number }) =>
     ipcRenderer.invoke("terminal-spawn", payload) as Promise<{ ok: boolean; id?: string; error?: string }>,

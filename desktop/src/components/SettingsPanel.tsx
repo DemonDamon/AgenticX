@@ -12,6 +12,7 @@ import {
   Trash2,
   Wrench,
   Loader2,
+  Zap,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import type { Avatar, ChatPane, ChatStyle, GroupChat } from "../store";
@@ -44,7 +45,17 @@ type McpServer = {
 
 const MCP_PRIMARY_CONFIG_PATH = "~/.agenticx/mcp.json";
 
-type SettingsTab = "general" | "provider" | "mcp" | "tools" | "skills" | "email" | "workspace" | "favorites" | "server";
+type SettingsTab =
+  | "general"
+  | "provider"
+  | "mcp"
+  | "tools"
+  | "skills"
+  | "automation"
+  | "email"
+  | "workspace"
+  | "favorites"
+  | "server";
 type ConfirmMode = "manual" | "semi-auto" | "auto";
 type EmailPresetId = "qq" | "163" | "gmail" | "outlook" | "custom";
 
@@ -148,6 +159,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "mcp", label: "MCP 服务", icon: Plug },
   { id: "tools", label: "工具", icon: Wrench },
   { id: "skills", label: "技能", icon: Sparkles },
+  { id: "automation", label: "自动化", icon: Zap },
   { id: "email", label: "邮件通知", icon: Mail },
   { id: "workspace", label: "工作区", icon: FolderOpen },
   { id: "favorites", label: "收藏", icon: Bookmark },
@@ -398,6 +410,19 @@ function SkillsTab() {
   const [marketResults, setMarketResults] = useState<RegistrySearchItem[]>([]);
   const [marketLoading, setMarketLoading] = useState(false);
   const [marketMsg, setMarketMsg] = useState("");
+  const [registryInstallBusy, setRegistryInstallBusy] = useState(false);
+  const [bundlePendingPath, setBundlePendingPath] = useState("");
+  const [bundleNeedsConfirmNonHigh, setBundleNeedsConfirmNonHigh] = useState(false);
+  const [bundleNeedsConfirmHigh, setBundleNeedsConfirmHigh] = useState(false);
+  const [marketPending, setMarketPending] = useState<RegistrySearchItem | null>(null);
+  const [marketNeedsConfirmNonHigh, setMarketNeedsConfirmNonHigh] = useState(false);
+  const [marketNeedsConfirmHigh, setMarketNeedsConfirmHigh] = useState(false);
+
+  useEffect(() => {
+    setBundleNeedsConfirmNonHigh(false);
+    setBundleNeedsConfirmHigh(false);
+    setBundlePendingPath("");
+  }, [bundleInstallPath]);
 
   useEffect(() => {
     let cancelled = false;
@@ -446,22 +471,87 @@ function SkillsTab() {
     }
   };
 
+  const reloadSkillsAndBundles = async () => {
+    const [skillsRes, bundlesRes] = await Promise.all([
+      window.agenticxDesktop.loadSkills(),
+      window.agenticxDesktop.loadBundles(),
+    ]);
+    if (skillsRes.ok) setItems(skillsRes.items ?? []);
+    if (bundlesRes.ok) setBundles(bundlesRes.items ?? []);
+  };
+
   const onInstallBundle = async () => {
     if (!bundleInstallPath.trim()) return;
+    const sourcePath = bundleInstallPath.trim();
     setBundleBusy(true);
     setBundleMsg("");
+    setBundleNeedsConfirmNonHigh(false);
+    setBundleNeedsConfirmHigh(false);
+    setBundlePendingPath("");
     try {
-      const res = await window.agenticxDesktop.installBundle({ sourcePath: bundleInstallPath.trim() });
+      setBundleMsg("正在扫描扩展包…");
+      const prev = await window.agenticxDesktop.installBundlePreview({ sourcePath });
+      if (!prev.ok) {
+        setBundleMsg(`扫描未通过: ${prev.error ?? "未知错误"}`);
+        return;
+      }
+      if (prev.scan) {
+        setBundleMsg(formatSkillScanSummary(prev.scan));
+      } else {
+        setBundleMsg("未发现需要展示的扫描条目。");
+      }
+
+      const res = await window.agenticxDesktop.installBundle({ sourcePath });
       if (res.ok) {
         setBundleMsg(`已安装扩展包 "${res.name ?? ""}" v${res.version ?? ""}`);
         setBundleInstallPath("");
-        // Reload both skills and bundles
-        const [skillsRes, bundlesRes] = await Promise.all([
-          window.agenticxDesktop.loadSkills(),
-          window.agenticxDesktop.loadBundles(),
-        ]);
-        if (skillsRes.ok) setItems(skillsRes.items ?? []);
-        if (bundlesRes.ok) setBundles(bundlesRes.items ?? []);
+        await reloadSkillsAndBundles();
+        return;
+      }
+      if (res.error_code === "non_high_risk_confirm_required") {
+        setBundlePendingPath(sourcePath);
+        setBundleNeedsConfirmNonHigh(true);
+        if (res.scan_summary) {
+          setBundleMsg(`${formatSkillScanSummary(res.scan_summary)}\n\n当前策略要求你点「确认安装」后再写入。`);
+        } else {
+          setBundleMsg("当前策略要求你点「确认安装」后再写入。");
+        }
+        return;
+      }
+      if (res.error_code === "high_risk_confirm_required") {
+        setBundlePendingPath(sourcePath);
+        setBundleNeedsConfirmHigh(true);
+        if (res.scan_summary) {
+          setBundleMsg(`${formatSkillScanSummary(res.scan_summary)}\n\n命中高危规则：请阅读摘要后点下方按钮确认。`);
+        } else {
+          setBundleMsg("命中高危规则：请阅读说明后点下方按钮确认。");
+        }
+        return;
+      }
+      setBundleMsg(`安装失败: ${res.error ?? "未知错误"}`);
+    } catch (e) {
+      setBundleMsg(`安装失败: ${String(e)}`);
+    } finally {
+      setBundleBusy(false);
+    }
+  };
+
+  const onConfirmBundleInstall = async (kind: "non_high" | "high") => {
+    if (!bundlePendingPath.trim()) return;
+    setBundleBusy(true);
+    try {
+      const res = await window.agenticxDesktop.installBundle({
+        sourcePath: bundlePendingPath.trim(),
+        confirmNonHighRisk: kind === "non_high",
+        acknowledgeHighRisk: kind === "high",
+      });
+      setBundleNeedsConfirmNonHigh(false);
+      setBundleNeedsConfirmHigh(false);
+      setBundlePendingPath("");
+      if (res.ok) {
+        setBundleMsg(`已安装扩展包 "${res.name ?? ""}" v${res.version ?? ""}`);
+        setBundleInstallPath("");
+        await reloadSkillsAndBundles();
       } else {
         setBundleMsg(`安装失败: ${res.error ?? "未知错误"}`);
       }
@@ -512,8 +602,24 @@ function SkillsTab() {
   };
 
   const onMarketInstall = async (item: RegistrySearchItem) => {
-    setMarketMsg(`正在安装 "${item.name}"...`);
+    setRegistryInstallBusy(true);
+    setMarketNeedsConfirmNonHigh(false);
+    setMarketNeedsConfirmHigh(false);
+    setMarketPending(null);
+    setMarketMsg(`正在拉取并扫描「${item.name}」…`);
     try {
+      const prev = await window.agenticxDesktop.installFromRegistryPreview({
+        source: item.source,
+        name: item.name,
+      });
+      if (!prev.ok) {
+        setMarketMsg(`扫描未通过: ${prev.error ?? "未知错误"}`);
+        return;
+      }
+      if (prev.scan) {
+        setMarketMsg(formatSkillScanSummary(prev.scan));
+      }
+
       const res = await window.agenticxDesktop.installFromRegistry({
         source: item.source,
         name: item.name,
@@ -522,11 +628,61 @@ function SkillsTab() {
         setMarketMsg(`已安装 "${item.name}"`);
         const skillsRes = await window.agenticxDesktop.loadSkills();
         if (skillsRes.ok) setItems(skillsRes.items ?? []);
+        return;
+      }
+      if (res.error_code === "non_high_risk_confirm_required") {
+        setMarketPending(item);
+        setMarketNeedsConfirmNonHigh(true);
+        if (res.scan_summary) {
+          setMarketMsg(`${formatSkillScanSummary(res.scan_summary)}\n\n当前策略要求你点「确认安装」后再写入。`);
+        } else {
+          setMarketMsg("当前策略要求你点「确认安装」后再写入。");
+        }
+        return;
+      }
+      if (res.error_code === "high_risk_confirm_required") {
+        setMarketPending(item);
+        setMarketNeedsConfirmHigh(true);
+        if (res.scan_summary) {
+          setMarketMsg(`${formatSkillScanSummary(res.scan_summary)}\n\n命中高危规则：请阅读摘要后点下方按钮确认。`);
+        } else {
+          setMarketMsg("命中高危规则：请阅读说明后点下方按钮确认。");
+        }
+        return;
+      }
+      setMarketMsg(`安装失败: ${res.error ?? "未知错误"}`);
+    } catch (e) {
+      setMarketMsg(String(e));
+    } finally {
+      setRegistryInstallBusy(false);
+    }
+  };
+
+  const onConfirmMarketInstall = async (kind: "non_high" | "high") => {
+    if (!marketPending) return;
+    const pending = marketPending;
+    setRegistryInstallBusy(true);
+    try {
+      const res = await window.agenticxDesktop.installFromRegistry({
+        source: pending.source,
+        name: pending.name,
+        confirmNonHighRisk: kind === "non_high",
+        acknowledgeHighRisk: kind === "high",
+      });
+      setMarketNeedsConfirmNonHigh(false);
+      setMarketNeedsConfirmHigh(false);
+      setMarketPending(null);
+      if (res.ok) {
+        setMarketMsg(`已安装 "${pending.name}"`);
+        const skillsRes = await window.agenticxDesktop.loadSkills();
+        if (skillsRes.ok) setItems(skillsRes.items ?? []);
       } else {
         setMarketMsg(`安装失败: ${res.error ?? "未知错误"}`);
       }
     } catch (e) {
       setMarketMsg(String(e));
+    } finally {
+      setRegistryInstallBusy(false);
     }
   };
 
@@ -708,8 +864,53 @@ function SkillsTab() {
           </button>
         </div>
         {marketMsg && (
-          <div className={`mt-1.5 text-xs ${marketMsg.includes("失败") || marketMsg.includes("未找到") ? "text-amber-400" : "text-emerald-400"}`}>
+          <div
+            className={`mt-1.5 whitespace-pre-wrap text-xs ${
+              marketMsg.includes("失败") || marketMsg.includes("未找到")
+                ? "text-amber-400"
+                : marketNeedsConfirmNonHigh || marketNeedsConfirmHigh || marketMsg.includes("高危")
+                  ? "text-amber-300"
+                  : "text-emerald-400"
+            }`}
+          >
             {marketMsg}
+          </div>
+        )}
+        {(marketNeedsConfirmNonHigh || marketNeedsConfirmHigh) && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {marketNeedsConfirmNonHigh && (
+              <button
+                type="button"
+                className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-300 transition hover:bg-cyan-500/20 disabled:opacity-40"
+                disabled={registryInstallBusy}
+                onClick={() => void onConfirmMarketInstall("non_high")}
+              >
+                {registryInstallBusy ? "安装中…" : "确认安装"}
+              </button>
+            )}
+            {marketNeedsConfirmHigh && (
+              <button
+                type="button"
+                className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-40"
+                disabled={registryInstallBusy}
+                onClick={() => void onConfirmMarketInstall("high")}
+              >
+                {registryInstallBusy ? "安装中…" : "我已知晓风险，确认安装"}
+              </button>
+            )}
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+              disabled={registryInstallBusy}
+              onClick={() => {
+                setMarketNeedsConfirmNonHigh(false);
+                setMarketNeedsConfirmHigh(false);
+                setMarketPending(null);
+                setMarketMsg("");
+              }}
+            >
+              取消
+            </button>
           </div>
         )}
         {marketResults.length > 0 && (
@@ -738,10 +939,11 @@ function SkillsTab() {
                 </div>
                 <button
                   type="button"
-                  className="shrink-0 rounded border border-cyan-500/30 px-2 py-0.5 text-[10px] text-cyan-400 transition hover:bg-cyan-500/10"
+                  className="shrink-0 rounded border border-cyan-500/30 px-2 py-0.5 text-[10px] text-cyan-400 transition hover:bg-cyan-500/10 disabled:opacity-40"
+                  disabled={registryInstallBusy || marketLoading}
                   onClick={() => void onMarketInstall(item)}
                 >
-                  安装
+                  {registryInstallBusy ? "安装中…" : "安装"}
                 </button>
               </div>
             ))}
@@ -775,8 +977,53 @@ function SkillsTab() {
           </button>
         </div>
         {bundleMsg && (
-          <div className={`mb-2 text-xs ${bundleMsg.includes("失败") ? "text-rose-400" : "text-emerald-400"}`}>
+          <div
+            className={`mb-2 whitespace-pre-wrap text-xs ${
+              bundleMsg.includes("失败") || bundleMsg.includes("扫描未通过")
+                ? "text-rose-400"
+                : bundleNeedsConfirmNonHigh || bundleNeedsConfirmHigh || bundleMsg.includes("高危") || bundleMsg.includes("确认安装")
+                  ? "text-amber-300"
+                  : "text-emerald-400"
+            }`}
+          >
             {bundleMsg}
+          </div>
+        )}
+        {(bundleNeedsConfirmNonHigh || bundleNeedsConfirmHigh) && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {bundleNeedsConfirmNonHigh && (
+              <button
+                type="button"
+                className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-300 transition hover:bg-cyan-500/20 disabled:opacity-40"
+                disabled={bundleBusy}
+                onClick={() => void onConfirmBundleInstall("non_high")}
+              >
+                {bundleBusy ? "安装中…" : "确认安装"}
+              </button>
+            )}
+            {bundleNeedsConfirmHigh && (
+              <button
+                type="button"
+                className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-40"
+                disabled={bundleBusy}
+                onClick={() => void onConfirmBundleInstall("high")}
+              >
+                {bundleBusy ? "安装中…" : "我已知晓风险，确认安装"}
+              </button>
+            )}
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+              disabled={bundleBusy}
+              onClick={() => {
+                setBundleNeedsConfirmNonHigh(false);
+                setBundleNeedsConfirmHigh(false);
+                setBundlePendingPath("");
+                setBundleMsg("");
+              }}
+            >
+              取消
+            </button>
           </div>
         )}
 
@@ -1553,8 +1800,78 @@ function useTrinityConfig() {
   return { loading, saving, form, message, update };
 }
 
+function useSkillInstallPolicy() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [nonHighRiskAutoInstall, setNonHighRiskAutoInstall] = useState(true);
+  const [lastSaved, setLastSaved] = useState(true);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let disposed = false;
+    const load = async () => {
+      setLoading(true);
+      setMessage("");
+      try {
+        const result = await window.agenticxDesktop.loadSkillInstallPolicy();
+        if (!disposed && result?.ok && result.config) {
+          const v = Boolean(result.config.non_high_risk_auto_install);
+          setNonHighRiskAutoInstall(v);
+          setLastSaved(v);
+        } else if (!disposed) {
+          setMessage(result?.error ? String(result.error) : "读取技能安装策略失败。");
+        }
+      } catch {
+        if (!disposed) setMessage("读取技能安装策略失败。");
+      } finally {
+        if (!disposed) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const updatePolicy = useCallback(async (next: boolean) => {
+    setNonHighRiskAutoInstall(next);
+    setSaving(true);
+    setMessage("");
+    try {
+      const result = await window.agenticxDesktop.saveSkillInstallPolicy({
+        non_high_risk_auto_install: next,
+      });
+      if (!result?.ok) {
+        setNonHighRiskAutoInstall(lastSaved);
+        setMessage(result?.error ? String(result.error) : "保存失败。");
+        return;
+      }
+      setLastSaved(next);
+      setMessage("已保存。之后装扩展包或市场技能时，是否跳过确认由本开关与安装前扫描结果一起决定（与后端共用同一份配置）。");
+    } catch (e) {
+      setNonHighRiskAutoInstall(lastSaved);
+      setMessage(e instanceof Error ? e.message : "保存失败。");
+    } finally {
+      setSaving(false);
+    }
+  }, [lastSaved]);
+
+  return { loading, saving, nonHighRiskAutoInstall, message, updatePolicy };
+}
+
 function SkillAdvancedPanel() {
-  const { loading, saving, form, message, update } = useTrinityConfig();
+  const { loading: trinityLoading, saving: trinitySaving, form, message: trinityMessage, update } =
+    useTrinityConfig();
+  const {
+    loading: policyLoading,
+    saving: policySaving,
+    nonHighRiskAutoInstall,
+    message: policyMessage,
+    updatePolicy,
+  } = useSkillInstallPolicy();
+
+  const loading = trinityLoading || policyLoading;
+  const busy = trinitySaving || policySaving;
 
   if (loading) {
     return (
@@ -1569,33 +1886,41 @@ function SkillAdvancedPanel() {
       <p className="mb-3 text-xs text-text-faint">
         写入 <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
       </p>
-      <div className="space-y-2 text-sm text-text-subtle">
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            className="h-4 w-4 accent-[var(--ui-btn-primary-bg)]"
-            checked={form.skill_protocol}
-            disabled={saving}
-            onChange={(e) => void update({ skill_protocol: e.target.checked })}
-          />
-          启用技能优先协议
-          <span className="text-[11px] text-text-faint">agent 优先调用匹配的技能指令</span>
-        </label>
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            className="h-4 w-4 accent-[var(--ui-btn-primary-bg)]"
-            checked={form.skill_manage_enabled}
-            disabled={saving}
-            onChange={(e) => void update({ skill_manage_enabled: e.target.checked })}
-          />
-          允许动态管理技能
-          <span className="text-[11px] text-text-faint">agent 可创建、修改、删除技能</span>
-        </label>
+      <div className="space-y-3">
+        <SettingsToggleCard
+          title="技能文档优先"
+          description="当任务命中已安装技能时，优先按该技能里的步骤与约束来选工具和执行顺序。"
+          checked={form.skill_protocol}
+          disabled={busy}
+          onChange={(next) => void update({ skill_protocol: next })}
+        />
+        <SettingsToggleCard
+          title="允许助手改本地技能"
+          description="开启后，模型可以在授权范围内新增、改写或删除 ~/.agenticx 下的技能文件（仍受后端 skill_manage 开关约束）。"
+          checked={form.skill_manage_enabled}
+          disabled={busy}
+          onChange={(next) => void update({ skill_manage_enabled: next })}
+        />
+        <SettingsToggleCard
+          title="未见高危则自动装完"
+          description="安装前仍会跑一遍静态规则扫描并展示摘要；只有未命中高危规则时才可能一路装完，一旦命中高危必须你点确认。"
+          checked={nonHighRiskAutoInstall}
+          disabled={busy}
+          onChange={(next) => void updatePolicy(next)}
+        />
       </div>
-      {message ? (
-        <div className={`mt-2 text-xs ${message.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}>
-          {message}
+      {trinityMessage ? (
+        <div
+          className={`mt-2 text-xs ${trinityMessage.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}
+        >
+          {trinityMessage}
+        </div>
+      ) : null}
+      {policyMessage ? (
+        <div
+          className={`mt-2 text-xs ${policyMessage.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}
+        >
+          {policyMessage}
         </div>
       ) : null}
     </Panel>
@@ -1644,6 +1969,138 @@ function SessionMemoryPanel() {
       </div>
       {message ? (
         <div className={`mt-2 text-xs ${message.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}>
+          {message}
+        </div>
+      ) : null}
+    </Panel>
+  );
+}
+
+function formatSkillScanSummary(scan: {
+  overall: string;
+  skills: Array<{ skill_name: string; verdict: string; findings?: Array<{ pattern_name: string }> }>;
+}): string {
+  const verdictLabel = (v: string) =>
+    v === "dangerous" ? "高危" : v === "caution" ? "需注意" : "未见高危规则";
+  const lines = [
+    `安装前扫描 · 总体：${verdictLabel(scan.overall)}`,
+    ...scan.skills.map(
+      (s) =>
+        `· ${s.skill_name || "skill"}：${verdictLabel(s.verdict)}${
+          s.findings?.length ? `（命中 ${s.findings.length} 条）` : ""
+        }`
+    ),
+  ];
+  return lines.join("\n");
+}
+
+function SettingsToggleCard(props: {
+  title: string;
+  description: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const { title, description, checked, disabled, onChange } = props;
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3.5">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold text-text-strong">{title}</div>
+        <p className="mt-1 text-xs leading-relaxed text-text-muted">{description}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={`relative h-7 w-12 shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-btn-primary-bg)] disabled:opacity-40 ${
+          checked ? "bg-emerald-500/85" : "bg-surface-hover"
+        }`}
+      >
+        <span
+          className={`pointer-events-none absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform ${
+            checked ? "translate-x-5" : "translate-x-0"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
+function AutomationPreventSleepPanel() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let disposed = false;
+    const load = async () => {
+      setLoading(true);
+      setMessage("");
+      try {
+        const result = await window.agenticxDesktop.loadAutomationConfig();
+        if (!disposed && result?.ok && result.config) {
+          setEnabled(Boolean(result.config.prevent_sleep));
+        }
+      } catch {
+        if (!disposed) setMessage("读取自动化配置失败。");
+      } finally {
+        if (!disposed) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const persist = async (next: boolean) => {
+    setSaving(true);
+    setMessage("");
+    try {
+      const result = await window.agenticxDesktop.saveAutomationConfig({ prevent_sleep: next });
+      if (!result?.ok) {
+        setMessage(result?.error ? String(result.error) : "保存失败。");
+        setEnabled(!next);
+        return;
+      }
+      setEnabled(next);
+      setMessage("已保存。只要本应用还在跑，系统会更不容易自动睡眠。");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "保存失败。");
+      setEnabled(!next);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Panel title="自动化">
+        <div className="py-2 text-sm text-text-faint">加载中…</div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="自动化">
+      <p className="mb-3 text-xs text-text-faint">
+        写入本机 <code className="text-text-subtle">~/.agenticx/config.yaml</code> 中的{" "}
+        <code className="text-text-subtle">automation.prevent_sleep</code>。
+      </p>
+      <SettingsToggleCard
+        title="抑制系统睡眠"
+        description="向系统申请「推迟睡眠」，减少长跑任务、合盖挂机或远程串联时被系统挂起的概率；退出 Machi 后不再拦截。"
+        checked={enabled}
+        disabled={saving}
+        onChange={(next) => void persist(next)}
+      />
+      {message ? (
+        <div
+          className={`mt-2 text-xs ${message.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}
+        >
           {message}
         </div>
       ) : null}
@@ -2273,6 +2730,12 @@ export function SettingsPanel({
               <div className="space-y-4">
                 <SkillsTab />
                 <SkillAdvancedPanel />
+              </div>
+            )}
+
+            {tab === "automation" && (
+              <div className="space-y-4">
+                <AutomationPreventSleepPanel />
               </div>
             )}
 
