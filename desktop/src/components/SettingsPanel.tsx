@@ -1715,6 +1715,13 @@ export function SettingsPanel({
   const [serverTestError, setServerTestError] = useState("");
   const [serverShowToken, setServerShowToken] = useState(false);
 
+  const [gwEnabled, setGwEnabled] = useState(false);
+  const [gwUrl, setGwUrl] = useState("");
+  const [gwDeviceId, setGwDeviceId] = useState("");
+  const [gwToken, setGwToken] = useState("");
+  const [gwStudioBase, setGwStudioBase] = useState("");
+  const [gwShowToken, setGwShowToken] = useState(false);
+
   useEffect(() => {
     // Reset the guard when dialog is closed.
     if (!open) {
@@ -1756,6 +1763,13 @@ export function SettingsPanel({
       setServerMode(rs.enabled ? "remote" : "local");
       setServerUrl(rs.url || "");
       setServerToken(rs.token || "");
+    });
+    void window.agenticxDesktop.loadGatewayIm().then((gw) => {
+      setGwEnabled(gw.enabled);
+      setGwUrl(gw.url || "");
+      setGwDeviceId(gw.deviceId || "");
+      setGwToken(gw.token || "");
+      setGwStudioBase(gw.studioBaseUrl || "");
     });
     if (sessionId) void onRefreshMcp(sessionId);
   }, [open, providers, defaultProvider, sessionId, onRefreshMcp]);
@@ -2371,6 +2385,82 @@ export function SettingsPanel({
                       )}
                     </div>
                   </fieldset>
+                </Panel>
+
+                <Panel title="远程指令（IM 网关）">
+                  <p className="mb-3 text-xs text-text-faint">
+                    连接云端 Webhook 网关后，可通过飞书/企微机器人向本机 Machi 下发指令。需在网关侧配置相同 device_id 与 token，并在 IM 中发送「绑定 &lt;绑定码&gt;」完成首次绑定。
+                  </p>
+                  <label className="flex items-center gap-2 text-sm text-text-subtle cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={gwEnabled}
+                      onChange={(e) => setGwEnabled(e.target.checked)}
+                      className="accent-[var(--ui-btn-primary-bg)]"
+                    />
+                    启用网关客户端（agx serve 启动后连接 WebSocket）
+                  </label>
+                  <label className="mt-3 block text-sm text-text-muted">
+                    网关 WebSocket 基址（https:// 将自动转为 wss://）
+                    <input
+                      className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                      placeholder="https://gateway.example.com"
+                      value={gwUrl}
+                      onChange={(e) => setGwUrl(e.target.value)}
+                    />
+                  </label>
+                  <label className="mt-3 block text-sm text-text-muted">
+                    设备 ID（与网关 devices.auth_tokens 中一致）
+                    <input
+                      className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                      placeholder="my-macbook"
+                      value={gwDeviceId}
+                      onChange={(e) => setGwDeviceId(e.target.value)}
+                    />
+                  </label>
+                  <label className="mt-3 block text-sm text-text-muted">
+                    设备 Token
+                    <div className="relative mt-1">
+                      <input
+                        className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 pr-16 text-sm text-text-subtle"
+                        type={gwShowToken ? "text" : "password"}
+                        value={gwToken}
+                        onChange={(e) => setGwToken(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
+                        onClick={() => setGwShowToken(!gwShowToken)}
+                      >
+                        {gwShowToken ? "隐藏" : "显示"}
+                      </button>
+                    </div>
+                  </label>
+                  <label className="mt-3 block text-sm text-text-muted">
+                    本机 Studio 基址（留空则使用 http://127.0.0.1:当前端口）
+                    <input
+                      className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                      placeholder="http://127.0.0.1:8000"
+                      value={gwStudioBase}
+                      onChange={(e) => setGwStudioBase(e.target.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="mt-4 rounded-md border border-border px-3 py-1.5 text-sm text-text-subtle hover:bg-surface-hover"
+                    onClick={async () => {
+                      await window.agenticxDesktop.saveGatewayIm({
+                        enabled: gwEnabled,
+                        url: gwUrl.trim().replace(/\/+$/, ""),
+                        deviceId: gwDeviceId.trim(),
+                        token: gwToken.trim(),
+                        studioBaseUrl: gwStudioBase.trim().replace(/\/+$/, ""),
+                      });
+                      alert("IM 网关配置已保存。需重启 Machi / agx serve 后生效；飞书侧请发送「绑定 <绑定码>」。");
+                    }}
+                  >
+                    保存 IM 网关配置
+                  </button>
                 </Panel>
 
                 <div className="flex items-center gap-3">

@@ -33,6 +33,21 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("save-remote-server", payload),
   testRemoteServer: async (payload: { url: string; token: string }) =>
     ipcRenderer.invoke("test-remote-server", payload),
+  loadGatewayIm: async () =>
+    ipcRenderer.invoke("load-gateway-im") as Promise<{
+      enabled: boolean;
+      url: string;
+      deviceId: string;
+      token: string;
+      studioBaseUrl: string;
+    }>,
+  saveGatewayIm: async (payload: {
+    enabled: boolean;
+    url: string;
+    deviceId: string;
+    token: string;
+    studioBaseUrl: string;
+  }) => ipcRenderer.invoke("save-gateway-im", payload),
   onOpenSettings: (cb: () => void): void => {
     ipcRenderer.on("open-settings", () => cb());
   },
