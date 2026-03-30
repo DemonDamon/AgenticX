@@ -328,28 +328,28 @@ export function AvatarSidebar() {
                     setContextMenu({ x: e.clientX, y: e.clientY, target: "avatar", avatarId: avatar.id });
                   }}
                 >
-                  {avatar.avatarUrl ? (
-                    <img
-                      src={avatar.avatarUrl}
-                      alt={avatar.name}
-                      className="h-8 w-8 shrink-0 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div
-                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${avatarColor(avatar.id)}`}
-                    >
-                      {avatarInitials(avatar.name)}
-                    </div>
-                  )}
+                  {/* 方形圆角头像 + 右下角在线圆圈 */}
+                  <div className="relative shrink-0">
+                    {avatar.avatarUrl ? (
+                      <img
+                        src={avatar.avatarUrl}
+                        alt={avatar.name}
+                        className="h-8 w-8 rounded-[6px] object-cover"
+                      />
+                    ) : (
+                      <div
+                        className={`flex h-8 w-8 items-center justify-center rounded-[6px] text-xs font-bold text-white ${avatarColor(avatar.id)}`}
+                      >
+                        {avatarInitials(avatar.name)}
+                      </div>
+                    )}
+                    {hasPane && (
+                      <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface-sidebar bg-emerald-500" />
+                    )}
+                  </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1">
                       <span className="truncate text-sm">{avatar.name}</span>
-                      {hasPane && (
-                        <span
-                          className="h-1.5 w-1.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: avatarDotColor(avatar.id) }}
-                        />
-                      )}
                       {avatar.pinned && <span className="text-[10px] text-amber-400">*</span>}
                     </div>
                     {avatar.role && (
@@ -396,16 +396,20 @@ export function AvatarSidebar() {
                     setGroupContextMenu({ x: e.clientX, y: e.clientY, groupId: group.id });
                   }}
                 >
-                  <div
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-[10px] font-bold text-white"
-                    style={{ backgroundColor: iconBg }}
-                  >
-                    {group.name.slice(0, 1).toUpperCase()}
+                  <div className="relative shrink-0">
+                    <div
+                      className="flex h-8 w-8 items-center justify-center rounded-[6px] text-[10px] font-bold text-white"
+                      style={{ backgroundColor: iconBg }}
+                    >
+                      {group.name.slice(0, 1).toUpperCase()}
+                    </div>
+                    {hasPane && (
+                      <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface-sidebar bg-emerald-500" />
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1">
                       <div className="truncate text-xs">{group.name}</div>
-                      {hasPane && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: dotColor }} />}
                     </div>
                     <div className="truncate text-[10px] text-text-faint">
                       {group.avatarIds.length} avatars ·{" "}
