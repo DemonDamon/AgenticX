@@ -53,6 +53,13 @@ type AgxConfig = {
   active_provider?: string;
   active_model?: string;
   remote_server?: RemoteServerConfig;
+  gateway?: {
+    enabled?: boolean;
+    url?: string;
+    device_id?: string;
+    token?: string;
+    studio_base_url?: string;
+  };
   notifications?: {
     email?: {
       enabled?: boolean;
@@ -887,6 +894,37 @@ function registerIpc(): void {
     } catch (err) {
       return { ok: false, error: String(err) };
     }
+  });
+
+  ipcMain.handle("load-gateway-im", async () => {
+    const cfg = loadAgxConfig();
+    const gw = cfg.gateway;
+    return {
+      enabled: gw?.enabled ?? false,
+      url: gw?.url ?? "",
+      deviceId: gw?.device_id ?? "",
+      token: gw?.token ?? "",
+      studioBaseUrl: gw?.studio_base_url ?? "",
+    };
+  });
+
+  ipcMain.handle("save-gateway-im", async (_event, payload: {
+    enabled: boolean;
+    url: string;
+    deviceId: string;
+    token: string;
+    studioBaseUrl: string;
+  }) => {
+    const cfg = loadAgxConfig();
+    cfg.gateway = {
+      enabled: payload.enabled,
+      url: (payload.url || "").trim().replace(/\/+$/, ""),
+      device_id: (payload.deviceId || "").trim(),
+      token: (payload.token || "").trim(),
+      studio_base_url: (payload.studioBaseUrl || "").trim().replace(/\/+$/, ""),
+    };
+    saveAgxConfig(cfg);
+    return { ok: true, restart_required: true };
   });
 
   ipcMain.handle("list-avatars", async () => {

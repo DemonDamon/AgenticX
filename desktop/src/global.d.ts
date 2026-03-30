@@ -180,6 +180,20 @@ declare global {
       loadRemoteServer: () => Promise<{ enabled: boolean; url: string; token: string }>;
       saveRemoteServer: (payload: { enabled: boolean; url: string; token: string }) => Promise<{ ok: boolean; restart_required?: boolean }>;
       testRemoteServer: (payload: { url: string; token: string }) => Promise<{ ok: boolean; status?: number; error?: string }>;
+      loadGatewayIm: () => Promise<{
+        enabled: boolean;
+        url: string;
+        deviceId: string;
+        token: string;
+        studioBaseUrl: string;
+      }>;
+      saveGatewayIm: (payload: {
+        enabled: boolean;
+        url: string;
+        deviceId: string;
+        token: string;
+        studioBaseUrl: string;
+      }) => Promise<{ ok: boolean; restart_required?: boolean }>;
       onOpenSettings: (cb: () => void) => void;
 
       listAvatars: () => Promise<{ ok: boolean; avatars: AvatarItem[] }>;
