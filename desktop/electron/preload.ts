@@ -48,6 +48,17 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     token: string;
     studioBaseUrl: string;
   }) => ipcRenderer.invoke("save-gateway-im", payload),
+  loadFeishuConfig: async () =>
+    ipcRenderer.invoke("load-feishu-config") as Promise<{
+      enabled: boolean;
+      appId: string;
+      appSecret: string;
+    }>,
+  saveFeishuConfig: async (payload: {
+    enabled: boolean;
+    appId: string;
+    appSecret: string;
+  }) => ipcRenderer.invoke("save-feishu-config", payload),
   onOpenSettings: (cb: () => void): void => {
     ipcRenderer.on("open-settings", () => cb());
   },
