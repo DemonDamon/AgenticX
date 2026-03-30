@@ -35,4 +35,5 @@ devices:
   auth_tokens:
     - device_id: "my-macbook"
       token: "replace-with-long-random"
+      # Required for Machi「扫码连接」: POST /api/connect/session reuses this code
       binding_code: "882291"

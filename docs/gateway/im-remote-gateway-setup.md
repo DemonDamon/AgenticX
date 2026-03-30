@@ -69,6 +69,21 @@ agx serve --gateway
 
 成功后即可直接发送自然语言指令。
 
+### 5.1 扫码连接（Machi 桌面）
+
+在 **设置 → 服务器连接 → 远程指令** 中展开「高级配置」，填好网关基址、`device_id`、`token` 并保存后，可点击 **「扫码连接（飞书/企微）」**：
+
+1. 桌面会向网关 `POST /api/connect/session`（使用当前设备的 `device_id` + `token` 鉴权），返回 `qr_url`（形如 `https://<网关>/connect/<session_id>`）。
+2. 用手机扫描弹窗中的二维码，打开引导页，一键复制「绑定 &lt;绑定码&gt;」到飞书/企微机器人会话发送。
+3. 弹窗轮询 `GET /api/connect/session/<session_id>`，状态依次为 `pending` → `scanned`（已打开引导页）→ `bound`（IM 侧绑定成功）。
+
+**前提**：该设备在 `gateway_config.yaml` 的 `devices.auth_tokens` 中必须配置 **`binding_code`**，否则无法创建扫码会话。
+
+**已绑定列表与解绑**（需设备 token）：
+
+- `GET /api/device/<device_id>/bindings?token=<token>`
+- `DELETE /api/device/<device_id>/bindings?token=<token>&platform=feishu&sender_id=<open_id>`
+
 ## 6. Siri / 快捷指令（HTTP）
 
 向网关发送：

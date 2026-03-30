@@ -12,7 +12,14 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, TypedDict
+
+
+class BindingEntry(TypedDict):
+    platform: str
+    sender_id: str
+    device_id: str
+    bound_at: float
 
 
 _BIND_RE = re.compile(r"^\s*绑定\s+(\S+)\s*$", re.IGNORECASE)
@@ -91,6 +98,51 @@ class UserDeviceMap:
         if not m:
             return None
         return m.group(1).strip()
+
+    def get_bindings_for_device(self, device_id: str) -> List[BindingEntry]:
+        """List IM identities bound to the given device_id."""
+        want = (device_id or "").strip()
+        if not want:
+            return []
+        out: List[BindingEntry] = []
+        with self._lock:
+            b = self._data.get("bindings", {})
+            if not isinstance(b, dict):
+                return []
+            for key, entry in b.items():
+                if not isinstance(key, str) or ":" not in key:
+                    continue
+                platform, sender_id = key.split(":", 1)
+                did: Optional[str] = None
+                bound_at = 0.0
+                if isinstance(entry, str):
+                    did = entry
+                elif isinstance(entry, dict):
+                    did = str(entry.get("device_id") or "").strip() or None
+                    try:
+                        bound_at = float(entry.get("bound_at") or 0.0)
+                    except (TypeError, ValueError):
+                        bound_at = 0.0
+                if did == want:
+                    out.append(
+                        {
+                            "platform": platform,
+                            "sender_id": sender_id,
+                            "device_id": did,
+                            "bound_at": bound_at,
+                        }
+                    )
+        return out
+
+    def remove_binding(self, platform: str, sender_id: str) -> bool:
+        key = self.key(platform, sender_id)
+        with self._lock:
+            b = self._data.setdefault("bindings", {})
+            if key not in b:
+                return False
+            del b[key]
+            self._save()
+        return True
 
     @staticmethod
     def is_new_chat_command(text: str) -> bool:
