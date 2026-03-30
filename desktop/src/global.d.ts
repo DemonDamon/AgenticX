@@ -238,6 +238,8 @@ declare global {
         token: string;
         studioBaseUrl: string;
       }) => Promise<{ ok: boolean; restart_required?: boolean }>;
+      loadFeishuConfig: () => Promise<{ enabled: boolean; appId: string; appSecret: string }>;
+      saveFeishuConfig: (payload: { enabled: boolean; appId: string; appSecret: string }) => Promise<{ ok: boolean }>;
       onOpenSettings: (cb: () => void) => void;
 
       listAvatars: () => Promise<{ ok: boolean; avatars: AvatarItem[] }>;

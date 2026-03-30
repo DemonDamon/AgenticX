@@ -62,6 +62,11 @@ type AgxConfig = {
     token?: string;
     studio_base_url?: string;
   };
+  feishu_longconn?: {
+    enabled?: boolean;
+    app_id?: string;
+    app_secret?: string;
+  };
   notifications?: {
     email?: {
       enabled?: boolean;
@@ -363,6 +368,7 @@ let tray: Tray | null = null;
 let apiPort = 8000;
 const apiToken = crypto.randomBytes(16).toString("hex");
 let serveProcess: ChildProcess | null = null;
+let feishuProcess: ChildProcess | null = null;
 let isQuitting = false;
 let serveStdoutBuffer = "";
 let serveStderrBuffer = "";
@@ -729,6 +735,29 @@ function stopStudioServe(): void {
   }
 }
 
+function startFeishuProcess(): void {
+  const cfg = loadAgxConfig();
+  const lc = cfg.feishu_longconn;
+  if (!lc?.enabled || !lc.app_id || !lc.app_secret) return;
+  if (feishuProcess && !feishuProcess.killed) return;
+  feishuProcess = spawnAgx(
+    ["feishu", "--app-id", lc.app_id, "--app-secret", lc.app_secret],
+    { cwd: os.homedir(), stdio: ["ignore", "pipe", "pipe"] }
+  );
+  feishuProcess.on("exit", (code) => {
+    if (!isQuitting) {
+      log.info(`feishu process exited (code=${String(code)}), will not auto-restart`);
+    }
+    feishuProcess = null;
+  });
+}
+
+function stopFeishuProcess(): void {
+  if (!feishuProcess) return;
+  try { feishuProcess.kill("SIGTERM"); } catch { /* noop */ }
+  feishuProcess = null;
+}
+
 type TerminalSession = {
   pty: import("node-pty").IPty;
   wc: Electron.WebContents;
@@ -984,6 +1013,34 @@ function registerIpc(): void {
     };
     saveAgxConfig(cfg);
     return { ok: true, restart_required: true };
+  });
+
+  ipcMain.handle("load-feishu-config", async () => {
+    const cfg = loadAgxConfig();
+    const lc = cfg.feishu_longconn;
+    return {
+      enabled: lc?.enabled ?? false,
+      appId: lc?.app_id ?? "",
+      appSecret: lc?.app_secret ?? "",
+    };
+  });
+
+  ipcMain.handle("save-feishu-config", async (_event, payload: {
+    enabled: boolean;
+    appId: string;
+    appSecret: string;
+  }) => {
+    const cfg = loadAgxConfig();
+    cfg.feishu_longconn = {
+      enabled: payload.enabled,
+      app_id: (payload.appId || "").trim(),
+      app_secret: (payload.appSecret || "").trim(),
+    };
+    saveAgxConfig(cfg);
+    // Restart feishu process with new config
+    stopFeishuProcess();
+    if (payload.enabled) startFeishuProcess();
+    return { ok: true };
   });
 
   ipcMain.handle("list-avatars", async () => {
@@ -2411,6 +2468,7 @@ if (!gotTheLock) {
 
         await startStudioServe();
         await waitServeReady();
+        startFeishuProcess();
       }
 
       registerIpc();
@@ -2440,6 +2498,7 @@ if (!gotTheLock) {
   app.on("before-quit", () => {
     isQuitting = true;
     killAllTerminalSessions();
+    stopFeishuProcess();
     stopStudioServe();
   });
 }

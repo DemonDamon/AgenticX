@@ -2212,6 +2212,13 @@ export function SettingsPanel({
   const [gwShowToken, setGwShowToken] = useState(false);
   const [gwAdvancedOpen, setGwAdvancedOpen] = useState(false);
   const [gwQrOpen, setGwQrOpen] = useState(false);
+  // Feishu long-connection
+  const [imTab, setImTab] = useState<"feishu" | "webhook">("feishu");
+  const [feishuEnabled, setFeishuEnabled] = useState(false);
+  const [feishuAppId, setFeishuAppId] = useState("");
+  const [feishuAppSecret, setFeishuAppSecret] = useState("");
+  const [feishuShowSecret, setFeishuShowSecret] = useState(false);
+  const [feishuSaving, setFeishuSaving] = useState(false);
   const [gwBindings, setGwBindings] = useState<
     Array<{ platform: string; sender_id: string; device_id: string; bound_at: number }>
   >([]);
@@ -2315,6 +2322,11 @@ export function SettingsPanel({
       setGwDeviceId(gw.deviceId || "");
       setGwToken(gw.token || "");
       setGwStudioBase(gw.studioBaseUrl || "");
+    });
+    void window.agenticxDesktop.loadFeishuConfig().then((lc) => {
+      setFeishuEnabled(lc.enabled);
+      setFeishuAppId(lc.appId || "");
+      setFeishuAppSecret(lc.appSecret || "");
     });
     if (sessionId) void onRefreshMcp(sessionId);
   }, [open, providers, defaultProvider, sessionId, onRefreshMcp]);
@@ -2428,6 +2440,11 @@ export function SettingsPanel({
       deviceId: gwDeviceId.trim(),
       token: gwToken.trim(),
       studioBaseUrl: gwStudioBase.trim().replace(/\/+$/, ""),
+    });
+    await window.agenticxDesktop.saveFeishuConfig({
+      enabled: feishuEnabled,
+      appId: feishuAppId.trim(),
+      appSecret: feishuAppSecret.trim(),
     });
     onClose();
   };
@@ -2993,48 +3010,123 @@ export function SettingsPanel({
                 </Panel>
 
                 <Panel title="远程指令（IM 网关）">
-                  <p className="mb-3 text-xs text-text-faint">
-                    连接云端 Webhook 网关后，可通过飞书/企微机器人向本机 Machi 下发指令。推荐扫码打开手机引导页完成绑定；亦可在 IM 中手动发送「绑定 &lt;绑定码&gt;」。
-                  </p>
-                  <div className="space-y-3">
-                    <label className="block text-sm text-text-muted">
-                      网关地址
-                      <input
-                        className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
-                        placeholder="https://gateway.example.com"
-                        value={gwUrl}
-                        onChange={(e) => setGwUrl(e.target.value)}
-                      />
-                    </label>
-                    <label className="block text-sm text-text-muted">
-                      设备 ID
-                      <input
-                        className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
-                        placeholder="my-macbook"
-                        value={gwDeviceId}
-                        onChange={(e) => setGwDeviceId(e.target.value)}
-                      />
-                    </label>
-                    <label className="block text-sm text-text-muted">
-                      设备 Token
-                      <div className="relative mt-1">
-                        <input
-                          className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 pr-16 text-sm text-text-subtle"
-                          type={gwShowToken ? "text" : "password"}
-                          value={gwToken}
-                          onChange={(e) => setGwToken(e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
-                          onClick={() => setGwShowToken(!gwShowToken)}
-                        >
-                          {gwShowToken ? "隐藏" : "显示"}
-                        </button>
-                      </div>
-                    </label>
+                  {/* Tab switcher */}
+                  <div className="mb-4 flex gap-1 rounded-lg bg-surface-hover p-0.5">
+                    {(["feishu", "webhook"] as const).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        className={`flex-1 rounded-md px-3 py-1 text-xs font-medium transition ${
+                          imTab === t
+                            ? "bg-surface-panel text-text-strong shadow-sm"
+                            : "text-text-faint hover:text-text-subtle"
+                        }`}
+                        onClick={() => setImTab(t)}
+                      >
+                        {t === "feishu" ? "飞书长连接（推荐）" : "Webhook 模式"}
+                      </button>
+                    ))}
                   </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
+
+                  {/* Feishu long-connection tab */}
+                  {imTab === "feishu" && (
+                    <div className="space-y-3">
+                      <p className="text-xs text-text-faint">
+                        无需公网服务器，使用飞书官方 WebSocket 长连接接收消息，Machi 启动后自动在后台运行。
+                      </p>
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-sm text-text-subtle">启用飞书机器人</span>
+                        <SettingsSwitch
+                          checked={feishuEnabled}
+                          onChange={setFeishuEnabled}
+                          aria-label="启用飞书长连接"
+                        />
+                      </div>
+                      {feishuEnabled && (
+                        <>
+                          <label className="block text-sm text-text-muted">
+                            App ID
+                            <input
+                              className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                              placeholder="cli_xxxxxxxxxxxxxx"
+                              value={feishuAppId}
+                              onChange={(e) => setFeishuAppId(e.target.value)}
+                            />
+                          </label>
+                          <label className="block text-sm text-text-muted">
+                            App Secret
+                            <div className="relative mt-1">
+                              <input
+                                className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 pr-16 text-sm text-text-subtle"
+                                type={feishuShowSecret ? "text" : "password"}
+                                placeholder="••••••••••••••••"
+                                value={feishuAppSecret}
+                                onChange={(e) => setFeishuAppSecret(e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
+                                onClick={() => setFeishuShowSecret(!feishuShowSecret)}
+                              >
+                                {feishuShowSecret ? "隐藏" : "显示"}
+                              </button>
+                            </div>
+                          </label>
+                          <p className="text-xs text-text-faint">
+                            保存后 Machi 自动在后台启动飞书长连接，无需额外开终端。
+                            飞书应用须开启「机器人」能力，订阅 <code className="rounded bg-surface-hover px-1">im.message.receive_v1</code> 长连接事件。
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Webhook mode tab */}
+                  {imTab === "webhook" && (
+                    <div className="space-y-3">
+                      <p className="text-xs text-text-faint">
+                        需要公网可访问的服务器部署云端 Gateway，再通过扫码与 Machi 绑定。
+                      </p>
+                      <label className="block text-sm text-text-muted">
+                        网关地址
+                        <input
+                          className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                          placeholder="https://gateway.example.com"
+                          value={gwUrl}
+                          onChange={(e) => setGwUrl(e.target.value)}
+                        />
+                      </label>
+                      <label className="block text-sm text-text-muted">
+                        设备 ID
+                        <input
+                          className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                          placeholder="my-macbook"
+                          value={gwDeviceId}
+                          onChange={(e) => setGwDeviceId(e.target.value)}
+                        />
+                      </label>
+                      <label className="block text-sm text-text-muted">
+                        设备 Token
+                        <div className="relative mt-1">
+                          <input
+                            className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 pr-16 text-sm text-text-subtle"
+                            type={gwShowToken ? "text" : "password"}
+                            value={gwToken}
+                            onChange={(e) => setGwToken(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
+                            onClick={() => setGwShowToken(!gwShowToken)}
+                          >
+                            {gwShowToken ? "隐藏" : "显示"}
+                          </button>
+                        </div>
+                      </label>
+                    </div>
+                  )}
+                  {imTab === "webhook" && (
+                  <><div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
@@ -3130,6 +3222,7 @@ export function SettingsPanel({
                       </p>
                     </div>
                   )}
+                  </>)}
                 </Panel>
                 <QrConnectModal
                   open={gwQrOpen}
