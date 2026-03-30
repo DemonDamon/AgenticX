@@ -59,6 +59,13 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     appId: string;
     appSecret: string;
   }) => ipcRenderer.invoke("save-feishu-config", payload),
+  loadFeishuBinding: async () =>
+    ipcRenderer.invoke("load-feishu-binding") as Promise<{ ok: boolean; bindings: Record<string, unknown> }>,
+  saveFeishuDesktopBinding: async (payload: {
+    sessionId: string | null;
+    avatarId?: string | null;
+    avatarName?: string | null;
+  }) => ipcRenderer.invoke("save-feishu-desktop-binding", payload),
   onOpenSettings: (cb: () => void): void => {
     ipcRenderer.on("open-settings", () => cb());
   },

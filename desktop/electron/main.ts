@@ -117,6 +117,8 @@ type SkillInstallPolicyConfig = {
 
 const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.yaml");
+const FEISHU_BINDING_PATH = path.join(CONFIG_DIR, "feishu_binding.json");
+const FEISHU_DESKTOP_BINDING_KEY = "_desktop";
 const EMAIL_CONFIG_KEYS = new Set([
   "enabled",
   "smtp_host",
@@ -1040,6 +1042,46 @@ function registerIpc(): void {
     // Restart feishu process with new config
     stopFeishuProcess();
     if (payload.enabled) startFeishuProcess();
+    return { ok: true };
+  });
+
+  ipcMain.handle("load-feishu-binding", async () => {
+    try {
+      const raw = fs.readFileSync(FEISHU_BINDING_PATH, "utf-8");
+      const data = JSON.parse(raw) as Record<string, unknown>;
+      return { ok: true, bindings: data };
+    } catch {
+      return { ok: true, bindings: {} as Record<string, unknown> };
+    }
+  });
+
+  ipcMain.handle("save-feishu-desktop-binding", async (_event, payload: {
+    sessionId: string | null;
+    avatarId?: string | null;
+    avatarName?: string | null;
+  }) => {
+    let data: Record<string, unknown> = {};
+    try {
+      const raw = fs.readFileSync(FEISHU_BINDING_PATH, "utf-8");
+      data = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      /* empty */
+    }
+    const sid = (payload.sessionId || "").trim();
+    if (!sid) {
+      delete data[FEISHU_DESKTOP_BINDING_KEY];
+    } else {
+      const aid = (payload.avatarId ?? "").toString().trim();
+      const aname = (payload.avatarName ?? "").toString().trim();
+      data[FEISHU_DESKTOP_BINDING_KEY] = {
+        session_id: sid,
+        avatar_id: aid || null,
+        avatar_name: aname || null,
+        bound_at: new Date().toISOString(),
+      };
+    }
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(FEISHU_BINDING_PATH, JSON.stringify(data, null, 2), "utf-8");
     return { ok: true };
   });
 
