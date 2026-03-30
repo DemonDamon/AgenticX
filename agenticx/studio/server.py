@@ -7,6 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import importlib.util
 import json
@@ -125,7 +126,32 @@ def _zhipu_glm5_family_no_vision(model_name: str) -> bool:
 
 
 def create_studio_app() -> FastAPI:
-    app = FastAPI(title="AgenticX Studio Service", version="0.1.0")
+    @contextlib.asynccontextmanager
+    async def _studio_lifespan(app: FastAPI):
+        gw_task: asyncio.Task | None = None
+        try:
+            from agenticx.gateway.client import GatewayClient, load_gateway_client_settings
+
+            settings = load_gateway_client_settings()
+            if settings is not None:
+                gc = GatewayClient(settings)
+                app.state.gateway_client = gc
+                gw_task = asyncio.create_task(gc.run_forever())
+                app.state.gateway_client_task = gw_task
+        except Exception as exc:
+            logger.warning("Gateway client not started: %s", exc)
+        yield
+        if gw_task is not None and not gw_task.done():
+            gc = getattr(app.state, "gateway_client", None)
+            if gc is not None:
+                gc.request_stop()
+            gw_task.cancel()
+            try:
+                await gw_task
+            except asyncio.CancelledError:
+                pass
+
+    app = FastAPI(title="AgenticX Studio Service", version="0.1.0", lifespan=_studio_lifespan)
     default_origins = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
