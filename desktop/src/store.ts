@@ -173,6 +173,8 @@ type ProviderEntry = {
   baseUrl: string;
   model: string;
   models: string[];
+  /** When true, persist `drop_params` for LiteLLM (strip unsupported params like tool_choice on some gateways). */
+  dropParams: boolean;
 };
 
 type SettingsState = {

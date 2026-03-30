@@ -5,6 +5,7 @@ type ProviderConfig = {
   base_url?: string;
   model?: string;
   models?: string[];
+  drop_params?: boolean;
 };
 
 type LoadConfigResult = {
@@ -360,6 +361,7 @@ declare global {
         baseUrl?: string;
         model?: string;
         models?: string[];
+        dropParams?: boolean;
       }) => Promise<{ ok: boolean }>;
       setDefaultProvider: (name: string) => Promise<{ ok: boolean }>;
       deleteProvider: (name: string) => Promise<{ ok: boolean }>;

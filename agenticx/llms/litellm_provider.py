@@ -18,6 +18,15 @@ class LiteLLMProvider(BaseLLMProvider):
     timeout: Optional[float] = Field(default=None, description="Request timeout in seconds")
     max_retries: Optional[int] = Field(default=None, description="Maximum number of retries")
     fallbacks: Optional[List[str]] = Field(default=None, description="List of fallback model names when primary model fails")
+    drop_params: Optional[bool] = Field(
+        default=None,
+        description="When True, LiteLLM strips unsupported params (e.g. tool_choice) for strict OpenAI-compatible proxies.",
+    )
+
+    def _apply_drop_params_default(self, kwargs: Dict[str, Any]) -> None:
+        if self.drop_params is None:
+            return
+        kwargs.setdefault("drop_params", self.drop_params)
 
     def invoke(
         self, prompt: Union[str, List[Dict]], tools: Optional[List[Dict]] = None, **kwargs
@@ -33,6 +42,7 @@ class LiteLLMProvider(BaseLLMProvider):
         timeout = kwargs.pop("timeout", self.timeout)
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
+        self._apply_drop_params_default(kwargs)
         try:
             response = litellm.completion(
                 model=self.model,
@@ -64,6 +74,7 @@ class LiteLLMProvider(BaseLLMProvider):
         timeout = kwargs.pop("timeout", self.timeout)
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
+        self._apply_drop_params_default(kwargs)
         try:
             response = await litellm.acompletion(
                 model=self.model,
@@ -94,6 +105,7 @@ class LiteLLMProvider(BaseLLMProvider):
         timeout = kwargs.pop("timeout", self.timeout)
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
+        self._apply_drop_params_default(kwargs)
         response_stream = litellm.completion(
             model=self.model,
             messages=messages,
@@ -136,6 +148,7 @@ class LiteLLMProvider(BaseLLMProvider):
         timeout = kwargs.pop("timeout", self.timeout)
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
+        self._apply_drop_params_default(kwargs)
         response_stream = litellm.completion(
             model=self.model,
             messages=messages,
@@ -203,6 +216,7 @@ class LiteLLMProvider(BaseLLMProvider):
         timeout = kwargs.pop("timeout", self.timeout)
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
+        self._apply_drop_params_default(kwargs)
         response_stream = await litellm.acompletion(
             model=self.model,
             messages=messages,
@@ -383,4 +397,5 @@ class LiteLLMProvider(BaseLLMProvider):
             timeout=config.get("timeout"),
             max_retries=config.get("max_retries"),
             fallbacks=config.get("fallbacks"),
+            drop_params=config.get("drop_params"),
         )

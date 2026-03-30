@@ -46,6 +46,7 @@ class ZhipuProvider(LiteLLMProvider):
             base_url=config.get("base_url") or "https://open.bigmodel.cn/api/paas/v4",
             timeout=config.get("timeout", 45.0),
             max_retries=config.get("max_retries", 1),
+            drop_params=config.get("drop_params"),
         )
 
     def _with_zhipu_litellm_defaults(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:

@@ -30,4 +30,5 @@ class QianfanProvider(LiteLLMProvider):
             timeout=config.get("timeout"),
             max_retries=config.get("max_retries"),
             secret_key=config.get("secret_key"),
+            drop_params=config.get("drop_params"),
         )

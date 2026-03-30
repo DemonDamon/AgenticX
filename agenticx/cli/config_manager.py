@@ -64,6 +64,7 @@ class ProviderConfig:
     endpoint_id: Optional[str] = None
     secret_key: Optional[str] = None
     group_id: Optional[str] = None
+    drop_params: Optional[bool] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -148,6 +149,7 @@ class AgxConfig:
             endpoint_id=raw.pop("endpoint_id", None),
             secret_key=raw.pop("secret_key", None),
             group_id=raw.pop("group_id", None),
+            drop_params=raw.pop("drop_params", None),
             extra=raw,
         )
 

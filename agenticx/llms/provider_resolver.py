@@ -63,6 +63,7 @@ class ProviderResolver:
             "endpoint_id",
             "secret_key",
             "group_id",
+            "drop_params",
         ):
             if provider_cfg.get(key) is not None:
                 kwargs[key] = provider_cfg[key]
@@ -94,6 +95,7 @@ class ProviderResolver:
             for key in (
                 "model", "api_key", "base_url", "api_version",
                 "timeout", "max_retries", "endpoint_id", "secret_key", "group_id",
+                "drop_params",
             ):
                 val = kwargs.get(key)
                 if val is not None:
