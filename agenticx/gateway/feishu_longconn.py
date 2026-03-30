@@ -19,7 +19,8 @@ import hashlib
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -80,6 +81,152 @@ try:
 except ImportError:
     lark = None  # type: ignore
     P2ImMessageReceiveV1 = None  # type: ignore
+
+
+# ---------------------------------------------------------------------------
+# Markdown → Feishu post rich-text converter
+# ---------------------------------------------------------------------------
+
+def _md_inline_to_elements(text: str) -> List[Dict[str, Any]]:
+    """Parse inline Markdown (bold, inline-code, links) into Feishu content elements."""
+    elements: List[Dict[str, Any]] = []
+    # Pattern order matters: code > bold/italic > link > plain
+    pattern = re.compile(
+        r"`([^`]+)`"                         # inline code
+        r"|(\*\*\*(.+?)\*\*\*)"             # bold+italic
+        r"|(\*\*(.+?)\*\*)"                 # bold
+        r"|(\*(.+?)\*|_(.+?)_)"             # italic
+        r"|\[([^\]]+)\]\(([^)]+)\)"         # link
+    )
+    last = 0
+    for m in pattern.finditer(text):
+        if m.start() > last:
+            elements.append({"tag": "text", "text": text[last:m.start()]})
+        if m.group(1) is not None:
+            # inline code
+            elements.append({"tag": "text", "text": m.group(1),
+                              "styles": ["code_inline"]})
+        elif m.group(2) is not None:
+            elements.append({"tag": "text", "text": m.group(3),
+                              "styles": ["bold", "italic"]})
+        elif m.group(4) is not None:
+            elements.append({"tag": "text", "text": m.group(5),
+                              "styles": ["bold"]})
+        elif m.group(6) is not None:
+            content = m.group(7) or m.group(8) or ""
+            elements.append({"tag": "text", "text": content,
+                              "styles": ["italic"]})
+        elif m.group(9) is not None:
+            elements.append({"tag": "a", "text": m.group(9),
+                              "href": m.group(10)})
+        last = m.end()
+    if last < len(text):
+        elements.append({"tag": "text", "text": text[last:]})
+    return elements or [{"tag": "text", "text": text}]
+
+
+def md_to_feishu_post(markdown: str, title: str = "") -> Dict[str, Any]:
+    """Convert Markdown text to Feishu post rich-text content dict.
+
+    Feishu post content format:
+        {
+          "zh_cn": {
+            "title": "...",
+            "content": [[...elements...], ...]   # each inner list = one paragraph
+          }
+        }
+    Supported Markdown:
+        - # / ## / ### headings  → bold paragraph
+        - **bold**, *italic*, `code`, [link](url)
+        - ``` fenced code blocks → code block paragraphs
+        - - / * / 1. list items  → prefixed text
+        - --- horizontal rule   → divider line (text fallback)
+        - blank lines           → empty paragraph separator
+    """
+    lines = markdown.splitlines()
+    paragraphs: List[List[Dict[str, Any]]] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Fenced code block
+        if line.strip().startswith("```"):
+            lang = line.strip()[3:].strip()
+            code_lines: List[str] = []
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                code_lines.append(lines[i])
+                i += 1
+            i += 1  # skip closing ```
+            code_text = "\n".join(code_lines)
+            if code_text:
+                # Feishu code_block tag (only available in some versions; fallback to text)
+                para: List[Dict[str, Any]] = [
+                    {"tag": "text", "text": f"[{lang}]\n" if lang else ""},
+                    {"tag": "text", "text": code_text, "styles": ["code_inline"]},
+                ]
+                paragraphs.append([e for e in para if e.get("text")])
+            continue
+
+        # Horizontal rule
+        if re.match(r"^-{3,}$|^\*{3,}$|^_{3,}$", line.strip()):
+            paragraphs.append([{"tag": "text", "text": "─" * 20}])
+            i += 1
+            continue
+
+        # Heading  # / ## / ###
+        m = re.match(r"^(#{1,3})\s+(.*)", line)
+        if m:
+            heading_text = m.group(2).strip()
+            paragraphs.append([{"tag": "text", "text": heading_text,
+                                 "styles": ["bold"]}])
+            i += 1
+            continue
+
+        # Unordered list item
+        m = re.match(r"^[\-\*\+]\s+(.*)", line)
+        if m:
+            item_text = m.group(1)
+            row = [{"tag": "text", "text": "• "}] + _md_inline_to_elements(item_text)
+            paragraphs.append(row)
+            i += 1
+            continue
+
+        # Ordered list item
+        m = re.match(r"^\d+\.\s+(.*)", line)
+        if m:
+            item_text = m.group(1)
+            num = re.match(r"^(\d+)\.", line).group(1)  # type: ignore[union-attr]
+            row = [{"tag": "text", "text": f"{num}. "}] + _md_inline_to_elements(item_text)
+            paragraphs.append(row)
+            i += 1
+            continue
+
+        # Blank line → keep as separator (empty paragraph)
+        if line.strip() == "":
+            if paragraphs and paragraphs[-1]:
+                paragraphs.append([])
+            i += 1
+            continue
+
+        # Normal paragraph line
+        paragraphs.append(_md_inline_to_elements(line))
+        i += 1
+
+    # Remove trailing empty paragraphs
+    while paragraphs and not paragraphs[-1]:
+        paragraphs.pop()
+
+    # Feishu requires at least one non-empty paragraph
+    if not paragraphs:
+        paragraphs = [[{"tag": "text", "text": markdown[:4000]}]]
+
+    return {
+        "zh_cn": {
+            "title": title,
+            "content": paragraphs,
+        }
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +340,10 @@ async def _send_reply(
     text: str,
     message_id: Optional[str] = None,
 ) -> None:
-    """Reply via Feishu OpenAPI (reply-in-thread preferred, fallback to direct send)."""
-    content = json.dumps({"text": text[:4000]}, ensure_ascii=False)
+    """Reply via Feishu OpenAPI using post (rich-text) format for Markdown rendering."""
+    post_content = md_to_feishu_post(text[:4000])
+    content = json.dumps(post_content, ensure_ascii=False)
+    msg_type = "post"
     loop = asyncio.get_event_loop()
     try:
         if message_id:
@@ -204,7 +353,7 @@ async def _send_reply(
                 .request_body(
                     ReplyMessageRequestBody.builder()
                     .content(content)
-                    .msg_type("text")
+                    .msg_type(msg_type)
                     .build()
                 )
                 .build()
@@ -220,7 +369,7 @@ async def _send_reply(
                     CreateMessageRequestBody.builder()
                     .receive_id(receive_id)
                     .content(content)
-                    .msg_type("text")
+                    .msg_type(msg_type)
                     .build()
                 )
                 .build()
@@ -230,8 +379,53 @@ async def _send_reply(
             )
         if not resp.success():
             logger.warning("Feishu send failed code=%s msg=%s", resp.code, resp.msg)
+            # fallback to plain text if post fails
+            fallback = json.dumps({"text": text[:4000]}, ensure_ascii=False)
+            await _send_plain_text(lark_client, receive_id, receive_id_type,
+                                   fallback, message_id, loop)
     except Exception as exc:
         logger.warning("Feishu send error: %s", exc)
+
+
+async def _send_plain_text(
+    lark_client: Any,
+    receive_id: str,
+    receive_id_type: str,
+    content: str,
+    message_id: Optional[str],
+    loop: Any,
+) -> None:
+    """Fallback: send plain text message."""
+    try:
+        if message_id:
+            req = (
+                ReplyMessageRequest.builder()
+                .message_id(message_id)
+                .request_body(
+                    ReplyMessageRequestBody.builder()
+                    .content(content)
+                    .msg_type("text")
+                    .build()
+                )
+                .build()
+            )
+            await loop.run_in_executor(None, lambda: lark_client.im.v1.message.reply(req))
+        else:
+            req = (
+                CreateMessageRequest.builder()
+                .receive_id_type(receive_id_type)
+                .request_body(
+                    CreateMessageRequestBody.builder()
+                    .receive_id(receive_id)
+                    .content(content)
+                    .msg_type("text")
+                    .build()
+                )
+                .build()
+            )
+            await loop.run_in_executor(None, lambda: lark_client.im.v1.message.create(req))
+    except Exception as exc:
+        logger.warning("Feishu fallback send error: %s", exc)
 
 
 # ---------------------------------------------------------------------------
