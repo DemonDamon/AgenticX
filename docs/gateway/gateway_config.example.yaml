@@ -1,0 +1,38 @@
+# Example IM gateway server configuration (use with: agx gateway -c path/to/this/file.yaml)
+#
+# Author: Damon Li
+
+server:
+  host: "0.0.0.0"
+  port: 8081
+
+reply_timeout_seconds: 300
+
+# Optional: Siri / HTTP POST /api/command uses this header instead of per-device token
+# command_api_secret: "your-shared-secret"
+
+adapters:
+  feishu:
+    enabled: false
+    app_id: "cli_xxxxxx"
+    app_secret: "xxxxxxxxxxxx"
+    encrypt_key: "xxxxxxxxxxxx"
+    verification_token: "xxxxxxxxxxxx"
+
+  wecom:
+    enabled: false
+    corp_id: "wwxxxxxxxxxx"
+    agent_id: 1000002
+    secret: "xxxxxxxxxxxx"
+    token: "xxxxxxxxxxxx"
+    encoding_aes_key: "xxxxxxxxxxxx"
+
+  dingtalk:
+    enabled: false
+    app_secret: "xxxxxxxxxxxx"
+
+devices:
+  auth_tokens:
+    - device_id: "my-macbook"
+      token: "replace-with-long-random"
+      binding_code: "882291"
