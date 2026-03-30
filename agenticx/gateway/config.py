@@ -93,3 +93,15 @@ def binding_code_table(config: GatewayServerConfig) -> Dict[str, str]:
         if code and did:
             out[code] = did
     return out
+
+
+def binding_code_for_device(config: GatewayServerConfig, device_id: str) -> Optional[str]:
+    """Return the binding_code from gateway config for a registered device_id."""
+    did = (device_id or "").strip()
+    if not did:
+        return None
+    for entry in config.devices.auth_tokens:
+        if (entry.device_id or "").strip() == did:
+            code = (entry.binding_code or "").strip()
+            return code or None
+    return None

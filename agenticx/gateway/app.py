@@ -15,17 +15,20 @@ from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from agenticx.gateway.adapters.dingtalk import DingTalkAdapter
 from agenticx.gateway.adapters.feishu import FeishuAdapter
 from agenticx.gateway.adapters.wecom import WeComAdapter, query_dict_from_request
 from agenticx.gateway.config import (
     GatewayServerConfig,
+    binding_code_for_device,
     binding_code_table,
     device_token_table,
     load_gateway_config,
 )
+from agenticx.gateway.connect_page import render_connect_page
+from agenticx.gateway.connect_session import ConnectSessionManager
 from agenticx.gateway.device_manager import DeviceManager
 from agenticx.gateway.models import GatewayMessage, GatewayReply
 from agenticx.gateway.router import MessageRouter
@@ -52,12 +55,14 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
     for code, did in bindings.items():
         user_map.register_binding_code(code, did)
 
+    connect_sessions = ConnectSessionManager()
     router = MessageRouter(
         device_manager,
         user_map,
         tokens,
         bindings,
         reply_timeout_seconds=cfg.reply_timeout_seconds,
+        connect_sessions=connect_sessions,
     )
 
     feishu: Optional[FeishuAdapter] = None
@@ -90,6 +95,13 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
     app.state.feishu = feishu
     app.state.wecom = wecom
     app.state.dingtalk = dingtalk
+    app.state.connect_sessions = connect_sessions
+
+    def _require_device_token(device_id: str, token: str) -> None:
+        did = (device_id or "").strip()
+        tok = (token or "").strip()
+        if not did or not tok or tokens.get(did) != tok:
+            raise HTTPException(status_code=401, detail="invalid device credentials")
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -220,6 +232,76 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
         if reply is None:
             raise HTTPException(status_code=504, detail="reply timeout")
         return JSONResponse({"ok": True, "reply": reply.content})
+
+    @app.post("/api/connect/session")
+    async def api_connect_session(request: Request) -> JSONResponse:
+        """Create a short-lived QR connect session; requires device_id + token."""
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid json")
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="invalid body")
+        did = str(body.get("device_id") or "").strip()
+        tok = str(body.get("token") or "").strip()
+        _require_device_token(did, tok)
+        bcode = binding_code_for_device(cfg, did)
+        if not bcode:
+            raise HTTPException(
+                status_code=400,
+                detail="gateway_config: set binding_code for this device_id under devices.auth_tokens",
+            )
+        sess = connect_sessions.create(did, bcode)
+        base = str(request.base_url).rstrip("/")
+        qr_url = f"{base}/connect/{sess.session_id}"
+        out = sess.to_api_dict()
+        out["qr_url"] = qr_url
+        return JSONResponse(out)
+
+    @app.get("/api/connect/session/{session_id}")
+    async def api_connect_session_status(session_id: str) -> JSONResponse:
+        s = connect_sessions.get(session_id)
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        return JSONResponse(s.to_api_dict())
+
+    @app.get("/connect/{session_id}", response_class=HTMLResponse)
+    async def connect_landing(session_id: str, request: Request) -> HTMLResponse:
+        s = connect_sessions.get(session_id)
+        if s is None:
+            return HTMLResponse(
+                "<!DOCTYPE html><html><body><p>会话无效或已过期</p></body></html>",
+                status_code=404,
+            )
+        connect_sessions.mark_scanned(session_id)
+        page_url = str(request.url)
+        return HTMLResponse(render_connect_page(s, page_url=page_url))
+
+    @app.get("/api/device/{device_id}/bindings")
+    async def api_list_device_bindings(
+        device_id: str,
+        token: str = Query(default=""),
+    ) -> JSONResponse:
+        _require_device_token(device_id, token)
+        rows = user_map.get_bindings_for_device(device_id)
+        return JSONResponse({"bindings": rows})
+
+    @app.delete("/api/device/{device_id}/bindings")
+    async def api_delete_device_binding(
+        device_id: str,
+        token: str = Query(default=""),
+        platform: str = Query(default=""),
+        sender_id: str = Query(default=""),
+    ) -> JSONResponse:
+        _require_device_token(device_id, token)
+        plat = (platform or "").strip()
+        sid = (sender_id or "").strip()
+        if not plat or not sid:
+            raise HTTPException(status_code=400, detail="platform and sender_id query params required")
+        if user_map.get_device(plat, sid) != (device_id or "").strip():
+            raise HTTPException(status_code=404, detail="binding not found")
+        user_map.remove_binding(plat, sid)
+        return JSONResponse({"ok": True})
 
     @app.websocket("/ws/device/{device_id}")
     async def ws_device(websocket: WebSocket, device_id: str) -> None:

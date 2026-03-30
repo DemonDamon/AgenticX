@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Protocol
+from typing import TYPE_CHECKING, Optional, Protocol
 
 from agenticx.gateway.device_manager import DeviceManager
+
+if TYPE_CHECKING:
+    from agenticx.gateway.connect_session import ConnectSessionManager
 from agenticx.gateway.models import GatewayMessage, GatewayReply
 from agenticx.gateway.user_device_map import UserDeviceMap
 
@@ -36,12 +39,14 @@ class MessageRouter:
         device_tokens: dict[str, str],
         binding_codes: dict[str, str],
         reply_timeout_seconds: float = 300.0,
+        connect_sessions: Optional["ConnectSessionManager"] = None,
     ) -> None:
         self._dm = device_manager
         self._user_map = user_map
         self._device_tokens = device_tokens
         self._binding_codes = binding_codes
         self._reply_timeout = reply_timeout_seconds
+        self._connect_sessions = connect_sessions
 
     async def route(
         self,
@@ -69,6 +74,9 @@ class MessageRouter:
                 )
                 return
             self._user_map.set_binding(platform, sender, device_id)
+            if self._connect_sessions is not None:
+                name = (message.sender_name or "").strip() or sender
+                self._connect_sessions.try_complete_bind(bind_code, device_id, platform, name)
             await adapter.send_reply(
                 GatewayReply(
                     message_id=message.message_id,
