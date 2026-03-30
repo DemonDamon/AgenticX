@@ -83,6 +83,11 @@ export function PaneManager({ onOpenConfirm }: Props) {
     );
     setRowSizes((prev) => {
       const newEqual = 100 / newRows;
+      // 行数变化时必须整行重算：从 1 行(100%) 增到 2 行时若沿用 prev[0]=100 会得到 [100,50]，合计 150%，
+      // 多行布局底部会出现大块空白（第二行被挤出可视区域）。
+      if (prev.length !== newRows) {
+        return Array.from({ length: newRows }, () => newEqual);
+      }
       return Array.from({ length: newRows }, (_, i) => prev[i] ?? newEqual);
     });
   }, [paneCount]);

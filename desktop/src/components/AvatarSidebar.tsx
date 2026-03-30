@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Settings } from "lucide-react";
 import { useAppStore, type Avatar, type GroupChat } from "../store";
-import { avatarBgClass, groupColorByIndex } from "../utils/avatar-color";
+import { avatarBgClass, avatarDotColor, groupColorByIndex } from "../utils/avatar-color";
 import { AvatarCreateDialog } from "./AvatarCreateDialog";
 import { AvatarToolPermissionDialog } from "./AvatarToolPermissionDialog";
 
@@ -344,7 +344,12 @@ export function AvatarSidebar() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1">
                       <span className="truncate text-sm">{avatar.name}</span>
-                      {hasPane && <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />}
+                      {hasPane && (
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: avatarDotColor(avatar.id) }}
+                        />
+                      )}
                       {avatar.pinned && <span className="text-[10px] text-amber-400">*</span>}
                     </div>
                     {avatar.role && (

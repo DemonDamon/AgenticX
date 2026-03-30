@@ -18,6 +18,7 @@ import { Panel } from "./ds/Panel";
 import type { Avatar, ChatPane, ChatStyle, GroupChat } from "../store";
 import { useAppStore } from "../store";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
+import { QrConnectModal } from "./QrConnectModal";
 
 export type FavoriteForwardContext = {
   sourceSessionId: string;
@@ -335,7 +336,7 @@ function ToolsTab() {
           const badgeClass = tool.installed
             ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
             : isInstalling
-              ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+              ? "border-[var(--settings-accent-border-muted)] bg-[var(--settings-accent-subtle-bg)] text-[var(--settings-accent-fg-muted)]"
               : isManual
                 ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
                 : "border-border bg-surface-panel text-text-faint";
@@ -376,7 +377,7 @@ function ToolsTab() {
                     <div className="h-1.5 w-full overflow-hidden rounded bg-surface-panel">
                       <div
                         className={`h-full ${
-                          installState.phase === "error" ? "bg-rose-400" : installState.phase === "done" ? "bg-emerald-400" : "bg-cyan-400"
+                          installState.phase === "error" ? "bg-rose-400" : installState.phase === "done" ? "bg-emerald-400" : "bg-[var(--settings-accent-progress)]"
                         }`}
                         style={{ width: `${Math.max(0, Math.min(100, installState.percent))}%` }}
                       />
@@ -758,9 +759,9 @@ function SkillsTab() {
 
       {/* Detail panel */}
       {detail && (
-        <div className="rounded-md border border-cyan-500/30 bg-surface-card">
+        <div className="rounded-md border border-[var(--settings-accent-border-muted)] bg-surface-card">
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
-            <span className="text-xs font-medium text-cyan-400">{detail.name}</span>
+            <span className="text-xs font-medium text-[var(--settings-accent-fg)]">{detail.name}</span>
             <button
               className="text-xs text-text-faint transition hover:text-text-primary"
               onClick={() => setDetail(null)}
@@ -790,7 +791,7 @@ function SkillsTab() {
                 type="button"
                 className={`w-full rounded-md border px-3 py-2 text-left transition ${
                   detail?.name === skill.name
-                    ? "border-cyan-500/40 bg-cyan-500/10"
+                    ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
                     : "border-border bg-surface-card hover:bg-surface-hover"
                 }`}
                 onClick={() => void onViewDetail(skill.name)}
@@ -822,7 +823,7 @@ function SkillsTab() {
                 type="button"
                 className={`w-full rounded-md border px-3 py-2 text-left transition ${
                   detail?.name === skill.name
-                    ? "border-cyan-500/40 bg-cyan-500/10"
+                    ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
                     : "border-border bg-surface-card hover:bg-surface-hover"
                 }`}
                 onClick={() => void onViewDetail(skill.name)}
@@ -881,7 +882,7 @@ function SkillsTab() {
             {marketNeedsConfirmNonHigh && (
               <button
                 type="button"
-                className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-300 transition hover:bg-cyan-500/20 disabled:opacity-40"
+                className="rounded-md border border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)] px-3 py-1.5 text-xs text-[var(--settings-accent-fg-muted)] transition hover:bg-[var(--settings-accent-subtle-bg-hover)] disabled:opacity-40"
                 disabled={registryInstallBusy}
                 onClick={() => void onConfirmMarketInstall("non_high")}
               >
@@ -939,7 +940,7 @@ function SkillsTab() {
                 </div>
                 <button
                   type="button"
-                  className="shrink-0 rounded border border-cyan-500/30 px-2 py-0.5 text-[10px] text-cyan-400 transition hover:bg-cyan-500/10 disabled:opacity-40"
+                  className="shrink-0 rounded border border-[var(--settings-accent-border-muted)] px-2 py-0.5 text-[10px] text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
                   disabled={registryInstallBusy || marketLoading}
                   onClick={() => void onMarketInstall(item)}
                 >
@@ -969,7 +970,7 @@ function SkillsTab() {
             onKeyDown={(e) => { if (e.key === "Enter") void onInstallBundle(); }}
           />
           <button
-            className="shrink-0 rounded-md border border-cyan-500/30 px-3 py-1.5 text-xs text-cyan-400 transition hover:bg-cyan-500/10 disabled:opacity-40"
+            className="shrink-0 rounded-md border border-[var(--settings-accent-border-muted)] px-3 py-1.5 text-xs text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
             onClick={() => void onInstallBundle()}
             disabled={bundleBusy || !bundleInstallPath.trim()}
           >
@@ -994,7 +995,7 @@ function SkillsTab() {
             {bundleNeedsConfirmNonHigh && (
               <button
                 type="button"
-                className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-300 transition hover:bg-cyan-500/20 disabled:opacity-40"
+                className="rounded-md border border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)] px-3 py-1.5 text-xs text-[var(--settings-accent-fg-muted)] transition hover:bg-[var(--settings-accent-subtle-bg-hover)] disabled:opacity-40"
                 disabled={bundleBusy}
                 onClick={() => void onConfirmBundleInstall("non_high")}
               >
@@ -1173,17 +1174,16 @@ function EmailSettingsTab() {
   return (
     <div className="space-y-4">
       <div className="rounded-md border border-border bg-surface-card p-3">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between gap-3">
           <div className="text-sm font-medium text-text-primary">SMTP 配置</div>
-          <label className="inline-flex items-center gap-2 text-xs text-text-muted">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5"
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-text-muted">启用邮件通知</span>
+            <SettingsSwitch
               checked={form.enabled}
-              onChange={(e) => updateField("enabled", e.target.checked)}
+              onChange={(next) => updateField("enabled", next)}
+              aria-label="启用邮件通知"
             />
-            启用邮件通知
-          </label>
+          </div>
         </div>
 
         <div className="space-y-3">
@@ -1287,7 +1287,7 @@ function EmailSettingsTab() {
           {testing ? "测试中..." : "测试发送"}
         </button>
         <button
-          className="rounded-md bg-cyan-400 px-3 py-1.5 text-xs font-medium text-black transition hover:bg-cyan-300 disabled:opacity-40"
+          className="rounded-md bg-[var(--settings-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--settings-accent-solid-text)] transition hover:bg-[var(--settings-accent-solid-hover)] disabled:opacity-40"
           onClick={onSave}
           disabled={testing || saving}
         >
@@ -1543,7 +1543,7 @@ function FavoritesTab({
                         });
                       }}
                       placeholder="输入新标签后按 Enter"
-                      className="min-w-[8rem] flex-1 rounded border border-border bg-surface-card px-2 py-1 text-xs text-text-primary outline-none focus:border-cyan-500"
+                      className="min-w-[8rem] flex-1 rounded border border-border bg-surface-card px-2 py-1 text-xs text-text-primary outline-none focus:border-[var(--settings-accent-focus)]"
                     />
                     <button
                       type="button"
@@ -1645,6 +1645,41 @@ function FavoritesTab({
   );
 }
 
+/** 设置内统一开关：绿轨 + 白钮（与技能高级设置卡片一致） */
+function SettingsSwitch({
+  checked,
+  disabled,
+  onChange,
+  "aria-label": ariaLabel,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+  "aria-label"?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onClick={() => {
+        if (!disabled) onChange(!checked);
+      }}
+      className={`relative h-7 w-12 shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/55 disabled:opacity-40 ${
+        checked ? "bg-emerald-500" : "bg-surface-hover"
+      }`}
+    >
+      <span
+        className={`pointer-events-none absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${
+          checked ? "translate-x-5" : "translate-x-0"
+        }`}
+      />
+    </button>
+  );
+}
+
 /** 桌面操控开关：在「通用」Tab，不在工作区。 */
 function ComputerUseGeneralPanel() {
   const [loading, setLoading] = useState(true);
@@ -1711,16 +1746,17 @@ function ComputerUseGeneralPanel() {
         写入本机 <code className="text-text-subtle">~/.agenticx/config.yaml</code> 中的{" "}
         <code className="text-text-subtle">computer_use.enabled</code>。开启后由 Machi 随应用启动的内置助手读取该开关并尝试加载桌面级能力。若对话里仍看不到相关工具，请确认已安装包含该能力的 Machi 版本；修改后需完全退出并重新打开 Machi（远程模式见保存成功后的说明）。
       </p>
-      <label className="flex cursor-pointer items-center gap-2 text-sm text-text-subtle">
-        <input
-          type="checkbox"
-          className="h-4 w-4 accent-[var(--ui-btn-primary-bg)]"
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-sm text-text-subtle">
+          启用桌面操控（桌面级截屏 / 键鼠等，需权限与依赖）
+        </span>
+        <SettingsSwitch
           checked={enabled}
           disabled={saving}
-          onChange={(e) => void persist(e.target.checked)}
+          onChange={(next) => void persist(next)}
+          aria-label="启用桌面操控"
         />
-        启用桌面操控（桌面级截屏 / 键鼠等，需权限与依赖）
-      </label>
+      </div>
       {message ? (
         <div
           className={`mt-2 text-xs ${message.startsWith("已保存到本机配置") ? "text-text-muted" : "text-rose-400"}`}
@@ -1943,29 +1979,31 @@ function SessionMemoryPanel() {
       <p className="mb-3 text-xs text-text-faint">
         写入 <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
       </p>
-      <div className="space-y-2 text-sm text-text-subtle">
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            className="h-4 w-4 accent-[var(--ui-btn-primary-bg)]"
+      <div className="space-y-3 text-sm text-text-subtle">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div>启用会话摘要延续</div>
+            <div className="mt-0.5 text-[11px] text-text-faint">新会话可继承前次摘要上下文</div>
+          </div>
+          <SettingsSwitch
             checked={form.session_summary}
             disabled={saving}
-            onChange={(e) => void update({ session_summary: e.target.checked })}
+            onChange={(next) => void update({ session_summary: next })}
+            aria-label="启用会话摘要延续"
           />
-          启用会话摘要延续
-          <span className="text-[11px] text-text-faint">新会话可继承前次摘要上下文</span>
-        </label>
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            className="h-4 w-4 accent-[var(--ui-btn-primary-bg)]"
+        </div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div>启用观察式学习</div>
+            <div className="mt-0.5 text-[11px] text-text-faint">agent 自动沉淀高频操作为可复用知识</div>
+          </div>
+          <SettingsSwitch
             checked={form.learning_enabled}
             disabled={saving}
-            onChange={(e) => void update({ learning_enabled: e.target.checked })}
+            onChange={(next) => void update({ learning_enabled: next })}
+            aria-label="启用观察式学习"
           />
-          启用观察式学习
-          <span className="text-[11px] text-text-faint">agent 自动沉淀高频操作为可复用知识</span>
-        </label>
+        </div>
       </div>
       {message ? (
         <div className={`mt-2 text-xs ${message.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}>
@@ -2008,22 +2046,12 @@ function SettingsToggleCard(props: {
         <div className="text-sm font-semibold text-text-strong">{title}</div>
         <p className="mt-1 text-xs leading-relaxed text-text-muted">{description}</p>
       </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
+      <SettingsSwitch
+        checked={checked}
         disabled={disabled}
-        onClick={() => onChange(!checked)}
-        className={`relative h-7 w-12 shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-btn-primary-bg)] disabled:opacity-40 ${
-          checked ? "bg-emerald-500/85" : "bg-surface-hover"
-        }`}
-      >
-        <span
-          className={`pointer-events-none absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform ${
-            checked ? "translate-x-5" : "translate-x-0"
-          }`}
-        />
-      </button>
+        onChange={onChange}
+        aria-label={title}
+      />
     </div>
   );
 }
@@ -2178,6 +2206,55 @@ export function SettingsPanel({
   const [gwToken, setGwToken] = useState("");
   const [gwStudioBase, setGwStudioBase] = useState("");
   const [gwShowToken, setGwShowToken] = useState(false);
+  const [gwAdvancedOpen, setGwAdvancedOpen] = useState(false);
+  const [gwQrOpen, setGwQrOpen] = useState(false);
+  const [gwBindings, setGwBindings] = useState<
+    Array<{ platform: string; sender_id: string; device_id: string; bound_at: number }>
+  >([]);
+  const [gwBindingsLoading, setGwBindingsLoading] = useState(false);
+  const [gwBindingsErr, setGwBindingsErr] = useState("");
+
+  const refreshGwBindings = useCallback(async () => {
+    const base = gwUrl.trim().replace(/\/+$/, "");
+    const did = gwDeviceId.trim();
+    const tok = gwToken.trim();
+    if (!base || !did || !tok) {
+      setGwBindings([]);
+      setGwBindingsErr("");
+      return;
+    }
+    setGwBindingsLoading(true);
+    setGwBindingsErr("");
+    try {
+      const r = await fetch(
+        `${base}/api/device/${encodeURIComponent(did)}/bindings?token=${encodeURIComponent(tok)}`,
+      );
+      const text = await r.text();
+      let j: { bindings?: typeof gwBindings; detail?: string | unknown[] };
+      try {
+        j = JSON.parse(text) as { bindings?: typeof gwBindings; detail?: string | unknown[] };
+      } catch {
+        throw new Error(text.slice(0, 160) || `HTTP ${r.status}`);
+      }
+      if (!r.ok) {
+        const d = j.detail;
+        const msg =
+          typeof d === "string" ? d : Array.isArray(d) ? JSON.stringify(d) : text.slice(0, 160);
+        throw new Error(msg || `HTTP ${r.status}`);
+      }
+      setGwBindings(Array.isArray(j.bindings) ? j.bindings : []);
+    } catch (e) {
+      setGwBindingsErr(String(e));
+      setGwBindings([]);
+    } finally {
+      setGwBindingsLoading(false);
+    }
+  }, [gwUrl, gwDeviceId, gwToken]);
+
+  useEffect(() => {
+    if (!open || tab !== "server") return;
+    void refreshGwBindings();
+  }, [open, tab, refreshGwBindings]);
 
   useEffect(() => {
     // Reset the guard when dialog is closed.
@@ -2509,13 +2586,13 @@ export function SettingsPanel({
                       <button
                         key={name}
                         className={`flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs transition ${
-                          active === name ? "bg-cyan-500/15 text-cyan-400" : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
+                          active === name ? "bg-[var(--settings-accent-row-bg)] text-[var(--settings-accent-fg)]" : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
                         }`}
                         onClick={() => { setActive(name); setShowModelPanel(false); }}
                       >
                         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${hasKey ? "bg-emerald-400" : "bg-surface-hover"}`} />
                         <span className="truncate">{name}</span>
-                        {name === defProv && <span className="ml-auto shrink-0 rounded bg-cyan-500/20 px-1 text-[9px] text-cyan-400">默认</span>}
+                        {name === defProv && <span className="ml-auto shrink-0 rounded bg-[var(--settings-accent-badge-bg)] px-1 text-[9px] text-[var(--settings-accent-fg)]">默认</span>}
                       </button>
                     );
                   })}
@@ -2567,11 +2644,19 @@ export function SettingsPanel({
                       </label>
                       <div className="flex items-center gap-3">
                         {defProv !== active && (
-                          <button className="rounded-md border border-cyan-500/30 px-3 py-1.5 text-xs text-cyan-400 transition hover:bg-cyan-500/10" onClick={() => setDefProv(active)}>
+                          <button
+                            type="button"
+                            className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                            onClick={() => setDefProv(active)}
+                          >
                             设为默认 Provider
                           </button>
                         )}
-                        <button className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong" onClick={() => setShowModelPanel(true)}>
+                        <button
+                          type="button"
+                          className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                          onClick={() => setShowModelPanel(true)}
+                        >
                           管理模型
                         </button>
                       </div>
@@ -2588,7 +2673,7 @@ export function SettingsPanel({
                       </div>
                       <div className="mb-3 flex gap-2">
                         <input className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm" value={newModelInput} onChange={(e) => setNewModelInput(e.target.value)} placeholder="手动添加模型名..." onKeyDown={(e) => { if (e.key === "Enter") onAddModel(); }} />
-                        <button className="shrink-0 rounded-md bg-cyan-500 px-3 py-1.5 text-xs font-medium text-black transition hover:bg-cyan-400 disabled:opacity-40" disabled={!newModelInput.trim()} onClick={onAddModel}>
+                        <button className="shrink-0 rounded-md bg-[var(--settings-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--settings-accent-solid-text)] transition hover:bg-[var(--settings-accent-solid-hover)] disabled:opacity-40" disabled={!newModelInput.trim()} onClick={onAddModel}>
                           添加
                         </button>
                       </div>
@@ -2601,11 +2686,11 @@ export function SettingsPanel({
                             <div key={model} className="flex items-center gap-2 rounded-md border border-border bg-surface-panel/50 px-3 py-2">
                               <span className={`h-2 w-2 shrink-0 rounded-full ${health === "healthy" ? "bg-emerald-400" : health === "error" ? "bg-rose-400" : health === "checking" ? "bg-amber-400 animate-pulse" : "bg-surface-hover"}`} />
                               <span className="flex-1 truncate text-sm text-text-muted">{model}</span>
-                              {model === current.model && <span className="shrink-0 rounded bg-cyan-500/20 px-1.5 text-[10px] text-cyan-400">默认</span>}
-                              <button className="shrink-0 text-xs text-text-faint transition hover:text-cyan-400 disabled:opacity-40" disabled={health === "checking" || !current.apiKey} onClick={() => onHealthCheck(model)}>
+                              {model === current.model && <span className="shrink-0 rounded bg-[var(--settings-accent-badge-bg)] px-1.5 text-[10px] text-[var(--settings-accent-fg)]">默认</span>}
+                              <button className="shrink-0 text-xs text-text-faint transition hover:text-[var(--settings-accent-fg)] disabled:opacity-40" disabled={health === "checking" || !current.apiKey} onClick={() => onHealthCheck(model)}>
                                 {health === "checking" ? "..." : "检测"}
                               </button>
-                              <button className="shrink-0 text-xs text-text-faint transition hover:text-cyan-400" onClick={() => updateField("model", model)}>⚙</button>
+                              <button className="shrink-0 text-xs text-text-faint transition hover:text-[var(--settings-accent-fg)]" onClick={() => updateField("model", model)}>⚙</button>
                               <button className="shrink-0 text-xs text-text-faint transition hover:text-rose-400" onClick={() => onRemoveModel(model)}>—</button>
                             </div>
                           );
@@ -2696,25 +2781,17 @@ export function SettingsPanel({
                         <span className={`h-2 w-2 shrink-0 rounded-full ${server.connected ? "bg-emerald-400" : "bg-surface-hover"}`} />
                         <span className="flex-1 truncate text-sm text-text-muted">{server.name}</span>
                         <span className="max-w-[220px] truncate text-[10px] text-text-faint">{server.command ?? ""}</span>
-                        {server.connected ? (
-                          <button
-                            type="button"
-                            className="shrink-0 rounded border border-border px-2 py-0.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-                            onClick={() => void handleDisconnectMcp(server.name)}
-                            disabled={mcpBusy || !sessionId}
-                          >
-                            断开
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="shrink-0 rounded border border-border px-2 py-0.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-                            onClick={() => void handleConnectMcp(server.name)}
-                            disabled={mcpBusy || !sessionId}
-                          >
-                            连接
-                          </button>
-                        )}
+                        <SettingsSwitch
+                          checked={server.connected}
+                          disabled={mcpBusy || !sessionId}
+                          onChange={(next) => {
+                            if (next) void handleConnectMcp(server.name);
+                            else void handleDisconnectMcp(server.name);
+                          }}
+                          aria-label={
+                            server.connected ? `已连接 ${server.name}，关闭以断开` : `连接 ${server.name}`
+                          }
+                        />
                       </div>
                     ))
                   )}
@@ -2852,79 +2929,167 @@ export function SettingsPanel({
 
                 <Panel title="远程指令（IM 网关）">
                   <p className="mb-3 text-xs text-text-faint">
-                    连接云端 Webhook 网关后，可通过飞书/企微机器人向本机 Machi 下发指令。需在网关侧配置相同 device_id 与 token，并在 IM 中发送「绑定 &lt;绑定码&gt;」完成首次绑定。
+                    连接云端 Webhook 网关后，可通过飞书/企微机器人向本机 Machi 下发指令。推荐扫码打开手机引导页完成绑定；亦可在 IM 中手动发送「绑定 &lt;绑定码&gt;」。网关
+                    <code className="mx-0.5 rounded bg-surface-hover px-1">gateway_config.yaml</code>
+                    须为该设备配置 binding_code。
                   </p>
-                  <label className="flex items-center gap-2 text-sm text-text-subtle cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={gwEnabled}
-                      onChange={(e) => setGwEnabled(e.target.checked)}
-                      className="accent-[var(--ui-btn-primary-bg)]"
-                    />
-                    启用网关客户端（agx serve 启动后连接 WebSocket）
-                  </label>
-                  <label className="mt-3 block text-sm text-text-muted">
-                    网关 WebSocket 基址（https:// 将自动转为 wss://）
-                    <input
-                      className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
-                      placeholder="https://gateway.example.com"
-                      value={gwUrl}
-                      onChange={(e) => setGwUrl(e.target.value)}
-                    />
-                  </label>
-                  <label className="mt-3 block text-sm text-text-muted">
-                    设备 ID（与网关 devices.auth_tokens 中一致）
-                    <input
-                      className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
-                      placeholder="my-macbook"
-                      value={gwDeviceId}
-                      onChange={(e) => setGwDeviceId(e.target.value)}
-                    />
-                  </label>
-                  <label className="mt-3 block text-sm text-text-muted">
-                    设备 Token
-                    <div className="relative mt-1">
-                      <input
-                        className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 pr-16 text-sm text-text-subtle"
-                        type={gwShowToken ? "text" : "password"}
-                        value={gwToken}
-                        onChange={(e) => setGwToken(e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
-                        onClick={() => setGwShowToken(!gwShowToken)}
-                      >
-                        {gwShowToken ? "隐藏" : "显示"}
-                      </button>
-                    </div>
-                  </label>
-                  <label className="mt-3 block text-sm text-text-muted">
-                    本机 Studio 基址（留空则使用 http://127.0.0.1:当前端口）
-                    <input
-                      className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
-                      placeholder="http://127.0.0.1:8000"
-                      value={gwStudioBase}
-                      onChange={(e) => setGwStudioBase(e.target.value)}
-                    />
-                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
+                      disabled={!gwUrl.trim() || !gwDeviceId.trim() || !gwToken.trim()}
+                      onClick={() => setGwQrOpen(true)}
+                    >
+                      扫码连接（飞书/企微）
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-md border border-border px-3 py-1.5 text-sm text-text-subtle hover:bg-surface-hover disabled:opacity-50"
+                      disabled={!gwUrl.trim() || !gwDeviceId.trim() || !gwToken.trim() || gwBindingsLoading}
+                      onClick={() => void refreshGwBindings()}
+                    >
+                      {gwBindingsLoading ? "刷新中…" : "刷新已绑定账号"}
+                    </button>
+                  </div>
+                  {gwBindingsErr && (
+                    <p className="mt-2 text-xs text-red-400" title={gwBindingsErr}>
+                      无法拉取绑定列表：{gwBindingsErr.slice(0, 120)}
+                    </p>
+                  )}
+                  {gwBindings.length > 0 && (
+                    <ul className="mt-3 space-y-2 text-sm text-text-subtle">
+                      {gwBindings.map((b) => (
+                        <li
+                          key={`${b.platform}:${b.sender_id}`}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface-card px-2 py-1.5"
+                        >
+                          <span>
+                            <span className="text-text-muted">{b.platform}</span>
+                            <span className="mx-1 text-text-faint">·</span>
+                            <span className="font-mono text-xs">{b.sender_id}</span>
+                          </span>
+                          <button
+                            type="button"
+                            className="shrink-0 rounded border border-border px-2 py-0.5 text-xs text-text-faint hover:bg-surface-hover hover:text-text-subtle"
+                            onClick={async () => {
+                              const base = gwUrl.trim().replace(/\/+$/, "");
+                              const did = gwDeviceId.trim();
+                              const tok = gwToken.trim();
+                              try {
+                                const r = await fetch(
+                                  `${base}/api/device/${encodeURIComponent(did)}/bindings?token=${encodeURIComponent(tok)}&platform=${encodeURIComponent(b.platform)}&sender_id=${encodeURIComponent(b.sender_id)}`,
+                                  { method: "DELETE" },
+                                );
+                                if (!r.ok) {
+                                  const t = await r.text();
+                                  throw new Error(t.slice(0, 120) || `HTTP ${r.status}`);
+                                }
+                                await refreshGwBindings();
+                              } catch (e) {
+                                alert(`解绑失败：${String(e)}`);
+                              }
+                            }}
+                          >
+                            解绑
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   <button
                     type="button"
-                    className="mt-4 rounded-md border border-border px-3 py-1.5 text-sm text-text-subtle hover:bg-surface-hover"
-                    onClick={async () => {
-                      await window.agenticxDesktop.saveGatewayIm({
-                        enabled: gwEnabled,
-                        url: gwUrl.trim().replace(/\/+$/, ""),
-                        deviceId: gwDeviceId.trim(),
-                        token: gwToken.trim(),
-                        studioBaseUrl: gwStudioBase.trim().replace(/\/+$/, ""),
-                      });
-                      alert("IM 网关配置已保存。需重启 Machi / agx serve 后生效；飞书侧请发送「绑定 <绑定码>」。");
-                    }}
+                    className="mt-4 text-sm text-text-faint underline decoration-dotted hover:text-text-subtle"
+                    onClick={() => setGwAdvancedOpen(!gwAdvancedOpen)}
                   >
-                    保存 IM 网关配置
+                    {gwAdvancedOpen ? "收起高级配置" : "展开高级配置"}
                   </button>
+                  {gwAdvancedOpen && (
+                    <div className="mt-3 space-y-3 border-t border-border pt-3">
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-sm text-text-subtle">
+                          启用网关客户端（agx serve 启动后连接 WebSocket）
+                        </span>
+                        <SettingsSwitch
+                          checked={gwEnabled}
+                          onChange={setGwEnabled}
+                          aria-label="启用网关客户端"
+                        />
+                      </div>
+                      <label className="block text-sm text-text-muted">
+                        网关 WebSocket 基址（https:// 将自动转为 wss://）
+                        <input
+                          className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                          placeholder="https://gateway.example.com"
+                          value={gwUrl}
+                          onChange={(e) => setGwUrl(e.target.value)}
+                        />
+                      </label>
+                      <label className="block text-sm text-text-muted">
+                        设备 ID（与网关 devices.auth_tokens 中一致）
+                        <input
+                          className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                          placeholder="my-macbook"
+                          value={gwDeviceId}
+                          onChange={(e) => setGwDeviceId(e.target.value)}
+                        />
+                      </label>
+                      <label className="block text-sm text-text-muted">
+                        设备 Token
+                        <div className="relative mt-1">
+                          <input
+                            className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 pr-16 text-sm text-text-subtle"
+                            type={gwShowToken ? "text" : "password"}
+                            value={gwToken}
+                            onChange={(e) => setGwToken(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-0.5 text-xs text-text-faint hover:text-text-subtle"
+                            onClick={() => setGwShowToken(!gwShowToken)}
+                          >
+                            {gwShowToken ? "隐藏" : "显示"}
+                          </button>
+                        </div>
+                      </label>
+                      <label className="block text-sm text-text-muted">
+                        本机 Studio 基址（留空则使用 http://127.0.0.1:当前端口）
+                        <input
+                          className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                          placeholder="http://127.0.0.1:8000"
+                          value={gwStudioBase}
+                          onChange={(e) => setGwStudioBase(e.target.value)}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="rounded-md border border-border px-3 py-1.5 text-sm text-text-subtle hover:bg-surface-hover"
+                        onClick={async () => {
+                          await window.agenticxDesktop.saveGatewayIm({
+                            enabled: gwEnabled,
+                            url: gwUrl.trim().replace(/\/+$/, ""),
+                            deviceId: gwDeviceId.trim(),
+                            token: gwToken.trim(),
+                            studioBaseUrl: gwStudioBase.trim().replace(/\/+$/, ""),
+                          });
+                          alert(
+                            "IM 网关配置已保存。需重启 Machi / agx serve 后生效；也可使用「扫码连接」或手动发送「绑定 <绑定码>」。",
+                          );
+                          void refreshGwBindings();
+                        }}
+                      >
+                        保存 IM 网关配置
+                      </button>
+                    </div>
+                  )}
                 </Panel>
+                <QrConnectModal
+                  open={gwQrOpen}
+                  gatewayBaseUrl={gwUrl.trim().replace(/\/+$/, "")}
+                  deviceId={gwDeviceId.trim()}
+                  token={gwToken.trim()}
+                  onClose={() => setGwQrOpen(false)}
+                  onBound={() => void refreshGwBindings()}
+                />
 
                 <div className="flex items-center gap-3">
                   <button
