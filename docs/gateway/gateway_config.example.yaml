@@ -1,7 +1,30 @@
-# Example IM gateway server configuration (use with: agx gateway -c path/to/this/file.yaml)
+# Example IM gateway server configuration
+#
+# TWO modes are supported:
+#
+#   Mode A — Feishu long-connection (RECOMMENDED, no public IP needed):
+#     agx feishu --app-id cli_xxx --app-secret yyy
+#     or: FEISHU_APP_ID=cli_xxx FEISHU_APP_SECRET=yyy agx feishu
+#
+#   Mode B — Webhook gateway (requires public IP/domain):
+#     agx gateway -c gateway_config.yaml
 #
 # Author: Damon Li
 
+# ── Mode A: Feishu long-connection ──────────────────────────────────────────
+# Run with: agx feishu --app-id <APP_ID> --app-secret <APP_SECRET>
+# Or set env vars:
+#   export FEISHU_APP_ID=cli_a9f7680d09389bef
+#   export FEISHU_APP_SECRET=your_app_secret
+#   export AGX_STUDIO_BASE_URL=http://127.0.0.1:8000  # default
+#   agx feishu
+#
+# Feishu app requirements:
+#   - Bot capability enabled
+#   - Event: im.message.receive_v1 (long-connection mode)
+#   - Permission: im:message, im:message:send_as_bot, im:message.receive_event
+
+# ── Mode B: Webhook gateway server ──────────────────────────────────────────
 server:
   host: "0.0.0.0"
   port: 8081
@@ -16,7 +39,7 @@ adapters:
     enabled: false
     app_id: "cli_xxxxxx"
     app_secret: "xxxxxxxxxxxx"
-    encrypt_key: "xxxxxxxxxxxx"
+    encrypt_key: ""               # Leave empty if Encrypt Key is disabled in Feishu console
     verification_token: "xxxxxxxxxxxx"
 
   wecom:

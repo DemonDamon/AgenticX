@@ -562,6 +562,19 @@ def serve(
         os.environ["AGX_GATEWAY_ENABLED"] = "true"
 
     effective_token = os.environ.get("AGX_DESKTOP_TOKEN", "").strip()
+
+    # Write port and token to ~/.agenticx/serve.port / serve.token
+    # so sibling processes (e.g. agx feishu) can auto-discover without extra flags.
+    try:
+        base_dir = Path.home() / ".agenticx"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        (base_dir / "serve.port").write_text(str(port))
+        _tok = os.environ.get("AGX_DESKTOP_TOKEN", "").strip()
+        if _tok:
+            (base_dir / "serve.token").write_text(_tok)
+    except Exception:
+        pass
+
     app_inst = create_studio_app()
     console.print(f"[bold green]AgenticX Studio Server[/bold green] http://{host}:{port}")
     if effective_token:
@@ -600,6 +613,89 @@ def gateway_serve(
             " 请参考 docs/gateway/im-remote-gateway-setup.md 创建配置。"
         )
     run_gateway_server(cfg_path)
+
+
+@app.command("feishu")
+def feishu_longconn(
+    app_id: str = typer.Option(
+        "",
+        "--app-id",
+        help="飞书应用 App ID（优先于环境变量 FEISHU_APP_ID）",
+    ),
+    app_secret: str = typer.Option(
+        "",
+        "--app-secret",
+        help="飞书应用 App Secret（优先于环境变量 FEISHU_APP_SECRET）",
+    ),
+    studio_url: str = typer.Option(
+        "",
+        "--studio-url",
+        help="本机 agx serve 地址，默认 http://127.0.0.1:8000",
+    ),
+    desktop_token: str = typer.Option(
+        "",
+        "--desktop-token",
+        help="agx serve 鉴权 token（如有）",
+    ),
+    debug: bool = typer.Option(False, "--debug", help="开启 DEBUG 日志"),
+):
+    """通过飞书长连接（WebSocket）接收消息并转发给本机 Machi 执行。
+
+    无需公网 IP，使用飞书官方 SDK 主动连接飞书服务器。
+
+    配置优先级：命令行参数 > 环境变量（FEISHU_APP_ID / FEISHU_APP_SECRET）
+
+    示例：
+
+        agx feishu --app-id cli_xxx --app-secret yyy
+
+        FEISHU_APP_ID=cli_xxx FEISHU_APP_SECRET=yyy agx feishu
+    """
+    _suppress_macos_dock_icon()
+
+    import logging as _logging
+    _logging.basicConfig(
+        level=_logging.DEBUG if debug else _logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+    resolved_app_id = (app_id or os.environ.get("FEISHU_APP_ID") or "").strip()
+    resolved_app_secret = (app_secret or os.environ.get("FEISHU_APP_SECRET") or "").strip()
+    resolved_studio = (studio_url or os.environ.get("AGX_STUDIO_BASE_URL") or "").strip()
+    resolved_token = (desktop_token or os.environ.get("AGX_DESKTOP_TOKEN") or "").strip()
+
+    if not resolved_app_id or not resolved_app_secret:
+        console.print(
+            "[bold red]错误:[/bold red] 需要提供 --app-id 和 --app-secret，"
+            "或设置环境变量 FEISHU_APP_ID / FEISHU_APP_SECRET。"
+        )
+        raise typer.Exit(1)
+
+    if not resolved_studio:
+        host = os.environ.get("AGX_SERVE_HOST", "127.0.0.1")
+        port = os.environ.get("AGX_SERVE_PORT", "8000")
+        resolved_studio = f"http://{host}:{port}"
+
+    try:
+        from agenticx.gateway.feishu_longconn import FeishuLongConnRunner
+    except ImportError as e:
+        console.print(f"[bold red]错误:[/bold red] 无法加载飞书模块: {e}")
+        console.print("请先安装依赖: [cyan]pip install lark-oapi[/cyan]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]飞书长连接启动中...[/green] app_id={resolved_app_id}")
+    console.print(f"  本机 agx serve: [cyan]{resolved_studio}[/cyan]")
+    console.print("  在飞书里给机器人发消息即可触发 Machi 执行。")
+    console.print("  发送「新对话」可重置会话上下文，「状态」可检查连接。")
+
+    runner = FeishuLongConnRunner(
+        app_id=resolved_app_id,
+        app_secret=resolved_app_secret,
+        studio_base_url=resolved_studio,
+        desktop_token=resolved_token,
+        log_level="DEBUG" if debug else "INFO",
+    )
+    runner.run()
 
 
 @app.command()

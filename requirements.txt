@@ -22,6 +22,7 @@ requests>=2.31.0
 aiohttp>=3.9.0
 aiofiles>=23.0.0
 websockets>=12.0
+lark-oapi>=1.3.0          # Feishu long-connection bot (agx feishu)
 
 # Web 框架
 fastapi>=0.100.0
