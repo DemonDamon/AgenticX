@@ -742,11 +742,11 @@ function startFeishuProcess(): void {
   if (feishuProcess && !feishuProcess.killed) return;
   feishuProcess = spawnAgx(
     ["feishu", "--app-id", lc.app_id, "--app-secret", lc.app_secret],
-    { cwd: os.homedir(), stdio: ["ignore", "pipe", "pipe"] }
+    { cwd: os.homedir(), stdio: ["ignore", "pipe", "pipe"], env: process.env }
   );
   feishuProcess.on("exit", (code) => {
     if (!isQuitting) {
-      log.info(`feishu process exited (code=${String(code)}), will not auto-restart`);
+      console.info(`[feishu] process exited (code=${String(code)}), will not auto-restart`);
     }
     feishuProcess = null;
   });

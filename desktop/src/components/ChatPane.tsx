@@ -1262,7 +1262,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   useEffect(() => {
     if (!pane?.sessionId) return;
-    if (!hasDelegation && (pane.messages?.length ?? 0) > 0) return;
+    const isImSession = pane.sessionId.startsWith("im-");
+    if (!hasDelegation && !isImSession && (pane.messages?.length ?? 0) > 0) return;
     let active = true;
     const poll = async () => {
       if (!active) return;
@@ -1307,7 +1308,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
     };
     void poll();
-    if (!hasDelegation) return;
+    if (!hasDelegation && !isImSession) return;
     const timer = window.setInterval(() => void poll(), 3000);
     return () => {
       active = false;
