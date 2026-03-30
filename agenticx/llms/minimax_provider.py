@@ -41,4 +41,5 @@ class MiniMaxProvider(LiteLLMProvider):
             timeout=config.get("timeout"),
             max_retries=config.get("max_retries"),
             group_id=config.get("group_id"),
+            drop_params=config.get("drop_params"),
         )

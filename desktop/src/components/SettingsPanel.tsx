@@ -31,11 +31,15 @@ const ALL_PROVIDERS = [
   "zhipu", "qianfan", "minimax", "kimi", "ollama",
 ] as const;
 
+/** LiteLLM routes: show optional drop_params toggle for strict OpenAI-compatible gateways. */
+const DROP_PARAMS_CAPABLE_PROVIDERS = new Set<string>(["openai", "anthropic", "ollama"]);
+
 type ProviderEntry = {
   apiKey: string;
   baseUrl: string;
   model: string;
   models: string[];
+  dropParams: boolean;
 };
 
 type McpServer = {
@@ -2276,11 +2280,18 @@ export function SettingsPanel({
         baseUrl: saved?.baseUrl ?? "",
         model: saved?.model ?? "",
         models: saved?.models ?? [],
+        dropParams: saved?.dropParams === true,
       };
     }
     for (const [name, saved] of Object.entries(providers)) {
       if (!merged[name]) {
-        merged[name] = { apiKey: saved?.apiKey ?? "", baseUrl: saved?.baseUrl ?? "", model: saved?.model ?? "", models: saved?.models ?? [] };
+        merged[name] = {
+          apiKey: saved?.apiKey ?? "",
+          baseUrl: saved?.baseUrl ?? "",
+          model: saved?.model ?? "",
+          models: saved?.models ?? [],
+          dropParams: saved?.dropParams === true,
+        };
       }
     }
     setDraft(merged);
@@ -2343,10 +2354,13 @@ export function SettingsPanel({
     [sessionId, onRefreshMcp]
   );
 
-  const current = useMemo(() => draft[active] ?? { apiKey: "", baseUrl: "", model: "", models: [] }, [draft, active]);
+  const current = useMemo(
+    () => draft[active] ?? { apiKey: "", baseUrl: "", model: "", models: [], dropParams: false },
+    [draft, active]
+  );
 
   const updateField = useCallback(
-    (field: keyof ProviderEntry, value: string | string[]) => {
+    (field: keyof ProviderEntry, value: string | string[] | boolean) => {
       setDraft((prev) => ({ ...prev, [active]: { ...prev[active], [field]: value } }));
     },
     [active]
@@ -2390,8 +2404,19 @@ export function SettingsPanel({
     setNewModelInput("");
   };
 
+  /** Normalize base_url: strip trailing slash; if no version segment (/v1, /v2…), append /v1. */
+  const normalizeBaseUrl = (url: string): string => {
+    const b = url.trim().replace(/\/+$/, "");
+    if (!b) return b;
+    return /\/v\d(\/|$)/.test(b) ? b : `${b}/v1`;
+  };
+
   const handleSave = async () => {
-    await onSave({ defaultProvider: defProv, providers: draft });
+    const normalized: Record<string, ProviderEntry> = {};
+    for (const [name, entry] of Object.entries(draft)) {
+      normalized[name] = { ...entry, baseUrl: normalizeBaseUrl(entry.baseUrl) };
+    }
+    await onSave({ defaultProvider: defProv, providers: normalized });
     onClose();
   };
 
@@ -2630,7 +2655,35 @@ export function SettingsPanel({
                       <label className="block text-sm text-text-muted">
                         API 地址 <span className="text-xs text-text-faint">(留空使用默认)</span>
                         <input className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm" value={current.baseUrl} onChange={(e) => updateField("baseUrl", e.target.value)} placeholder="https://..." />
+                        {current.baseUrl.trim() && (
+                          <div className="mt-1 text-xs text-text-faint">
+                            预览：<span className="text-text-subtle">{
+                              (() => {
+                                const b = current.baseUrl.trim().replace(/\/+$/, "");
+                                // Normalize: ensure /v1 segment is present (Cherry Studio behavior)
+                                const base = /\/v\d(\/|$)/.test(b) ? b : `${b}/v1`;
+                                return `${base}/chat/completions`;
+                              })()
+                            }</span>
+                          </div>
+                        )}
                       </label>
+                      {DROP_PARAMS_CAPABLE_PROVIDERS.has(active) && (
+                        <label className="flex cursor-pointer items-start gap-2 text-sm text-text-muted">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 h-4 w-4 shrink-0 rounded border-border"
+                            checked={current.dropParams}
+                            onChange={(e) => updateField("dropParams", e.target.checked)}
+                          />
+                          <span>
+                            兼容模式：丢弃上游不支持的参数（<code className="text-xs text-text-faint">drop_params</code>）
+                            <span className="mt-0.5 block text-xs text-text-faint">
+                              自建 LiteLLM / 部分 OpenAI 兼容网关不支持 <code className="text-[10px]">tool_choice</code> 时需开启；保存后重启本机 <code className="text-[10px]">agx serve</code> 或重开 Machi 后生效。
+                            </span>
+                          </span>
+                        </label>
+                      )}
                       <label className="block text-sm text-text-muted">
                         默认模型
                         {current.models.length > 0 ? (

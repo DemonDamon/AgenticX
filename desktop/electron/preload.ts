@@ -224,6 +224,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     baseUrl?: string;
     model?: string;
     models?: string[];
+    dropParams?: boolean;
   }) => ipcRenderer.invoke("save-provider", payload),
   setDefaultProvider: async (name: string) => ipcRenderer.invoke("set-default-provider", name),
   deleteProvider: async (name: string) => ipcRenderer.invoke("delete-provider", name),

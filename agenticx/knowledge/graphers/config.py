@@ -15,6 +15,7 @@ class LLMConfig:
     max_retries: Optional[int] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
+    drop_params: Optional[bool] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

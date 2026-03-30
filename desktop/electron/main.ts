@@ -31,6 +31,7 @@ type ProviderConfig = {
   base_url?: string;
   model?: string;
   models?: string[];
+  drop_params?: boolean;
 };
 
 type RemoteServerConfig = {
@@ -1889,17 +1890,24 @@ function registerIpc(): void {
     baseUrl?: string;
     model?: string;
     models?: string[];
+    dropParams?: boolean;
   }) => {
     const cfg = loadAgxConfig();
     if (!cfg.providers) cfg.providers = {};
     const prev = cfg.providers[payload.name] ?? {};
-    cfg.providers[payload.name] = {
+    const next: ProviderConfig = {
       ...prev,
       api_key: payload.apiKey ?? prev.api_key,
       base_url: payload.baseUrl ?? prev.base_url,
       model: payload.model ?? prev.model,
       models: payload.models ?? prev.models,
     };
+    if (payload.dropParams === true) {
+      next.drop_params = true;
+    } else if (payload.dropParams === false) {
+      delete next.drop_params;
+    }
+    cfg.providers[payload.name] = next;
     saveAgxConfig(cfg);
     return { ok: true };
   });

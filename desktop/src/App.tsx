@@ -38,14 +38,15 @@ type PersistedWorkspaceState = {
   panes: PersistedPaneState[];
 };
 
-function toProviderEntries(raw: Record<string, { api_key?: string; base_url?: string; model?: string; models?: string[] }>) {
-  const result: Record<string, { apiKey: string; baseUrl: string; model: string; models: string[] }> = {};
+function toProviderEntries(raw: Record<string, { api_key?: string; base_url?: string; model?: string; models?: string[]; drop_params?: boolean }>) {
+  const result: Record<string, { apiKey: string; baseUrl: string; model: string; models: string[]; dropParams: boolean }> = {};
   for (const [name, cfg] of Object.entries(raw)) {
     result[name] = {
       apiKey: cfg.api_key ?? "",
       baseUrl: cfg.base_url ?? "",
       model: cfg.model ?? "",
       models: cfg.models ?? [],
+      dropParams: cfg.drop_params === true,
     };
   }
   return result;
@@ -955,7 +956,7 @@ export function App() {
 
   const handleSettingsSave = async (result: {
     defaultProvider: string;
-    providers: Record<string, { apiKey: string; baseUrl: string; model: string; models: string[] }>;
+    providers: Record<string, { apiKey: string; baseUrl: string; model: string; models: string[]; dropParams: boolean }>;
   }) => {
     for (const [name, entry] of Object.entries(result.providers)) {
       if (!entry.apiKey && !entry.model && !entry.baseUrl && entry.models.length === 0) continue;
@@ -965,6 +966,7 @@ export function App() {
         baseUrl: entry.baseUrl || undefined,
         model: entry.model || undefined,
         models: entry.models.length > 0 ? entry.models : undefined,
+        dropParams: entry.dropParams,
       });
     }
     await window.agenticxDesktop.setDefaultProvider(result.defaultProvider);
