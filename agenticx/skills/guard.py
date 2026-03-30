@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 ScanVerdict = Literal["safe", "caution", "dangerous"]
 
@@ -92,6 +92,57 @@ def scan_skill(skill_dir: Path, *, source: str = "agent-created") -> ScanResult:
                     )
                 )
     return ScanResult(verdict=_merge_verdict(findings), findings=findings)
+
+
+def scan_skill_markdown_text(text: str, *, source: str = "community") -> ScanResult:
+    """Scan SKILL.md content from a string (writes a temp dir with SKILL.md).
+
+    Args:
+        text: Markdown body of SKILL.md.
+        source: Trust label passed through to :func:`scan_skill` (reserved).
+
+    Returns:
+        Same shape as :func:`scan_skill` on a directory.
+    """
+    import tempfile
+
+    _ = source
+    with tempfile.TemporaryDirectory() as td:
+        skill_dir = Path(td) / "_skill"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(text, encoding="utf-8", errors="replace")
+        return scan_skill(skill_dir, source=source)
+
+
+def finding_to_dict(finding: ScanFinding) -> dict[str, Any]:
+    """Serialize a single finding for API / UI."""
+    return {
+        "severity": finding.severity,
+        "pattern_name": finding.pattern_name,
+        "matched_text": finding.matched_text,
+        "file_path": finding.file_path,
+        "line_number": finding.line_number,
+    }
+
+
+def scan_result_to_payload(result: ScanResult, skill_name: str = "") -> dict[str, Any]:
+    """Serialize scan result for API responses."""
+    return {
+        "skill_name": skill_name,
+        "verdict": result.verdict,
+        "findings": [finding_to_dict(f) for f in result.findings],
+    }
+
+
+def merge_verdicts(verdicts: list[ScanVerdict]) -> ScanVerdict:
+    """Pick the highest severity from a list of verdicts."""
+    if not verdicts:
+        return "safe"
+    best: ScanVerdict = "safe"
+    for v in verdicts:
+        if _verdict_rank(v) > _verdict_rank(best):
+            best = v
+    return best
 
 
 def should_allow(result: ScanResult, source: str) -> tuple[bool, str]:

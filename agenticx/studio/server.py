@@ -315,6 +315,21 @@ def create_studio_app() -> FastAPI:
         if x_agx_desktop_token != desktop_token:
             raise HTTPException(status_code=401, detail="invalid desktop token")
 
+    def _load_non_high_risk_auto_install() -> bool:
+        """Read skills.non_high_risk_auto_install from global config (default True)."""
+        try:
+            raw = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH) or {}
+            skills_block = raw.get("skills") or {}
+            if isinstance(skills_block, dict):
+                v = skills_block.get("non_high_risk_auto_install")
+                if isinstance(v, bool):
+                    return v
+                if isinstance(v, str):
+                    return v.strip().lower() in ("true", "1", "yes", "on")
+            return True
+        except Exception:
+            return True
+
     def _tool_install_hint(tool_id: str) -> str:
         platform = os.uname().sysname.lower() if hasattr(os, "uname") else ""
         if tool_id == "libreoffice":
@@ -2687,6 +2702,34 @@ def create_studio_app() -> FastAPI:
             logger.warning("list_bundles error: %s", exc)
             return {"ok": False, "items": [], "count": 0, "error": str(exc)}
 
+    @app.post("/api/bundles/install-preview")
+    async def install_bundle_preview(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Scan bundle skills before install (no filesystem writes to bundle targets)."""
+        _check_token(x_agx_desktop_token)
+        source_path = str(payload.get("source_path", "")).strip()
+        if not source_path:
+            raise HTTPException(status_code=400, detail="source_path is required")
+        try:
+            from agenticx.extensions.installer import scan_bundle_source
+
+            raw = scan_bundle_source(Path(source_path))
+            if not raw.get("ok"):
+                return {"ok": False, "error": str(raw.get("error", "scan failed"))}
+            return {
+                "ok": True,
+                "scan": {
+                    "overall": raw.get("overall"),
+                    "skills": raw.get("skills", []),
+                    "bundle_name": raw.get("bundle_name"),
+                },
+            }
+        except Exception as exc:
+            logger.warning("install_bundle_preview error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     @app.post("/api/bundles/install")
     async def install_bundle_endpoint(
         payload: dict,
@@ -2700,7 +2743,15 @@ def create_studio_app() -> FastAPI:
         try:
             from agenticx.extensions.installer import install_bundle
 
-            result = install_bundle(Path(source_path))
+            auto_non_high = _load_non_high_risk_auto_install()
+            acknowledge_high_risk = bool(payload.get("acknowledge_high_risk"))
+            confirm_non_high_risk = bool(payload.get("confirm_non_high_risk"))
+            result = install_bundle(
+                Path(source_path),
+                acknowledge_high_risk=acknowledge_high_risk,
+                confirm_non_high_risk=confirm_non_high_risk,
+                auto_non_high=auto_non_high,
+            )
             if result.success:
                 return {
                     "ok": True,
@@ -2711,7 +2762,12 @@ def create_studio_app() -> FastAPI:
                     "avatars_installed": result.avatars_installed,
                     "memory_templates_installed": result.memory_templates_installed,
                 }
-            return {"ok": False, "error": result.error}
+            body: dict[str, Any] = {"ok": False, "error": result.error}
+            if result.error_code:
+                body["error_code"] = result.error_code
+            if result.scan_summary:
+                body["scan_summary"] = result.scan_summary
+            return body
         except Exception as exc:
             logger.warning("install_bundle error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -2755,6 +2811,35 @@ def create_studio_app() -> FastAPI:
             logger.warning("registry_search error: %s", exc)
             return {"ok": False, "items": [], "count": 0, "error": str(exc)}
 
+    @app.post("/api/registry/install-preview")
+    async def registry_install_preview(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Fetch registry skill content and return security scan (no install)."""
+        _check_token(x_agx_desktop_token)
+        source_name = str(payload.get("source", "")).strip()
+        skill_name = str(payload.get("name", "")).strip()
+        if not source_name or not skill_name:
+            raise HTTPException(status_code=400, detail="source and name are required")
+        try:
+            from agenticx.extensions.registry_hub import RegistryHub
+            from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
+
+            hub = RegistryHub.from_config()
+            content, err = hub.fetch_skill_markdown(source_name, skill_name)
+            if err or content is None:
+                return {"ok": False, "error": err or "fetch failed"}
+            sr = scan_skill_markdown_text(content)
+            one = scan_result_to_payload(sr, skill_name)
+            return {
+                "ok": True,
+                "scan": {"overall": one["verdict"], "skills": [one]},
+            }
+        except Exception as exc:
+            logger.warning("registry_install_preview error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     @app.post("/api/registry/install")
     async def registry_install(
         payload: dict,
@@ -2768,12 +2853,44 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="source and name are required")
         try:
             from agenticx.extensions.registry_hub import RegistryHub
+            from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
 
             hub = RegistryHub.from_config()
-            result = hub.install(source_name, skill_name)
-            if result.success:
-                return {"ok": True, "name": result.name, "installed_path": result.installed_path}
-            return {"ok": False, "error": result.error}
+            content, err = hub.fetch_skill_markdown(source_name, skill_name)
+            if err or content is None:
+                return {"ok": False, "error": err or "fetch failed"}
+
+            sr = scan_skill_markdown_text(content)
+            summary = {
+                "overall": sr.verdict,
+                "skills": [scan_result_to_payload(sr, skill_name)],
+            }
+            auto_non_high = _load_non_high_risk_auto_install()
+            acknowledge_high_risk = bool(payload.get("acknowledge_high_risk"))
+            confirm_non_high_risk = bool(payload.get("confirm_non_high_risk"))
+
+            if sr.verdict == "dangerous" and not acknowledge_high_risk:
+                return {
+                    "ok": False,
+                    "error": "high_risk_confirm_required",
+                    "error_code": "high_risk_confirm_required",
+                    "scan_summary": summary,
+                }
+            if sr.verdict in ("safe", "caution") and not auto_non_high and not confirm_non_high_risk:
+                return {
+                    "ok": False,
+                    "error": "non_high_risk_confirm_required",
+                    "error_code": "non_high_risk_confirm_required",
+                    "scan_summary": summary,
+                }
+
+            md_path = hub.write_registry_skill(skill_name, content)
+            return {
+                "ok": True,
+                "name": skill_name,
+                "installed_path": str(md_path),
+                "scan_summary": summary,
+            }
         except Exception as exc:
             logger.warning("registry_install error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc

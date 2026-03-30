@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,8 @@ class InstallResult:
     name: str = ""
     error: str = ""
     installed_path: str = ""
+    scan_summary: Optional[Dict[str, Any]] = None
+    error_code: Optional[str] = None
 
 
 class RegistryHub:
@@ -254,21 +256,43 @@ class RegistryHub:
         except Exception as exc:
             return InstallResult(success=False, name=skill_name, error=str(exc))
 
-    def _install_agx(self, url: str, skill_name: str) -> InstallResult:
-        """Install from an AGX native registry via SkillRegistryClient."""
+    def fetch_skill_markdown(self, source_name: str, skill_name: str) -> Tuple[Optional[str], str]:
+        """Download SKILL.md body without writing to the skills registry.
+
+        Returns:
+            Tuple of (content or None, error message — empty string on success).
+        """
+        reg = next(
+            (r for r in self._registries if r.get("name") == source_name), None
+        )
+        if reg is None:
+            return None, f"Registry '{source_name}' not found in configuration"
+
+        reg_type = str(reg.get("type", "agx")).lower()
+        reg_url = str(reg.get("url", "")).rstrip("/")
+        if not reg_url:
+            return None, "Registry URL is empty"
+
+        try:
+            if reg_type == "agx":
+                return self._fetch_agx_markdown(reg_url, skill_name)
+            if reg_type == "clawhub":
+                return self._fetch_clawhub_markdown(reg_url, skill_name)
+            return None, f"Fetch not supported for registry type '{reg_type}'"
+        except Exception as exc:
+            return None, str(exc)
+
+    def _fetch_agx_markdown(self, url: str, skill_name: str) -> Tuple[Optional[str], str]:
         from agenticx.skills.registry import SkillRegistryClient
 
         client = SkillRegistryClient(registry_url=url)
-        install_root = Path.home() / ".agenticx" / "skills" / "registry"
-        md_path = client.install(skill_name, target_dir=install_root)
-        return InstallResult(
-            success=True,
-            name=skill_name,
-            installed_path=str(md_path),
-        )
+        entry = client.get(skill_name)
+        text = str(entry.skill_content or "").strip()
+        if not text:
+            return None, "Empty skill content from registry"
+        return text, ""
 
-    def _install_clawhub(self, url: str, skill_name: str) -> InstallResult:
-        """Install a ClawHub skill by fetching its SKILL.md content."""
+    def _fetch_clawhub_markdown(self, url: str, skill_name: str) -> Tuple[Optional[str], str]:
         import httpx
 
         try:
@@ -286,19 +310,42 @@ class RegistryHub:
             or payload.get("md_content")
             or ""
         )
-        if not skill_content:
-            return InstallResult(
-                success=False,
-                name=skill_name,
-                error="No skill_content returned from ClawHub API",
-            )
+        if not skill_content.strip():
+            return None, "No skill_content returned from ClawHub API"
+        return skill_content, ""
 
+    def write_registry_skill(self, skill_name: str, skill_content: str) -> Path:
+        """Write SKILL.md under ~/.agenticx/skills/registry/<name>/."""
+        from agenticx.skills.registry import _validate_skill_name
+
+        validated = _validate_skill_name(skill_name)
         install_root = Path.home() / ".agenticx" / "skills" / "registry"
-        skill_dir = install_root / skill_name
+        install_root = install_root.resolve()
+        skill_dir = (install_root / validated).resolve()
+        skill_dir.relative_to(install_root)
         skill_dir.mkdir(parents=True, exist_ok=True)
         md_path = skill_dir / "SKILL.md"
         md_path.write_text(skill_content, encoding="utf-8")
+        return md_path
 
+    def _install_agx(self, url: str, skill_name: str) -> InstallResult:
+        """Install from an AGX native registry via SkillRegistryClient."""
+        content, err = self._fetch_agx_markdown(url, skill_name)
+        if err or content is None:
+            return InstallResult(success=False, name=skill_name, error=err or "fetch failed")
+        md_path = self.write_registry_skill(skill_name, content)
+        return InstallResult(
+            success=True,
+            name=skill_name,
+            installed_path=str(md_path),
+        )
+
+    def _install_clawhub(self, url: str, skill_name: str) -> InstallResult:
+        """Install a ClawHub skill by fetching its SKILL.md content."""
+        content, err = self._fetch_clawhub_markdown(url, skill_name)
+        if err or content is None:
+            return InstallResult(success=False, name=skill_name, error=err or "fetch failed")
+        md_path = self.write_registry_skill(skill_name, content)
         return InstallResult(
             success=True,
             name=skill_name,

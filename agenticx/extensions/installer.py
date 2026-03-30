@@ -103,6 +103,8 @@ class InstallResult:
     mcp_servers_installed: List[str] = field(default_factory=list)
     avatars_installed: List[str] = field(default_factory=list)
     memory_templates_installed: List[str] = field(default_factory=list)
+    scan_summary: Optional[Dict[str, Any]] = None
+    error_code: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -170,10 +172,61 @@ def _save_mcp_json(data: Dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Bundle skill scan (pre-install)
+# ---------------------------------------------------------------------------
+
+
+def scan_bundle_source(source: Path) -> Dict[str, Any]:
+    """Parse bundle manifest and scan each referenced skill directory.
+
+    Returns:
+        Dict with keys: ok (bool), overall (verdict), skills (list), bundle_name, error (optional).
+    """
+    from agenticx.extensions.bundle import BundleParseError, parse_bundle_manifest
+    from agenticx.skills.guard import ScanVerdict, merge_verdicts, scan_result_to_payload, scan_skill
+
+    try:
+        manifest = parse_bundle_manifest(source)
+    except (BundleParseError, FileNotFoundError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+    per_skill: List[Dict[str, Any]] = []
+    verdicts: List[ScanVerdict] = []
+    for skill_ref in manifest.skills:
+        skill_md = skill_ref.resolved_path(manifest.source_dir)
+        skill_dir = skill_md.parent
+        sr = scan_skill(skill_dir, source="community")
+        per_skill.append(scan_result_to_payload(sr, skill_dir.name))
+        verdicts.append(sr.verdict)
+
+    overall = merge_verdicts(verdicts)
+    return {
+        "ok": True,
+        "bundle_name": manifest.name,
+        "overall": overall,
+        "skills": per_skill,
+    }
+
+
+def _bundle_scan_summary_from_dict(scan: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "overall": scan.get("overall"),
+        "skills": scan.get("skills", []),
+        "bundle_name": scan.get("bundle_name"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # install_bundle
 # ---------------------------------------------------------------------------
 
-def install_bundle(source: Path) -> InstallResult:
+def install_bundle(
+    source: Path,
+    *,
+    acknowledge_high_risk: bool = False,
+    confirm_non_high_risk: bool = False,
+    auto_non_high: bool = True,
+) -> InstallResult:
     """Install an AGX Bundle from a local directory.
 
     Steps:
@@ -190,12 +243,35 @@ def install_bundle(source: Path) -> InstallResult:
     Returns:
         :class:`InstallResult` with success flag and component lists.
     """
-    from agenticx.extensions.bundle import parse_bundle_manifest, BundleParseError
+    from agenticx.extensions.bundle import BundleParseError, parse_bundle_manifest
 
     try:
         manifest = parse_bundle_manifest(source)
     except (BundleParseError, FileNotFoundError) as exc:
         return InstallResult(success=False, error=str(exc))
+
+    scan_raw = scan_bundle_source(source)
+    if not scan_raw.get("ok"):
+        return InstallResult(
+            success=False,
+            error=str(scan_raw.get("error", "scan failed")),
+        )
+    summary = _bundle_scan_summary_from_dict(scan_raw)
+    overall = str(summary.get("overall") or "safe")
+    if overall == "dangerous" and not acknowledge_high_risk:
+        return InstallResult(
+            success=False,
+            error="high_risk_confirm_required",
+            error_code="high_risk_confirm_required",
+            scan_summary=summary,
+        )
+    if overall in ("safe", "caution") and not auto_non_high and not confirm_non_high_risk:
+        return InstallResult(
+            success=False,
+            error="non_high_risk_confirm_required",
+            error_code="non_high_risk_confirm_required",
+            scan_summary=summary,
+        )
 
     with _lock:
         bundle_name = manifest.name

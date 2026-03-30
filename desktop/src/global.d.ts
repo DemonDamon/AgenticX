@@ -40,6 +40,30 @@ type TrinityConfig = {
   learning_enabled: boolean;
   skill_manage_enabled: boolean;
 };
+
+type AutomationConfig = {
+  prevent_sleep: boolean;
+};
+
+type SkillInstallPolicyConfig = {
+  non_high_risk_auto_install: boolean;
+};
+
+type SkillScanPayload = {
+  overall: string;
+  skills: Array<{
+    skill_name: string;
+    verdict: string;
+    findings: Array<{
+      severity: string;
+      pattern_name: string;
+      matched_text: string;
+      file_path: string;
+      line_number: number;
+    }>;
+  }>;
+  bundle_name?: string;
+};
 type AvatarItem = {
   id: string;
   name: string;
@@ -154,6 +178,8 @@ type BundleInstallResult = {
   avatars_installed?: string[];
   memory_templates_installed?: string[];
   error?: string;
+  error_code?: string;
+  scan_summary?: SkillScanPayload;
 };
 type BundleUninstallResult = { ok: boolean; name?: string; error?: string };
 
@@ -167,7 +193,24 @@ type RegistrySearchItem = {
   install_hint: string;
 };
 type RegistrySearchResult = { ok: boolean; items: RegistrySearchItem[]; count: number; error?: string };
-type RegistryInstallResult = { ok: boolean; name?: string; installed_path?: string; error?: string };
+type RegistryInstallResult = {
+  ok: boolean;
+  name?: string;
+  installed_path?: string;
+  error?: string;
+  error_code?: string;
+  scan_summary?: SkillScanPayload;
+};
+type BundleInstallPreviewResult = {
+  ok: boolean;
+  scan?: SkillScanPayload;
+  error?: string;
+};
+type RegistryInstallPreviewResult = {
+  ok: boolean;
+  scan?: SkillScanPayload;
+  error?: string;
+};
 
 declare global {
   interface Window {
@@ -276,6 +319,10 @@ declare global {
       saveComputerUseConfig: (payload: ComputerUseConfig) => Promise<{ ok: boolean; error?: string }>;
       loadTrinityConfig: () => Promise<{ ok: boolean; config?: TrinityConfig; error?: string }>;
       saveTrinityConfig: (payload: TrinityConfig) => Promise<{ ok: boolean; error?: string }>;
+      loadAutomationConfig: () => Promise<{ ok: boolean; config?: AutomationConfig; error?: string }>;
+      saveAutomationConfig: (payload: AutomationConfig) => Promise<{ ok: boolean; error?: string }>;
+      loadSkillInstallPolicy: () => Promise<{ ok: boolean; config?: SkillInstallPolicyConfig; error?: string }>;
+      saveSkillInstallPolicy: (payload: SkillInstallPolicyConfig) => Promise<{ ok: boolean; error?: string }>;
       loadEmailConfig: () => Promise<{ ok: boolean; config: EmailConfig; error?: string }>;
       loadMcpStatus: (sessionId: string) => Promise<McpStatusResult>;
       importMcpConfig: (payload: { sessionId: string; sourcePath: string }) => Promise<{
@@ -347,11 +394,22 @@ declare global {
       refreshSkills: () => Promise<SkillRefreshResult>;
 
       loadBundles: () => Promise<BundleListResult>;
-      installBundle: (args: { sourcePath: string }) => Promise<BundleInstallResult>;
+      installBundle: (args: {
+        sourcePath: string;
+        acknowledgeHighRisk?: boolean;
+        confirmNonHighRisk?: boolean;
+      }) => Promise<BundleInstallResult>;
+      installBundlePreview: (args: { sourcePath: string }) => Promise<BundleInstallPreviewResult>;
       uninstallBundle: (args: { name: string }) => Promise<BundleUninstallResult>;
 
       searchRegistry: (args: { q: string }) => Promise<RegistrySearchResult>;
-      installFromRegistry: (args: { source: string; name: string }) => Promise<RegistryInstallResult>;
+      installFromRegistry: (args: {
+        source: string;
+        name: string;
+        acknowledgeHighRisk?: boolean;
+        confirmNonHighRisk?: boolean;
+      }) => Promise<RegistryInstallResult>;
+      installFromRegistryPreview: (args: { source: string; name: string }) => Promise<RegistryInstallPreviewResult>;
 
       terminalSpawn: (payload: {
         id: string;

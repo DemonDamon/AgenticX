@@ -6,6 +6,7 @@ import {
   Menu,
   MenuItemConstructorOptions,
   nativeImage,
+  powerSaveBlocker,
   shell,
   Tray
 } from "electron";
@@ -78,6 +79,8 @@ type AgxConfig = {
     session_summary?: boolean;
     learning_enabled?: boolean;
   };
+  automation?: { prevent_sleep?: boolean };
+  skills?: { non_high_risk_auto_install?: boolean };
 };
 
 type EmailConfig = {
@@ -96,6 +99,14 @@ type TrinityConfig = {
   session_summary: boolean;
   learning_enabled: boolean;
   skill_manage_enabled: boolean;
+};
+
+type AutomationConfig = {
+  prevent_sleep: boolean;
+};
+
+type SkillInstallPolicyConfig = {
+  non_high_risk_auto_install: boolean;
 };
 
 const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
@@ -127,6 +138,53 @@ const DEFAULT_TRINITY_CONFIG: TrinityConfig = {
   learning_enabled: false,
   skill_manage_enabled: false,
 };
+
+const DEFAULT_AUTOMATION_CONFIG: AutomationConfig = {
+  prevent_sleep: false,
+};
+
+const DEFAULT_SKILL_INSTALL_POLICY: SkillInstallPolicyConfig = {
+  non_high_risk_auto_install: true,
+};
+
+let preventSleepBlockerId: number | null = null;
+
+function loadAutomationConfigFromAgx(cfg: AgxConfig): AutomationConfig {
+  const raw = cfg.automation;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ...DEFAULT_AUTOMATION_CONFIG };
+  }
+  const row = raw as Record<string, unknown>;
+  return {
+    prevent_sleep: parseBooleanLoose(row.prevent_sleep, DEFAULT_AUTOMATION_CONFIG.prevent_sleep),
+  };
+}
+
+function loadSkillInstallPolicyFromAgx(cfg: AgxConfig): SkillInstallPolicyConfig {
+  const raw = cfg.skills;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ...DEFAULT_SKILL_INSTALL_POLICY };
+  }
+  const row = raw as Record<string, unknown>;
+  return {
+    non_high_risk_auto_install: parseBooleanLoose(
+      row.non_high_risk_auto_install,
+      DEFAULT_SKILL_INSTALL_POLICY.non_high_risk_auto_install
+    ),
+  };
+}
+
+function applyPreventSleepFromConfig(cfg: AgxConfig): void {
+  const enabled = loadAutomationConfigFromAgx(cfg).prevent_sleep;
+  if (enabled) {
+    if (preventSleepBlockerId === null) {
+      preventSleepBlockerId = powerSaveBlocker.start("prevent-app-suspension");
+    }
+  } else if (preventSleepBlockerId !== null) {
+    powerSaveBlocker.stop(preventSleepBlockerId);
+    preventSleepBlockerId = null;
+  }
+}
 
 const KNOWN_BASE_URLS: Record<string, string> = {
   openai: "https://api.openai.com/v1",
@@ -1576,6 +1634,69 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("load-automation-config", async () => {
+    const cfg = loadAgxConfig();
+    return { ok: true, config: loadAutomationConfigFromAgx(cfg) };
+  });
+
+  ipcMain.handle("save-automation-config", async (_event, payload: unknown) => {
+    if (!payload || typeof payload !== "object") return { ok: false, error: "invalid payload: object required" };
+    const p = payload as { prevent_sleep?: unknown };
+    let preventSleep: boolean;
+    try {
+      preventSleep = parseBooleanStrict(p.prevent_sleep, "prevent_sleep");
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+    try {
+      const cfg = loadAgxConfig();
+      const root = cfg as Record<string, unknown>;
+      const prev = root.automation;
+      const merged =
+        prev && typeof prev === "object" && !Array.isArray(prev)
+          ? { ...(prev as Record<string, unknown>) }
+          : {};
+      merged.prevent_sleep = preventSleep;
+      root.automation = merged;
+      saveAgxConfig(cfg);
+      applyPreventSleepFromConfig(cfg);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("load-skill-install-policy", async () => {
+    const cfg = loadAgxConfig();
+    return { ok: true, config: loadSkillInstallPolicyFromAgx(cfg) };
+  });
+
+  ipcMain.handle("save-skill-install-policy", async (_event, payload: unknown) => {
+    if (!payload || typeof payload !== "object") return { ok: false, error: "invalid payload: object required" };
+    const p = payload as { non_high_risk_auto_install?: unknown };
+    let flag: boolean;
+    try {
+      flag = parseBooleanStrict(p.non_high_risk_auto_install, "non_high_risk_auto_install");
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+    try {
+      const cfg = loadAgxConfig();
+      const root = cfg as Record<string, unknown>;
+      const prev = root.skills;
+      const merged =
+        prev && typeof prev === "object" && !Array.isArray(prev)
+          ? { ...(prev as Record<string, unknown>) }
+          : {};
+      merged.non_high_risk_auto_install = flag;
+      root.skills = merged;
+      saveAgxConfig(cfg);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("save-email-config", async (_event, payload: unknown) => {
     const checked = validateEmailConfigPayload(payload);
     if (!checked.ok) return { ok: false, error: checked.error };
@@ -1977,10 +2098,38 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("install-bundle", async (_event, args: { sourcePath: string }) => {
+  ipcMain.handle(
+    "install-bundle",
+    async (
+      _event,
+      args: {
+        sourcePath: string;
+        acknowledgeHighRisk?: boolean;
+        confirmNonHighRisk?: boolean;
+      }
+    ) => {
+      const studioUrl = getStudioUrl();
+      try {
+        const resp = await fetch(`${studioUrl}/api/bundles/install`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+          body: JSON.stringify({
+            source_path: args.sourcePath,
+            acknowledge_high_risk: Boolean(args.acknowledgeHighRisk),
+            confirm_non_high_risk: Boolean(args.confirmNonHighRisk),
+          }),
+        });
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    }
+  );
+
+  ipcMain.handle("install-bundle-preview", async (_event, args: { sourcePath: string }) => {
     const studioUrl = getStudioUrl();
     try {
-      const resp = await fetch(`${studioUrl}/api/bundles/install`, {
+      const resp = await fetch(`${studioUrl}/api/bundles/install-preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify({ source_path: args.sourcePath }),
@@ -2017,10 +2166,40 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("install-from-registry", async (_event, args: { source: string; name: string }) => {
+  ipcMain.handle(
+    "install-from-registry",
+    async (
+      _event,
+      args: {
+        source: string;
+        name: string;
+        acknowledgeHighRisk?: boolean;
+        confirmNonHighRisk?: boolean;
+      }
+    ) => {
+      const studioUrl = getStudioUrl();
+      try {
+        const resp = await fetch(`${studioUrl}/api/registry/install`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+          body: JSON.stringify({
+            source: args.source,
+            name: args.name,
+            acknowledge_high_risk: Boolean(args.acknowledgeHighRisk),
+            confirm_non_high_risk: Boolean(args.confirmNonHighRisk),
+          }),
+        });
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    }
+  );
+
+  ipcMain.handle("install-from-registry-preview", async (_event, args: { source: string; name: string }) => {
     const studioUrl = getStudioUrl();
     try {
-      const resp = await fetch(`${studioUrl}/api/registry/install`, {
+      const resp = await fetch(`${studioUrl}/api/registry/install-preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify({ source: args.source, name: args.name }),
@@ -2227,6 +2406,7 @@ if (!gotTheLock) {
       }
 
       registerIpc();
+      applyPreventSleepFromConfig(loadAgxConfig());
       createWindow();
       createTray();
     } catch (error) {
