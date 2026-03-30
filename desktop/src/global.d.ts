@@ -240,6 +240,12 @@ declare global {
       }) => Promise<{ ok: boolean; restart_required?: boolean }>;
       loadFeishuConfig: () => Promise<{ enabled: boolean; appId: string; appSecret: string }>;
       saveFeishuConfig: (payload: { enabled: boolean; appId: string; appSecret: string }) => Promise<{ ok: boolean }>;
+      loadFeishuBinding: () => Promise<{ ok: boolean; bindings: Record<string, unknown> }>;
+      saveFeishuDesktopBinding: (payload: {
+        sessionId: string | null;
+        avatarId?: string | null;
+        avatarName?: string | null;
+      }) => Promise<{ ok: boolean }>;
       onOpenSettings: (cb: () => void) => void;
 
       listAvatars: () => Promise<{ ok: boolean; avatars: AvatarItem[] }>;

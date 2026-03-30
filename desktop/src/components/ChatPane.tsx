@@ -1146,6 +1146,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [attachToastOpen, setAttachToastOpen] = useState(false);
   const [favoriteToastOpen, setFavoriteToastOpen] = useState(false);
   const [favoriteToastMsg, setFavoriteToastMsg] = useState("");
+  const [feishuDesktopBound, setFeishuDesktopBound] = useState(false);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
   useEffect(() => {
@@ -1315,6 +1316,53 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       window.clearInterval(timer);
     };
   }, [hasDelegation, pane?.sessionId, pane?.id, pane?.messages?.length, panes, setPaneMessages]);
+
+  useEffect(() => {
+    if (isGroupPane || !pane?.sessionId) {
+      setFeishuDesktopBound(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await window.agenticxDesktop.loadFeishuBinding();
+        if (cancelled || !r.ok) return;
+        const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
+        setFeishuDesktopBound(
+          Boolean(
+            desk &&
+              typeof desk.session_id === "string" &&
+              desk.session_id === pane.sessionId
+          )
+        );
+      } catch {
+        if (!cancelled) setFeishuDesktopBound(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isGroupPane, pane?.sessionId]);
+
+  const toggleFeishuDesktopBinding = useCallback(async () => {
+    if (isGroupPane || !pane?.sessionId) return;
+    try {
+      if (feishuDesktopBound) {
+        await window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
+        setFeishuDesktopBound(false);
+      } else {
+        const aid = pane.avatarId?.startsWith("group:") ? null : pane.avatarId || null;
+        await window.agenticxDesktop.saveFeishuDesktopBinding({
+          sessionId: pane.sessionId,
+          avatarId: aid,
+          avatarName: pane.avatarName || null,
+        });
+        setFeishuDesktopBound(true);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [feishuDesktopBound, isGroupPane, pane?.sessionId, pane?.avatarId, pane?.avatarName]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -3153,6 +3201,34 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   <path d="M6 12h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
                 </svg>
               </button>
+            ) : null}
+            {!isGroupPane && pane.sessionId ? (
+              <HoverTip
+                label={
+                  feishuDesktopBound
+                    ? "已绑定飞书到此会话（点击取消桌面绑定；飞书内 /unbind 可取消个人绑定）"
+                    : "绑定飞书到此会话（未在飞书单独绑定时，消息将进此会话）"
+                }
+              >
+                <button
+                  type="button"
+                  className={`rounded px-2 py-0.5 text-[11px] transition ${
+                    feishuDesktopBound
+                      ? "bg-surface-card-strong text-text-strong"
+                      : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
+                  }`}
+                  onClick={() => void toggleFeishuDesktopBinding()}
+                >
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path
+                      d="M6.2 9.8a2.5 2.5 0 0 1 0-3.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-.4.4M9.8 6.2a2.5 2.5 0 0 1 0 3.5l-1 1a2.5 2.5 0 0 1-3.5-3.5l.4-.4"
+                      stroke="currentColor"
+                      strokeWidth="1.25"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              </HoverTip>
             ) : null}
             <button
               className={`rounded px-2 py-0.5 text-[11px] transition ${

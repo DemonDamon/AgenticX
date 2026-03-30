@@ -20,7 +20,8 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -28,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 _PORT_FILE = os.path.expanduser("~/.agenticx/serve.port")
 _TOKEN_FILE = os.path.expanduser("~/.agenticx/serve.token")
+_BINDING_FILE = os.path.expanduser("~/.agenticx/feishu_binding.json")
+_DESKTOP_BINDING_KEY = "_desktop"
 
 
 def _read_serve_info() -> tuple[str, str]:
@@ -250,6 +253,87 @@ def _is_status(text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Feishu ↔ Machi session binding (shared with Desktop via JSON file)
+# ---------------------------------------------------------------------------
+
+def _read_bindings_file() -> Dict[str, Any]:
+    try:
+        with open(_BINDING_FILE, encoding="utf-8") as f:
+            raw = json.load(f)
+            return raw if isinstance(raw, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_bindings_file(data: Dict[str, Any]) -> None:
+    parent = os.path.dirname(_BINDING_FILE)
+    if parent:
+        os.makedirs(parent, mode=0o700, exist_ok=True)
+    tmp = _BINDING_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, _BINDING_FILE)
+
+
+def _resolve_binding_for_sender(open_id: str) -> Optional[Dict[str, Any]]:
+    """Return binding dict for Feishu user: open_id first, then _desktop fallback."""
+    data = _read_bindings_file()
+    if open_id and open_id in data and isinstance(data[open_id], dict):
+        b = data[open_id]
+        sid = str(b.get("session_id") or "").strip()
+        if sid:
+            return {
+                "session_id": sid,
+                "avatar_id": (str(b.get("avatar_id") or "").strip() or None),
+                "avatar_name": (str(b.get("avatar_name") or "").strip() or None),
+            }
+    desk = data.get(_DESKTOP_BINDING_KEY)
+    if isinstance(desk, dict):
+        sid = str(desk.get("session_id") or "").strip()
+        if sid:
+            return {
+                "session_id": sid,
+                "avatar_id": (str(desk.get("avatar_id") or "").strip() or None),
+                "avatar_name": (str(desk.get("avatar_name") or "").strip() or None),
+            }
+    return None
+
+
+def _write_binding_key(key: str, binding: Dict[str, Any]) -> None:
+    data = _read_bindings_file()
+    binding = dict(binding)
+    binding["bound_at"] = datetime.now(timezone.utc).isoformat()
+    data[key] = binding
+    _write_bindings_file(data)
+
+
+def _clear_binding_key(key: str) -> None:
+    data = _read_bindings_file()
+    if key in data:
+        del data[key]
+        _write_bindings_file(data)
+
+
+def _parse_feishu_command(text: str) -> Optional[Tuple[str, Optional[str]]]:
+    """Return (command, arg) or None. Commands: unbind, sessions, bind_avatar, bind_session, bind_help."""
+    t = text.strip()
+    low = t.lower()
+    if low == "/unbind":
+        return ("unbind", None)
+    if low == "/sessions":
+        return ("sessions", None)
+    m = re.match(r"(?i)^/bind\s+@(.+)$", t)
+    if m:
+        return ("bind_avatar", m.group(1).strip())
+    m = re.match(r"(?i)^/bind\s+(\S+)$", t)
+    if m:
+        return ("bind_session", m.group(1).strip())
+    if re.match(r"(?i)^/bind\s*$", t):
+        return ("bind_help", None)
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Local agx serve calls
 # ---------------------------------------------------------------------------
 
@@ -276,18 +360,214 @@ async def _delete_session(studio_base: str, session_id: str,
             logger.warning("delete session failed: %s", exc)
 
 
-async def _chat_turn(studio_base: str, session_id: str, text: str,
-                     sender_name: str, headers: Dict[str, str]) -> str:
-    """Send one message to local agx serve and collect the final reply."""
-    timeout = httpx.Timeout(600.0, connect=30.0)
+async def _bootstrap_session(
+    studio_base: str,
+    session_id: str,
+    headers: Dict[str, str],
+    avatar_id: Optional[str] = None,
+) -> None:
+    """GET /api/session to ensure session exists; pass avatar_id when session is avatar-bound."""
+    timeout = httpx.Timeout(60.0, connect=30.0)
+    params: Dict[str, str] = {"session_id": session_id}
+    aid = (avatar_id or "").strip()
+    if aid:
+        params["avatar_id"] = aid
     async with _no_proxy_client(timeout=timeout) as client:
         r = await client.get(
             f"{studio_base}/api/session",
-            params={"session_id": session_id},
+            params=params,
             headers=headers,
         )
         if r.status_code >= 400:
             raise RuntimeError(f"session bootstrap failed: {r.status_code} {r.text[:200]}")
+
+
+async def _list_sessions_api(
+    studio_base: str, headers: Dict[str, str], avatar_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    async with _no_proxy_client(timeout=30.0) as client:
+        params: Dict[str, str] = {}
+        if avatar_id:
+            params["avatar_id"] = avatar_id
+        r = await client.get(
+            f"{studio_base}/api/sessions",
+            params=params or None,
+            headers=headers,
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(f"list sessions failed: {r.status_code} {r.text[:200]}")
+        data = r.json()
+        sessions = data.get("sessions") if isinstance(data, dict) else None
+        return sessions if isinstance(sessions, list) else []
+
+
+async def _list_avatars_api(studio_base: str, headers: Dict[str, str]) -> List[Dict[str, Any]]:
+    async with _no_proxy_client(timeout=30.0) as client:
+        r = await client.get(f"{studio_base}/api/avatars", headers=headers)
+        if r.status_code >= 400:
+            raise RuntimeError(f"list avatars failed: {r.status_code} {r.text[:200]}")
+        data = r.json()
+        avatars = data.get("avatars") if isinstance(data, dict) else None
+        return avatars if isinstance(avatars, list) else []
+
+
+async def _feishu_cmd_reply(
+    studio_base: str,
+    headers: Dict[str, str],
+    open_id: str,
+    cmd: str,
+    arg: Optional[str],
+) -> str:
+    """Handle /bind /unbind /sessions; returns text for Feishu."""
+    if cmd == "bind_help":
+        return (
+            "**飞书绑定 Machi 会话**\n\n"
+            "• `/bind <session_id>` — 绑定到指定会话（从 `/sessions` 复制 id）\n"
+            "• `/bind @分身显示名` — 绑定到该分身**最近更新**的会话\n"
+            "• `/unbind` — 取消你的飞书账号与此会话的绑定（恢复默认 im 会话）\n"
+            "• `/sessions` — 列出近期会话\n\n"
+            "也可在 Machi 客户端当前窗格点「绑定飞书」按钮（写入桌面绑定，"
+            "飞书端未单独绑定时会沿用）。"
+        )
+    if cmd == "unbind":
+        if not open_id:
+            return "无法识别飞书用户身份，请使用机器人**单聊**发送 `/unbind`。"
+        _clear_binding_key(open_id)
+        return "已取消飞书账号的会话绑定。后续消息将使用默认 Machi 会话。"
+
+    if cmd == "sessions":
+        try:
+            rows = await _list_sessions_api(studio_base, headers, avatar_id=None)
+        except Exception as exc:
+            return f"拉取会话列表失败：{exc}"
+        lines = ["**近期会话**（复制 session_id 用于 `/bind`）\n"]
+        for row in rows[:25]:
+            sid = str(row.get("session_id") or "")
+            aname = str(row.get("avatar_name") or row.get("avatar_id") or "Meta")
+            sname = str(row.get("session_name") or "")[:40]
+            title = f"{sname}" if sname else "(无标题)"
+            lines.append(f"• `{sid}` — {aname} / {title}")
+        if len(rows) > 25:
+            lines.append(f"\n…共 {len(rows)} 条，仅显示前 25 条")
+        if not rows:
+            lines.append("（暂无会话）")
+        return "\n".join(lines)
+
+    if cmd == "bind_session" and arg:
+        try:
+            rows = await _list_sessions_api(studio_base, headers, avatar_id=None)
+        except Exception as exc:
+            return f"验证会话失败：{exc}"
+        match = None
+        for row in rows:
+            if str(row.get("session_id") or "") == arg:
+                match = row
+                break
+        if not match:
+            return f"未找到会话 `{arg}`。先发 `/sessions` 查看有效 id。"
+        sid = str(match.get("session_id") or "")
+        aid = match.get("avatar_id")
+        aid_s = str(aid).strip() if aid else ""
+        aname = str(match.get("avatar_name") or "").strip() or None
+        try:
+            await _bootstrap_session(studio_base, sid, headers,
+                                     avatar_id=aid_s or None)
+        except Exception as exc:
+            return f"无法打开该会话：{exc}"
+        if not open_id:
+            return (
+                "会话已验证，但当前消息缺少飞书用户标识，绑定未保存。"
+                "请使用机器人**单聊**发送 `/bind`。"
+            )
+        _write_binding_key(
+            open_id,
+            {
+                "session_id": sid,
+                "avatar_id": aid_s or None,
+                "avatar_name": aname,
+            },
+        )
+        return (
+            f"已绑定到会话 `{sid}`"
+            + (f"（分身：{aname or aid_s}）" if (aname or aid_s) else "（Meta）")
+        )
+
+    if cmd == "bind_avatar" and arg:
+        name_query = arg.strip().lstrip("@")
+        try:
+            avatars = await _list_avatars_api(studio_base, headers)
+        except Exception as exc:
+            return f"拉取分身列表失败：{exc}"
+        found: Optional[Dict[str, Any]] = None
+        nq_lower = name_query.lower()
+        for a in avatars:
+            disp = str(a.get("name") or a.get("display_name") or "")
+            aid = str(a.get("id") or a.get("avatar_id") or "")
+            if disp.lower() == nq_lower or aid.lower() == nq_lower:
+                found = a
+                break
+        if not found:
+            for a in avatars:
+                disp = str(a.get("name") or a.get("display_name") or "")
+                aid = str(a.get("id") or a.get("avatar_id") or "")
+                if nq_lower in disp.lower() or nq_lower in aid.lower():
+                    found = a
+                    break
+        if not found:
+            return f"未找到名为「{name_query}」的分身。检查 Machi 里的分身显示名。"
+        avatar_id = str(found.get("id") or found.get("avatar_id") or "").strip()
+        avatar_name = str(found.get("name") or found.get("display_name") or "").strip()
+        if not avatar_id:
+            return "分身数据缺少 id，无法绑定。"
+        try:
+            rows = await _list_sessions_api(studio_base, headers, avatar_id=avatar_id)
+        except Exception as exc:
+            return f"拉取该分身会话失败：{exc}"
+        if not rows:
+            return (
+                f"分身「{avatar_name}」暂无会话。请先在 Machi 里与该分身开聊，"
+                "再执行 `/bind @{name_query}`。"
+            )
+        top = rows[0]
+        sid = str(top.get("session_id") or "")
+        if not sid:
+            return "会话列表异常，请重试。"
+        try:
+            await _bootstrap_session(studio_base, sid, headers, avatar_id=avatar_id)
+        except Exception as exc:
+            return f"无法打开该会话：{exc}"
+        if not open_id:
+            return (
+                "会话已验证，但当前消息缺少飞书用户标识，绑定未保存。"
+                "请使用机器人**单聊**发送 `/bind`。"
+            )
+        _write_binding_key(
+            open_id,
+            {
+                "session_id": sid,
+                "avatar_id": avatar_id,
+                "avatar_name": avatar_name or None,
+            },
+        )
+        return (
+            f"已绑定到分身「{avatar_name}」的最近会话：\n`{sid}`"
+        )
+
+    return "未知指令。"
+
+
+async def _chat_turn(
+    studio_base: str,
+    session_id: str,
+    text: str,
+    sender_name: str,
+    headers: Dict[str, str],
+    avatar_id: Optional[str] = None,
+) -> str:
+    """Send one message to local agx serve and collect the final reply."""
+    timeout = httpx.Timeout(600.0, connect=30.0)
+    async with _no_proxy_client(timeout=timeout) as client:
+        await _bootstrap_session(studio_base, session_id, headers, avatar_id=avatar_id)
 
         body = {
             "session_id": session_id,
@@ -533,18 +813,41 @@ class FeishuLongConnRunner:
 
         logger.info("Feishu msg from=%s chat=%s text=%s", open_id, chat_id, text[:80])
 
-        session_id = _session_id(self._app_id, open_id)
         headers = self._headers()
+        default_sid = _session_id(self._app_id, open_id)
+        binding = _resolve_binding_for_sender(open_id)
+        effective_sid = binding["session_id"] if binding else default_sid
+        effective_avatar = binding.get("avatar_id") if binding else None
 
-        if _is_new_chat(text):
-            await _delete_session(self._studio_base, session_id, headers)
+        cmd = _parse_feishu_command(text)
+        if cmd is not None:
+            cname, carg = cmd
+            try:
+                reply = await _feishu_cmd_reply(
+                    self._studio_base, headers, open_id, cname, carg
+                )
+            except Exception as exc:
+                logger.exception("feishu command failed: %s", exc)
+                reply = f"[Machi] 指令执行出错：{exc}"
+        elif _is_new_chat(text):
+            await _delete_session(self._studio_base, effective_sid, headers)
             reply = "已开始新对话。"
         elif _is_status(text):
             reply = "Machi 在线，飞书长连接正常。"
+            if binding:
+                an = binding.get("avatar_name") or binding.get("avatar_id") or ""
+                reply += f"\n当前绑定会话：`{effective_sid}`"
+                if an:
+                    reply += f"（{an}）"
         else:
             try:
                 reply = await _chat_turn(
-                    self._studio_base, session_id, text, sender_name, headers
+                    self._studio_base,
+                    effective_sid,
+                    text,
+                    sender_name,
+                    headers,
+                    avatar_id=effective_avatar,
                 )
             except Exception as exc:
                 logger.exception("chat_turn failed: %s", exc)
