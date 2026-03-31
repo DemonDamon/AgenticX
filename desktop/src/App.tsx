@@ -1166,14 +1166,18 @@ export function App() {
         feishuBindingSidRef.current = newSid;
 
         if (!newSid) {
-          // _desktop was cleared (/unbind) — switch back to the first non-bound pane (Meta/Machi)
-          if (!prevSid) return; // was already unbound, nothing to do
+          // _desktop was cleared (/unbind) — switch back to the Meta/Machi pane
+          if (!prevSid) return; // was already unbound at startup, nothing to do
           const state = useAppStore.getState();
-          const firstPane = state.panes[0];
-          if (firstPane) {
-            setActivePaneId(firstPane.id);
-            const aid = firstPane.avatarId;
-            setActiveAvatarId(aid?.startsWith("group:") ? null : (aid ?? null));
+          // Prefer the pane whose session was previously bound (to deactivate it),
+          // then fall back to the first pane with no avatarId (Meta/Machi),
+          // then fall back to panes[0].
+          const metaPane =
+            state.panes.find((p) => !p.avatarId || p.avatarId === "") ??
+            state.panes[0];
+          if (metaPane) {
+            setActivePaneId(metaPane.id);
+            setActiveAvatarId(null);
           }
           return;
         }
