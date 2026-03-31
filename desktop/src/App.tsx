@@ -1147,6 +1147,75 @@ export function App() {
     ]
   );
 
+  // Watch feishu_binding.json for _desktop key changes — auto-switch pane when /bind fires
+  const feishuBindingSidRef = useRef<string>("");
+  useEffect(() => {
+    if (!apiBase || !onboardingCompleted) return;
+    let cancelled = false;
+
+    const check = async () => {
+      if (cancelled) return;
+      try {
+        const r = await window.agenticxDesktop.loadFeishuBinding();
+        if (!r.ok || cancelled) return;
+        const desk = r.bindings["_desktop"] as { session_id?: string; avatar_id?: string; avatar_name?: string } | undefined;
+        const newSid = (desk?.session_id ?? "").trim();
+
+        if (newSid === feishuBindingSidRef.current) return;
+        const prevSid = feishuBindingSidRef.current;
+        feishuBindingSidRef.current = newSid;
+
+        if (!newSid) {
+          // _desktop was cleared (/unbind) — switch back to the first non-bound pane (Meta/Machi)
+          if (!prevSid) return; // was already unbound, nothing to do
+          const state = useAppStore.getState();
+          const firstPane = state.panes[0];
+          if (firstPane) {
+            setActivePaneId(firstPane.id);
+            const aid = firstPane.avatarId;
+            setActiveAvatarId(aid?.startsWith("group:") ? null : (aid ?? null));
+          }
+          return;
+        }
+
+        // New binding: find or create a pane for this session
+        const state = useAppStore.getState();
+        const existingPane = state.panes.find((p) => p.sessionId === newSid);
+        if (existingPane) {
+          setActivePaneId(existingPane.id);
+          const aid = existingPane.avatarId;
+          setActiveAvatarId(aid?.startsWith("group:") ? null : (aid ?? null));
+        } else {
+          const avatarId = (desk?.avatar_id ?? "").trim() || null;
+          const avatarName = (desk?.avatar_name ?? "").trim() || "分身";
+          const paneId = addPane(avatarId, avatarName, newSid);
+          setActivePaneId(paneId);
+          setActiveAvatarId(avatarId?.startsWith("group:") ? null : (avatarId ?? null));
+          // Load messages for the new pane
+          try {
+            const msgs = await window.agenticxDesktop.loadSessionMessages(newSid);
+            if (msgs.ok && Array.isArray(msgs.messages)) {
+              const mapped = msgs.messages.map((item, idx) =>
+                mapLoadedSessionMessage(item as LoadedSessionMessage, newSid, idx)
+              );
+              setPaneMessages(paneId, mapped);
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const timer = window.setInterval(() => void check(), 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [apiBase, onboardingCompleted, addPane, setActivePaneId, setActiveAvatarId, setPaneMessages]);
+
   return (
     <div
       className={`agx-app ${

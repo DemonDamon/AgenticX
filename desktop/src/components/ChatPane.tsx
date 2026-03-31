@@ -1263,9 +1263,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   useEffect(() => {
     if (!pane?.sessionId) return;
-    const isImSession = pane.sessionId.startsWith("im-");
-    if (!hasDelegation && !isImSession && (pane.messages?.length ?? 0) > 0) return;
     let active = true;
+    let timer: number | undefined;
+
+    const isFeishuBoundSession = async (sid: string): Promise<boolean> => {
+      try {
+        const r = await window.agenticxDesktop.loadFeishuBinding();
+        if (!r.ok) return false;
+        const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
+        return Boolean(desk && desk.session_id === sid);
+      } catch {
+        return false;
+      }
+    };
+
     const poll = async () => {
       if (!active) return;
       const currentSid = pane.sessionId;
@@ -1308,14 +1319,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         // ignore polling failures
       }
     };
-    void poll();
-    if (!hasDelegation && !isImSession) return;
-    const timer = window.setInterval(() => void poll(), 3000);
+
+    const setup = async () => {
+      if (!active) return;
+      const sid = pane.sessionId;
+      if (!sid) return;
+      const isImSession = sid.startsWith("im-");
+      const isBound = await isFeishuBoundSession(sid);
+      if (!active) return;
+      const needsExternalPoll = isImSession || isBound;
+      if (!hasDelegation && !needsExternalPoll && (pane.messages?.length ?? 0) > 0) return;
+      void poll();
+      if (!hasDelegation && !needsExternalPoll) return;
+      timer = window.setInterval(() => void poll(), 3000);
+    };
+
+    void setup();
     return () => {
       active = false;
-      window.clearInterval(timer);
+      if (timer != null) window.clearInterval(timer);
     };
-  }, [hasDelegation, pane?.sessionId, pane?.id, pane?.messages?.length, panes, setPaneMessages]);
+  }, [hasDelegation, feishuDesktopBound, pane?.sessionId, pane?.id, pane?.messages?.length, panes, setPaneMessages]);
 
   useEffect(() => {
     if (isGroupPane || !pane?.sessionId) {
@@ -1323,24 +1347,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       return;
     }
     let cancelled = false;
-    void (async () => {
+    const sid = pane.sessionId;
+
+    const checkBound = async () => {
+      if (cancelled) return;
       try {
         const r = await window.agenticxDesktop.loadFeishuBinding();
         if (cancelled || !r.ok) return;
         const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
         setFeishuDesktopBound(
-          Boolean(
-            desk &&
-              typeof desk.session_id === "string" &&
-              desk.session_id === pane.sessionId
-          )
+          Boolean(desk && typeof desk.session_id === "string" && desk.session_id === sid)
         );
       } catch {
         if (!cancelled) setFeishuDesktopBound(false);
       }
-    })();
+    };
+
+    void checkBound();
+    const timer = window.setInterval(() => void checkBound(), 3000);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, [isGroupPane, pane?.sessionId]);
 
@@ -3129,7 +3156,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               />
             ) : null}
             <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-text-strong">{pane.avatarName}</div>
+              <div className="flex items-center gap-1.5 truncate text-sm font-medium text-text-strong">
+                {pane.avatarName}
+                {feishuDesktopBound && (
+                  <span className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[9px] font-medium leading-tight" style={{ backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
+                      <path d="M5.63 4.02a1 1 0 0 1 1.4.17l4.97 6.3 4.97-6.3a1 1 0 0 1 1.58 1.22L14 10.83l5.37 6.8a1 1 0 0 1-1.57 1.24L12 12.16l-5.8 6.71a1 1 0 0 1-1.57-1.24L10 10.83 5.45 5.42a1 1 0 0 1 .18-1.4Z" fill="currentColor"/>
+                    </svg>
+                    飞书
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">
                 <span>session: {pane.sessionId ? pane.sessionId.slice(0, 8) + "…" : "-"}</span>
                 {visibleMessages.length > 0 && (
@@ -3203,32 +3240,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               </button>
             ) : null}
             {!isGroupPane && pane.sessionId ? (
-              <HoverTip
-                label={
+              <button
+                type="button"
+                className={`rounded px-2 py-0.5 text-[11px] transition ${
                   feishuDesktopBound
-                    ? "已绑定飞书到此会话（点击取消桌面绑定；飞书内 /unbind 可取消个人绑定）"
-                    : "绑定飞书到此会话（未在飞书单独绑定时，消息将进此会话）"
+                    ? ""
+                    : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
+                }`}
+                style={feishuDesktopBound ? { backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" } : undefined}
+                onClick={() => void toggleFeishuDesktopBinding()}
+                title={
+                  feishuDesktopBound
+                    ? "已绑定飞书（点击解绑）"
+                    : "绑定飞书到此会话"
                 }
               >
-                <button
-                  type="button"
-                  className={`rounded px-2 py-0.5 text-[11px] transition ${
-                    feishuDesktopBound
-                      ? "bg-surface-card-strong text-text-strong"
-                      : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
-                  }`}
-                  onClick={() => void toggleFeishuDesktopBinding()}
-                >
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path
-                      d="M6.2 9.8a2.5 2.5 0 0 1 0-3.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-.4.4M9.8 6.2a2.5 2.5 0 0 1 0 3.5l-1 1a2.5 2.5 0 0 1-3.5-3.5l.4-.4"
-                      stroke="currentColor"
-                      strokeWidth="1.25"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
-              </HoverTip>
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path
+                    d="M6.2 9.8a2.5 2.5 0 0 1 0-3.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-.4.4M9.8 6.2a2.5 2.5 0 0 1 0 3.5l-1 1a2.5 2.5 0 0 1-3.5-3.5l.4-.4"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
             ) : null}
             <button
               className={`rounded px-2 py-0.5 text-[11px] transition ${

@@ -314,20 +314,37 @@ def _clear_binding_key(key: str) -> None:
         _write_bindings_file(data)
 
 
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
 def _parse_feishu_command(text: str) -> Optional[Tuple[str, Optional[str]]]:
-    """Return (command, arg) or None. Commands: unbind, sessions, bind_avatar, bind_session, bind_help."""
+    """Return (command, arg) or None.
+
+    Commands:
+      unbind       — /unbind
+      sessions     — /sessions
+      bind_avatar  — /bind <name> or /bind @<name>  (non-UUID arg → try avatar name first)
+      bind_session — /bind <uuid>                   (UUID arg → exact session_id match)
+      bind_help    — /bind  (no arg)
+    """
     t = text.strip()
     low = t.lower()
     if low == "/unbind":
         return ("unbind", None)
     if low == "/sessions":
         return ("sessions", None)
+    # /bind @分身名 or /bind 分身名 or /bind <session_uuid>
     m = re.match(r"(?i)^/bind\s+@(.+)$", t)
     if m:
         return ("bind_avatar", m.group(1).strip())
-    m = re.match(r"(?i)^/bind\s+(\S+)$", t)
+    m = re.match(r"(?i)^/bind\s+(.+)$", t)
     if m:
-        return ("bind_session", m.group(1).strip())
+        arg = m.group(1).strip()
+        # If arg looks like a UUID → treat as session_id
+        if _UUID_RE.match(arg):
+            return ("bind_session", arg)
+        # Otherwise treat as avatar display name (case-insensitive fuzzy match)
+        return ("bind_avatar", arg)
     if re.match(r"(?i)^/bind\s*$", t):
         return ("bind_help", None)
     return None
@@ -422,17 +439,17 @@ async def _feishu_cmd_reply(
     if cmd == "bind_help":
         return (
             "**飞书绑定 Machi 会话**\n\n"
-            "• `/bind <session_id>` — 绑定到指定会话（从 `/sessions` 复制 id）\n"
-            "• `/bind @分身显示名` — 绑定到该分身**最近更新**的会话\n"
-            "• `/unbind` — 取消你的飞书账号与此会话的绑定（恢复默认 im 会话）\n"
+            "• `/bind 分身名` — 绑定到该分身最近的会话（如 `/bind cole`）\n"
+            "• `/bind <session_uuid>` — 绑定到指定会话（从 `/sessions` 复制 id）\n"
+            "• `/unbind` — 取消绑定，恢复默认 im 会话\n"
             "• `/sessions` — 列出近期会话\n\n"
-            "也可在 Machi 客户端当前窗格点「绑定飞书」按钮（写入桌面绑定，"
-            "飞书端未单独绑定时会沿用）。"
+            "也可在 Machi 客户端当前窗格点「绑定飞书」按钮。"
         )
     if cmd == "unbind":
         if not open_id:
             return "无法识别飞书用户身份，请使用机器人**单聊**发送 `/unbind`。"
         _clear_binding_key(open_id)
+        _clear_binding_key(_DESKTOP_BINDING_KEY)
         return "已取消飞书账号的会话绑定。后续消息将使用默认 Machi 会话。"
 
     if cmd == "sessions":
@@ -479,14 +496,13 @@ async def _feishu_cmd_reply(
                 "会话已验证，但当前消息缺少飞书用户标识，绑定未保存。"
                 "请使用机器人**单聊**发送 `/bind`。"
             )
-        _write_binding_key(
-            open_id,
-            {
-                "session_id": sid,
-                "avatar_id": aid_s or None,
-                "avatar_name": aname,
-            },
-        )
+        binding_payload = {
+            "session_id": sid,
+            "avatar_id": aid_s or None,
+            "avatar_name": aname,
+        }
+        _write_binding_key(open_id, binding_payload)
+        _write_binding_key(_DESKTOP_BINDING_KEY, binding_payload)
         return (
             f"已绑定到会话 `{sid}`"
             + (f"（分身：{aname or aid_s}）" if (aname or aid_s) else "（Meta）")
@@ -541,14 +557,13 @@ async def _feishu_cmd_reply(
                 "会话已验证，但当前消息缺少飞书用户标识，绑定未保存。"
                 "请使用机器人**单聊**发送 `/bind`。"
             )
-        _write_binding_key(
-            open_id,
-            {
-                "session_id": sid,
-                "avatar_id": avatar_id,
-                "avatar_name": avatar_name or None,
-            },
-        )
+        binding_payload = {
+            "session_id": sid,
+            "avatar_id": avatar_id,
+            "avatar_name": avatar_name or None,
+        }
+        _write_binding_key(open_id, binding_payload)
+        _write_binding_key(_DESKTOP_BINDING_KEY, binding_payload)
         return (
             f"已绑定到分身「{avatar_name}」的最近会话：\n`{sid}`"
         )
