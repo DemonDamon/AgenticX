@@ -313,22 +313,40 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "skill_manage",
-            "description": "Create, patch, or delete agent-created skills under ~/.agenticx/skills/agent-created/.",
+            "description": (
+                "Create, patch, or delete skills stored under ~/.agenticx/skills/. "
+                "For 'create': provide action + name + content (the full SKILL.md text). "
+                "For 'patch': provide action + name + old_string + new_string. "
+                "For 'delete': provide action + name. "
+                "Sub-paths are supported (e.g. name='ima/notes' creates ~/.agenticx/skills/ima/notes/SKILL.md). "
+                "IMPORTANT: never call with empty arguments — action and name are always required."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
                         "enum": ["create", "patch", "delete"],
-                        "description": "Operation to perform.",
+                        "description": "Operation: 'create' writes a new SKILL.md; 'patch' edits an existing one; 'delete' removes the skill directory.",
                     },
-                    "name": {"type": "string", "description": "Skill directory name (no path separators)."},
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "Skill directory name under ~/.agenticx/skills/. "
+                            "Simple names like 'ima' or sub-paths like 'ima/notes' are both valid. "
+                            "Each segment must be alphanumeric with optional hyphens/underscores (no spaces, no leading dots)."
+                        ),
+                    },
                     "content": {
                         "type": "string",
-                        "description": "Full SKILL.md body for create.",
+                        "description": (
+                            "Required for 'create': the full SKILL.md text, starting with a YAML frontmatter block "
+                            "(--- name: ... description: ... ---) followed by the skill body. "
+                            "Must not be empty."
+                        ),
                     },
-                    "old_string": {"type": "string", "description": "Substring to replace (patch)."},
-                    "new_string": {"type": "string", "description": "Replacement text (patch)."},
+                    "old_string": {"type": "string", "description": "Required for 'patch': exact substring to find and replace in the existing SKILL.md."},
+                    "new_string": {"type": "string", "description": "Required for 'patch': replacement text for old_string."},
                 },
                 "required": ["action", "name"],
                 "additionalProperties": False,
@@ -1553,16 +1571,27 @@ def _skill_manage_enabled() -> bool:
 
 
 def _safe_skill_dir_name(name: str) -> Optional[str]:
-    n = str(name or "").strip()
-    if not n or "/" in n or "\\" in n or n.startswith(".") or ".." in n:
+    """Validate a skill name, allowing sub-paths like ``ima/notes``.
+
+    Each path segment must start with an alphanumeric character and contain
+    only alphanumerics, dots, underscores, or hyphens.  Back-references
+    (``..``) and hidden segments (starting with ``.``) are rejected.
+    """
+    n = str(name or "").strip().replace("\\", "/")
+    if not n:
         return None
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", n):
-        return None
+    _SEG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+    segments = n.split("/")
+    for seg in segments:
+        if not seg or seg.startswith(".") or seg == "..":
+            return None
+        if not _SEG.fullmatch(seg):
+            return None
     return n
 
 
 def _agent_created_skill_root() -> Path:
-    return Path.home() / ".agenticx" / "skills" / "agent-created"
+    return Path.home() / ".agenticx" / "skills"
 
 
 def _tool_session_search(arguments: Dict[str, Any], session: Optional[StudioSession]) -> str:
@@ -1624,15 +1653,31 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
             "or AGX_CONFIRM_STRATEGY=auto (Run Everything hook)."
         )
     action = str(arguments.get("action", "") or "").strip().lower()
-    name = _safe_skill_dir_name(str(arguments.get("name", "") or ""))
+    if not action:
+        return (
+            "ERROR: 'action' is required. "
+            "Call skill_manage with action='create'|'patch'|'delete', name=<skill-name>, "
+            "and content=<full SKILL.md text> for create."
+        )
+    raw_name = str(arguments.get("name", "") or "").strip()
+    if not raw_name:
+        return (
+            "ERROR: 'name' is required. "
+            "Provide the skill directory name, e.g. name='my-skill' or name='ima/notes'."
+        )
+    name = _safe_skill_dir_name(raw_name)
     if name is None:
-        return "ERROR: invalid skill name"
+        return (
+            f"ERROR: invalid skill name {raw_name!r}. "
+            "Name must be alphanumeric with hyphens/underscores. "
+            "Sub-paths like 'ima/notes' are allowed; spaces and leading dots are not."
+        )
     root = _agent_created_skill_root().expanduser().resolve(strict=False)
     skill_dir = (root / name).resolve(strict=False)
     try:
         skill_dir.relative_to(root)
     except ValueError:
-        return "ERROR: skill path outside agent-created root"
+        return "ERROR: skill path outside skills root"
 
     if action == "create":
         content = str(arguments.get("content", "") or "")
