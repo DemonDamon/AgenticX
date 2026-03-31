@@ -36,12 +36,15 @@ TRUST_POLICY: dict[str, tuple[str, str, str]] = {
 }
 
 _PATTERN_DEFS: list[tuple[str, ScanVerdict, re.Pattern[str]]] = [
-    ("exfiltration_curl", "dangerous", re.compile(r"curl.*\$", re.IGNORECASE)),
-    ("exfiltration_wget", "dangerous", re.compile(r"wget.*\$", re.IGNORECASE)),
-    ("exfiltration_fetch_env", "dangerous", re.compile(r"fetch.*env", re.IGNORECASE)),
-    ("credential_ssh", "dangerous", re.compile(r"~/.ssh")),
+    # Detect curl/wget piping shell variables ($VAR or ${VAR}) into a URL —
+    # the signal for credential/environment exfiltration.
+    # Plain ``curl https://... -H "..."`` in API docs does NOT match.
+    ("exfiltration_curl", "dangerous", re.compile(r"curl\s+.*\$\{?\w", re.IGNORECASE)),
+    ("exfiltration_wget", "dangerous", re.compile(r"wget\s+.*\$\{?\w", re.IGNORECASE)),
+    # fetch() calls reading process.env / os.environ — exfiltration pattern.
+    ("exfiltration_fetch_env", "dangerous", re.compile(r"fetch\s*\(.*(?:process\.env|os\.environ)", re.IGNORECASE)),
+    ("credential_ssh", "dangerous", re.compile(r"~/\.ssh")),
     ("credential_dotenv", "caution", re.compile(r"\.env\b")),
-    ("credential_word", "caution", re.compile(r"credentials", re.IGNORECASE)),
     ("prompt_ignore_previous", "dangerous", re.compile(r"ignore\s+previous", re.IGNORECASE)),
     ("prompt_system", "dangerous", re.compile(r"system\s+prompt", re.IGNORECASE)),
     ("prompt_system_tag", "dangerous", re.compile(r"<system>", re.IGNORECASE)),
