@@ -13,6 +13,7 @@ import {
   Wrench,
   Loader2,
   Zap,
+  ChevronRight,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import type { Avatar, ChatPane, ChatStyle, GroupChat } from "../store";
@@ -105,7 +106,178 @@ type SkillItem = {
   description: string;
   location: string;
   base_dir?: string;
+  source?: string;
 };
+
+type SkillScanPresetRow = {
+  id: string;
+  label: string;
+  path: string;
+  enabled: boolean;
+};
+
+function normalizedPath(path?: string): string {
+  return String(path ?? "").replace(/\\/g, "/").toLowerCase();
+}
+
+function inferSourceFromBaseDir(baseDir?: string): string | null {
+  const p = normalizedPath(baseDir);
+  if (!p) return null;
+  if (p.includes("/agenticx/skills/")) return "builtin";
+  if (p.includes("/.agenticx/skills/registry/")) return "registry";
+  if (p.includes("/.agenticx/skills/bundles/")) return "bundle";
+  if (p.includes("/.cursor/skills/")) return "cursor";
+  if (p.includes("/.claude/skills/")) return "claude";
+  if (p.includes("/.agents/skills/")) return "agents";
+  if (p.includes("/.agent/skills/")) return "agent_global";
+  return null;
+}
+
+function effectiveSkillSource(skill: SkillItem): string {
+  const raw = String(skill.source ?? "").trim();
+  if (raw && raw !== "unknown" && raw !== "custom") return raw;
+  return inferSourceFromBaseDir(skill.base_dir) ?? (raw || "custom");
+}
+
+function effectiveSkillLocation(skill: SkillItem): "project" | "global" {
+  const src = effectiveSkillSource(skill);
+  if (["cursor", "claude", "agents", "agent_global", "registry", "bundle"].includes(src)) {
+    return "global";
+  }
+  return skill.location === "project" ? "project" : "global";
+}
+
+function skillSourceBadge(source: string | undefined): { label: string; className: string } {
+  const base = "shrink-0 rounded-full border px-1.5 text-[10px]";
+  switch (source) {
+    case "builtin":
+      return { label: "内置", className: `${base} border-zinc-500/30 bg-zinc-500/10 text-zinc-400` };
+    case "cursor":
+      return { label: "Cursor", className: `${base} border-sky-500/30 bg-sky-500/10 text-sky-400` };
+    case "claude":
+      return { label: "Claude", className: `${base} border-orange-500/30 bg-orange-500/10 text-orange-400` };
+    case "registry":
+      // ClawHub 安装技能：棕褐底 + 珊瑚色字（与品牌参考一致）
+      return {
+        label: "ClawHub",
+        className: `${base} border-[#5c4038]/80 bg-[#2f2019] text-[#eba899]`,
+      };
+    case "bundle":
+      return { label: "Bundle", className: `${base} border-indigo-500/30 bg-indigo-500/10 text-indigo-400` };
+    case "agents":
+      return {
+        label: "Agents 全局",
+        className: `${base} border-emerald-500/30 bg-emerald-500/10 text-emerald-400`,
+      };
+    case "agent_global":
+      return {
+        label: "全局 .agent",
+        className: `${base} border-teal-500/30 bg-teal-500/10 text-teal-400`,
+      };
+    case "project_agents":
+      return {
+        label: "项目 .agents",
+        className: `${base} border-cyan-500/30 bg-cyan-500/10 text-cyan-400`,
+      };
+    case "project_agent":
+      return {
+        label: "项目 .agent",
+        className: `${base} border-cyan-500/30 bg-cyan-500/5 text-cyan-300`,
+      };
+    case "agenticx":
+      return { label: "AgenticX", className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-400` };
+    case "agent_created":
+      return { label: "智能体创建", className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-300` };
+    case "custom":
+      return { label: "自定义", className: `${base} border-border bg-surface-panel text-text-faint` };
+    default:
+      return { label: "其他", className: `${base} border-border bg-surface-panel text-text-faint` };
+  }
+}
+
+function SkillRowButton({
+  skill,
+  detail,
+  recentMarketSkillName,
+  locationLabel,
+  onViewDetail,
+}: {
+  skill: SkillItem;
+  detail: { name: string; content: string } | null;
+  recentMarketSkillName: string | null;
+  locationLabel: "全局" | "项目";
+  onViewDetail: (name: string) => void;
+}) {
+  const src = skillSourceBadge(effectiveSkillSource(skill));
+  const locClass =
+    locationLabel === "项目"
+      ? "shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400"
+      : "shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint";
+  return (
+    <button
+      type="button"
+      className={`w-full rounded-md border px-3 py-2 text-left transition ${
+        detail?.name === skill.name
+          ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
+          : skill.name === recentMarketSkillName
+            ? "border-amber-500/35 bg-amber-500/5"
+            : "border-border bg-surface-card hover:bg-surface-hover"
+      }`}
+      onClick={() => void onViewDetail(skill.name)}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
+        {skill.name === recentMarketSkillName && (
+          <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
+            刚安装
+          </span>
+        )}
+        <span className={src.className}>{src.label}</span>
+        <span className={locClass}>{locationLabel}</span>
+      </div>
+      {skill.description ? (
+        <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
+      ) : null}
+    </button>
+  );
+}
+
+function SkillsLocationSection({
+  skills,
+  title,
+  locationLabel,
+  detail,
+  recentMarketSkillName,
+  onViewDetail,
+}: {
+  skills: SkillItem[];
+  title: string;
+  locationLabel: "全局" | "项目";
+  detail: { name: string; content: string } | null;
+  recentMarketSkillName: string | null;
+  onViewDetail: (name: string) => void;
+}) {
+  if (skills.length === 0) return null;
+  return (
+    <div>
+      <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+        {title} ({skills.length})
+      </div>
+      <div className="space-y-1">
+        {skills.map((skill) => (
+          <SkillRowButton
+            key={skill.name}
+            skill={skill}
+            detail={detail}
+            recentMarketSkillName={recentMarketSkillName}
+            locationLabel={locationLabel}
+            onViewDetail={onViewDetail}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 type BundleItem = {
   name: string;
@@ -436,6 +608,11 @@ function SkillsTab() {
   const [marketQueuedKeys, setMarketQueuedKeys] = useState<string[]>([]);
   /** After marketplace install: pin this skill at top of its group and surface global section first. */
   const [recentMarketSkillName, setRecentMarketSkillName] = useState<string | null>(null);
+  const [skillScanPresets, setSkillScanPresets] = useState<SkillScanPresetRow[]>([]);
+  const [skillScanCustomPaths, setSkillScanCustomPaths] = useState<string[]>([]);
+  const [skillScanBusy, setSkillScanBusy] = useState(false);
+  const [skillScanMsg, setSkillScanMsg] = useState("");
+  const [builtinSkillsExpanded, setBuiltinSkillsExpanded] = useState(false);
   const marketSearchSeqRef = useRef(0);
   const marketInstallQueueRef = useRef<RegistrySearchItem[]>([]);
   const skillsListAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -452,14 +629,28 @@ function SkillsTab() {
     setErr("");
     void (async () => {
       try {
-        const [skillsRes, bundlesRes] = await Promise.all([
+        const [skillsRes, bundlesRes, scanRes] = await Promise.all([
           window.agenticxDesktop.loadSkills(),
           window.agenticxDesktop.loadBundles(),
+          window.agenticxDesktop.getSkillSettings(),
         ]);
         if (!cancelled) {
           if (skillsRes.ok) setItems(skillsRes.items ?? []);
           else setErr(skillsRes.error ?? "加载技能失败");
           if (bundlesRes.ok) setBundles(bundlesRes.items ?? []);
+          if (scanRes.ok && Array.isArray(scanRes.preset_paths)) {
+            setSkillScanPresets(
+              scanRes.preset_paths.map((p) => ({
+                id: String(p.id ?? ""),
+                label: String(p.label ?? ""),
+                path: String(p.path ?? ""),
+                enabled: Boolean(p.enabled),
+              })),
+            );
+          }
+          if (scanRes.ok && Array.isArray(scanRes.custom_paths)) {
+            setSkillScanCustomPaths([...scanRes.custom_paths]);
+          }
         }
       } catch (e) {
         if (!cancelled) setErr(String(e));
@@ -477,6 +668,46 @@ function SkillsTab() {
     skillsListAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [recentMarketSkillName]);
 
+  const persistSkillScanSettings = useCallback(
+    async (presetRows: SkillScanPresetRow[], customs: string[]) => {
+      setSkillScanBusy(true);
+      setSkillScanMsg("");
+      try {
+        const cleanedCustom = customs.map((x) => x.trim()).filter(Boolean);
+        const r = await window.agenticxDesktop.putSkillSettings({
+          presetPaths: presetRows.map((p) => ({ id: p.id, enabled: p.enabled })),
+          customPaths: cleanedCustom,
+        });
+        if (r.ok) {
+          if (Array.isArray(r.preset_paths)) {
+            setSkillScanPresets(
+              r.preset_paths.map((p) => ({
+                id: String(p.id ?? ""),
+                label: String(p.label ?? ""),
+                path: String(p.path ?? ""),
+                enabled: Boolean(p.enabled),
+              })),
+            );
+          }
+          if (Array.isArray(r.custom_paths)) {
+            setSkillScanCustomPaths([...r.custom_paths]);
+          }
+          setSkillScanMsg("已保存扫描路径");
+          await window.agenticxDesktop.refreshSkills();
+          const skillsRes = await window.agenticxDesktop.loadSkills();
+          if (skillsRes.ok) setItems(skillsRes.items ?? []);
+        } else {
+          setSkillScanMsg(r.error ?? "保存失败");
+        }
+      } catch (e) {
+        setSkillScanMsg(String(e));
+      } finally {
+        setSkillScanBusy(false);
+      }
+    },
+    [],
+  );
+
   const onRefresh = async () => {
     setLoading(true);
     setErr("");
@@ -485,13 +716,27 @@ function SkillsTab() {
     setRecentMarketSkillName(null);
     try {
       await window.agenticxDesktop.refreshSkills();
-      const [skillsRes, bundlesRes] = await Promise.all([
+      const [skillsRes, bundlesRes, scanRes] = await Promise.all([
         window.agenticxDesktop.loadSkills(),
         window.agenticxDesktop.loadBundles(),
+        window.agenticxDesktop.getSkillSettings(),
       ]);
       if (skillsRes.ok) setItems(skillsRes.items ?? []);
       else setErr(skillsRes.error ?? "刷新失败");
       if (bundlesRes.ok) setBundles(bundlesRes.items ?? []);
+      if (scanRes.ok && Array.isArray(scanRes.preset_paths)) {
+        setSkillScanPresets(
+          scanRes.preset_paths.map((p) => ({
+            id: String(p.id ?? ""),
+            label: String(p.label ?? ""),
+            path: String(p.path ?? ""),
+            enabled: Boolean(p.enabled),
+          })),
+        );
+      }
+      if (scanRes.ok && Array.isArray(scanRes.custom_paths)) {
+        setSkillScanCustomPaths([...scanRes.custom_paths]);
+      }
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -808,7 +1053,7 @@ function SkillsTab() {
     }
   };
 
-  const filtered = search.trim()
+  const filteredAll = search.trim()
     ? items.filter(
         (s) =>
           s.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -816,12 +1061,15 @@ function SkillsTab() {
       )
     : items;
 
+  const builtinFiltered = filteredAll.filter((s) => effectiveSkillSource(s) === "builtin");
+  const filtered = filteredAll.filter((s) => effectiveSkillSource(s) !== "builtin");
+
   const projectSkills = pinSkillFirst(
-    filtered.filter((s) => s.location === "project"),
+    filtered.filter((s) => effectiveSkillLocation(s) === "project"),
     recentMarketSkillName
   );
   const globalSkills = pinSkillFirst(
-    filtered.filter((s) => s.location !== "project"),
+    filtered.filter((s) => effectiveSkillLocation(s) !== "project"),
     recentMarketSkillName
   );
   const showGlobalSkillsFirst =
@@ -836,6 +1084,91 @@ function SkillsTab() {
     <div className="space-y-3">
       <div ref={skillsListAnchorRef} className="text-sm text-text-subtle">
         技能（Skills）是注入给 Agent 的领域知识指令，告诉 AI 在特定任务中「怎么做」。
+      </div>
+
+      {/* Skill scan roots (presets + custom paths) */}
+      <div className="space-y-3 rounded-md border border-border bg-surface-card p-3">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">扫描路径</div>
+        <p className="text-xs text-text-faint">
+          项目内 <code className="text-text-muted">.agents/skills</code>、<code className="text-text-muted">.claude/skills</code>、<code className="text-text-muted">~/.agenticx/skills</code>（含 ClawHub 安装、智能体创建）以及内置包始终参与扫描。以下第三方根目录可按开关启用；也可添加自定义文件夹。
+        </p>
+        <div className="space-y-2">
+          {skillScanPresets.map((p) => (
+            <div
+              key={p.id}
+              className="flex items-center gap-3 rounded-md border border-border/60 bg-surface-panel/50 px-3 py-2"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="text-sm text-text-primary">{p.label}</span>
+                <span className="mt-0.5 block font-mono text-[10px] text-text-faint">{p.path}</span>
+              </span>
+              <SettingsSwitch
+                checked={p.enabled}
+                disabled={skillScanBusy}
+                aria-label={`切换 ${p.label}`}
+                onChange={(next) => {
+                  const updated = skillScanPresets.map((row) =>
+                    row.id === p.id ? { ...row, enabled: next } : row,
+                  );
+                  setSkillScanPresets(updated);
+                  void persistSkillScanSettings(updated, skillScanCustomPaths);
+                }}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="text-xs font-medium text-text-subtle">自定义路径</div>
+        <div className="space-y-2">
+          {skillScanCustomPaths.map((row, i) => (
+            <div key={`skill-custom-${i}`} className="flex gap-2">
+              <input
+                className="min-w-0 flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 font-mono text-xs text-text-primary placeholder:text-text-faint"
+                placeholder="例如 ~/my-skills 或绝对路径"
+                value={row}
+                disabled={skillScanBusy}
+                onChange={(e) => {
+                  const next = [...skillScanCustomPaths];
+                  next[i] = e.target.value;
+                  setSkillScanCustomPaths(next);
+                }}
+                onBlur={(e) => {
+                  const next = [...skillScanCustomPaths];
+                  next[i] = e.target.value;
+                  void persistSkillScanSettings(skillScanPresets, next);
+                }}
+              />
+              <button
+                type="button"
+                className="shrink-0 rounded-md border border-border p-2 text-text-faint transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
+                disabled={skillScanBusy}
+                title="移除"
+                onClick={() => {
+                  const next = skillScanCustomPaths.filter((_, j) => j !== i);
+                  setSkillScanCustomPaths(next);
+                  void persistSkillScanSettings(skillScanPresets, next);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+            disabled={skillScanBusy}
+            onClick={() => setSkillScanCustomPaths((prev) => [...prev, ""])}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            添加路径
+          </button>
+        </div>
+        {skillScanMsg ? (
+          <div
+            className={`text-xs ${skillScanMsg.includes("失败") ? "text-amber-400" : "text-emerald-400"}`}
+          >
+            {skillScanMsg}
+          </div>
+        ) : null}
       </div>
 
       {/* Search + Refresh */}
@@ -865,7 +1198,7 @@ function SkillsTab() {
         <div className="py-6 text-center text-sm text-text-faint">
           未发现任何技能。<br />
           <span className="text-xs text-text-subtle">
-            可将 SKILL.md 放置在 .agents/skills/、~/.agents/skills/ 或 .claude/skills/ 等目录。
+            可将 SKILL.md 放置在项目 .agents/skills/、开启上方的第三方扫描路径，或使用「自定义路径」。
           </span>
         </div>
       )}
@@ -892,167 +1225,76 @@ function SkillsTab() {
       )}
 
       {/* Skills list grouped by location; after market install, global block first + pinned row */}
-      {showGlobalSkillsFirst ? (
-        <>
-          {globalSkills.length > 0 && (
-            <div>
-              <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-                全局技能 ({globalSkills.length})
-              </div>
-              <div className="space-y-1">
-                {globalSkills.map((skill) => (
-                  <button
-                    key={skill.name}
-                    type="button"
-                    className={`w-full rounded-md border px-3 py-2 text-left transition ${
-                      detail?.name === skill.name
-                        ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
-                        : skill.name === recentMarketSkillName
-                          ? "border-amber-500/35 bg-amber-500/5"
-                          : "border-border bg-surface-card hover:bg-surface-hover"
-                    }`}
-                    onClick={() => void onViewDetail(skill.name)}
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
-                      {skill.name === recentMarketSkillName && (
-                        <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
-                          刚安装
-                        </span>
-                      )}
-                      <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
-                        全局
-                      </span>
-                    </div>
-                    {skill.description && (
-                      <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+      <div className="space-y-3">
+        {showGlobalSkillsFirst ? (
+          <>
+            <SkillsLocationSection
+              skills={globalSkills}
+              title="全局技能"
+              locationLabel="全局"
+              detail={detail}
+              recentMarketSkillName={recentMarketSkillName}
+              onViewDetail={onViewDetail}
+            />
+            <SkillsLocationSection
+              skills={projectSkills}
+              title="项目技能"
+              locationLabel="项目"
+              detail={detail}
+              recentMarketSkillName={recentMarketSkillName}
+              onViewDetail={onViewDetail}
+            />
+          </>
+        ) : (
+          <>
+            <SkillsLocationSection
+              skills={projectSkills}
+              title="项目技能"
+              locationLabel="项目"
+              detail={detail}
+              recentMarketSkillName={recentMarketSkillName}
+              onViewDetail={onViewDetail}
+            />
+            <SkillsLocationSection
+              skills={globalSkills}
+              title="全局技能"
+              locationLabel="全局"
+              detail={detail}
+              recentMarketSkillName={recentMarketSkillName}
+              onViewDetail={onViewDetail}
+            />
+          </>
+        )}
 
-          {projectSkills.length > 0 && (
-            <div>
-              <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-                项目技能 ({projectSkills.length})
-              </div>
-              <div className="space-y-1">
-                {projectSkills.map((skill) => (
-                  <button
+        {builtinFiltered.length > 0 && (
+          <div className="rounded-md border border-border bg-surface-card">
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-text-subtle transition hover:bg-surface-hover"
+              onClick={() => setBuiltinSkillsExpanded((v) => !v)}
+            >
+              <ChevronRight
+                className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${builtinSkillsExpanded ? "rotate-90" : ""}`}
+              />
+              <span>内置技能 ({builtinFiltered.length})</span>
+            </button>
+            {builtinSkillsExpanded && (
+              <div className="space-y-1 border-t border-border px-3 py-2">
+                {builtinFiltered.map((skill) => (
+                  <SkillRowButton
                     key={skill.name}
-                    type="button"
-                    className={`w-full rounded-md border px-3 py-2 text-left transition ${
-                      detail?.name === skill.name
-                        ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
-                        : skill.name === recentMarketSkillName
-                          ? "border-amber-500/35 bg-amber-500/5"
-                          : "border-border bg-surface-card hover:bg-surface-hover"
-                    }`}
-                    onClick={() => void onViewDetail(skill.name)}
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
-                      {skill.name === recentMarketSkillName && (
-                        <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
-                          刚安装
-                        </span>
-                      )}
-                      <span className="shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400">
-                        项目
-                      </span>
-                    </div>
-                    {skill.description && (
-                      <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
-                    )}
-                  </button>
+                    skill={skill}
+                    detail={detail}
+                    recentMarketSkillName={recentMarketSkillName}
+                    locationLabel={effectiveSkillLocation(skill) === "project" ? "项目" : "全局"}
+                    onViewDetail={onViewDetail}
+                  />
                 ))}
               </div>
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          {projectSkills.length > 0 && (
-            <div>
-              <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-                项目技能 ({projectSkills.length})
-              </div>
-              <div className="space-y-1">
-                {projectSkills.map((skill) => (
-                  <button
-                    key={skill.name}
-                    type="button"
-                    className={`w-full rounded-md border px-3 py-2 text-left transition ${
-                      detail?.name === skill.name
-                        ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
-                        : skill.name === recentMarketSkillName
-                          ? "border-amber-500/35 bg-amber-500/5"
-                          : "border-border bg-surface-card hover:bg-surface-hover"
-                    }`}
-                    onClick={() => void onViewDetail(skill.name)}
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
-                      {skill.name === recentMarketSkillName && (
-                        <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
-                          刚安装
-                        </span>
-                      )}
-                      <span className="shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400">
-                        项目
-                      </span>
-                    </div>
-                    {skill.description && (
-                      <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {globalSkills.length > 0 && (
-            <div>
-              <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-                全局技能 ({globalSkills.length})
-              </div>
-              <div className="space-y-1">
-                {globalSkills.map((skill) => (
-                  <button
-                    key={skill.name}
-                    type="button"
-                    className={`w-full rounded-md border px-3 py-2 text-left transition ${
-                      detail?.name === skill.name
-                        ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
-                        : skill.name === recentMarketSkillName
-                          ? "border-amber-500/35 bg-amber-500/5"
-                          : "border-border bg-surface-card hover:bg-surface-hover"
-                    }`}
-                    onClick={() => void onViewDetail(skill.name)}
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
-                      {skill.name === recentMarketSkillName && (
-                        <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
-                          刚安装
-                        </span>
-                      )}
-                      <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
-                        全局
-                      </span>
-                    </div>
-                    {skill.description && (
-                      <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
+            )}
+          </div>
+        )}
+      </div>
 
       {/* === Marketplace Browser === */}
       <div className="mt-4 border-t border-border pt-4">
@@ -2098,7 +2340,7 @@ function useSkillInstallPolicy() {
         return;
       }
       setLastSaved(next);
-      setMessage("已保存。之后装扩展包或市场技能时，是否跳过确认由本开关与安装前扫描结果一起决定（与后端共用同一份配置）。");
+      setMessage("已保存。之后装扩展包或从 ClawHub 安装的技能时，是否跳过确认由本开关与安装前扫描结果一起决定（与后端共用同一份配置）。");
     } catch (e) {
       setNonHighRiskAutoInstall(lastSaved);
       setMessage(e instanceof Error ? e.message : "保存失败。");

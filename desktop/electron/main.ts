@@ -1939,6 +1939,49 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("get-skill-settings", async () => {
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/skills/settings`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle(
+    "put-skill-settings",
+    async (
+      _event,
+      payload: { presetPaths: Array<{ id: string; enabled: boolean }>; customPaths: string[] },
+    ) => {
+      const preset_paths = Array.isArray(payload?.presetPaths) ? payload.presetPaths : [];
+      const custom_paths = Array.isArray(payload?.customPaths) ? payload.customPaths : [];
+      try {
+        const resp = await fetch(`${getStudioUrl()}/api/skills/settings`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "x-agx-desktop-token": getStudioToken(),
+          },
+          body: JSON.stringify({ preset_paths, custom_paths }),
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+        }
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
   ipcMain.handle("disconnect-mcp", async (_event, payload: { sessionId: string; name: string }) => {
     const sid = String(payload?.sessionId || "").trim();
     const name = String(payload?.name || "").trim();
