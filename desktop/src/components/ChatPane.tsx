@@ -1202,6 +1202,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         .join("\0"),
     [paneSubAgents]
   );
+  const primaryMetaPaneId = useMemo(
+    () => panes.find((p) => !p.avatarId || p.avatarId === "")?.id ?? null,
+    [panes]
+  );
+  const primaryPaneForSessionId = useMemo(() => {
+    const sid = (pane?.sessionId ?? "").trim();
+    if (!sid) return null;
+    return panes.find((p) => p.sessionId === sid)?.id ?? null;
+  }, [panes, pane?.sessionId]);
+  const shouldShowBoundFeishuBadge = feishuDesktopBound && primaryPaneForSessionId === pane.id;
+  const shouldShowDefaultMetaFeishuBadge =
+    !hasAnyFeishuDesktopBinding &&
+    !pane.avatarId &&
+    !((pane.sessionId ?? "").startsWith("im-")) &&
+    primaryMetaPaneId === pane.id;
+  const shouldShowFeishuBadge = shouldShowBoundFeishuBadge || shouldShowDefaultMetaFeishuBadge;
 
   useEffect(() => {
     if (paneSubAgents.length === 0) {
@@ -3165,7 +3181,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 truncate text-sm font-medium text-text-strong">
                 {pane.avatarName}
-                {(feishuDesktopBound || pane.sessionId?.startsWith("im-") || (!hasAnyFeishuDesktopBinding && !pane.avatarId)) && (
+                {shouldShowFeishuBadge && (
                   <span className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[9px] font-medium leading-tight" style={{ backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" }}>
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
                       <path d="M5.63 4.02a1 1 0 0 1 1.4.17l4.97 6.3 4.97-6.3a1 1 0 0 1 1.58 1.22L14 10.83l5.37 6.8a1 1 0 0 1-1.57 1.24L12 12.16l-5.8 6.71a1 1 0 0 1-1.57-1.24L10 10.83 5.45 5.42a1 1 0 0 1 .18-1.4Z" fill="currentColor"/>
@@ -3248,8 +3264,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             ) : null}
             {!isGroupPane && pane.sessionId ? (() => {
               const isImSession = pane.sessionId.startsWith("im-");
-              const isDefaultMetaRoute = !hasAnyFeishuDesktopBinding && !pane.avatarId && !isImSession;
-              const isFeishuActive = feishuDesktopBound || isImSession || isDefaultMetaRoute;
+              const isDefaultMetaRoute =
+                !hasAnyFeishuDesktopBinding &&
+                !pane.avatarId &&
+                !isImSession &&
+                primaryMetaPaneId === pane.id;
+              const isFeishuActive = shouldShowFeishuBadge;
               return (
                 <button
                   type="button"
