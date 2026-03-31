@@ -382,10 +382,16 @@ async def _bootstrap_session(
     session_id: str,
     headers: Dict[str, str],
     avatar_id: Optional[str] = None,
-) -> None:
-    """GET /api/session to ensure session exists; pass avatar_id when session is avatar-bound."""
+) -> str:
+    """GET /api/session to ensure session exists; pass avatar_id when session is avatar-bound.
+
+    Returns the actual session_id from the response (may differ from input when creating new).
+    """
     timeout = httpx.Timeout(60.0, connect=30.0)
-    params: Dict[str, str] = {"session_id": session_id}
+    params: Dict[str, str] = {}
+    sid = (session_id or "").strip()
+    if sid:
+        params["session_id"] = sid
     aid = (avatar_id or "").strip()
     if aid:
         params["avatar_id"] = aid
@@ -397,6 +403,12 @@ async def _bootstrap_session(
         )
         if r.status_code >= 400:
             raise RuntimeError(f"session bootstrap failed: {r.status_code} {r.text[:200]}")
+        try:
+            data = r.json()
+            actual_sid = str(data.get("session_id") or "").strip()
+            return actual_sid if actual_sid else sid
+        except Exception:
+            return sid
 
 
 async def _list_sessions_api(
@@ -487,8 +499,8 @@ async def _feishu_cmd_reply(
         aid_s = str(aid).strip() if aid else ""
         aname = str(match.get("avatar_name") or "").strip() or None
         try:
-            await _bootstrap_session(studio_base, sid, headers,
-                                     avatar_id=aid_s or None)
+            _ = await _bootstrap_session(studio_base, sid, headers,
+                                         avatar_id=aid_s or None)
         except Exception as exc:
             return f"无法打开该会话：{exc}"
         if not open_id:
@@ -539,19 +551,19 @@ async def _feishu_cmd_reply(
             rows = await _list_sessions_api(studio_base, headers, avatar_id=avatar_id)
         except Exception as exc:
             return f"拉取该分身会话失败：{exc}"
-        if not rows:
-            return (
-                f"分身「{avatar_name}」暂无会话。请先在 Machi 里与该分身开聊，"
-                "再执行 `/bind @{name_query}`。"
-            )
-        top = rows[0]
-        sid = str(top.get("session_id") or "")
-        if not sid:
-            return "会话列表异常，请重试。"
+
+        sid = str(rows[0].get("session_id") or "").strip() if rows else ""
+
         try:
-            await _bootstrap_session(studio_base, sid, headers, avatar_id=avatar_id)
+            # If no existing session, pass empty sid so backend auto-creates one
+            actual_sid = await _bootstrap_session(studio_base, sid, headers, avatar_id=avatar_id)
+            if actual_sid:
+                sid = actual_sid
         except Exception as exc:
             return f"无法打开该会话：{exc}"
+
+        if not sid:
+            return "会话创建失败，请重试。"
         if not open_id:
             return (
                 "会话已验证，但当前消息缺少飞书用户标识，绑定未保存。"
@@ -582,7 +594,7 @@ async def _chat_turn(
     """Send one message to local agx serve and collect the final reply."""
     timeout = httpx.Timeout(600.0, connect=30.0)
     async with _no_proxy_client(timeout=timeout) as client:
-        await _bootstrap_session(studio_base, session_id, headers, avatar_id=avatar_id)
+        _ = await _bootstrap_session(studio_base, session_id, headers, avatar_id=avatar_id)
 
         body = {
             "session_id": session_id,
