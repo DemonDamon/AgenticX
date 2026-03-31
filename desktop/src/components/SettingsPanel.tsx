@@ -104,6 +104,7 @@ type SkillItem = {
   name: string;
   description: string;
   location: string;
+  base_dir?: string;
 };
 
 type BundleItem = {
@@ -400,6 +401,15 @@ function ToolsTab() {
   );
 }
 
+function pinSkillFirst(skills: SkillItem[], pin: string | null): SkillItem[] {
+  if (!pin || skills.length === 0) return skills;
+  const i = skills.findIndex((s) => s.name === pin);
+  if (i <= 0) return skills;
+  const next = [...skills];
+  const [one] = next.splice(i, 1);
+  return [one, ...next];
+}
+
 function SkillsTab() {
   const [items, setItems] = useState<SkillItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -422,7 +432,13 @@ function SkillsTab() {
   const [marketPending, setMarketPending] = useState<RegistrySearchItem | null>(null);
   const [marketNeedsConfirmNonHigh, setMarketNeedsConfirmNonHigh] = useState(false);
   const [marketNeedsConfirmHigh, setMarketNeedsConfirmHigh] = useState(false);
+  const [marketInstallingKey, setMarketInstallingKey] = useState<string | null>(null);
+  const [marketQueuedKeys, setMarketQueuedKeys] = useState<string[]>([]);
+  /** After marketplace install: pin this skill at top of its group and surface global section first. */
+  const [recentMarketSkillName, setRecentMarketSkillName] = useState<string | null>(null);
   const marketSearchSeqRef = useRef(0);
+  const marketInstallQueueRef = useRef<RegistrySearchItem[]>([]);
+  const skillsListAnchorRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setBundleNeedsConfirmNonHigh(false);
@@ -456,11 +472,17 @@ function SkillsTab() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!recentMarketSkillName) return;
+    skillsListAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [recentMarketSkillName]);
+
   const onRefresh = async () => {
     setLoading(true);
     setErr("");
     setDetail(null);
     setBundleMsg("");
+    setRecentMarketSkillName(null);
     try {
       await window.agenticxDesktop.refreshSkills();
       const [skillsRes, bundlesRes] = await Promise.all([
@@ -484,6 +506,24 @@ function SkillsTab() {
     ]);
     if (skillsRes.ok) setItems(skillsRes.items ?? []);
     if (bundlesRes.ok) setBundles(bundlesRes.items ?? []);
+  };
+
+  const reloadSkillsAfterMarketInstall = async (installedSlug: string) => {
+    try {
+      await window.agenticxDesktop.refreshSkills();
+    } catch {
+      /* still try load */
+    }
+    const skillsRes = await window.agenticxDesktop.loadSkills();
+    if (!skillsRes.ok) return;
+    const list = skillsRes.items ?? [];
+    setItems(list);
+    const needle = `/registry/${installedSlug}`;
+    const byRegistryPath = list.find((s) =>
+      (s.base_dir ?? "").replace(/\\/g, "/").includes(needle)
+    );
+    const pinName = byRegistryPath?.name ?? list.find((s) => s.name === installedSlug)?.name ?? installedSlug;
+    setRecentMarketSkillName(pinName);
   };
 
   const onInstallBundle = async () => {
@@ -615,19 +655,60 @@ function SkillsTab() {
   };
 
   const onMarketInstall = async (item: RegistrySearchItem) => {
+    const key = `${item.source}:${item.name}`;
+    if (registryInstallBusy && marketInstallingKey && marketInstallingKey !== key) {
+      const exists = marketInstallQueueRef.current.some(
+        (q) => q.source === item.source && q.name === item.name
+      );
+      if (!exists) {
+        marketInstallQueueRef.current.push(item);
+        setMarketQueuedKeys((prev) => (prev.includes(key) ? prev : [...prev, key]));
+      }
+      setMarketMsg(`正在安装「${marketInstallingKey.split(":")[1]}」，已将「${item.name}」加入队列。`);
+      return;
+    }
+    setMarketQueuedKeys((prev) => prev.filter((k) => k !== key));
+    marketInstallQueueRef.current = marketInstallQueueRef.current.filter(
+      (q) => !(q.source === item.source && q.name === item.name)
+    );
+    setMarketInstallingKey(key);
     setRegistryInstallBusy(true);
     setMarketNeedsConfirmNonHigh(false);
     setMarketNeedsConfirmHigh(false);
     setMarketPending(null);
     setMarketMsg(`正在拉取并扫描「${item.name}」…`);
+    let pauseQueue = false;
     try {
       const prev = await window.agenticxDesktop.installFromRegistryPreview({
         source: item.source,
         name: item.name,
       });
       if (!prev.ok) {
-        setMarketMsg(`扫描未通过: ${prev.error ?? "未知错误"}`);
-        return;
+        const rawErr = String(prev.error ?? "未知错误");
+        const is429 = rawErr.includes("rate limited (429)") || rawErr.includes("Too Many Requests");
+        if (is429) {
+          const secMatch = rawErr.match(/about (\d+)s/);
+          const waitSec = secMatch ? Math.min(Number(secMatch[1]), 30) : 10;
+          setMarketMsg(`拉取受限：ClawHub 限流中，${waitSec} 秒后自动重试…`);
+          await new Promise((r) => setTimeout(r, waitSec * 1000));
+          setMarketMsg(`正在重新拉取「${item.name}」…`);
+          const retry = await window.agenticxDesktop.installFromRegistryPreview({
+            source: item.source,
+            name: item.name,
+          });
+          if (!retry.ok) {
+            const retryErr = String(retry.error ?? "未知错误");
+            setMarketMsg(`拉取失败：${retryErr}`);
+            return;
+          }
+          Object.assign(prev, retry);
+        } else if (rawErr.includes("fetch failed") || rawErr.includes("Failed to fetch skill")) {
+          setMarketMsg(`拉取失败：${rawErr}`);
+          return;
+        } else {
+          setMarketMsg(`扫描未通过：${rawErr}`);
+          return;
+        }
       }
       if (prev.scan) {
         setMarketMsg(formatSkillScanSummary(prev.scan));
@@ -639,13 +720,13 @@ function SkillsTab() {
       });
       if (res.ok) {
         setMarketMsg(`已安装 "${item.name}"`);
-        const skillsRes = await window.agenticxDesktop.loadSkills();
-        if (skillsRes.ok) setItems(skillsRes.items ?? []);
+        await reloadSkillsAfterMarketInstall(String(res.name ?? item.name));
         return;
       }
       if (res.error_code === "non_high_risk_confirm_required") {
         setMarketPending(item);
         setMarketNeedsConfirmNonHigh(true);
+        pauseQueue = true;
         if (res.scan_summary) {
           setMarketMsg(`${formatSkillScanSummary(res.scan_summary)}\n\n当前策略要求你点「确认安装」后再写入。`);
         } else {
@@ -656,6 +737,7 @@ function SkillsTab() {
       if (res.error_code === "high_risk_confirm_required") {
         setMarketPending(item);
         setMarketNeedsConfirmHigh(true);
+        pauseQueue = true;
         if (res.scan_summary) {
           setMarketMsg(`${formatSkillScanSummary(res.scan_summary)}\n\n命中高危规则：请阅读摘要后点下方按钮确认。`);
         } else {
@@ -668,12 +750,22 @@ function SkillsTab() {
       setMarketMsg(String(e));
     } finally {
       setRegistryInstallBusy(false);
+      setMarketInstallingKey(null);
+      if (!pauseQueue && marketInstallQueueRef.current.length > 0) {
+        const next = marketInstallQueueRef.current.shift()!;
+        const nextKey = `${next.source}:${next.name}`;
+        setMarketQueuedKeys((prev) => prev.filter((k) => k !== nextKey));
+        setTimeout(() => {
+          void onMarketInstall(next);
+        }, 0);
+      }
     }
   };
 
   const onConfirmMarketInstall = async (kind: "non_high" | "high") => {
     if (!marketPending) return;
     const pending = marketPending;
+    setMarketInstallingKey(`${pending.source}:${pending.name}`);
     setRegistryInstallBusy(true);
     try {
       const res = await window.agenticxDesktop.installFromRegistry({
@@ -687,8 +779,7 @@ function SkillsTab() {
       setMarketPending(null);
       if (res.ok) {
         setMarketMsg(`已安装 "${pending.name}"`);
-        const skillsRes = await window.agenticxDesktop.loadSkills();
-        if (skillsRes.ok) setItems(skillsRes.items ?? []);
+        await reloadSkillsAfterMarketInstall(String(res.name ?? pending.name));
       } else {
         setMarketMsg(`安装失败: ${res.error ?? "未知错误"}`);
       }
@@ -696,6 +787,7 @@ function SkillsTab() {
       setMarketMsg(String(e));
     } finally {
       setRegistryInstallBusy(false);
+      setMarketInstallingKey(null);
     }
   };
 
@@ -724,8 +816,17 @@ function SkillsTab() {
       )
     : items;
 
-  const projectSkills = filtered.filter((s) => s.location === "project");
-  const globalSkills = filtered.filter((s) => s.location !== "project");
+  const projectSkills = pinSkillFirst(
+    filtered.filter((s) => s.location === "project"),
+    recentMarketSkillName
+  );
+  const globalSkills = pinSkillFirst(
+    filtered.filter((s) => s.location !== "project"),
+    recentMarketSkillName
+  );
+  const showGlobalSkillsFirst =
+    Boolean(recentMarketSkillName) &&
+    globalSkills.some((s) => s.name === recentMarketSkillName);
 
   if (loading) {
     return <div className="py-8 text-center text-sm text-text-faint">加载技能中...</div>;
@@ -733,7 +834,7 @@ function SkillsTab() {
 
   return (
     <div className="space-y-3">
-      <div className="text-sm text-text-subtle">
+      <div ref={skillsListAnchorRef} className="text-sm text-text-subtle">
         技能（Skills）是注入给 Agent 的领域知识指令，告诉 AI 在特定任务中「怎么做」。
       </div>
 
@@ -790,69 +891,167 @@ function SkillsTab() {
         <div className="py-2 text-center text-xs text-text-faint">加载详情...</div>
       )}
 
-      {/* Skills list grouped by location */}
-      {projectSkills.length > 0 && (
-        <div>
-          <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-            项目技能 ({projectSkills.length})
-          </div>
-          <div className="space-y-1">
-            {projectSkills.map((skill) => (
-              <button
-                key={skill.name}
-                type="button"
-                className={`w-full rounded-md border px-3 py-2 text-left transition ${
-                  detail?.name === skill.name
-                    ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
-                    : "border-border bg-surface-card hover:bg-surface-hover"
-                }`}
-                onClick={() => void onViewDetail(skill.name)}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
-                  <span className="shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400">
-                    项目
-                  </span>
-                </div>
-                {skill.description && (
-                  <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Skills list grouped by location; after market install, global block first + pinned row */}
+      {showGlobalSkillsFirst ? (
+        <>
+          {globalSkills.length > 0 && (
+            <div>
+              <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+                全局技能 ({globalSkills.length})
+              </div>
+              <div className="space-y-1">
+                {globalSkills.map((skill) => (
+                  <button
+                    key={skill.name}
+                    type="button"
+                    className={`w-full rounded-md border px-3 py-2 text-left transition ${
+                      detail?.name === skill.name
+                        ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
+                        : skill.name === recentMarketSkillName
+                          ? "border-amber-500/35 bg-amber-500/5"
+                          : "border-border bg-surface-card hover:bg-surface-hover"
+                    }`}
+                    onClick={() => void onViewDetail(skill.name)}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
+                      {skill.name === recentMarketSkillName && (
+                        <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
+                          刚安装
+                        </span>
+                      )}
+                      <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
+                        全局
+                      </span>
+                    </div>
+                    {skill.description && (
+                      <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-      {globalSkills.length > 0 && (
-        <div>
-          <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-            全局技能 ({globalSkills.length})
-          </div>
-          <div className="space-y-1">
-            {globalSkills.map((skill) => (
-              <button
-                key={skill.name}
-                type="button"
-                className={`w-full rounded-md border px-3 py-2 text-left transition ${
-                  detail?.name === skill.name
-                    ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
-                    : "border-border bg-surface-card hover:bg-surface-hover"
-                }`}
-                onClick={() => void onViewDetail(skill.name)}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
-                  <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
-                    全局
-                  </span>
-                </div>
-                {skill.description && (
-                  <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
+          {projectSkills.length > 0 && (
+            <div>
+              <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+                项目技能 ({projectSkills.length})
+              </div>
+              <div className="space-y-1">
+                {projectSkills.map((skill) => (
+                  <button
+                    key={skill.name}
+                    type="button"
+                    className={`w-full rounded-md border px-3 py-2 text-left transition ${
+                      detail?.name === skill.name
+                        ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
+                        : skill.name === recentMarketSkillName
+                          ? "border-amber-500/35 bg-amber-500/5"
+                          : "border-border bg-surface-card hover:bg-surface-hover"
+                    }`}
+                    onClick={() => void onViewDetail(skill.name)}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
+                      {skill.name === recentMarketSkillName && (
+                        <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
+                          刚安装
+                        </span>
+                      )}
+                      <span className="shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400">
+                        项目
+                      </span>
+                    </div>
+                    {skill.description && (
+                      <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {projectSkills.length > 0 && (
+            <div>
+              <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+                项目技能 ({projectSkills.length})
+              </div>
+              <div className="space-y-1">
+                {projectSkills.map((skill) => (
+                  <button
+                    key={skill.name}
+                    type="button"
+                    className={`w-full rounded-md border px-3 py-2 text-left transition ${
+                      detail?.name === skill.name
+                        ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
+                        : skill.name === recentMarketSkillName
+                          ? "border-amber-500/35 bg-amber-500/5"
+                          : "border-border bg-surface-card hover:bg-surface-hover"
+                    }`}
+                    onClick={() => void onViewDetail(skill.name)}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
+                      {skill.name === recentMarketSkillName && (
+                        <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
+                          刚安装
+                        </span>
+                      )}
+                      <span className="shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400">
+                        项目
+                      </span>
+                    </div>
+                    {skill.description && (
+                      <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {globalSkills.length > 0 && (
+            <div>
+              <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+                全局技能 ({globalSkills.length})
+              </div>
+              <div className="space-y-1">
+                {globalSkills.map((skill) => (
+                  <button
+                    key={skill.name}
+                    type="button"
+                    className={`w-full rounded-md border px-3 py-2 text-left transition ${
+                      detail?.name === skill.name
+                        ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
+                        : skill.name === recentMarketSkillName
+                          ? "border-amber-500/35 bg-amber-500/5"
+                          : "border-border bg-surface-card hover:bg-surface-hover"
+                    }`}
+                    onClick={() => void onViewDetail(skill.name)}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
+                      {skill.name === recentMarketSkillName && (
+                        <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
+                          刚安装
+                        </span>
+                      )}
+                      <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
+                        全局
+                      </span>
+                    </div>
+                    {skill.description && (
+                      <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* === Marketplace Browser === */}
@@ -953,10 +1152,14 @@ function SkillsTab() {
                 <button
                   type="button"
                   className="shrink-0 rounded border border-[var(--settings-accent-border-muted)] px-2 py-0.5 text-[10px] text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
-                  disabled={registryInstallBusy || marketLoading}
+                  disabled={marketLoading || marketInstallingKey === `${item.source}:${item.name}` || marketQueuedKeys.includes(`${item.source}:${item.name}`)}
                   onClick={() => void onMarketInstall(item)}
                 >
-                  {registryInstallBusy ? "安装中…" : "安装"}
+                  {marketInstallingKey === `${item.source}:${item.name}`
+                    ? "安装中…"
+                    : marketQueuedKeys.includes(`${item.source}:${item.name}`)
+                      ? "排队中…"
+                      : "安装"}
                 </button>
               </div>
             ))}
@@ -2028,19 +2231,52 @@ function SessionMemoryPanel() {
 
 function formatSkillScanSummary(scan: {
   overall: string;
-  skills: Array<{ skill_name: string; verdict: string; findings?: Array<{ pattern_name: string }> }>;
+  skills: Array<{
+    skill_name: string;
+    verdict: string;
+    findings?: Array<{
+      pattern_name: string;
+      severity?: string;
+      matched_text?: string;
+    }>;
+  }>;
 }): string {
   const verdictLabel = (v: string) =>
     v === "dangerous" ? "高危" : v === "caution" ? "需注意" : "未见高危规则";
+  const sevLabel = (s: string | undefined) =>
+    s === "dangerous" ? "⛔ 高危" : s === "caution" ? "⚠ 注意" : s ?? "";
+  const patternLabel: Record<string, string> = {
+    exfiltration_curl: "数据外泄（curl）",
+    exfiltration_wget: "数据外泄（wget）",
+    exfiltration_fetch_env: "读取环境变量并上传",
+    credential_ssh: "访问 SSH 密钥",
+    credential_dotenv: "引用 .env 文件",
+    credential_word: "涉及凭据/密码关键词",
+    prompt_ignore_previous: "提示词注入（忽略先前指令）",
+    prompt_system: "提示词注入（system prompt）",
+    prompt_system_tag: "提示词注入（<system> 标签）",
+    destructive_rm: "破坏性操作（rm -rf /）",
+    destructive_chmod: "破坏性操作（chmod 777）",
+    destructive_sql: "破坏性操作（DROP TABLE）",
+  };
+
   const lines = [
     `安装前扫描 · 总体：${verdictLabel(scan.overall)}`,
-    ...scan.skills.map(
-      (s) =>
-        `· ${s.skill_name || "skill"}：${verdictLabel(s.verdict)}${
-          s.findings?.length ? `（命中 ${s.findings.length} 条）` : ""
-        }`
-    ),
   ];
+  for (const s of scan.skills) {
+    lines.push(
+      `· ${s.skill_name || "skill"}：${verdictLabel(s.verdict)}${
+        s.findings?.length ? `（命中 ${s.findings.length} 条规则）` : ""
+      }`
+    );
+    if (s.findings?.length) {
+      for (const f of s.findings) {
+        const label = patternLabel[f.pattern_name] || f.pattern_name;
+        const matched = f.matched_text ? `「${f.matched_text.slice(0, 60)}」` : "";
+        lines.push(`  ${sevLabel(f.severity)} ${label}${matched ? " — " + matched : ""}`);
+      }
+    }
+  }
   return lines.join("\n");
 }
 

@@ -30,6 +30,9 @@ Author: Damon Li
 from __future__ import annotations
 
 import logging
+import io
+import time
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -123,6 +126,8 @@ class RegistryHub:
         """
         seen: set[str] = set()
         results: List[SearchResult] = []
+        failed_sources: List[str] = []
+        successful_sources = 0
 
         for reg in self._registries:
             reg_type = str(reg.get("type", "agx")).lower()
@@ -140,8 +145,10 @@ class RegistryHub:
                 else:
                     logger.warning("Unknown registry type '%s'; skipping '%s'", reg_type, reg_name)
                     continue
+                successful_sources += 1
             except Exception as exc:
                 logger.warning("Search failed for registry '%s': %s", reg_name, exc)
+                failed_sources.append(f"{reg_name}: {exc}")
                 continue
 
             for result in batch:
@@ -149,6 +156,11 @@ class RegistryHub:
                 if key not in seen:
                     seen.add(key)
                     results.append(result)
+
+        # If every configured source failed, surface an error to caller instead of
+        # pretending this was a normal "no match" result.
+        if not results and successful_sources == 0 and failed_sources:
+            raise RuntimeError("All registry sources failed: " + " | ".join(failed_sources[:3]))
 
         return results
 
@@ -190,6 +202,43 @@ class RegistryHub:
         """
         import httpx
 
+        def _compute_wait(resp: httpx.Response) -> float:
+            for hdr in ("retry-after", "ratelimit-reset", "x-ratelimit-reset"):
+                raw = str(resp.headers.get(hdr, "")).strip()
+                if not raw:
+                    continue
+                try:
+                    val = float(raw)
+                except Exception:
+                    continue
+                if val > 1_000_000_000:
+                    return max(1.0, min(60.0, val - time.time()))
+                return max(1.0, min(60.0, val))
+            return 5.0
+
+        def _get_with_retry(
+            endpoint: str,
+            *,
+            params: Optional[Dict[str, Any]] = None,
+            timeout: float = 10.0,
+            attempts: int = 3,
+        ) -> httpx.Response:
+            last_resp: Optional[httpx.Response] = None
+            for attempt in range(attempts):
+                resp = httpx.get(endpoint, params=params, timeout=timeout, **_REGISTRY_HTTPX)
+                last_resp = resp
+                if resp.status_code != 429:
+                    return resp
+                if attempt < attempts - 1:
+                    delay = _compute_wait(resp)
+                    logger.info("ClawHub search 429 (attempt %d), sleeping %.1fs", attempt + 1, delay)
+                    time.sleep(delay)
+            assert last_resp is not None
+            wait = int(_compute_wait(last_resp))
+            raise RuntimeError(
+                f"ClawHub search rate limited (429). Retry in about {wait}s."
+            )
+
         q = (query or "").strip()
         params = {"q": q, "limit": "50"} if q else {"limit": "50"}
         payload: Dict[str, Any] = {}
@@ -198,11 +247,14 @@ class RegistryHub:
         if q:
             try:
                 search_params = {"q": q, "type": "skill", "limit": "50"}
-                resp = httpx.get(
-                    f"{url}/v1/search", params=search_params, timeout=10.0, **_REGISTRY_HTTPX
+                resp = _get_with_retry(
+                    f"{url}/v1/search", params=search_params, timeout=10.0
                 )
                 resp.raise_for_status()
                 payload = resp.json()
+            except RuntimeError:
+                # Preserve explicit rate-limit errors for caller/UI.
+                raise
             except Exception:
                 payload = {}
 
@@ -330,28 +382,125 @@ class RegistryHub:
     def _fetch_clawhub_markdown(self, url: str, skill_name: str) -> Tuple[Optional[str], str]:
         import httpx
 
-        try:
-            resp = httpx.get(
-                f"{url}/v1/skills/{skill_name}", timeout=15.0, **_REGISTRY_HTTPX
-            )
-            resp.raise_for_status()
-            payload = resp.json()
-        except Exception:
-            resp = httpx.get(
-                f"{url}/skills/{skill_name}", timeout=15.0, **_REGISTRY_HTTPX
-            )
-            resp.raise_for_status()
-            payload = resp.json()
+        def _compute_429_wait(resp: httpx.Response) -> float:
+            """Derive wait seconds from ClawHub rate-limit headers.
 
-        skill_content = str(
-            payload.get("skill_content")
-            or payload.get("content")
-            or payload.get("md_content")
-            or ""
-        )
-        if not skill_content.strip():
-            return None, "No skill_content returned from ClawHub API"
-        return skill_content, ""
+            ClawHub uses ``ratelimit-reset`` (Unix epoch) and ``x-ratelimit-reset``
+            rather than ``retry-after``.  Fall back to exponential backoff when the
+            header is missing or unparseable.
+            """
+            for hdr in ("retry-after", "ratelimit-reset", "x-ratelimit-reset"):
+                raw = str(resp.headers.get(hdr, "")).strip()
+                if not raw:
+                    continue
+                try:
+                    val = float(raw)
+                except Exception:
+                    continue
+                if val > 1_000_000_000:
+                    return max(1.0, min(60.0, val - time.time()))
+                return max(1.0, min(60.0, val))
+            return 5.0
+
+        def _rate_limited_err(resp: httpx.Response) -> str:
+            wait = int(_compute_429_wait(resp))
+            return f"ClawHub API rate limited (429). Please retry in about {wait}s."
+
+        def _get_with_retry(
+            endpoint: str,
+            *,
+            params: Optional[Dict[str, Any]] = None,
+            timeout: float = 15.0,
+            attempts: int = 3,
+        ) -> Tuple[Optional[httpx.Response], str]:
+            last_resp: Optional[httpx.Response] = None
+            for attempt in range(attempts):
+                resp = httpx.get(
+                    endpoint,
+                    params=params,
+                    timeout=timeout,
+                    **_REGISTRY_HTTPX,
+                )
+                last_resp = resp
+                if resp.status_code != 429:
+                    return resp, ""
+                if attempt < attempts - 1:
+                    delay = _compute_429_wait(resp)
+                    logger.info("ClawHub 429 on %s (attempt %d), sleeping %.1fs", endpoint, attempt + 1, delay)
+                    time.sleep(delay)
+            assert last_resp is not None
+            return None, _rate_limited_err(last_resp)
+
+        # Step 1: Fetch version list to get the latest version tag.
+        # The /v1/skills/{slug} detail endpoint only returns metadata (no SKILL.md content),
+        # so we skip that request and go straight to the versions endpoint.
+        try:
+            versions_resp, limited_err = _get_with_retry(
+                f"{url}/v1/packages/{skill_name}/versions",
+                timeout=15.0,
+            )
+            if limited_err:
+                return None, limited_err
+            assert versions_resp is not None
+            versions_resp.raise_for_status()
+            versions_payload = versions_resp.json()
+            versions = versions_payload.get("items") or []
+            if not isinstance(versions, list) or not versions:
+                return None, "No package versions returned from ClawHub API"
+            latest_version = str((versions[0] or {}).get("version") or "").strip()
+            if not latest_version:
+                return None, "Missing latest version in ClawHub package metadata"
+
+            # Step 2: Fetch the specific version detail to get the SKILL.md file hash.
+            version_resp, limited_err = _get_with_retry(
+                f"{url}/v1/packages/{skill_name}/versions/{latest_version}",
+                timeout=15.0,
+            )
+            if limited_err:
+                return None, limited_err
+            assert version_resp is not None
+            version_resp.raise_for_status()
+            version_payload = version_resp.json()
+            files = (version_payload.get("version") or {}).get("files") or []
+            if not isinstance(files, list):
+                files = []
+
+            skill_file_hash = ""
+            for f in files:
+                if not isinstance(f, dict):
+                    continue
+                if str(f.get("path", "")).strip().upper() == "SKILL.MD":
+                    skill_file_hash = str(f.get("sha256") or "").strip()
+                    break
+            if not skill_file_hash:
+                return None, "SKILL.md hash not found in ClawHub package files"
+
+            # Step 3: Download the SKILL.md (ClawHub returns a zip archive).
+            download_resp, limited_err = _get_with_retry(
+                f"{url}/v1/download",
+                params={"slug": skill_name, "hash": skill_file_hash, "file": "SKILL.md"},
+                timeout=20.0,
+            )
+            if limited_err:
+                return None, limited_err
+            assert download_resp is not None
+            download_resp.raise_for_status()
+
+            content_type = str(download_resp.headers.get("content-type", "")).lower()
+            if "zip" in content_type or download_resp.content.startswith(b"PK\x03\x04"):
+                with zipfile.ZipFile(io.BytesIO(download_resp.content)) as zf:
+                    for member in zf.namelist():
+                        if member.strip().upper().endswith("SKILL.MD"):
+                            return zf.read(member).decode("utf-8", errors="replace"), ""
+                return None, "Downloaded package zip does not contain SKILL.md"
+
+            # Fallback: some deployments may return raw markdown/plain text directly.
+            text = download_resp.text
+            if text.strip():
+                return text, ""
+            return None, "Downloaded SKILL.md content is empty"
+        except Exception as exc:
+            return None, f"Failed to fetch skill from ClawHub: {exc}"
 
     def write_registry_skill(self, skill_name: str, skill_content: str) -> Path:
         """Write SKILL.md under ~/.agenticx/skills/registry/<name>/."""
