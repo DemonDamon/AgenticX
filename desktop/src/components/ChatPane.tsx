@@ -1202,10 +1202,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         .join("\0"),
     [paneSubAgents]
   );
-  const primaryMetaPaneId = useMemo(
-    () => panes.find((p) => !p.avatarId || p.avatarId === "")?.id ?? null,
-    [panes]
-  );
+  const primaryMetaPaneId = useMemo(() => {
+    const metaPanes = panes.filter((p) => !p.avatarId || p.avatarId === "");
+    if (metaPanes.length === 0) return null;
+    const preferred = metaPanes.find((p) => !((p.sessionId ?? "").startsWith("im-")));
+    return (preferred ?? metaPanes[0])?.id ?? null;
+  }, [panes]);
   const primaryPaneForSessionId = useMemo(() => {
     const sid = (pane?.sessionId ?? "").trim();
     if (!sid) return null;
@@ -1215,7 +1217,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const shouldShowDefaultMetaFeishuBadge =
     !hasAnyFeishuDesktopBinding &&
     !pane.avatarId &&
-    !((pane.sessionId ?? "").startsWith("im-")) &&
     primaryMetaPaneId === pane.id;
   const shouldShowFeishuBadge = shouldShowBoundFeishuBadge || shouldShowDefaultMetaFeishuBadge;
 

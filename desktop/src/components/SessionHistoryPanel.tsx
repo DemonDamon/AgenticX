@@ -85,10 +85,13 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
 }
 
 export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onClose, tintColor }: Props) {
+  const panes = useAppStore((s) => s.panes);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const addPane = useAppStore((s) => s.addPane);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [feishuBoundSessionId, setFeishuBoundSessionId] = useState<string | null>(null);
+  const [hasAnyFeishuDesktopBinding, setHasAnyFeishuDesktopBinding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [contextMenu, setContextMenu] = useState<SessionContextMenu | null>(null);
@@ -98,8 +101,24 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const [batchDeleting, setBatchDeleting] = useState(false);
 
   const title = useMemo(() => (pane.avatarName || "Machi").trim(), [pane.avatarName]);
+  const primaryMetaPaneId = useMemo(() => {
+    const metaPanes = panes.filter((p) => !p.avatarId || p.avatarId === "");
+    if (metaPanes.length === 0) return null;
+    const preferred = metaPanes.find((p) => !((p.sessionId ?? "").startsWith("im-")));
+    return (preferred ?? metaPanes[0])?.id ?? null;
+  }, [panes]);
+  const defaultMetaMarkedSessionId =
+    !hasAnyFeishuDesktopBinding &&
+    !pane.avatarId &&
+    primaryMetaPaneId === pane.id
+      ? (pane.sessionId || "").trim() || null
+      : null;
+  const feishuMarkedSessionId = feishuBoundSessionId || defaultMetaMarkedSessionId;
 
   const groupedSessions = useMemo<GroupedSessions>(() => {
+    const visibleSessions = feishuMarkedSessionId
+      ? sessions.filter((item) => item.session_id !== feishuMarkedSessionId)
+      : sessions;
     const now = new Date();
     const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
     const startPrevious7Days = startToday - 7 * 24 * 3600;
@@ -109,7 +128,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       previous7Days: [],
       older: [],
     };
-    for (const item of sessions) {
+    for (const item of visibleSessions) {
       if (item.pinned) {
         grouped.pinned.push(item);
         continue;
@@ -124,7 +143,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       }
     }
     return grouped;
-  }, [sessions]);
+  }, [sessions, feishuMarkedSessionId]);
 
   const loadSessions = async () => {
     try {
@@ -146,6 +165,35 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   }, [pane.historyOpen, pane.avatarId, pane.sessionId]);
 
   useEffect(() => {
+    if (!pane.historyOpen) return;
+    let cancelled = false;
+
+    const syncFeishuBinding = async () => {
+      if (cancelled) return;
+      try {
+        const r = await window.agenticxDesktop.loadFeishuBinding();
+        if (!r.ok || cancelled) return;
+        const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
+        const sid = typeof desk?.session_id === "string" ? desk.session_id.trim() : "";
+        setFeishuBoundSessionId(sid || null);
+        setHasAnyFeishuDesktopBinding(Boolean(sid));
+      } catch {
+        if (!cancelled) {
+          setFeishuBoundSessionId(null);
+          setHasAnyFeishuDesktopBinding(false);
+        }
+      }
+    };
+
+    void syncFeishuBinding();
+    const timer = window.setInterval(() => void syncFeishuBinding(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [pane.historyOpen]);
+
+  useEffect(() => {
     if (!contextMenu) return;
     if (selectMode) {
       setContextMenu(null);
@@ -163,6 +211,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   // --- All hooks above, conditional render below ---
 
   if (!pane.historyOpen) return null;
+
+  const feishuSession = feishuMarkedSessionId
+    ? sessions.find((item) => item.session_id === feishuMarkedSessionId) ?? null
+    : null;
 
   const switchSession = async (sessionId: string, targetPaneId = pane.id) => {
     setPaneSessionId(targetPaneId, sessionId);
@@ -342,6 +394,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     const label = (item.session_name || "").trim() || `新会话 ${item.session_id.slice(0, 6)}`;
     const unread = unreadSessionIds.includes(item.session_id);
     const createdAt = getSessionCreatedTimestamp(item) || Date.now() / 1000;
+    const feishuMarked = feishuMarkedSessionId === item.session_id;
     return (
       <div key={item.session_id} className="mb-1">
         {editingId === item.session_id ? (
@@ -392,6 +445,14 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               ) : null}
               {item.pinned ? <span className="text-[10px] text-amber-300">pin</span> : null}
               <span className="truncate">{label}</span>
+              {feishuMarked ? (
+                <span
+                  className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
+                  style={{ backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" }}
+                >
+                  飞书
+                </span>
+              ) : null}
               {unread ? <span className="inline-block h-1.5 w-1.5 rounded-full bg-text-muted" /> : null}
             </span>
             <span className="mt-0.5 truncate w-full text-[9px] text-text-faint">
@@ -576,6 +637,20 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           </div>
         ) : (
           <>
+            {feishuSession ? (
+              <div className="mb-2">
+                <div className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-[#3370FF]">
+                  <span>飞书会话</span>
+                  <span
+                    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
+                    style={{ backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" }}
+                  >
+                    唯一
+                  </span>
+                </div>
+                {renderSessionItem(feishuSession)}
+              </div>
+            ) : null}
             {renderGroup("Pinned", groupedSessions.pinned)}
             {renderGroup("Today", groupedSessions.today)}
             {renderGroup("Previous 7 days", groupedSessions.previous7Days)}

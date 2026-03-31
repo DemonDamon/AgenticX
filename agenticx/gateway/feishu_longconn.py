@@ -275,18 +275,14 @@ def _write_bindings_file(data: Dict[str, Any]) -> None:
     os.replace(tmp, _BINDING_FILE)
 
 
-def _resolve_binding_for_sender(open_id: str) -> Optional[Dict[str, Any]]:
-    """Return binding dict for Feishu user: open_id first, then _desktop fallback."""
+def _resolve_binding_for_sender(_open_id: str) -> Optional[Dict[str, Any]]:
+    """Return the global desktop binding.
+
+    The desktop integration uses a single global binding key (`_desktop`) as the
+    source of truth, so Feishu routing and Desktop badge always point to the same
+    session at any given time.
+    """
     data = _read_bindings_file()
-    if open_id and open_id in data and isinstance(data[open_id], dict):
-        b = data[open_id]
-        sid = str(b.get("session_id") or "").strip()
-        if sid:
-            return {
-                "session_id": sid,
-                "avatar_id": (str(b.get("avatar_id") or "").strip() or None),
-                "avatar_name": (str(b.get("avatar_name") or "").strip() or None),
-            }
     desk = data.get(_DESKTOP_BINDING_KEY)
     if isinstance(desk, dict):
         sid = str(desk.get("session_id") or "").strip()
