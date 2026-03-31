@@ -218,7 +218,7 @@ extensions:
       url: https://example.com/agx-registry.json
       type: agx
     - name: clawhub
-      url: https://www.clawhub.io/api
+      url: https://clawhub.ai/api
       type: clawhub                      # ClawHub skills market
   scan_dirs:
     - ~/.agenticx/bundles
@@ -230,7 +230,7 @@ Two registry types are supported:
 | Type | Description |
 |------|-------------|
 | `agx` | AgenticX native registry — REST API compatible with `agenticx.skills.registry` |
-| `clawhub` | ClawHub skills market — search and install `SKILL.md` files from [clawhub.io](https://www.clawhub.io) |
+| `clawhub` | ClawHub skills market — search and install `SKILL.md` files from [clawhub.ai](https://clawhub.ai) |
 
 ### Searching the Marketplace
 
@@ -331,7 +331,7 @@ Add to `~/.agenticx/config.yaml`:
 extensions:
   registries:
     - name: clawhub
-      url: https://www.clawhub.io/api
+      url: https://clawhub.ai/api
       type: clawhub
 ```
 
