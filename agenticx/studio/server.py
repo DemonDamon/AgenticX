@@ -2615,6 +2615,58 @@ def create_studio_app() -> FastAPI:
 
     # --- Skills API ---
 
+    @app.get("/api/skills/settings")
+    async def get_skill_settings(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Skill scan roots: preset toggles + custom paths (``~/.agenticx/config.yaml``)."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.tools.skill_bundle import skill_scan_settings_payload
+
+            body = skill_scan_settings_payload()
+            return {"ok": True, **body}
+        except Exception as exc:
+            logger.warning("get_skill_settings error: %s", exc)
+            return {
+                "ok": False,
+                "preset_paths": [],
+                "custom_paths": [],
+                "error": str(exc),
+            }
+
+    @app.put("/api/skills/settings")
+    async def put_skill_settings(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Persist skill scan settings and return the merged effective payload."""
+        _check_token(x_agx_desktop_token)
+        preset = payload.get("preset_paths")
+        custom = payload.get("custom_paths")
+        if preset is not None and not isinstance(preset, list):
+            raise HTTPException(
+                status_code=400, detail="preset_paths must be a list or omitted"
+            )
+        if custom is not None and not isinstance(custom, list):
+            raise HTTPException(
+                status_code=400, detail="custom_paths must be a list or omitted"
+            )
+        try:
+            from agenticx.tools.skill_bundle import (
+                persist_skill_scan_settings,
+                skill_scan_settings_payload,
+            )
+
+            persist_skill_scan_settings(
+                list(preset) if isinstance(preset, list) else [],
+                list(custom) if isinstance(custom, list) else [],
+            )
+            return {"ok": True, **skill_scan_settings_payload()}
+        except Exception as exc:
+            logger.warning("put_skill_settings error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     @app.get("/api/skills")
     async def list_skills(
         x_agx_desktop_token: str | None = Header(default=None),
@@ -2632,6 +2684,7 @@ def create_studio_app() -> FastAPI:
                     "description": s.description,
                     "location": s.location,
                     "base_dir": str(s.base_dir),
+                    "source": s.source,
                 }
                 for s in skills
             ]
@@ -2661,6 +2714,7 @@ def create_studio_app() -> FastAPI:
                 "name": name,
                 "description": meta.description if meta else "",
                 "location": meta.location if meta else "",
+                "source": meta.source if meta else "",
                 "content": content,
             }
         except HTTPException:

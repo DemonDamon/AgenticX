@@ -266,6 +266,11 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadSkills: async () => ipcRenderer.invoke("load-skills"),
   loadSkillDetail: async (args: { name: string }) => ipcRenderer.invoke("load-skill-detail", args),
   refreshSkills: async () => ipcRenderer.invoke("refresh-skills"),
+  getSkillSettings: async () => ipcRenderer.invoke("get-skill-settings"),
+  putSkillSettings: async (payload: {
+    presetPaths: Array<{ id: string; enabled: boolean }>;
+    customPaths: string[];
+  }) => ipcRenderer.invoke("put-skill-settings", payload),
 
   // Bundles
   loadBundles: async () => ipcRenderer.invoke("load-bundles"),

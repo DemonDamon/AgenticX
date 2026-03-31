@@ -144,14 +144,23 @@ type SkillItem = {
   name: string;
   description: string;
   location: string;
-  base_dir: string;
+  base_dir?: string;
+  source?: string;
 };
 type SkillListResult = { ok: boolean; items: SkillItem[]; count: number; error?: string };
+type SkillScanPresetRow = { id: string; label: string; path: string; enabled: boolean };
+type SkillSettingsResult = {
+  ok: boolean;
+  preset_paths?: SkillScanPresetRow[];
+  custom_paths?: string[];
+  error?: string;
+};
 type SkillDetailResult = {
   ok: boolean;
   name: string;
   description: string;
   location: string;
+  source?: string;
   content: string;
   error?: string;
 };
@@ -402,6 +411,11 @@ declare global {
       loadSkills: () => Promise<SkillListResult>;
       loadSkillDetail: (args: { name: string }) => Promise<SkillDetailResult>;
       refreshSkills: () => Promise<SkillRefreshResult>;
+      getSkillSettings: () => Promise<SkillSettingsResult>;
+      putSkillSettings: (payload: {
+        presetPaths: Array<{ id: string; enabled: boolean }>;
+        customPaths: string[];
+      }) => Promise<SkillSettingsResult>;
 
       loadBundles: () => Promise<BundleListResult>;
       installBundle: (args: {

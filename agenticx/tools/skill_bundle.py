@@ -106,6 +106,8 @@ class SkillMetadata:
         base_dir: 技能根目录（包含 SKILL.md 和资源文件）
         skill_md_path: SKILL.md 文件的完整路径
         location: 技能位置类型（'project' 或 'global'）
+        source: 技能来源标签（builtin/registry/bundle/cursor/claude/agents/agent_global/
+            project_agents/project_agent/custom 等）
         gate: 门控规则（OpenClaw 风格）。空 gate 表示无限制。
     """
     name: str
@@ -113,6 +115,7 @@ class SkillMetadata:
     base_dir: Path
     skill_md_path: Path
     location: str = "project"  # 'project' | 'global'
+    source: str = "unknown"
     gate: SkillGate = field(default_factory=SkillGate)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -123,6 +126,7 @@ class SkillMetadata:
             "base_dir": str(self.base_dir),
             "skill_md_path": str(self.skill_md_path),
             "location": self.location,
+            "source": self.source,
             "gate": {
                 "os": self.gate.os,
                 "requires_bins": self.gate.requires_bins,
@@ -132,6 +136,271 @@ class SkillMetadata:
                 "always": self.gate.always,
             },
         }
+
+
+# =============================================================================
+# Skill scan paths & source inference (Desktop settings + provenance)
+# =============================================================================
+
+_SKILL_BUNDLE_FILE = Path(__file__).resolve()
+_SKILL_PACKAGE_SKILLS_DIR = _SKILL_BUNDLE_FILE.parent.parent / "skills"
+
+# Presets shown in Desktop (third-party roots); toggled via skills.preset_paths in config.
+SKILL_SCAN_PRESET_DEFAULTS: List[Dict[str, Any]] = [
+    {
+        "id": "cursor_skills",
+        "label": "Cursor Skills",
+        "path": "~/.cursor/skills",
+        "enabled": True,
+    },
+    {
+        "id": "claude_skills_home",
+        "label": "Claude Skills",
+        "path": "~/.claude/skills",
+        "enabled": True,
+    },
+    {
+        "id": "agents_home",
+        "label": "Agents Global",
+        "path": "~/.agents/skills",
+        "enabled": False,
+    },
+]
+
+# Substrings in normalized path (posix, lower); first match wins. More specific first.
+# Note: ``~/.agents/skills`` vs project ``./.agents/skills`` are distinguished in
+# :func:`infer_skill_source` — disabling the "Agents Global" preset only stops the
+# home directory; project ``.agents/skills`` remains a core scan root.
+_SKILL_SOURCE_FRAGMENTS: List[tuple[str, str]] = [
+    (".agenticx/skills/registry", "registry"),
+    (".agenticx/skills/bundles", "bundle"),
+    (".agenticx/skills/agent-created", "agent_created"),
+    (".agenticx/skills", "agenticx"),
+    ("/.cursor/skills", "cursor"),
+    ("/.cursor/plugins", "cursor"),
+    ("/.claude/skills", "claude"),
+    ("/.claude/plugins", "claude"),
+]
+
+
+def infer_skill_source(base_dir: Path, builtin_root: Optional[Path] = None) -> str:
+    """Derive a stable ``source`` label from the skill package directory.
+
+    Checks **both** the original (possibly symlinked) path and the resolved
+    real path so that symlinks like ``~/.claude/skills/foo -> ~/mySkills/foo``
+    are still recognised as ``claude``.
+    """
+    root = builtin_root or _SKILL_PACKAGE_SKILLS_DIR
+    try:
+        bd = base_dir.resolve()
+        br = root.resolve()
+        bd.relative_to(br)
+        return "builtin"
+    except (ValueError, OSError):
+        pass
+
+    try:
+        bd = base_dir.resolve()
+    except Exception:
+        bd = base_dir
+
+    # Build two normalised path strings: original (symlink) + resolved (real).
+    orig_norm = str(base_dir).replace("\\", "/").lower()
+    try:
+        resolved_norm = str(bd).replace("\\", "/").lower()
+    except Exception:
+        resolved_norm = orig_norm
+    norms = {orig_norm, resolved_norm}
+
+    # Preset ``~/.agents/skills`` only — not repo ``./.agents/skills``.
+    try:
+        bd.relative_to((Path.home() / ".agents" / "skills").resolve())
+        return "agents"
+    except (ValueError, OSError):
+        pass
+    if any("/.agents/skills" in n and str(Path.home()).replace("\\", "/").lower() in n
+           for n in norms if "/.agents/skills" in n):
+        for n in norms:
+            home_prefix = str(Path.home()).replace("\\", "/").lower()
+            if n.startswith(home_prefix) and "/.agents/skills" in n:
+                return "agents"
+
+    # Core path ``~/.agent/skills`` (always scanned; separate from ``.agents``).
+    try:
+        bd.relative_to((Path.home() / ".agent" / "skills").resolve())
+        return "agent_global"
+    except (ValueError, OSError):
+        pass
+
+    # Fragment matching — match against EITHER original or resolved path.
+    for fragment, src in _SKILL_SOURCE_FRAGMENTS:
+        for n in norms:
+            if fragment in n:
+                return src
+
+    for n in norms:
+        if "/.agents/skills" in n:
+            return "project_agents"
+        if "/.agent/skills" in n:
+            return "project_agent"
+
+    return "custom"
+
+
+def _expand_skill_path(path_str: str) -> Path:
+    s = str(path_str).strip()
+    if not s:
+        return Path()
+    return Path(os.path.expanduser(s))
+
+
+def _normalize_preset_paths_from_config(raw: Any) -> Optional[List[Dict[str, Any]]]:
+    """Return merged preset list or None if config key is unset (use code defaults)."""
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        return None
+    enabled_by_id: Dict[str, bool] = {}
+    for item in raw:
+        if isinstance(item, dict) and str(item.get("id", "")).strip():
+            enabled_by_id[str(item["id"]).strip()] = bool(item.get("enabled", True))
+    return [
+        {
+            "id": d["id"],
+            "label": d["label"],
+            "path": d["path"],
+            "enabled": enabled_by_id.get(d["id"], d["enabled"]),
+        }
+        for d in SKILL_SCAN_PRESET_DEFAULTS
+    ]
+
+
+def _normalize_custom_paths_from_config(raw: Any) -> List[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str) and raw.strip():
+        return [raw.strip()]
+    if not isinstance(raw, list):
+        return []
+    out: List[str] = []
+    for x in raw:
+        s = str(x).strip()
+        if s:
+            out.append(s)
+    return out
+
+
+def get_skill_scan_settings_from_config() -> tuple[List[Dict[str, Any]], List[str]]:
+    """Read ``skills.preset_paths`` and ``skills.custom_paths`` from merged YAML."""
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+    except Exception:
+        return [dict(p) for p in SKILL_SCAN_PRESET_DEFAULTS], []
+
+    merged_presets = _normalize_preset_paths_from_config(
+        ConfigManager.get_value("skills.preset_paths")
+    )
+    if merged_presets is None:
+        presets = [dict(p) for p in SKILL_SCAN_PRESET_DEFAULTS]
+    else:
+        presets = merged_presets
+    custom = _normalize_custom_paths_from_config(ConfigManager.get_value("skills.custom_paths"))
+    return presets, custom
+
+
+def build_skill_search_paths() -> List[Path]:
+    """Core paths + enabled presets + custom paths (Desktop / API default)."""
+    core: List[Path] = [
+        Path("./.agents/skills"),
+        Path("./.agent/skills"),
+        Path("./.claude/skills"),
+        Path.home() / ".agenticx" / "skills",
+        Path.home() / ".agent" / "skills",
+        _SKILL_PACKAGE_SKILLS_DIR,
+    ]
+    presets, custom_strs = get_skill_scan_settings_from_config()
+    extra: List[Path] = []
+    agents_home_enabled = True
+    for p in presets:
+        if p.get("id") == "agents_home":
+            agents_home_enabled = bool(p.get("enabled", True))
+        if not p.get("enabled", True):
+            continue
+        path_str = str(p.get("path", "")).strip()
+        if not path_str:
+            continue
+        extra.append(_expand_skill_path(path_str))
+    for s in custom_strs:
+        extra.append(_expand_skill_path(s))
+
+    # If "~/.agent/skills" resolves to "~/.agents/skills", and the user disabled
+    # "Agents Global", avoid accidentally re-introducing the same directory via core.
+    if not agents_home_enabled:
+        try:
+            agents_root = (Path.home() / ".agents" / "skills").resolve()
+            core = [
+                p
+                for p in core
+                if not (
+                    p.is_absolute()
+                    and str(p).replace("\\", "/").endswith("/.agent/skills")
+                    and p.resolve() == agents_root
+                )
+            ]
+        except Exception:
+            pass
+
+    # Keep ordering, but dedupe by resolved path.
+    out: List[Path] = []
+    seen: set[str] = set()
+    for p in core + extra:
+        try:
+            key = str(p.resolve(strict=False))
+        except Exception:
+            key = str(p.expanduser())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
+
+
+def persist_skill_scan_settings(
+    preset_paths: List[Dict[str, Any]],
+    custom_paths: List[str],
+) -> None:
+    """Write skill scan settings to global config."""
+    from agenticx.cli.config_manager import ConfigManager
+
+    enabled_by_id: Dict[str, bool] = {}
+    for item in preset_paths:
+        if isinstance(item, dict) and str(item.get("id", "")).strip():
+            enabled_by_id[str(item["id"]).strip()] = bool(item.get("enabled", True))
+    cleaned_presets = [
+        {
+            "id": d["id"],
+            "label": d["label"],
+            "path": d["path"],
+            "enabled": enabled_by_id.get(d["id"], d["enabled"]),
+        }
+        for d in SKILL_SCAN_PRESET_DEFAULTS
+    ]
+    custom_clean: List[str] = []
+    seen: set[str] = set()
+    for s in custom_paths:
+        t = str(s).strip()
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        custom_clean.append(t)
+    ConfigManager.set_value("skills.preset_paths", cleaned_presets)
+    ConfigManager.set_value("skills.custom_paths", custom_clean)
+
+
+def skill_scan_settings_payload() -> Dict[str, Any]:
+    """API payload for GET /api/skills/settings."""
+    presets, custom = get_skill_scan_settings_from_config()
+    return {"preset_paths": presets, "custom_paths": custom}
 
 
 # =============================================================================
@@ -148,15 +417,11 @@ class SkillBundleLoader:
     - 技能去重（同名技能按优先级保留第一个）
     - DiscoveryBus 集成（可选）
     
-    搜索路径优先级（从高到低）：
-    1. ./.agents/skills (项目级，Cherry Studio 兼容)
-    2. ./.agent/skills (项目级 universal，兼容旧路径)
-    3. ~/.agents/skills (全局，Cherry Studio 兼容)
-    4. ~/.agent/skills (全局 universal，兼容旧路径)
-    5. ./.claude/skills (项目级)
-    6. ~/.claude/skills (全局)
-    7. ~/.agenticx/skills/registry (ClawHub / 市场安装写入的 SKILL.md)
-    
+    默认扫描路径由 :func:`build_skill_search_paths` 生成：核心路径（项目 .agents/.agent/.claude、
+    ``~/.agent/skills``、AgenticX bundles/registry、内置包内 skills）始终启用；第三方根目录
+    （Cursor / Claude / ``~/.agents/skills`` 等）由 ``~/.agenticx/config.yaml`` 中
+    ``skills.preset_paths`` 逐条开关；另支持 ``skills.custom_paths``。
+
     Example:
         >>> loader = SkillBundleLoader()
         >>> skills = loader.scan()
@@ -164,24 +429,9 @@ class SkillBundleLoader:
         ...     print(f"{skill.name}: {skill.description}")
     """
     
-    # Built-in skills shipped with the agenticx package (lowest priority)
-    _BUILTIN_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
+    # Built-in skills shipped with the agenticx package (lowest scan priority in core list)
+    _BUILTIN_SKILLS_DIR = _SKILL_PACKAGE_SKILLS_DIR
 
-    # 默认搜索路径（按优先级排序）
-    DEFAULT_SEARCH_PATHS = [
-        Path("./.agents/skills"),
-        Path("./.agent/skills"),
-        Path.home() / ".agents" / "skills",
-        Path.home() / ".agent" / "skills",
-        Path("./.claude/skills"),
-        Path.home() / ".claude" / "skills",
-        # AGX Bundle install directory — skills installed via `agx bundle install`
-        Path.home() / ".agenticx" / "skills" / "bundles",
-        # Registry / marketplace installs (write_registry_skill in registry_hub)
-        Path.home() / ".agenticx" / "skills" / "registry",
-        _BUILTIN_SKILLS_DIR,
-    ]
-    
     def __init__(
         self,
         search_paths: Optional[List[Path]] = None,
@@ -194,11 +444,13 @@ class SkillBundleLoader:
         初始化技能加载器。
         
         Args:
-            search_paths: 自定义搜索路径列表（None 使用默认路径）
+            search_paths: 自定义搜索路径列表（None 使用 :func:`build_skill_search_paths`）
             discovery_bus: DiscoveryBus 实例（用于发布技能发现事件）
             execution_backend: SkillExecutionBackend 实例（可选，用于控制技能执行方式）
         """
-        self.search_paths = search_paths or self.DEFAULT_SEARCH_PATHS
+        self.search_paths = (
+            search_paths if search_paths is not None else build_skill_search_paths()
+        )
         self.discovery_bus = discovery_bus
         self.execution_backend = execution_backend
         self.registry_url = registry_url
@@ -221,6 +473,28 @@ class SkillBundleLoader:
             return list(self._skills.values())
         
         seen_names: set = set()
+        presets, _custom_paths = get_skill_scan_settings_from_config()
+        disabled_roots: List[Path] = []
+        disabled_sources: set[str] = set()
+        preset_source_map: Dict[str, str] = {
+            "cursor_skills": "cursor",
+            "claude_skills_home": "claude",
+            "agents_home": "agents",
+        }
+        for p in presets:
+            if bool(p.get("enabled", True)):
+                continue
+            sid = str(p.get("id", "")).strip()
+            mapped_source = preset_source_map.get(sid)
+            if mapped_source:
+                disabled_sources.add(mapped_source)
+            raw_path = str(p.get("path", "")).strip()
+            if not raw_path:
+                continue
+            try:
+                disabled_roots.append(Path(os.path.expanduser(raw_path)).resolve(strict=False))
+            except Exception:
+                disabled_roots.append(Path(os.path.expanduser(raw_path)))
         
         for path in self.search_paths:
             resolved_path = path.resolve() if not path.is_absolute() else path
@@ -233,8 +507,8 @@ class SkillBundleLoader:
                 logger.debug(f"Skill search path is not a directory: {resolved_path}")
                 continue
             
-            # 判断是项目级还是全局级
-            is_project = str(Path.cwd()) in str(resolved_path) or str(resolved_path).startswith(".")
+            # 判断是项目级还是全局级（按“配置路径是相对/绝对”判定，避免 cwd 影响）
+            is_project = not path.is_absolute()
             location = "project" if is_project else "global"
             
             # 遍历目录下的子目录
@@ -242,41 +516,101 @@ class SkillBundleLoader:
                 for skill_dir in resolved_path.iterdir():
                     if not skill_dir.is_dir():
                         continue
+
+                    # Hard-filter disabled preset roots by resolved path. This prevents
+                    # symlink/alias reintroduction (e.g. ~/.agent/skills/* -> ~/.agents/skills/*).
+                    if disabled_roots:
+                        try:
+                            resolved_skill_dir = skill_dir.resolve(strict=False)
+                        except Exception:
+                            resolved_skill_dir = skill_dir
+                        blocked = False
+                        for root in disabled_roots:
+                            try:
+                                resolved_skill_dir.relative_to(root)
+                                blocked = True
+                                break
+                            except Exception:
+                                continue
+                        if blocked:
+                            logger.debug("Skip skill under disabled preset root: %s", skill_dir)
+                            continue
                     
                     # 跳过隐藏目录
                     if skill_dir.name.startswith("."):
                         continue
-                    
-                    skill_md = skill_dir / "SKILL.md"
-                    if not skill_md.exists():
-                        continue
-                    
-                    # 解析技能元数据
-                    meta = self._parse_skill_md(skill_md, skill_dir, location)
-                    if meta is None:
-                        logger.warning(f"Failed to parse SKILL.md: {skill_md}")
-                        continue
-                    
-                    # 去重：同名技能只保留第一个（高优先级路径）
-                    if meta.name in seen_names:
-                        logger.debug(f"Skill '{meta.name}' already loaded, skipping: {skill_md}")
-                        continue
-                    
-                    # Gate check (OpenClaw-inspired): skip ineligible skills
-                    if not self._check_gate(meta.gate):
-                        logger.warning(
-                            "Skill '%s' failed gate check, skipping: %s",
-                            meta.name, skill_md,
-                        )
-                        continue
-                    
-                    seen_names.add(meta.name)
-                    self._skills[meta.name] = meta
-                    
-                    # 发布发现事件（P1-1）
-                    self._publish_discovery(meta)
-                    
-                    logger.info(f"Discovered skill: {meta.name} at {skill_dir}")
+
+                    # Collect candidate (skill_dir, skill_md) pairs.
+                    # If the first-level dir has SKILL.md, use it directly;
+                    # otherwise scan one level deeper (for grouping dirs like
+                    # agent-created/, registry/, bundles/).
+                    candidates: List[tuple[Path, Path]] = []
+                    first_level_md = skill_dir / "SKILL.md"
+                    if first_level_md.exists():
+                        candidates.append((skill_dir, first_level_md))
+                    else:
+                        try:
+                            for sub in skill_dir.iterdir():
+                                if not sub.is_dir() or sub.name.startswith("."):
+                                    continue
+                                sub_md = sub / "SKILL.md"
+                                if sub_md.exists():
+                                    candidates.append((sub, sub_md))
+                        except OSError:
+                            pass
+
+                    for cand_dir, cand_md in candidates:
+
+                        # Hard-filter disabled roots for nested candidates
+                        if disabled_roots:
+                            try:
+                                resolved_cand = cand_dir.resolve(strict=False)
+                            except Exception:
+                                resolved_cand = cand_dir
+                            blocked_inner = False
+                            for root in disabled_roots:
+                                try:
+                                    resolved_cand.relative_to(root)
+                                    blocked_inner = True
+                                    break
+                                except Exception:
+                                    continue
+                            if blocked_inner:
+                                continue
+
+                        # 解析技能元数据
+                        meta = self._parse_skill_md(cand_md, cand_dir, location)
+                        if meta is None:
+                            logger.warning(f"Failed to parse SKILL.md: {cand_md}")
+                            continue
+
+                        # Source-level guard
+                        if meta.source in disabled_sources:
+                            logger.debug(
+                                "Skip skill from disabled source '%s': %s",
+                                meta.source,
+                                cand_dir,
+                            )
+                            continue
+
+                        # 去重
+                        if meta.name in seen_names:
+                            logger.debug(f"Skill '{meta.name}' already loaded, skipping: {cand_md}")
+                            continue
+
+                        # Gate check
+                        if not self._check_gate(meta.gate):
+                            logger.warning(
+                                "Skill '%s' failed gate check, skipping: %s",
+                                meta.name, cand_md,
+                            )
+                            continue
+
+                        seen_names.add(meta.name)
+                        self._skills[meta.name] = meta
+
+                        self._publish_discovery(meta)
+                        logger.info(f"Discovered skill: {meta.name} at {cand_dir}")
                     
             except PermissionError as e:
                 logger.warning(f"Permission denied accessing {resolved_path}: {e}")
@@ -345,6 +679,7 @@ class SkillBundleLoader:
             base_dir=base_dir,
             skill_md_path=skill_md,
             location=location,
+            source=infer_skill_source(base_dir),
             gate=gate,
         )
     
@@ -482,6 +817,7 @@ class SkillBundleLoader:
                     base_dir=remote_base,
                     skill_md_path=remote_md,
                     location="global",
+                    source="registry",
                     gate=SkillGate(),
                 )
         except Exception as exc:
