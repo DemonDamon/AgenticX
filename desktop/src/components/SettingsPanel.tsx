@@ -422,6 +422,7 @@ function SkillsTab() {
   const [marketPending, setMarketPending] = useState<RegistrySearchItem | null>(null);
   const [marketNeedsConfirmNonHigh, setMarketNeedsConfirmNonHigh] = useState(false);
   const [marketNeedsConfirmHigh, setMarketNeedsConfirmHigh] = useState(false);
+  const marketSearchSeqRef = useRef(0);
 
   useEffect(() => {
     setBundleNeedsConfirmNonHigh(false);
@@ -588,21 +589,28 @@ function SkillsTab() {
   };
 
   const onMarketSearch = async () => {
+    const seq = ++marketSearchSeqRef.current;
+    const q = marketQuery.trim();
     setMarketLoading(true);
     setMarketMsg("");
     try {
-      const res = await window.agenticxDesktop.searchRegistry({ q: marketQuery });
+      const res = await window.agenticxDesktop.searchRegistry({ q });
+      if (seq !== marketSearchSeqRef.current) return;
       if (res.ok) {
         setMarketResults(res.items ?? []);
         if ((res.items ?? []).length === 0) setMarketMsg("未找到相关技能");
+        else setMarketMsg("");
       } else {
         setMarketMsg(res.error ?? "搜索失败");
         setMarketResults([]);
       }
     } catch (e) {
+      if (seq !== marketSearchSeqRef.current) return;
       setMarketMsg(String(e));
     } finally {
-      setMarketLoading(false);
+      if (seq === marketSearchSeqRef.current) {
+        setMarketLoading(false);
+      }
     }
   };
 

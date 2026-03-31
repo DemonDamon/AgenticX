@@ -91,7 +91,7 @@ extensions:
       url: https://registry.agxbuilder.com
       type: agx          # AgenticX native registry
     - name: clawhub
-      url: https://www.clawhub.io/api
+      url: https://clawhub.ai/api
       type: clawhub      # ClawHub community skills
     - name: community
       url: https://example.com/agx-registry.json

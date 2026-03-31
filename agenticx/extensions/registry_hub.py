@@ -18,7 +18,7 @@ Registry configuration lives in ``~/.agenticx/config.yaml`` under
           url: https://example.com/agx-registry.json
           type: agx
         - name: clawhub
-          url: https://clawhub.com/api
+          url: https://clawhub.ai/api
           type: clawhub
       scan_dirs:
         - ~/.agenticx/bundles
@@ -35,6 +35,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Registry hosts are public HTTPS endpoints; do not inherit HTTP(S)_PROXY or SOCKS
+# from the environment (SOCKS without socksio breaks httpx; proxies often break TLS).
+_REGISTRY_HTTPX = {"trust_env": False}
 
 
 @dataclass
@@ -153,7 +157,9 @@ class RegistryHub:
         import httpx
 
         params = {"q": query} if query else {}
-        resp = httpx.get(f"{url}/skills", params=params, timeout=10.0)
+        resp = httpx.get(
+            f"{url}/skills", params=params, timeout=10.0, **_REGISTRY_HTTPX
+        )
         resp.raise_for_status()
         items = resp.json().get("items", [])
         results = []
@@ -177,34 +183,63 @@ class RegistryHub:
     def _search_clawhub(self, url: str, source_name: str, query: str) -> List[SearchResult]:
         """Search ClawHub skills API.
 
-        ClawHub exposes a search endpoint at GET /api/v1/skills?q=...
+        ClawHub currently exposes a unified search endpoint at
+        GET /api/v1/search?q=... (with result records containing slug/displayName/summary).
+        Some deployments also provide GET /api/v1/skills?q=... and/or /api/skills.
         Returns skill cards with name/description/author/downloads.
         """
         import httpx
 
-        params = {"q": query, "limit": "50"} if query else {"limit": "50"}
-        try:
-            resp = httpx.get(f"{url}/v1/skills", params=params, timeout=10.0)
-            resp.raise_for_status()
-            payload = resp.json()
-        except Exception:
-            # Fallback: try /skills endpoint (some deployments differ)
-            resp = httpx.get(f"{url}/skills", params=params, timeout=10.0)
-            resp.raise_for_status()
-            payload = resp.json()
+        q = (query or "").strip()
+        params = {"q": q, "limit": "50"} if q else {"limit": "50"}
+        payload: Dict[str, Any] = {}
 
-        items = payload.get("items") or payload.get("skills") or []
+        # Preferred endpoint: /v1/search (matches current clawhub.ai web behavior)
+        if q:
+            try:
+                search_params = {"q": q, "type": "skill", "limit": "50"}
+                resp = httpx.get(
+                    f"{url}/v1/search", params=search_params, timeout=10.0, **_REGISTRY_HTTPX
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+            except Exception:
+                payload = {}
+
+        # Fallback to legacy list endpoints when search is unavailable or empty.
+        if not payload:
+            try:
+                resp = httpx.get(
+                    f"{url}/v1/skills", params=params, timeout=10.0, **_REGISTRY_HTTPX
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+            except Exception:
+                # Fallback: try /skills endpoint (some deployments differ)
+                resp = httpx.get(
+                    f"{url}/skills", params=params, timeout=10.0, **_REGISTRY_HTTPX
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+
+        items = payload.get("results") or payload.get("items") or payload.get("skills") or []
         results = []
         for item in items:
             if not isinstance(item, dict):
                 continue
-            name = str(item.get("name") or item.get("slug") or "")
+            # Use slug as stable install identifier; displayName may contain spaces.
+            name = str(item.get("slug") or item.get("name") or "")
             if not name:
                 continue
+            display_name = str(item.get("displayName") or "").strip()
+            summary = str(item.get("summary") or item.get("description") or "").strip()
+            description = summary
+            if display_name and display_name.lower() != name.lower():
+                description = f"{display_name} — {summary}" if summary else display_name
             results.append(
                 SearchResult(
                     name=name,
-                    description=str(item.get("description") or item.get("summary") or ""),
+                    description=description,
                     version=str(item.get("version") or "latest"),
                     author=str(item.get("author") or item.get("publisher") or "unknown"),
                     source=source_name,
@@ -296,11 +331,15 @@ class RegistryHub:
         import httpx
 
         try:
-            resp = httpx.get(f"{url}/v1/skills/{skill_name}", timeout=15.0)
+            resp = httpx.get(
+                f"{url}/v1/skills/{skill_name}", timeout=15.0, **_REGISTRY_HTTPX
+            )
             resp.raise_for_status()
             payload = resp.json()
         except Exception:
-            resp = httpx.get(f"{url}/skills/{skill_name}", timeout=15.0)
+            resp = httpx.get(
+                f"{url}/skills/{skill_name}", timeout=15.0, **_REGISTRY_HTTPX
+            )
             resp.raise_for_status()
             payload = resp.json()
 
