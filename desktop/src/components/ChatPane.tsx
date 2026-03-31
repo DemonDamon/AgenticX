@@ -3158,7 +3158,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 truncate text-sm font-medium text-text-strong">
                 {pane.avatarName}
-                {feishuDesktopBound && (
+                {(feishuDesktopBound || pane.sessionId?.startsWith("im-")) && (
                   <span className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[9px] font-medium leading-tight" style={{ backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" }}>
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
                       <path d="M5.63 4.02a1 1 0 0 1 1.4.17l4.97 6.3 4.97-6.3a1 1 0 0 1 1.58 1.22L14 10.83l5.37 6.8a1 1 0 0 1-1.57 1.24L12 12.16l-5.8 6.71a1 1 0 0 1-1.57-1.24L10 10.83 5.45 5.42a1 1 0 0 1 .18-1.4Z" fill="currentColor"/>
@@ -3239,32 +3239,38 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 </svg>
               </button>
             ) : null}
-            {!isGroupPane && pane.sessionId ? (
-              <button
-                type="button"
-                className={`rounded px-2 py-0.5 text-[11px] transition ${
-                  feishuDesktopBound
-                    ? ""
-                    : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
-                }`}
-                style={feishuDesktopBound ? { backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" } : undefined}
-                onClick={() => void toggleFeishuDesktopBinding()}
-                title={
-                  feishuDesktopBound
-                    ? "已绑定飞书（点击解绑）"
-                    : "绑定飞书到此会话"
-                }
-              >
-                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path
-                    d="M6.2 9.8a2.5 2.5 0 0 1 0-3.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-.4.4M9.8 6.2a2.5 2.5 0 0 1 0 3.5l-1 1a2.5 2.5 0 0 1-3.5-3.5l.4-.4"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-            ) : null}
+            {!isGroupPane && pane.sessionId ? (() => {
+              const isImSession = pane.sessionId.startsWith("im-");
+              const isFeishuActive = feishuDesktopBound || isImSession;
+              return (
+                <button
+                  type="button"
+                  className={`rounded px-2 py-0.5 text-[11px] transition ${
+                    isFeishuActive
+                      ? ""
+                      : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
+                  }`}
+                  style={isFeishuActive ? { backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" } : undefined}
+                  onClick={isImSession ? undefined : () => void toggleFeishuDesktopBinding()}
+                  title={
+                    isImSession
+                      ? "默认飞书会话（飞书消息未绑定分身时路由至此）"
+                      : feishuDesktopBound
+                      ? "已绑定飞书（点击解绑）"
+                      : "绑定飞书到此会话"
+                  }
+                >
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path
+                      d="M6.2 9.8a2.5 2.5 0 0 1 0-3.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-.4.4M9.8 6.2a2.5 2.5 0 0 1 0 3.5l-1 1a2.5 2.5 0 0 1-3.5-3.5l.4-.4"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              );
+            })() : null}
             <button
               className={`rounded px-2 py-0.5 text-[11px] transition ${
                 pane.historyOpen
