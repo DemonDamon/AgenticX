@@ -155,6 +155,7 @@ class SkillBundleLoader:
     4. ~/.agent/skills (全局 universal，兼容旧路径)
     5. ./.claude/skills (项目级)
     6. ~/.claude/skills (全局)
+    7. ~/.agenticx/skills/registry (ClawHub / 市场安装写入的 SKILL.md)
     
     Example:
         >>> loader = SkillBundleLoader()
@@ -176,6 +177,8 @@ class SkillBundleLoader:
         Path.home() / ".claude" / "skills",
         # AGX Bundle install directory — skills installed via `agx bundle install`
         Path.home() / ".agenticx" / "skills" / "bundles",
+        # Registry / marketplace installs (write_registry_skill in registry_hub)
+        Path.home() / ".agenticx" / "skills" / "registry",
         _BUILTIN_SKILLS_DIR,
     ]
     

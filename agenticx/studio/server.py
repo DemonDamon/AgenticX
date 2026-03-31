@@ -2794,6 +2794,12 @@ def create_studio_app() -> FastAPI:
 
     # --- Registry / Marketplace API ---
 
+    # Short-lived in-memory cache: maps "source:name" -> (content, expiry_ts).
+    # preview fetches SKILL.md and stores it here; install reuses it to avoid
+    # a second round of ClawHub HTTP requests (which can trigger rate limits).
+    _registry_preview_cache: dict[str, tuple[str, float]] = {}
+    _REGISTRY_CACHE_TTL = 120.0  # seconds
+
     @app.get("/api/registry/search")
     async def registry_search(
         q: str = "",
@@ -2816,13 +2822,18 @@ def create_studio_app() -> FastAPI:
         payload: dict,
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
-        """Fetch registry skill content and return security scan (no install)."""
+        """Fetch registry skill content and return security scan (no install).
+
+        The downloaded SKILL.md is cached briefly so the subsequent install
+        request can reuse it without a second round of ClawHub HTTP calls.
+        """
         _check_token(x_agx_desktop_token)
         source_name = str(payload.get("source", "")).strip()
         skill_name = str(payload.get("name", "")).strip()
         if not source_name or not skill_name:
             raise HTTPException(status_code=400, detail="source and name are required")
         try:
+            import time as _time
             from agenticx.extensions.registry_hub import RegistryHub
             from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
 
@@ -2830,6 +2841,10 @@ def create_studio_app() -> FastAPI:
             content, err = hub.fetch_skill_markdown(source_name, skill_name)
             if err or content is None:
                 return {"ok": False, "error": err or "fetch failed"}
+
+            cache_key = f"{source_name}:{skill_name}"
+            _registry_preview_cache[cache_key] = (content, _time.monotonic() + _REGISTRY_CACHE_TTL)
+
             sr = scan_skill_markdown_text(content)
             one = scan_result_to_payload(sr, skill_name)
             return {
@@ -2845,18 +2860,31 @@ def create_studio_app() -> FastAPI:
         payload: dict,
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
-        """Install a skill from a specific configured registry source."""
+        """Install a skill from a specific configured registry source.
+
+        Reuses the SKILL.md content cached by install-preview when available,
+        avoiding a redundant second fetch to the remote registry.
+        """
         _check_token(x_agx_desktop_token)
         source_name = str(payload.get("source", "")).strip()
         skill_name = str(payload.get("name", "")).strip()
         if not source_name or not skill_name:
             raise HTTPException(status_code=400, detail="source and name are required")
         try:
+            import time as _time
             from agenticx.extensions.registry_hub import RegistryHub
             from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
 
             hub = RegistryHub.from_config()
-            content, err = hub.fetch_skill_markdown(source_name, skill_name)
+
+            cache_key = f"{source_name}:{skill_name}"
+            cached = _registry_preview_cache.get(cache_key)
+            if cached and _time.monotonic() < cached[1]:
+                content = cached[0]
+                err = ""
+            else:
+                content, err = hub.fetch_skill_markdown(source_name, skill_name)
+
             if err or content is None:
                 return {"ok": False, "error": err or "fetch failed"}
 
