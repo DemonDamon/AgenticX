@@ -1147,6 +1147,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [favoriteToastOpen, setFavoriteToastOpen] = useState(false);
   const [favoriteToastMsg, setFavoriteToastMsg] = useState("");
   const [feishuDesktopBound, setFeishuDesktopBound] = useState(false);
+  const [hasAnyFeishuDesktopBinding, setHasAnyFeishuDesktopBinding] = useState(false);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
   useEffect(() => {
@@ -1344,6 +1345,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   useEffect(() => {
     if (isGroupPane || !pane?.sessionId) {
       setFeishuDesktopBound(false);
+      setHasAnyFeishuDesktopBinding(false);
       return;
     }
     let cancelled = false;
@@ -1355,11 +1357,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         const r = await window.agenticxDesktop.loadFeishuBinding();
         if (cancelled || !r.ok) return;
         const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
+        const hasDesktopBinding = Boolean(desk && typeof desk.session_id === "string" && desk.session_id.trim());
+        setHasAnyFeishuDesktopBinding(hasDesktopBinding);
         setFeishuDesktopBound(
           Boolean(desk && typeof desk.session_id === "string" && desk.session_id === sid)
         );
       } catch {
-        if (!cancelled) setFeishuDesktopBound(false);
+        if (!cancelled) {
+          setFeishuDesktopBound(false);
+          setHasAnyFeishuDesktopBinding(false);
+        }
       }
     };
 
@@ -3158,7 +3165,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 truncate text-sm font-medium text-text-strong">
                 {pane.avatarName}
-                {(feishuDesktopBound || pane.sessionId?.startsWith("im-")) && (
+                {(feishuDesktopBound || pane.sessionId?.startsWith("im-") || (!hasAnyFeishuDesktopBinding && !pane.avatarId)) && (
                   <span className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[9px] font-medium leading-tight" style={{ backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" }}>
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
                       <path d="M5.63 4.02a1 1 0 0 1 1.4.17l4.97 6.3 4.97-6.3a1 1 0 0 1 1.58 1.22L14 10.83l5.37 6.8a1 1 0 0 1-1.57 1.24L12 12.16l-5.8 6.71a1 1 0 0 1-1.57-1.24L10 10.83 5.45 5.42a1 1 0 0 1 .18-1.4Z" fill="currentColor"/>
@@ -3241,7 +3248,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             ) : null}
             {!isGroupPane && pane.sessionId ? (() => {
               const isImSession = pane.sessionId.startsWith("im-");
-              const isFeishuActive = feishuDesktopBound || isImSession;
+              const isDefaultMetaRoute = !hasAnyFeishuDesktopBinding && !pane.avatarId && !isImSession;
+              const isFeishuActive = feishuDesktopBound || isImSession || isDefaultMetaRoute;
               return (
                 <button
                   type="button"
@@ -3251,10 +3259,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                       : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
                   }`}
                   style={isFeishuActive ? { backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" } : undefined}
-                  onClick={isImSession ? undefined : () => void toggleFeishuDesktopBinding()}
+                  onClick={isImSession || isDefaultMetaRoute ? undefined : () => void toggleFeishuDesktopBinding()}
                   title={
                     isImSession
                       ? "默认飞书会话（飞书消息未绑定分身时路由至此）"
+                      : isDefaultMetaRoute
+                      ? "默认飞书路由已回到 Machi（未绑定分身）"
                       : feishuDesktopBound
                       ? "已绑定飞书（点击解绑）"
                       : "绑定飞书到此会话"
