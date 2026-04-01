@@ -468,6 +468,7 @@ declare global {
 
       searchRegistry: (args: { q: string }) => Promise<RegistrySearchResult>;
       searchSkillHub: (args: { q: string }) => Promise<SkillHubSearchResult>;
+      loadLocalImageDataUrl: (path: string) => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
       installFromRegistry: (args: {
         source: string;
         name: string;
