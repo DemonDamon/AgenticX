@@ -15,6 +15,44 @@ function avatarColor(id: string): string {
   return avatarBgClass(id);
 }
 
+type SessionListItem = {
+  session_id: string;
+  avatar_id: string | null;
+  updated_at: number;
+  created_at?: number;
+  archived?: boolean;
+};
+
+function isSessionAvatarMatch(item: SessionListItem, avatarId?: string | null): boolean {
+  const targetAvatarId = (avatarId ?? "").trim();
+  const itemAvatarId = String(item.avatar_id ?? "").trim();
+  if (!targetAvatarId) return itemAvatarId.length === 0;
+  return itemAvatarId === targetAvatarId;
+}
+
+function pickMostRecentSessionId(
+  sessions: SessionListItem[],
+  avatarId?: string | null
+): string | undefined {
+  const sorted = [...sessions]
+    .filter((item) => {
+      const sid = String(item.session_id ?? "").trim();
+      if (!sid) return false;
+      if (item.archived === true) return false;
+      return isSessionAvatarMatch(item, avatarId);
+    })
+    .sort((a, b) => {
+      const ua = Number.isFinite(a.updated_at) ? a.updated_at : 0;
+      const ub = Number.isFinite(b.updated_at) ? b.updated_at : 0;
+      if (ub !== ua) return ub - ua;
+      const ca = Number.isFinite(a.created_at ?? NaN) ? (a.created_at as number) : 0;
+      const cb = Number.isFinite(b.created_at ?? NaN) ? (b.created_at as number) : 0;
+      return cb - ca;
+    });
+  const sid = sorted[0]?.session_id;
+  return sid ? String(sid).trim() : undefined;
+}
+
 type ContextMenuState =
   | { x: number; y: number; target: "avatar"; avatarId: string }
   | { x: number; y: number; target: "machi" }
@@ -154,9 +192,19 @@ export function AvatarSidebar() {
 
     void (async () => {
       try {
-        const created = await window.agenticxDesktop.createSession({
-          avatar_id: avatarId ?? undefined,
-        });
+        // Re-open most recent session for this avatar first; create a new one only when none exists.
+        const listed = await window.agenticxDesktop
+          .listSessions(avatarId ?? undefined)
+          .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
+        const recentSid =
+          listed.ok && Array.isArray(listed.sessions)
+            ? pickMostRecentSessionId(listed.sessions, avatarId)
+            : undefined;
+        if (recentSid) {
+          setPaneSessionId(paneId, recentSid);
+          return;
+        }
+        const created = await window.agenticxDesktop.createSession({ avatar_id: avatarId ?? undefined });
         if (created.ok && created.session_id) {
           setPaneSessionId(paneId, created.session_id);
         }
@@ -184,10 +232,18 @@ export function AvatarSidebar() {
 
     void (async () => {
       try {
-        const created = await window.agenticxDesktop.createSession({
-          avatar_id: groupAvatarId,
-          name: group.name,
-        });
+        const listed = await window.agenticxDesktop
+          .listSessions(groupAvatarId)
+          .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
+        const recentSid =
+          listed.ok && Array.isArray(listed.sessions)
+            ? pickMostRecentSessionId(listed.sessions, groupAvatarId)
+            : undefined;
+        if (recentSid) {
+          setPaneSessionId(paneId, recentSid);
+          return;
+        }
+        const created = await window.agenticxDesktop.createSession({ avatar_id: groupAvatarId, name: group.name });
         if (created.ok && created.session_id) {
           setPaneSessionId(paneId, created.session_id);
         }
