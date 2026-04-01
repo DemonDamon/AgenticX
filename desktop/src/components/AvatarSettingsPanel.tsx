@@ -176,9 +176,11 @@ export function AvatarSettingsPanel(props: Props) {
   const activeTab = tabs.find((t) => t.id === tab) ? tab : tabs[0].id;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-      {/* 与主「设置」面板一致用 bg-surface-panel；勿用 bg-surface-card（暗色主题下近透明） */}
-      <div className="flex h-[min(85vh,640px)] w-[min(90vw,640px)] flex-col overflow-hidden rounded-2xl border border-border bg-surface-panel shadow-2xl">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-none">
+      <div
+        className="flex h-[min(85vh,640px)] w-[min(90vw,640px)] flex-col overflow-hidden rounded-2xl border border-border shadow-2xl"
+        style={{ backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
+      >
         {/* Header */}
         <div className="flex shrink-0 items-center gap-2 border-b border-border bg-surface-panel px-4 py-3">
           <button
@@ -221,7 +223,7 @@ export function AvatarSettingsPanel(props: Props) {
               <label className="block text-sm text-text-muted">
                 名称
                 <input
-                  className="mt-1 w-full rounded-md border border-border bg-surface-panel/50 px-3 py-2 text-sm text-text-primary"
+                  className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="分身名称"
@@ -230,7 +232,7 @@ export function AvatarSettingsPanel(props: Props) {
               <label className="block text-sm text-text-muted">
                 角色
                 <input
-                  className="mt-1 w-full rounded-md border border-border bg-surface-panel/50 px-3 py-2 text-sm text-text-primary"
+                  className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
                   placeholder="例：全栈开发工程师、数据分析师"
@@ -239,7 +241,7 @@ export function AvatarSettingsPanel(props: Props) {
               <label className="block text-sm text-text-muted">
                 System Prompt
                 <textarea
-                  className="mt-1 min-h-[120px] w-full resize-y rounded-md border border-border bg-surface-panel/50 px-3 py-2 text-sm text-text-primary"
+                  className="mt-1 min-h-[120px] w-full resize-y rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   placeholder="例如：你是资深前端工程师，先给结论，再给步骤；代码优先给可直接运行版本。"
@@ -264,7 +266,7 @@ export function AvatarSettingsPanel(props: Props) {
                 {customizedCount > 0 ? `已自定义 ${customizedCount} 项` : "未自定义（使用默认）"} · {toolsModeHint}
               </p>
               {loadingTools ? (
-                <div className="rounded-md border border-border bg-surface-panel/50 px-3 py-2 text-xs text-text-faint">
+                <div className="rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-faint">
                   加载工具列表中...
                 </div>
               ) : (
@@ -274,7 +276,7 @@ export function AvatarSettingsPanel(props: Props) {
                     const enabled = inherited ? true : Boolean(toolsEnabled[tool.id]);
                     const stateLabel = inherited ? "默认" : enabled ? "启用" : "禁用";
                     return (
-                      <div key={tool.id} className="rounded-md border border-border bg-surface-panel/50 px-2.5 py-2">
+                      <div key={tool.id} className="rounded-md border border-border bg-surface-card px-2.5 py-2">
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
                             <div className="truncate text-sm text-text-primary">{tool.name}</div>
@@ -341,12 +343,12 @@ export function AvatarSettingsPanel(props: Props) {
                 {mode === "avatar" ? "当前分身" : "Machi（Meta-Agent）"} 的长期行为风格。
               </p>
               {loadingSoul ? (
-                <div className="rounded-md border border-border bg-surface-panel/50 px-3 py-2 text-xs text-text-faint">
+                <div className="rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-faint">
                   加载中...
                 </div>
               ) : (
                 <textarea
-                  className="min-h-[220px] w-full resize-y rounded-md border border-border bg-surface-panel/50 px-3 py-2 text-sm text-text-primary"
+                  className="min-h-[220px] w-full resize-y rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
                   value={soulValue}
                   onChange={(e) => setSoulValue(e.target.value)}
                   placeholder="例如：先给结论，再给证据；避免重复确认；把进度和风险讲清楚。"
