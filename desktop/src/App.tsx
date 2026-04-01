@@ -21,6 +21,8 @@ type PersistedPaneState = {
   avatarId: string | null;
   avatarName: string;
   sessionId: string;
+  modelProvider?: string;
+  modelName?: string;
   historyOpen: boolean;
   contextInherited: boolean;
   taskspacePanelOpen: boolean;
@@ -95,6 +97,8 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         avatarId: row.avatarId == null ? null : String(row.avatarId),
         avatarName,
         sessionId: String(row.sessionId ?? "").trim(),
+        modelProvider: String(row.modelProvider ?? "").trim(),
+        modelName: String(row.modelName ?? "").trim(),
         historyOpen: Boolean(row.historyOpen),
         contextInherited: Boolean(row.contextInherited),
         taskspacePanelOpen: Boolean(row.taskspacePanelOpen),
@@ -211,6 +215,7 @@ export function App() {
   const closeSettings = useAppStore((s) => s.closeSettings);
   const updateSettings = useAppStore((s) => s.updateSettings);
   const setActiveModel = useAppStore((s) => s.setActiveModel);
+  const setPaneModel = useAppStore((s) => s.setPaneModel);
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
   const confirmScopeRef = useRef<string | null>(null);
   const autoApproveScopesRef = useRef<Set<string>>(new Set());
@@ -444,6 +449,8 @@ export function App() {
               panes: hydratedPanes.map((pane) => ({
                 ...pane,
                 messages: [],
+                modelProvider: pane.modelProvider ?? "",
+                modelName: pane.modelName ?? "",
                 membersPanelOpen: pane.membersPanelOpen ?? false,
                 sidePanelTab: pane.sidePanelTab ?? "workspace",
                 spawnsColumnOpen: pane.spawnsColumnOpen ?? false,
@@ -537,8 +544,20 @@ export function App() {
       const savedActiveModel = cfg.activeModel ?? "";
       if (savedActiveProvider && savedActiveModel) {
         setActiveModel(savedActiveProvider, savedActiveModel);
+        const currentPaneId = useAppStore.getState().activePaneId;
+        const currentPane = useAppStore.getState().panes.find((pane) => pane.id === currentPaneId);
+        const hasPaneModel = Boolean(currentPane?.modelProvider?.trim() && currentPane?.modelName?.trim());
+        if (!hasPaneModel) {
+          setPaneModel(currentPaneId, savedActiveProvider, savedActiveModel);
+        }
       } else if (defP && defEntry?.model) {
         setActiveModel(defP, defEntry.model);
+        const currentPaneId = useAppStore.getState().activePaneId;
+        const currentPane = useAppStore.getState().panes.find((pane) => pane.id === currentPaneId);
+        const hasPaneModel = Boolean(currentPane?.modelProvider?.trim() && currentPane?.modelName?.trim());
+        if (!hasPaneModel) {
+          setPaneModel(currentPaneId, defP, defEntry.model);
+        }
       }
       window.agenticxDesktop.onOpenSettings(() => openSettings());
       workspaceHydratedRef.current = true;
@@ -556,6 +575,8 @@ export function App() {
         avatarId: pane.avatarId,
         avatarName: pane.avatarName,
         sessionId: pane.sessionId,
+        modelProvider: pane.modelProvider,
+        modelName: pane.modelName,
         historyOpen: pane.historyOpen,
         contextInherited: pane.contextInherited,
         taskspacePanelOpen: pane.taskspacePanelOpen,
@@ -860,8 +881,10 @@ export function App() {
         const triggerMsg =
           `[系统通知] 以下子智能体已结束（可能成功或失败），请立即向用户主动汇报：完成情况/失败原因、产出文件列表、下一步建议。\n${agentLines}`;
 
-        const activeProvider = store.activeProvider;
-        const activeModel = store.activeModel;
+        const paneProvider = String(matchingPane.modelProvider ?? "").trim();
+        const paneModel = String(matchingPane.modelName ?? "").trim();
+        const activeProvider = paneProvider || store.activeProvider;
+        const activeModel = paneModel || store.activeModel;
         const body: Record<string, unknown> = { session_id: sid, user_input: triggerMsg };
         if (activeProvider) body.provider = activeProvider;
         if (activeModel) body.model = activeModel;
@@ -1139,6 +1162,8 @@ export function App() {
     if (!curProvider || !curModel) {
       if (result.defaultProvider && defEntry?.model) {
         setActiveModel(result.defaultProvider, defEntry.model);
+          const currentPaneId = useAppStore.getState().activePaneId;
+          setPaneModel(currentPaneId, result.defaultProvider, defEntry.model);
       }
     }
     await window.agenticxDesktop.saveConfig({

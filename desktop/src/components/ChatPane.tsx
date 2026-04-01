@@ -56,6 +56,8 @@ const FALLBACK_PANE: ChatPaneState = {
   avatarId: null,
   avatarName: "Machi",
   sessionId: "",
+  modelProvider: "",
+  modelName: "",
   messages: [],
   historyOpen: false,
   contextInherited: false,
@@ -142,17 +144,16 @@ class HistoryPanelBoundary extends Component<
   }
 }
 
-function PaneModelPicker() {
+function PaneModelPicker({ paneId }: { paneId: string }) {
   const settings = useAppStore((s) => s.settings);
-  const activeProvider = useAppStore((s) => s.activeProvider);
-  const activeModel = useAppStore((s) => s.activeModel);
-  const setActiveModel = useAppStore((s) => s.setActiveModel);
+  const setPaneModel = useAppStore((s) => s.setPaneModel);
+  const paneModel = useAppStore((s) => s.panes.find((pane) => pane.id === paneId));
   const [open, setOpen] = useState(false);
 
   const handleSelect = (provider: string, model: string) => {
-    setActiveModel(provider, model);
+    setPaneModel(paneId, provider, model);
     setOpen(false);
-    // Persist selected provider/model so it survives app restarts
+    // Persist the current pane model as global fallback for restarts.
     void window.agenticxDesktop.saveConfig({ activeProvider: provider, activeModel: model });
   };
 
@@ -169,7 +170,9 @@ function PaneModelPicker() {
     return result;
   }, [settings.providers]);
 
-  const currentLabel = activeModel ? `${activeProvider}/${activeModel}` : "未选模型";
+  const currentProvider = (paneModel?.modelProvider || "").trim();
+  const currentModel = (paneModel?.modelName || "").trim();
+  const currentLabel = currentModel ? `${currentProvider}/${currentModel}` : "未选模型";
 
   return (
     <div className="relative">
@@ -191,7 +194,7 @@ function PaneModelPicker() {
               </div>
             ) : (
               options.map((opt) => {
-                const isActive = opt.provider === activeProvider && opt.model === activeModel;
+                const isActive = opt.provider === currentProvider && opt.model === currentModel;
                 return (
                   <button
                     key={`${opt.provider}:${opt.model}`}
@@ -3692,7 +3695,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             </div>
           ) : null}
           <div className="mt-1.5 flex items-center">
-            <PaneModelPicker />
+            <PaneModelPicker paneId={pane.id} />
           </div>
         </div>
       </div>
