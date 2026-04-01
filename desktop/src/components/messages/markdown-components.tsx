@@ -2,6 +2,9 @@ import type { Components } from "react-markdown";
 import type { Element as HastElement, ElementContent } from "hast";
 import type { ReactElement, ReactNode } from "react";
 import { Children, isValidElement } from "react";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { MermaidBlock } from "./MermaidBlock";
 
 const MERMAID_LANG = new Set(["mermaid", "mmd"]);
@@ -79,6 +82,34 @@ function extractMermaidFromPreChildren(children: ReactNode): string | null {
   if (!shouldRenderMermaid(lang, trimmed)) return null;
   return text;
 }
+
+function normalizeLatexMathDelimitersInText(text: string): string {
+  let next = text;
+  // Convert LaTeX delimiters to remark-math syntax.
+  next = next.replace(/\\\[((?:.|\n)*?)\\\]/g, (_whole, expr: string) => {
+    const inner = expr.trim();
+    return inner ? `$$\n${inner}\n$$` : _whole;
+  });
+  next = next.replace(/\\\((.+?)\\\)/g, (_whole, expr: string) => {
+    const inner = expr.trim();
+    return inner ? `$${inner}$` : _whole;
+  });
+  return next;
+}
+
+export function normalizeChatMarkdownContent(raw: string): string {
+  if (!raw) return raw;
+  // Keep fenced code blocks untouched to avoid rewriting code snippets.
+  const FENCED_BLOCK_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
+  const chunks = raw.split(FENCED_BLOCK_RE);
+  return chunks
+    .map((chunk, idx) => (idx % 2 === 1 ? chunk : normalizeLatexMathDelimitersInText(chunk)))
+    .join("");
+}
+
+/** Shared ReactMarkdown `components` map (GFM + Mermaid fenced blocks). */
+export const chatRemarkPlugins = [remarkGfm, remarkMath];
+export const chatRehypePlugins = [rehypeKatex];
 
 /** Shared ReactMarkdown `components` map (GFM + Mermaid fenced blocks). */
 export const chatMarkdownComponents: Partial<Components> = {

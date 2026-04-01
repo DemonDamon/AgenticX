@@ -87,6 +87,13 @@ body {
   background: color-mix(in srgb, var(--surface-hover) 25%, transparent);
 }
 
+/* KaTeX long display formulas should scroll instead of clipping in bubbles. */
+.msg-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.1rem 0;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

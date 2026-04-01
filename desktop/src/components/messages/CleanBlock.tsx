@@ -1,10 +1,14 @@
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type { Message } from "../../store";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { parseReasoningContent } from "./reasoning-parser";
-import { chatMarkdownComponents } from "./markdown-components";
+import {
+  chatMarkdownComponents,
+  chatRehypePlugins,
+  chatRemarkPlugins,
+  normalizeChatMarkdownContent,
+} from "./markdown-components";
 
 type Props = {
   message: Message;
@@ -41,8 +45,12 @@ export function CleanBlock({ message, badge }: Props) {
           <ReasoningBlock text={parsed.reasoning} />
         ) : null}
         {hasBody ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={chatMarkdownComponents}>
-            {bodyText}
+          <ReactMarkdown
+            remarkPlugins={chatRemarkPlugins}
+            rehypePlugins={chatRehypePlugins}
+            components={chatMarkdownComponents}
+          >
+            {normalizeChatMarkdownContent(bodyText)}
           </ReactMarkdown>
         ) : null}
       </div>
