@@ -724,12 +724,36 @@ function SkillsTab() {
   const [skillhubLoading, setSkillhubLoading] = useState(false);
   const [skillhubMsg, setSkillhubMsg] = useState("");
   const [skillhubHint, setSkillhubHint] = useState("");
+  const [recommendedIconData, setRecommendedIconData] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setBundleNeedsConfirmNonHigh(false);
     setBundleNeedsConfirmHigh(false);
     setBundlePendingPath("");
   }, [bundleInstallPath]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const next: Record<string, string> = {};
+      for (const skill of RECOMMENDED_SKILLS) {
+        try {
+          const res = await window.agenticxDesktop.loadLocalImageDataUrl(skill.icon_src);
+          if (res?.ok && res.dataUrl) {
+            next[skill.id] = res.dataUrl;
+          } else {
+            next[skill.id] = skill.icon_src;
+          }
+        } catch {
+          next[skill.id] = skill.icon_src;
+        }
+      }
+      if (!cancelled) setRecommendedIconData(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1532,7 +1556,7 @@ function SkillsTab() {
             >
               <div className="flex items-start gap-2">
                 <img
-                  src={skill.icon_src}
+                  src={recommendedIconData[skill.id] || ""}
                   alt={`${skill.name} 图标`}
                   className="h-9 w-9 shrink-0 rounded-md border border-border/70 bg-white object-cover"
                   loading="lazy"

@@ -2473,6 +2473,32 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("load-local-image-data-url", async (_event, inputPath: string) => {
+    try {
+      const raw = String(inputPath || "").trim();
+      if (!raw) return { ok: false, error: "empty path" };
+      const normalized = raw.startsWith("file://") ? decodeURIComponent(raw.replace(/^file:\/\//, "")) : raw;
+      if (!fs.existsSync(normalized)) {
+        return { ok: false, error: "file not found" };
+      }
+      const buf = await fs.promises.readFile(normalized);
+      const ext = path.extname(normalized).toLowerCase();
+      const mime =
+        ext === ".png"
+          ? "image/png"
+          : ext === ".jpg" || ext === ".jpeg"
+            ? "image/jpeg"
+            : ext === ".gif"
+              ? "image/gif"
+              : ext === ".webp"
+                ? "image/webp"
+                : "application/octet-stream";
+      return { ok: true, dataUrl: `data:${mime};base64,${buf.toString("base64")}` };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle(
     "install-from-registry",
     async (

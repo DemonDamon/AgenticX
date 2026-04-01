@@ -297,6 +297,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   // Registry marketplace
   searchRegistry: async (args: { q: string }) => ipcRenderer.invoke("search-registry", args),
   searchSkillHub: async (args: { q: string }) => ipcRenderer.invoke("search-skillhub", args),
+  loadLocalImageDataUrl: async (path: string) => ipcRenderer.invoke("load-local-image-data-url", path),
   installFromRegistry: async (args: {
     source: string;
     name: string;
