@@ -3733,7 +3733,7 @@ export function SettingsPanel({
                   <div className="flex gap-2">
                     <input
                       readOnly
-                      className="flex-1 cursor-not-allowed rounded-md border border-border bg-surface-panel/60 px-2 py-1.5 text-sm text-text-muted"
+                      className="flex-1 cursor-not-allowed rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-muted"
                       value={MCP_PRIMARY_CONFIG_PATH}
                       aria-label="主 MCP 配置路径"
                     />

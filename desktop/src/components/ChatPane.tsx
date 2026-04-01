@@ -33,6 +33,7 @@ import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 import { usePaneSortableHandle } from "./pane-sortable-context";
+import { FeishuBadge } from "./FeishuBadge";
 
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
 const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
@@ -3183,12 +3184,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               <div className="flex items-center gap-1.5 truncate text-sm font-medium text-text-strong">
                 {pane.avatarName}
                 {shouldShowFeishuBadge && (
-                  <span className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[9px] font-medium leading-tight" style={{ backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" }}>
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
-                      <path d="M5.63 4.02a1 1 0 0 1 1.4.17l4.97 6.3 4.97-6.3a1 1 0 0 1 1.58 1.22L14 10.83l5.37 6.8a1 1 0 0 1-1.57 1.24L12 12.16l-5.8 6.71a1 1 0 0 1-1.57-1.24L10 10.83 5.45 5.42a1 1 0 0 1 .18-1.4Z" fill="currentColor"/>
-                    </svg>
-                    飞书
-                  </span>
+                  <FeishuBadge variant="topbar" />
                 )}
               </div>
               <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">

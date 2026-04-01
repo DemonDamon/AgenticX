@@ -96,7 +96,8 @@ body,
   padding: 7px 16px;
   border-bottom: 1px solid var(--border-muted);
   background: var(--surface-topbar);
-  backdrop-filter: blur(18px) saturate(1.15);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   -webkit-app-region: drag;
   -webkit-user-select: none;
   user-select: none;

@@ -11,7 +11,7 @@
   --surface-base-fallback: rgba(8, 10, 16, 0.88);
   --surface-panel: rgba(10, 14, 20, 0.72);
   --surface-sidebar: rgba(14, 14, 18, 0.65);
-  --surface-topbar: rgba(10, 14, 20, 0.55);
+  --surface-topbar: rgba(14, 14, 18, 0.65);
   --surface-messages: transparent;
   --surface-composer: rgba(10, 14, 20, 0.55);
   --surface-card: rgba(255, 255, 255, 0.04);

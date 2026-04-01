@@ -9,7 +9,7 @@
   --surface-base: transparent;
   --surface-panel: rgba(18, 22, 31, 0.75);
   --surface-sidebar: rgba(20, 20, 24, 0.68);
-  --surface-topbar: rgba(16, 20, 28, 0.58);
+  --surface-topbar: rgba(20, 20, 24, 0.68);
   --surface-messages: transparent;
   --surface-composer: rgba(16, 20, 28, 0.62);
   --surface-card: rgba(255, 255, 255, 0.035);

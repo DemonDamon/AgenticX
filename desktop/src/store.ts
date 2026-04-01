@@ -26,6 +26,7 @@ export type Avatar = {
   avatarUrl: string;
   pinned: boolean;
   createdBy: string;
+  systemPrompt?: string;
   toolsEnabled?: Record<string, boolean>;
 };
 
