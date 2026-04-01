@@ -79,6 +79,8 @@ body,
   min-height: 0;
   overflow: hidden;
   position: relative;
+  /* 侧栏与主区之间常驻细分割线（对齐 Workbuddy 式 1px 低对比边界） */
+  border-right: 1px solid var(--border-strong);
 }
 
 .agx-main-shell {
