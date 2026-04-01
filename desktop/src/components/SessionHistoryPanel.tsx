@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { useAppStore, type ChatPane, type Message } from "../store";
 import { attachmentsFromSessionRow } from "../utils/session-message-map";
+import { FeishuBadge } from "./FeishuBadge";
 
 function timeAgo(ts: number): string {
   const diff = Date.now() / 1000 - ts;
@@ -446,12 +447,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               {item.pinned ? <span className="text-[10px] text-amber-300">pin</span> : null}
               <span className="truncate">{label}</span>
               {feishuMarked ? (
-                <span
-                  className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
-                  style={{ backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" }}
-                >
-                  飞书
-                </span>
+                <FeishuBadge />
               ) : null}
               {unread ? <span className="inline-block h-1.5 w-1.5 rounded-full bg-text-muted" /> : null}
             </span>

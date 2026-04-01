@@ -72,6 +72,7 @@ type AvatarItem = {
   avatar_url?: string;
   pinned?: boolean;
   created_by?: string;
+  system_prompt?: string;
   tools_enabled?: Record<string, boolean>;
 };
 
