@@ -25,6 +25,7 @@ from agenticx.cli.studio import StudioSession
 from agenticx.memory.session_store import SessionStore
 from agenticx.runtime import AsyncConfirmGate
 from agenticx.runtime.team_manager import AgentTeamManager, SubAgentContext
+from agenticx.utils.atomic_writer import atomic_write_json
 
 EventEmitter = Callable[[Any], Awaitable[None]]
 SummarySink = Callable[[str, SubAgentContext], Awaitable[None]]
@@ -554,9 +555,7 @@ class SessionManager:
 
     def _save_messages_snapshot(self, session_id: str, messages: list[dict]) -> None:
         path = self._messages_path(session_id)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(messages, fh, ensure_ascii=False, indent=2)
+        atomic_write_json(path, messages)
 
     def _load_messages_snapshot(self, session_id: str) -> list[dict]:
         path = self._messages_path(session_id)
@@ -576,9 +575,7 @@ class SessionManager:
             return
         tail = messages[-40:]
         path = self._agent_messages_path(session_id)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(tail, fh, ensure_ascii=False, indent=2)
+        atomic_write_json(path, tail)
 
     def _load_agent_messages_snapshot(self, session_id: str) -> list[dict]:
         path = self._agent_messages_path(session_id)
@@ -599,9 +596,7 @@ class SessionManager:
             return
         paths = list(ctx.keys())
         path = self._context_refs_path(session_id)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(paths, fh, ensure_ascii=False, indent=2)
+        atomic_write_json(path, paths)
 
     def _load_context_refs(self, session_id: str, session: StudioSession) -> None:
         path = self._context_refs_path(session_id)
@@ -933,9 +928,7 @@ class SessionManager:
 
     def _save_global_taskspaces(self, rows: list[dict[str, str]]) -> None:
         path = self._global_taskspaces_path()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(rows, fh, ensure_ascii=False, indent=2)
+        atomic_write_json(path, rows)
 
     def _resolve_taskspace_path(self, path: str) -> str:
         root = Path(str(path).strip()).expanduser()

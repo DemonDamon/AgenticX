@@ -45,6 +45,14 @@ export function AvatarSidebar() {
     | { mode: "machi-global"; title: string }
     | null
   >(null);
+  const [soulDialog, setSoulDialog] = useState<{
+    target: "avatar" | "machi";
+    avatarId?: string;
+    title: string;
+    value: string;
+    saving: boolean;
+    message: string;
+  } | null>(null);
   const [machiToolsEnabled, setMachiToolsEnabled] = useState<Record<string, boolean>>({});
   const menuRef = useRef<HTMLDivElement>(null);
   const groupMenuRef = useRef<HTMLDivElement>(null);
@@ -216,6 +224,17 @@ export function AvatarSidebar() {
           avatarId,
           title: `${avatar?.name ?? "分身"} · 工具权限`,
         });
+      } else if (action === "soul") {
+        const avatar = avatars.find((a) => a.id === avatarId);
+        const result = await window.agenticxDesktop.loadAvatarSoul({ avatarId });
+        setSoulDialog({
+          target: "avatar",
+          avatarId,
+          title: `${avatar?.name ?? "分身"} · 会后设置（SOUL）`,
+          value: result?.ok ? String(result.content ?? "") : "",
+          saving: false,
+          message: result?.ok ? "" : `加载失败: ${result?.error ?? "未知错误"}`,
+        });
       } else if (action === "delete") {
         panes.filter((item) => item.avatarId === avatarId).forEach((item) => removePane(item.id));
         if (activeAvatarId === avatarId) setActiveAvatarId(null);
@@ -228,10 +247,58 @@ export function AvatarSidebar() {
       return;
     }
 
-    if (target === "machi" && action === "tools") {
-      const policy = await window.agenticxDesktop.getToolsPolicy();
-      setMachiToolsEnabled(policy?.ok ? policy.tools_enabled ?? {} : {});
-      setPermissionDialog({ mode: "machi-global", title: "Machi · 工具权限（全局）" });
+    if (target === "machi") {
+      if (action === "tools") {
+        const policy = await window.agenticxDesktop.getToolsPolicy();
+        setMachiToolsEnabled(policy?.ok ? policy.tools_enabled ?? {} : {});
+        setPermissionDialog({ mode: "machi-global", title: "Machi · 工具权限（全局）" });
+      } else if (action === "soul") {
+        const result = await window.agenticxDesktop.loadMetaSoul();
+        setSoulDialog({
+          target: "machi",
+          title: "Machi（Meta-Agent）· SOUL",
+          value: result?.ok ? String(result.content ?? "") : "",
+          saving: false,
+          message: result?.ok ? "" : `加载失败: ${result?.error ?? "未知错误"}`,
+        });
+      }
+    }
+  };
+
+  const saveSoulDialog = async () => {
+    if (!soulDialog) return;
+    setSoulDialog((prev) => (prev ? { ...prev, saving: true, message: "" } : prev));
+    try {
+      if (soulDialog.target === "avatar" && soulDialog.avatarId) {
+        const res = await window.agenticxDesktop.saveAvatarSoul({
+          avatarId: soulDialog.avatarId,
+          content: soulDialog.value,
+        });
+        setSoulDialog((prev) =>
+          prev
+            ? {
+                ...prev,
+                saving: false,
+                message: res?.ok ? "已保存，下一轮该分身对话生效。" : `保存失败: ${res?.error ?? "未知错误"}`,
+              }
+            : prev,
+        );
+        return;
+      }
+      const res = await window.agenticxDesktop.saveMetaSoul({ content: soulDialog.value });
+      setSoulDialog((prev) =>
+        prev
+          ? {
+              ...prev,
+              saving: false,
+              message: res?.ok ? "已保存，下一轮 Machi 对话生效。" : `保存失败: ${res?.error ?? "未知错误"}`,
+            }
+          : prev,
+      );
+    } catch (err) {
+      setSoulDialog((prev) =>
+        prev ? { ...prev, saving: false, message: `保存失败: ${String(err)}` } : prev,
+      );
     }
   };
 
@@ -454,9 +521,13 @@ export function AvatarSidebar() {
                       : "置顶",
                   },
                   { id: "tools", label: "工具权限" },
+                  { id: "soul", label: "会后设置（SOUL）" },
                   { id: "delete", label: "删除" },
                 ]
-              : [{ id: "tools", label: "工具权限（全局）" }]),
+              : [
+                  { id: "tools", label: "工具权限（全局）" },
+                  { id: "soul", label: "Meta SOUL 设置" },
+                ]),
           ].map((item) => (
             <button
               key={item.id}
@@ -552,6 +623,51 @@ export function AvatarSidebar() {
             void refreshGroups();
           }}
         />
+      )}
+      {soulDialog && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-border bg-surface-card shadow-2xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div className="text-sm font-semibold text-text-strong">{soulDialog.title}</div>
+              <button
+                className="rounded px-2 py-1 text-xs text-text-faint hover:bg-surface-hover hover:text-text-strong"
+                onClick={() => setSoulDialog(null)}
+              >
+                关闭
+              </button>
+            </div>
+            <div className="space-y-3 px-4 py-3">
+              <p className="text-xs text-text-faint">
+                支持自由 Markdown 文本。该配置用于塑造{" "}
+                {soulDialog.target === "avatar" ? "当前分身" : "Machi（Meta-Agent）"} 的长期行为风格。
+              </p>
+              <textarea
+                className="min-h-[220px] w-full resize-y rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
+                value={soulDialog.value}
+                onChange={(e) =>
+                  setSoulDialog((prev) => (prev ? { ...prev, value: e.target.value } : prev))
+                }
+                placeholder="例如：先给结论，再给证据；避免重复确认；把进度和风险讲清楚。"
+              />
+              <div className="flex items-center justify-between gap-3">
+                <div
+                  className={`text-xs ${
+                    soulDialog.message.startsWith("已保存") ? "text-text-subtle" : "text-rose-400"
+                  }`}
+                >
+                  {soulDialog.message}
+                </div>
+                <button
+                  className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
+                  disabled={soulDialog.saving}
+                  onClick={() => void saveSoulDialog()}
+                >
+                  {soulDialog.saving ? "保存中..." : "保存"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
