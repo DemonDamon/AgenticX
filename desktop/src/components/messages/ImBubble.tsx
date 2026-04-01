@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type { Message, MessageAttachment } from "../../store";
 import { AttachmentCard } from "./AttachmentCard";
 import { ReasoningBlock } from "./ReasoningBlock";
@@ -9,7 +8,12 @@ import { parseReasoningContent } from "./reasoning-parser";
 import { ForwardedHistoryCard } from "./ForwardedHistoryCard";
 import { ForwardedHistoryModal } from "./ForwardedHistoryModal";
 import { getContainedSelectionText } from "../../utils/favorite-selection";
-import { chatMarkdownComponents } from "./markdown-components";
+import {
+  chatMarkdownComponents,
+  chatRehypePlugins,
+  chatRemarkPlugins,
+  normalizeChatMarkdownContent,
+} from "./markdown-components";
 
 type Props = {
   message: Message;
@@ -258,8 +262,12 @@ export function ImBubble({
                           {renderUserTextWithReferenceTokens(bodyText, referenceAttachments)}
                         </div>
                       ) : (
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={chatMarkdownComponents}>
-                        {bodyText}
+                      <ReactMarkdown
+                        remarkPlugins={chatRemarkPlugins}
+                        rehypePlugins={chatRehypePlugins}
+                        components={chatMarkdownComponents}
+                      >
+                        {normalizeChatMarkdownContent(bodyText)}
                       </ReactMarkdown>
                       )
                     ) : null}
