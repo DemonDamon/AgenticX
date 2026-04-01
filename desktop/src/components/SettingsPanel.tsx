@@ -3405,9 +3405,12 @@ export function SettingsPanel({
   const ks = keyStatus[active] ?? "idle";
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-none">
       {/* 固定为视口比例，避免切换 tab 时随内容伸缩；长内容在右侧滚动区内滚动 */}
-      <div className="flex h-[min(85vh,calc(100dvh-2rem))] w-[min(90vw,51.25rem)] max-w-[calc(100vw-2rem)] shrink-0 overflow-hidden rounded-2xl border border-border bg-surface-panel shadow-2xl">
+      <div
+        className="flex h-[min(85vh,calc(100dvh-2rem))] w-[min(90vw,51.25rem)] max-w-[calc(100vw-2rem)] shrink-0 overflow-hidden rounded-2xl border border-border shadow-2xl"
+        style={{ backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
+      >
         {/* Left: tab navigation */}
         <div className="flex h-full min-h-0 w-[200px] shrink-0 flex-col bg-surface-sidebar p-4">
           <div className="mb-4 text-[15px] font-semibold text-text-strong">设置</div>

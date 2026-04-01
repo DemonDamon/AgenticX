@@ -7,6 +7,7 @@
   --text-faint: rgba(225, 229, 236, 0.42);
 
   --surface-base: transparent;
+  --surface-base-fallback: #121720;
   --surface-panel: rgba(18, 22, 31, 0.75);
   --surface-sidebar: rgba(20, 20, 24, 0.68);
   --surface-topbar: rgba(20, 20, 24, 0.68);
