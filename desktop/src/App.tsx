@@ -275,6 +275,50 @@ export function App() {
     }
   }, [setMcpServers]);
 
+  const ensureMcpAutoConnectOnStartup = useCallback(async (sid?: string) => {
+    const effectiveSid = (sid || useAppStore.getState().sessionId || "").trim();
+    if (!effectiveSid) return;
+    try {
+      const [settings, status] = await Promise.all([
+        window.agenticxDesktop.getMcpSettings(),
+        window.agenticxDesktop.loadMcpStatus(effectiveSid),
+      ]);
+      if (!settings.ok || !Array.isArray(settings.auto_connect) || settings.auto_connect.length === 0) {
+        return;
+      }
+      if (!status.ok || !Array.isArray(status.servers) || status.servers.length === 0) {
+        return;
+      }
+      const wanted = new Set(settings.auto_connect.map((name) => String(name || "").trim()).filter(Boolean));
+      if (wanted.size === 0) return;
+      const toConnect = status.servers
+        .filter((server) => wanted.has(server.name) && !server.connected)
+        .map((server) => server.name);
+      if (toConnect.length === 0) return;
+      const results = await Promise.all(
+        toConnect.map(async (name) => {
+          try {
+            const result = await window.agenticxDesktop.connectMcp({ sessionId: effectiveSid, name });
+            return { name, ok: Boolean(result?.ok), error: result?.error };
+          } catch (error) {
+            return { name, ok: false, error: String(error) };
+          }
+        })
+      );
+      const failed = results.filter((item) => !item.ok);
+      if (failed.length > 0) {
+        console.warn(
+          "[App init] MCP startup auto-connect partial failure:",
+          failed.map((item) => ({ name: item.name, error: item.error })),
+        );
+      }
+      await refreshMcpStatus(effectiveSid);
+    } catch (error) {
+      // Best effort: startup MCP auto-connect should never block app init.
+      console.warn("[App init] MCP startup auto-connect failed:", error);
+    }
+  }, [refreshMcpStatus]);
+
   const buildConfirmScope = (
     question: string,
     context?: Record<string, unknown>
@@ -418,6 +462,7 @@ export function App() {
             if (nextSessionId) {
               setSessionId(nextSessionId);
               await refreshMcpStatus(nextSessionId).catch(() => {});
+              await ensureMcpAutoConnectOnStartup(nextSessionId).catch(() => {});
               recovered = true;
             }
           }
@@ -443,6 +488,7 @@ export function App() {
             setSessionId(sid);
             setPaneSessionId("pane-meta", sid);
             await refreshMcpStatus(sid).catch(() => {});
+            await ensureMcpAutoConnectOnStartup(sid).catch(() => {});
             sessionCreated = true;
             recovered = true;
           } catch (err) {
@@ -456,6 +502,7 @@ export function App() {
             setSessionId(sid);
             setPaneSessionId("pane-meta", sid);
             await refreshMcpStatus(sid).catch(() => {});
+            await ensureMcpAutoConnectOnStartup(sid).catch(() => {});
             sessionCreated = true;
             break;
           } catch (err) {
@@ -497,7 +544,7 @@ export function App() {
       workspaceHydratedRef.current = true;
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [ensureMcpAutoConnectOnStartup, refreshMcpStatus]);
 
   useEffect(() => {
     if (!workspaceHydratedRef.current) return;
