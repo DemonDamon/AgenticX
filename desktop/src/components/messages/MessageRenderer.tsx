@@ -16,6 +16,7 @@ type Props = {
   assistantAvatarUrl?: string;
   /** IM 风格下用户气泡旁显示名（默认「我」） */
   userName?: string;
+  userAvatarUrl?: string;
   onCopyMessage?: (message: Message) => void;
   onQuoteMessage?: (message: Message, selectedText?: string) => void;
   onFavoriteMessage?: (message: Message, selectedText?: string) => void;
@@ -43,6 +44,7 @@ export function MessageRenderer({
   assistantName,
   assistantAvatarUrl,
   userName,
+  userAvatarUrl,
   onCopyMessage,
   onQuoteMessage,
   onFavoriteMessage,
@@ -64,6 +66,7 @@ export function MessageRenderer({
         assistantName={message.avatarName || assistantName}
         assistantAvatarUrl={message.avatarUrl || assistantAvatarUrl}
         userName={userName}
+        userAvatarUrl={userAvatarUrl}
         onCopyMessage={onCopyMessage}
         onQuoteMessage={onQuoteMessage}
         onFavoriteMessage={onFavoriteMessage}

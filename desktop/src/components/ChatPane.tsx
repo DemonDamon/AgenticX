@@ -1092,6 +1092,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const subAgents = useAppStore((s) => s.subAgents);
   const avatars = useAppStore((s) => s.avatars);
   const groups = useAppStore((s) => s.groups);
+  const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
+  const userAvatarUrl = useAppStore((s) => s.userAvatarUrl);
   const chatStyle = useAppStore((s) => s.chatStyle);
   const userNickname = useAppStore((s) => s.userNickname);
   const userPreference = useAppStore((s) => s.userPreference);
@@ -1113,13 +1115,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const paneAvatarMeta = useMemo(() => {
     const aid = pane?.avatarId;
-    if (!aid || aid.startsWith("group:")) return { name: pane?.avatarName || "AI", url: undefined };
+    if (!aid) {
+      const paneName = (pane?.avatarName ?? "").trim();
+      const isMetaPane = paneName === "Machi";
+      return { name: pane?.avatarName || "AI", url: isMetaPane ? metaAvatarUrl || undefined : undefined };
+    }
+    if (aid.startsWith("group:")) return { name: pane?.avatarName || "AI", url: undefined };
     const found = avatars.find((a) => a.id === aid);
     return {
       name: found?.name || pane?.avatarName || "AI",
       url: found?.avatarUrl || undefined,
     };
-  }, [pane?.avatarId, pane?.avatarName, avatars]);
+  }, [pane?.avatarId, pane?.avatarName, avatars, metaAvatarUrl]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -2092,6 +2099,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               assistantName={paneAvatarMeta.name}
               assistantAvatarUrl={paneAvatarMeta.url}
               userName={userBubbleLabel}
+              userAvatarUrl={userAvatarUrl || undefined}
               onCopyMessage={copyMessage}
               onQuoteMessage={(msg, selectedText) =>
                 setQuoteTarget({ message: msg, body: resolveQuoteBody(msg, selectedText) })
@@ -2135,7 +2143,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         )
       ) : null}
     </>
-  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, isGroupPane, paneAvatarMeta, resolveGroupInlineConfirm, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, streamedAssistantText, streaming, streamingModel, toggleSelectMessage, userBubbleLabel, visibleMessages]);
+  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, isGroupPane, paneAvatarMeta, resolveGroupInlineConfirm, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, streamedAssistantText, streaming, streamingModel, toggleSelectMessage, userAvatarUrl, userBubbleLabel, visibleMessages]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {

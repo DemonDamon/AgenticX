@@ -3124,8 +3124,12 @@ export function SettingsPanel({
 }: Props) {
   const userNickname = useAppStore((s) => s.userNickname);
   const setUserNickname = useAppStore((s) => s.setUserNickname);
+  const userAvatarUrl = useAppStore((s) => s.userAvatarUrl);
+  const setUserAvatarUrl = useAppStore((s) => s.setUserAvatarUrl);
   const userPreference = useAppStore((s) => s.userPreference);
   const setUserPreference = useAppStore((s) => s.setUserPreference);
+  const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
+  const setMetaAvatarUrl = useAppStore((s) => s.setMetaAvatarUrl);
   const initializedForOpenRef = useRef(false);
   const [tab, setTab] = useState<SettingsTab>("general");
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
@@ -3151,6 +3155,8 @@ export function SettingsPanel({
   const [metaSoul, setMetaSoul] = useState("");
   const [metaSoulSaving, setMetaSoulSaving] = useState(false);
   const [metaSoulMessage, setMetaSoulMessage] = useState("");
+  const [userAvatarMessage, setUserAvatarMessage] = useState("");
+  const [metaAvatarMessage, setMetaAvatarMessage] = useState("");
 
   const [gwEnabled, setGwEnabled] = useState(false);
   const [gwUrl, setGwUrl] = useState("");
@@ -3303,6 +3309,44 @@ export function SettingsPanel({
       setMetaSoulSaving(false);
     }
   }, [metaSoul]);
+
+  const handleProfileAvatarUpload = useCallback(
+    (file: File, target: "user" | "meta") => {
+      const maxBytes = 1.8 * 1024 * 1024;
+      if (!file.type.startsWith("image/")) {
+        (target === "user" ? setUserAvatarMessage : setMetaAvatarMessage)(
+          "请选择图片文件（PNG/JPG/WebP/GIF）。"
+        );
+        return;
+      }
+      if (file.size > maxBytes) {
+        (target === "user" ? setUserAvatarMessage : setMetaAvatarMessage)(
+          "图片过大，请选择小于 1.8MB 的文件。"
+        );
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = typeof reader.result === "string" ? reader.result : "";
+        if (!result) {
+          (target === "user" ? setUserAvatarMessage : setMetaAvatarMessage)("读取图片失败，请重试。");
+          return;
+        }
+        if (target === "user") {
+          setUserAvatarUrl(result);
+          setUserAvatarMessage("已更新我的头像。");
+        } else {
+          setMetaAvatarUrl(result);
+          setMetaAvatarMessage("已更新 Machi 头像。");
+        }
+      };
+      reader.onerror = () => {
+        (target === "user" ? setUserAvatarMessage : setMetaAvatarMessage)("读取图片失败，请重试。");
+      };
+      reader.readAsDataURL(file);
+    },
+    [setMetaAvatarUrl, setUserAvatarUrl]
+  );
 
   useEffect(() => {
     if (!open || tab !== "mcp") return;
@@ -3563,6 +3607,102 @@ export function SettingsPanel({
                   <p className="mt-1 text-[11px] text-text-subtle">
                     在单聊与群聊中均以此称呼标注你的身份，分身会称呼你此名。
                   </p>
+                  <div className="mt-4">
+                    <div className="text-sm text-text-muted">我的头像</div>
+                    <div className="mt-2 flex items-center gap-3">
+                      {userAvatarUrl ? (
+                        <img
+                          src={userAvatarUrl}
+                          alt="我的头像"
+                          className="h-12 w-12 rounded-full border border-border object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-surface-card text-sm font-semibold text-text-primary">
+                          {(userNickname.trim().slice(0, 1) || "我").toUpperCase()}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong">
+                          上传图片
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleProfileAvatarUpload(file, "user");
+                              e.currentTarget.value = "";
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
+                          disabled={!userAvatarUrl}
+                          onClick={() => {
+                            setUserAvatarUrl("");
+                            setUserAvatarMessage("已恢复默认用户头像。");
+                          }}
+                        >
+                          恢复默认
+                        </button>
+                      </div>
+                    </div>
+                    <p className="mt-1 text-[11px] text-text-subtle">
+                      会用于 IM 风格聊天中的用户消息头像。仅本机生效，保存在本地浏览器存储。
+                    </p>
+                    {userAvatarMessage ? (
+                      <p className="mt-1 text-[11px] text-text-subtle">{userAvatarMessage}</p>
+                    ) : null}
+                  </div>
+                  <div className="mt-4">
+                    <div className="text-sm text-text-muted">Machi 头像（Meta-Agent）</div>
+                    <div className="mt-2 flex items-center gap-3">
+                      {metaAvatarUrl ? (
+                        <img
+                          src={metaAvatarUrl}
+                          alt="Machi 头像"
+                          className="h-12 w-12 rounded-full border border-border object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-gradient-to-br from-cyan-500 to-blue-600 text-sm font-semibold text-white">
+                          M
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong">
+                          上传图片
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleProfileAvatarUpload(file, "meta");
+                              e.currentTarget.value = "";
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
+                          disabled={!metaAvatarUrl}
+                          onClick={() => {
+                            setMetaAvatarUrl("");
+                            setMetaAvatarMessage("已恢复默认 Machi 头像。");
+                          }}
+                        >
+                          恢复默认
+                        </button>
+                      </div>
+                    </div>
+                    <p className="mt-1 text-[11px] text-text-subtle">
+                      仅本机生效，保存在本地浏览器存储。建议使用小于 1.8MB 的方形图片。
+                    </p>
+                    {metaAvatarMessage ? (
+                      <p className="mt-1 text-[11px] text-text-subtle">{metaAvatarMessage}</p>
+                    ) : null}
+                  </div>
                   <label className="mt-4 block text-sm text-text-muted">
                     个人偏好与风格
                     <textarea

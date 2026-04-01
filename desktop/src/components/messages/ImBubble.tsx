@@ -21,6 +21,7 @@ type Props = {
   assistantName?: string;
   assistantAvatarUrl?: string;
   userName?: string;
+  userAvatarUrl?: string;
   onCopyMessage?: (message: Message) => void;
   onQuoteMessage?: (message: Message, selectedText?: string) => void;
   onFavoriteMessage?: (message: Message, selectedText?: string) => void;
@@ -126,6 +127,7 @@ export function ImBubble({
   assistantName,
   assistantAvatarUrl,
   userName,
+  userAvatarUrl,
   onCopyMessage,
   onQuoteMessage,
   onFavoriteMessage,
@@ -137,7 +139,7 @@ export function ImBubble({
 }: Props) {
   const isUser = message.role === "user";
   const displayName = isUser ? (userName || "我") : (assistantName || "AI");
-  const avatarUrl = isUser ? undefined : assistantAvatarUrl;
+  const avatarUrl = isUser ? userAvatarUrl : assistantAvatarUrl;
   const isStreaming = message.id === "__stream__";
   const isGroupTyping = !isUser && typeof message.id === "string" && message.id.startsWith("typing-");
   const parsed = !isUser ? parseReasoningContent(message.content) : null;

@@ -73,6 +73,7 @@ export function AvatarSidebar() {
   const groups = useAppStore((s) => s.groups);
   const setGroups = useAppStore((s) => s.setGroups);
   const openSettings = useAppStore((s) => s.openSettings);
+  const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
   const [createOpen, setCreateOpen] = useState(false);
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
   const [groupEditTarget, setGroupEditTarget] = useState<GroupChat | null>(null);
@@ -335,9 +336,17 @@ export function AvatarSidebar() {
             setContextMenu({ x: e.clientX, y: e.clientY, target: "machi" });
           }}
         >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 text-xs font-bold text-white">
-            M
-          </div>
+          {metaAvatarUrl ? (
+            <img
+              src={metaAvatarUrl}
+              alt="Machi"
+              className="h-8 w-8 shrink-0 rounded-full object-cover"
+            />
+          ) : (
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 text-xs font-bold text-white">
+              M
+            </div>
+          )}
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium">Machi</div>
             <div className="truncate text-[10px] text-text-faint">全局调度</div>
