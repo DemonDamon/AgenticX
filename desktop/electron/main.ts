@@ -117,6 +117,9 @@ type SkillInstallPolicyConfig = {
 
 const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.yaml");
+const WORKSPACE_DIR = path.join(CONFIG_DIR, "workspace");
+const META_SOUL_PATH = path.join(WORKSPACE_DIR, "SOUL.md");
+const AVATARS_DIR = path.join(CONFIG_DIR, "avatars");
 const FEISHU_BINDING_PATH = path.join(CONFIG_DIR, "feishu_binding.json");
 const FEISHU_DESKTOP_BINDING_KEY = "_desktop";
 const EMAIL_CONFIG_KEYS = new Set([
@@ -222,6 +225,32 @@ function loadAgxConfig(): AgxConfig {
 function saveAgxConfig(cfg: AgxConfig): void {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_PATH, yaml.dump(cfg, { lineWidth: -1 }), "utf-8");
+}
+
+function loadSoulFile(pathName: string): string {
+  try {
+    return fs.readFileSync(pathName, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
+function saveSoulFile(pathName: string, content: string): void {
+  fs.mkdirSync(path.dirname(pathName), { recursive: true });
+  fs.writeFileSync(pathName, content, "utf-8");
+}
+
+function resolveAvatarSoulPath(avatarId: string): string {
+  const id = String(avatarId || "").trim();
+  if (!id || !/^[a-zA-Z0-9._-]+$/.test(id)) {
+    throw new Error("invalid avatar id");
+  }
+  const root = path.resolve(AVATARS_DIR);
+  const target = path.resolve(path.join(AVATARS_DIR, id, "SOUL.md"));
+  if (!target.startsWith(root + path.sep)) {
+    throw new Error("avatar soul path outside root");
+  }
+  return target;
 }
 
 function normalizeEmailConfig(input: unknown): EmailConfig {
@@ -375,6 +404,8 @@ let isQuitting = false;
 let serveStdoutBuffer = "";
 let serveStderrBuffer = "";
 let remoteConfig: ResolvedRemoteConfig | null = null;
+let skillsDirWatchers: fs.FSWatcher[] = [];
+let skillsChangedDebounceTimer: NodeJS.Timeout | null = null;
 
 function loadRemoteConfig(): ResolvedRemoteConfig | null {
   const cfg = loadAgxConfig();
@@ -407,6 +438,73 @@ function getStudioUrl(): string {
 
 function getStudioToken(): string {
   return remoteConfig ? remoteConfig.token : apiToken;
+}
+
+function emitSkillsChanged(): void {
+  if (skillsChangedDebounceTimer) {
+    clearTimeout(skillsChangedDebounceTimer);
+  }
+  skillsChangedDebounceTimer = setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("skills-changed");
+    }
+  }, 300);
+}
+
+function buildSkillWatchRoots(): string[] {
+  const roots = [
+    path.join(CONFIG_DIR, "skills"),
+    path.join(os.homedir(), ".agents", "skills"),
+    path.join(os.homedir(), ".agent", "skills"),
+    path.join(os.homedir(), ".claude", "skills"),
+    path.join(os.homedir(), ".cursor", "skills"),
+    path.join(process.cwd(), ".agents", "skills"),
+    path.join(process.cwd(), ".agent", "skills"),
+    path.join(process.cwd(), ".claude", "skills"),
+  ];
+  const dedup = new Set<string>();
+  for (const root of roots) {
+    dedup.add(path.resolve(root));
+  }
+  return Array.from(dedup);
+}
+
+function startSkillsDirWatcher(): void {
+  if (skillsDirWatchers.length > 0) return;
+  for (const watchRoot of buildSkillWatchRoots()) {
+    fs.mkdirSync(watchRoot, { recursive: true });
+    try {
+      const one = fs.watch(
+        watchRoot,
+        { recursive: true },
+        (_eventType, filename) => {
+          const name = String(filename || "");
+          if (!name || !name.endsWith("SKILL.md")) return;
+          emitSkillsChanged();
+        },
+      );
+      skillsDirWatchers.push(one);
+    } catch (err) {
+      console.warn("[main] skills watcher start failed:", watchRoot, err);
+    }
+  }
+}
+
+function stopSkillsDirWatcher(): void {
+  if (skillsChangedDebounceTimer) {
+    clearTimeout(skillsChangedDebounceTimer);
+    skillsChangedDebounceTimer = null;
+  }
+  if (skillsDirWatchers.length > 0) {
+    try {
+      for (const one of skillsDirWatchers) {
+        one.close();
+      }
+    } catch {
+      /* noop */
+    }
+    skillsDirWatchers = [];
+  }
 }
 
 // Suppress noisy Chromium network diagnostics
@@ -1958,10 +2056,18 @@ function registerIpc(): void {
     "put-skill-settings",
     async (
       _event,
-      payload: { presetPaths: Array<{ id: string; enabled: boolean }>; customPaths: string[] },
+      payload: {
+        presetPaths: Array<{ id: string; enabled: boolean }>;
+        customPaths: string[];
+        preferredSources?: Record<string, string>;
+      },
     ) => {
       const preset_paths = Array.isArray(payload?.presetPaths) ? payload.presetPaths : [];
       const custom_paths = Array.isArray(payload?.customPaths) ? payload.customPaths : [];
+      const preferred_sources =
+        payload?.preferredSources && typeof payload.preferredSources === "object"
+          ? payload.preferredSources
+          : {};
       try {
         const resp = await fetch(`${getStudioUrl()}/api/skills/settings`, {
           method: "PUT",
@@ -1969,7 +2075,7 @@ function registerIpc(): void {
             "Content-Type": "application/json",
             "x-agx-desktop-token": getStudioToken(),
           },
-          body: JSON.stringify({ preset_paths, custom_paths }),
+          body: JSON.stringify({ preset_paths, custom_paths, preferred_sources }),
         });
         if (!resp.ok) {
           const body = await resp.text().catch(() => "");
@@ -2199,6 +2305,42 @@ function registerIpc(): void {
     return { ok: true };
   });
 
+  ipcMain.handle("load-meta-soul", async () => {
+    try {
+      return { ok: true, content: loadSoulFile(META_SOUL_PATH) };
+    } catch (err) {
+      return { ok: false, content: "", error: String(err) };
+    }
+  });
+
+  ipcMain.handle("save-meta-soul", async (_event, payload: { content?: string }) => {
+    try {
+      saveSoulFile(META_SOUL_PATH, String(payload?.content ?? ""));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("load-avatar-soul", async (_event, payload: { avatarId?: string }) => {
+    try {
+      const soulPath = resolveAvatarSoulPath(String(payload?.avatarId ?? ""));
+      return { ok: true, content: loadSoulFile(soulPath) };
+    } catch (err) {
+      return { ok: false, content: "", error: String(err) };
+    }
+  });
+
+  ipcMain.handle("save-avatar-soul", async (_event, payload: { avatarId?: string; content?: string }) => {
+    try {
+      const soulPath = resolveAvatarSoulPath(String(payload?.avatarId ?? ""));
+      saveSoulFile(soulPath, String(payload?.content ?? ""));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("load-skills", async () => {
     const studioUrl = getStudioUrl();
     try {
@@ -2230,7 +2372,9 @@ function registerIpc(): void {
         method: "POST",
         headers: { "x-agx-desktop-token": getStudioToken() },
       });
-      return await resp.json();
+      const data = await resp.json();
+      if (data?.ok) emitSkillsChanged();
+      return data;
     } catch (err) {
       return { ok: false, error: String(err), count: 0 };
     }
@@ -2308,6 +2452,19 @@ function registerIpc(): void {
     try {
       const params = new URLSearchParams({ q: args.q || "" });
       const resp = await fetch(`${studioUrl}/api/registry/search?${params.toString()}`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err), items: [], count: 0 };
+    }
+  });
+
+  ipcMain.handle("search-skillhub", async (_event, args: { q: string }) => {
+    const studioUrl = getStudioUrl();
+    try {
+      const params = new URLSearchParams({ q: args.q || "" });
+      const resp = await fetch(`${studioUrl}/api/registry/skillhub/search?${params.toString()}`, {
         headers: { "x-agx-desktop-token": getStudioToken() },
       });
       return await resp.json();
@@ -2559,6 +2716,7 @@ if (!gotTheLock) {
       registerIpc();
       applyPreventSleepFromConfig(loadAgxConfig());
       createWindow();
+      startSkillsDirWatcher();
       createTray();
     } catch (error) {
       await dialog.showErrorBox(
@@ -2582,6 +2740,7 @@ if (!gotTheLock) {
 
   app.on("before-quit", () => {
     isQuitting = true;
+    stopSkillsDirWatcher();
     killAllTerminalSessions();
     stopFeishuProcess();
     stopStudioServe();

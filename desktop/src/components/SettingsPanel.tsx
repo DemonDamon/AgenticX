@@ -18,6 +18,8 @@ import {
 import { Panel } from "./ds/Panel";
 import type { Avatar, ChatPane, ChatStyle, GroupChat } from "../store";
 import { useAppStore } from "../store";
+import { RECOMMENDED_SKILLS } from "../data/recommended-skills";
+import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
 
@@ -102,11 +104,23 @@ type TrinityConfigForm = {
 };
 
 type SkillItem = {
+  skill_id?: string;
   name: string;
   description: string;
   location: string;
   base_dir?: string;
   source?: string;
+  tag?: string;
+  icon?: string;
+  content_hash?: string;
+  conflict_count?: number;
+  variants?: Array<{
+    skill_id?: string;
+    source?: string;
+    base_dir?: string;
+    location?: string;
+    content_hash?: string;
+  }>;
 };
 
 type SkillScanPresetRow = {
@@ -200,15 +214,31 @@ function SkillRowButton({
   detail,
   recentMarketSkillName,
   locationLabel,
+  preferredSource,
+  onChoosePreferredSource,
   onViewDetail,
 }: {
   skill: SkillItem;
   detail: { name: string; content: string } | null;
   recentMarketSkillName: string | null;
   locationLabel: "全局" | "项目";
+  preferredSource?: string;
+  onChoosePreferredSource: (name: string, source: string) => void;
   onViewDetail: (name: string) => void;
 }) {
   const src = skillSourceBadge(effectiveSkillSource(skill));
+  const conflictCount = Number(skill.conflict_count ?? 0);
+  const variants = Array.isArray(skill.variants) ? skill.variants : [];
+  const uniqueSources = Array.from(
+    new Set(
+      variants
+        .map((v) => String(v?.source ?? "").trim())
+        .filter(Boolean),
+    ),
+  );
+  const selectedSource = preferredSource && uniqueSources.includes(preferredSource)
+    ? preferredSource
+    : effectiveSkillSource(skill);
   const locClass =
     locationLabel === "项目"
       ? "shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400"
@@ -234,9 +264,44 @@ function SkillRowButton({
         )}
         <span className={src.className}>{src.label}</span>
         <span className={locClass}>{locationLabel}</span>
+        {skill.tag ? (
+          <span className="shrink-0 rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 text-[10px] text-violet-300">
+            {skill.tag}
+          </span>
+        ) : null}
+        {skill.icon ? (
+          <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
+            icon:{skill.icon}
+          </span>
+        ) : null}
+        {conflictCount > 1 ? (
+          <span className="shrink-0 rounded-full border border-rose-500/30 bg-rose-500/10 px-1.5 text-[10px] text-rose-300">
+            同名冲突({conflictCount})
+          </span>
+        ) : null}
       </div>
       {skill.description ? (
         <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
+      ) : null}
+      {conflictCount > 1 ? (
+        <div className="mt-1.5 flex items-center gap-2 text-[11px] text-text-faint">
+          <span>默认来源</span>
+          <select
+            className="rounded border border-border bg-surface-panel px-1.5 py-0.5 text-[11px] text-text-primary"
+            value={selectedSource}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              e.stopPropagation();
+              onChoosePreferredSource(skill.name, e.target.value);
+            }}
+          >
+            {uniqueSources.map((source) => (
+              <option key={`${skill.name}:${source}`} value={source}>
+                {skillSourceBadge(source).label}
+              </option>
+            ))}
+          </select>
+        </div>
       ) : null}
     </button>
   );
@@ -248,6 +313,8 @@ function SkillsLocationSection({
   locationLabel,
   detail,
   recentMarketSkillName,
+  preferredSources,
+  onChoosePreferredSource,
   onViewDetail,
 }: {
   skills: SkillItem[];
@@ -255,25 +322,44 @@ function SkillsLocationSection({
   locationLabel: "全局" | "项目";
   detail: { name: string; content: string } | null;
   recentMarketSkillName: string | null;
+  preferredSources: Record<string, string>;
+  onChoosePreferredSource: (name: string, source: string) => void;
   onViewDetail: (name: string) => void;
 }) {
   if (skills.length === 0) return null;
+  const PREVIEW_COUNT = 10;
+  const [expanded, setExpanded] = useState(false);
+  const shouldCollapse = skills.length > PREVIEW_COUNT;
+  const visibleSkills = expanded || !shouldCollapse ? skills : skills.slice(0, PREVIEW_COUNT);
+  const remaining = Math.max(0, skills.length - visibleSkills.length);
+
   return (
     <div>
       <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
         {title} ({skills.length})
       </div>
       <div className="space-y-1">
-        {skills.map((skill) => (
+        {visibleSkills.map((skill) => (
           <SkillRowButton
             key={skill.name}
             skill={skill}
             detail={detail}
             recentMarketSkillName={recentMarketSkillName}
             locationLabel={locationLabel}
+            preferredSource={preferredSources[skill.name]}
+            onChoosePreferredSource={onChoosePreferredSource}
             onViewDetail={onViewDetail}
           />
         ))}
+        {shouldCollapse ? (
+          <button
+            type="button"
+            className="w-full rounded-md border border-border bg-surface-panel px-2.5 py-2 text-left text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? "Show less" : `Show all (${remaining} more)`}
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -296,6 +382,16 @@ type RegistrySearchItem = {
   author: string;
   source: string;
   source_type: string;
+};
+
+/** Matches SkillHubSearchResult.items from preload / agx serve. */
+type SkillHubRow = {
+  slug: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  downloads?: string | number;
 };
 
 type Props = {
@@ -610,12 +706,24 @@ function SkillsTab() {
   const [recentMarketSkillName, setRecentMarketSkillName] = useState<string | null>(null);
   const [skillScanPresets, setSkillScanPresets] = useState<SkillScanPresetRow[]>([]);
   const [skillScanCustomPaths, setSkillScanCustomPaths] = useState<string[]>([]);
+  const [preferredSkillSources, setPreferredSkillSources] = useState<Record<string, string>>({});
   const [skillScanBusy, setSkillScanBusy] = useState(false);
   const [skillScanMsg, setSkillScanMsg] = useState("");
   const [builtinSkillsExpanded, setBuiltinSkillsExpanded] = useState(false);
   const marketSearchSeqRef = useRef(0);
   const marketInstallQueueRef = useRef<RegistrySearchItem[]>([]);
   const skillsListAnchorRef = useRef<HTMLDivElement | null>(null);
+
+  const addPane = useAppStore((s) => s.addPane);
+  const setForwardAutoReply = useAppStore((s) => s.setForwardAutoReply);
+  const closeSettings = useAppStore((s) => s.closeSettings);
+
+  const [installPromptBusy, setInstallPromptBusy] = useState(false);
+  const [skillhubQuery, setSkillhubQuery] = useState("");
+  const [skillhubResults, setSkillhubResults] = useState<SkillHubRow[]>([]);
+  const [skillhubLoading, setSkillhubLoading] = useState(false);
+  const [skillhubMsg, setSkillhubMsg] = useState("");
+  const [skillhubHint, setSkillhubHint] = useState("");
 
   useEffect(() => {
     setBundleNeedsConfirmNonHigh(false);
@@ -651,6 +759,9 @@ function SkillsTab() {
           if (scanRes.ok && Array.isArray(scanRes.custom_paths)) {
             setSkillScanCustomPaths([...scanRes.custom_paths]);
           }
+          if (scanRes.ok && scanRes.preferred_sources && typeof scanRes.preferred_sources === "object") {
+            setPreferredSkillSources({ ...scanRes.preferred_sources });
+          }
         }
       } catch (e) {
         if (!cancelled) setErr(String(e));
@@ -664,12 +775,29 @@ function SkillsTab() {
   }, []);
 
   useEffect(() => {
+    const off = window.agenticxDesktop.onSkillsChanged(() => {
+      void (async () => {
+        const skillsRes = await window.agenticxDesktop.loadSkills();
+        if (skillsRes.ok) {
+          setItems(skillsRes.items ?? []);
+          setErr("");
+        }
+      })();
+    });
+    return () => off();
+  }, []);
+
+  useEffect(() => {
     if (!recentMarketSkillName) return;
     skillsListAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [recentMarketSkillName]);
 
   const persistSkillScanSettings = useCallback(
-    async (presetRows: SkillScanPresetRow[], customs: string[]) => {
+    async (
+      presetRows: SkillScanPresetRow[],
+      customs: string[],
+      preferredSources: Record<string, string>,
+    ) => {
       setSkillScanBusy(true);
       setSkillScanMsg("");
       try {
@@ -677,6 +805,7 @@ function SkillsTab() {
         const r = await window.agenticxDesktop.putSkillSettings({
           presetPaths: presetRows.map((p) => ({ id: p.id, enabled: p.enabled })),
           customPaths: cleanedCustom,
+          preferredSources,
         });
         if (r.ok) {
           if (Array.isArray(r.preset_paths)) {
@@ -691,6 +820,9 @@ function SkillsTab() {
           }
           if (Array.isArray(r.custom_paths)) {
             setSkillScanCustomPaths([...r.custom_paths]);
+          }
+          if (r.preferred_sources && typeof r.preferred_sources === "object") {
+            setPreferredSkillSources({ ...r.preferred_sources });
           }
           setSkillScanMsg("已保存扫描路径");
           await window.agenticxDesktop.refreshSkills();
@@ -737,11 +869,20 @@ function SkillsTab() {
       if (scanRes.ok && Array.isArray(scanRes.custom_paths)) {
         setSkillScanCustomPaths([...scanRes.custom_paths]);
       }
+      if (scanRes.ok && scanRes.preferred_sources && typeof scanRes.preferred_sources === "object") {
+        setPreferredSkillSources({ ...scanRes.preferred_sources });
+      }
     } catch (e) {
       setErr(String(e));
     } finally {
       setLoading(false);
     }
+  };
+
+  const choosePreferredSource = async (skillName: string, source: string) => {
+    const next = { ...preferredSkillSources, [skillName]: source };
+    setPreferredSkillSources(next);
+    await persistSkillScanSettings(skillScanPresets, skillScanCustomPaths, next);
   };
 
   const reloadSkillsAndBundles = async () => {
@@ -769,6 +910,75 @@ function SkillsTab() {
     );
     const pinName = byRegistryPath?.name ?? list.find((s) => s.name === installedSlug)?.name ?? installedSlug;
     setRecentMarketSkillName(pinName);
+  };
+
+  const runInstallPromptInMetaAgent = useCallback(
+    async (prompt: string) => {
+      const text = prompt.trim();
+      if (!text) return;
+      setSkillhubMsg("");
+      setInstallPromptBusy(true);
+      try {
+        const created = await window.agenticxDesktop.createSession({});
+        if (!created.ok || !created.session_id) {
+          const err = created.error ?? "创建 Meta-Agent 会话失败";
+          setSkillhubMsg(err);
+          return;
+        }
+        const sid = created.session_id;
+        const paneId = addPane(null, "Machi", sid);
+        setForwardAutoReply({ paneId, sessionId: sid, text });
+        closeSettings();
+      } catch (e) {
+        const msg = String(e);
+        setSkillhubMsg(msg);
+      } finally {
+        setInstallPromptBusy(false);
+      }
+    },
+    [addPane, setForwardAutoReply, closeSettings],
+  );
+
+  const onSkillHubMarketInstall = (slug: string) => {
+    const prompt = buildSkillHubAgentInstallPrompt(slug);
+    if (!prompt.trim()) return;
+    void runInstallPromptInMetaAgent(prompt);
+  };
+
+  const onSkillHubSearch = async () => {
+    setSkillhubLoading(true);
+    setSkillhubMsg("");
+    setSkillhubHint("");
+    try {
+      const res = await window.agenticxDesktop.searchSkillHub({ q: skillhubQuery });
+      if (!res.ok) {
+        setSkillhubResults([]);
+        setSkillhubMsg(res.error || "搜索失败");
+        return;
+      }
+      const raw = Array.isArray(res.items) ? res.items : [];
+      const rows: SkillHubRow[] = [];
+      for (const row of raw) {
+        const r = row as SkillHubRow;
+        const slug = String(r.slug || r.name || "").trim();
+        if (!slug) continue;
+        rows.push({
+          slug,
+          name: String(r.name || slug).trim() || slug,
+          description: String(r.description || "").trim(),
+          version: String(r.version || "latest"),
+          author: String(r.author || "unknown"),
+          downloads: r.downloads,
+        });
+      }
+      setSkillhubResults(rows);
+      setSkillhubHint(typeof res.hint === "string" ? res.hint : "");
+    } catch (e) {
+      setSkillhubResults([]);
+      setSkillhubMsg(String(e));
+    } finally {
+      setSkillhubLoading(false);
+    }
   };
 
   const onInstallBundle = async () => {
@@ -1111,7 +1321,7 @@ function SkillsTab() {
                     row.id === p.id ? { ...row, enabled: next } : row,
                   );
                   setSkillScanPresets(updated);
-                  void persistSkillScanSettings(updated, skillScanCustomPaths);
+                  void persistSkillScanSettings(updated, skillScanCustomPaths, preferredSkillSources);
                 }}
               />
             </div>
@@ -1134,7 +1344,7 @@ function SkillsTab() {
                 onBlur={(e) => {
                   const next = [...skillScanCustomPaths];
                   next[i] = e.target.value;
-                  void persistSkillScanSettings(skillScanPresets, next);
+                  void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources);
                 }}
               />
               <button
@@ -1145,7 +1355,7 @@ function SkillsTab() {
                 onClick={() => {
                   const next = skillScanCustomPaths.filter((_, j) => j !== i);
                   setSkillScanCustomPaths(next);
-                  void persistSkillScanSettings(skillScanPresets, next);
+                  void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources);
                 }}
               >
                 <Trash2 className="h-4 w-4" />
@@ -1234,6 +1444,8 @@ function SkillsTab() {
               locationLabel="全局"
               detail={detail}
               recentMarketSkillName={recentMarketSkillName}
+              preferredSources={preferredSkillSources}
+              onChoosePreferredSource={choosePreferredSource}
               onViewDetail={onViewDetail}
             />
             <SkillsLocationSection
@@ -1242,6 +1454,8 @@ function SkillsTab() {
               locationLabel="项目"
               detail={detail}
               recentMarketSkillName={recentMarketSkillName}
+              preferredSources={preferredSkillSources}
+              onChoosePreferredSource={choosePreferredSource}
               onViewDetail={onViewDetail}
             />
           </>
@@ -1253,6 +1467,8 @@ function SkillsTab() {
               locationLabel="项目"
               detail={detail}
               recentMarketSkillName={recentMarketSkillName}
+              preferredSources={preferredSkillSources}
+              onChoosePreferredSource={choosePreferredSource}
               onViewDetail={onViewDetail}
             />
             <SkillsLocationSection
@@ -1261,6 +1477,8 @@ function SkillsTab() {
               locationLabel="全局"
               detail={detail}
               recentMarketSkillName={recentMarketSkillName}
+              preferredSources={preferredSkillSources}
+              onChoosePreferredSource={choosePreferredSource}
               onViewDetail={onViewDetail}
             />
           </>
@@ -1287,6 +1505,8 @@ function SkillsTab() {
                     detail={detail}
                     recentMarketSkillName={recentMarketSkillName}
                     locationLabel={effectiveSkillLocation(skill) === "project" ? "项目" : "全局"}
+                    preferredSource={preferredSkillSources[skill.name]}
+                    onChoosePreferredSource={choosePreferredSource}
                     onViewDetail={onViewDetail}
                   />
                 ))}
@@ -1296,10 +1516,58 @@ function SkillsTab() {
         )}
       </div>
 
-      {/* === Marketplace Browser === */}
+      {/* === Recommended official shortcuts === */}
       <div className="mt-4 border-t border-border pt-4">
         <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-          浏览市场
+          推荐
+        </div>
+        <p className="mb-2 text-xs text-text-faint">
+          以下为各产品官网入口，技能由对应提供方提供。请点击官网查看最新安装说明与授权要求。
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {RECOMMENDED_SKILLS.map((skill) => (
+            <div
+              key={skill.id}
+              className="flex flex-col rounded-md border border-border bg-surface-card px-3 py-2.5 transition hover:bg-surface-hover/40"
+            >
+              <div className="flex items-start gap-2">
+                <img
+                  src={skill.icon_src}
+                  alt={`${skill.name} 图标`}
+                  className="h-9 w-9 shrink-0 rounded-md border border-border/70 bg-white object-cover"
+                  loading="lazy"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-sm font-medium text-text-primary">{skill.name}</span>
+                    <span className="shrink-0 rounded-full border border-border px-1.5 text-[10px] text-text-faint">
+                      {skill.provider}
+                    </span>
+                    <span className="shrink-0 rounded-full border border-border/80 px-1.5 text-[10px] text-text-muted">
+                      {skill.category}
+                    </span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-xs text-text-muted">{skill.description}</p>
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-md border border-border px-2.5 py-1 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+                  onClick={() => window.open(skill.official_url, "_blank", "noopener,noreferrer")}
+                >
+                  官网 ↗
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* === ClawHub marketplace (registry aggregate) === */}
+      <div className="mt-4 border-t border-border pt-4">
+        <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+          ClawHub 市场
         </div>
         <div className="flex gap-2">
           <input
@@ -1403,6 +1671,105 @@ function SkillsTab() {
                       ? "排队中…"
                       : "安装"}
                 </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* === SkillHub (Tencent) marketplace === */}
+      <div className="mt-4 border-t border-border pt-4">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+            SkillHub 市场
+          </div>
+          <button
+            type="button"
+            className="text-[11px] text-text-faint underline decoration-border underline-offset-2 transition hover:text-[var(--settings-accent-fg)]"
+            onClick={() => window.open("https://skillhub.tencent.com/", "_blank", "noopener,noreferrer")}
+          >
+            skillhub.tencent.com ↗
+          </button>
+        </div>
+        <p className="mb-2 text-xs text-text-faint">
+          搜索由本机 SkillHub CLI（若已安装）或已配置的 ClawHub 注册表提供；安装将跳转 Meta-Agent 会话并下发 SkillHub 官方安装指引中的指令。
+        </p>
+        <div className="flex gap-2">
+          <input
+            className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
+            placeholder="搜索 SkillHub 技能名称或关键词..."
+            value={skillhubQuery}
+            onChange={(e) => setSkillhubQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void onSkillHubSearch();
+            }}
+          />
+          <button
+            type="button"
+            className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+            onClick={() => void onSkillHubSearch()}
+            disabled={skillhubLoading}
+          >
+            {skillhubLoading ? "搜索中..." : "搜索"}
+          </button>
+        </div>
+        {skillhubMsg && (
+          <div
+            className={`mt-1.5 whitespace-pre-wrap text-xs ${
+              skillhubMsg.includes("失败") ? "text-amber-400" : "text-rose-400"
+            }`}
+          >
+            {skillhubMsg}
+          </div>
+        )}
+        {skillhubHint && (
+          <div className="mt-1.5 text-xs text-text-faint">{skillhubHint}</div>
+        )}
+        {skillhubResults.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {skillhubResults.map((item) => (
+              <div
+                key={item.slug}
+                className="flex items-start gap-2 rounded-md border border-border bg-surface-card px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="truncate text-sm font-medium text-text-primary">{item.name}</span>
+                    <span className="shrink-0 rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 text-[10px] text-sky-400">
+                      SkillHub
+                    </span>
+                  </div>
+                  {item.description ? (
+                    <p className="mt-0.5 line-clamp-2 text-xs text-text-muted">{item.description}</p>
+                  ) : null}
+                  <p className="mt-0.5 text-[10px] text-text-faint">
+                    by {item.author} · v{item.version}
+                    {item.downloads != null && item.downloads !== "" ? ` · 下载 ${String(item.downloads)}` : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-col gap-1">
+                  <button
+                    type="button"
+                    className="rounded border border-[var(--settings-accent-border-muted)] px-2 py-0.5 text-[10px] text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
+                    disabled={installPromptBusy}
+                    onClick={() => onSkillHubMarketInstall(item.slug)}
+                  >
+                    安装
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-border px-2 py-0.5 text-[10px] text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+                    onClick={() =>
+                      window.open(
+                        `https://skillhub.tencent.com/skill/${encodeURIComponent(item.slug)}`,
+                        "_blank",
+                        "noopener,noreferrer",
+                      )
+                    }
+                  >
+                    详情 ↗
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -2689,6 +3056,9 @@ export function SettingsPanel({
   const [serverTestStatus, setServerTestStatus] = useState<"idle" | "testing" | "ok" | "fail">("idle");
   const [serverTestError, setServerTestError] = useState("");
   const [serverShowToken, setServerShowToken] = useState(false);
+  const [metaSoul, setMetaSoul] = useState("");
+  const [metaSoulSaving, setMetaSoulSaving] = useState(false);
+  const [metaSoulMessage, setMetaSoulMessage] = useState("");
 
   const [gwEnabled, setGwEnabled] = useState(false);
   const [gwUrl, setGwUrl] = useState("");
@@ -2795,6 +3165,7 @@ export function SettingsPanel({
     setModelHealthMap({});
     setShowModelPanel(false);
     setMcpMessage("");
+    setMetaSoulMessage("");
     setServerTestStatus("idle");
     setServerTestError("");
     void window.agenticxDesktop.loadRemoteServer().then((rs) => {
@@ -2814,8 +3185,32 @@ export function SettingsPanel({
       setFeishuAppId(lc.appId || "");
       setFeishuAppSecret(lc.appSecret || "");
     });
+    void window.agenticxDesktop.loadMetaSoul().then((res) => {
+      if (res?.ok) {
+        setMetaSoul(res.content || "");
+      } else {
+        setMetaSoul("");
+      }
+    });
     if (sessionId) void onRefreshMcp(sessionId);
   }, [open, providers, defaultProvider, sessionId, onRefreshMcp]);
+
+  const saveMetaSoul = useCallback(async () => {
+    setMetaSoulSaving(true);
+    setMetaSoulMessage("");
+    try {
+      const res = await window.agenticxDesktop.saveMetaSoul({ content: metaSoul });
+      if (res?.ok) {
+        setMetaSoulMessage("Meta-Agent SOUL 已保存。下一轮对话生效。");
+      } else {
+        setMetaSoulMessage(`保存失败: ${res?.error ?? "未知错误"}`);
+      }
+    } catch (err) {
+      setMetaSoulMessage(`保存失败: ${String(err)}`);
+    } finally {
+      setMetaSoulSaving(false);
+    }
+  }, [metaSoul]);
 
   useEffect(() => {
     if (!open || tab !== "mcp") return;
@@ -3087,6 +3482,37 @@ export function SettingsPanel({
                   <p className="mt-1 text-[11px] text-text-subtle">
                     {`${userPreference.length}/500 字。此偏好会注入到每次对话的系统提示中，对所有 agent 生效。`}
                   </p>
+                  <label className="mt-4 block text-sm text-text-muted">
+                    Meta-Agent SOUL（全局人格）
+                    <textarea
+                      className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
+                      rows={6}
+                      value={metaSoul}
+                      onChange={(e) => setMetaSoul(e.target.value)}
+                      placeholder={"写入 ~/.agenticx/workspace/SOUL.md。\n例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
+                    />
+                  </label>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
+                      disabled={metaSoulSaving}
+                      onClick={() => void saveMetaSoul()}
+                    >
+                      {metaSoulSaving ? "保存中..." : "保存 Meta SOUL"}
+                    </button>
+                    {metaSoulMessage ? (
+                      <span
+                        className={`text-xs ${
+                          metaSoulMessage.startsWith("Meta-Agent SOUL 已保存")
+                            ? "text-text-subtle"
+                            : "text-rose-400"
+                        }`}
+                      >
+                        {metaSoulMessage}
+                      </span>
+                    ) : null}
+                  </div>
                 </Panel>
                 <Panel title="权限">
                   <div className="mb-2 text-sm font-medium text-text-primary">工具执行权限模式</div>

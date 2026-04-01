@@ -69,6 +69,11 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   onOpenSettings: (cb: () => void): void => {
     ipcRenderer.on("open-settings", () => cb());
   },
+  onSkillsChanged: (cb: () => void): (() => void) => {
+    const handler = () => cb();
+    ipcRenderer.on("skills-changed", handler);
+    return () => ipcRenderer.removeListener("skills-changed", handler);
+  },
 
   listAvatars: async () => ipcRenderer.invoke("list-avatars"),
   createAvatar: async (payload: {
@@ -181,6 +186,11 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   deleteGroup: async (id: string) => ipcRenderer.invoke("delete-group", id),
 
   loadConfig: async () => ipcRenderer.invoke("load-config"),
+  loadMetaSoul: async () => ipcRenderer.invoke("load-meta-soul"),
+  saveMetaSoul: async (payload: { content: string }) => ipcRenderer.invoke("save-meta-soul", payload),
+  loadAvatarSoul: async (payload: { avatarId: string }) => ipcRenderer.invoke("load-avatar-soul", payload),
+  saveAvatarSoul: async (payload: { avatarId: string; content: string }) =>
+    ipcRenderer.invoke("save-avatar-soul", payload),
   loadComputerUseConfig: async () => ipcRenderer.invoke("load-computer-use-config"),
   saveComputerUseConfig: async (payload: { enabled: boolean }) =>
     ipcRenderer.invoke("save-computer-use-config", payload),
@@ -270,6 +280,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   putSkillSettings: async (payload: {
     presetPaths: Array<{ id: string; enabled: boolean }>;
     customPaths: string[];
+    preferredSources?: Record<string, string>;
   }) => ipcRenderer.invoke("put-skill-settings", payload),
 
   // Bundles
@@ -285,6 +296,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
 
   // Registry marketplace
   searchRegistry: async (args: { q: string }) => ipcRenderer.invoke("search-registry", args),
+  searchSkillHub: async (args: { q: string }) => ipcRenderer.invoke("search-skillhub", args),
   installFromRegistry: async (args: {
     source: string;
     name: string;
