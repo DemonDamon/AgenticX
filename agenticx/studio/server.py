@@ -2632,6 +2632,7 @@ def create_studio_app() -> FastAPI:
                 "ok": False,
                 "preset_paths": [],
                 "custom_paths": [],
+                "preferred_sources": {},
                 "error": str(exc),
             }
 
@@ -2644,6 +2645,7 @@ def create_studio_app() -> FastAPI:
         _check_token(x_agx_desktop_token)
         preset = payload.get("preset_paths")
         custom = payload.get("custom_paths")
+        preferred = payload.get("preferred_sources")
         if preset is not None and not isinstance(preset, list):
             raise HTTPException(
                 status_code=400, detail="preset_paths must be a list or omitted"
@@ -2651,6 +2653,10 @@ def create_studio_app() -> FastAPI:
         if custom is not None and not isinstance(custom, list):
             raise HTTPException(
                 status_code=400, detail="custom_paths must be a list or omitted"
+            )
+        if preferred is not None and not isinstance(preferred, dict):
+            raise HTTPException(
+                status_code=400, detail="preferred_sources must be a dict or omitted"
             )
         try:
             from agenticx.tools.skill_bundle import (
@@ -2661,6 +2667,7 @@ def create_studio_app() -> FastAPI:
             persist_skill_scan_settings(
                 list(preset) if isinstance(preset, list) else [],
                 list(custom) if isinstance(custom, list) else [],
+                dict(preferred) if isinstance(preferred, dict) else {},
             )
             return {"ok": True, **skill_scan_settings_payload()}
         except Exception as exc:
@@ -2680,11 +2687,26 @@ def create_studio_app() -> FastAPI:
             skills = loader.scan()
             items = [
                 {
+                    "skill_id": f"{getattr(s, 'source', 'unknown')}:{s.name}",
                     "name": s.name,
                     "description": s.description,
                     "location": s.location,
                     "base_dir": str(s.base_dir),
                     "source": s.source,
+                    "tag": getattr(s, "tag", None),
+                    "icon": getattr(s, "icon", None),
+                    "content_hash": getattr(s, "content_hash", ""),
+                    "conflict_count": len(loader.get_skill_variants(s.name)),
+                    "variants": [
+                        {
+                            "skill_id": f"{getattr(v, 'source', 'unknown')}:{v.name}",
+                            "source": getattr(v, "source", "unknown"),
+                            "base_dir": str(getattr(v, "base_dir", "")),
+                            "location": getattr(v, "location", ""),
+                            "content_hash": getattr(v, "content_hash", ""),
+                        }
+                        for v in loader.get_skill_variants(s.name)
+                    ],
                 }
                 for s in skills
             ]
@@ -2869,6 +2891,21 @@ def create_studio_app() -> FastAPI:
             return {"ok": True, "items": [r.to_dict() for r in results], "count": len(results)}
         except Exception as exc:
             logger.warning("registry_search error: %s", exc)
+            return {"ok": False, "items": [], "count": 0, "error": str(exc)}
+
+    @app.get("/api/registry/skillhub/search")
+    async def registry_skillhub_search(
+        q: str = "",
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Search Tencent SkillHub market (CLI or ClawHub mirror fallback)."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.extensions.skillhub_adapter import search_skillhub_market
+
+            return search_skillhub_market(q)
+        except Exception as exc:
+            logger.warning("registry_skillhub_search error: %s", exc)
             return {"ok": False, "items": [], "count": 0, "error": str(exc)}
 
     @app.post("/api/registry/install-preview")

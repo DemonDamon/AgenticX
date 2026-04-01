@@ -141,11 +141,23 @@ type McpStatusResult = {
 };
 
 type SkillItem = {
+  skill_id?: string;
   name: string;
   description: string;
   location: string;
   base_dir?: string;
   source?: string;
+  tag?: string;
+  icon?: string;
+  content_hash?: string;
+  conflict_count?: number;
+  variants?: Array<{
+    skill_id?: string;
+    source?: string;
+    base_dir?: string;
+    location?: string;
+    content_hash?: string;
+  }>;
 };
 type SkillListResult = { ok: boolean; items: SkillItem[]; count: number; error?: string };
 type SkillScanPresetRow = { id: string; label: string; path: string; enabled: boolean };
@@ -153,6 +165,7 @@ type SkillSettingsResult = {
   ok: boolean;
   preset_paths?: SkillScanPresetRow[];
   custom_paths?: string[];
+  preferred_sources?: Record<string, string>;
   error?: string;
 };
 type SkillDetailResult = {
@@ -203,6 +216,24 @@ type RegistrySearchItem = {
   install_hint: string;
 };
 type RegistrySearchResult = { ok: boolean; items: RegistrySearchItem[]; count: number; error?: string };
+
+type SkillHubSearchItem = {
+  slug: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  downloads?: string | number;
+};
+type SkillHubSearchResult = {
+  ok: boolean;
+  items: SkillHubSearchItem[];
+  count?: number;
+  source?: string;
+  hint?: string;
+  error?: string;
+};
+
 type RegistryInstallResult = {
   ok: boolean;
   name?: string;
@@ -256,6 +287,7 @@ declare global {
         avatarName?: string | null;
       }) => Promise<{ ok: boolean }>;
       onOpenSettings: (cb: () => void) => void;
+      onSkillsChanged: (cb: () => void) => () => void;
 
       listAvatars: () => Promise<{ ok: boolean; avatars: AvatarItem[] }>;
       createAvatar: (payload: {
@@ -333,6 +365,13 @@ declare global {
       deleteGroup: (id: string) => Promise<{ ok: boolean; error?: string }>;
 
       loadConfig: () => Promise<LoadConfigResult>;
+      loadMetaSoul: () => Promise<{ ok: boolean; content: string; error?: string }>;
+      saveMetaSoul: (payload: { content: string }) => Promise<{ ok: boolean; error?: string }>;
+      loadAvatarSoul: (payload: { avatarId: string }) => Promise<{ ok: boolean; content: string; error?: string }>;
+      saveAvatarSoul: (payload: {
+        avatarId: string;
+        content: string;
+      }) => Promise<{ ok: boolean; error?: string }>;
       loadComputerUseConfig: () => Promise<{ ok: boolean; config?: ComputerUseConfig; error?: string }>;
       saveComputerUseConfig: (payload: ComputerUseConfig) => Promise<{ ok: boolean; error?: string }>;
       loadTrinityConfig: () => Promise<{ ok: boolean; config?: TrinityConfig; error?: string }>;
@@ -415,6 +454,7 @@ declare global {
       putSkillSettings: (payload: {
         presetPaths: Array<{ id: string; enabled: boolean }>;
         customPaths: string[];
+        preferredSources?: Record<string, string>;
       }) => Promise<SkillSettingsResult>;
 
       loadBundles: () => Promise<BundleListResult>;
@@ -427,6 +467,7 @@ declare global {
       uninstallBundle: (args: { name: string }) => Promise<BundleUninstallResult>;
 
       searchRegistry: (args: { q: string }) => Promise<RegistrySearchResult>;
+      searchSkillHub: (args: { q: string }) => Promise<SkillHubSearchResult>;
       installFromRegistry: (args: {
         source: string;
         name: string;

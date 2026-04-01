@@ -21,6 +21,7 @@ import os
 import platform
 import re
 import shutil
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
@@ -117,16 +118,28 @@ class SkillMetadata:
     location: str = "project"  # 'project' | 'global'
     source: str = "unknown"
     gate: SkillGate = field(default_factory=SkillGate)
+    tag: Optional[str] = None
+    icon: Optional[str] = None
+    examples: List[str] = field(default_factory=list)
+    requires: Dict[str, Any] = field(default_factory=dict)
+    content_hash: str = ""
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式。"""
+        skill_id = f"{self.source}:{self.name}" if self.source else self.name
         return {
+            "skill_id": skill_id,
             "name": self.name,
             "description": self.description,
             "base_dir": str(self.base_dir),
             "skill_md_path": str(self.skill_md_path),
             "location": self.location,
             "source": self.source,
+            "tag": self.tag,
+            "icon": self.icon,
+            "examples": list(self.examples),
+            "requires": dict(self.requires),
+            "content_hash": self.content_hash,
             "gate": {
                 "os": self.gate.os,
                 "requires_bins": self.gate.requires_bins,
@@ -166,6 +179,25 @@ SKILL_SCAN_PRESET_DEFAULTS: List[Dict[str, Any]] = [
         "enabled": False,
     },
 ]
+
+# Higher wins when duplicated skill names appear across roots.
+# This ensures explicit preset sources (e.g. Cursor/Claude) can override
+# earlier scanned mirror copies with the same `name`.
+_SKILL_SOURCE_PRIORITY: Dict[str, int] = {
+    "cursor": 100,
+    "claude": 95,
+    "agents": 90,
+    "agent_global": 80,
+    "project_agents": 70,
+    "project_agent": 65,
+    "agenticx": 60,
+    "registry": 55,
+    "bundle": 50,
+    "agent_created": 45,
+    "builtin": 40,
+    "custom": 10,
+    "unknown": 0,
+}
 
 # Substrings in normalized path (posix, lower); first match wins. More specific first.
 # Note: ``~/.agents/skills`` vs project ``./.agents/skills`` are distinguished in
@@ -290,12 +322,25 @@ def _normalize_custom_paths_from_config(raw: Any) -> List[str]:
     return out
 
 
-def get_skill_scan_settings_from_config() -> tuple[List[Dict[str, Any]], List[str]]:
+def _normalize_preferred_sources_from_config(raw: Any) -> Dict[str, str]:
+    if raw is None or not isinstance(raw, dict):
+        return {}
+    out: Dict[str, str] = {}
+    for key, value in raw.items():
+        name = str(key).strip()
+        source = str(value).strip()
+        if not name or not source:
+            continue
+        out[name] = source
+    return out
+
+
+def get_skill_scan_settings_from_config() -> tuple[List[Dict[str, Any]], List[str], Dict[str, str]]:
     """Read ``skills.preset_paths`` and ``skills.custom_paths`` from merged YAML."""
     try:
         from agenticx.cli.config_manager import ConfigManager
     except Exception:
-        return [dict(p) for p in SKILL_SCAN_PRESET_DEFAULTS], []
+        return [dict(p) for p in SKILL_SCAN_PRESET_DEFAULTS], [], {}
 
     merged_presets = _normalize_preset_paths_from_config(
         ConfigManager.get_value("skills.preset_paths")
@@ -305,7 +350,10 @@ def get_skill_scan_settings_from_config() -> tuple[List[Dict[str, Any]], List[st
     else:
         presets = merged_presets
     custom = _normalize_custom_paths_from_config(ConfigManager.get_value("skills.custom_paths"))
-    return presets, custom
+    preferred = _normalize_preferred_sources_from_config(
+        ConfigManager.get_value("skills.preferred_sources")
+    )
+    return presets, custom, preferred
 
 
 def build_skill_search_paths() -> List[Path]:
@@ -318,7 +366,7 @@ def build_skill_search_paths() -> List[Path]:
         Path.home() / ".agent" / "skills",
         _SKILL_PACKAGE_SKILLS_DIR,
     ]
-    presets, custom_strs = get_skill_scan_settings_from_config()
+    presets, custom_strs, _preferred = get_skill_scan_settings_from_config()
     extra: List[Path] = []
     agents_home_enabled = True
     for p in presets:
@@ -368,6 +416,7 @@ def build_skill_search_paths() -> List[Path]:
 def persist_skill_scan_settings(
     preset_paths: List[Dict[str, Any]],
     custom_paths: List[str],
+    preferred_sources: Optional[Dict[str, str]] = None,
 ) -> None:
     """Write skill scan settings to global config."""
     from agenticx.cli.config_manager import ConfigManager
@@ -393,14 +442,20 @@ def persist_skill_scan_settings(
             continue
         seen.add(t)
         custom_clean.append(t)
+    preferred_clean = _normalize_preferred_sources_from_config(preferred_sources or {})
     ConfigManager.set_value("skills.preset_paths", cleaned_presets)
     ConfigManager.set_value("skills.custom_paths", custom_clean)
+    ConfigManager.set_value("skills.preferred_sources", preferred_clean)
 
 
 def skill_scan_settings_payload() -> Dict[str, Any]:
     """API payload for GET /api/skills/settings."""
-    presets, custom = get_skill_scan_settings_from_config()
-    return {"preset_paths": presets, "custom_paths": custom}
+    presets, custom, preferred = get_skill_scan_settings_from_config()
+    return {
+        "preset_paths": presets,
+        "custom_paths": custom,
+        "preferred_sources": preferred,
+    }
 
 
 # =============================================================================
@@ -439,6 +494,7 @@ class SkillBundleLoader:
         execution_backend: Optional[Any] = None,
         registry_url: Optional[str] = None,
         config_watcher: Optional["ConfigWatcher"] = None,
+        preferred_sources: Optional[Dict[str, str]] = None,
     ):
         """
         初始化技能加载器。
@@ -455,7 +511,9 @@ class SkillBundleLoader:
         self.execution_backend = execution_backend
         self.registry_url = registry_url
         self.config_watcher = config_watcher
+        self.preferred_sources = dict(preferred_sources or {})
         self._skills: Dict[str, SkillMetadata] = {}
+        self._skill_variants: Dict[str, List[SkillMetadata]] = {}
         self._scanned = False
         self._watcher_hook_registered = False
 
@@ -472,8 +530,9 @@ class SkillBundleLoader:
         if self._scanned:
             return list(self._skills.values())
         
-        seen_names: set = set()
-        presets, _custom_paths = get_skill_scan_settings_from_config()
+        presets, _custom_paths, config_preferred_sources = get_skill_scan_settings_from_config()
+        preferred_sources = self.preferred_sources or config_preferred_sources
+        self._skill_variants.clear()
         disabled_roots: List[Path] = []
         disabled_sources: set[str] = set()
         preset_source_map: Dict[str, str] = {
@@ -593,10 +652,49 @@ class SkillBundleLoader:
                             )
                             continue
 
-                        # 去重
-                        if meta.name in seen_names:
-                            logger.debug(f"Skill '{meta.name}' already loaded, skipping: {cand_md}")
-                            continue
+                        variants = self._skill_variants.setdefault(meta.name, [])
+                        if not any(
+                            v.source == meta.source and str(v.base_dir) == str(meta.base_dir)
+                            for v in variants
+                        ):
+                            variants.append(meta)
+
+                        existing = self._skills.get(meta.name)
+                        if existing is not None:
+                            preferred_source = str(preferred_sources.get(meta.name, "")).strip()
+                            existing_is_preferred = bool(preferred_source) and existing.source == preferred_source
+                            incoming_is_preferred = bool(preferred_source) and meta.source == preferred_source
+                            if existing_is_preferred and not incoming_is_preferred:
+                                continue
+                            if incoming_is_preferred and not existing_is_preferred:
+                                logger.info(
+                                    "Skill '%s' duplicate replaced by preferred source=%s",
+                                    meta.name,
+                                    meta.source,
+                                )
+                            else:
+                                existing_pri = _SKILL_SOURCE_PRIORITY.get(
+                                    getattr(existing, "source", "unknown"),
+                                    0,
+                                )
+                                incoming_pri = _SKILL_SOURCE_PRIORITY.get(meta.source, 0)
+                                if incoming_pri <= existing_pri:
+                                    logger.debug(
+                                        "Skill '%s' duplicate kept existing source=%s (pri=%s), skip incoming source=%s (pri=%s): %s",
+                                        meta.name,
+                                        getattr(existing, "source", "unknown"),
+                                        existing_pri,
+                                        meta.source,
+                                        incoming_pri,
+                                        cand_md,
+                                    )
+                                    continue
+                                logger.info(
+                                    "Skill '%s' duplicate replaced source=%s -> %s",
+                                    meta.name,
+                                    getattr(existing, "source", "unknown"),
+                                    meta.source,
+                                )
 
                         # Gate check
                         if not self._check_gate(meta.gate):
@@ -606,7 +704,6 @@ class SkillBundleLoader:
                             )
                             continue
 
-                        seen_names.add(meta.name)
                         self._skills[meta.name] = meta
 
                         self._publish_discovery(meta)
@@ -667,8 +764,14 @@ class SkillBundleLoader:
             logger.warning(f"SKILL.md missing 'name' field: {skill_md}")
             return None
         
+        fm_text = self._extract_frontmatter(content)
         name = name_match.group(1).strip()
         description = desc_match.group(1).strip() if desc_match else ""
+        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        tag = self._parse_frontmatter_scalar(fm_text, "tag") or None
+        icon = self._parse_frontmatter_scalar(fm_text, "icon") or None
+        examples = self._parse_frontmatter_list(fm_text, "examples")
+        requires = self._parse_requires_from_frontmatter(fm_text)
         
         # --- Parse gate from metadata.agenticx.gate (OpenClaw-inspired) ---
         gate = self._parse_gate_from_frontmatter(content)
@@ -681,6 +784,11 @@ class SkillBundleLoader:
             location=location,
             source=infer_skill_source(base_dir),
             gate=gate,
+            tag=tag,
+            icon=icon,
+            examples=examples,
+            requires=requires,
+            content_hash=content_hash,
         )
     
     # -----------------------------------------------------------------
@@ -698,30 +806,75 @@ class SkillBundleLoader:
         gate = SkillGate()
 
         # Extract the frontmatter block
-        fm_match = re.match(r"^---\s*\n(.*?)\n---", content, re.DOTALL)
-        if not fm_match:
+        fm_text = SkillBundleLoader._extract_frontmatter(content)
+        if not fm_text:
             return gate
-        fm_text = fm_match.group(1)
 
-        def _parse_list(key: str) -> List[str]:
-            """Parse ``key: ["a", "b"]`` or ``key: [a, b]`` from frontmatter."""
-            m = re.search(rf"^\s*{key}\s*:\s*\[(.+?)\]", fm_text, re.MULTILINE)
-            if not m:
-                return []
-            raw = m.group(1)
-            return [v.strip().strip("\"'") for v in raw.split(",") if v.strip()]
-
-        gate.os = _parse_list("os")
-        gate.requires_bins = _parse_list("requires_bins")
-        gate.requires_any_bins = _parse_list("requires_any_bins")
-        gate.requires_env = _parse_list("requires_env")
-        gate.requires_config = _parse_list("requires_config")
+        gate.os = SkillBundleLoader._parse_frontmatter_list(fm_text, "os")
+        gate.requires_bins = SkillBundleLoader._parse_frontmatter_list(fm_text, "requires_bins")
+        gate.requires_any_bins = SkillBundleLoader._parse_frontmatter_list(
+            fm_text,
+            "requires_any_bins",
+        )
+        gate.requires_env = SkillBundleLoader._parse_frontmatter_list(fm_text, "requires_env")
+        gate.requires_config = SkillBundleLoader._parse_frontmatter_list(fm_text, "requires_config")
 
         always_match = re.search(r"^\s*always\s*:\s*(true|false)", fm_text, re.MULTILINE | re.IGNORECASE)
         if always_match:
             gate.always = always_match.group(1).lower() == "true"
 
         return gate
+
+    @staticmethod
+    def _extract_frontmatter(content: str) -> str:
+        """Return frontmatter body text (without delimiters)."""
+        fm_match = re.match(r"^---\s*\n(.*?)\n---", content, re.DOTALL)
+        if not fm_match:
+            return ""
+        return fm_match.group(1)
+
+    @staticmethod
+    def _parse_frontmatter_list(frontmatter: str, key: str) -> List[str]:
+        """Parse ``key: [a, b]`` style list from frontmatter."""
+        if not frontmatter:
+            return []
+        match = re.search(rf"^\s*{key}\s*:\s*\[(.+?)\]", frontmatter, re.MULTILINE)
+        if not match:
+            return []
+        raw = match.group(1)
+        return [item.strip().strip("\"'") for item in raw.split(",") if item.strip()]
+
+    @staticmethod
+    def _parse_frontmatter_scalar(frontmatter: str, key: str) -> str:
+        """Parse ``key: value`` scalar from frontmatter."""
+        if not frontmatter:
+            return ""
+        match = re.search(rf"^\s*{key}\s*:\s*(.+?)$", frontmatter, re.MULTILINE)
+        if not match:
+            return ""
+        return match.group(1).strip()
+
+    @staticmethod
+    def _parse_requires_from_frontmatter(frontmatter: str) -> Dict[str, Any]:
+        """Parse simple nested requires block from frontmatter."""
+        if not frontmatter:
+            return {}
+        match = re.search(
+            r"^\s*requires\s*:\s*\n((?:[ \t]+.+\n?)*)",
+            frontmatter,
+            re.MULTILINE,
+        )
+        if not match:
+            return {}
+        block = match.group(1)
+        tools = SkillBundleLoader._parse_frontmatter_list(block, "tools")
+        plugins = SkillBundleLoader._parse_frontmatter_list(block, "plugins")
+        out: Dict[str, Any] = {}
+        if tools:
+            out["tools"] = tools
+        if plugins:
+            out["plugins"] = plugins
+        return out
 
     @staticmethod
     def _check_gate(gate: SkillGate) -> bool:
@@ -898,8 +1051,15 @@ class SkillBundleLoader:
             已发现的技能元数据列表
         """
         self._skills.clear()
+        self._skill_variants.clear()
         self._scanned = False
         return self.scan()
+
+    def get_skill_variants(self, name: str) -> List[SkillMetadata]:
+        """Return all discovered variants for a skill name."""
+        if not self._scanned:
+            self.scan()
+        return list(self._skill_variants.get(name, []))
 
 
 # =============================================================================
@@ -1010,13 +1170,25 @@ class SkillTool(BaseTool):
         if project_skills:
             lines.append("Project skills:")
             for s in project_skills:
-                lines.append(f"  - {s.name}: {s.description}")
+                extra = []
+                if s.tag:
+                    extra.append(f"tag={s.tag}")
+                if s.icon:
+                    extra.append(f"icon={s.icon}")
+                suffix = f" ({', '.join(extra)})" if extra else ""
+                lines.append(f"  - {s.name}: {s.description}{suffix}")
             lines.append("")
         
         if global_skills:
             lines.append("Global skills:")
             for s in global_skills:
-                lines.append(f"  - {s.name}: {s.description}")
+                extra = []
+                if s.tag:
+                    extra.append(f"tag={s.tag}")
+                if s.icon:
+                    extra.append(f"icon={s.icon}")
+                suffix = f" ({', '.join(extra)})" if extra else ""
+                lines.append(f"  - {s.name}: {s.description}{suffix}")
         
         lines.append(f"\nTotal: {len(skills)} skill(s)")
         lines.append("Use action='read' with skill_name to load skill instructions.")
