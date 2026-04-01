@@ -211,20 +211,30 @@ function skillSourceBadge(source: string | undefined): { label: string; classNam
 
 function SkillRowButton({
   skill,
-  detail,
+  isActive,
+  isExpanded,
+  detailContent,
+  detailLoading,
   recentMarketSkillName,
   locationLabel,
   preferredSource,
   onChoosePreferredSource,
-  onViewDetail,
+  onActivate,
+  onExpandDetail,
+  onCollapseDetail,
 }: {
   skill: SkillItem;
-  detail: { name: string; content: string } | null;
+  isActive: boolean;
+  isExpanded: boolean;
+  detailContent: string | null;
+  detailLoading: boolean;
   recentMarketSkillName: string | null;
   locationLabel: "全局" | "项目";
   preferredSource?: string;
   onChoosePreferredSource: (name: string, source: string) => void;
-  onViewDetail: (name: string) => void;
+  onActivate: (name: string) => void;
+  onExpandDetail: (name: string) => void;
+  onCollapseDetail: () => void;
 }) {
   const src = skillSourceBadge(effectiveSkillSource(skill));
   const conflictCount = Number(skill.conflict_count ?? 0);
@@ -244,45 +254,51 @@ function SkillRowButton({
       ? "shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-400"
       : "shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint";
   return (
-    <button
-      type="button"
-      className={`w-full rounded-md border px-3 py-2 text-left transition ${
-        detail?.name === skill.name
+    <div
+      className={`w-full rounded-md border px-3 py-2 transition ${
+        isExpanded || isActive
           ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
           : skill.name === recentMarketSkillName
             ? "border-amber-500/35 bg-amber-500/5"
             : "border-border bg-surface-card hover:bg-surface-hover"
       }`}
-      onClick={() => void onViewDetail(skill.name)}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
-        {skill.name === recentMarketSkillName && (
-          <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
-            刚安装
-          </span>
-        )}
-        <span className={src.className}>{src.label}</span>
-        <span className={locClass}>{locationLabel}</span>
-        {skill.tag ? (
-          <span className="shrink-0 rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 text-[10px] text-violet-300">
-            {skill.tag}
-          </span>
+      <button
+        type="button"
+        className="w-full text-left"
+        onClick={() => onActivate(skill.name)}
+        onDoubleClick={() => void onExpandDetail(skill.name)}
+        title="双击展开当前技能"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-sm font-medium text-text-primary">{skill.name}</span>
+          {skill.name === recentMarketSkillName && (
+            <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 text-[10px] text-amber-300">
+              刚安装
+            </span>
+          )}
+          <span className={src.className}>{src.label}</span>
+          <span className={locClass}>{locationLabel}</span>
+          {skill.tag ? (
+            <span className="shrink-0 rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 text-[10px] text-violet-300">
+              {skill.tag}
+            </span>
+          ) : null}
+          {skill.icon ? (
+            <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
+              icon:{skill.icon}
+            </span>
+          ) : null}
+          {conflictCount > 1 ? (
+            <span className="shrink-0 rounded-full border border-rose-500/30 bg-rose-500/10 px-1.5 text-[10px] text-rose-300">
+              同名冲突({conflictCount})
+            </span>
+          ) : null}
+        </div>
+        {skill.description ? (
+          <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
         ) : null}
-        {skill.icon ? (
-          <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
-            icon:{skill.icon}
-          </span>
-        ) : null}
-        {conflictCount > 1 ? (
-          <span className="shrink-0 rounded-full border border-rose-500/30 bg-rose-500/10 px-1.5 text-[10px] text-rose-300">
-            同名冲突({conflictCount})
-          </span>
-        ) : null}
-      </div>
-      {skill.description ? (
-        <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
-      ) : null}
+      </button>
       {conflictCount > 1 ? (
         <div className="mt-1.5 flex items-center gap-2 text-[11px] text-text-faint">
           <span>默认来源</span>
@@ -303,7 +319,31 @@ function SkillRowButton({
           </select>
         </div>
       ) : null}
-    </button>
+      {isExpanded ? (
+        <div className="mt-2 rounded-md border border-[var(--settings-accent-border-muted)] bg-surface-card">
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+            <span className="text-xs font-medium text-[var(--settings-accent-fg)]">SKILL.md</span>
+            <button
+              type="button"
+              className="text-xs text-text-faint transition hover:text-text-primary"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCollapseDetail();
+              }}
+            >
+              关闭 ✕
+            </button>
+          </div>
+          {detailLoading ? (
+            <div className="px-3 py-3 text-xs text-text-faint">加载详情...</div>
+          ) : (
+            <pre className="max-h-[55vh] overflow-y-auto px-3 py-2 text-[11px] leading-relaxed text-text-muted whitespace-pre-wrap break-words">
+              {detailContent ?? ""}
+            </pre>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -311,20 +351,30 @@ function SkillsLocationSection({
   skills,
   title,
   locationLabel,
+  activeSkillName,
+  expandedSkillName,
   detail,
+  loadingDetail,
   recentMarketSkillName,
   preferredSources,
   onChoosePreferredSource,
-  onViewDetail,
+  onActivate,
+  onExpandDetail,
+  onCollapseDetail,
 }: {
   skills: SkillItem[];
   title: string;
   locationLabel: "全局" | "项目";
+  activeSkillName: string | null;
+  expandedSkillName: string | null;
   detail: { name: string; content: string } | null;
+  loadingDetail: boolean;
   recentMarketSkillName: string | null;
   preferredSources: Record<string, string>;
   onChoosePreferredSource: (name: string, source: string) => void;
-  onViewDetail: (name: string) => void;
+  onActivate: (name: string) => void;
+  onExpandDetail: (name: string) => void;
+  onCollapseDetail: () => void;
 }) {
   if (skills.length === 0) return null;
   const PREVIEW_COUNT = 10;
@@ -343,12 +393,17 @@ function SkillsLocationSection({
           <SkillRowButton
             key={skill.name}
             skill={skill}
-            detail={detail}
+            isActive={activeSkillName === skill.name}
+            isExpanded={expandedSkillName === skill.name}
+            detailLoading={expandedSkillName === skill.name && loadingDetail && detail?.name !== skill.name}
+            detailContent={expandedSkillName === skill.name && detail?.name === skill.name ? detail.content : null}
             recentMarketSkillName={recentMarketSkillName}
             locationLabel={locationLabel}
             preferredSource={preferredSources[skill.name]}
             onChoosePreferredSource={onChoosePreferredSource}
-            onViewDetail={onViewDetail}
+            onActivate={onActivate}
+            onExpandDetail={onExpandDetail}
+            onCollapseDetail={onCollapseDetail}
           />
         ))}
         {shouldCollapse ? (
@@ -684,6 +739,8 @@ function SkillsTab() {
   const [err, setErr] = useState("");
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState<{ name: string; content: string } | null>(null);
+  const [activeSkillName, setActiveSkillName] = useState<string | null>(null);
+  const [expandedSkillName, setExpandedSkillName] = useState<string | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [bundles, setBundles] = useState<BundleItem[]>([]);
   const [bundleInstallPath, setBundleInstallPath] = useState("");
@@ -711,6 +768,7 @@ function SkillsTab() {
   const [skillScanMsg, setSkillScanMsg] = useState("");
   const [builtinSkillsExpanded, setBuiltinSkillsExpanded] = useState(false);
   const marketSearchSeqRef = useRef(0);
+  const detailRequestSeqRef = useRef(0);
   const marketInstallQueueRef = useRef<RegistrySearchItem[]>([]);
   const skillsListAnchorRef = useRef<HTMLDivElement | null>(null);
 
@@ -868,6 +926,7 @@ function SkillsTab() {
     setLoading(true);
     setErr("");
     setDetail(null);
+    setExpandedSkillName(null);
     setBundleMsg("");
     setRecentMarketSkillName(null);
     try {
@@ -1270,20 +1329,25 @@ function SkillsTab() {
     }
   };
 
-  const onViewDetail = async (name: string) => {
-    if (detail?.name === name) {
-      setDetail(null);
-      return;
-    }
+  const onExpandDetail = async (name: string) => {
+    setActiveSkillName(name);
+    setExpandedSkillName(name);
+    if (detail?.name === name && detail.content) return;
+    const requestSeq = detailRequestSeqRef.current + 1;
+    detailRequestSeqRef.current = requestSeq;
     setLoadingDetail(true);
     try {
       const res = await window.agenticxDesktop.loadSkillDetail({ name });
+      if (detailRequestSeqRef.current !== requestSeq) return;
       if (res.ok) setDetail({ name, content: res.content });
       else setErr(res.error ?? "加载详情失败");
     } catch (e) {
+      if (detailRequestSeqRef.current !== requestSeq) return;
       setErr(String(e));
     } finally {
-      setLoadingDetail(false);
+      if (detailRequestSeqRef.current === requestSeq) {
+        setLoadingDetail(false);
+      }
     }
   };
 
@@ -1437,27 +1501,6 @@ function SkillsTab() {
         </div>
       )}
 
-      {/* Detail panel */}
-      {detail && (
-        <div className="rounded-md border border-[var(--settings-accent-border-muted)] bg-surface-card">
-          <div className="flex items-center justify-between border-b border-border px-3 py-2">
-            <span className="text-xs font-medium text-[var(--settings-accent-fg)]">{detail.name}</span>
-            <button
-              className="text-xs text-text-faint transition hover:text-text-primary"
-              onClick={() => setDetail(null)}
-            >
-              关闭 ✕
-            </button>
-          </div>
-          <pre className="max-h-64 overflow-y-auto px-3 py-2 text-[11px] leading-relaxed text-text-muted whitespace-pre-wrap break-words">
-            {detail.content}
-          </pre>
-        </div>
-      )}
-      {loadingDetail && (
-        <div className="py-2 text-center text-xs text-text-faint">加载详情...</div>
-      )}
-
       {/* Skills list grouped by location; after market install, global block first + pinned row */}
       <div className="space-y-3">
         {showGlobalSkillsFirst ? (
@@ -1466,21 +1509,31 @@ function SkillsTab() {
               skills={globalSkills}
               title="全局技能"
               locationLabel="全局"
+              activeSkillName={activeSkillName}
+              expandedSkillName={expandedSkillName}
               detail={detail}
+              loadingDetail={loadingDetail}
               recentMarketSkillName={recentMarketSkillName}
               preferredSources={preferredSkillSources}
               onChoosePreferredSource={choosePreferredSource}
-              onViewDetail={onViewDetail}
+              onActivate={setActiveSkillName}
+              onExpandDetail={onExpandDetail}
+              onCollapseDetail={() => setExpandedSkillName(null)}
             />
             <SkillsLocationSection
               skills={projectSkills}
               title="项目技能"
               locationLabel="项目"
+              activeSkillName={activeSkillName}
+              expandedSkillName={expandedSkillName}
               detail={detail}
+              loadingDetail={loadingDetail}
               recentMarketSkillName={recentMarketSkillName}
               preferredSources={preferredSkillSources}
               onChoosePreferredSource={choosePreferredSource}
-              onViewDetail={onViewDetail}
+              onActivate={setActiveSkillName}
+              onExpandDetail={onExpandDetail}
+              onCollapseDetail={() => setExpandedSkillName(null)}
             />
           </>
         ) : (
@@ -1489,21 +1542,31 @@ function SkillsTab() {
               skills={projectSkills}
               title="项目技能"
               locationLabel="项目"
+              activeSkillName={activeSkillName}
+              expandedSkillName={expandedSkillName}
               detail={detail}
+              loadingDetail={loadingDetail}
               recentMarketSkillName={recentMarketSkillName}
               preferredSources={preferredSkillSources}
               onChoosePreferredSource={choosePreferredSource}
-              onViewDetail={onViewDetail}
+              onActivate={setActiveSkillName}
+              onExpandDetail={onExpandDetail}
+              onCollapseDetail={() => setExpandedSkillName(null)}
             />
             <SkillsLocationSection
               skills={globalSkills}
               title="全局技能"
               locationLabel="全局"
+              activeSkillName={activeSkillName}
+              expandedSkillName={expandedSkillName}
               detail={detail}
+              loadingDetail={loadingDetail}
               recentMarketSkillName={recentMarketSkillName}
               preferredSources={preferredSkillSources}
               onChoosePreferredSource={choosePreferredSource}
-              onViewDetail={onViewDetail}
+              onActivate={setActiveSkillName}
+              onExpandDetail={onExpandDetail}
+              onCollapseDetail={() => setExpandedSkillName(null)}
             />
           </>
         )}
@@ -1526,12 +1589,17 @@ function SkillsTab() {
                   <SkillRowButton
                     key={skill.name}
                     skill={skill}
-                    detail={detail}
+                    isActive={activeSkillName === skill.name}
+                    isExpanded={expandedSkillName === skill.name}
+                    detailLoading={expandedSkillName === skill.name && loadingDetail && detail?.name !== skill.name}
+                    detailContent={expandedSkillName === skill.name && detail?.name === skill.name ? detail.content : null}
                     recentMarketSkillName={recentMarketSkillName}
                     locationLabel={effectiveSkillLocation(skill) === "project" ? "项目" : "全局"}
                     preferredSource={preferredSkillSources[skill.name]}
                     onChoosePreferredSource={choosePreferredSource}
-                    onViewDetail={onViewDetail}
+                    onActivate={setActiveSkillName}
+                    onExpandDetail={onExpandDetail}
+                    onCollapseDetail={() => setExpandedSkillName(null)}
                   />
                 ))}
               </div>
