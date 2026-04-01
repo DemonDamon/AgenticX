@@ -210,8 +210,12 @@ type AppState = {
   chatStyle: ChatStyle;
   /** Global user nickname shown on all bubbles and sent as context label (empty → 「我」). */
   userNickname: string;
+  /** Custom avatar for current user. */
+  userAvatarUrl: string;
   /** Free-text user preference/style injected into every agent system prompt. Max 500 chars. */
   userPreference: string;
+  /** Custom avatar for Meta-Agent (Machi). */
+  metaAvatarUrl: string;
   confirmStrategy: ConfirmStrategy;
   mcpServers: McpServer[];
   avatars: Avatar[];
@@ -236,7 +240,9 @@ type AppState = {
   setTheme: (theme: ThemeMode) => void;
   setChatStyle: (style: ChatStyle) => void;
   setUserNickname: (name: string) => void;
+  setUserAvatarUrl: (url: string) => void;
   setUserPreference: (pref: string) => void;
+  setMetaAvatarUrl: (url: string) => void;
   setConfirmStrategy: (v: ConfirmStrategy) => void;
   setMcpServers: (servers: McpServer[]) => void;
   setAvatars: (avatars: Avatar[]) => void;
@@ -357,6 +363,8 @@ function makeDefaultPane(): ChatPane {
 const CHAT_STYLE_STORAGE_KEY = "agx-chat-style";
 const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
 const USER_PREFERENCE_KEY = "agx-user-preference";
+const USER_AVATAR_URL_KEY = "agx-user-avatar-url";
+const META_AVATAR_URL_KEY = "agx-meta-avatar-url";
 
 function loadChatStyle(): ChatStyle {
   try {
@@ -388,6 +396,26 @@ function loadUserPreference(): string {
   return "";
 }
 
+function loadUserAvatarUrl(): string {
+  try {
+    const saved = window.localStorage.getItem(USER_AVATAR_URL_KEY);
+    if (typeof saved === "string") return saved;
+  } catch {
+    // ignore storage errors
+  }
+  return "";
+}
+
+function loadMetaAvatarUrl(): string {
+  try {
+    const saved = window.localStorage.getItem(META_AVATAR_URL_KEY);
+    if (typeof saved === "string") return saved;
+  } catch {
+    // ignore storage errors
+  }
+  return "";
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   apiBase: "",
   apiToken: "",
@@ -404,7 +432,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   theme: "dark",
   chatStyle: loadChatStyle(),
   userNickname: loadUserNickname(),
+  userAvatarUrl: loadUserAvatarUrl(),
   userPreference: loadUserPreference(),
+  metaAvatarUrl: loadMetaAvatarUrl(),
   confirmStrategy: "semi-auto",
   mcpServers: [],
   avatars: [],
@@ -450,6 +480,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { userNickname: next };
     }),
+  setUserAvatarUrl: (url) =>
+    set(() => {
+      const next = String(url ?? "");
+      try {
+        if (next.trim()) window.localStorage.setItem(USER_AVATAR_URL_KEY, next);
+        else window.localStorage.removeItem(USER_AVATAR_URL_KEY);
+      } catch {
+        // ignore storage errors
+      }
+      return { userAvatarUrl: next };
+    }),
   setUserPreference: (pref) =>
     set(() => {
       const next = String(pref ?? "").slice(0, 500);
@@ -460,6 +501,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         // ignore storage errors
       }
       return { userPreference: next };
+    }),
+  setMetaAvatarUrl: (url) =>
+    set(() => {
+      const next = String(url ?? "");
+      try {
+        if (next.trim()) window.localStorage.setItem(META_AVATAR_URL_KEY, next);
+        else window.localStorage.removeItem(META_AVATAR_URL_KEY);
+      } catch {
+        // ignore storage errors
+      }
+      return { metaAvatarUrl: next };
     }),
   setConfirmStrategy: (confirmStrategy) => set({ confirmStrategy }),
   setMcpServers: (mcpServers) => set({ mcpServers }),
