@@ -112,6 +112,44 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
   return { sessionId, activePaneId, panes };
 }
 
+type SessionListItem = {
+  session_id: string;
+  avatar_id: string | null;
+  updated_at: number;
+  created_at?: number;
+  archived?: boolean;
+};
+
+function isSessionItemMatchingAvatar(item: SessionListItem, avatarId?: string | null): boolean {
+  const targetAvatarId = (avatarId ?? "").trim();
+  const itemAvatarId = String(item.avatar_id ?? "").trim();
+  if (!targetAvatarId) return itemAvatarId.length === 0;
+  return itemAvatarId === targetAvatarId;
+}
+
+function pickMostRecentSessionId(
+  sessions: SessionListItem[],
+  avatarId?: string | null
+): string | undefined {
+  const sorted = [...sessions]
+    .filter((item) => {
+      const sid = String(item.session_id ?? "").trim();
+      if (!sid) return false;
+      if (item.archived === true) return false;
+      return isSessionItemMatchingAvatar(item, avatarId);
+    })
+    .sort((a, b) => {
+      const ua = Number.isFinite(a.updated_at) ? a.updated_at : 0;
+      const ub = Number.isFinite(b.updated_at) ? b.updated_at : 0;
+      if (ub !== ua) return ub - ua;
+      const ca = Number.isFinite(a.created_at ?? NaN) ? (a.created_at as number) : 0;
+      const cb = Number.isFinite(b.created_at ?? NaN) ? (b.created_at as number) : 0;
+      return cb - ca;
+    });
+  const sid = sorted[0]?.session_id;
+  return sid ? String(sid).trim() : undefined;
+}
+
 async function requestSession(
   base: string,
   token: string,
@@ -282,12 +320,55 @@ export function App() {
         const raw = window.localStorage.getItem(WORKSPACE_STATE_STORAGE_KEY);
         const parsed = raw ? JSON.parse(raw) : null;
         const saved = normalizePersistedWorkspaceState(parsed);
+        const sessionsCache = new Map<string, SessionListItem[]>();
+        const recentSidCache = new Map<string, string>();
+        const getSessionsForAvatar = async (avatarId?: string | null): Promise<SessionListItem[]> => {
+          const key = (avatarId ?? "").trim();
+          if (sessionsCache.has(key)) return sessionsCache.get(key) ?? [];
+          try {
+            const listed = await window.agenticxDesktop.listSessions(key || undefined);
+            if (!listed.ok || !Array.isArray(listed.sessions) || listed.sessions.length === 0) {
+              sessionsCache.set(key, []);
+              return [];
+            }
+            const normalized = listed.sessions.filter((item) => isSessionItemMatchingAvatar(item, key || undefined));
+            sessionsCache.set(key, normalized);
+            return normalized;
+          } catch {
+            sessionsCache.set(key, []);
+            return [];
+          }
+        };
+        const isSessionCompatible = async (sid: string, avatarId?: string | null): Promise<boolean> => {
+          const needle = sid.trim();
+          if (!needle) return false;
+          const rows = await getSessionsForAvatar(avatarId);
+          return rows.some((item) => String(item.session_id ?? "").trim() === needle);
+        };
+        const getRecentSessionId = async (avatarId?: string | null): Promise<string | undefined> => {
+          const key = (avatarId ?? "").trim();
+          if (recentSidCache.has(key)) return recentSidCache.get(key) || undefined;
+          const rows = await getSessionsForAvatar(key || undefined);
+          if (rows.length === 0) {
+            recentSidCache.set(key, "");
+            return undefined;
+          }
+          const sid = pickMostRecentSessionId(rows, key || undefined);
+          recentSidCache.set(key, sid ?? "");
+          return sid;
+        };
         if (saved) {
           const hydratedPanes: PersistedPaneState[] = [];
           const claimedSessionIds = new Set<string>();
           for (const pane of saved.panes) {
             try {
               let wantedSid = (pane.sessionId || "").trim() || undefined;
+              if (wantedSid && !(await isSessionCompatible(wantedSid, pane.avatarId))) {
+                wantedSid = undefined;
+              }
+              if (!wantedSid) {
+                wantedSid = await getRecentSessionId(pane.avatarId ?? undefined);
+              }
               if (wantedSid && claimedSessionIds.has(wantedSid)) {
                 console.warn(
                   "[App init] duplicate sessionId %s across panes — forcing new session for pane %s (avatar=%s)",
@@ -297,10 +378,13 @@ export function App() {
                 );
                 wantedSid = undefined;
               }
-              const sid = await requestSession(base, token, {
-                sessionId: wantedSid,
-                avatarId: pane.avatarId,
-              });
+              // When a concrete session id exists, restore by sid only.
+              // Passing avatar_id here can trigger avatar-binding mismatch and force-create a new session.
+              const sid = await requestSession(
+                base,
+                token,
+                wantedSid ? { sessionId: wantedSid } : { avatarId: pane.avatarId }
+              );
               claimedSessionIds.add(sid);
               hydratedPanes.push({ ...pane, sessionId: sid });
             } catch (err) {
@@ -344,7 +428,29 @@ export function App() {
 
       if (!recovered) {
         let sessionCreated = false;
+        const latestSid = await (async () => {
+          try {
+            const listed = await window.agenticxDesktop.listSessions();
+            if (!listed.ok || !Array.isArray(listed.sessions) || listed.sessions.length === 0) return undefined;
+            return pickMostRecentSessionId(listed.sessions, null);
+          } catch {
+            return undefined;
+          }
+        })();
+        if (latestSid) {
+          try {
+            const sid = await requestSession(base, token, { sessionId: latestSid });
+            setSessionId(sid);
+            setPaneSessionId("pane-meta", sid);
+            await refreshMcpStatus(sid).catch(() => {});
+            sessionCreated = true;
+            recovered = true;
+          } catch (err) {
+            console.error("[App init] reuse latest session failed:", err);
+          }
+        }
         for (let attempt = 0; attempt < 3; attempt++) {
+          if (sessionCreated) break;
           try {
             const sid = await requestSession(base, token);
             setSessionId(sid);
