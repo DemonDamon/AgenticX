@@ -66,6 +66,8 @@ export type ChatPane = {
   avatarId: string | null;
   avatarName: string;
   sessionId: string;
+  modelProvider: string;
+  modelName: string;
   messages: Message[];
   historyOpen: boolean;
   contextInherited: boolean;
@@ -232,6 +234,7 @@ type AppState = {
   setSessionId: (id: string) => void;
   setStatus: (status: UiStatus) => void;
   setActiveModel: (provider: string, model: string) => void;
+  setPaneModel: (paneId: string, provider: string, model: string) => void;
   setUserMode: (mode: "pro" | "lite") => void;
   setOnboardingCompleted: (v: boolean) => void;
   setCommandPaletteOpen: (v: boolean) => void;
@@ -344,6 +347,8 @@ function makeDefaultPane(): ChatPane {
     avatarId: null,
     avatarName: "Machi",
     sessionId: "",
+    modelProvider: "",
+    modelName: "",
     messages: [],
     historyOpen: false,
     contextInherited: false,
@@ -454,6 +459,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSessionId: (sessionId) => set({ sessionId }),
   setStatus: (status) => set({ status }),
   setActiveModel: (activeProvider, activeModel) => set({ activeProvider, activeModel }),
+  setPaneModel: (paneId, provider, model) =>
+    set((state) => {
+      const nextProvider = String(provider ?? "").trim();
+      const nextModel = String(model ?? "").trim();
+      const paneExists = state.panes.some((pane) => pane.id === paneId);
+      if (!paneExists) return state;
+      const nextPanes = state.panes.map((pane) =>
+        pane.id === paneId
+          ? { ...pane, modelProvider: nextProvider, modelName: nextModel }
+          : pane
+      );
+      if (state.activePaneId !== paneId) {
+        return { panes: nextPanes };
+      }
+      return {
+        panes: nextPanes,
+        activeProvider: nextProvider,
+        activeModel: nextModel,
+      };
+    }),
   setUserMode: (userMode) => set({ userMode }),
   setOnboardingCompleted: (onboardingCompleted) => set({ onboardingCompleted }),
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
@@ -519,7 +544,37 @@ export const useAppStore = create<AppState>((set, get) => ({
   setActiveAvatarId: (activeAvatarId) => set({ activeAvatarId }),
   setAvatarSessions: (avatarSessions) => set({ avatarSessions }),
   setGroups: (groups) => set({ groups }),
-  setActivePaneId: (activePaneId) => set({ activePaneId }),
+  setActivePaneId: (activePaneId) =>
+    set((state) => {
+      const target = state.panes.find((pane) => pane.id === activePaneId);
+      if (!target) return state;
+      let provider = (target.modelProvider || "").trim();
+      let model = (target.modelName || "").trim();
+      if (!provider || !model) {
+        const defaultProvider = (state.settings.defaultProvider || "").trim();
+        const defaultModel = (state.settings.providers[defaultProvider]?.model || "").trim();
+        if (defaultProvider && defaultModel) {
+          provider = defaultProvider;
+          model = defaultModel;
+          return {
+            activePaneId,
+            activeProvider: provider,
+            activeModel: model,
+            panes: state.panes.map((pane) =>
+              pane.id === activePaneId
+                ? { ...pane, modelProvider: provider, modelName: model }
+                : pane
+            ),
+          };
+        }
+        return { activePaneId };
+      }
+      return {
+        activePaneId,
+        activeProvider: provider,
+        activeModel: model,
+      };
+    }),
   setForwardAutoReply: (forwardAutoReply) => set({ forwardAutoReply }),
   addPane: (avatarId, avatarName, sessionId) => {
     const paneId = uid();
@@ -531,6 +586,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           avatarId,
           avatarName,
           sessionId,
+          modelProvider: state.activeProvider,
+          modelName: state.activeModel,
           messages: [],
           historyOpen: false,
           contextInherited: false,
@@ -559,7 +616,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         state.activePaneId === paneId
           ? nextPanes[Math.max(0, nextPanes.length - 1)]?.id ?? nextPanes[0].id
           : state.activePaneId;
-      return { panes: nextPanes, activePaneId: nextActive };
+      const activePane = nextPanes.find((pane) => pane.id === nextActive) ?? nextPanes[0];
+      const provider = (activePane?.modelProvider || "").trim();
+      const model = (activePane?.modelName || "").trim();
+      return {
+        panes: nextPanes,
+        activePaneId: nextActive,
+        ...(provider && model
+          ? { activeProvider: provider, activeModel: model }
+          : {}),
+      };
     }),
   reorderPanes: (fromIndex, toIndex) =>
     set((state) => {
