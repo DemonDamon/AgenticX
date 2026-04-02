@@ -74,6 +74,7 @@ type AvatarItem = {
   created_by?: string;
   system_prompt?: string;
   tools_enabled?: Record<string, boolean>;
+  skills_enabled?: Record<string, boolean> | null;
 };
 
 type ToolStatusItem = {
@@ -151,6 +152,7 @@ type SkillItem = {
   tag?: string;
   icon?: string;
   content_hash?: string;
+  globally_disabled?: boolean;
   conflict_count?: number;
   variants?: Array<{
     skill_id?: string;
@@ -167,6 +169,7 @@ type SkillSettingsResult = {
   preset_paths?: SkillScanPresetRow[];
   custom_paths?: string[];
   preferred_sources?: Record<string, string>;
+  disabled_skills?: string[];
   error?: string;
 };
 type SkillDetailResult = {
@@ -298,6 +301,7 @@ declare global {
         system_prompt?: string;
         created_by?: string;
         tools_enabled?: Record<string, boolean>;
+        skills_enabled?: Record<string, boolean> | null;
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       updateAvatar: (payload: {
         id: string;
@@ -307,6 +311,7 @@ declare global {
         pinned?: boolean;
         system_prompt?: string;
         tools_enabled?: Record<string, boolean>;
+        skills_enabled?: Record<string, boolean> | null;
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       deleteAvatar: (id: string) => Promise<{ ok: boolean; error?: string }>;
       getToolsStatus: () => Promise<{ ok: boolean; tools: ToolStatusItem[]; error?: string }>;
@@ -456,6 +461,7 @@ declare global {
         presetPaths: Array<{ id: string; enabled: boolean }>;
         customPaths: string[];
         preferredSources?: Record<string, string>;
+        disabledSkills?: string[];
       }) => Promise<SkillSettingsResult>;
 
       loadBundles: () => Promise<BundleListResult>;

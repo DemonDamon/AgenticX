@@ -281,6 +281,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     presetPaths: Array<{ id: string; enabled: boolean }>;
     customPaths: string[];
     preferredSources?: Record<string, string>;
+    disabledSkills?: string[];
   }) => ipcRenderer.invoke("put-skill-settings", payload),
 
   // Bundles

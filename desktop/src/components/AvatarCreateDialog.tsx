@@ -1,5 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ChevronRight } from "lucide-react";
 import { AvatarToolPermissionDialog } from "./AvatarToolPermissionDialog";
+
+type SkillRow = { name: string; description: string };
 
 type Props = {
   open: boolean;
@@ -9,6 +12,7 @@ type Props = {
     role: string;
     systemPrompt: string;
     toolsEnabled: Record<string, boolean>;
+    skillsEnabled?: Record<string, boolean>;
   }) => Promise<void>;
 };
 
@@ -23,7 +27,33 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
   const [aiError, setAiError] = useState("");
   const [toolsDialogOpen, setToolsDialogOpen] = useState(false);
   const [toolsEnabled, setToolsEnabled] = useState<Record<string, boolean>>({});
+  const [skillsSectionOpen, setSkillsSectionOpen] = useState(false);
+  const [skillsItems, setSkillsItems] = useState<SkillRow[]>([]);
+  const [loadingSkills, setLoadingSkills] = useState(false);
+  /** Per-skill `false` = disabled for this avatar (aligned with avatar.yaml skills_enabled). */
+  const [skillsEnabledDraft, setSkillsEnabledDraft] = useState<Record<string, boolean>>({});
   const customizedCount = Object.keys(toolsEnabled).filter((key) => toolsEnabled[key] !== undefined).length;
+  const skillsCustomizedCount = Object.keys(skillsEnabledDraft).filter((k) => skillsEnabledDraft[k] === false).length;
+
+  useEffect(() => {
+    if (!open || mode !== "manual" || !skillsSectionOpen) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingSkills(true);
+      try {
+        const r = await window.agenticxDesktop.loadSkills();
+        if (!cancelled && r.ok) {
+          const list = (r.items ?? []).filter((s) => !s.globally_disabled);
+          setSkillsItems(list.map((s) => ({ name: s.name, description: s.description })));
+        }
+      } finally {
+        if (!cancelled) setLoadingSkills(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, mode, skillsSectionOpen]);
 
   if (!open) return null;
 
@@ -31,16 +61,22 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
     if (!name.trim()) return;
     setBusy(true);
     try {
+      const skillsOnlyFalse = Object.fromEntries(
+        Object.entries(skillsEnabledDraft).filter(([, v]) => v === false),
+      );
       await onCreate({
         name: name.trim(),
         role: role.trim(),
         systemPrompt: systemPrompt.trim(),
         toolsEnabled: { ...toolsEnabled },
+        ...(Object.keys(skillsOnlyFalse).length > 0 ? { skillsEnabled: skillsOnlyFalse } : {}),
       });
       setName("");
       setRole("");
       setSystemPrompt("");
       setToolsEnabled({});
+      setSkillsEnabledDraft({});
+      setSkillsSectionOpen(false);
       setToolsDialogOpen(false);
       onClose();
     } finally {
@@ -74,6 +110,8 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
     setDescription("");
     setAiError("");
     setToolsEnabled({});
+    setSkillsEnabledDraft({});
+    setSkillsSectionOpen(false);
     setToolsDialogOpen(false);
     onClose();
   };
@@ -141,6 +179,65 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
               >
                 工具权限（{customizedCount > 0 ? `已自定义 ${customizedCount} 项` : "继承全局默认"}）
               </button>
+
+              <div className="rounded-md border border-border bg-surface-card">
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-text-muted transition hover:bg-surface-hover"
+                  onClick={() => setSkillsSectionOpen((v) => !v)}
+                >
+                  <ChevronRight
+                    className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${skillsSectionOpen ? "rotate-90" : ""}`}
+                  />
+                  <span>
+                    技能（{skillsCustomizedCount > 0 ? `已禁用 ${skillsCustomizedCount} 项` : "默认全部启用"}）
+                  </span>
+                </button>
+                {skillsSectionOpen && (
+                  <div className="space-y-2 border-t border-border px-3 py-2">
+                    <p className="text-[11px] text-text-faint">
+                      全局已在设置中禁用的技能不会列出。关闭表示该分身不使用对应技能。
+                    </p>
+                    {loadingSkills ? (
+                      <div className="py-2 text-xs text-text-faint">加载中...</div>
+                    ) : skillsItems.length === 0 ? (
+                      <div className="py-2 text-xs text-text-faint">暂无可配置技能。</div>
+                    ) : (
+                      <div className="max-h-[200px] space-y-1.5 overflow-y-auto">
+                        {skillsItems.map((skill) => {
+                          const disabled = skillsEnabledDraft[skill.name] === false;
+                          return (
+                            <div
+                              key={skill.name}
+                              className="flex items-center justify-between gap-2 rounded border border-border/60 bg-surface-panel/50 px-2 py-1.5"
+                            >
+                              <span className="min-w-0 truncate text-xs text-text-primary">{skill.name}</span>
+                              <button
+                                type="button"
+                                className={`shrink-0 rounded border px-2 py-0.5 text-[11px] transition ${
+                                  disabled
+                                    ? "border-border-strong text-text-muted"
+                                    : "border-cyan-500/40 bg-cyan-500/10 text-cyan-400"
+                                }`}
+                                onClick={() => {
+                                  setSkillsEnabledDraft((prev) => {
+                                    const next = { ...prev };
+                                    if (disabled) delete next[skill.name];
+                                    else next[skill.name] = false;
+                                    return next;
+                                  });
+                                }}
+                              >
+                                {disabled ? "已禁用" : "启用"}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button

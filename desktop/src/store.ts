@@ -28,6 +28,8 @@ export type Avatar = {
   createdBy: string;
   systemPrompt?: string;
   toolsEnabled?: Record<string, boolean>;
+  /** Per-skill overrides: false = disabled for this avatar; missing = inherit global. */
+  skillsEnabled?: Record<string, boolean>;
 };
 
 export type SessionItem = {
