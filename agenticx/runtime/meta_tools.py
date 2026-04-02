@@ -733,9 +733,14 @@ async def _chat_with_avatar_payload(
     }
 
 
-def _list_skills_payload() -> Dict[str, Any]:
+def _list_skills_payload(session: Optional["StudioSession"] = None) -> Dict[str, Any]:
     try:
-        skills = get_all_skill_summaries()
+        bound = (
+            str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+            if session is not None
+            else None
+        )
+        skills = get_all_skill_summaries(bound_avatar_id=bound)
     except Exception as exc:
         return {"ok": False, "error": f"failed to load skills: {exc}"}
     return {
@@ -1889,7 +1894,7 @@ async def dispatch_meta_tool_async(
         return json.dumps(payload, ensure_ascii=False)
 
     if name == "list_skills":
-        return json.dumps(_list_skills_payload(), ensure_ascii=False)
+        return json.dumps(_list_skills_payload(session), ensure_ascii=False)
 
     if name == "list_mcps":
         return json.dumps(_list_mcps_payload(session), ensure_ascii=False)

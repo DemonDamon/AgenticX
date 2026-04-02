@@ -28,7 +28,11 @@ from agenticx.cli.studio_mcp import (
     mcp_call_tool_async,
     mcp_connect,
 )
-from agenticx.cli.studio_skill import get_all_skill_summaries, skill_use as studio_skill_use
+from agenticx.cli.studio_skill import (
+    get_all_skill_summaries,
+    skill_is_allowed_for_session,
+    skill_use as studio_skill_use,
+)
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.memory.session_store import SessionStore
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
@@ -1441,13 +1445,20 @@ def _tool_skill_use(arguments: Dict[str, Any], session: StudioSession) -> str:
     name = str(arguments.get("name", "")).strip()
     if not name:
         return "ERROR: missing skill name"
-    ok = studio_skill_use(session.context_files, name)
+    bound = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+    allowed, err = skill_is_allowed_for_session(name, bound_avatar_id=bound)
+    if not allowed:
+        return f"ERROR: {err}"
+    ok = studio_skill_use(
+        session.context_files, name, bound_avatar_id=bound, quiet=True
+    )
     return "OK" if ok else "ERROR: skill activation failed"
 
 
-def _tool_skill_list() -> str:
+def _tool_skill_list(session: StudioSession) -> str:
     try:
-        summaries = get_all_skill_summaries()
+        bound = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+        summaries = get_all_skill_summaries(bound_avatar_id=bound)
     except Exception as exc:
         return f"ERROR: list skill failed: {exc}"
     if not summaries:
@@ -2025,7 +2036,7 @@ async def dispatch_tool_async(
         if name == "skill_use":
             return _tool_skill_use(arguments, session)
         if name == "skill_list":
-            return _tool_skill_list()
+            return _tool_skill_list(session)
         if name == "skill_manage":
             return _tool_skill_manage(arguments, session)
         if name == "todo_write":

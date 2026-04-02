@@ -52,6 +52,7 @@ class AvatarConfig:
     default_model: str = ""
     pinned: bool = False
     tools_enabled: Dict[str, bool] = field(default_factory=dict)
+    skills_enabled: Optional[Dict[str, bool]] = None
     created_at: str = ""
     updated_at: str = ""
 
@@ -60,7 +61,7 @@ class AvatarConfig:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> AvatarConfig:
-        known = {f.name for f in field().__class__.__dataclass_fields__.values()} if False else set(cls.__dataclass_fields__)
+        known = set(cls.__dataclass_fields__.keys())
         filtered = {k: v for k, v in data.items() if k in known}
         return cls(**filtered)
 
@@ -128,11 +129,15 @@ class AvatarRegistry:
         default_provider: str = "",
         default_model: str = "",
         tools_enabled: Optional[Dict[str, bool]] = None,
+        skills_enabled: Optional[Dict[str, bool]] = None,
     ) -> AvatarConfig:
         """Create a new avatar with isolated workspace."""
         avatar_id = uuid.uuid4().hex[:12]
         now = datetime.now(timezone.utc).isoformat()
         workspace_dir = str(self._avatar_dir(avatar_id) / "workspace")
+        se: Optional[Dict[str, bool]] = None
+        if skills_enabled is not None and len(skills_enabled) > 0:
+            se = {str(k): bool(v) for k, v in skills_enabled.items() if str(k).strip()}
         config = AvatarConfig(
             id=avatar_id,
             name=name,
@@ -144,6 +149,7 @@ class AvatarRegistry:
             default_provider=default_provider,
             default_model=default_model,
             tools_enabled=dict(tools_enabled or {}),
+            skills_enabled=se,
             created_at=now,
             updated_at=now,
         )
@@ -159,6 +165,14 @@ class AvatarRegistry:
         immutable = {"id", "created_at", "workspace_dir"}
         for key, value in patch.items():
             if key in immutable:
+                continue
+            if key == "skills_enabled":
+                if value is None or (isinstance(value, dict) and len(value) == 0):
+                    config.skills_enabled = None
+                elif isinstance(value, dict):
+                    config.skills_enabled = {
+                        str(k): bool(v) for k, v in value.items() if str(k).strip()
+                    }
                 continue
             if hasattr(config, key):
                 setattr(config, key, value)

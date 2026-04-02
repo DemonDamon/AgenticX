@@ -24,7 +24,7 @@ import shutil
 import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
 
 from pydantic import BaseModel, Field  # type: ignore
 
@@ -335,12 +335,33 @@ def _normalize_preferred_sources_from_config(raw: Any) -> Dict[str, str]:
     return out
 
 
-def get_skill_scan_settings_from_config() -> tuple[List[Dict[str, Any]], List[str], Dict[str, str]]:
-    """Read ``skills.preset_paths`` and ``skills.custom_paths`` from merged YAML."""
+def _normalize_disabled_skills_from_config(raw: Any) -> List[str]:
+    """Normalize ``skills.disabled`` to a sorted unique list of skill names."""
+    if raw is None:
+        return []
+    if isinstance(raw, str) and raw.strip():
+        return [raw.strip()]
+    if not isinstance(raw, list):
+        return []
+    seen: set[str] = set()
+    out: List[str] = []
+    for x in raw:
+        name = str(x).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return sorted(out)
+
+
+def get_skill_scan_settings_from_config() -> tuple[
+    List[Dict[str, Any]], List[str], Dict[str, str], List[str]
+]:
+    """Read skill scan settings and ``skills.disabled`` from merged YAML."""
     try:
         from agenticx.cli.config_manager import ConfigManager
     except Exception:
-        return [dict(p) for p in SKILL_SCAN_PRESET_DEFAULTS], [], {}
+        return [dict(p) for p in SKILL_SCAN_PRESET_DEFAULTS], [], {}, []
 
     merged_presets = _normalize_preset_paths_from_config(
         ConfigManager.get_value("skills.preset_paths")
@@ -353,7 +374,38 @@ def get_skill_scan_settings_from_config() -> tuple[List[Dict[str, Any]], List[st
     preferred = _normalize_preferred_sources_from_config(
         ConfigManager.get_value("skills.preferred_sources")
     )
-    return presets, custom, preferred
+    disabled = _normalize_disabled_skills_from_config(
+        ConfigManager.get_value("skills.disabled")
+    )
+    return presets, custom, preferred, disabled
+
+
+def get_disabled_skill_names_set() -> Set[str]:
+    """Return the set of globally disabled skill names (from config)."""
+    try:
+        _, _, _, disabled_list = get_skill_scan_settings_from_config()
+    except Exception:
+        return set()
+    return set(disabled_list)
+
+
+def filter_skills_by_enablement(
+    skills: List[SkillMetadata],
+    *,
+    disabled_names: Optional[Set[str]] = None,
+    avatar_skills_enabled: Optional[Dict[str, bool]] = None,
+) -> List[SkillMetadata]:
+    """Apply global disabled list and optional per-avatar overrides."""
+    dn = disabled_names if disabled_names is not None else get_disabled_skill_names_set()
+    out: List[SkillMetadata] = []
+    for s in skills:
+        if s.name in dn:
+            continue
+        if avatar_skills_enabled:
+            if s.name in avatar_skills_enabled and not avatar_skills_enabled[s.name]:
+                continue
+        out.append(s)
+    return out
 
 
 def build_skill_search_paths() -> List[Path]:
@@ -366,7 +418,7 @@ def build_skill_search_paths() -> List[Path]:
         Path.home() / ".agent" / "skills",
         _SKILL_PACKAGE_SKILLS_DIR,
     ]
-    presets, custom_strs, _preferred = get_skill_scan_settings_from_config()
+    presets, custom_strs, _preferred, _ = get_skill_scan_settings_from_config()
     extra: List[Path] = []
     agents_home_enabled = True
     for p in presets:
@@ -417,8 +469,12 @@ def persist_skill_scan_settings(
     preset_paths: List[Dict[str, Any]],
     custom_paths: List[str],
     preferred_sources: Optional[Dict[str, str]] = None,
+    disabled_skills: Optional[List[str]] = None,
 ) -> None:
-    """Write skill scan settings to global config."""
+    """Write skill scan settings to global config.
+
+    When ``disabled_skills`` is None, the existing ``skills.disabled`` value is kept.
+    """
     from agenticx.cli.config_manager import ConfigManager
 
     enabled_by_id: Dict[str, bool] = {}
@@ -446,15 +502,19 @@ def persist_skill_scan_settings(
     ConfigManager.set_value("skills.preset_paths", cleaned_presets)
     ConfigManager.set_value("skills.custom_paths", custom_clean)
     ConfigManager.set_value("skills.preferred_sources", preferred_clean)
+    if disabled_skills is not None:
+        disabled_clean = _normalize_disabled_skills_from_config(disabled_skills)
+        ConfigManager.set_value("skills.disabled", disabled_clean)
 
 
 def skill_scan_settings_payload() -> Dict[str, Any]:
     """API payload for GET /api/skills/settings."""
-    presets, custom, preferred = get_skill_scan_settings_from_config()
+    presets, custom, preferred, disabled = get_skill_scan_settings_from_config()
     return {
         "preset_paths": presets,
         "custom_paths": custom,
         "preferred_sources": preferred,
+        "disabled_skills": disabled,
     }
 
 
@@ -530,7 +590,9 @@ class SkillBundleLoader:
         if self._scanned:
             return list(self._skills.values())
         
-        presets, _custom_paths, config_preferred_sources = get_skill_scan_settings_from_config()
+        presets, _custom_paths, config_preferred_sources, _ = (
+            get_skill_scan_settings_from_config()
+        )
         preferred_sources = self.preferred_sources or config_preferred_sources
         self._skill_variants.clear()
         disabled_roots: List[Path] = []

@@ -537,7 +537,12 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
             elif subcmd == "search" and len(parts) > 2:
                 skill_search(parts[2].strip())
             elif subcmd == "use" and len(parts) > 2:
-                skill_use(session.context_files, parts[2].strip())
+                _bound = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+                skill_use(
+                    session.context_files,
+                    parts[2].strip(),
+                    bound_avatar_id=_bound,
+                )
             elif subcmd == "info" and len(parts) > 2:
                 skill_info(parts[2].strip())
             else:
@@ -559,7 +564,8 @@ def run_studio(provider: Optional[str] = None, model: Optional[str] = None) -> N
             mcp_server_names = list(session.mcp_configs.keys()) if session.mcp_configs else []
             skill_summaries = []
             try:
-                skill_summaries = get_all_skill_summaries()
+                _bound = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+                skill_summaries = get_all_skill_summaries(bound_avatar_id=_bound)
             except Exception:
                 pass
             discover_prompt = (
