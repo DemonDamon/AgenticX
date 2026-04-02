@@ -567,16 +567,49 @@ function pathListSeparator(): string {
   return process.platform === "win32" ? ";" : ":";
 }
 
+/** Editable / venv installs: agx lives under repo `.venv` while `npm run dev` cwd is usually `desktop/`. */
+function repoAdjacentVenvBinDirs(): string[] {
+  const cwd = process.cwd();
+  const sub = process.platform === "win32" ? "Scripts" : "bin";
+  const roots = [cwd, path.resolve(cwd, "..")];
+  const out: string[] = [];
+  for (const root of roots) {
+    for (const name of [".venv", "venv"]) {
+      const p = path.join(root, name, sub);
+      try {
+        if (fs.statSync(p).isDirectory()) {
+          out.push(p);
+        }
+      } catch {
+        /* noop */
+      }
+    }
+  }
+  return out;
+}
+
 function buildAugmentedPath(): string {
   const home = os.homedir();
   const sep = pathListSeparator();
   const basePath =
     process.env.PATH ?? (process.platform === "win32" ? "" : "/usr/bin:/bin");
 
+  const venvDirs = repoAdjacentVenvBinDirs();
   let extraPaths: string[];
   if (process.platform === "win32") {
     const localAppData = process.env.LOCALAPPDATA || "";
+    const appDataRoaming = process.env.APPDATA || "";
+    const pyWinFolders = ["Python313", "Python312", "Python311", "Python310", "Python39", "Python38"];
+    const programsPythonScripts = localAppData
+      ? pyWinFolders.map((folder) => path.join(localAppData, "Programs", "Python", folder, "Scripts"))
+      : [];
+    const userSiteScripts = appDataRoaming
+      ? pyWinFolders.map((folder) => path.join(appDataRoaming, "Python", folder, "Scripts"))
+      : [];
     extraPaths = [
+      ...venvDirs,
+      ...programsPythonScripts,
+      ...userSiteScripts,
       path.join(home, "miniconda3", "Scripts"),
       path.join(home, "miniconda3", "condabin"),
       path.join(home, "anaconda3", "Scripts"),
@@ -592,6 +625,7 @@ function buildAugmentedPath(): string {
       (v) => `${home}/Library/Python/${v}/bin`
     );
     extraPaths = [
+      ...venvDirs,
       ...pyUserBins,
       "/opt/miniconda3/bin",
       "/opt/miniconda3/condabin",
@@ -613,13 +647,16 @@ function buildAugmentedPath(): string {
  * Spawn `agx` without a login shell.
  * macOS: `zsh -l -c` runs `/etc/zprofile` → `path_helper` rebuilds PATH and drops
  * conda/venv paths inherited from the parent Electron process, so `agx` vanishes.
- * Windows: `cmd /c` is unnecessary; Node resolves `agx`/`agx.cmd` from PATH.
+ * Windows: prefer a resolved `agx.exe` path; bare `agx` can fail to spawn from Electron
+ * when only `agx.cmd` exists or PATHEXT resolution differs from the login shell.
  */
 function spawnAgx(
+  resolvedExecutable: string | null,
   args: string[],
   options: { cwd?: string; stdio: ("ignore" | "pipe")[]; env: NodeJS.ProcessEnv }
 ): ChildProcess {
-  return spawn("agx", args, { ...options, shell: false });
+  const cmd = resolvedExecutable ?? "agx";
+  return spawn(cmd, args, { ...options, shell: false });
 }
 
 /** Packaged macOS app: embedded PyInstaller binary under Resources/backend/agx-server */
@@ -650,11 +687,12 @@ function spawnBundledServer(
 function findAgxBinaryOnPath(augmentedPath: string): string | null {
   const dirs = augmentedPath.split(pathListSeparator());
   const names = process.platform === "win32" ? ["agx.exe", "agx.cmd", "agx"] : ["agx"];
+  const mode = process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK;
   for (const dir of dirs) {
     for (const name of names) {
       const candidate = path.join(dir, name);
       try {
-        fs.accessSync(candidate, fs.constants.X_OK);
+        fs.accessSync(candidate, mode);
         return candidate;
       } catch { /* not here */ }
     }
@@ -664,12 +702,10 @@ function findAgxBinaryOnPath(augmentedPath: string): string | null {
 
 async function checkAgxCli(): Promise<boolean> {
   const augmentedPath = buildAugmentedPath();
-
   const binaryPath = findAgxBinaryOnPath(augmentedPath);
-  if (!binaryPath) return false;
 
   return new Promise((resolve) => {
-    const proc = spawnAgx(["--version"], {
+    const proc = spawnAgx(binaryPath, ["--version"], {
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, PATH: augmentedPath },
     });
@@ -707,6 +743,8 @@ async function startStudioServe(): Promise<void> {
     AGX_SKILL_MANAGE: trinity.skill_manage_enabled ? "1" : "0",
   };
 
+  const agxResolved = findAgxBinaryOnPath(augmentedPath);
+
   if (bundledPath) {
     serveProcess = spawnBundledServer(
       bundledPath,
@@ -715,6 +753,7 @@ async function startStudioServe(): Promise<void> {
     );
   } else {
     serveProcess = spawnAgx(
+      agxResolved,
       ["serve", "--host", "127.0.0.1", "--port", String(apiPort)],
       { cwd: desktopHome, stdio: ["ignore", "pipe", "pipe"], env }
     );
@@ -802,8 +841,8 @@ async function waitServeReady(timeoutMs = 45000): Promise<void> {
     const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
       fail(`agx serve exited before ready (code=${String(code)}, signal=${String(signal)})`);
     };
-    const onError = () => {
-      fail("agx serve failed to start");
+    const onError = (err: Error) => {
+      fail(`agx serve failed to start: ${err.message}`);
     };
     const cleanup = () => {
       clearTimeout(timer);
@@ -840,9 +879,12 @@ function startFeishuProcess(): void {
   const lc = cfg.feishu_longconn;
   if (!lc?.enabled || !lc.app_id || !lc.app_secret) return;
   if (feishuProcess && !feishuProcess.killed) return;
+  const augmentedPath = buildAugmentedPath();
+  const agxResolved = findAgxBinaryOnPath(augmentedPath);
   feishuProcess = spawnAgx(
+    agxResolved,
     ["feishu", "--app-id", lc.app_id, "--app-secret", lc.app_secret],
-    { cwd: os.homedir(), stdio: ["ignore", "pipe", "pipe"], env: process.env }
+    { cwd: os.homedir(), stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PATH: augmentedPath } }
   );
   feishuProcess.on("exit", (code) => {
     if (!isQuitting) {
