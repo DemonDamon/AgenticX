@@ -1086,8 +1086,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const clearSpawnsColumnSuppress = useAppStore((s) => s.clearSpawnsColumnSuppress);
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
-  const activeProvider = useAppStore((s) => s.activeProvider);
-  const activeModel = useAppStore((s) => s.activeModel);
+  const storeActiveProvider = useAppStore((s) => s.activeProvider);
+  const storeActiveModel = useAppStore((s) => s.activeModel);
+  const { chatProvider, chatModel } = useMemo(() => {
+    const pp = (pane?.modelProvider ?? "").trim();
+    const pm = (pane?.modelName ?? "").trim();
+    if (pp && pm) return { chatProvider: pp, chatModel: pm };
+    return { chatProvider: storeActiveProvider, chatModel: storeActiveModel };
+  }, [pane?.modelProvider, pane?.modelName, storeActiveProvider, storeActiveModel]);
   const selectedSubAgent = useAppStore((s) => s.selectedSubAgent);
   const setSelectedSubAgent = useAppStore((s) => s.setSelectedSubAgent);
   const addSubAgent = useAppStore((s) => s.addSubAgent);
@@ -2159,7 +2165,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, []);
 
   const parseLocalFile = useCallback((file: File, key: string) => {
-    if (isImageFile(file) && isKnownNonVisionChatModel(activeProvider, activeModel)) {
+    if (isImageFile(file) && isKnownNonVisionChatModel(chatProvider, chatModel)) {
       setAttachToastOpen(true);
       return;
     }
@@ -2250,7 +2256,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         errorText: "不支持的文件格式",
       },
     }));
-  }, [activeProvider, activeModel]);
+  }, [chatProvider, chatModel]);
 
   const onMicClick = () => {
     if (recording) {
@@ -2374,7 +2380,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setStreaming(true);
     cancelStreamRenderFrame();
     setStreamedAssistantText("");
-    setStreamingModel(activeModel ? { provider: activeProvider, model: activeModel } : null);
+    setStreamingModel(chatModel ? { provider: chatProvider, model: chatModel } : null);
     streamTextRef.current = "";
     streamCommittedRef.current = false;
     const abortController = new AbortController();
@@ -2382,7 +2388,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     const commitCurrentStreamIfNeeded = () => {
       const partial = streamTextRef.current.trim();
       if (!partial || isThinkingPlaceholderText(partial) || streamCommittedRef.current) return false;
-      addPaneMessage(pane.id, "assistant", streamTextRef.current, "meta", activeProvider, activeModel);
+      addPaneMessage(pane.id, "assistant", streamTextRef.current, "meta", chatProvider, chatModel);
       streamCommittedRef.current = true;
       return true;
     };
@@ -2402,8 +2408,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         body.quoted_message_id = quoteTarget.message.id;
         body.quoted_content = `${quoteTarget.message.avatarName || quoteTarget.message.agentId || quoteTarget.message.role}: ${quoteTarget.body}`;
       }
-      if (activeProvider) body.provider = activeProvider;
-      if (activeModel) body.model = activeModel;
+      if (chatProvider) body.provider = chatProvider;
+      if (chatModel) body.model = chatModel;
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
       if (isGroupPane && targetAgentId === "meta") {
         body.group_id = groupChatId;
@@ -2491,8 +2497,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 "tool",
                 `${avatarName}：${progressText}`,
                 eventAgentId,
-                activeProvider,
-                activeModel,
+                chatProvider,
+                chatModel,
                 undefined,
                 { avatarName, avatarUrl: avatarUrl || undefined }
               );
@@ -2519,8 +2525,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   "tool",
                   `${avatarName}：确认通过，继续执行`,
                   eventAgentId,
-                  activeProvider,
-                  activeModel,
+                  chatProvider,
+                  chatModel,
                   undefined,
                   { avatarName, avatarUrl: avatarUrl || undefined }
                 );
@@ -2541,8 +2547,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 "tool",
                 `${avatarName}：⏸ ${blockedText}`,
                 eventAgentId,
-                activeProvider,
-                activeModel,
+                chatProvider,
+                chatModel,
                 undefined,
                 {
                   avatarName,
@@ -2575,8 +2581,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   "assistant",
                   content,
                   eventAgentId,
-                  activeProvider,
-                  activeModel,
+                  chatProvider,
+                  chatModel,
                   undefined,
                   { avatarName, avatarUrl: avatarUrl || undefined }
                 );
@@ -2586,8 +2592,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   "assistant",
                   `${avatarName} 回复失败：${errorText}`,
                   eventAgentId,
-                  activeProvider,
-                  activeModel,
+                  chatProvider,
+                  chatModel,
                   undefined,
                   { avatarName, avatarUrl: avatarUrl || undefined }
                 );
@@ -2604,8 +2610,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   "assistant",
                   content,
                   eventAgentId,
-                  activeProvider,
-                  activeModel,
+                  chatProvider,
+                  chatModel,
                   undefined,
                   { avatarName, avatarUrl: avatarUrl || undefined }
                 );
@@ -2915,7 +2921,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
 
       if (full.trim() && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
-        addPaneMessage(pane.id, "assistant", full, "meta", activeProvider, activeModel);
+        addPaneMessage(pane.id, "assistant", full, "meta", chatProvider, chatModel);
         streamCommittedRef.current = true;
       }
     } catch (error) {
@@ -3128,8 +3134,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       "tool",
       `${confirm.agentId}：${approved ? "确认通过，继续执行" : "确认拒绝，执行终止"}`,
       confirm.agentId,
-      activeProvider,
-      activeModel
+      chatProvider,
+      chatModel
     );
     try {
       await fetch(`${apiBase}/api/confirm`, {
@@ -3397,9 +3403,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             <span className="shrink-0 truncate rounded border border-border bg-surface-card px-2 py-0.5" style={{ maxWidth: "45%" }}>
               {pane.sessionId ? `${pane.sessionId.slice(0, 8)}…` : "-"}
             </span>
-            {activeProvider && activeModel ? (
-              <span className="min-w-0 truncate rounded border border-border bg-surface-card px-2 py-0.5" style={{ maxWidth: "55%" }} title={`${activeProvider}/${activeModel}`}>
-                {activeProvider}/{activeModel}
+            {chatProvider && chatModel ? (
+              <span className="min-w-0 truncate rounded border border-border bg-surface-card px-2 py-0.5" style={{ maxWidth: "55%" }} title={`${chatProvider}/${chatModel}`}>
+                {chatProvider}/{chatModel}
               </span>
             ) : null}
           </div>
@@ -3512,7 +3518,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 const raw = extractClipboardImageFiles(dt);
                 const plain = dt?.getData("text/plain") ?? "";
                 if (raw.length === 0) return;
-                if (isKnownNonVisionChatModel(activeProvider, activeModel)) {
+                if (isKnownNonVisionChatModel(chatProvider, chatModel)) {
                   e.preventDefault();
                   setAttachToastOpen(true);
                   return;
@@ -3600,7 +3606,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     if (!files) return;
                     let showedVisionToast = false;
                     for (const file of Array.from(files)) {
-                      if (isImageFile(file) && isKnownNonVisionChatModel(activeProvider, activeModel)) {
+                      if (isImageFile(file) && isKnownNonVisionChatModel(chatProvider, chatModel)) {
                         if (!showedVisionToast) {
                           setAttachToastOpen(true);
                           showedVisionToast = true;
