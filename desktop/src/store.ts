@@ -372,6 +372,7 @@ const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
 const USER_PREFERENCE_KEY = "agx-user-preference";
 const USER_AVATAR_URL_KEY = "agx-user-avatar-url";
 const META_AVATAR_URL_KEY = "agx-meta-avatar-url";
+const SESSION_TOKEN_CACHE_KEY = "agx-session-token-cache-v1";
 
 function loadChatStyle(): ChatStyle {
   try {
@@ -421,6 +422,67 @@ function loadMetaAvatarUrl(): string {
     // ignore storage errors
   }
   return "";
+}
+
+type SessionTokenCache = Record<string, { input: number; output: number; updatedAt: number }>;
+
+function toNonNegativeInt(raw: unknown): number {
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n);
+}
+
+function readSessionTokenCache(): SessionTokenCache {
+  try {
+    const raw = window.localStorage.getItem(SESSION_TOKEN_CACHE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : {};
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: SessionTokenCache = {};
+    for (const [sid, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!sid || !value || typeof value !== "object") continue;
+      const row = value as Record<string, unknown>;
+      out[sid] = {
+        input: toNonNegativeInt(row.input),
+        output: toNonNegativeInt(row.output),
+        updatedAt: toNonNegativeInt(row.updatedAt) || Date.now(),
+      };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeSessionTokenCache(cache: SessionTokenCache): void {
+  try {
+    const entries = Object.entries(cache).sort((a, b) => (b[1].updatedAt ?? 0) - (a[1].updatedAt ?? 0));
+    const trimmed = entries.slice(0, 500);
+    const normalized: SessionTokenCache = {};
+    for (const [sid, row] of trimmed) normalized[sid] = row;
+    window.localStorage.setItem(SESSION_TOKEN_CACHE_KEY, JSON.stringify(normalized));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function getSessionTokensFromCache(sessionId: string): { input: number; output: number } | null {
+  const sid = String(sessionId ?? "").trim();
+  if (!sid) return null;
+  const row = readSessionTokenCache()[sid];
+  if (!row) return null;
+  return { input: toNonNegativeInt(row.input), output: toNonNegativeInt(row.output) };
+}
+
+function upsertSessionTokenCache(sessionId: string, input: number, output: number): void {
+  const sid = String(sessionId ?? "").trim();
+  if (!sid) return;
+  const cache = readSessionTokenCache();
+  cache[sid] = {
+    input: toNonNegativeInt(input),
+    output: toNonNegativeInt(output),
+    updatedAt: Date.now(),
+  };
+  writeSessionTokenCache(cache);
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -667,22 +729,40 @@ export const useAppStore = create<AppState>((set, get) => ({
       ),
     })),
   accumulatePaneTokens: (paneId, input, output) =>
+    set((state) => {
+      let targetSessionId = "";
+      let nextInput = 0;
+      let nextOutput = 0;
+      const nextPanes = state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const merged = {
+          input: (pane.sessionTokens?.input ?? 0) + input,
+          output: (pane.sessionTokens?.output ?? 0) + output,
+        };
+        targetSessionId = String(pane.sessionId ?? "").trim();
+        nextInput = merged.input;
+        nextOutput = merged.output;
+        return { ...pane, sessionTokens: merged };
+      });
+      if (targetSessionId) {
+        upsertSessionTokenCache(targetSessionId, nextInput, nextOutput);
+      }
+      return { panes: nextPanes };
+    }),
+  setPaneSessionId: (paneId, sessionId) =>
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === paneId
-          ? {
-              ...pane,
-              sessionTokens: {
-                input: (pane.sessionTokens?.input ?? 0) + input,
-                output: (pane.sessionTokens?.output ?? 0) + output,
-              },
-            }
+          ? (() => {
+              const cached = getSessionTokensFromCache(sessionId);
+              if (cached) return { ...pane, sessionId, sessionTokens: cached };
+              if (String(pane.sessionId ?? "").trim() === String(sessionId ?? "").trim()) {
+                return { ...pane, sessionId, sessionTokens: pane.sessionTokens ?? { input: 0, output: 0 } };
+              }
+              return { ...pane, sessionId, sessionTokens: { input: 0, output: 0 } };
+            })()
           : pane
       ),
-    })),
-  setPaneSessionId: (paneId, sessionId) =>
-    set((state) => ({
-      panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, sessionId } : pane)),
     })),
   setPaneMessages: (paneId, messages) =>
     set((state) => ({

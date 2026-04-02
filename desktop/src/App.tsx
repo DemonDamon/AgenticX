@@ -32,6 +32,7 @@ type PersistedPaneState = {
   spawnsColumnOpen?: boolean;
   spawnsColumnSuppressAuto?: boolean;
   spawnsColumnBaselineIds?: string[];
+  sessionTokens?: { input: number; output: number };
 };
 
 type PersistedWorkspaceState = {
@@ -92,6 +93,12 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
       const baselineIds = Array.isArray(baselineRaw)
         ? baselineRaw.map((x) => String(x)).filter((x) => x.length > 0)
         : [];
+      const sessionTokensRaw =
+        row.sessionTokens && typeof row.sessionTokens === "object"
+          ? (row.sessionTokens as Record<string, unknown>)
+          : null;
+      const tokInput = Number(sessionTokensRaw?.input ?? 0);
+      const tokOutput = Number(sessionTokensRaw?.output ?? 0);
       return {
         id,
         avatarId: row.avatarId == null ? null : String(row.avatarId),
@@ -109,6 +116,10 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         spawnsColumnSuppressAuto:
           typeof row.spawnsColumnSuppressAuto === "boolean" ? row.spawnsColumnSuppressAuto : undefined,
         spawnsColumnBaselineIds: baselineIds.length > 0 ? baselineIds : undefined,
+        sessionTokens: {
+          input: Number.isFinite(tokInput) && tokInput > 0 ? Math.floor(tokInput) : 0,
+          output: Number.isFinite(tokOutput) && tokOutput > 0 ? Math.floor(tokOutput) : 0,
+        },
       };
     })
     .filter((item): item is PersistedPaneState => !!item);
@@ -449,6 +460,7 @@ export function App() {
               panes: hydratedPanes.map((pane) => ({
                 ...pane,
                 messages: [],
+                sessionTokens: pane.sessionTokens ?? { input: 0, output: 0 },
                 modelProvider: pane.modelProvider ?? "",
                 modelName: pane.modelName ?? "",
                 membersPanelOpen: pane.membersPanelOpen ?? false,
@@ -461,6 +473,10 @@ export function App() {
               })),
               activePaneId: nextActivePaneId,
             });
+            // Re-apply sid bindings so store can restore per-session token cache.
+            for (const pane of hydratedPanes) {
+              setPaneSessionId(pane.id, pane.sessionId);
+            }
             const metaPane = hydratedPanes.find((pane) => pane.id === "pane-meta");
             const nextSessionId =
               (metaPane?.sessionId ?? "").trim() ||
@@ -586,6 +602,7 @@ export function App() {
         spawnsColumnOpen: pane.spawnsColumnOpen,
         spawnsColumnSuppressAuto: pane.spawnsColumnSuppressAuto,
         spawnsColumnBaselineIds: pane.spawnsColumnBaselineIds,
+        sessionTokens: pane.sessionTokens,
       })),
     };
     try {
