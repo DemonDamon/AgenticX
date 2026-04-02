@@ -3,7 +3,7 @@ name: agenticx-workflow-designer
 description: Guide for designing and running AgenticX workflows including sequential pipelines, parallel execution, graph-based orchestration, conditional routing, and trigger services. Use when the user wants to create workflows, orchestrate multiple agents, design agent pipelines, or set up complex multi-step processes.
 metadata:
   author: AgenticX
-  version: "0.3.4"
+  version: "0.3.5"
 ---
 
 # AgenticX Workflow Designer

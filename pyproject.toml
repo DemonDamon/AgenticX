@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agenticx"
-version = "0.3.4"
+version = "0.3.5"
 description = "A unified, scalable, production-ready multi-agent application development framework"
 authors = [
     {name = "Ziran Li", email = "bingzhenli@hotmail.com"},
