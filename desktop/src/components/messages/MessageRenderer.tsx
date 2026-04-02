@@ -59,11 +59,18 @@ export function MessageRenderer({
   if (message.role === "user" || message.role === "assistant") {
     if (chatStyle === "terminal") return <TerminalLine message={message} badge={assistantBadge} />;
     if (chatStyle === "clean") return <CleanBlock message={message} badge={assistantBadge} />;
+    const rawAssist = (message.avatarName ?? "").trim();
+    const mergedAssistName =
+      message.role === "assistant"
+        ? rawAssist && rawAssist !== "分身"
+          ? rawAssist
+          : assistantName
+        : assistantName;
     return (
       <ImBubble
         message={message}
         badge={assistantBadge}
-        assistantName={message.avatarName || assistantName}
+        assistantName={mergedAssistName}
         assistantAvatarUrl={message.avatarUrl || assistantAvatarUrl}
         userName={userName}
         userAvatarUrl={userAvatarUrl}

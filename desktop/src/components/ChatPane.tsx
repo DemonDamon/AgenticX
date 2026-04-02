@@ -1065,7 +1065,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const panes = useAppStore((s) => s.panes);
   const metaLeaderDisplayName = useMemo(() => {
     const mp = panes.find((p) => p.avatarId === null);
-    return (mp?.avatarName ?? "").trim() || "Machi";
+    const t = (mp?.avatarName ?? "").trim();
+    return t && t !== "分身" ? t : "Machi";
   }, [panes]);
   const removePane = useAppStore((s) => s.removePane);
   const addPane = useAppStore((s) => s.addPane);
@@ -1119,9 +1120,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const paneAvatarMeta = useMemo(() => {
     const aid = pane?.avatarId;
     if (!aid) {
+      // avatarId 为空即为 Machi 窗格；勿依赖 avatarName===「Machi」才给 meta 头像（飞书绑定曾错误写入「分身」）
       const paneName = (pane?.avatarName ?? "").trim();
-      const isMetaPane = paneName === "Machi";
-      return { name: pane?.avatarName || "AI", url: isMetaPane ? metaAvatarUrl || undefined : undefined };
+      const name = paneName && paneName !== "分身" ? paneName : "Machi";
+      return { name, url: metaAvatarUrl || undefined };
     }
     if (aid.startsWith("group:")) return { name: pane?.avatarName || "AI", url: undefined };
     const found = avatars.find((a) => a.id === aid);
@@ -3193,7 +3195,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             ) : null}
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 truncate text-sm font-medium text-text-strong">
-                {pane.avatarName}
+                {paneAvatarMeta.name}
                 {shouldShowFeishuBadge && (
                   <FeishuBadge variant="topbar" />
                 )}
