@@ -258,9 +258,10 @@ def _serialize_context_files(session: StudioSession) -> str:
     return "\n\n".join(parts)
 
 
-def _serialize_skill_summaries() -> str:
+def _serialize_skill_summaries(session: StudioSession) -> str:
     try:
-        summaries = get_all_skill_summaries()
+        bound = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+        summaries = get_all_skill_summaries(bound_avatar_id=bound)
     except Exception:
         summaries = []
     if not summaries:
@@ -304,7 +305,7 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         "- 必须使用中文回复。\n"
         "- 简洁、可执行、优先给出当前进度。\n\n"
         "## 可用元 Skills 摘要\n"
-        f"{_serialize_skill_summaries()}\n\n"
+        f"{_serialize_skill_summaries(session)}\n\n"
         "## 当前会话 artifacts\n"
         f"{_serialize_artifacts(session)}\n\n"
         "## 当前 Todo 列表\n"

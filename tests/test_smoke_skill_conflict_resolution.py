@@ -34,6 +34,7 @@ def _force_presets_enabled(monkeypatch) -> None:
             ],
             [],
             {},
+            [],
         ),
     )
 

@@ -6,7 +6,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from rich.console import Console
 from rich.syntax import Syntax
@@ -63,16 +63,48 @@ def skill_search(query: str, registry_url: str = "http://127.0.0.1:8321") -> Non
     console.print(table)
 
 
+def skill_is_allowed_for_session(
+    name: str,
+    *,
+    bound_avatar_id: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """Return (allowed, error_message). Empty error_message when allowed."""
+    from agenticx.avatar.registry import AvatarRegistry
+    from agenticx.tools.skill_bundle import get_disabled_skill_names_set
+
+    if name in get_disabled_skill_names_set():
+        return False, f"Skill '{name}' is disabled globally in Settings."
+    if bound_avatar_id:
+        av = AvatarRegistry().get_avatar(bound_avatar_id)
+        if (
+            av is not None
+            and av.skills_enabled
+            and name in av.skills_enabled
+            and not av.skills_enabled[name]
+        ):
+            return False, f"Skill '{name}' is disabled for this avatar."
+    return True, ""
+
+
 def skill_use(
     context_files: Dict[str, str],
     name: str,
     registry_url: Optional[str] = None,
+    *,
+    bound_avatar_id: Optional[str] = None,
+    quiet: bool = False,
 ) -> bool:
     """Load a skill's SKILL.md content into session context_files.
 
     Returns True on success.
     """
     from agenticx.tools.skill_bundle import SkillBundleLoader
+
+    allowed, err = skill_is_allowed_for_session(name, bound_avatar_id=bound_avatar_id)
+    if not allowed:
+        if not quiet:
+            console.print(f"[red]{err}[/red]")
+        return False
 
     loader = SkillBundleLoader(registry_url=registry_url)
     content = loader.get_skill_content(name)
@@ -101,10 +133,30 @@ def skill_info(name: str, registry_url: Optional[str] = None) -> None:
     console.print(Syntax(content, "markdown", line_numbers=False))
 
 
-def get_all_skill_summaries(registry_url: Optional[str] = None) -> List[Dict[str, str]]:
-    """Get name+description for all available skills (used by /discover)."""
-    from agenticx.tools.skill_bundle import SkillBundleLoader
+def get_all_skill_summaries(
+    registry_url: Optional[str] = None,
+    *,
+    bound_avatar_id: Optional[str] = None,
+) -> List[Dict[str, str]]:
+    """Get name+description for skills allowed for the session (global + avatar filters)."""
+    from agenticx.avatar.registry import AvatarRegistry
+    from agenticx.tools.skill_bundle import (
+        SkillBundleLoader,
+        filter_skills_by_enablement,
+        get_disabled_skill_names_set,
+    )
 
     loader = SkillBundleLoader(registry_url=registry_url)
     skills = loader.scan()
-    return [{"name": s.name, "description": s.description} for s in skills]
+    disabled = get_disabled_skill_names_set()
+    avatar_map: Optional[Dict[str, bool]] = None
+    if bound_avatar_id:
+        av = AvatarRegistry().get_avatar(bound_avatar_id)
+        if av is not None and av.skills_enabled:
+            avatar_map = dict(av.skills_enabled)
+    filtered = filter_skills_by_enablement(
+        list(skills),
+        disabled_names=disabled,
+        avatar_skills_enabled=avatar_map,
+    )
+    return [{"name": s.name, "description": s.description} for s in filtered]

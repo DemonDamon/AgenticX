@@ -440,6 +440,18 @@ def create_studio_app() -> FastAPI:
             if str(key).strip()
         }
 
+    def _sanitize_avatar_skills_enabled(raw: Any) -> dict[str, bool] | None:
+        if raw is None:
+            return None
+        if not isinstance(raw, dict):
+            return None
+        out = {
+            str(k): bool(v)
+            for k, v in raw.items()
+            if str(k).strip()
+        }
+        return out or None
+
     def _load_global_tools_policy() -> dict[str, bool]:
         try:
             raw = ConfigManager.get_value("tools_enabled")
@@ -1183,6 +1195,11 @@ def create_studio_app() -> FastAPI:
             meta_done = False
             try:
                 async def _produce_meta_events() -> None:
+                    setattr(
+                        session,
+                        "bound_avatar_id",
+                        active_avatar_id if is_avatar_session else None,
+                    )
                     _meta_label = str(getattr(payload, "meta_leader_display_name", None) or "").strip() or "Machi"
                     if isinstance(session.scratchpad, dict):
                         session.scratchpad[META_LEADER_LABEL_SCRATCH_KEY] = _meta_label
@@ -1202,6 +1219,16 @@ def create_studio_app() -> FastAPI:
                         )
                     if is_avatar_session:
                         sys_prompt = _build_avatar_direct_prompt()
+                        try:
+                            from agenticx.cli.studio_skill import get_all_skill_summaries
+                            from agenticx.runtime.prompts.meta_agent import _build_skills_context
+
+                            _av_skill_summaries = get_all_skill_summaries(
+                                bound_avatar_id=active_avatar_id,
+                            )
+                            sys_prompt += "\n\n" + _build_skills_context(_av_skill_summaries)
+                        except Exception:
+                            pass
                     else:
                         _u_nickname = str(getattr(payload, "user_nickname", None) or "").strip()
                         _u_preference = str(getattr(payload, "user_preference", None) or "").strip()
@@ -1332,6 +1359,11 @@ def create_studio_app() -> FastAPI:
             loop_tools_source,
             avatar_tools_enabled=loop_avatar_tools_enabled,
             global_tools_enabled=_load_global_tools_policy(),
+        )
+        setattr(
+            session,
+            "bound_avatar_id",
+            loop_avatar_id if loop_is_avatar else None,
         )
         loop_sys_prompt = build_meta_agent_system_prompt(
             session,
@@ -1942,6 +1974,7 @@ def create_studio_app() -> FastAPI:
                 for key, value in raw_tools_enabled.items()
                 if str(key).strip()
             }
+        skills_enabled = _sanitize_avatar_skills_enabled(payload.get("skills_enabled"))
         config = avatar_registry.create_avatar(
             name=name,
             role=str(payload.get("role", "")).strip(),
@@ -1951,6 +1984,7 @@ def create_studio_app() -> FastAPI:
             default_provider=str(payload.get("default_provider", "")).strip(),
             default_model=str(payload.get("default_model", "")).strip(),
             tools_enabled=tools_enabled,
+            skills_enabled=skills_enabled,
         )
         return {"ok": True, "avatar": config.to_dict()}
 
@@ -1964,6 +1998,11 @@ def create_studio_app() -> FastAPI:
         if "tools_enabled" in payload:
             payload = dict(payload)
             payload["tools_enabled"] = _sanitize_tools_enabled(payload.get("tools_enabled"))
+        if "skills_enabled" in payload:
+            payload = dict(payload)
+            payload["skills_enabled"] = _sanitize_avatar_skills_enabled(
+                payload.get("skills_enabled")
+            )
         updated = avatar_registry.update_avatar(avatar_id, payload)
         if updated is None:
             raise HTTPException(status_code=404, detail="avatar not found")
@@ -2633,6 +2672,7 @@ def create_studio_app() -> FastAPI:
                 "preset_paths": [],
                 "custom_paths": [],
                 "preferred_sources": {},
+                "disabled_skills": [],
                 "error": str(exc),
             }
 
@@ -2646,6 +2686,17 @@ def create_studio_app() -> FastAPI:
         preset = payload.get("preset_paths")
         custom = payload.get("custom_paths")
         preferred = payload.get("preferred_sources")
+        disabled_skills_arg: list[str] | None = None
+        if "disabled_skills" in payload:
+            ds = payload.get("disabled_skills")
+            if ds is None:
+                disabled_skills_arg = []
+            elif isinstance(ds, list):
+                disabled_skills_arg = [str(x).strip() for x in ds if str(x).strip()]
+            else:
+                raise HTTPException(
+                    status_code=400, detail="disabled_skills must be a list or null"
+                )
         if preset is not None and not isinstance(preset, list):
             raise HTTPException(
                 status_code=400, detail="preset_paths must be a list or omitted"
@@ -2668,6 +2719,7 @@ def create_studio_app() -> FastAPI:
                 list(preset) if isinstance(preset, list) else [],
                 list(custom) if isinstance(custom, list) else [],
                 dict(preferred) if isinstance(preferred, dict) else {},
+                disabled_skills=disabled_skills_arg,
             )
             return {"ok": True, **skill_scan_settings_payload()}
         except Exception as exc:
@@ -2681,10 +2733,14 @@ def create_studio_app() -> FastAPI:
         """List all available skills with metadata."""
         _check_token(x_agx_desktop_token)
         try:
-            from agenticx.tools.skill_bundle import SkillBundleLoader
+            from agenticx.tools.skill_bundle import (
+                SkillBundleLoader,
+                get_disabled_skill_names_set,
+            )
 
             loader = SkillBundleLoader()
             skills = loader.scan()
+            disabled_set = get_disabled_skill_names_set()
             items = [
                 {
                     "skill_id": f"{getattr(s, 'source', 'unknown')}:{s.name}",
@@ -2696,6 +2752,7 @@ def create_studio_app() -> FastAPI:
                     "tag": getattr(s, "tag", None),
                     "icon": getattr(s, "icon", None),
                     "content_hash": getattr(s, "content_hash", ""),
+                    "globally_disabled": s.name in disabled_set,
                     "conflict_count": len(loader.get_skill_variants(s.name)),
                     "variants": [
                         {

@@ -21,10 +21,14 @@ MAX_WORKSPACE_BLOCK_CHARS = 1800
 MAX_WORKSPACE_TOTAL_CHARS = 6000
 
 
-def _build_skills_context(skills: list[dict[str, Any]] | None = None) -> str:
+def _build_skills_context(
+    skills: list[dict[str, Any]] | None = None,
+    *,
+    bound_avatar_id: str | None = None,
+) -> str:
     if skills is None:
         try:
-            skills = get_all_skill_summaries()
+            skills = get_all_skill_summaries(bound_avatar_id=bound_avatar_id)
         except Exception:
             skills = []
     if not skills:
@@ -394,8 +398,9 @@ def build_meta_agent_system_prompt(
     user_nickname: str = "",
     user_preference: str = "",
 ) -> str:
+    bound_skill = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
     try:
-        skill_summaries = get_all_skill_summaries()
+        skill_summaries = get_all_skill_summaries(bound_avatar_id=bound_skill)
     except Exception:
         skill_summaries = []
     workspace_context = _build_workspace_context_block()
