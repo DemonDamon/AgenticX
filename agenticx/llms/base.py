@@ -6,12 +6,13 @@ from .response import LLMResponse
 
 
 class StreamChunk(TypedDict, total=False):
-    type: Literal["content", "tool_call_delta", "done"]
+    type: Literal["content", "tool_call_delta", "usage", "done"]
     text: str
     tool_index: int
     tool_call_id: str
     tool_name: str
     arguments_delta: str
+    usage: Dict[str, int]
     finish_reason: str
 
 
