@@ -86,13 +86,11 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
 }
 
 export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onClose, tintColor }: Props) {
-  const panes = useAppStore((s) => s.panes);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const addPane = useAppStore((s) => s.addPane);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [feishuBoundSessionId, setFeishuBoundSessionId] = useState<string | null>(null);
-  const [hasAnyFeishuDesktopBinding, setHasAnyFeishuDesktopBinding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [contextMenu, setContextMenu] = useState<SessionContextMenu | null>(null);
@@ -102,19 +100,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const [batchDeleting, setBatchDeleting] = useState(false);
 
   const title = useMemo(() => (pane.avatarName || "Machi").trim(), [pane.avatarName]);
-  const primaryMetaPaneId = useMemo(() => {
-    const metaPanes = panes.filter((p) => !p.avatarId || p.avatarId === "");
-    if (metaPanes.length === 0) return null;
-    const preferred = metaPanes.find((p) => !((p.sessionId ?? "").startsWith("im-")));
-    return (preferred ?? metaPanes[0])?.id ?? null;
-  }, [panes]);
-  const defaultMetaMarkedSessionId =
-    !hasAnyFeishuDesktopBinding &&
-    !pane.avatarId &&
-    primaryMetaPaneId === pane.id
-      ? (pane.sessionId || "").trim() || null
-      : null;
-  const feishuMarkedSessionId = feishuBoundSessionId || defaultMetaMarkedSessionId;
+  const feishuMarkedSessionId = feishuBoundSessionId;
 
   const groupedSessions = useMemo<GroupedSessions>(() => {
     const visibleSessions = feishuMarkedSessionId
@@ -173,15 +159,16 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       if (cancelled) return;
       try {
         const r = await window.agenticxDesktop.loadFeishuBinding();
-        if (!r.ok || cancelled) return;
+        if (!r.ok || cancelled) {
+          if (!cancelled) setFeishuBoundSessionId(null);
+          return;
+        }
         const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
         const sid = typeof desk?.session_id === "string" ? desk.session_id.trim() : "";
         setFeishuBoundSessionId(sid || null);
-        setHasAnyFeishuDesktopBinding(Boolean(sid));
       } catch {
         if (!cancelled) {
           setFeishuBoundSessionId(null);
-          setHasAnyFeishuDesktopBinding(false);
         }
       }
     };
@@ -474,6 +461,24 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     if (!contextMenu) return;
     const item = contextMenu.item;
     setContextMenu(null);
+    if (action === "toggle_feishu_binding") {
+      const currentBound = (feishuBoundSessionId || "").trim();
+      const target = (item.session_id || "").trim();
+      if (!target) return;
+      if (currentBound === target) {
+        await window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
+        setFeishuBoundSessionId(null);
+      } else {
+        const aid = (item.avatar_id || "").trim();
+        await window.agenticxDesktop.saveFeishuDesktopBinding({
+          sessionId: target,
+          avatarId: aid.startsWith("group:") ? null : (aid || null),
+          avatarName: item.avatar_name || null,
+        });
+        setFeishuBoundSessionId(target);
+      }
+      return;
+    }
     if (action === "rename") {
       const label = (item.session_name || "").trim() || `新会话 ${item.session_id.slice(0, 6)}`;
       setEditingId(item.session_id);
@@ -664,44 +669,50 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("pin")}
           >
-            {contextMenu.item.pinned ? "Unpin" : "Pin"}
+            {contextMenu.item.pinned ? "取消置顶" : "置顶"}
+          </button>
+          <button
+            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+            onClick={() => void runContextAction("toggle_feishu_binding")}
+          >
+            {feishuBoundSessionId === contextMenu.item.session_id ? "取消绑定飞书会话" : "绑定为飞书会话"}
           </button>
           <button
             className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("fork")}
           >
-            Fork Chat
+            分叉会话
           </button>
           <button
             className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("open_new_tab")}
           >
-            Open in New Tab
+            在新标签打开
           </button>
           <button
             className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("mark_unread")}
           >
-            Mark as Unread
+            标记未读
           </button>
           <div className="my-1 border-t border-border" />
           <button
             className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("delete")}
           >
-            Delete
+            删除
           </button>
           <button
             className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("rename")}
           >
-            Rename
+            重命名
           </button>
           <button
             className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("archive_prior")}
           >
-            Archive Prior Chats
+            归档此前会话
           </button>
         </div>
       ) : null}
