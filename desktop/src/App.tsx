@@ -1369,7 +1369,9 @@ export function App() {
           setActiveAvatarId(aid?.startsWith("group:") ? null : (aid ?? null));
         } else {
           const avatarId = (desk?.avatar_id ?? "").trim() || null;
-          const avatarName = (desk?.avatar_name ?? "").trim() || "分身";
+          const rawName = (desk?.avatar_name ?? "").trim();
+          // avatar_id 为空表示飞书默认路由到 Machi；勿用「分身」占位，否则顶栏/气泡会与元智能体不一致且无 meta 头像
+          const avatarName = rawName || (avatarId ? "分身" : "Machi");
           const paneId = addPane(avatarId, avatarName, newSid);
           setActivePaneId(paneId);
           setActiveAvatarId(avatarId?.startsWith("group:") ? null : (avatarId ?? null));
