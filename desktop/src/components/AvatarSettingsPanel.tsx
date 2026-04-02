@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, Save, RotateCcw } from "lucide-react";
+import { Save, RotateCcw, X } from "lucide-react";
 import type { Avatar } from "../store";
 
 type SkillItem = {
@@ -173,7 +173,8 @@ export function AvatarSettingsPanel(props: Props) {
       ? "未设置项继承 Machi 全局策略；如全局未设置，则默认启用。"
       : "Machi 全局策略将作为所有分身默认值；未设置项默认启用。";
 
-  const handleSaveGeneral = async () => {
+  /** 分身「基本信息」Tab：名称 / 角色 / System Prompt + SOUL 一并保存 */
+  const handleSaveGeneralAndSoul = async () => {
     if (mode !== "avatar" || !avatar) return;
     setSaving(true);
     setMessage("");
@@ -184,8 +185,20 @@ export function AvatarSettingsPanel(props: Props) {
         role: role.trim(),
         system_prompt: systemPrompt.trim(),
       });
-      setMessage(res?.ok ? "已保存" : `保存失败: ${res?.error ?? "未知错误"}`);
-      if (res?.ok) onSaved();
+      if (!res?.ok) {
+        setMessage(`保存失败: ${res?.error ?? "未知错误"}`);
+        return;
+      }
+      const soulRes = await window.agenticxDesktop.saveAvatarSoul({
+        avatarId: avatar.id,
+        content: soulValue,
+      });
+      if (!soulRes?.ok) {
+        setMessage(`基本信息已保存；SOUL 保存失败: ${soulRes?.error ?? "未知错误"}`);
+        return;
+      }
+      setMessage("已保存，下一轮对话生效。");
+      onSaved();
     } catch (err) {
       setMessage(`保存失败: ${String(err)}`);
     } finally {
@@ -241,17 +254,13 @@ export function AvatarSettingsPanel(props: Props) {
     }
   };
 
-  const handleSaveSoul = async () => {
+  const handleSaveMetaSoul = async () => {
+    if (mode !== "machi") return;
     setSaving(true);
     setMessage("");
     try {
-      if (mode === "avatar" && avatar) {
-        const res = await window.agenticxDesktop.saveAvatarSoul({ avatarId: avatar.id, content: soulValue });
-        setMessage(res?.ok ? "已保存，下一轮对话生效。" : `保存失败: ${res?.error ?? "未知错误"}`);
-      } else {
-        const res = await window.agenticxDesktop.saveMetaSoul({ content: soulValue });
-        setMessage(res?.ok ? "已保存，下一轮 Machi 对话生效。" : `保存失败: ${res?.error ?? "未知错误"}`);
-      }
+      const res = await window.agenticxDesktop.saveMetaSoul({ content: soulValue });
+      setMessage(res?.ok ? "已保存，下一轮 Machi 对话生效。" : `保存失败: ${res?.error ?? "未知错误"}`);
     } catch (err) {
       setMessage(`保存失败: ${String(err)}`);
     } finally {
@@ -259,13 +268,18 @@ export function AvatarSettingsPanel(props: Props) {
     }
   };
 
+  useEffect(() => {
+    if (mode === "avatar" && tab === "soul") {
+      setTab("general");
+    }
+  }, [mode, tab]);
+
   const tabs: { id: Tab; label: string }[] =
     mode === "avatar"
       ? [
           { id: "general", label: "基本信息" },
           { id: "tools", label: "工具权限" },
           { id: "skills", label: "技能" },
-          { id: "soul", label: "SOUL" },
         ]
       : [
           { id: "tools", label: "工具权限（全局）" },
@@ -280,15 +294,17 @@ export function AvatarSettingsPanel(props: Props) {
         className="flex h-[min(85vh,640px)] w-[min(90vw,640px)] flex-col overflow-hidden rounded-2xl border border-border shadow-2xl"
         style={{ backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
       >
-        {/* Header */}
-        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-surface-panel px-4 py-3">
+        {/* Header：标题 + 右上角关闭 */}
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-surface-panel px-3 py-3 sm:px-4">
+          <div className="min-w-0 flex-1 truncate text-sm font-semibold text-text-strong">{title}</div>
           <button
-            className="rounded p-1 text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
+            type="button"
+            aria-label="关闭"
+            className="shrink-0 rounded-md p-1.5 text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
             onClick={onClose}
           >
-            <ChevronLeft className="h-4 w-4" />
+            <X className="h-5 w-5" strokeWidth={2.25} />
           </button>
-          <div className="text-sm font-semibold text-text-strong">{title}</div>
         </div>
 
         {/* Tab bar */}
@@ -346,11 +362,29 @@ export function AvatarSettingsPanel(props: Props) {
                   placeholder="例如：你是资深前端工程师，先给结论，再给步骤；代码优先给可直接运行版本。"
                 />
               </label>
+              <div className="border-t border-border pt-4">
+                <label className="block text-sm text-text-muted">
+                  SOUL
+                  <span className="ml-1 text-xs font-normal text-text-faint">（长期风格与策略，支持 Markdown）</span>
+                </label>
+                {loadingSoul ? (
+                  <div className="mt-1 rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-faint">
+                    加载中...
+                  </div>
+                ) : (
+                  <textarea
+                    className="mt-1 min-h-[160px] w-full resize-y rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
+                    value={soulValue}
+                    onChange={(e) => setSoulValue(e.target.value)}
+                    placeholder="例如：先给结论，再给证据；避免重复确认；把进度和风险讲清楚。"
+                  />
+                )}
+              </div>
               <div className="flex justify-end">
                 <button
                   className="flex items-center gap-1.5 rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
                   disabled={saving || !name.trim()}
-                  onClick={() => void handleSaveGeneral()}
+                  onClick={() => void handleSaveGeneralAndSoul()}
                 >
                   <Save className="h-3.5 w-3.5" />
                   {saving ? "保存中..." : "保存"}
@@ -502,11 +536,10 @@ export function AvatarSettingsPanel(props: Props) {
             </div>
           )}
 
-          {activeTab === "soul" && (
+          {activeTab === "soul" && mode === "machi" && (
             <div className="space-y-3">
               <p className="text-xs text-text-faint">
-                支持自由 Markdown 文本。该配置用于塑造{" "}
-                {mode === "avatar" ? "当前分身" : "Machi（Meta-Agent）"} 的长期行为风格。
+                支持自由 Markdown 文本。该配置用于塑造 Machi（Meta-Agent）的长期行为风格。
               </p>
               {loadingSoul ? (
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-faint">
@@ -524,7 +557,7 @@ export function AvatarSettingsPanel(props: Props) {
                 <button
                   className="flex items-center gap-1.5 rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
                   disabled={saving}
-                  onClick={() => void handleSaveSoul()}
+                  onClick={() => void handleSaveMetaSoul()}
                 >
                   <Save className="h-3.5 w-3.5" />
                   {saving ? "保存中..." : "保存"}
