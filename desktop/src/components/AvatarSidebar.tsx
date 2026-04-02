@@ -101,6 +101,7 @@ export function AvatarSidebar() {
           createdBy: a.created_by ?? "manual",
           systemPrompt: a.system_prompt ?? "",
           toolsEnabled: a.tools_enabled ?? {},
+          skillsEnabled: a.skills_enabled && typeof a.skills_enabled === "object" ? { ...a.skills_enabled } : undefined,
         }))
       );
     }
@@ -166,12 +167,20 @@ export function AvatarSidebar() {
     role: string;
     systemPrompt: string;
     toolsEnabled: Record<string, boolean>;
+    skillsEnabled?: Record<string, boolean>;
   }) => {
+    const se = data.skillsEnabled;
+    const falses =
+      se && typeof se === "object"
+        ? Object.fromEntries(Object.entries(se).filter(([, v]) => v === false))
+        : {};
+    const skillsPayload = Object.keys(falses).length > 0 ? falses : undefined;
     await window.agenticxDesktop.createAvatar({
       name: data.name,
       role: data.role,
       system_prompt: data.systemPrompt,
       tools_enabled: data.toolsEnabled,
+      ...(skillsPayload !== undefined ? { skills_enabled: skillsPayload } : {}),
     });
     await refreshAvatars();
   };

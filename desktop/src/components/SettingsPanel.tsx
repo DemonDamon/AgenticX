@@ -222,6 +222,9 @@ function SkillRowButton({
   onActivate,
   onExpandDetail,
   onCollapseDetail,
+  globalSkillEnabled,
+  skillScanBusy,
+  onToggleGlobalSkill,
 }: {
   skill: SkillItem;
   isActive: boolean;
@@ -235,6 +238,9 @@ function SkillRowButton({
   onActivate: (name: string) => void;
   onExpandDetail: (name: string) => void;
   onCollapseDetail: () => void;
+  globalSkillEnabled: boolean;
+  skillScanBusy: boolean;
+  onToggleGlobalSkill: (name: string, enabled: boolean) => void;
 }) {
   const src = skillSourceBadge(effectiveSkillSource(skill));
   const conflictCount = Number(skill.conflict_count ?? 0);
@@ -261,11 +267,12 @@ function SkillRowButton({
           : skill.name === recentMarketSkillName
             ? "border-amber-500/35 bg-amber-500/5"
             : "border-border bg-surface-card hover:bg-surface-hover"
-      }`}
+      } ${!globalSkillEnabled ? "opacity-60" : ""}`}
     >
+      <div className="flex items-start gap-2">
       <button
         type="button"
-        className="w-full text-left"
+        className="min-w-0 flex-1 text-left"
         onClick={() => onActivate(skill.name)}
         onDoubleClick={() => void onExpandDetail(skill.name)}
         title="双击展开当前技能"
@@ -299,6 +306,16 @@ function SkillRowButton({
           <p className="mt-0.5 truncate text-xs text-text-muted">{skill.description}</p>
         ) : null}
       </button>
+      <div className="flex shrink-0 flex-col items-end gap-0.5 pt-0.5">
+        <span className="text-[10px] text-text-faint">全局</span>
+        <SettingsSwitch
+          checked={globalSkillEnabled}
+          disabled={skillScanBusy}
+          aria-label={`全局启用技能 ${skill.name}`}
+          onChange={(next) => onToggleGlobalSkill(skill.name, next)}
+        />
+      </div>
+      </div>
       {conflictCount > 1 ? (
         <div className="mt-1.5 flex items-center gap-2 text-[11px] text-text-faint">
           <span>默认来源</span>
@@ -361,6 +378,9 @@ function SkillsLocationSection({
   onActivate,
   onExpandDetail,
   onCollapseDetail,
+  disabledSkillNames,
+  skillScanBusy,
+  onToggleGlobalSkill,
 }: {
   skills: SkillItem[];
   title: string;
@@ -375,6 +395,9 @@ function SkillsLocationSection({
   onActivate: (name: string) => void;
   onExpandDetail: (name: string) => void;
   onCollapseDetail: () => void;
+  disabledSkillNames: string[];
+  skillScanBusy: boolean;
+  onToggleGlobalSkill: (name: string, enabled: boolean) => void;
 }) {
   if (skills.length === 0) return null;
   const PREVIEW_COUNT = 10;
@@ -404,6 +427,9 @@ function SkillsLocationSection({
             onActivate={onActivate}
             onExpandDetail={onExpandDetail}
             onCollapseDetail={onCollapseDetail}
+            globalSkillEnabled={!disabledSkillNames.includes(skill.name)}
+            skillScanBusy={skillScanBusy}
+            onToggleGlobalSkill={onToggleGlobalSkill}
           />
         ))}
         {shouldCollapse ? (
@@ -764,6 +790,8 @@ function SkillsTab() {
   const [skillScanPresets, setSkillScanPresets] = useState<SkillScanPresetRow[]>([]);
   const [skillScanCustomPaths, setSkillScanCustomPaths] = useState<string[]>([]);
   const [preferredSkillSources, setPreferredSkillSources] = useState<Record<string, string>>({});
+  /** Skill names globally disabled in ~/.agenticx/config.yaml (skills.disabled). */
+  const [disabledSkillNames, setDisabledSkillNames] = useState<string[]>([]);
   const [skillScanBusy, setSkillScanBusy] = useState(false);
   const [skillScanMsg, setSkillScanMsg] = useState("");
   const [builtinSkillsExpanded, setBuiltinSkillsExpanded] = useState(false);
@@ -844,6 +872,9 @@ function SkillsTab() {
           if (scanRes.ok && scanRes.preferred_sources && typeof scanRes.preferred_sources === "object") {
             setPreferredSkillSources({ ...scanRes.preferred_sources });
           }
+          if (scanRes.ok && Array.isArray(scanRes.disabled_skills)) {
+            setDisabledSkillNames([...scanRes.disabled_skills]);
+          }
         }
       } catch (e) {
         if (!cancelled) setErr(String(e));
@@ -879,6 +910,7 @@ function SkillsTab() {
       presetRows: SkillScanPresetRow[],
       customs: string[],
       preferredSources: Record<string, string>,
+      disabledSkills: string[],
     ) => {
       setSkillScanBusy(true);
       setSkillScanMsg("");
@@ -888,6 +920,7 @@ function SkillsTab() {
           presetPaths: presetRows.map((p) => ({ id: p.id, enabled: p.enabled })),
           customPaths: cleanedCustom,
           preferredSources,
+          disabledSkills,
         });
         if (r.ok) {
           if (Array.isArray(r.preset_paths)) {
@@ -905,6 +938,9 @@ function SkillsTab() {
           }
           if (r.preferred_sources && typeof r.preferred_sources === "object") {
             setPreferredSkillSources({ ...r.preferred_sources });
+          }
+          if (Array.isArray(r.disabled_skills)) {
+            setDisabledSkillNames([...r.disabled_skills]);
           }
           setSkillScanMsg("已保存扫描路径");
           await window.agenticxDesktop.refreshSkills();
@@ -955,6 +991,9 @@ function SkillsTab() {
       if (scanRes.ok && scanRes.preferred_sources && typeof scanRes.preferred_sources === "object") {
         setPreferredSkillSources({ ...scanRes.preferred_sources });
       }
+      if (scanRes.ok && Array.isArray(scanRes.disabled_skills)) {
+        setDisabledSkillNames([...scanRes.disabled_skills]);
+      }
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -965,8 +1004,30 @@ function SkillsTab() {
   const choosePreferredSource = async (skillName: string, source: string) => {
     const next = { ...preferredSkillSources, [skillName]: source };
     setPreferredSkillSources(next);
-    await persistSkillScanSettings(skillScanPresets, skillScanCustomPaths, next);
+    await persistSkillScanSettings(skillScanPresets, skillScanCustomPaths, next, disabledSkillNames);
   };
+
+  const toggleGlobalSkill = useCallback(
+    async (name: string, enabled: boolean) => {
+      const nextDisabled = enabled
+        ? disabledSkillNames.filter((n) => n !== name)
+        : [...new Set([...disabledSkillNames, name])].sort();
+      setDisabledSkillNames(nextDisabled);
+      await persistSkillScanSettings(
+        skillScanPresets,
+        skillScanCustomPaths,
+        preferredSkillSources,
+        nextDisabled,
+      );
+    },
+    [
+      disabledSkillNames,
+      persistSkillScanSettings,
+      skillScanPresets,
+      skillScanCustomPaths,
+      preferredSkillSources,
+    ],
+  );
 
   const reloadSkillsAndBundles = async () => {
     const [skillsRes, bundlesRes] = await Promise.all([
@@ -1409,7 +1470,7 @@ function SkillsTab() {
                     row.id === p.id ? { ...row, enabled: next } : row,
                   );
                   setSkillScanPresets(updated);
-                  void persistSkillScanSettings(updated, skillScanCustomPaths, preferredSkillSources);
+                  void persistSkillScanSettings(updated, skillScanCustomPaths, preferredSkillSources, disabledSkillNames);
                 }}
               />
             </div>
@@ -1432,7 +1493,7 @@ function SkillsTab() {
                 onBlur={(e) => {
                   const next = [...skillScanCustomPaths];
                   next[i] = e.target.value;
-                  void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources);
+                  void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
                 }}
               />
               <button
@@ -1443,7 +1504,7 @@ function SkillsTab() {
                 onClick={() => {
                   const next = skillScanCustomPaths.filter((_, j) => j !== i);
                   setSkillScanCustomPaths(next);
-                  void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources);
+                  void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
                 }}
               >
                 <Trash2 className="h-4 w-4" />
@@ -1519,6 +1580,9 @@ function SkillsTab() {
               onActivate={setActiveSkillName}
               onExpandDetail={onExpandDetail}
               onCollapseDetail={() => setExpandedSkillName(null)}
+              disabledSkillNames={disabledSkillNames}
+              skillScanBusy={skillScanBusy}
+              onToggleGlobalSkill={toggleGlobalSkill}
             />
             <SkillsLocationSection
               skills={projectSkills}
@@ -1534,6 +1598,9 @@ function SkillsTab() {
               onActivate={setActiveSkillName}
               onExpandDetail={onExpandDetail}
               onCollapseDetail={() => setExpandedSkillName(null)}
+              disabledSkillNames={disabledSkillNames}
+              skillScanBusy={skillScanBusy}
+              onToggleGlobalSkill={toggleGlobalSkill}
             />
           </>
         ) : (
@@ -1552,6 +1619,9 @@ function SkillsTab() {
               onActivate={setActiveSkillName}
               onExpandDetail={onExpandDetail}
               onCollapseDetail={() => setExpandedSkillName(null)}
+              disabledSkillNames={disabledSkillNames}
+              skillScanBusy={skillScanBusy}
+              onToggleGlobalSkill={toggleGlobalSkill}
             />
             <SkillsLocationSection
               skills={globalSkills}
@@ -1567,6 +1637,9 @@ function SkillsTab() {
               onActivate={setActiveSkillName}
               onExpandDetail={onExpandDetail}
               onCollapseDetail={() => setExpandedSkillName(null)}
+              disabledSkillNames={disabledSkillNames}
+              skillScanBusy={skillScanBusy}
+              onToggleGlobalSkill={toggleGlobalSkill}
             />
           </>
         )}
@@ -1600,6 +1673,9 @@ function SkillsTab() {
                     onActivate={setActiveSkillName}
                     onExpandDetail={onExpandDetail}
                     onCollapseDetail={() => setExpandedSkillName(null)}
+                    globalSkillEnabled={!disabledSkillNames.includes(skill.name)}
+                    skillScanBusy={skillScanBusy}
+                    onToggleGlobalSkill={toggleGlobalSkill}
                   />
                 ))}
               </div>

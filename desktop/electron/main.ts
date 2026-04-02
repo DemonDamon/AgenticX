@@ -1202,6 +1202,7 @@ function registerIpc(): void {
     system_prompt?: string;
     created_by?: string;
     tools_enabled?: Record<string, boolean>;
+    skills_enabled?: Record<string, boolean> | null;
   }) => {
     try {
       const resp = await fetch(`${getStudioUrl()}/api/avatars`, {
@@ -1227,6 +1228,7 @@ function registerIpc(): void {
     pinned?: boolean;
     system_prompt?: string;
     tools_enabled?: Record<string, boolean>;
+    skills_enabled?: Record<string, boolean> | null;
   }) => {
     const { id, ...body } = payload;
     try {
@@ -2060,6 +2062,7 @@ function registerIpc(): void {
         presetPaths: Array<{ id: string; enabled: boolean }>;
         customPaths: string[];
         preferredSources?: Record<string, string>;
+        disabledSkills?: string[];
       },
     ) => {
       const preset_paths = Array.isArray(payload?.presetPaths) ? payload.presetPaths : [];
@@ -2068,6 +2071,10 @@ function registerIpc(): void {
         payload?.preferredSources && typeof payload.preferredSources === "object"
           ? payload.preferredSources
           : {};
+      const body: Record<string, unknown> = { preset_paths, custom_paths, preferred_sources };
+      if (Array.isArray(payload?.disabledSkills)) {
+        body.disabled_skills = payload.disabledSkills;
+      }
       try {
         const resp = await fetch(`${getStudioUrl()}/api/skills/settings`, {
           method: "PUT",
@@ -2075,7 +2082,7 @@ function registerIpc(): void {
             "Content-Type": "application/json",
             "x-agx-desktop-token": getStudioToken(),
           },
-          body: JSON.stringify({ preset_paths, custom_paths, preferred_sources }),
+          body: JSON.stringify(body),
         });
         if (!resp.ok) {
           const body = await resp.text().catch(() => "");

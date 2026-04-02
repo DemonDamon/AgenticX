@@ -2,6 +2,47 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, Save, RotateCcw } from "lucide-react";
 import type { Avatar } from "../store";
 
+type SkillItem = {
+  name: string;
+  description: string;
+  globally_disabled?: boolean;
+};
+
+/** 与设置 → 技能 Tab 一致：绿轨 + 白钮 */
+function SettingsSwitch({
+  checked,
+  disabled,
+  onChange,
+  "aria-label": ariaLabel,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+  "aria-label"?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onClick={() => {
+        if (!disabled) onChange(!checked);
+      }}
+      className={`relative h-7 w-12 shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/55 disabled:opacity-40 ${
+        checked ? "bg-emerald-500" : "bg-surface-hover"
+      }`}
+    >
+      <span
+        className={`pointer-events-none absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${
+          checked ? "translate-x-5" : "translate-x-0"
+        }`}
+      />
+    </button>
+  );
+}
+
 type ToolItem = {
   id: string;
   name: string;
@@ -15,7 +56,7 @@ const DEFAULT_TOOLS: ToolItem[] = [
   { id: "imagemagick", name: "ImageMagick", description: "图像转换依赖" },
 ];
 
-type Tab = "general" | "tools" | "soul";
+type Tab = "general" | "tools" | "skills" | "soul";
 
 type Props =
   | { mode: "avatar"; avatar: Avatar; onClose: () => void; onSaved: () => void }
@@ -38,6 +79,11 @@ export function AvatarSettingsPanel(props: Props) {
   const [tools, setTools] = useState<ToolItem[]>(DEFAULT_TOOLS);
   const [toolsEnabled, setToolsEnabled] = useState<Record<string, boolean>>({});
   const [loadingTools, setLoadingTools] = useState(false);
+
+  // Per-avatar skills (only `false` entries are persisted to avatar.yaml skills_enabled)
+  const [skillsItems, setSkillsItems] = useState<SkillItem[]>([]);
+  const [loadingSkills, setLoadingSkills] = useState(false);
+  const [skillsEnabledDraft, setSkillsEnabledDraft] = useState<Record<string, boolean>>({});
 
   // SOUL
   const [soulValue, setSoulValue] = useState("");
@@ -81,15 +127,41 @@ export function AvatarSettingsPanel(props: Props) {
   useEffect(() => {
     if (mode === "avatar" && avatar) {
       setToolsEnabled({ ...(avatar.toolsEnabled ?? {}) });
+      const raw = avatar.skillsEnabled;
+      setSkillsEnabledDraft(
+        raw && typeof raw === "object"
+          ? Object.fromEntries(Object.entries(raw).filter(([, v]) => v === false))
+          : {},
+      );
     } else {
       void (async () => {
         const policy = await window.agenticxDesktop.getToolsPolicy();
         setToolsEnabled(policy?.ok ? policy.tools_enabled ?? {} : {});
       })();
+      setSkillsEnabledDraft({});
     }
     void loadTools();
     void loadSoul();
   }, [mode, avatar, loadTools, loadSoul]);
+
+  const loadSkillsList = useCallback(async () => {
+    setLoadingSkills(true);
+    try {
+      const r = await window.agenticxDesktop.loadSkills();
+      if (r?.ok) {
+        const list = (r.items ?? []).filter((s) => !s.globally_disabled);
+        setSkillsItems(list.map((s) => ({ name: s.name, description: s.description, globally_disabled: s.globally_disabled })));
+      }
+    } finally {
+      setLoadingSkills(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (mode === "avatar" && avatar && tab === "skills") {
+      void loadSkillsList();
+    }
+  }, [mode, avatar, tab, loadSkillsList]);
 
   const customizedCount = useMemo(
     () => Object.keys(toolsEnabled).filter((key) => toolsEnabled[key] !== undefined).length,
@@ -111,6 +183,32 @@ export function AvatarSettingsPanel(props: Props) {
         name: name.trim() || avatar.name,
         role: role.trim(),
         system_prompt: systemPrompt.trim(),
+      });
+      setMessage(res?.ok ? "已保存" : `保存失败: ${res?.error ?? "未知错误"}`);
+      if (res?.ok) onSaved();
+    } catch (err) {
+      setMessage(`保存失败: ${String(err)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const skillsCustomizedCount = useMemo(
+    () => Object.keys(skillsEnabledDraft).filter((k) => skillsEnabledDraft[k] === false).length,
+    [skillsEnabledDraft],
+  );
+
+  const handleSaveSkills = async () => {
+    if (mode !== "avatar" || !avatar) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      const onlyFalse = Object.fromEntries(
+        Object.entries(skillsEnabledDraft).filter(([, v]) => v === false),
+      );
+      const res = await window.agenticxDesktop.updateAvatar({
+        id: avatar.id,
+        skills_enabled: Object.keys(onlyFalse).length > 0 ? onlyFalse : {},
       });
       setMessage(res?.ok ? "已保存" : `保存失败: ${res?.error ?? "未知错误"}`);
       if (res?.ok) onSaved();
@@ -166,6 +264,7 @@ export function AvatarSettingsPanel(props: Props) {
       ? [
           { id: "general", label: "基本信息" },
           { id: "tools", label: "工具权限" },
+          { id: "skills", label: "技能" },
           { id: "soul", label: "SOUL" },
         ]
       : [
@@ -252,6 +351,73 @@ export function AvatarSettingsPanel(props: Props) {
                   className="flex items-center gap-1.5 rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
                   disabled={saving || !name.trim()}
                   onClick={() => void handleSaveGeneral()}
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  {saving ? "保存中..." : "保存"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "skills" && mode === "avatar" && (
+            <div className="space-y-3">
+              <p className="text-xs text-text-faint">
+                已在设置 → 技能中全局禁用的条目不会出现在此列表。未列出的技能对该分身默认启用；关闭开关表示该分身不使用此技能。
+              </p>
+              {loadingSkills ? (
+                <div className="rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-faint">
+                  加载技能列表中...
+                </div>
+              ) : skillsItems.length === 0 ? (
+                <div className="rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-faint">
+                  当前没有可用的技能（或全部被全局禁用）。
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {skillsItems.map((skill) => {
+                    const skillOffForAvatar = skillsEnabledDraft[skill.name] === false;
+                    return (
+                      <div key={skill.name} className="rounded-md border border-border bg-surface-card px-2.5 py-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm text-text-primary">{skill.name}</div>
+                            {skill.description ? (
+                              <div className="truncate text-xs text-text-faint">{skill.description}</div>
+                            ) : null}
+                          </div>
+                          <SettingsSwitch
+                            checked={!skillOffForAvatar}
+                            disabled={saving}
+                            aria-label={`${skill.name} 对该分身启用`}
+                            onChange={(next) => {
+                              setSkillsEnabledDraft((prev) => {
+                                const draft = { ...prev };
+                                if (!next) draft[skill.name] = false;
+                                else delete draft[skill.name];
+                                return draft;
+                              });
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  type="button"
+                  className="flex items-center gap-1 rounded border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover disabled:opacity-40"
+                  onClick={() => setSkillsEnabledDraft({})}
+                  disabled={skillsCustomizedCount === 0 || saving}
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  重置（全部启用）
+                </button>
+                <button
+                  className="flex items-center gap-1.5 rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
+                  disabled={saving}
+                  onClick={() => void handleSaveSkills()}
                 >
                   <Save className="h-3.5 w-3.5" />
                   {saving ? "保存中..." : "保存"}
