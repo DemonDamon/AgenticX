@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Save, RotateCcw, X } from "lucide-react";
 import type { Avatar } from "../store";
+import { avatarBgClass } from "../utils/avatar-color";
+
+function avatarInitials(name: string): string {
+  const t = name.trim();
+  if (!t) return "?";
+  return t.slice(0, 2);
+}
 
 type SkillItem = {
   name: string;
@@ -74,6 +81,8 @@ export function AvatarSettingsPanel(props: Props) {
   const [name, setName] = useState(avatar?.name ?? "");
   const [role, setRole] = useState(avatar?.role ?? "");
   const [systemPrompt, setSystemPrompt] = useState(avatar?.systemPrompt ?? "");
+  const [avatarUrlDraft, setAvatarUrlDraft] = useState(avatar?.avatarUrl ?? "");
+  const [avatarImageHint, setAvatarImageHint] = useState("");
 
   // Tools
   const [tools, setTools] = useState<ToolItem[]>(DEFAULT_TOOLS);
@@ -126,6 +135,8 @@ export function AvatarSettingsPanel(props: Props) {
 
   useEffect(() => {
     if (mode === "avatar" && avatar) {
+      setAvatarUrlDraft(avatar.avatarUrl ?? "");
+      setAvatarImageHint("");
       setToolsEnabled({ ...(avatar.toolsEnabled ?? {}) });
       const raw = avatar.skillsEnabled;
       setSkillsEnabledDraft(
@@ -163,6 +174,30 @@ export function AvatarSettingsPanel(props: Props) {
     }
   }, [mode, avatar, tab, loadSkillsList]);
 
+  const handlePickAvatarImage = useCallback((file: File) => {
+    const maxBytes = 1.8 * 1024 * 1024;
+    if (!file.type.startsWith("image/")) {
+      setAvatarImageHint("请选择图片文件（PNG/JPG/WebP/GIF）。");
+      return;
+    }
+    if (file.size > maxBytes) {
+      setAvatarImageHint("图片过大，请选择小于 1.8MB 的文件。");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      if (!result) {
+        setAvatarImageHint("读取图片失败，请重试。");
+        return;
+      }
+      setAvatarUrlDraft(result);
+      setAvatarImageHint("已选择图片，请点击「保存」写入分身配置。");
+    };
+    reader.onerror = () => setAvatarImageHint("读取图片失败，请重试。");
+    reader.readAsDataURL(file);
+  }, []);
+
   const customizedCount = useMemo(
     () => Object.keys(toolsEnabled).filter((key) => toolsEnabled[key] !== undefined).length,
     [toolsEnabled],
@@ -184,6 +219,7 @@ export function AvatarSettingsPanel(props: Props) {
         name: name.trim() || avatar.name,
         role: role.trim(),
         system_prompt: systemPrompt.trim(),
+        avatar_url: avatarUrlDraft.trim(),
       });
       if (!res?.ok) {
         setMessage(`保存失败: ${res?.error ?? "未知错误"}`);
@@ -198,6 +234,7 @@ export function AvatarSettingsPanel(props: Props) {
         return;
       }
       setMessage("已保存，下一轮对话生效。");
+      setAvatarImageHint("");
       onSaved();
     } catch (err) {
       setMessage(`保存失败: ${String(err)}`);
@@ -335,6 +372,54 @@ export function AvatarSettingsPanel(props: Props) {
                 `System Prompt` 用于定义该分身的即时行为规则；`SOUL` 用于长期风格偏好与策略。两者会一起生效，
                 互不替代。
               </p>
+              <div>
+                <div className="text-sm text-text-muted">分身头像</div>
+                <div className="mt-2 flex items-center gap-3">
+                  {avatarUrlDraft ? (
+                    <img
+                      src={avatarUrlDraft}
+                      alt=""
+                      className="h-12 w-12 shrink-0 rounded-full border border-border object-cover"
+                    />
+                  ) : (
+                    <div
+                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${avatar ? avatarBgClass(avatar.id) : "bg-surface-hover text-text-primary"}`}
+                    >
+                      {avatarInitials(name || avatar?.name || "")}
+                    </div>
+                  )}
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                    <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong">
+                      上传图片
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handlePickAvatarImage(file);
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
+                      disabled={!avatarUrlDraft}
+                      onClick={() => {
+                        setAvatarUrlDraft("");
+                        setAvatarImageHint("已清除预览，请点击「保存」以恢复默认头像。");
+                      }}
+                    >
+                      恢复默认
+                    </button>
+                  </div>
+                </div>
+                <p className="mt-1 text-[11px] text-text-subtle">
+                  与侧栏、会话列表一致展示；建议小于 1.8MB 的方形图片。保存后写入该分身目录下的 avatar.yaml。
+                </p>
+                {avatarImageHint ? <p className="mt-1 text-[11px] text-text-subtle">{avatarImageHint}</p> : null}
+              </div>
               <label className="block text-sm text-text-muted">
                 名称
                 <input
