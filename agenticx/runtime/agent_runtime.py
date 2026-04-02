@@ -846,6 +846,24 @@ class AgentRuntime:
                         waiting_hint_emitted = False
                         last_pulse_at = stream_started_at
                         tool_calls_acc: Dict[int, Dict[str, str]] = {}
+                        stream_usage: Dict[str, int] = {}
+                        def _safe_int(value: Any) -> int:
+                            if isinstance(value, bool):
+                                return int(value)
+                            if isinstance(value, (int, float)):
+                                return int(value)
+                            if isinstance(value, str):
+                                raw = value.strip()
+                                if not raw:
+                                    return 0
+                                try:
+                                    return int(raw)
+                                except ValueError:
+                                    try:
+                                        return int(float(raw))
+                                    except ValueError:
+                                        return 0
+                            return 0
                         while True:
                             if await _check_should_stop():
                                 stop_stream.set()
@@ -904,6 +922,26 @@ class AgentRuntime:
                                         data={"text": tok},
                                         agent_id=agent_id,
                                     )
+                            elif chunk_type == "usage":
+                                usage_raw = stream_chunk.get("usage", {})
+                                if isinstance(usage_raw, dict):
+                                    pt = _safe_int(
+                                        usage_raw.get("prompt_tokens") or usage_raw.get("input_tokens") or 0
+                                    )
+                                    ct = _safe_int(
+                                        usage_raw.get("completion_tokens")
+                                        or usage_raw.get("output_tokens")
+                                        or 0
+                                    )
+                                    tt = _safe_int(usage_raw.get("total_tokens") or 0)
+                                    if tt == 0 and (pt > 0 or ct > 0):
+                                        tt = pt + ct
+                                    if pt > 0 or ct > 0 or tt > 0:
+                                        stream_usage = {
+                                            "prompt_tokens": pt,
+                                            "completion_tokens": ct,
+                                            "total_tokens": tt,
+                                        }
                             elif chunk_type == "tool_call_delta":
                                 raw_idx = stream_chunk.get("tool_index", 0)
                                 idx = raw_idx if isinstance(raw_idx, int) else 0
@@ -947,7 +985,7 @@ class AgentRuntime:
                         response = type(
                             "StreamResponse",
                             (),
-                            {"content": response_text, "tool_calls": tool_calls},
+                            {"content": response_text, "tool_calls": tool_calls, "usage": stream_usage},
                         )()
                         used_stream_path = True
                     except Exception:

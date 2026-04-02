@@ -364,6 +364,24 @@ class BailianProvider(BaseLLMProvider):
         **kwargs: Any,
     ) -> Generator[StreamChunk, None, None]:
         """Stream content/tool-call deltas in a normalized chunk format."""
+        def _safe_int(value: Any) -> int:
+            if isinstance(value, bool):
+                return int(value)
+            if isinstance(value, (int, float)):
+                return int(value)
+            if isinstance(value, str):
+                raw = value.strip()
+                if not raw:
+                    return 0
+                try:
+                    return int(raw)
+                except ValueError:
+                    try:
+                        return int(float(raw))
+                    except ValueError:
+                        return 0
+            return 0
+
         try:
             if isinstance(prompt, str):
                 messages = [{"role": "user", "content": prompt}]
@@ -389,6 +407,11 @@ class BailianProvider(BaseLLMProvider):
                 "stream": True,
                 **kwargs,
             }
+            stream_options = request_params.get("stream_options")
+            if not isinstance(stream_options, dict):
+                stream_options = {}
+            stream_options["include_usage"] = True
+            request_params["stream_options"] = stream_options
             if tools:
                 request_params["tools"] = tools
 
@@ -399,45 +422,69 @@ class BailianProvider(BaseLLMProvider):
             response_stream = self.client.chat.completions.create(**final_params)
             last_finish_reason = ""
             for chunk in response_stream:
-                if not getattr(chunk, "choices", None):
-                    continue
-                choice = chunk.choices[0]
-                finish_reason = getattr(choice, "finish_reason", None)
-                if isinstance(finish_reason, str) and finish_reason:
-                    last_finish_reason = finish_reason
-                delta = getattr(choice, "delta", None)
-                if delta is None:
-                    continue
-
-                content = getattr(delta, "content", None)
-                if isinstance(content, str) and content:
-                    yield {"type": "content", "text": content}
-
-                tool_calls = getattr(delta, "tool_calls", None)
-                if tool_calls:
-                    for tc in tool_calls:
-                        idx = getattr(tc, "index", 0)
-                        tc_id = getattr(tc, "id", "") or ""
-                        fn_obj = getattr(tc, "function", None)
-                        fn_name = (
-                            getattr(fn_obj, "name", "") if fn_obj is not None else ""
+                usage_chunk: Dict[str, int] | None = None
+                usage = getattr(chunk, "usage", None)
+                if usage:
+                    if isinstance(usage, dict):
+                        pt = _safe_int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+                        ct = _safe_int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+                        tt = _safe_int(usage.get("total_tokens") or 0)
+                    else:
+                        pt = _safe_int(
+                            getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0) or 0
                         )
-                        fn_args = (
-                            getattr(fn_obj, "arguments", "")
-                            if fn_obj is not None
-                            else ""
+                        ct = _safe_int(
+                            getattr(usage, "completion_tokens", 0)
+                            or getattr(usage, "output_tokens", 0)
+                            or 0
                         )
-                        try:
-                            tool_index = int(idx)
-                        except (TypeError, ValueError):
-                            tool_index = 0
-                        yield {
-                            "type": "tool_call_delta",
-                            "tool_index": tool_index,
-                            "tool_call_id": str(tc_id),
-                            "tool_name": str(fn_name),
-                            "arguments_delta": "" if fn_args is None else str(fn_args),
+                        tt = _safe_int(getattr(usage, "total_tokens", 0) or 0)
+                    if tt == 0 and (pt > 0 or ct > 0):
+                        tt = pt + ct
+                    if pt > 0 or ct > 0 or tt > 0:
+                        usage_chunk = {
+                            "prompt_tokens": pt,
+                            "completion_tokens": ct,
+                            "total_tokens": tt,
                         }
+                if getattr(chunk, "choices", None):
+                    choice = chunk.choices[0]
+                    finish_reason = getattr(choice, "finish_reason", None)
+                    if isinstance(finish_reason, str) and finish_reason:
+                        last_finish_reason = finish_reason
+                    delta = getattr(choice, "delta", None)
+                    if delta is not None:
+                        content = getattr(delta, "content", None)
+                        if isinstance(content, str) and content:
+                            yield {"type": "content", "text": content}
+
+                        tool_calls = getattr(delta, "tool_calls", None)
+                        if tool_calls:
+                            for tc in tool_calls:
+                                idx = getattr(tc, "index", 0)
+                                tc_id = getattr(tc, "id", "") or ""
+                                fn_obj = getattr(tc, "function", None)
+                                fn_name = (
+                                    getattr(fn_obj, "name", "") if fn_obj is not None else ""
+                                )
+                                fn_args = (
+                                    getattr(fn_obj, "arguments", "")
+                                    if fn_obj is not None
+                                    else ""
+                                )
+                                try:
+                                    tool_index = int(idx)
+                                except (TypeError, ValueError):
+                                    tool_index = 0
+                                yield {
+                                    "type": "tool_call_delta",
+                                    "tool_index": tool_index,
+                                    "tool_call_id": str(tc_id),
+                                    "tool_name": str(fn_name),
+                                    "arguments_delta": "" if fn_args is None else str(fn_args),
+                                }
+                if usage_chunk:
+                    yield {"type": "usage", "usage": usage_chunk}
             yield {"type": "done", "finish_reason": last_finish_reason}
         except Exception as e:
             raise Exception(
@@ -451,6 +498,24 @@ class BailianProvider(BaseLLMProvider):
         **kwargs: Any,
     ) -> Generator[StreamChunk, None, None]:
         """Stream with native HTTP for models needing Bailian-specific params."""
+        def _safe_int(value: Any) -> int:
+            if isinstance(value, bool):
+                return int(value)
+            if isinstance(value, (int, float)):
+                return int(value)
+            if isinstance(value, str):
+                raw = value.strip()
+                if not raw:
+                    return 0
+                try:
+                    return int(raw)
+                except ValueError:
+                    try:
+                        return int(float(raw))
+                    except ValueError:
+                        return 0
+            return 0
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -462,6 +527,11 @@ class BailianProvider(BaseLLMProvider):
             "stream": True,
             **kwargs,
         }
+        stream_options = request_params.get("stream_options")
+        if not isinstance(stream_options, dict):
+            stream_options = {}
+        stream_options["include_usage"] = True
+        request_params["stream_options"] = stream_options
         if tools:
             request_params["tools"] = tools
         request_params["enable_thinking"] = False
@@ -470,65 +540,88 @@ class BailianProvider(BaseLLMProvider):
         timeout = kwargs.get("timeout", self.timeout)
         last_finish_reason = ""
 
-        with requests.Session() as session:
-            session.trust_env = False
-            with session.post(
-                url,
-                headers=headers,
-                json=request_params,
-                timeout=timeout,
-                stream=True,
-                verify=True,
-            ) as response:
-                if response.status_code != 200:
-                    error_text = response.text[:1000] if response.text else "No error details"
-                    raise Exception(f"HTTP {response.status_code}: {error_text}")
-                for raw_line in response.iter_lines(decode_unicode=True):
-                    if not raw_line:
-                        continue
-                    line = str(raw_line).strip()
-                    if not line.startswith("data:"):
-                        continue
-                    payload_text = line[5:].strip()
-                    if not payload_text or payload_text == "[DONE]":
-                        continue
-                    try:
-                        payload = json.loads(payload_text)
-                    except Exception:
-                        continue
-                    choices = payload.get("choices") if isinstance(payload, dict) else None
-                    if not choices:
-                        continue
+        with requests.post(
+            url,
+            headers=headers,
+            json=request_params,
+            timeout=timeout,
+            stream=True,
+            verify=True,
+        ) as response:
+            if response.status_code != 200:
+                error_text = response.text[:1000] if response.text else "No error details"
+                raise Exception(f"HTTP {response.status_code}: {error_text}")
+            for raw_line in response.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                line = str(raw_line).strip()
+                if not line.startswith("data:"):
+                    continue
+                payload_text = line[5:].strip()
+                if not payload_text or payload_text == "[DONE]":
+                    continue
+                try:
+                    payload = json.loads(payload_text)
+                except Exception:
+                    continue
+                choices = payload.get("choices") if isinstance(payload, dict) else None
+                usage_chunk: Dict[str, int] | None = None
+                usage = payload.get("usage") if isinstance(payload, dict) else None
+                if usage:
+                    if isinstance(usage, dict):
+                        pt = _safe_int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+                        ct = _safe_int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+                        tt = _safe_int(usage.get("total_tokens") or 0)
+                    else:
+                        pt = _safe_int(
+                            getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0) or 0
+                        )
+                        ct = _safe_int(
+                            getattr(usage, "completion_tokens", 0)
+                            or getattr(usage, "output_tokens", 0)
+                            or 0
+                        )
+                        tt = _safe_int(getattr(usage, "total_tokens", 0) or 0)
+                    if tt == 0 and (pt > 0 or ct > 0):
+                        tt = pt + ct
+                    if pt > 0 or ct > 0 or tt > 0:
+                        usage_chunk = {
+                            "prompt_tokens": pt,
+                            "completion_tokens": ct,
+                            "total_tokens": tt,
+                        }
+                if choices:
                     choice = choices[0] if isinstance(choices[0], dict) else {}
                     finish_reason = choice.get("finish_reason")
                     if isinstance(finish_reason, str) and finish_reason:
                         last_finish_reason = finish_reason
                     delta = choice.get("delta")
-                    if not isinstance(delta, dict):
-                        continue
-                    content = delta.get("content")
-                    if isinstance(content, str) and content:
-                        yield {"type": "content", "text": content}
-                    tool_calls = delta.get("tool_calls")
-                    if isinstance(tool_calls, list):
-                        for tc in tool_calls:
-                            if not isinstance(tc, dict):
-                                continue
-                            idx_raw = tc.get("index", 0)
-                            try:
-                                tool_index = int(idx_raw)
-                            except (TypeError, ValueError):
-                                tool_index = 0
-                            fn_obj = tc.get("function")
-                            fn = fn_obj if isinstance(fn_obj, dict) else {}
-                            fn_args = fn.get("arguments", "")
-                            yield {
-                                "type": "tool_call_delta",
-                                "tool_index": tool_index,
-                                "tool_call_id": str(tc.get("id", "") or ""),
-                                "tool_name": str(fn.get("name", "") or ""),
-                                "arguments_delta": "" if fn_args is None else str(fn_args),
-                            }
+                    if isinstance(delta, dict):
+                        content = delta.get("content")
+                        if isinstance(content, str) and content:
+                            yield {"type": "content", "text": content}
+                        tool_calls = delta.get("tool_calls")
+                        if isinstance(tool_calls, list):
+                            for tc in tool_calls:
+                                if not isinstance(tc, dict):
+                                    continue
+                                idx_raw = tc.get("index", 0)
+                                try:
+                                    tool_index = int(idx_raw)
+                                except (TypeError, ValueError):
+                                    tool_index = 0
+                                fn_obj = tc.get("function")
+                                fn = fn_obj if isinstance(fn_obj, dict) else {}
+                                fn_args = fn.get("arguments", "")
+                                yield {
+                                    "type": "tool_call_delta",
+                                    "tool_index": tool_index,
+                                    "tool_call_id": str(tc.get("id", "") or ""),
+                                    "tool_name": str(fn.get("name", "") or ""),
+                                    "arguments_delta": "" if fn_args is None else str(fn_args),
+                                }
+                if usage_chunk:
+                    yield {"type": "usage", "usage": usage_chunk}
         yield {"type": "done", "finish_reason": last_finish_reason}
     
     async def astream(self, prompt: Union[str, List[Dict]], **kwargs):  # type: ignore

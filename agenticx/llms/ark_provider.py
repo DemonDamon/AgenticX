@@ -450,6 +450,24 @@ class ArkLLMProvider(BaseLLMProvider):
         **kwargs: Any,
     ) -> Generator[StreamChunk, None, None]:
         """Stream content/tool-call deltas in a normalized chunk format."""
+        def _safe_int(value: Any) -> int:
+            if isinstance(value, bool):
+                return int(value)
+            if isinstance(value, (int, float)):
+                return int(value)
+            if isinstance(value, str):
+                raw = value.strip()
+                if not raw:
+                    return 0
+                try:
+                    return int(raw)
+                except ValueError:
+                    try:
+                        return int(float(raw))
+                    except ValueError:
+                        return 0
+            return 0
+
         try:
             messages = self._convert_prompt_to_messages(prompt)
             params = self._prepare_request_params(
@@ -458,6 +476,11 @@ class ArkLLMProvider(BaseLLMProvider):
                 stream=True,
                 **kwargs,
             )
+            stream_options = params.get("stream_options")
+            if not isinstance(stream_options, dict):
+                stream_options = {}
+            stream_options["include_usage"] = True
+            params["stream_options"] = stream_options
 
             logger.info(
                 f"Ark streaming-with-tools request: model={self._get_effective_model()}"
@@ -469,48 +492,72 @@ class ArkLLMProvider(BaseLLMProvider):
             response_stream = self.client.chat.completions.create(**params)
             last_finish_reason = ""
             for chunk in response_stream:
-                if not getattr(chunk, "choices", None):
-                    continue
-                choice = chunk.choices[0]
-                finish_reason = getattr(choice, "finish_reason", None)
-                if isinstance(finish_reason, str) and finish_reason:
-                    last_finish_reason = finish_reason
-                delta = getattr(choice, "delta", None)
-                if delta is None:
-                    continue
-
-                content = getattr(delta, "content", None)
-                if isinstance(content, str) and content:
-                    yield {"type": "content", "text": content}
-
-                tool_calls = getattr(delta, "tool_calls", None)
-                if tool_calls:
-                    for tc in tool_calls:
-                        idx = getattr(tc, "index", 0)
-                        tc_id = getattr(tc, "id", "") or ""
-                        fn_obj = getattr(tc, "function", None)
-                        raw_fn_name = (
-                            getattr(fn_obj, "name", "") if fn_obj is not None else ""
+                usage_chunk: Dict[str, int] | None = None
+                usage = getattr(chunk, "usage", None)
+                if usage:
+                    if isinstance(usage, dict):
+                        pt = _safe_int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+                        ct = _safe_int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+                        tt = _safe_int(usage.get("total_tokens") or 0)
+                    else:
+                        pt = _safe_int(
+                            getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0) or 0
                         )
-                        fn_name = str(raw_fn_name) if isinstance(raw_fn_name, str) else ""
-                        if fn_name.lower() == "none":
-                            fn_name = ""
-                        fn_args = (
-                            getattr(fn_obj, "arguments", "")
-                            if fn_obj is not None
-                            else ""
+                        ct = _safe_int(
+                            getattr(usage, "completion_tokens", 0)
+                            or getattr(usage, "output_tokens", 0)
+                            or 0
                         )
-                        try:
-                            tool_index = int(idx)
-                        except (TypeError, ValueError):
-                            tool_index = 0
-                        yield {
-                            "type": "tool_call_delta",
-                            "tool_index": tool_index,
-                            "tool_call_id": str(tc_id),
-                            "tool_name": fn_name,
-                            "arguments_delta": "" if fn_args is None else str(fn_args),
+                        tt = _safe_int(getattr(usage, "total_tokens", 0) or 0)
+                    if tt == 0 and (pt > 0 or ct > 0):
+                        tt = pt + ct
+                    if pt > 0 or ct > 0 or tt > 0:
+                        usage_chunk = {
+                            "prompt_tokens": pt,
+                            "completion_tokens": ct,
+                            "total_tokens": tt,
                         }
+                if getattr(chunk, "choices", None):
+                    choice = chunk.choices[0]
+                    finish_reason = getattr(choice, "finish_reason", None)
+                    if isinstance(finish_reason, str) and finish_reason:
+                        last_finish_reason = finish_reason
+                    delta = getattr(choice, "delta", None)
+                    if delta is not None:
+                        content = getattr(delta, "content", None)
+                        if isinstance(content, str) and content:
+                            yield {"type": "content", "text": content}
+
+                        tool_calls = getattr(delta, "tool_calls", None)
+                        if tool_calls:
+                            for tc in tool_calls:
+                                idx = getattr(tc, "index", 0)
+                                tc_id = getattr(tc, "id", "") or ""
+                                fn_obj = getattr(tc, "function", None)
+                                raw_fn_name = (
+                                    getattr(fn_obj, "name", "") if fn_obj is not None else ""
+                                )
+                                fn_name = str(raw_fn_name) if isinstance(raw_fn_name, str) else ""
+                                if fn_name.lower() == "none":
+                                    fn_name = ""
+                                fn_args = (
+                                    getattr(fn_obj, "arguments", "")
+                                    if fn_obj is not None
+                                    else ""
+                                )
+                                try:
+                                    tool_index = int(idx)
+                                except (TypeError, ValueError):
+                                    tool_index = 0
+                                yield {
+                                    "type": "tool_call_delta",
+                                    "tool_index": tool_index,
+                                    "tool_call_id": str(tc_id),
+                                    "tool_name": fn_name,
+                                    "arguments_delta": "" if fn_args is None else str(fn_args),
+                                }
+                if usage_chunk:
+                    yield {"type": "usage", "usage": usage_chunk}
             yield {"type": "done", "finish_reason": last_finish_reason}
         except Exception as e:
             logger.error(f"Ark streaming-with-tools call failed: {str(e)}")

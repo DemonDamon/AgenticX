@@ -138,6 +138,24 @@ class LiteLLMProvider(BaseLLMProvider):
         **kwargs: Any,
     ) -> Generator[StreamChunk, None, None]:
         """Stream content/tool-call deltas in a normalized chunk format."""
+        def _safe_int(value: Any) -> int:
+            if isinstance(value, bool):
+                return int(value)
+            if isinstance(value, (int, float)):
+                return int(value)
+            if isinstance(value, str):
+                raw = value.strip()
+                if not raw:
+                    return 0
+                try:
+                    return int(raw)
+                except ValueError:
+                    try:
+                        return int(float(raw))
+                    except ValueError:
+                        return 0
+            return 0
+
         if isinstance(prompt, str):
             messages = [{"role": "user", "content": prompt}]
         elif isinstance(prompt, list):
@@ -148,12 +166,18 @@ class LiteLLMProvider(BaseLLMProvider):
         timeout = kwargs.pop("timeout", self.timeout)
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
+        stream_options = kwargs.pop("stream_options", None)
+        if not isinstance(stream_options, dict):
+            stream_options = {}
+        # Ask provider to include usage in streamed chunks when available.
+        stream_options["include_usage"] = True
         self._apply_drop_params_default(kwargs)
         response_stream = litellm.completion(
             model=self.model,
             messages=messages,
             tools=tools,
             stream=True,
+            stream_options=stream_options,
             api_key=self.api_key,
             base_url=self.base_url,
             api_version=self.api_version,
@@ -166,38 +190,63 @@ class LiteLLMProvider(BaseLLMProvider):
         try:
             for chunk in response_stream:
                 chunk = cast(Any, chunk)
-                choices = getattr(chunk, "choices", None)
-                if not choices:
-                    continue
-                choice0 = choices[0]
-                finish_reason = getattr(choice0, "finish_reason", None)
-                if isinstance(finish_reason, str) and finish_reason:
-                    last_finish_reason = finish_reason
-                delta = getattr(choice0, "delta", None)
-                if delta is None:
-                    continue
-                content = getattr(delta, "content", None)
-                if isinstance(content, str) and content:
-                    yield {"type": "content", "text": content}
-                tool_calls = getattr(delta, "tool_calls", None)
-                if tool_calls:
-                    for tc in tool_calls:
-                        tc_any = cast(Any, tc)
-                        idx = getattr(tc_any, "index", 0)
-                        tc_id = getattr(tc_any, "id", "") or ""
-                        fn_obj = getattr(tc_any, "function", None)
-                        raw_fn_name = getattr(fn_obj, "name", "") if fn_obj is not None else ""
-                        fn_name = str(raw_fn_name) if isinstance(raw_fn_name, str) else ""
-                        if fn_name.lower() == "none":
-                            fn_name = ""
-                        fn_args = getattr(fn_obj, "arguments", "") if fn_obj is not None else ""
-                        yield {
-                            "type": "tool_call_delta",
-                            "tool_index": int(idx) if isinstance(idx, int) else 0,
-                            "tool_call_id": str(tc_id),
-                            "tool_name": fn_name,
-                            "arguments_delta": str(fn_args),
+                usage_chunk: Dict[str, int] | None = None
+                usage = getattr(chunk, "usage", None)
+                if usage:
+                    if isinstance(usage, dict):
+                        pt = _safe_int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+                        ct = _safe_int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+                        tt = _safe_int(usage.get("total_tokens") or 0)
+                    else:
+                        pt = _safe_int(
+                            getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0) or 0
+                        )
+                        ct = _safe_int(
+                            getattr(usage, "completion_tokens", 0)
+                            or getattr(usage, "output_tokens", 0)
+                            or 0
+                        )
+                        tt = _safe_int(getattr(usage, "total_tokens", 0) or 0)
+                    if tt == 0 and (pt > 0 or ct > 0):
+                        tt = pt + ct
+                    if pt > 0 or ct > 0 or tt > 0:
+                        usage_chunk = {
+                            "prompt_tokens": pt,
+                            "completion_tokens": ct,
+                            "total_tokens": tt,
                         }
+                choices = getattr(chunk, "choices", None)
+                if choices:
+                    choice0 = choices[0]
+                    finish_reason = getattr(choice0, "finish_reason", None)
+                    if isinstance(finish_reason, str) and finish_reason:
+                        last_finish_reason = finish_reason
+                    delta = getattr(choice0, "delta", None)
+                    if delta is not None:
+                        content = getattr(delta, "content", None)
+                        if isinstance(content, str) and content:
+                            yield {"type": "content", "text": content}
+                        tool_calls = getattr(delta, "tool_calls", None)
+                        if tool_calls:
+                            for tc in tool_calls:
+                                tc_any = cast(Any, tc)
+                                idx = getattr(tc_any, "index", 0)
+                                tc_id = getattr(tc_any, "id", "") or ""
+                                fn_obj = getattr(tc_any, "function", None)
+                                raw_fn_name = getattr(fn_obj, "name", "") if fn_obj is not None else ""
+                                fn_name = str(raw_fn_name) if isinstance(raw_fn_name, str) else ""
+                                if fn_name.lower() == "none":
+                                    fn_name = ""
+                                fn_args = getattr(fn_obj, "arguments", "") if fn_obj is not None else ""
+                                yield {
+                                    "type": "tool_call_delta",
+                                    "tool_index": int(idx) if isinstance(idx, int) else 0,
+                                    "tool_call_id": str(tc_id),
+                                    "tool_name": fn_name,
+                                    "arguments_delta": str(fn_args),
+                                }
+                if usage_chunk:
+                    yield {"type": "usage", "usage": usage_chunk}
             yield {"type": "done", "finish_reason": last_finish_reason}
         except Exception as e:
             raise e
