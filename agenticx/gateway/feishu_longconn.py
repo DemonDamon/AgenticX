@@ -586,14 +586,17 @@ async def _chat_turn(
     sender_name: str,
     headers: Dict[str, str],
     avatar_id: Optional[str] = None,
-) -> str:
+) -> Tuple[str, str]:
     """Send one message to local agx serve and collect the final reply."""
     timeout = httpx.Timeout(600.0, connect=30.0)
     async with _no_proxy_client(timeout=timeout) as client:
-        _ = await _bootstrap_session(studio_base, session_id, headers, avatar_id=avatar_id)
+        actual_sid = await _bootstrap_session(
+            studio_base, session_id, headers, avatar_id=avatar_id
+        )
+        target_sid = (actual_sid or session_id or "").strip()
 
         body = {
-            "session_id": session_id,
+            "session_id": target_sid,
             "user_input": text,
             "user_display_name": sender_name,
         }
@@ -629,7 +632,7 @@ async def _chat_turn(
                                 final_text = t
                         elif et == "error":
                             raise RuntimeError(str(data.get("text") or "chat error"))
-    return final_text.strip() or "（无文本回复）"
+    return final_text.strip() or "（无文本回复）", target_sid
 
 
 # ---------------------------------------------------------------------------
@@ -864,7 +867,7 @@ class FeishuLongConnRunner:
                     reply += f"（{an}）"
         else:
             try:
-                reply = await _chat_turn(
+                reply, used_sid = await _chat_turn(
                     self._studio_base,
                     effective_sid,
                     text,
@@ -872,6 +875,18 @@ class FeishuLongConnRunner:
                     headers,
                     avatar_id=effective_avatar,
                 )
+                if binding and used_sid and used_sid != effective_sid:
+                    try:
+                        rebound_payload = {
+                            "session_id": used_sid,
+                            "avatar_id": effective_avatar,
+                            "avatar_name": binding.get("avatar_name"),
+                        }
+                        if open_id:
+                            _write_binding_key(open_id, rebound_payload)
+                        _write_binding_key(_DESKTOP_BINDING_KEY, rebound_payload)
+                    except Exception as bind_exc:
+                        logger.warning("feishu binding rebound failed: %s", bind_exc)
             except Exception as exc:
                 logger.exception("chat_turn failed: %s", exc)
                 reply = f"[Machi] 执行出错：{exc}"
