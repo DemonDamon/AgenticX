@@ -3,6 +3,10 @@
 
 name: Build Desktop
 
+# GitHub Actions JS actions move to Node 24 (see 2025-09-19 changelog); opt in early to avoid Node 20 deprecation noise.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   workflow_dispatch:
     inputs:
@@ -49,6 +53,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+          cache-dependency-path: packaging/wechat-sidecar/go.sum
 
       - name: Build agx-server (single arch)
         run: packaging/build_backend.sh ${{ matrix.arch }}
@@ -114,6 +119,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+          cache-dependency-path: packaging/wechat-sidecar/go.sum
 
       - name: Build agx-server
         run: packaging/build_backend.sh "${{ env.ARCH }}"
