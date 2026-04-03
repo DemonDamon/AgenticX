@@ -291,6 +291,13 @@ declare global {
         avatarName?: string | null;
       }) => Promise<{ ok: boolean }>;
 
+      loadWechatBinding: () => Promise<{ ok: boolean; bindings: Record<string, unknown> }>;
+      saveWechatDesktopBinding: (payload: {
+        sessionId: string | null;
+        avatarId?: string | null;
+        avatarName?: string | null;
+      }) => Promise<{ ok: boolean }>;
+
       wechatSidecarStart: () => Promise<{ ok: boolean; port: number }>;
       wechatSidecarStop: () => Promise<{ ok: boolean }>;
       wechatSidecarPort: () => Promise<{ port: number; running: boolean }>;

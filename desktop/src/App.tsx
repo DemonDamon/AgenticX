@@ -1389,7 +1389,17 @@ export function App() {
           const rawName = (desk?.avatar_name ?? "").trim();
           // avatar_id 为空表示飞书默认路由到 Machi；勿用「分身」占位，否则顶栏/气泡会与元智能体不一致且无 meta 头像
           const avatarName = rawName || (avatarId ? "分身" : "Machi");
-          const paneId = addPane(avatarId, avatarName, newSid);
+          const reusableMetaPane =
+            !avatarId
+              ? state.panes.find((pane) => !String(pane.avatarId ?? "").trim())
+              : null;
+          const paneId = reusableMetaPane
+            ? reusableMetaPane.id
+            : addPane(avatarId, avatarName, newSid);
+          if (reusableMetaPane) {
+            setPaneSessionId(reusableMetaPane.id, newSid);
+            setPaneMessages(reusableMetaPane.id, []);
+          }
           setActivePaneId(paneId);
           setActiveAvatarId(avatarId?.startsWith("group:") ? null : (avatarId ?? null));
           // Load messages for the new pane
@@ -1400,9 +1410,11 @@ export function App() {
                 mapLoadedSessionMessage(item as LoadedSessionMessage, newSid, idx)
               );
               setPaneMessages(paneId, mapped);
+            } else {
+              setPaneMessages(paneId, []);
             }
           } catch {
-            /* ignore */
+            setPaneMessages(paneId, []);
           }
         }
       } catch {
@@ -1415,7 +1427,7 @@ export function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [apiBase, onboardingCompleted, addPane, setActivePaneId, setActiveAvatarId, setPaneMessages]);
+  }, [apiBase, onboardingCompleted, addPane, setActivePaneId, setActiveAvatarId, setPaneMessages, setPaneSessionId]);
 
   return (
     <div
