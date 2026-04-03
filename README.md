@@ -557,6 +557,15 @@ We welcome community contributions! Please refer to:
 3. Submit Pull Requests, ensuring all tests pass
 4. Participate in code reviews and discussions
 
+## Acknowledgements / Upstream Credits
+
+Personal WeChat (iLink) integration in AgenticX drew on public materials from **OpeniLink Hub** and **WorkBuddy** for connection patterns and SDK-oriented usage ideas:
+
+- [openilink/openilink-hub](https://github.com/openilink/openilink-hub)
+- [WorkBuddy — WeixinBot Guide](https://www.codebuddy.cn/docs/workbuddy/WeixinBot-Guide)
+
+We did **not** ship the full OpeniLink Hub console or app marketplace. AgenticX’s **core runtime** and **multi-agent collaboration** remain an independent implementation.
+
 ## License
 
 This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0) - see [LICENSE](LICENSE) file for details
