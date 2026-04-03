@@ -28,7 +28,8 @@ jobs:
         include:
           - os: macos-14
             arch: arm64
-          - os: macos-13
+          # macos-13 已退役；Intel/x64 使用 macos-15-intel（至约 2027-08）
+          - os: macos-15-intel
             arch: x64
     steps:
       - uses: actions/checkout@v4
@@ -45,14 +46,26 @@ jobs:
         with:
           node-version: "20"
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
       - name: Build agx-server (single arch)
         run: packaging/build_backend.sh ${{ matrix.arch }}
+
+      - name: Build wechat-sidecar
+        working-directory: packaging/wechat-sidecar
+        run: |
+          GOARCH=${{ matrix.arch == 'x64' && 'amd64' || 'arm64' }} GOOS=darwin \
+            go build -ldflags "-s -w" -o agx-wechat-sidecar .
 
       - name: Stage bundled backend (arm64 / x64)
         run: |
           mkdir -p "desktop/bundled-backend/${{ matrix.arch }}"
           cp "packaging/dist/${{ matrix.arch }}/agx-server" "desktop/bundled-backend/${{ matrix.arch }}/agx-server"
           chmod +x "desktop/bundled-backend/${{ matrix.arch }}/agx-server"
+          cp "packaging/wechat-sidecar/agx-wechat-sidecar" "desktop/bundled-backend/${{ matrix.arch }}/agx-wechat-sidecar"
+          chmod +x "desktop/bundled-backend/${{ matrix.arch }}/agx-wechat-sidecar"
 
       - name: Install desktop deps
         working-directory: desktop
@@ -77,7 +90,7 @@ jobs:
 
   build-dispatch:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ${{ github.event.inputs.arch == 'x64' && 'macos-13' || 'macos-14' }}
+    runs-on: ${{ github.event.inputs.arch == 'x64' && 'macos-15-intel' || 'macos-14' }}
     env:
       ARCH: ${{ github.event.inputs.arch }}
     steps:
@@ -94,14 +107,26 @@ jobs:
         with:
           node-version: "20"
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
       - name: Build agx-server
         run: packaging/build_backend.sh "${{ env.ARCH }}"
+
+      - name: Build wechat-sidecar
+        working-directory: packaging/wechat-sidecar
+        run: |
+          GOARCH=${{ env.ARCH == 'x64' && 'amd64' || 'arm64' }} GOOS=darwin \
+            go build -ldflags "-s -w" -o agx-wechat-sidecar .
 
       - name: Stage bundled backend
         run: |
           mkdir -p "desktop/bundled-backend/${{ env.ARCH }}"
           cp "packaging/dist/${{ env.ARCH }}/agx-server" "desktop/bundled-backend/${{ env.ARCH }}/agx-server"
           chmod +x "desktop/bundled-backend/${{ env.ARCH }}/agx-server"
+          cp "packaging/wechat-sidecar/agx-wechat-sidecar" "desktop/bundled-backend/${{ env.ARCH }}/agx-wechat-sidecar"
+          chmod +x "desktop/bundled-backend/${{ env.ARCH }}/agx-wechat-sidecar"
 
       - name: Install desktop deps
         working-directory: desktop
