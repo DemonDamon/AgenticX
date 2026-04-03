@@ -155,7 +155,7 @@ function effectiveSkillSource(skill: SkillItem): string {
 
 function effectiveSkillLocation(skill: SkillItem): "project" | "global" {
   const src = effectiveSkillSource(skill);
-  if (["cursor", "claude", "agents", "agent_global", "registry", "bundle"].includes(src)) {
+  if (["cursor", "claude", "agents", "agent_global", "skillhub", "registry", "bundle"].includes(src)) {
     return "global";
   }
   return skill.location === "project" ? "project" : "global";
@@ -170,6 +170,8 @@ function skillSourceBadge(source: string | undefined): { label: string; classNam
       return { label: "Cursor", className: `${base} border-sky-500/30 bg-sky-500/10 text-sky-400` };
     case "claude":
       return { label: "Claude", className: `${base} border-orange-500/30 bg-orange-500/10 text-orange-400` };
+    case "skillhub":
+      return { label: "SkillHub", className: `${base} border-cyan-500/30 bg-cyan-500/10 text-cyan-300` };
     case "registry":
       // ClawHub 安装技能：棕褐底 + 珊瑚色字（与品牌参考一致）
       return {
@@ -3246,6 +3248,9 @@ export function SettingsPanel({
   const [wechatStatus, setWechatStatus] = useState<"idle" | "binding" | "connected" | "expired" | "error">("idle");
   const [wechatBotId, setWechatBotId] = useState("");
   const [wechatQrUrl, setWechatQrUrl] = useState("");
+  const [wechatQrFallbackUrl, setWechatQrFallbackUrl] = useState("");
+  const [wechatBindSessionId, setWechatBindSessionId] = useState("");
+  const [wechatBindSidecarPort, setWechatBindSidecarPort] = useState(0);
   const [wechatBindMsg, setWechatBindMsg] = useState("");
   // Feishu long-connection
   const [imTab, setImTab] = useState<"feishu" | "webhook">("feishu");
@@ -4491,25 +4496,63 @@ export function SettingsPanel({
                             }
                             if (!sidecarPort) { setWechatBindMsg("Sidecar 未启动"); return; }
                             const resp = await fetch(`http://127.0.0.1:${sidecarPort}/bind/start`, { method: "POST" });
-                            const data = await resp.json() as { session_id: string; qr_url: string };
-                            setWechatQrUrl(data.qr_url);
+                            const data = await resp.json() as { session_id: string; qr_url?: string };
+                            const sid = String(data.session_id || "").trim();
+                            if (!sid) { setWechatBindMsg("会话创建失败，请重试"); return; }
+                            const proxyQrUrl = `http://127.0.0.1:${sidecarPort}/bind/${sid}/qr?ts=${Date.now()}`;
+                            setWechatBindSessionId(sid);
+                            setWechatBindSidecarPort(sidecarPort);
+                            setWechatQrFallbackUrl(String(data.qr_url || "").trim());
+                            setWechatQrUrl(proxyQrUrl);
                             setWechatStatus("binding");
-                            const ws = new WebSocket(`ws://127.0.0.1:${sidecarPort}/bind/${data.session_id}/ws`);
+                            const ws = new WebSocket(`ws://127.0.0.1:${sidecarPort}/bind/${sid}/ws`);
                             ws.onmessage = (ev) => {
                               const msg = JSON.parse(ev.data as string) as { event: string; status?: string; bot_id?: string; qr_url?: string; error?: string };
                               if (msg.event === "status") {
                                 if (msg.status === "scanned") setWechatBindMsg("已扫码，请在手机上确认…");
-                                if (msg.status === "expired" && msg.qr_url) { setWechatQrUrl(msg.qr_url); setWechatBindMsg("二维码已刷新"); }
-                                if (msg.status === "confirmed") { setWechatStatus("connected"); setWechatBotId(msg.bot_id || ""); setWechatQrUrl(""); setWechatBindMsg(""); ws.close(); }
-                                if (msg.status === "timeout") { setWechatStatus("idle"); setWechatQrUrl(""); setWechatBindMsg("绑定超时，请重试"); ws.close(); }
+                                if (msg.status === "expired") {
+                                  const fallback = String(msg.qr_url || "").trim();
+                                  if (fallback) setWechatQrFallbackUrl(fallback);
+                                  setWechatQrUrl(`http://127.0.0.1:${sidecarPort}/bind/${sid}/qr?ts=${Date.now()}`);
+                                  setWechatBindMsg("二维码已刷新");
+                                }
+                                if (msg.status === "confirmed") {
+                                  setWechatStatus("connected");
+                                  setWechatBotId(msg.bot_id || "");
+                                  setWechatQrUrl("");
+                                  setWechatQrFallbackUrl("");
+                                  setWechatBindSessionId("");
+                                  setWechatBindSidecarPort(0);
+                                  setWechatBindMsg("");
+                                  ws.close();
+                                }
+                                if (msg.status === "timeout") {
+                                  setWechatStatus("idle");
+                                  setWechatQrUrl("");
+                                  setWechatQrFallbackUrl("");
+                                  setWechatBindSessionId("");
+                                  setWechatBindSidecarPort(0);
+                                  setWechatBindMsg("绑定超时，请重试");
+                                  ws.close();
+                                }
                               }
                               if (msg.event === "error") { setWechatBindMsg(msg.error || "绑定出错"); }
                             };
-                            ws.onerror = () => { setWechatBindMsg("WebSocket 连接失败"); setWechatStatus("idle"); setWechatQrUrl(""); };
+                            ws.onerror = () => {
+                              setWechatBindMsg("WebSocket 连接失败");
+                              setWechatStatus("idle");
+                              setWechatQrUrl("");
+                              setWechatQrFallbackUrl("");
+                              setWechatBindSessionId("");
+                              setWechatBindSidecarPort(0);
+                            };
                             ws.onclose = () => { if (wechatStatus === "binding") { /* keep state */ } };
                           } catch (e) {
                             setWechatBindMsg(String(e));
                             setWechatStatus("idle");
+                            setWechatQrFallbackUrl("");
+                            setWechatBindSessionId("");
+                            setWechatBindSidecarPort(0);
                           }
                         }}
                       >
@@ -4522,7 +4565,24 @@ export function SettingsPanel({
                     <div className="space-y-3">
                       <p className="text-xs text-text-faint">请使用微信扫描下方二维码：</p>
                       <div className="flex justify-center">
-                        <img src={wechatQrUrl} alt="WeChat QR" className="h-48 w-48 rounded-md border border-border" />
+                        <img
+                          src={wechatQrUrl}
+                          alt="WeChat QR"
+                          className="h-48 w-48 rounded-md border border-border"
+                          onError={() => {
+                            const proxyPrefix = wechatBindSessionId && wechatBindSidecarPort
+                              ? `http://127.0.0.1:${wechatBindSidecarPort}/bind/${wechatBindSessionId}/qr`
+                              : "";
+                            const isProxySrc = proxyPrefix && wechatQrUrl.startsWith(proxyPrefix);
+                            const fallback = String(wechatQrFallbackUrl || "").trim();
+                            if (isProxySrc && fallback && fallback !== wechatQrUrl) {
+                              setWechatQrUrl(fallback);
+                              setWechatBindMsg("本地二维码代理不可用，已回退直连链接");
+                              return;
+                            }
+                            setWechatBindMsg("二维码加载失败，请重试");
+                          }}
+                        />
                       </div>
                       {wechatBindMsg && <p className="text-center text-xs text-text-subtle">{wechatBindMsg}</p>}
                     </div>
@@ -4550,6 +4610,9 @@ export function SettingsPanel({
                           setWechatStatus("idle");
                           setWechatBotId("");
                           setWechatQrUrl("");
+                          setWechatQrFallbackUrl("");
+                          setWechatBindSessionId("");
+                          setWechatBindSidecarPort(0);
                           setWechatBindMsg("");
                         }}
                       >
@@ -4570,7 +4633,14 @@ export function SettingsPanel({
                       <button
                         type="button"
                         className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
-                        onClick={() => { setWechatStatus("idle"); setWechatBotId(""); setWechatQrUrl(""); }}
+                        onClick={() => {
+                          setWechatStatus("idle");
+                          setWechatBotId("");
+                          setWechatQrUrl("");
+                          setWechatQrFallbackUrl("");
+                          setWechatBindSessionId("");
+                          setWechatBindSidecarPort(0);
+                        }}
                       >
                         重新绑定
                       </button>
