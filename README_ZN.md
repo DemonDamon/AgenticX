@@ -556,12 +556,20 @@ graph TD
 
 ## 致谢与来源说明
 
-AgenticX 中**个人微信（iLink）**相关接入，在**接入模式**与 **SDK 使用思路**上参考了 **OpeniLink Hub** 与 **WorkBuddy** 的公开文档与资料：
+AgenticX 中**个人微信（iLink）**通道集成，构建于 [OpeniLink Hub](https://github.com/openilink/openilink-hub) 提供的 **openilink-sdk-go** 库之上。我们具体依赖了：
 
-- [openilink/openilink-hub](https://github.com/openilink/openilink-hub)
-- [WorkBuddy — 微信机器人指南](https://www.codebuddy.cn/docs/workbuddy/WeixinBot-Guide)
+- **二维码绑定流程** — `FetchQRCode` / `PollQRStatus` API 实现扫码绑定体验
+- **消息监听** — `client.Monitor()` 实现入站消息实时流式接收
+- **消息下发** — `SendText` / `Push` 配合 `context_token` 路由实现回复发送
+- **CDN 媒体处理** — `DownloadMedia` / `DownloadVoice` 处理微信加密媒体文件
 
-说明：**未引入** OpeniLink Hub 的完整控制台与应用市场能力；**AgenticX 核心运行时**与**多智能体协作**仍为**独立实现**。
+OpeniLink Hub 的 [OpenClaw App](https://github.com/openilink/openilink-hub) 也展示了 AI Agent 网关集成模式，为我们的 adapter 架构设计提供了参考。
+
+**未引入** OpeniLink Hub 的 Web 控制台、应用市场及多 Bot 管理功能。AgenticX 的**核心多智能体运行时**、**会话管理**及 **Desktop 界面**均为独立实现。
+
+> OpeniLink Hub — MIT 许可证 — [github.com/openilink/openilink-hub](https://github.com/openilink/openilink-hub)
+
+补充参考：[WorkBuddy — 微信机器人指南](https://www.codebuddy.cn/docs/workbuddy/WeixinBot-Guide)，iLink 协议使用模式参考。
 
 ## 许可证
 
