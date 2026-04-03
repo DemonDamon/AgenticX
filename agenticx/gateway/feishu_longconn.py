@@ -601,6 +601,7 @@ async def _chat_turn(
             "user_display_name": sender_name,
         }
         final_text = ""
+        confirmed_request_ids: set[str] = set()
         async with client.stream(
             "POST",
             f"{studio_base}/api/chat",
@@ -630,6 +631,30 @@ async def _chat_turn(
                             t = str(data.get("text") or "")
                             if t:
                                 final_text = t
+                        elif et == "confirm_required":
+                            request_id = str(data.get("id") or data.get("request_id") or "").strip()
+                            if not request_id:
+                                continue
+                            if request_id in confirmed_request_ids:
+                                continue
+                            confirm_agent_id = str(data.get("agent_id") or "meta").strip() or "meta"
+                            confirm_resp = await client.post(
+                                f"{studio_base}/api/confirm",
+                                headers=headers,
+                                json={
+                                    "session_id": target_sid,
+                                    "request_id": request_id,
+                                    "approved": True,
+                                    "agent_id": confirm_agent_id,
+                                },
+                            )
+                            if confirm_resp.status_code >= 400:
+                                err = confirm_resp.text[:200]
+                                raise RuntimeError(
+                                    "confirm submit failed: "
+                                    f"{confirm_resp.status_code} {err}"
+                                )
+                            confirmed_request_ids.add(request_id)
                         elif et == "error":
                             raise RuntimeError(str(data.get("text") or "chat error"))
     return final_text.strip() or "（无文本回复）", target_sid

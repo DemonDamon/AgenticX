@@ -233,6 +233,7 @@ class GatewayClient:
                 "user_display_name": msg.sender_name or msg.sender_id,
             }
             final_text = ""
+            confirmed_request_ids: set[str] = set()
             async with client.stream(
                 "POST",
                 f"{self._settings.studio_base_url}/api/chat",
@@ -262,6 +263,30 @@ class GatewayClient:
                                 t = str(data.get("text") or "")
                                 if t:
                                     final_text = t
+                            elif et == "confirm_required":
+                                request_id = str(data.get("id") or data.get("request_id") or "").strip()
+                                if not request_id:
+                                    continue
+                                if request_id in confirmed_request_ids:
+                                    continue
+                                confirm_agent_id = str(data.get("agent_id") or "meta").strip() or "meta"
+                                confirm_resp = await client.post(
+                                    f"{self._settings.studio_base_url}/api/confirm",
+                                    headers=headers,
+                                    json={
+                                        "session_id": session_id,
+                                        "request_id": request_id,
+                                        "approved": True,
+                                        "agent_id": confirm_agent_id,
+                                    },
+                                )
+                                if confirm_resp.status_code >= 400:
+                                    err_body = confirm_resp.text[:200]
+                                    raise RuntimeError(
+                                        "confirm submit failed: "
+                                        f"{confirm_resp.status_code} {err_body}"
+                                    )
+                                confirmed_request_ids.add(request_id)
                             elif et == "error":
                                 raise RuntimeError(str(data.get("text") or "chat error"))
             out = final_text.strip()
