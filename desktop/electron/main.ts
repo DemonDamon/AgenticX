@@ -483,10 +483,16 @@ function buildSkillWatchRoots(): string[] {
     path.join(os.homedir(), ".agent", "skills"),
     path.join(os.homedir(), ".claude", "skills"),
     path.join(os.homedir(), ".cursor", "skills"),
-    path.join(process.cwd(), ".agents", "skills"),
-    path.join(process.cwd(), ".agent", "skills"),
-    path.join(process.cwd(), ".claude", "skills"),
   ];
+  // Project-local skill roots are useful in dev only. In packaged apps, cwd can
+  // be "/" or app bundle internals; forcing mkdir there causes ENOENT/EACCES.
+  if (!app.isPackaged) {
+    roots.push(
+      path.join(process.cwd(), ".agents", "skills"),
+      path.join(process.cwd(), ".agent", "skills"),
+      path.join(process.cwd(), ".claude", "skills"),
+    );
+  }
   const dedup = new Set<string>();
   for (const root of roots) {
     dedup.add(path.resolve(root));
@@ -496,8 +502,14 @@ function buildSkillWatchRoots(): string[] {
 
 function startSkillsDirWatcher(): void {
   if (skillsDirWatchers.length > 0) return;
+  const managedSkillsRoot = path.resolve(path.join(CONFIG_DIR, "skills"));
   for (const watchRoot of buildSkillWatchRoots()) {
-    fs.mkdirSync(watchRoot, { recursive: true });
+    // Only create AgenticX-managed root. External roots should be watched iff present.
+    if (watchRoot === managedSkillsRoot) {
+      fs.mkdirSync(watchRoot, { recursive: true });
+    } else if (!fs.existsSync(watchRoot)) {
+      continue;
+    }
     try {
       const one = fs.watch(
         watchRoot,
