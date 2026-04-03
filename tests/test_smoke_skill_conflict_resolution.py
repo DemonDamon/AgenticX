@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agenticx.tools import skill_bundle as skill_bundle_module
-from agenticx.tools.skill_bundle import SkillBundleLoader
+from agenticx.tools.skill_bundle import SkillBundleLoader, infer_skill_source
 
 
 def _write_skill(root: Path, name: str, description: str, body: str) -> None:
@@ -85,3 +85,32 @@ def test_duplicate_skill_keeps_variants_with_content_hashes(tmp_path: Path, monk
     hashes = {v.content_hash for v in variants}
     assert len(hashes) == 2
     assert all(len(h) == 64 for h in hashes)
+
+
+def test_infer_skill_source_recognizes_skillhub_home_path(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    skill_dir = home / "skills" / "frontend-slides"
+    skill_dir.mkdir(parents=True)
+    monkeypatch.setattr(skill_bundle_module.Path, "home", lambda: home)
+
+    source = infer_skill_source(skill_dir)
+
+    assert source == "skillhub"
+
+
+def test_infer_skill_source_keeps_cursor_label_for_symlinked_skillhub_dir(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    real_skill_dir = home / "skills" / "frontend-slides"
+    cursor_root = home / ".cursor" / "skills"
+    cursor_root.mkdir(parents=True)
+    real_skill_dir.mkdir(parents=True)
+    linked_skill_dir = cursor_root / "frontend-slides"
+    linked_skill_dir.symlink_to(real_skill_dir, target_is_directory=True)
+    monkeypatch.setattr(skill_bundle_module.Path, "home", lambda: home)
+
+    source = infer_skill_source(linked_skill_dir)
+
+    assert source == "cursor"
