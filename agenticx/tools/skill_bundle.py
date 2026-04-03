@@ -161,6 +161,12 @@ _SKILL_PACKAGE_SKILLS_DIR = _SKILL_BUNDLE_FILE.parent.parent / "skills"
 # Presets shown in Desktop (third-party roots); toggled via skills.preset_paths in config.
 SKILL_SCAN_PRESET_DEFAULTS: List[Dict[str, Any]] = [
     {
+        "id": "skillhub_home",
+        "label": "SkillHub Home",
+        "path": "~/skills",
+        "enabled": True,
+    },
+    {
         "id": "cursor_skills",
         "label": "Cursor Skills",
         "path": "~/.cursor/skills",
@@ -186,6 +192,7 @@ SKILL_SCAN_PRESET_DEFAULTS: List[Dict[str, Any]] = [
 _SKILL_SOURCE_PRIORITY: Dict[str, int] = {
     "cursor": 100,
     "claude": 95,
+    "skillhub": 92,
     "agents": 90,
     "agent_global": 80,
     "project_agents": 70,
@@ -269,6 +276,13 @@ def infer_skill_source(base_dir: Path, builtin_root: Optional[Path] = None) -> s
         for n in norms:
             if fragment in n:
                 return src
+
+    # SkillHub default installation directory.
+    try:
+        bd.relative_to((Path.home() / "skills").resolve())
+        return "skillhub"
+    except (ValueError, OSError):
+        pass
 
     for n in norms:
         if "/.agents/skills" in n:
@@ -598,6 +612,7 @@ class SkillBundleLoader:
         disabled_roots: List[Path] = []
         disabled_sources: set[str] = set()
         preset_source_map: Dict[str, str] = {
+            "skillhub_home": "skillhub",
             "cursor_skills": "cursor",
             "claude_skills_home": "claude",
             "agents_home": "agents",
