@@ -60,6 +60,11 @@ cookies.txt
 # PyInstaller packaging venv (local backend bundle builds)
 packaging/.venv-packaging/
 
+# WeChat iLink sidecar — build locally: cd packaging/wechat-sidecar && make build
+packaging/wechat-sidecar/agx-wechat-sidecar
+packaging/wechat-sidecar/agx-wechat-sidecar-*
+packaging/wechat-sidecar/agx-wechat-sidecar-*.exe
+
 docs/.private/
 
 # Temporary planning files

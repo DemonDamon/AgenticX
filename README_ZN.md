@@ -571,6 +571,8 @@ OpeniLink Hub 的 [OpenClaw App](https://github.com/openilink/openilink-hub) 也
 
 补充参考：[WorkBuddy — 微信机器人指南](https://www.codebuddy.cn/docs/workbuddy/WeixinBot-Guide)，iLink 协议使用模式参考。
 
+**桌面端开发：** 个人微信 iLink 的 Go sidecar 可执行文件**不纳入**本仓库。首次在本地使用该能力前，请在 [`packaging/wechat-sidecar/`](packaging/wechat-sidecar/) 执行 `make build`（需 Go 1.22+）。说明见 [`packaging/wechat-sidecar/README.md`](packaging/wechat-sidecar/README.md)。
+
 ## 许可证
 
 本项目采用 GNU Affero General Public License v3.0 (AGPL-3.0) - 详见 [LICENSE](LICENSE) 文件
