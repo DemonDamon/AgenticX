@@ -1,4 +1,4 @@
-# Build Machi Desktop (macOS) with bundled agx-server; upload DMG/ZIP artifacts.
+# Build Machi Desktop (macOS) with bundled agx-server; upload DMG artifacts only.
 # Optional secrets: CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_ID_PASSWORD, APPLE_TEAM_ID
 
 name: Build Desktop
@@ -73,9 +73,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: machi-${{ matrix.arch }}
-          path: |
-            desktop/release/*.dmg
-            desktop/release/*.zip
+          path: desktop/release/*.dmg
 
   build-dispatch:
     if: github.event_name == 'workflow_dispatch'
@@ -135,6 +133,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: machi-${{ env.ARCH }}
-          path: |
-            desktop/release/*.dmg
-            desktop/release/*.zip
+          path: desktop/release/*.dmg
