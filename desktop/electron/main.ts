@@ -400,6 +400,8 @@ let apiPort = 8000;
 const apiToken = crypto.randomBytes(16).toString("hex");
 let serveProcess: ChildProcess | null = null;
 let feishuProcess: ChildProcess | null = null;
+let wechatSidecarProcess: ChildProcess | null = null;
+let wechatSidecarPort = 0;
 let isQuitting = false;
 let serveStdoutBuffer = "";
 let serveStderrBuffer = "";
@@ -900,6 +902,111 @@ function stopFeishuProcess(): void {
   feishuProcess = null;
 }
 
+// ── WeChat iLink Sidecar ──────────────────────────────────────────
+
+function getWechatSidecarPath(): string {
+  if (app.isPackaged) {
+    const resPath = path.join(process.resourcesPath, "agx-wechat-sidecar");
+    if (fs.existsSync(resPath)) return resPath;
+    const arch = process.arch === "x64" ? "x64" : "arm64";
+    const bundled = path.join(process.resourcesPath, "bundled-backend", arch, "agx-wechat-sidecar");
+    if (fs.existsSync(bundled)) return bundled;
+    return resPath;
+  }
+  const devPath = path.join(__dirname, "..", "..", "packaging", "wechat-sidecar", "agx-wechat-sidecar");
+  if (fs.existsSync(devPath)) return devPath;
+  return "agx-wechat-sidecar";
+}
+
+function findFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.listen(0, "127.0.0.1", () => {
+      const port = (srv.address() as net.AddressInfo).port;
+      srv.close(() => resolve(port));
+    });
+    srv.on("error", reject);
+  });
+}
+
+let wechatRestartCount = 0;
+const WECHAT_MAX_RESTARTS = 3;
+let wechatHealthTimer: ReturnType<typeof setInterval> | null = null;
+
+async function startWechatSidecar(): Promise<void> {
+  if (wechatSidecarProcess && !wechatSidecarProcess.killed) return;
+  const binaryPath = getWechatSidecarPath();
+  if (!fs.existsSync(binaryPath)) {
+    console.info("[wechat-sidecar] binary not found:", binaryPath);
+    return;
+  }
+  try {
+    const port = await findFreePort();
+    const dataDir = path.join(os.homedir(), ".agenticx");
+    wechatSidecarProcess = spawn(binaryPath, ["--port", String(port), "--data-dir", dataDir], {
+      cwd: os.homedir(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    wechatSidecarPort = port;
+    wechatSidecarProcess.stdout?.on("data", (chunk: Buffer) => {
+      const line = chunk.toString().trim();
+      if (line) console.info("[wechat-sidecar]", line);
+    });
+    wechatSidecarProcess.stderr?.on("data", (chunk: Buffer) => {
+      const line = chunk.toString().trim();
+      if (line) console.warn("[wechat-sidecar:err]", line);
+    });
+    wechatSidecarProcess.on("exit", (code) => {
+      if (!isQuitting) {
+        console.info(`[wechat-sidecar] exited (code=${String(code)})`);
+        if (wechatRestartCount < WECHAT_MAX_RESTARTS) {
+          wechatRestartCount++;
+          console.info(`[wechat-sidecar] auto-restart attempt ${wechatRestartCount}/${WECHAT_MAX_RESTARTS}`);
+          setTimeout(() => void startWechatSidecar(), 2000);
+        }
+      }
+      wechatSidecarProcess = null;
+      wechatSidecarPort = 0;
+    });
+    wechatRestartCount = 0;
+    startWechatHealthCheck();
+    console.info("[wechat-sidecar] started on port", port);
+  } catch (err) {
+    console.error("[wechat-sidecar] start failed:", err);
+  }
+}
+
+function stopWechatSidecar(): void {
+  stopWechatHealthCheck();
+  if (!wechatSidecarProcess) return;
+  try { wechatSidecarProcess.kill("SIGTERM"); } catch { /* noop */ }
+  wechatSidecarProcess = null;
+  wechatSidecarPort = 0;
+}
+
+function startWechatHealthCheck(): void {
+  stopWechatHealthCheck();
+  wechatHealthTimer = setInterval(async () => {
+    if (!wechatSidecarPort || !wechatSidecarProcess) return;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const resp = await fetch(`http://127.0.0.1:${wechatSidecarPort}/health`, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!resp.ok) throw new Error(`health check: ${resp.status}`);
+    } catch {
+      console.warn("[wechat-sidecar] health check failed");
+    }
+  }, 30_000);
+}
+
+function stopWechatHealthCheck(): void {
+  if (wechatHealthTimer) {
+    clearInterval(wechatHealthTimer);
+    wechatHealthTimer = null;
+  }
+}
+
 type TerminalSession = {
   pty: import("node-pty").IPty;
   wc: Electron.WebContents;
@@ -1223,6 +1330,22 @@ function registerIpc(): void {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
     fs.writeFileSync(FEISHU_BINDING_PATH, JSON.stringify(data, null, 2), "utf-8");
     return { ok: true };
+  });
+
+  // ── WeChat iLink Sidecar IPC ──────────────────────────────────
+
+  ipcMain.handle("wechat-sidecar-start", async () => {
+    await startWechatSidecar();
+    return { ok: true, port: wechatSidecarPort };
+  });
+
+  ipcMain.handle("wechat-sidecar-stop", async () => {
+    stopWechatSidecar();
+    return { ok: true };
+  });
+
+  ipcMain.handle("wechat-sidecar-port", async () => {
+    return { port: wechatSidecarPort, running: !!wechatSidecarProcess && !wechatSidecarProcess.killed };
   });
 
   ipcMain.handle("list-avatars", async () => {
@@ -2786,6 +2909,7 @@ if (!gotTheLock) {
         await startStudioServe();
         await waitServeReady();
         startFeishuProcess();
+        void startWechatSidecar();
       }
 
       registerIpc();
@@ -2818,6 +2942,7 @@ if (!gotTheLock) {
     stopSkillsDirWatcher();
     killAllTerminalSessions();
     stopFeishuProcess();
+    stopWechatSidecar();
     stopStudioServe();
   });
 }
