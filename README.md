@@ -559,12 +559,20 @@ We welcome community contributions! Please refer to:
 
 ## Acknowledgements / Upstream Credits
 
-Personal WeChat (iLink) integration in AgenticX drew on public materials from **OpeniLink Hub** and **WorkBuddy** for connection patterns and SDK-oriented usage ideas:
+The personal WeChat (iLink) channel integration in AgenticX was built on top of the **openilink-sdk-go** library from [OpeniLink Hub](https://github.com/openilink/openilink-hub). We specifically relied on:
 
-- [openilink/openilink-hub](https://github.com/openilink/openilink-hub)
-- [WorkBuddy — WeixinBot Guide](https://www.codebuddy.cn/docs/workbuddy/WeixinBot-Guide)
+- **QR code binding flow** — `FetchQRCode` / `PollQRStatus` APIs for the scan-to-bind UX
+- **Message monitoring** — `client.Monitor()` for real-time inbound message streaming  
+- **Outbound messaging** — `SendText` / `Push` for reply delivery with `context_token` routing
+- **CDN media handling** — `DownloadMedia` / `DownloadVoice` for encrypted WeChat media
 
-We did **not** ship the full OpeniLink Hub console or app marketplace. AgenticX’s **core runtime** and **multi-agent collaboration** remain an independent implementation.
+OpeniLink Hub's [OpenClaw App](https://github.com/openilink/openilink-hub) also demonstrated an AI Agent gateway integration pattern that informed our adapter architecture.
+
+We did **not** include OpeniLink Hub's web console, App Marketplace, or multi-bot management features. AgenticX's **core multi-agent runtime**, **session management**, and **Desktop UI** remain fully independent implementations.
+
+> OpeniLink Hub — MIT License — [github.com/openilink/openilink-hub](https://github.com/openilink/openilink-hub)
+
+Additional reference: [WorkBuddy — WeixinBot Guide](https://www.codebuddy.cn/docs/workbuddy/WeixinBot-Guide) for iLink protocol usage patterns.
 
 ## License
 
