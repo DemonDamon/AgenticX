@@ -574,6 +574,8 @@ We did **not** include OpeniLink Hub's web console, App Marketplace, or multi-bo
 
 Additional reference: [WorkBuddy — WeixinBot Guide](https://www.codebuddy.cn/docs/workbuddy/WeixinBot-Guide) for iLink protocol usage patterns.
 
+**Desktop development:** The iLink Go sidecar binary is **not** committed to this repository. Before using the personal WeChat bridge locally, run `make build` in [`packaging/wechat-sidecar/`](packaging/wechat-sidecar/) (requires Go 1.22+). See [`packaging/wechat-sidecar/README.md`](packaging/wechat-sidecar/README.md).
+
 ## License
 
 This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0) - see [LICENSE](LICENSE) file for details
