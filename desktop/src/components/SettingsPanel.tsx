@@ -3242,6 +3242,11 @@ export function SettingsPanel({
   const [gwShowToken, setGwShowToken] = useState(false);
   const [gwAdvancedOpen, setGwAdvancedOpen] = useState(false);
   const [gwQrOpen, setGwQrOpen] = useState(false);
+  // WeChat iLink sidecar
+  const [wechatStatus, setWechatStatus] = useState<"idle" | "binding" | "connected" | "expired" | "error">("idle");
+  const [wechatBotId, setWechatBotId] = useState("");
+  const [wechatQrUrl, setWechatQrUrl] = useState("");
+  const [wechatBindMsg, setWechatBindMsg] = useState("");
   // Feishu long-connection
   const [imTab, setImTab] = useState<"feishu" | "webhook">("feishu");
   const [feishuEnabled, setFeishuEnabled] = useState(false);
@@ -3358,6 +3363,22 @@ export function SettingsPanel({
       setFeishuEnabled(lc.enabled);
       setFeishuAppId(lc.appId || "");
       setFeishuAppSecret(lc.appSecret || "");
+    });
+    void window.agenticxDesktop.wechatSidecarPort().then((res) => {
+      if (res.running && res.port > 0) {
+        fetch(`http://127.0.0.1:${res.port}/status`)
+          .then((r) => r.json())
+          .then((data: { connected?: boolean; bot_id?: string; status?: string }) => {
+            if (data.connected) {
+              setWechatStatus("connected");
+              setWechatBotId(data.bot_id || "");
+            } else if (data.bot_id) {
+              setWechatStatus("idle");
+              setWechatBotId(data.bot_id);
+            }
+          })
+          .catch(() => {});
+      }
     });
     void window.agenticxDesktop.loadMetaSoul().then((res) => {
       if (res?.ok) {
@@ -4232,7 +4253,7 @@ export function SettingsPanel({
                   </fieldset>
                 </Panel>
 
-                <Panel title="远程指令（IM 网关）">
+                <Panel title="飞书集成">
                   {/* Tab switcher */}
                   <div className="mb-4 flex gap-1 rounded-lg bg-surface-hover p-0.5">
                     {(["feishu", "webhook"] as const).map((t) => (
@@ -4447,6 +4468,120 @@ export function SettingsPanel({
                   )}
                   </>)}
                 </Panel>
+
+                <Panel title="微信集成">
+                  {wechatStatus === "idle" && !wechatBotId && (
+                    <div className="space-y-3">
+                      <p className="text-xs text-text-faint">
+                        扫码绑定个人微信，绑定后可在微信中给 Machi 发消息触发 Agent 执行。基于微信官方 iLink 协议。
+                      </p>
+                      <button
+                        type="button"
+                        className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
+                        disabled={wechatStatus === "binding"}
+                        onClick={async () => {
+                          setWechatBindMsg("");
+                          try {
+                            const { port, running } = await window.agenticxDesktop.wechatSidecarPort();
+                            let sidecarPort = port;
+                            if (!running) {
+                              const startRes = await window.agenticxDesktop.wechatSidecarStart();
+                              sidecarPort = startRes.port;
+                              await new Promise((r) => setTimeout(r, 1500));
+                            }
+                            if (!sidecarPort) { setWechatBindMsg("Sidecar 未启动"); return; }
+                            const resp = await fetch(`http://127.0.0.1:${sidecarPort}/bind/start`, { method: "POST" });
+                            const data = await resp.json() as { session_id: string; qr_url: string };
+                            setWechatQrUrl(data.qr_url);
+                            setWechatStatus("binding");
+                            const ws = new WebSocket(`ws://127.0.0.1:${sidecarPort}/bind/${data.session_id}/ws`);
+                            ws.onmessage = (ev) => {
+                              const msg = JSON.parse(ev.data as string) as { event: string; status?: string; bot_id?: string; qr_url?: string; error?: string };
+                              if (msg.event === "status") {
+                                if (msg.status === "scanned") setWechatBindMsg("已扫码，请在手机上确认…");
+                                if (msg.status === "expired" && msg.qr_url) { setWechatQrUrl(msg.qr_url); setWechatBindMsg("二维码已刷新"); }
+                                if (msg.status === "confirmed") { setWechatStatus("connected"); setWechatBotId(msg.bot_id || ""); setWechatQrUrl(""); setWechatBindMsg(""); ws.close(); }
+                                if (msg.status === "timeout") { setWechatStatus("idle"); setWechatQrUrl(""); setWechatBindMsg("绑定超时，请重试"); ws.close(); }
+                              }
+                              if (msg.event === "error") { setWechatBindMsg(msg.error || "绑定出错"); }
+                            };
+                            ws.onerror = () => { setWechatBindMsg("WebSocket 连接失败"); setWechatStatus("idle"); setWechatQrUrl(""); };
+                            ws.onclose = () => { if (wechatStatus === "binding") { /* keep state */ } };
+                          } catch (e) {
+                            setWechatBindMsg(String(e));
+                            setWechatStatus("idle");
+                          }
+                        }}
+                      >
+                        绑定微信
+                      </button>
+                    </div>
+                  )}
+
+                  {wechatStatus === "binding" && wechatQrUrl && (
+                    <div className="space-y-3">
+                      <p className="text-xs text-text-faint">请使用微信扫描下方二维码：</p>
+                      <div className="flex justify-center">
+                        <img src={wechatQrUrl} alt="WeChat QR" className="h-48 w-48 rounded-md border border-border" />
+                      </div>
+                      {wechatBindMsg && <p className="text-center text-xs text-text-subtle">{wechatBindMsg}</p>}
+                    </div>
+                  )}
+
+                  {(wechatStatus === "connected" || (wechatStatus === "idle" && wechatBotId)) && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-block h-2 w-2 rounded-full ${wechatStatus === "connected" ? "bg-green-500" : "bg-yellow-500"}`} />
+                        <span className="text-sm text-text-subtle">
+                          {wechatStatus === "connected" ? "已连接" : "已绑定（未连接）"}
+                        </span>
+                      </div>
+                      {wechatBotId && (
+                        <p className="text-xs text-text-faint">Bot ID: <code className="rounded bg-surface-hover px-1">{wechatBotId}</code></p>
+                      )}
+                      <button
+                        type="button"
+                        className="rounded-md border border-red-500/30 px-3 py-1.5 text-sm text-red-400 transition hover:bg-red-500/10"
+                        onClick={async () => {
+                          try {
+                            const { port, running } = await window.agenticxDesktop.wechatSidecarPort();
+                            if (running && port) await fetch(`http://127.0.0.1:${port}/unbind`, { method: "POST" });
+                          } catch { /* noop */ }
+                          setWechatStatus("idle");
+                          setWechatBotId("");
+                          setWechatQrUrl("");
+                          setWechatBindMsg("");
+                        }}
+                      >
+                        解绑微信
+                      </button>
+                    </div>
+                  )}
+
+                  {wechatStatus === "expired" && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+                        <span className="text-sm text-red-400">会话已过期</span>
+                      </div>
+                      <p className="text-xs text-text-faint">
+                        微信 iLink 会话已过期（超过 24 小时未活跃），请重新扫码绑定。
+                      </p>
+                      <button
+                        type="button"
+                        className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+                        onClick={() => { setWechatStatus("idle"); setWechatBotId(""); setWechatQrUrl(""); }}
+                      >
+                        重新绑定
+                      </button>
+                    </div>
+                  )}
+
+                  {wechatBindMsg && wechatStatus !== "binding" && (
+                    <p className="mt-2 text-xs text-text-faint">{wechatBindMsg}</p>
+                  )}
+                </Panel>
+
                 <QrConnectModal
                   open={gwQrOpen}
                   gatewayBaseUrl={gwUrl.trim().replace(/\/+$/, "")}

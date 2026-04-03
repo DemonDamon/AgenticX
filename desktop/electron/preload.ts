@@ -66,6 +66,14 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     avatarId?: string | null;
     avatarName?: string | null;
   }) => ipcRenderer.invoke("save-feishu-desktop-binding", payload),
+
+  wechatSidecarStart: async () =>
+    ipcRenderer.invoke("wechat-sidecar-start") as Promise<{ ok: boolean; port: number }>,
+  wechatSidecarStop: async () =>
+    ipcRenderer.invoke("wechat-sidecar-stop") as Promise<{ ok: boolean }>,
+  wechatSidecarPort: async () =>
+    ipcRenderer.invoke("wechat-sidecar-port") as Promise<{ port: number; running: boolean }>,
+
   onOpenSettings: (cb: () => void): void => {
     ipcRenderer.on("open-settings", () => cb());
   },
