@@ -75,6 +75,10 @@ jobs:
         working-directory: desktop
         run: npm run build
 
+      - name: Clean old DMG artifacts
+        working-directory: desktop
+        run: rm -f release/*.dmg
+
       - name: Package (electron-builder, arm64 / x64)
         working-directory: desktop
         env:
@@ -86,7 +90,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: machi-${{ matrix.arch }}
-          path: desktop/release/*.dmg
+          path: desktop/release/*-${{ matrix.arch }}.dmg
 
   build-dispatch:
     if: github.event_name == 'workflow_dispatch'
@@ -136,6 +140,10 @@ jobs:
         working-directory: desktop
         run: npm run build
 
+      - name: Clean old DMG artifacts
+        working-directory: desktop
+        run: rm -f release/*.dmg
+
       - name: Pre-flight check
         working-directory: desktop
         run: |
@@ -158,4 +166,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: machi-${{ env.ARCH }}
-          path: desktop/release/*.dmg
+          path: desktop/release/*-${{ env.ARCH }}.dmg

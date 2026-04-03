@@ -9,11 +9,9 @@ extraResources:
   - assets/**/*
 # afterSign: scripts/mac/notarize.js  # 公证在本地签名时启用；CI 无 Apple 证书时跳过
 mac:
+  artifactName: "${productName}-${version}-${arch}.${ext}"
   target:
     - target: dmg
-      arch:
-        - arm64
-        - x64
   icon: assets/icon.icns
   category: public.app-category.developer-tools
   gatekeeperAssess: false
