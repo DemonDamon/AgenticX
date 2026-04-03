@@ -23,6 +23,10 @@ var (
 
 	credsMu     sync.RWMutex
 	storedCreds *Credentials
+
+	profileMu          sync.RWMutex
+	botDisplayName     string
+	botAvatarURL       string
 )
 
 func setCredentials(creds *Credentials) {
@@ -40,12 +44,19 @@ func getCredentials() *Credentials {
 func main() {
 	var port int
 	var dataDir string
+	var flagBotName string
 
 	flag.IntVar(&port, "port", 0, "HTTP listen port (0 = auto)")
 	flag.StringVar(&dataDir, "data-dir", defaultDataDir(), "Data directory")
+	flag.StringVar(&flagBotName, "bot-name", "Machi", "Bot display name shown in status/profile")
 	flag.Parse()
 
 	globalDataDir = dataDir
+
+	profileMu.Lock()
+	botDisplayName = flagBotName
+	profileMu.Unlock()
+	loadProfile(dataDir)
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
@@ -74,6 +85,8 @@ func main() {
 	mux.HandleFunc("POST /reconnect", handleReconnect)
 	mux.HandleFunc("POST /unbind", handleUnbind)
 	mux.HandleFunc("GET /health", handleHealth)
+	mux.HandleFunc("GET /profile", handleGetProfile)
+	mux.HandleFunc("POST /profile", handleSetProfile)
 	mux.HandleFunc("POST /media/download", handleMediaDownload)
 	mux.HandleFunc("POST /media/voice", handleVoiceDownload)
 
@@ -128,10 +141,17 @@ func handleStatus(w http.ResponseWriter, _ *http.Request) {
 		status = "idle"
 	}
 
+	profileMu.RLock()
+	displayName := botDisplayName
+	avatarURL := botAvatarURL
+	profileMu.RUnlock()
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"connected": connected,
-		"bot_id":    botID,
-		"status":    status,
+		"connected":        connected,
+		"bot_id":           botID,
+		"status":           status,
+		"bot_display_name": displayName,
+		"bot_avatar_url":   avatarURL,
 	})
 }
 
@@ -160,6 +180,87 @@ func handleUnbind(w http.ResponseWriter, _ *http.Request) {
 
 func handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func handleGetProfile(w http.ResponseWriter, _ *http.Request) {
+	profileMu.RLock()
+	displayName := botDisplayName
+	avatarURL := botAvatarURL
+	profileMu.RUnlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"bot_display_name": displayName,
+		"bot_avatar_url":   avatarURL,
+	})
+}
+
+func handleSetProfile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DisplayName *string `json:"bot_display_name"`
+		AvatarURL   *string `json:"bot_avatar_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	profileMu.Lock()
+	if req.DisplayName != nil {
+		botDisplayName = *req.DisplayName
+	}
+	if req.AvatarURL != nil {
+		botAvatarURL = *req.AvatarURL
+	}
+	name := botDisplayName
+	avatar := botAvatarURL
+	profileMu.Unlock()
+
+	saveProfile(globalDataDir, name, avatar)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":               true,
+		"bot_display_name": name,
+		"bot_avatar_url":   avatar,
+	})
+}
+
+func loadProfile(dataDir string) {
+	p := filepath.Join(dataDir, "wechat_profile.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return
+	}
+	var prof struct {
+		DisplayName string `json:"bot_display_name"`
+		AvatarURL   string `json:"bot_avatar_url"`
+	}
+	if err := json.Unmarshal(data, &prof); err != nil {
+		return
+	}
+	profileMu.Lock()
+	if prof.DisplayName != "" {
+		botDisplayName = prof.DisplayName
+	}
+	if prof.AvatarURL != "" {
+		botAvatarURL = prof.AvatarURL
+	}
+	profileMu.Unlock()
+}
+
+func saveProfile(dataDir, displayName, avatarURL string) {
+	prof := map[string]string{
+		"bot_display_name": displayName,
+		"bot_avatar_url":   avatarURL,
+	}
+	data, err := json.MarshalIndent(prof, "", "  ")
+	if err != nil {
+		slog.Error("marshal profile failed", "error", err)
+		return
+	}
+	p := filepath.Join(dataDir, "wechat_profile.json")
+	if err := os.WriteFile(p, data, 0644); err != nil {
+		slog.Error("write profile failed", "error", err)
+	}
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
