@@ -40,6 +40,12 @@ class DingTalkAdapterConfig(BaseModel):
     app_secret: str = ""
 
 
+class WeChatILinkAdapterConfig(BaseModel):
+    enabled: bool = False
+    sidecar_url: str = ""
+    sidecar_port: int = 0
+
+
 class DeviceAuthEntry(BaseModel):
     device_id: str = ""
     token: str = ""
@@ -54,6 +60,7 @@ class AdaptersConfig(BaseModel):
     feishu: FeishuAdapterConfig = Field(default_factory=FeishuAdapterConfig)
     wecom: WeComAdapterConfig = Field(default_factory=WeComAdapterConfig)
     dingtalk: DingTalkAdapterConfig = Field(default_factory=DingTalkAdapterConfig)
+    wechat_ilink: WeChatILinkAdapterConfig = Field(default_factory=WeChatILinkAdapterConfig)
 
 
 class GatewayServerConfig(BaseModel):
