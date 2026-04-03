@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Dict, Optional
@@ -22,6 +23,64 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _AGX_DIR = Path.home() / ".agenticx"
+
+_RE_BOLD = re.compile(r"\*\*(.+?)\*\*")
+_RE_ITALIC = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
+_RE_ITALIC_UNDER = re.compile(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)")
+_RE_STRIKE = re.compile(r"~~(.+?)~~")
+_RE_INLINE_CODE = re.compile(r"`([^`]+)`")
+_RE_LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_RE_IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+_RE_HEADING = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+_RE_HR = re.compile(r"^[-*_]{3,}\s*$", re.MULTILINE)
+_RE_CODE_BLOCK = re.compile(r"```[\w]*\n(.*?)```", re.DOTALL)
+
+
+def _markdown_to_wechat_text(md: str) -> str:
+    """Convert markdown to WeChat-friendly plain text.
+
+    WeChat does not render markdown, so we strip syntax while preserving
+    readability: headings become prefixed lines, bold markers removed,
+    code blocks indented, links shown inline, etc.
+    """
+    text = md
+
+    text = _RE_CODE_BLOCK.sub(lambda m: _indent_code(m.group(1)), text)
+
+    text = _RE_IMAGE.sub(lambda m: f"[图片: {m.group(1) or m.group(2)}]", text)
+    text = _RE_LINK.sub(lambda m: f"{m.group(1)}({m.group(2)})", text)
+
+    text = _RE_HEADING.sub(lambda m: f"{'━' * len(m.group(1))} {m.group(2)}", text)
+    text = _RE_HR.sub("————————", text)
+
+    text = _RE_BOLD.sub(r"【\1】", text)
+    text = _RE_STRIKE.sub(r"\1", text)
+    text = _RE_INLINE_CODE.sub(r"\1", text)
+    text = _RE_ITALIC.sub(r"\1", text)
+    text = _RE_ITALIC_UNDER.sub(r"\1", text)
+
+    lines = text.split("\n")
+    result: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r"^[-*+]\s", stripped):
+            result.append("  • " + stripped[2:])
+        elif re.match(r"^\d+\.\s", stripped):
+            result.append("  " + stripped)
+        else:
+            result.append(line)
+
+    text = "\n".join(result)
+    while "\n\n\n" in text:
+        text = text.replace("\n\n\n", "\n\n")
+    return text.strip()
+
+
+def _indent_code(code: str) -> str:
+    """Indent code block lines for readability in plain text."""
+    lines = code.strip().split("\n")
+    indented = "\n".join(f"  {line}" for line in lines)
+    return f"┌──────\n{indented}\n└──────"
 
 
 def _read_sidecar_port() -> int:
@@ -49,6 +108,7 @@ class WeChatILinkAdapter:
         self._studio_token = studio_token
         self._running = False
         self._task: Optional[asyncio.Task[None]] = None
+        self._reply_name = os.getenv("AGX_WECHAT_REPLY_NAME", "Machi").strip()
 
     def _resolve_sidecar_url(self) -> str:
         if self._sidecar_url:
@@ -340,6 +400,10 @@ class WeChatILinkAdapter:
         group_id: str,
     ) -> None:
         """Forward agent reply to WeChat via sidecar /send with route fallback."""
+        text = self._format_outbound_text(text)
+        if not text.strip():
+            logger.info("WeChat send skipped: empty formatted text")
+            return
         recipient_candidates = self._dedup_nonempty([group_id, session_id, sender])
         token_candidates = self._dedup_preserve(
             [context_token.strip(), ""]
@@ -443,6 +507,18 @@ class WeChatILinkAdapter:
             " | ".join(attempt_logs)[:1200],
             last_error_snippet[:200],
         )
+
+    def _format_outbound_text(self, text: str) -> str:
+        """Format outbound content for readability in WeChat client."""
+        body = _markdown_to_wechat_text(text)
+        if not body:
+            return ""
+        if not self._reply_name:
+            return body
+        prefixed = f"{self._reply_name}："
+        if body.lstrip().startswith(prefixed):
+            return body
+        return f"{self._reply_name}：\n{body}"
 
     @staticmethod
     def _dedup_nonempty(values: list[str]) -> list[str]:
