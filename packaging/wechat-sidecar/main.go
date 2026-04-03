@@ -16,10 +16,12 @@ import (
 	"time"
 )
 
+const sidecarVersion = "0.2.0-qrgen"
+
 var (
 	globalDataDir string
 
-	credsMu    sync.RWMutex
+	credsMu     sync.RWMutex
 	storedCreds *Credentials
 )
 
@@ -64,6 +66,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /bind/start", handleBindStart)
+	mux.HandleFunc("GET /bind/{session}/qr", handleBindQR)
 	mux.HandleFunc("GET /bind/{session}/ws", handleBindWS)
 	mux.HandleFunc("GET /status", handleStatus)
 	mux.HandleFunc("POST /send", handleSend)
@@ -89,6 +92,7 @@ func main() {
 
 	go func() {
 		slog.Info("wechat-sidecar listening", "port", actualPort)
+		slog.Info("sidecar version", "version", sidecarVersion)
 		fmt.Printf("wechat-sidecar listening on :%d\n", actualPort)
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
