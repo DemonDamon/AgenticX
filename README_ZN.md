@@ -554,6 +554,15 @@ graph TD
 3. 提交 Pull Request，确保通过所有测试
 4. 参与代码审查和讨论
 
+## 致谢与来源说明
+
+AgenticX 中**个人微信（iLink）**相关接入，在**接入模式**与 **SDK 使用思路**上参考了 **OpeniLink Hub** 与 **WorkBuddy** 的公开文档与资料：
+
+- [openilink/openilink-hub](https://github.com/openilink/openilink-hub)
+- [WorkBuddy — 微信机器人指南](https://www.codebuddy.cn/docs/workbuddy/WeixinBot-Guide)
+
+说明：**未引入** OpeniLink Hub 的完整控制台与应用市场能力；**AgenticX 核心运行时**与**多智能体协作**仍为**独立实现**。
+
 ## 许可证
 
 本项目采用 GNU Affero General Public License v3.0 (AGPL-3.0) - 详见 [LICENSE](LICENSE) 文件
