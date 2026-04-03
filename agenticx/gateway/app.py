@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from agenticx.gateway.adapters.dingtalk import DingTalkAdapter
 from agenticx.gateway.adapters.feishu import FeishuAdapter
+from agenticx.gateway.adapters.wechat_ilink import WeChatILinkAdapter
 from agenticx.gateway.adapters.wecom import WeComAdapter, query_dict_from_request
 from agenticx.gateway.config import (
     GatewayServerConfig,
@@ -88,6 +89,15 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
     if cfg.adapters.dingtalk.enabled:
         dingtalk = DingTalkAdapter(app_secret=cfg.adapters.dingtalk.app_secret)
 
+    wechat_ilink: Optional[WeChatILinkAdapter] = None
+    if cfg.adapters.wechat_ilink.enabled:
+        sidecar_url = (cfg.adapters.wechat_ilink.sidecar_url or "").strip()
+        if not sidecar_url:
+            sidecar_port = int(cfg.adapters.wechat_ilink.sidecar_port or 0)
+            if sidecar_port > 0:
+                sidecar_url = f"http://127.0.0.1:{sidecar_port}"
+        wechat_ilink = WeChatILinkAdapter(sidecar_url=sidecar_url)
+
     app.state.config = cfg
     app.state.device_manager = device_manager
     app.state.user_map = user_map
@@ -95,7 +105,22 @@ def create_gateway_app(config: Optional[GatewayServerConfig] = None) -> FastAPI:
     app.state.feishu = feishu
     app.state.wecom = wecom
     app.state.dingtalk = dingtalk
+    app.state.wechat_ilink = wechat_ilink
     app.state.connect_sessions = connect_sessions
+
+    @app.on_event("startup")
+    async def _startup_wechat_ilink() -> None:
+        if wechat_ilink is None:
+            return
+        await wechat_ilink.start()
+        logger.info("gateway lifecycle started wechat_ilink adapter")
+
+    @app.on_event("shutdown")
+    async def _shutdown_wechat_ilink() -> None:
+        if wechat_ilink is None:
+            return
+        await wechat_ilink.stop()
+        logger.info("gateway lifecycle stopped wechat_ilink adapter")
 
     def _require_device_token(device_id: str, token: str) -> None:
         did = (device_id or "").strip()

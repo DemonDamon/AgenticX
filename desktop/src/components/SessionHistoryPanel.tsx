@@ -91,6 +91,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const addPane = useAppStore((s) => s.addPane);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [feishuBoundSessionId, setFeishuBoundSessionId] = useState<string | null>(null);
+  const [wechatBoundSessionId, setWechatBoundSessionId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [contextMenu, setContextMenu] = useState<SessionContextMenu | null>(null);
@@ -101,10 +102,14 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
 
   const title = useMemo(() => (pane.avatarName || "Machi").trim(), [pane.avatarName]);
   const feishuMarkedSessionId = feishuBoundSessionId;
+  const wechatMarkedSessionId = wechatBoundSessionId;
 
   const groupedSessions = useMemo<GroupedSessions>(() => {
-    const visibleSessions = feishuMarkedSessionId
-      ? sessions.filter((item) => item.session_id !== feishuMarkedSessionId)
+    const specialIds = new Set<string>();
+    if (feishuMarkedSessionId) specialIds.add(feishuMarkedSessionId);
+    if (wechatMarkedSessionId) specialIds.add(wechatMarkedSessionId);
+    const visibleSessions = specialIds.size > 0
+      ? sessions.filter((item) => !specialIds.has(item.session_id))
       : sessions;
     const now = new Date();
     const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
@@ -130,7 +135,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       }
     }
     return grouped;
-  }, [sessions, feishuMarkedSessionId]);
+  }, [sessions, feishuMarkedSessionId, wechatMarkedSessionId]);
 
   const loadSessions = async () => {
     try {
@@ -173,8 +178,30 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       }
     };
 
+    const syncWechatBinding = async () => {
+      if (cancelled) return;
+      try {
+        const r = await window.agenticxDesktop.loadWechatBinding();
+        if (!r.ok || cancelled) {
+          if (!cancelled) setWechatBoundSessionId(null);
+          return;
+        }
+        const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
+        const sid = typeof desk?.session_id === "string" ? desk.session_id.trim() : "";
+        setWechatBoundSessionId(sid || null);
+      } catch {
+        if (!cancelled) {
+          setWechatBoundSessionId(null);
+        }
+      }
+    };
+
     void syncFeishuBinding();
-    const timer = window.setInterval(() => void syncFeishuBinding(), 3000);
+    void syncWechatBinding();
+    const timer = window.setInterval(() => {
+      void syncFeishuBinding();
+      void syncWechatBinding();
+    }, 3000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -202,6 +229,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
 
   const feishuSession = feishuMarkedSessionId
     ? sessions.find((item) => item.session_id === feishuMarkedSessionId) ?? null
+    : null;
+
+  const wechatSession = wechatMarkedSessionId
+    ? sessions.find((item) => item.session_id === wechatMarkedSessionId) ?? null
     : null;
 
   const switchSession = async (sessionId: string, targetPaneId = pane.id) => {
@@ -383,6 +414,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     const unread = unreadSessionIds.includes(item.session_id);
     const createdAt = getSessionCreatedTimestamp(item) || Date.now() / 1000;
     const feishuMarked = feishuMarkedSessionId === item.session_id;
+    const wechatMarked = wechatMarkedSessionId === item.session_id;
     return (
       <div key={item.session_id} className="mb-1">
         {editingId === item.session_id ? (
@@ -436,6 +468,14 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               {feishuMarked ? (
                 <FeishuBadge />
               ) : null}
+              {wechatMarked ? (
+                <span
+                  className="inline-flex shrink-0 items-center rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
+                  style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
+                >
+                  微信
+                </span>
+              ) : null}
               {unread ? <span className="inline-block h-1.5 w-1.5 rounded-full bg-text-muted" /> : null}
             </span>
             <span className="mt-0.5 truncate w-full text-[9px] text-text-faint">
@@ -476,6 +516,24 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           avatarName: item.avatar_name || null,
         });
         setFeishuBoundSessionId(target);
+      }
+      return;
+    }
+    if (action === "toggle_wechat_binding") {
+      const currentBound = (wechatBoundSessionId || "").trim();
+      const target = (item.session_id || "").trim();
+      if (!target) return;
+      if (currentBound === target) {
+        await window.agenticxDesktop.saveWechatDesktopBinding({ sessionId: null });
+        setWechatBoundSessionId(null);
+      } else {
+        const aid = (item.avatar_id || "").trim();
+        await window.agenticxDesktop.saveWechatDesktopBinding({
+          sessionId: target,
+          avatarId: aid.startsWith("group:") ? null : (aid || null),
+          avatarName: item.avatar_name || null,
+        });
+        setWechatBoundSessionId(target);
       }
       return;
     }
@@ -652,6 +710,20 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 {renderSessionItem(feishuSession)}
               </div>
             ) : null}
+            {wechatSession ? (
+              <div className="mb-2">
+                <div className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-[#25D366]">
+                  <span>微信会话</span>
+                  <span
+                    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
+                    style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
+                  >
+                    唯一
+                  </span>
+                </div>
+                {renderSessionItem(wechatSession)}
+              </div>
+            ) : null}
             {renderGroup("Pinned", groupedSessions.pinned)}
             {renderGroup("Today", groupedSessions.today)}
             {renderGroup("Previous 7 days", groupedSessions.previous7Days)}
@@ -676,6 +748,12 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             onClick={() => void runContextAction("toggle_feishu_binding")}
           >
             {feishuBoundSessionId === contextMenu.item.session_id ? "取消绑定飞书会话" : "绑定为飞书会话"}
+          </button>
+          <button
+            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+            onClick={() => void runContextAction("toggle_wechat_binding")}
+          >
+            {wechatBoundSessionId === contextMenu.item.session_id ? "取消绑定微信会话" : "绑定为微信会话"}
           </button>
           <button
             className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"

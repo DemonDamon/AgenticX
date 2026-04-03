@@ -140,7 +140,27 @@ def create_studio_app() -> FastAPI:
                 app.state.gateway_client_task = gw_task
         except Exception as exc:
             logger.warning("Gateway client not started: %s", exc)
+
+        # WeChat iLink adapter (always attempt startup; sidecar may come up later)
+        wechat_adapter = None
+        try:
+            from agenticx.gateway.adapters.wechat_ilink import WeChatILinkAdapter
+            wechat_adapter = WeChatILinkAdapter()
+            await wechat_adapter.start()
+            app.state.wechat_ilink_adapter = wechat_adapter
+            logger.info("WeChatILinkAdapter started in studio lifespan")
+        except Exception as exc:
+            logger.debug("WeChat adapter not started: %s", exc)
+
         yield
+
+        if wechat_adapter is not None:
+            try:
+                await wechat_adapter.stop()
+                logger.info("WeChatILinkAdapter stopped")
+            except Exception as exc:
+                logger.debug("WeChat adapter stop error: %s", exc)
+
         if gw_task is not None and not gw_task.done():
             gc = getattr(app.state, "gateway_client", None)
             if gc is not None:

@@ -4525,6 +4525,16 @@ export function SettingsPanel({
                                   setWechatBindSidecarPort(0);
                                   setWechatBindMsg("");
                                   ws.close();
+                                  void (async () => {
+                                    try {
+                                      const createRes = await window.agenticxDesktop.createSession({ name: "微信会话" });
+                                      if (createRes.ok && createRes.session_id) {
+                                        await window.agenticxDesktop.saveWechatDesktopBinding({
+                                          sessionId: createRes.session_id,
+                                        });
+                                      }
+                                    } catch { /* noop */ }
+                                  })();
                                 }
                                 if (msg.status === "timeout") {
                                   setWechatStatus("idle");
@@ -4606,6 +4616,9 @@ export function SettingsPanel({
                           try {
                             const { port, running } = await window.agenticxDesktop.wechatSidecarPort();
                             if (running && port) await fetch(`http://127.0.0.1:${port}/unbind`, { method: "POST" });
+                          } catch { /* noop */ }
+                          try {
+                            await window.agenticxDesktop.saveWechatDesktopBinding({ sessionId: null });
                           } catch { /* noop */ }
                           setWechatStatus("idle");
                           setWechatBotId("");

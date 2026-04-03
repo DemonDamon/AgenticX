@@ -122,6 +122,29 @@ const META_SOUL_PATH = path.join(WORKSPACE_DIR, "SOUL.md");
 const AVATARS_DIR = path.join(CONFIG_DIR, "avatars");
 const FEISHU_BINDING_PATH = path.join(CONFIG_DIR, "feishu_binding.json");
 const FEISHU_DESKTOP_BINDING_KEY = "_desktop";
+const WECHAT_BINDING_PATH = path.join(CONFIG_DIR, "wechat_binding.json");
+const WECHAT_DESKTOP_BINDING_KEY = "_desktop";
+
+function clearWechatDesktopBindingIfDeleted(sessionIds: string[]): void {
+  const deletedIds = new Set(sessionIds.map((sid) => String(sid || "").trim()).filter(Boolean));
+  if (deletedIds.size === 0) return;
+  let data: Record<string, unknown> = {};
+  try {
+    const raw = fs.readFileSync(WECHAT_BINDING_PATH, "utf-8");
+    data = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  const desktopBinding = data[WECHAT_DESKTOP_BINDING_KEY];
+  if (!desktopBinding || typeof desktopBinding !== "object" || Array.isArray(desktopBinding)) {
+    return;
+  }
+  const boundSid = String((desktopBinding as { session_id?: unknown }).session_id ?? "").trim();
+  if (!boundSid || !deletedIds.has(boundSid)) return;
+  delete data[WECHAT_DESKTOP_BINDING_KEY];
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(WECHAT_BINDING_PATH, JSON.stringify(data, null, 2), "utf-8");
+}
 const EMAIL_CONFIG_KEYS = new Set([
   "enabled",
   "smtp_host",
@@ -1348,6 +1371,46 @@ function registerIpc(): void {
     return { port: wechatSidecarPort, running: !!wechatSidecarProcess && !wechatSidecarProcess.killed };
   });
 
+  ipcMain.handle("load-wechat-binding", async () => {
+    try {
+      const raw = fs.readFileSync(WECHAT_BINDING_PATH, "utf-8");
+      const data = JSON.parse(raw) as Record<string, unknown>;
+      return { ok: true, bindings: data };
+    } catch {
+      return { ok: true, bindings: {} as Record<string, unknown> };
+    }
+  });
+
+  ipcMain.handle("save-wechat-desktop-binding", async (_event, payload: {
+    sessionId: string | null;
+    avatarId?: string | null;
+    avatarName?: string | null;
+  }) => {
+    let data: Record<string, unknown> = {};
+    try {
+      const raw = fs.readFileSync(WECHAT_BINDING_PATH, "utf-8");
+      data = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      /* empty */
+    }
+    const sid = (payload.sessionId || "").trim();
+    if (!sid) {
+      delete data[WECHAT_DESKTOP_BINDING_KEY];
+    } else {
+      const aid = (payload.avatarId ?? "").toString().trim();
+      const aname = (payload.avatarName ?? "").toString().trim();
+      data[WECHAT_DESKTOP_BINDING_KEY] = {
+        session_id: sid,
+        avatar_id: aid || null,
+        avatar_name: aname || null,
+        bound_at: new Date().toISOString(),
+      };
+    }
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(WECHAT_BINDING_PATH, JSON.stringify(data, null, 2), "utf-8");
+    return { ok: true };
+  });
+
   ipcMain.handle("list-avatars", async () => {
     try {
       const resp = await fetch(`${getStudioUrl()}/api/avatars`, {
@@ -1624,7 +1687,11 @@ function registerIpc(): void {
         const body = await resp.text().catch(() => "");
         return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
       }
-      return await resp.json();
+      const result = await resp.json();
+      if (result?.ok !== false) {
+        clearWechatDesktopBindingIfDeleted([sid]);
+      }
+      return result;
     } catch (err) {
       return { ok: false, error: String(err) };
     }
@@ -1645,7 +1712,19 @@ function registerIpc(): void {
         const body = await resp.text().catch(() => "");
         return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}`, deleted: [], failed: ids };
       }
-      return await resp.json();
+      const result = (await resp.json()) as {
+        ok?: boolean;
+        deleted?: string[];
+        failed?: string[];
+      };
+      if (result?.ok !== false) {
+        const deleted =
+          Array.isArray(result?.deleted) && result.deleted.length > 0
+            ? result.deleted
+            : ids.filter((sid) => !new Set((result?.failed ?? []).map((x) => String(x || "").trim())).has(sid));
+        clearWechatDesktopBindingIfDeleted(deleted);
+      }
+      return result;
     } catch (err) {
       return { ok: false, error: String(err), deleted: [], failed: ids };
     }

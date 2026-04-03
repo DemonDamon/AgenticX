@@ -76,6 +76,7 @@ class WeChatILinkAdapter:
                 pass
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if token:
+            headers["x-agx-desktop-token"] = token
             headers["Authorization"] = f"Bearer {token}"
         return base, headers
 
@@ -147,8 +148,10 @@ class WeChatILinkAdapter:
             return
 
         text = evt.get("text", "")
-        sender = evt.get("sender", "")
-        context_token = evt.get("context_token", "")
+        sender = str(evt.get("sender", "") or "").strip()
+        session_id = str(evt.get("session_id", "") or "").strip()
+        group_id = str(evt.get("group_id", "") or "").strip()
+        context_token = str(evt.get("context_token", "") or "").strip()
         items: list[dict[str, Any]] = evt.get("items", [])
 
         media_paths: list[str] = []
@@ -177,21 +180,33 @@ class WeChatILinkAdapter:
             len(media_paths),
         )
 
+        bound_session_id = self._resolve_bound_session()
+        effective_session_id = session_id or bound_session_id
+
         try:
-            reply = await self._chat_turn(user_input, sender)
+            reply = await self._chat_turn(
+                user_input, sender, session_id=effective_session_id
+            )
         except Exception:
             logger.exception("chat_turn failed for WeChat message")
             reply = "处理消息时出错，请稍后重试。"
 
         if reply:
-            await self._send_reply(sidecar_url, reply, context_token, sender)
+            await self._send_reply(
+                sidecar_url=sidecar_url,
+                text=reply,
+                context_token=context_token,
+                sender=sender,
+                session_id=session_id,
+                group_id=group_id,
+            )
 
     async def _download_media(
         self, sidecar_url: str, eqp: str, aes_key: str, url: str
     ) -> Optional[str]:
         """Download media via sidecar and save to temp directory."""
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(), timeout=60.0) as client:
                 resp = await client.post(
                     f"{sidecar_url}/media/download",
                     json={"eqp": eqp, "aes_key": aes_key, "url": url},
@@ -218,7 +233,23 @@ class WeChatILinkAdapter:
             logger.exception("media download error")
             return None
 
-    async def _chat_turn(self, text: str, sender_name: str) -> str:
+    def _resolve_bound_session(self) -> str:
+        """Read wechat_binding.json _desktop.session_id."""
+        binding_file = _AGX_DIR / "wechat_binding.json"
+        try:
+            import json as _json
+
+            data = _json.loads(binding_file.read_text("utf-8"))
+            desk = data.get("_desktop")
+            if isinstance(desk, dict):
+                return str(desk.get("session_id") or "").strip()
+        except (FileNotFoundError, ValueError, KeyError):
+            pass
+        return ""
+
+    async def _chat_turn(
+        self, text: str, sender_name: str, *, session_id: str = ""
+    ) -> str:
         """Send message to agx serve /api/chat and collect reply."""
         studio_base, headers = self._resolve_studio()
         timeout = httpx.Timeout(600.0, connect=30.0)
@@ -226,11 +257,14 @@ class WeChatILinkAdapter:
         async with httpx.AsyncClient(
             transport=transport, timeout=timeout
         ) as client:
-            body = {
+            body: Dict[str, Any] = {
                 "user_input": text,
                 "user_display_name": sender_name or "微信用户",
             }
+            if session_id:
+                body["session_id"] = session_id
             final_text = ""
+            confirmed_request_ids: set[str] = set()
             async with client.stream(
                 "POST",
                 f"{studio_base}/api/chat",
@@ -266,6 +300,30 @@ class WeChatILinkAdapter:
                                 t = str(data.get("text") or "")
                                 if t:
                                     final_text = t
+                            elif et == "confirm_required":
+                                request_id = str(data.get("id") or data.get("request_id") or "").strip()
+                                if not request_id:
+                                    continue
+                                if request_id in confirmed_request_ids:
+                                    continue
+                                confirm_agent_id = str(data.get("agent_id") or "meta").strip() or "meta"
+                                confirm_resp = await client.post(
+                                    f"{studio_base}/api/confirm",
+                                    headers=headers,
+                                    json={
+                                        "session_id": session_id,
+                                        "request_id": request_id,
+                                        "approved": True,
+                                        "agent_id": confirm_agent_id,
+                                    },
+                                )
+                                if confirm_resp.status_code >= 400:
+                                    err_body = confirm_resp.text[:200]
+                                    raise RuntimeError(
+                                        "confirm submit failed: "
+                                        f"{confirm_resp.status_code} {err_body}"
+                                    )
+                                confirmed_request_ids.add(request_id)
                             elif et == "error":
                                 raise RuntimeError(
                                     str(data.get("text") or "chat error")
@@ -277,24 +335,154 @@ class WeChatILinkAdapter:
         sidecar_url: str,
         text: str,
         context_token: str,
-        recipient: str,
+        sender: str,
+        session_id: str,
+        group_id: str,
     ) -> None:
-        """Forward agent reply to WeChat via sidecar /send."""
+        """Forward agent reply to WeChat via sidecar /send with route fallback."""
+        recipient_candidates = self._dedup_nonempty([group_id, session_id, sender])
+        token_candidates = self._dedup_preserve(
+            [context_token.strip(), ""]
+            if context_token.strip()
+            else [""]
+        )
+
+        logger.info(
+            (
+                "WeChat send route snapshot sender=%s session_id=%s group_id=%s "
+                "ctx_token=%s recipients=%d token_modes=%d"
+            ),
+            self._mask_route_id(sender),
+            self._mask_route_id(session_id),
+            self._mask_route_id(group_id),
+            self._mask_route_id(context_token),
+            len(recipient_candidates),
+            len(token_candidates),
+        )
+
+        if not recipient_candidates:
+            logger.error("WeChat send skipped: no recipient candidates")
+            return
+
+        attempt_logs: list[str] = []
+        last_error_snippet = ""
+
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    f"{sidecar_url}/send",
-                    json={
-                        "text": text,
-                        "context_token": context_token,
-                        "recipient": recipient,
-                    },
-                )
-                if resp.status_code >= 400:
-                    logger.error(
-                        "sidecar /send error: %d %s",
-                        resp.status_code,
-                        resp.text[:200],
+            async with httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(), timeout=30.0) as client:
+                for recipient in recipient_candidates:
+                    recipient_kind = self._recipient_kind(
+                        recipient=recipient,
+                        sender=sender,
+                        session_id=session_id,
+                        group_id=group_id,
                     )
+                    for token in token_candidates:
+                        used_context = bool(token)
+                        payload = {
+                            "text": text,
+                            "context_token": token,
+                            "recipient": recipient,
+                        }
+                        combo_tag = (
+                            f"{recipient_kind}:{self._mask_route_id(recipient)}:"
+                            f"ctx={'1' if used_context else '0'}"
+                        )
+                        try:
+                            resp = await client.post(
+                                f"{sidecar_url}/send",
+                                json=payload,
+                            )
+                        except Exception as exc:
+                            err_msg = str(exc)[:120]
+                            last_error_snippet = err_msg
+                            attempt_logs.append(f"{combo_tag}=EXC({err_msg})")
+                            continue
+
+                        body_snippet = resp.text[:160]
+                        if resp.status_code >= 400:
+                            last_error_snippet = body_snippet
+                            attempt_logs.append(f"{combo_tag}=HTTP{resp.status_code}")
+                            continue
+
+                        try:
+                            data = resp.json()
+                        except ValueError:
+                            logger.info(
+                                (
+                                    "WeChat send success recipient_kind=%s "
+                                    "used_context_token=%s status=%d non_json=true"
+                                ),
+                                recipient_kind,
+                                used_context,
+                                resp.status_code,
+                            )
+                            return
+
+                        if isinstance(data, dict) and data.get("ok") is True:
+                            logger.info(
+                                (
+                                    "WeChat send success recipient_kind=%s "
+                                    "used_context_token=%s status=%d"
+                                ),
+                                recipient_kind,
+                                used_context,
+                                resp.status_code,
+                            )
+                            return
+
+                        last_error_snippet = body_snippet
+                        attempt_logs.append(
+                            f"{combo_tag}=JSON_OK_FALSE(status={resp.status_code})"
+                        )
         except Exception:
             logger.exception("Failed to send reply via sidecar")
+            return
+
+        logger.error(
+            "WeChat send failed after attempts=%s last_error=%s",
+            " | ".join(attempt_logs)[:1200],
+            last_error_snippet[:200],
+        )
+
+    @staticmethod
+    def _dedup_nonempty(values: list[str]) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            v = (value or "").strip()
+            if not v or v in seen:
+                continue
+            seen.add(v)
+            out.append(v)
+        return out
+
+    @staticmethod
+    def _dedup_preserve(values: list[str]) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            out.append(value)
+        return out
+
+    @staticmethod
+    def _mask_route_id(value: str) -> str:
+        v = (value or "").strip()
+        if not v:
+            return "none"
+        prefix = v[:6]
+        return f"set:{prefix}***"
+
+    @staticmethod
+    def _recipient_kind(
+        *, recipient: str, sender: str, session_id: str, group_id: str
+    ) -> str:
+        if recipient == group_id and group_id:
+            return "group_id"
+        if recipient == session_id and session_id:
+            return "session_id"
+        if recipient == sender and sender:
+            return "sender"
+        return "unknown"
