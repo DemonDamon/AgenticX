@@ -327,6 +327,7 @@ declare global {
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       deleteAvatar: (id: string) => Promise<{ ok: boolean; error?: string }>;
       getToolsStatus: () => Promise<{ ok: boolean; tools: ToolStatusItem[]; error?: string }>;
+      getToolsRegistry: () => Promise<{ ok: boolean; tools: Array<{ name: string; description: string; category: string; is_meta: boolean }>; error?: string }>;
       getToolsPolicy: () => Promise<{ ok: boolean; tools_enabled: Record<string, boolean>; error?: string }>;
       saveToolsPolicy: (payload: ToolsPolicy) => Promise<{ ok: boolean; tools_enabled?: Record<string, boolean>; error?: string }>;
       installTool: (payload: { requestId: string; toolId: string }) => Promise<{ ok: boolean; error?: string }>;

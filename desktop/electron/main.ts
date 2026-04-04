@@ -1515,6 +1515,21 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("get-tools-registry", async () => {
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/tools/registry`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, tools: [], error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, tools: [], error: String(err) };
+    }
+  });
+
   ipcMain.handle("get-tools-policy", async () => {
     try {
       const resp = await fetch(`${getStudioUrl()}/api/tools/policy`, {
