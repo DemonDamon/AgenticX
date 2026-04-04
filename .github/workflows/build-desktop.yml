@@ -1,7 +1,12 @@
 # Build Machi Desktop (macOS) with bundled agx-server; upload DMG artifacts only.
 # Optional secrets: CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_ID_PASSWORD, APPLE_TEAM_ID
 
-name: Build Desktop
+name: Machi Desktop Build
+
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && format('Machi Desktop Build manual {0}', github.event.inputs.arch)
+      || format('Machi Desktop Build {0}', github.ref_name) }}
 
 on:
   workflow_dispatch:
