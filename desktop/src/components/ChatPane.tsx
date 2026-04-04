@@ -1069,6 +1069,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     return t && t !== "分身" ? t : "Machi";
   }, [panes]);
   const removePane = useAppStore((s) => s.removePane);
+  const closePaneAndCleanupEmptySession = () => {
+    void (async () => {
+      const sid = String(pane.sessionId ?? "").trim();
+      const hasUser = pane.messages.some(
+        (m) => m.role === "user" && String(m.content ?? "").trim().length > 0,
+      );
+      if (sid && !hasUser && typeof window.agenticxDesktop?.deleteSession === "function") {
+        try {
+          await window.agenticxDesktop.deleteSession(sid);
+        } catch {
+          /* ignore */
+        }
+      }
+      removePane(pane.id);
+    })();
+  };
   const addPane = useAppStore((s) => s.addPane);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const togglePaneHistory = useAppStore((s) => s.togglePaneHistory);
@@ -1167,6 +1183,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [favoriteToastMsg, setFavoriteToastMsg] = useState("");
   const [feishuDesktopBound, setFeishuDesktopBound] = useState(false);
   const [hasAnyFeishuDesktopBinding, setHasAnyFeishuDesktopBinding] = useState(false);
+  const [wechatDesktopBound, setWechatDesktopBound] = useState(false);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
   useEffect(() => {
@@ -1297,15 +1314,32 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, [paneSubAgents, subAgents, pane?.avatarName]);
 
   const lastPollCountRef = useRef(0);
+  const pollSessionSidRef = useRef<string>("");
 
   useEffect(() => {
     if (!pane?.sessionId) return;
+    const sidNow = pane.sessionId;
+    if (sidNow !== pollSessionSidRef.current) {
+      pollSessionSidRef.current = sidNow;
+      lastPollCountRef.current = 0;
+    }
     let active = true;
     let timer: number | undefined;
 
     const isFeishuBoundSession = async (sid: string): Promise<boolean> => {
       try {
         const r = await window.agenticxDesktop.loadFeishuBinding();
+        if (!r.ok) return false;
+        const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
+        return Boolean(desk && desk.session_id === sid);
+      } catch {
+        return false;
+      }
+    };
+
+    const isWechatBoundSession = async (sid: string): Promise<boolean> => {
+      try {
+        const r = await window.agenticxDesktop.loadWechatBinding();
         if (!r.ok) return false;
         const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
         return Boolean(desk && desk.session_id === sid);
@@ -1362,9 +1396,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const sid = pane.sessionId;
       if (!sid) return;
       const isImSession = sid.startsWith("im-");
-      const isBound = await isFeishuBoundSession(sid);
+      const isFeishuBound = await isFeishuBoundSession(sid);
+      const isWechatBound = await isWechatBoundSession(sid);
       if (!active) return;
-      const needsExternalPoll = isImSession || isBound;
+      const needsExternalPoll = isImSession || isFeishuBound || isWechatBound;
       if (!hasDelegation && !needsExternalPoll && (pane.messages?.length ?? 0) > 0) return;
       void poll();
       if (!hasDelegation && !needsExternalPoll) return;
@@ -1376,12 +1411,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       active = false;
       if (timer != null) window.clearInterval(timer);
     };
-  }, [hasDelegation, feishuDesktopBound, pane?.sessionId, pane?.id, pane?.messages?.length, panes, setPaneMessages]);
+  }, [
+    hasDelegation,
+    feishuDesktopBound,
+    wechatDesktopBound,
+    pane?.sessionId,
+    pane?.id,
+    pane?.messages?.length,
+    panes,
+    setPaneMessages,
+  ]);
 
   useEffect(() => {
     if (isGroupPane || !pane?.sessionId) {
       setFeishuDesktopBound(false);
       setHasAnyFeishuDesktopBinding(false);
+      setWechatDesktopBound(false);
       return;
     }
     let cancelled = false;
@@ -1391,18 +1436,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (cancelled) return;
       try {
         const r = await window.agenticxDesktop.loadFeishuBinding();
-        if (cancelled || !r.ok) return;
-        const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
-        const hasDesktopBinding = Boolean(desk && typeof desk.session_id === "string" && desk.session_id.trim());
-        setHasAnyFeishuDesktopBinding(hasDesktopBinding);
-        setFeishuDesktopBound(
-          Boolean(desk && typeof desk.session_id === "string" && desk.session_id === sid)
-        );
+        if (cancelled) return;
+        if (r.ok) {
+          const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
+          const hasDesktopBinding = Boolean(desk && typeof desk.session_id === "string" && desk.session_id.trim());
+          setHasAnyFeishuDesktopBinding(hasDesktopBinding);
+          setFeishuDesktopBound(
+            Boolean(desk && typeof desk.session_id === "string" && desk.session_id === sid)
+          );
+        } else {
+          setFeishuDesktopBound(false);
+          setHasAnyFeishuDesktopBinding(false);
+        }
       } catch {
         if (!cancelled) {
           setFeishuDesktopBound(false);
           setHasAnyFeishuDesktopBinding(false);
         }
+      }
+      try {
+        const rw = await window.agenticxDesktop.loadWechatBinding();
+        if (cancelled) return;
+        if (rw.ok) {
+          const deskW = rw.bindings["_desktop"] as { session_id?: string } | undefined;
+          setWechatDesktopBound(
+            Boolean(deskW && typeof deskW.session_id === "string" && deskW.session_id === sid)
+          );
+        } else if (!cancelled) {
+          setWechatDesktopBound(false);
+        }
+      } catch {
+        if (!cancelled) setWechatDesktopBound(false);
       }
     };
 
@@ -3333,7 +3397,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             </button>
             <button
               className="rounded px-2 py-0.5 text-[11px] text-text-faint transition hover:bg-surface-hover hover:text-status-error"
-              onClick={() => removePane(pane.id)}
+              onClick={closePaneAndCleanupEmptySession}
               title="关闭窗格"
             >
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">

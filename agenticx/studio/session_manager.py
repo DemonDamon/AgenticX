@@ -21,6 +21,22 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 
 _log = logging.getLogger(__name__)
 
+# Titles that should be replaced by the first real user message (case-insensitive ASCII).
+_PLACEHOLDER_SESSION_TITLE_CF: frozenset[str] = frozenset(
+    x.casefold()
+    for x in (
+        "微信会话",
+        "微信对话",
+        "微信聊天",
+        "飞书会话",
+        "飞书对话",
+        "新对话",
+        "新会话",
+        "new chat",
+        "new conversation",
+    )
+)
+
 from agenticx.cli.studio import StudioSession
 from agenticx.memory.session_store import SessionStore
 from agenticx.runtime import AsyncConfirmGate
@@ -208,6 +224,9 @@ class SessionManager:
                 continue
             if avatar_id and getattr(managed, "avatar_id", None) != avatar_id:
                 continue
+            hist = getattr(managed.studio_session, "chat_history", None) or []
+            if len(hist) == 0:
+                continue
             seen_session_ids.add(sid)
             result.append({
                 "session_id": sid,
@@ -248,11 +267,26 @@ class SessionManager:
         self._persist_session_state(session_id, managed.studio_session)
         return True
 
+    @staticmethod
+    def session_title_needs_auto_fill(name: Optional[str]) -> bool:
+        """True if missing or a generic IM/new-chat placeholder."""
+        raw = str(name or "").strip()
+        if not raw:
+            return True
+        key = raw.casefold()
+        if key in _PLACEHOLDER_SESSION_TITLE_CF:
+            return True
+        if key.startswith("新会话") or key.startswith("新对话"):
+            return True
+        if key.startswith("new session") or key.startswith("new chat"):
+            return True
+        return False
+
     def auto_title_session(self, session_id: str, first_user_message: str) -> bool:
         managed = self._sessions.get(session_id)
         if managed is None:
             return False
-        if managed.session_name:
+        if not self.session_title_needs_auto_fill(managed.session_name):
             return False
         title = self._build_auto_title(first_user_message)
         if not title:
@@ -522,6 +556,7 @@ class SessionManager:
             )
 
     def _persist_session_state(self, session_id: str, session: StudioSession) -> None:
+        self._ensure_session_title_from_chat_history(session_id, session)
         try:
             todos = session.todo_manager.to_payload()
             scratchpad = dict(getattr(session, "scratchpad", {}) or {})
@@ -695,7 +730,31 @@ class SessionManager:
         compact = " ".join(str(message or "").split())
         if not compact:
             return ""
-        return compact[:30]
+        return compact[:48]
+
+    @staticmethod
+    def _first_user_text_from_chat_history(chat_history: list) -> str:
+        for item in chat_history or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("role", "")).strip() != "user":
+                continue
+            content = str(item.get("content", "")).strip()
+            if content:
+                return content
+        return ""
+
+    def _ensure_session_title_from_chat_history(self, session_id: str, session: StudioSession) -> None:
+        managed = self._sessions.get(session_id)
+        if managed is None:
+            return
+        if not self.session_title_needs_auto_fill(managed.session_name):
+            return
+        first = self._first_user_text_from_chat_history(getattr(session, "chat_history", None) or [])
+        if not first:
+            return
+        managed.session_name = self._build_auto_title(first)
+        managed.updated_at = time.time()
 
     def _build_fork_name(self, base_name: Optional[str]) -> str:
         text = str(base_name or "").strip()

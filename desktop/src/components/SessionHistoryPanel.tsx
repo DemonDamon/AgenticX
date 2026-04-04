@@ -58,6 +58,39 @@ function sortSessionRows(rows: SessionRow[]): SessionRow[] {
   });
 }
 
+const PLACEHOLDER_SESSION_TITLES = new Set(
+  [
+    "微信会话",
+    "微信对话",
+    "微信聊天",
+    "飞书会话",
+    "飞书对话",
+    "新对话",
+    "新会话",
+    "new chat",
+    "new conversation",
+  ].map((s) => s.toLowerCase()),
+);
+
+function isPlaceholderSessionTitle(name: string): boolean {
+  const t = name.trim();
+  if (!t) return true;
+  const lower = t.toLowerCase();
+  if (PLACEHOLDER_SESSION_TITLES.has(lower)) return true;
+  if (t.startsWith("新会话") || t.startsWith("新对话")) return true;
+  if (lower.startsWith("new session") || lower.startsWith("new chat")) return true;
+  return false;
+}
+
+/** Title for history rows: real name, or short id — never generic 「新会话」. */
+function sessionHistoryLabel(item: SessionRow): string {
+  const raw = (item.session_name || "").trim();
+  if (raw && !isPlaceholderSessionTitle(raw)) return raw;
+  const compact = item.session_id.replace(/-/g, "");
+  const hint = compact.slice(0, 8);
+  return hint ? `·${hint}` : item.session_id.slice(0, 6);
+}
+
 function normalizeSessionRows(input: unknown): SessionRow[] {
   if (!Array.isArray(input)) return [];
   const rows: SessionRow[] = [];
@@ -228,11 +261,27 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   if (!pane.historyOpen) return null;
 
   const feishuSession = feishuMarkedSessionId
-    ? sessions.find((item) => item.session_id === feishuMarkedSessionId) ?? null
+    ? sessions.find((item) => item.session_id === feishuMarkedSessionId) ??
+      ({
+        session_id: feishuMarkedSessionId,
+        avatar_id: pane.avatarId ?? null,
+        avatar_name: pane.avatarName ?? null,
+        session_name: null,
+        updated_at: Date.now() / 1000,
+        created_at: Date.now() / 1000,
+      } satisfies SessionRow)
     : null;
 
   const wechatSession = wechatMarkedSessionId
-    ? sessions.find((item) => item.session_id === wechatMarkedSessionId) ?? null
+    ? sessions.find((item) => item.session_id === wechatMarkedSessionId) ??
+      ({
+        session_id: wechatMarkedSessionId,
+        avatar_id: pane.avatarId ?? null,
+        avatar_name: pane.avatarName ?? null,
+        session_name: null,
+        updated_at: Date.now() / 1000,
+        created_at: Date.now() / 1000,
+      } satisfies SessionRow)
     : null;
 
   const switchSession = async (sessionId: string, targetPaneId = pane.id) => {
@@ -410,7 +459,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const renderSessionItem = (item: SessionRow) => {
     if (!item || !item.session_id) return null;
     const active = item.session_id === pane.sessionId;
-    const label = (item.session_name || "").trim() || `新会话 ${item.session_id.slice(0, 6)}`;
+    const label = sessionHistoryLabel(item);
     const unread = unreadSessionIds.includes(item.session_id);
     const createdAt = getSessionCreatedTimestamp(item) || Date.now() / 1000;
     const feishuMarked = feishuMarkedSessionId === item.session_id;
@@ -538,7 +587,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       return;
     }
     if (action === "rename") {
-      const label = (item.session_name || "").trim() || `新会话 ${item.session_id.slice(0, 6)}`;
+      const label = sessionHistoryLabel(item);
       setEditingId(item.session_id);
       setEditingName(label);
       return;
@@ -699,7 +748,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             {feishuSession ? (
               <div className="mb-2">
                 <div className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-[#3370FF]">
-                  <span>飞书会话</span>
+                  <span>飞书绑定</span>
                   <span
                     className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
                     style={{ backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" }}
@@ -713,7 +762,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             {wechatSession ? (
               <div className="mb-2">
                 <div className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-[#25D366]">
-                  <span>微信会话</span>
+                  <span>微信绑定</span>
                   <span
                     className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
                     style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
