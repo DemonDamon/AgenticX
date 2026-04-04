@@ -48,7 +48,7 @@ from agenticx.runtime import AgentRuntime
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.loop_controller import LoopController
-from agenticx.cli.agent_tools import STUDIO_TOOLS
+from agenticx.cli.agent_tools import META_TOOL_NAMES, STUDIO_TOOLS
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS, META_LEADER_LABEL_SCRATCH_KEY
 from agenticx.runtime.prompts.meta_agent import build_meta_agent_system_prompt
 from agenticx.runtime.group_router import (
@@ -1808,6 +1808,59 @@ def create_studio_app() -> FastAPI:
     ) -> dict:
         _check_token(x_agx_desktop_token)
         return {"ok": True, "tools": _all_tools_status()}
+
+    @app.get("/api/tools/registry")
+    async def get_tools_registry(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Return all STUDIO_TOOLS + META tool definitions for the Desktop tools tab."""
+        _check_token(x_agx_desktop_token)
+
+        _TOOL_CATEGORIES: dict[str, str] = {
+            "bash_exec": "system",
+            "file_read": "filesystem", "file_write": "filesystem", "file_edit": "filesystem", "list_files": "filesystem",
+            "codegen": "code",
+            "lsp_goto_definition": "code", "lsp_find_references": "code", "lsp_hover": "code", "lsp_diagnostics": "code",
+            "mcp_connect": "mcp", "mcp_call": "mcp", "mcp_import": "mcp",
+            "skill_use": "skill", "skill_list": "skill", "skill_manage": "skill",
+            "todo_write": "agent", "scratchpad_write": "agent", "scratchpad_read": "agent",
+            "memory_append": "memory", "memory_search": "memory", "session_search": "memory",
+            "liteparse": "document",
+            "schedule_task": "scheduling", "list_scheduled_tasks": "scheduling", "cancel_scheduled_task": "scheduling",
+            "spawn_subagent": "meta", "cancel_subagent": "meta", "retry_subagent": "meta",
+            "query_subagent_status": "meta", "check_resources": "meta", "recommend_subagent_model": "meta",
+            "list_skills": "meta", "list_mcps": "meta",
+            "send_bug_report_email": "meta", "update_email_config": "meta",
+        }
+
+        items: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for tool in STUDIO_TOOLS:
+            fn = tool.get("function", {})
+            name = fn.get("name", "")
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            items.append({
+                "name": name,
+                "description": fn.get("description", ""),
+                "category": _TOOL_CATEGORIES.get(name, "other"),
+                "is_meta": name in META_TOOL_NAMES,
+            })
+        from agenticx.runtime.meta_tools import META_AGENT_TOOLS
+        for tool in META_AGENT_TOOLS:
+            fn = tool.get("function", {})
+            name = fn.get("name", "")
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            items.append({
+                "name": name,
+                "description": fn.get("description", ""),
+                "category": _TOOL_CATEGORIES.get(name, "meta"),
+                "is_meta": True,
+            })
+        return {"ok": True, "tools": items}
 
     @app.get("/api/tools/policy")
     async def get_tools_policy(
