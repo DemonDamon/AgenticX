@@ -94,6 +94,12 @@ body {
   padding: 0.1rem 0;
 }
 
+/* Session-search keyword highlight inside message history. */
+.agx-keyword-highlight {
+  background: color-mix(in srgb, #facc15 45%, transparent);
+  color: inherit;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

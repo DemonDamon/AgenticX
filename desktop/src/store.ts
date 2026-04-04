@@ -89,6 +89,8 @@ export type ChatPane = {
   activeTerminalTabId: string | null;
   /** Cumulative token usage for the current session (resets on new session). */
   sessionTokens: { input: number; output: number };
+  /** Temporary highlight terms from session-history search navigation. */
+  historySearchTerms: string[];
 };
 
 export type Message = {
@@ -283,6 +285,7 @@ type AppState = {
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string) => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
+  setPaneHistorySearchTerms: (paneId: string, terms: string[]) => void;
   togglePaneHistory: (paneId: string) => void;
   /** @deprecated Prefer cycleSidePanel / openSidePanel */
   toggleTaskspacePanel: (paneId: string) => void;
@@ -364,6 +367,7 @@ function makeDefaultPane(): ChatPane {
     terminalTabs: [],
     activeTerminalTabId: null,
     sessionTokens: { input: 0, output: 0 },
+    historySearchTerms: [],
   };
 }
 
@@ -665,6 +669,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           terminalTabs: [],
           activeTerminalTabId: null,
           sessionTokens: { input: 0, output: 0 },
+          historySearchTerms: [],
         },
       ],
       activePaneId: paneId,
@@ -767,6 +772,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPaneMessages: (paneId, messages) =>
     set((state) => ({
       panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, messages } : pane)),
+    })),
+  setPaneHistorySearchTerms: (paneId, terms) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId
+          ? {
+              ...pane,
+              historySearchTerms: Array.from(
+                new Set(
+                  (terms ?? [])
+                    .map((t) => String(t ?? "").trim())
+                    .filter((t) => t.length > 0)
+                )
+              ),
+            }
+          : pane
+      ),
     })),
   togglePaneHistory: (paneId) =>
     set((state) => ({

@@ -17,6 +17,7 @@ import {
 
 type Props = {
   message: Message;
+  highlightTerms?: string[];
   badge?: ReactNode;
   assistantName?: string;
   assistantAvatarUrl?: string;
@@ -31,6 +32,89 @@ type Props = {
   selectable?: boolean;
   selected?: boolean;
 };
+
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeHighlightTerms(terms?: string[]): string[] {
+  if (!terms || terms.length === 0) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of terms) {
+    const t = String(raw || "").trim();
+    if (t.length < 2) continue;
+    const key = t.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  out.sort((a, b) => b.length - a.length);
+  return out;
+}
+
+function unwrapHighlightMarks(root: HTMLElement): void {
+  const marks = Array.from(root.querySelectorAll("mark[data-agx-highlight='1']"));
+  for (const mark of marks) {
+    const text = mark.textContent || "";
+    mark.replaceWith(document.createTextNode(text));
+  }
+  root.normalize();
+}
+
+function applyKeywordHighlight(root: HTMLElement, terms: string[]): void {
+  const normalized = normalizeHighlightTerms(terms);
+  if (normalized.length === 0) return;
+  const pattern = normalized.map((t) => escapeRegExp(t)).join("|");
+  if (!pattern) return;
+  const regex = new RegExp(`(${pattern})`, "giu");
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  let current = walker.nextNode();
+  while (current) {
+    const textNode = current as Text;
+    const parentEl = textNode.parentElement;
+    const text = textNode.nodeValue ?? "";
+    if (!parentEl || !text.trim()) {
+      current = walker.nextNode();
+      continue;
+    }
+    const tag = parentEl.tagName;
+    if (tag === "MARK" || tag === "SCRIPT" || tag === "STYLE") {
+      current = walker.nextNode();
+      continue;
+    }
+    textNodes.push(textNode);
+    current = walker.nextNode();
+  }
+  for (const textNode of textNodes) {
+    const original = textNode.nodeValue ?? "";
+    regex.lastIndex = 0;
+    if (!regex.test(original)) continue;
+    regex.lastIndex = 0;
+    const frag = document.createDocumentFragment();
+    let cursor = 0;
+    let match: RegExpExecArray | null = regex.exec(original);
+    while (match) {
+      const idx = match.index ?? 0;
+      const word = match[0] ?? "";
+      if (idx > cursor) frag.appendChild(document.createTextNode(original.slice(cursor, idx)));
+      if (word) {
+        const mark = document.createElement("mark");
+        mark.setAttribute("data-agx-highlight", "1");
+        mark.className = "agx-keyword-highlight rounded px-[1px]";
+        mark.textContent = word;
+        frag.appendChild(mark);
+      }
+      cursor = idx + word.length;
+      match = regex.exec(original);
+    }
+    if (cursor < original.length) {
+      frag.appendChild(document.createTextNode(original.slice(cursor)));
+    }
+    textNode.replaceWith(frag);
+  }
+}
 
 function renderUserTextWithReferenceTokens(
   text: string,
@@ -123,6 +207,7 @@ function Avatar({ label, imageUrl }: { label: string; imageUrl?: string }) {
 
 export function ImBubble({
   message,
+  highlightTerms,
   badge,
   assistantName,
   assistantAvatarUrl,
@@ -189,6 +274,13 @@ export function ImBubble({
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
   }, [menuOpen]);
+
+  useEffect(() => {
+    const root = msgContentRef.current;
+    if (!root) return;
+    unwrapHighlightMarks(root);
+    applyKeywordHighlight(root, highlightTerms);
+  }, [highlightTerms, message.content, message.quotedContent, message.forwardedHistory, isStreaming, isGroupTyping, hasBody]);
 
   const openContextMenu = (ev: ReactMouseEvent) => {
     ev.preventDefault();

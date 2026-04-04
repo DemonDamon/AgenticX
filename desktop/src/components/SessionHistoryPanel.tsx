@@ -150,6 +150,17 @@ function sessionMatchesQuery(
   });
 }
 
+function buildHighlightTermsFromQuery(query: string): string[] {
+  const raw = String(query || "").trim();
+  if (!raw) return [];
+  const terms = new Set<string>([raw]);
+  for (const token of raw.split(/\s+/)) {
+    const t = token.trim();
+    if (t.length >= 2) terms.add(t);
+  }
+  return Array.from(terms);
+}
+
 function normalizeSessionRows(input: unknown): SessionRow[] {
   if (!Array.isArray(input)) return [];
   const rows: SessionRow[] = [];
@@ -180,6 +191,7 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
 export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onClose, tintColor }: Props) {
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
+  const setPaneHistorySearchTerms = useAppStore((s) => s.setPaneHistorySearchTerms);
   const addPane = useAppStore((s) => s.addPane);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [feishuBoundSessionId, setFeishuBoundSessionId] = useState<string | null>(null);
@@ -411,8 +423,9 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       } satisfies SessionRow)
     : null;
 
-  const switchSession = async (sessionId: string, targetPaneId = pane.id) => {
+  const switchSession = async (sessionId: string, targetPaneId = pane.id, highlightTerms: string[] = []) => {
     setPaneSessionId(targetPaneId, sessionId);
+    setPaneHistorySearchTerms(targetPaneId, highlightTerms);
     setUnreadSessionIds((prev) => prev.filter((id) => id !== sessionId));
     try {
       const result = await window.agenticxDesktop.loadSessionMessages(sessionId);
@@ -616,7 +629,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 toggleSelectSession(item.session_id);
                 return;
               }
-              void switchSession(item.session_id);
+              const terms = buildHighlightTermsFromQuery(sessionSearchTrim);
+              void switchSession(item.session_id, pane.id, terms);
             }}
             onDoubleClick={() => {
               if (selectMode) return;
@@ -740,7 +754,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     }
     if (action === "open_new_tab") {
       const paneId = addPane(item.avatar_id ?? null, item.avatar_name || "Machi", item.session_id);
-      await switchSession(item.session_id, paneId);
+      const terms = buildHighlightTermsFromQuery(sessionSearchTrim);
+      await switchSession(item.session_id, paneId, terms);
       return;
     }
     if (action === "mark_unread") {

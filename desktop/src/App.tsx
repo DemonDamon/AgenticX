@@ -461,6 +461,7 @@ export function App() {
                 ...pane,
                 messages: [],
                 sessionTokens: pane.sessionTokens ?? { input: 0, output: 0 },
+                historySearchTerms: [],
                 modelProvider: pane.modelProvider ?? "",
                 modelName: pane.modelName ?? "",
                 membersPanelOpen: pane.membersPanelOpen ?? false,

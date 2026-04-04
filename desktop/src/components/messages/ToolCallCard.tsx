@@ -1,6 +1,6 @@
 import type { Message } from "../../store";
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Wrench, ChevronDown, ChevronRight } from "lucide-react";
 
 type Props = {
@@ -8,6 +8,8 @@ type Props = {
   action?: ReactNode;
   /** 有需要用户操作的内联确认时强制展开 */
   forceExpand?: boolean;
+  /** 历史搜索关键词高亮（命中时自动展开） */
+  highlightTerms?: string[];
   /** 多选模式 */
   selectable?: boolean;
   selected?: boolean;
@@ -26,17 +28,67 @@ function extractToolSummary(content: string): string {
   return content.slice(0, 60).replace(/\n/g, " ").trim();
 }
 
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeHighlightTerms(terms?: string[]): string[] {
+  if (!terms || terms.length === 0) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of terms) {
+    const t = String(raw || "").trim();
+    if (t.length < 2) continue;
+    const key = t.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  out.sort((a, b) => b.length - a.length);
+  return out;
+}
+
+function renderHighlightedText(content: string, terms: string[]): ReactNode {
+  if (!content) return null;
+  if (terms.length === 0) return content;
+  const regex = new RegExp(`(${terms.map((t) => escapeRegExp(t)).join("|")})`, "giu");
+  const parts = content.split(regex);
+  return parts.map((part, idx) => {
+    if (!part) return null;
+    regex.lastIndex = 0;
+    const matched = regex.test(part);
+    if (!matched) return <span key={`tool-part-${idx}`}>{part}</span>;
+    return (
+      <mark key={`tool-part-${idx}`} data-agx-highlight="1" className="agx-keyword-highlight rounded px-[1px]">
+        {part}
+      </mark>
+    );
+  });
+}
+
 export function ToolCallCard({
   message,
   action,
   forceExpand = false,
+  highlightTerms,
   selectable,
   selected,
   onToggleSelectMessage,
 }: Props) {
-  const [expanded, setExpanded] = useState(forceExpand);
+  const normalizedTerms = useMemo(() => normalizeHighlightTerms(highlightTerms), [highlightTerms]);
+  const matchedByHighlight = useMemo(() => {
+    if (!message.content || normalizedTerms.length === 0) return false;
+    const hay = message.content.toLocaleLowerCase();
+    return normalizedTerms.some((t) => hay.includes(t.toLocaleLowerCase()));
+  }, [message.content, normalizedTerms]);
+  const shouldForceExpand = forceExpand || matchedByHighlight;
+  const [expanded, setExpanded] = useState(shouldForceExpand);
   const summary = extractToolSummary(message.content);
   const hasDetail = message.content.length > 0;
+
+  useEffect(() => {
+    if (shouldForceExpand) setExpanded(true);
+  }, [shouldForceExpand]);
 
   return (
     <div className="flex min-w-0 items-start gap-2">
@@ -88,13 +140,15 @@ export function ToolCallCard({
               {/* 展开内容 */}
               {expanded && (
                 <div className="space-y-1 border-t border-border px-3 pb-2 pt-1.5">
-                  <span className="break-all whitespace-pre-wrap">{message.content}</span>
+                  <span className="break-all whitespace-pre-wrap">
+                    {renderHighlightedText(message.content, normalizedTerms)}
+                  </span>
                   {action}
                 </div>
               )}
 
               {/* forceExpand 时 action 始终在外部显示（如确认按钮） */}
-              {!expanded && forceExpand && action && (
+              {!expanded && shouldForceExpand && action && (
                 <div className="border-t border-border px-3 pb-2 pt-1.5">
                   {action}
                 </div>

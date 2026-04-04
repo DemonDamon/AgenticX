@@ -10,6 +10,7 @@ import { TodoUpdateCard } from "../TodoUpdateCard";
 
 type Props = {
   message: Message;
+  highlightTerms?: string[];
   assistantBadge?: ReactNode;
   onRevealPath?: (path: string) => void;
   assistantName?: string;
@@ -39,6 +40,7 @@ function isTodoUpdateToolMessage(content: string): boolean {
 
 export function MessageRenderer({
   message,
+  highlightTerms,
   assistantBadge,
   onRevealPath,
   assistantName,
@@ -69,6 +71,7 @@ export function MessageRenderer({
     return (
       <ImBubble
         message={message}
+        highlightTerms={highlightTerms}
         badge={assistantBadge}
         assistantName={mergedAssistName}
         assistantAvatarUrl={message.avatarUrl || assistantAvatarUrl}
@@ -117,6 +120,7 @@ export function MessageRenderer({
     return (
       <ToolCallCard
         message={message}
+        highlightTerms={highlightTerms}
         forceExpand={!!inlineConfirm}
         selectable={selectable}
         selected={selected}
