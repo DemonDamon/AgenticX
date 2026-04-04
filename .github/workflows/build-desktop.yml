@@ -3,10 +3,6 @@
 
 name: Build Desktop
 
-# GitHub Actions JS actions move to Node 24 (see 2025-09-19 changelog); opt in early to avoid Node 20 deprecation noise.
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 on:
   workflow_dispatch:
     inputs:
@@ -36,9 +32,11 @@ jobs:
           - os: macos-15-intel
             arch: x64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -46,11 +44,12 @@ jobs:
       - name: Install setuptools for node-gyp
         run: python3 -m pip install --upgrade pip setuptools
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
+          package-manager-cache: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.22"
           cache-dependency-path: packaging/wechat-sidecar/go.sum
@@ -92,7 +91,7 @@ jobs:
         run: npx electron-builder --mac --${{ matrix.arch }} --publish never
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: machi-${{ matrix.arch }}
           path: desktop/release/*-${{ matrix.arch }}.dmg
@@ -103,20 +102,23 @@ jobs:
     env:
       ARCH: ${{ github.event.inputs.arch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install setuptools for node-gyp
         run: python3 -m pip install --upgrade pip setuptools
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
+          package-manager-cache: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.22"
           cache-dependency-path: packaging/wechat-sidecar/go.sum
@@ -169,7 +171,7 @@ jobs:
         run: npx electron-builder --mac --${{ env.ARCH }} --publish never
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: machi-${{ env.ARCH }}
           path: desktop/release/*-${{ env.ARCH }}.dmg
