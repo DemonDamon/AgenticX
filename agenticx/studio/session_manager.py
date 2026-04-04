@@ -38,7 +38,7 @@ _PLACEHOLDER_SESSION_TITLE_CF: frozenset[str] = frozenset(
 )
 
 from agenticx.cli.studio import StudioSession
-from agenticx.memory.session_store import SessionStore
+from agenticx.memory.session_store import SessionStore, session_fts_enabled
 from agenticx.runtime import AsyncConfirmGate
 from agenticx.runtime.team_manager import AgentTeamManager, SubAgentContext
 from agenticx.utils.atomic_writer import atomic_write_json
@@ -256,6 +256,88 @@ class SessionManager:
             reverse=True,
         )
         return result
+
+    @staticmethod
+    def _snippet_around_query(content: str, query: str, max_len: int = 140) -> str:
+        c = str(content or "")
+        q = (query or "").strip()
+        if not c:
+            return ""
+        if not q:
+            return (c[:max_len] + "…") if len(c) > max_len else c
+        try:
+            lower_c = c.casefold()
+            lower_q = q.casefold()
+        except Exception:
+            lower_c = c.lower()
+            lower_q = q.lower()
+        idx = lower_c.find(lower_q)
+        if idx < 0:
+            return (c[:max_len] + "…") if len(c) > max_len else c
+        start = max(0, idx - 36)
+        end = min(len(c), idx + max_len)
+        frag = c[start:end]
+        if start > 0:
+            frag = "…" + frag
+        if end < len(c):
+            frag = frag + "…"
+        return frag
+
+    def search_sessions_by_message_text(
+        self,
+        query: str,
+        *,
+        avatar_id: Optional[str] = None,
+        limit_sessions: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return session_id + snippet for sessions whose messages match query (FTS, then LIKE)."""
+        q = str(query or "").strip()
+        if not q:
+            return []
+        rows = self.list_sessions(avatar_id=avatar_id)
+        allowed = frozenset(
+            str(r["session_id"]).strip()
+            for r in rows
+            if r.get("session_id") and str(r["session_id"]).strip()
+        )
+        if not allowed:
+            return []
+        lim = max(1, min(int(limit_sessions), 100))
+        store = self._session_store
+        by_sid: dict[str, str] = {}
+
+        if session_fts_enabled():
+            try:
+                fts_hits = store._search_session_messages_sync(q, None, limit=400)
+            except Exception:
+                fts_hits = []
+            for hit in fts_hits:
+                sid = str(hit.get("session_id") or "").strip()
+                if sid not in allowed or sid in by_sid:
+                    continue
+                snip = str(hit.get("snippet") or "").strip()
+                if not snip:
+                    prev = str(hit.get("content_preview") or "")
+                    snip = (prev[:120] + "…") if len(prev) > 120 else prev
+                by_sid[sid] = snip or "…"
+                if len(by_sid) >= lim:
+                    return [{"session_id": k, "snippet": v} for k, v in by_sid.items()]
+
+        if len(by_sid) < lim:
+            try:
+                like_hits = store._search_session_messages_like_sync(q, allowed, limit=400)
+            except Exception:
+                like_hits = []
+            for hit in like_hits:
+                sid = str(hit.get("session_id") or "").strip()
+                if sid not in allowed or sid in by_sid:
+                    continue
+                body = str(hit.get("content") or "")
+                by_sid[sid] = self._snippet_around_query(body, q)
+                if len(by_sid) >= lim:
+                    break
+
+        return [{"session_id": k, "snippet": v} for k, v in by_sid.items()]
 
     def rename_session(self, session_id: str, name: str) -> bool:
         """Rename an existing session. Returns True if found and renamed."""

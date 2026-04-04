@@ -334,6 +334,11 @@ declare global {
       onToolInstallProgress: (cb: (payload: ToolInstallProgress) => void) => () => void;
 
       listSessions: (avatarId?: string) => Promise<{ ok: boolean; sessions: Array<{ session_id: string; avatar_id: string | null; avatar_name?: string | null; session_name: string | null; updated_at: number; created_at?: number; pinned?: boolean; archived?: boolean }> }>;
+      searchSessions: (payload: { q: string; avatarId?: string }) => Promise<{
+        ok: boolean;
+        hits?: Array<{ session_id: string; snippet: string }>;
+        error?: string;
+      }>;
       createSession: (payload: { avatar_id?: string; name?: string; inherit_from_session_id?: string }) => Promise<{ ok: boolean; session_id?: string; inherited?: boolean; error?: string }>;
       renameSession: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       deleteSession: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
