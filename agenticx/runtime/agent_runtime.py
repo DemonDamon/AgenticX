@@ -35,6 +35,25 @@ else:
 
 
 MAX_TOOL_ROUNDS = 10
+
+
+def _parallel_tools_enabled() -> bool:
+    """Check whether parallel tool dispatch is enabled.
+
+    Reads from ``AGX_PARALLEL_TOOLS`` env var or ``runtime.parallel_tools``
+    in ``config.yaml``.
+    """
+    env = os.environ.get("AGX_PARALLEL_TOOLS", "")
+    if env == "1":
+        return True
+    if env == "0":
+        return False
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+        val = ConfigManager.get_value("runtime.parallel_tools")
+        return bool(val)
+    except Exception:
+        return False
 MAX_CONTEXT_CHARS = 16_000
 STOP_MESSAGE = "已中断当前生成"
 DEFAULT_LLM_INVOKE_TIMEOUT_SECONDS = 120.0
@@ -635,6 +654,13 @@ class AgentRuntime:
         )
         self.team_manager = team_manager
         try:
+            from agenticx.runtime.hooks.legacy_event_bridge_hook import LegacyEventBridgeHook
+
+            # Bridge AgentRuntime events to global HookEvent handlers (bundled/imported hooks).
+            self.hooks.register(LegacyEventBridgeHook(), priority=100)
+        except Exception:
+            pass
+        try:
             from agenticx.runtime.hooks.memory_hook import MemoryHook
             self.hooks.register(MemoryHook(), priority=-10)
         except Exception:
@@ -698,6 +724,7 @@ class AgentRuntime:
         user_content: Any = user_message_content if user_message_content is not None else user_input
         messages.append({"role": "user", "content": user_content})
         session.agent_messages.append({"role": "user", "content": user_input})
+        await self.hooks.run_on_agent_start(session, agent_id, user_input)
         synced_session_message_count = len(session.agent_messages)
         if not _is_system_trigger:
             hist_user: dict[str, Any] = {"role": "user", "content": user_input}
@@ -1191,6 +1218,8 @@ class AgentRuntime:
             tool_call_text = f"工具调用:\n{json.dumps(tool_calls_summary, ensure_ascii=False)}"
             if not _is_system_trigger:
                 session.chat_history.append({"role": "tool", "content": tool_call_text})
+
+            _parallel_mode = _parallel_tools_enabled() and len(tool_calls) > 1
 
             for call in tool_calls:
                 if await _check_should_stop():

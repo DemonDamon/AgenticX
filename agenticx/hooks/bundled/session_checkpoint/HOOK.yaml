@@ -1,0 +1,7 @@
+name: session-checkpoint
+description: 会话开始/结束时自动写入状态快照，便于断点续开和历史追溯。
+events:
+  - agent:start
+  - agent:stop
+export: handle
+enabled: true

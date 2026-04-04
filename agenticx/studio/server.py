@@ -30,6 +30,7 @@ from fastapi.responses import StreamingResponse
 from agenticx.avatar.group_chat import GroupChatRegistry
 from agenticx.avatar.registry import AvatarRegistry
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.hooks import load_discovered_hooks
 from agenticx.cli.studio_mcp import (
     append_mcp_auto_connect_name,
     auto_connect_servers,
@@ -1128,6 +1129,11 @@ def create_studio_app() -> FastAPI:
             id(getattr(session, "_team_manager", None)),
             list(team_manager._agents.keys()) if team_manager else [],
         )
+        setattr(session, "_session_id", payload.session_id)
+        try:
+            load_discovered_hooks()
+        except Exception as exc:
+            logger.debug("Skipping discovered hooks loading for chat: %s", exc)
         try:
             runtime = AgentRuntime(
                 llm,
@@ -1351,6 +1357,11 @@ def create_studio_app() -> FastAPI:
         completion_promise = str(payload.get("completion_promise", "") or "").strip()
 
         session = managed.studio_session
+        setattr(session, "_session_id", session_id)
+        try:
+            load_discovered_hooks()
+        except Exception as exc:
+            logger.debug("Skipping discovered hooks loading for loop: %s", exc)
         llm = ProviderResolver.resolve(provider_name=session.provider_name, model=session.model_name)
         loop_tm = managed.team_manager
         try:
@@ -2910,6 +2921,192 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.warning("refresh_skills error: %s", exc)
             return {"ok": False, "count": 0, "error": str(exc)}
+
+    # --- Permissions API ---
+
+    @app.get("/api/permissions")
+    async def get_permissions(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Return permission settings from config.yaml."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            mode = ConfigManager.get_value("permissions.mode") or "default"
+            path_rules = ConfigManager.get_value("permissions.path_rules") or []
+            denied_commands = ConfigManager.get_value("permissions.denied_commands") or []
+            denied_tools = ConfigManager.get_value("permissions.denied_tools") or []
+            allowed_tools = ConfigManager.get_value("permissions.allowed_tools") or []
+            return {
+                "ok": True,
+                "mode": mode,
+                "path_rules": path_rules if isinstance(path_rules, list) else [],
+                "denied_commands": denied_commands if isinstance(denied_commands, list) else [],
+                "denied_tools": denied_tools if isinstance(denied_tools, list) else [],
+                "allowed_tools": allowed_tools if isinstance(allowed_tools, list) else [],
+            }
+        except Exception as exc:
+            logger.warning("get_permissions error: %s", exc)
+            return {"ok": False, "mode": "default", "path_rules": [], "denied_commands": [], "error": str(exc)}
+
+    @app.put("/api/permissions")
+    async def put_permissions(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Persist permission settings."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            for key in ("mode", "path_rules", "denied_commands", "denied_tools", "allowed_tools"):
+                if key in payload:
+                    ConfigManager.set_value(f"permissions.{key}", payload[key])
+
+            mode = ConfigManager.get_value("permissions.mode") or "default"
+            path_rules = ConfigManager.get_value("permissions.path_rules") or []
+            denied_commands = ConfigManager.get_value("permissions.denied_commands") or []
+            return {"ok": True, "mode": mode, "path_rules": path_rules, "denied_commands": denied_commands}
+        except Exception as exc:
+            logger.warning("put_permissions error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # --- Hooks API ---
+
+    @app.get("/api/hooks")
+    async def list_hooks(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Return curated + deduplicated imported hooks."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.hooks.loader import (
+                build_hook_search_paths,
+                deduplicate_hooks,
+                discover_declarative_hooks,
+                discover_hooks,
+                get_hook_settings_from_config,
+            )
+
+            settings = get_hook_settings_from_config()
+            disabled_set = set(
+                str(item).strip()
+                for item in (settings.get("disabled") or [])
+                if str(item).strip()
+            )
+
+            bundled_dir = Path(__file__).resolve().parent.parent / "hooks" / "bundled"
+            curated_hooks: list[dict] = []
+            if bundled_dir.exists():
+                from pathlib import Path as _P
+                for child in sorted(bundled_dir.iterdir()):
+                    yaml_path = child / "HOOK.yaml"
+                    if not yaml_path.exists():
+                        continue
+                    try:
+                        import yaml as _yaml
+                        with open(yaml_path, "r", encoding="utf-8") as _f:
+                            meta = _yaml.safe_load(_f) or {}
+                    except Exception:
+                        meta = {}
+                    hook_name = meta.get("name", child.name)
+                    curated_hooks.append({
+                        "name": hook_name,
+                        "description": meta.get("description", ""),
+                        "events": meta.get("events", []),
+                        "enabled": hook_name not in disabled_set,
+                        "source": "bundled",
+                    })
+
+            raw_configs = discover_declarative_hooks(
+                workspace_dir=None,
+                preset_settings=settings.get("preset_paths"),
+                custom_paths=settings.get("custom_paths"),
+                declarative_entries=settings.get("declarative"),
+            )
+            imported_hooks = deduplicate_hooks(raw_configs)
+            for item in imported_hooks:
+                item["enabled"] = item["name"] not in disabled_set
+
+            scan_paths = build_hook_search_paths(
+                workspace_dir=None,
+                preset_settings=settings.get("preset_paths"),
+                custom_paths=settings.get("custom_paths"),
+            )
+            scan_path_items = [
+                {
+                    "source": source,
+                    "path": str(path.expanduser()),
+                    "exists": bool(path.expanduser().exists()),
+                }
+                for source, path in scan_paths
+            ]
+            from collections import Counter
+            source_counts = dict(Counter(c.source for c in raw_configs))
+            return {
+                "ok": True,
+                "curated_hooks": curated_hooks,
+                "imported_hooks": imported_hooks,
+                "scan_summary": {
+                    "raw_total": len(raw_configs),
+                    "deduped_total": len(imported_hooks),
+                    "source_counts": source_counts,
+                },
+                "scan_paths": scan_path_items,
+            }
+        except Exception as exc:
+            logger.warning("list_hooks error: %s", exc)
+            return {
+                "ok": False,
+                "curated_hooks": [],
+                "imported_hooks": [],
+                "scan_summary": {"raw_total": 0, "deduped_total": 0, "source_counts": {}},
+                "scan_paths": [],
+                "error": str(exc),
+            }
+
+    @app.get("/api/hooks/settings")
+    async def get_hook_settings(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Return hook scan settings (preset toggles + custom paths)."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.hooks.loader import get_hook_settings_from_config
+
+            body = get_hook_settings_from_config()
+            return {"ok": True, **body}
+        except Exception as exc:
+            logger.warning("get_hook_settings error: %s", exc)
+            return {"ok": False, "preset_paths": {}, "custom_paths": [], "error": str(exc)}
+
+    @app.put("/api/hooks/settings")
+    async def put_hook_settings(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Persist hook scan settings and return updated state."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            if "preset_paths" in payload:
+                ConfigManager.set_value("hooks.preset_paths", payload["preset_paths"])
+            if "custom_paths" in payload:
+                ConfigManager.set_value("hooks.custom_paths", payload["custom_paths"])
+            if "declarative" in payload:
+                ConfigManager.set_value("hooks.declarative", payload["declarative"])
+            if "disabled" in payload:
+                ConfigManager.set_value("hooks.disabled", payload["disabled"])
+
+            from agenticx.hooks.loader import get_hook_settings_from_config
+
+            body = get_hook_settings_from_config()
+            return {"ok": True, **body}
+        except Exception as exc:
+            logger.warning("put_hook_settings error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     # --- Bundles API ---
 

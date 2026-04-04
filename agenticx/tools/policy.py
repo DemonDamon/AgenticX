@@ -205,6 +205,89 @@ class ToolPolicyStack:
             self._layers.insert(index, layer)
 
 
+# ---------------------------------------------------------------------------
+# Path-level Policy Layer
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PathPolicyLayer:
+    """fnmatch-based path permission rules.
+
+    Each rule is a ``(pattern, allow)`` tuple.  When a tool invocation
+    involves a *file_path*, the first matching rule determines the outcome.
+    Rules are evaluated in order; unmatched paths yield ``None``.
+    """
+
+    name: str = "path-rules"
+    rules: List[Dict[str, object]] = field(default_factory=list)
+
+    def evaluate(self, tool_name: str, *, file_path: Optional[str] = None, **_kw: object) -> Optional[PolicyAction]:
+        if not file_path or not self.rules:
+            return None
+        for rule in self.rules:
+            pattern = str(rule.get("pattern", ""))
+            allow = bool(rule.get("allow", True))
+            if pattern and fnmatch.fnmatch(file_path, pattern):
+                return PolicyAction.ALLOW if allow else PolicyAction.DENY
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Plan Mode Layer
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PlanModeLayer:
+    """Block all mutating tools when plan mode is active.
+
+    Tools that declare themselves read-only (via an ``is_read_only`` flag
+    or set membership) are allowed through.
+    """
+
+    name: str = "plan-mode"
+    active: bool = False
+    read_only_tools: set = field(default_factory=lambda: {
+        "file_read", "grep", "glob", "web_search", "web_fetch",
+        "liteparse", "skill_list", "skill_use", "session_search",
+        "memory_search", "mcp_list", "todo_list", "scratchpad_read",
+    })
+
+    def evaluate(self, tool_name: str, *, is_read_only: bool = False, **_kw: object) -> Optional[PolicyAction]:
+        if not self.active:
+            return None
+        if is_read_only or tool_name in self.read_only_tools:
+            return PolicyAction.ALLOW
+        return PolicyAction.DENY
+
+
+# ---------------------------------------------------------------------------
+# Command Deny Layer
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CommandDenyLayer:
+    """fnmatch-based command blacklist.
+
+    When a tool invocation carries a *command* string, it is checked against
+    the deny patterns.  Any match results in DENY.
+    """
+
+    name: str = "command-deny"
+    patterns: List[str] = field(default_factory=list)
+
+    def evaluate(self, tool_name: str, *, command: Optional[str] = None, **_kw: object) -> Optional[PolicyAction]:
+        if not command or not self.patterns:
+            return None
+        for pattern in self.patterns:
+            if fnmatch.fnmatch(command, pattern):
+                return PolicyAction.DENY
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Category Policy
+# ---------------------------------------------------------------------------
+
 @dataclass
 class CategoryPolicy:
     """Category-based tool access control.

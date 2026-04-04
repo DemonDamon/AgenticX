@@ -122,6 +122,26 @@ class ExtensionsConfig:
 
 
 @dataclass
+class PermissionsConfig:
+    """Tool execution permission settings.
+
+    Attributes:
+        mode: Permission mode — ``default`` (ask for writes), ``plan`` (read-only),
+              ``full_auto`` (allow everything).
+        path_rules: List of ``{pattern, allow}`` dicts for file-path-level rules.
+        denied_commands: fnmatch patterns for blocked shell commands.
+        denied_tools: Explicit tool deny list.
+        allowed_tools: Explicit tool allow list.
+    """
+
+    mode: str = "default"
+    path_rules: list = field(default_factory=list)
+    denied_commands: list = field(default_factory=list)
+    denied_tools: list = field(default_factory=list)
+    allowed_tools: list = field(default_factory=list)
+
+
+@dataclass
 class AgxConfig:
     """Top-level AGX config model."""
 
@@ -133,6 +153,7 @@ class AgxConfig:
     workspace_dir: str = "~/.agenticx/workspace"
     extensions: ExtensionsConfig = field(default_factory=ExtensionsConfig)
     computer_use: ComputerUseSettings = field(default_factory=ComputerUseSettings)
+    permissions: PermissionsConfig = field(default_factory=PermissionsConfig)
 
     def get_provider(self, name: Optional[str] = None) -> ProviderConfig:
         """Get provider config by name or default provider."""

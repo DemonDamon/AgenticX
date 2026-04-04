@@ -27,6 +27,9 @@ class AgentHook:
     async def after_model(self, response: Any, session: Any) -> None:
         return None
 
+    async def on_agent_start(self, session: Any, agent_id: str, user_input: str) -> None:
+        return None
+
     async def before_tool_call(
         self,
         tool_name: str,
@@ -83,6 +86,10 @@ class HookRegistry:
     async def run_after_model(self, response: Any, session: Any) -> None:
         for _, hook in self._entries:
             await hook.after_model(response, session)
+
+    async def run_on_agent_start(self, session: Any, agent_id: str, user_input: str) -> None:
+        for _, hook in self._entries:
+            await hook.on_agent_start(session, agent_id, user_input)
 
     async def run_before_tool_call(
         self,

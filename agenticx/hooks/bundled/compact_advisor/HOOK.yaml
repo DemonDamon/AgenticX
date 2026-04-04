@@ -1,0 +1,6 @@
+name: compact-advisor
+description: 按工具调用轮数统计，在阶段边界建议主动压缩上下文以保持对话质量。
+events:
+  - tool:after_call
+export: handle
+enabled: true
