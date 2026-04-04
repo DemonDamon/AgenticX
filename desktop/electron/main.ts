@@ -763,6 +763,17 @@ async function checkAgxCli(): Promise<boolean> {
 async function startStudioServe(): Promise<void> {
   apiPort = await pickFreePort();
   const desktopHome = os.homedir();
+
+  // Persist actual port & token so in-process adapters (WeChat, Feishu) and
+  // sibling processes discover the live agx serve instance, not a stale one.
+  try {
+    const portFile = path.join(os.homedir(), ".agenticx", "serve.port");
+    const tokenFile = path.join(os.homedir(), ".agenticx", "serve.token");
+    fs.mkdirSync(path.dirname(portFile), { recursive: true });
+    fs.writeFileSync(portFile, String(apiPort));
+    fs.writeFileSync(tokenFile, apiToken);
+  } catch { /* best-effort */ }
+
   const augmentedPath = buildAugmentedPath();
   const bundledPath = resolveBundledBackend();
   const cfg = loadAgxConfig();
