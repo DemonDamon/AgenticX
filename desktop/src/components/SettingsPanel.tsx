@@ -804,7 +804,7 @@ function ToolsTab() {
       ) : null}
 
       {/* ── 内建 Agent 工具 ── */}
-      <Panel title={`预授权工具 (${registry.length})`}>
+      <Panel title={`预授权工具 (${registry.length})`} collapsible defaultCollapsed>
         <div className="mb-2 flex items-center gap-2">
           <input
             type="text"
