@@ -249,9 +249,25 @@ class WeChatILinkAdapter:
             reply = await self._chat_turn(
                 user_input, sender, session_id=effective_session_id
             )
-        except Exception:
-            logger.exception("chat_turn failed for WeChat message")
-            reply = "处理消息时出错，请稍后重试。"
+        except Exception as exc:
+            recovered_session_id = ""
+            if effective_session_id and self._is_session_not_found_error(exc):
+                recovered_session_id = await self._recover_desktop_bound_session(
+                    effective_session_id
+                )
+            if recovered_session_id:
+                try:
+                    reply = await self._chat_turn(
+                        user_input, sender, session_id=recovered_session_id
+                    )
+                except Exception:
+                    logger.exception(
+                        "chat_turn retry failed for recovered WeChat session"
+                    )
+                    reply = "处理消息时出错，请稍后重试。"
+            else:
+                logger.exception("chat_turn failed for WeChat message")
+                reply = "处理消息时出错，请稍后重试。"
 
         if reply:
             await self._send_reply(
@@ -308,6 +324,62 @@ class WeChatILinkAdapter:
         except (FileNotFoundError, ValueError, KeyError):
             pass
         return ""
+
+    @staticmethod
+    def _is_session_not_found_error(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return "404" in text or "session not found" in text
+
+    async def _recover_desktop_bound_session(self, old_session_id: str) -> str:
+        """Create a new Studio session and rebind _desktop when bound session is stale."""
+        binding_file = _AGX_DIR / "wechat_binding.json"
+        try:
+            data = json.loads(binding_file.read_text("utf-8"))
+            desk = data.get("_desktop")
+            if not isinstance(desk, dict):
+                return ""
+            current = str(desk.get("session_id") or "").strip()
+            if current != old_session_id:
+                return ""
+        except (FileNotFoundError, ValueError, OSError):
+            return ""
+
+        studio_base, headers = self._resolve_studio()
+        try:
+            timeout = httpx.Timeout(30.0, connect=10.0)
+            async with httpx.AsyncClient(
+                transport=httpx.AsyncHTTPTransport(), timeout=timeout
+            ) as client:
+                resp = await client.post(
+                    f"{studio_base}/api/sessions",
+                    headers=headers,
+                    json={},
+                )
+                if resp.status_code >= 400:
+                    logger.warning(
+                        "recover session create failed: %s %s",
+                        resp.status_code,
+                        resp.text[:200],
+                    )
+                    return ""
+                payload = resp.json()
+                new_session_id = str(payload.get("session_id") or "").strip()
+                if not new_session_id:
+                    return ""
+                desk["session_id"] = new_session_id
+                binding_file.write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                logger.info(
+                    "Recovered stale WeChat bound session %s -> %s",
+                    old_session_id[:8],
+                    new_session_id[:8],
+                )
+                return new_session_id
+        except Exception:
+            logger.exception("recover desktop-bound WeChat session failed")
+            return ""
 
     async def _chat_turn(
         self, text: str, sender_name: str, *, session_id: str = ""

@@ -2434,7 +2434,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       return;
     }
 
-    const requestSessionId = pane.sessionId;
+    let requestSessionId = pane.sessionId;
     const selectedIsPaneSubagent =
       !!selectedSubAgent && paneSubAgents.some((item) => item.id === selectedSubAgent);
     const targetAgentId = selectedIsPaneSubagent ? selectedSubAgent : "meta";
@@ -2548,12 +2548,47 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           body.context_files = contextFilePayload;
         }
       }
-      const resp = await fetch(`${apiBase}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-        body: JSON.stringify(body),
-        signal: abortController.signal,
-      });
+      const sendChatRequest = (sessionId: string) => {
+        body.session_id = sessionId;
+        return fetch(`${apiBase}/api/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+          body: JSON.stringify(body),
+          signal: abortController.signal,
+        });
+      };
+
+      let resp = await sendChatRequest(requestSessionId);
+      if (resp.status === 404) {
+        // Recover from stale bound session IDs (e.g. old WeChat binding points to removed session).
+        const created = await window.agenticxDesktop.createSession({
+          avatar_id: pane.avatarId && !pane.avatarId.startsWith("group:") ? pane.avatarId : undefined,
+        });
+        if (created.ok && created.session_id) {
+          const oldSessionId = requestSessionId;
+          requestSessionId = created.session_id;
+          setPaneSessionId(pane.id, requestSessionId);
+
+          try {
+            const rw = await window.agenticxDesktop.loadWechatBinding();
+            const desk = rw.ok
+              ? (rw.bindings["_desktop"] as { session_id?: string; avatar_id?: string; avatar_name?: string } | undefined)
+              : undefined;
+            if (desk?.session_id === oldSessionId) {
+              await window.agenticxDesktop.saveWechatDesktopBinding({
+                sessionId: requestSessionId,
+                avatarId: (desk.avatar_id ?? pane.avatarId ?? null) as string | null,
+                avatarName: (desk.avatar_name ?? pane.avatarName ?? null) as string | null,
+              });
+            }
+          } catch {
+            // best-effort binding sync
+          }
+
+          addPaneMessage(pane.id, "tool", "⚠️ 会话已失效，已自动迁移到新会话并重试。", "meta");
+          resp = await sendChatRequest(requestSessionId);
+        }
+      }
       lastGroupProgressRef.current = {};
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
