@@ -941,12 +941,15 @@ function stopFeishuProcess(): void {
 
 function getWechatSidecarPath(): string {
   if (app.isPackaged) {
+    // electron-builder.yml: mac.extraResources maps bundled-backend/${arch} -> Resources/backend/
+    const backendPath = path.join(process.resourcesPath, "backend", "agx-wechat-sidecar");
+    if (fs.existsSync(backendPath)) return backendPath;
     const resPath = path.join(process.resourcesPath, "agx-wechat-sidecar");
     if (fs.existsSync(resPath)) return resPath;
     const arch = process.arch === "x64" ? "x64" : "arm64";
     const bundled = path.join(process.resourcesPath, "bundled-backend", arch, "agx-wechat-sidecar");
     if (fs.existsSync(bundled)) return bundled;
-    return resPath;
+    return backendPath;
   }
   const devPath = path.join(__dirname, "..", "..", "packaging", "wechat-sidecar", "agx-wechat-sidecar");
   if (fs.existsSync(devPath)) return devPath;
