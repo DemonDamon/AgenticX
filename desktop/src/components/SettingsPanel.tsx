@@ -627,7 +627,60 @@ const TOOL_LABELS: Record<string, string> = {
   list_mcps: "List MCPs",
   send_bug_report_email: "Bug Report Email",
   update_email_config: "Update Email Config",
+  set_taskspace: "Set Taskspace",
+  delegate_to_avatar: "Delegate to Avatar",
+  read_avatar_workspace: "Read Avatar Workspace",
+  chat_with_avatar: "Chat with Avatar",
 };
+
+/** 设置页展示用中文说明（不改后端发给模型的英文 tool schema） */
+const TOOL_DESCRIPTIONS_ZH: Record<string, string> = {
+  bash_exec: "在当前工作区执行 Shell 命令。",
+  file_read: "读取文件内容，可指定行号范围。",
+  file_write: "写入完整文件内容；会先展示统一 diff，写入前需确认。",
+  file_edit: "在文件中替换指定文本；会先展示统一 diff，写入前需确认。",
+  list_files: "列出指定路径下的文件与目录，可选递归。",
+  codegen: "使用内置 CodeGen 引擎生成代码产物（agent / workflow / tool / skill 等）。",
+  mcp_connect: "按配置连接一个 MCP 服务。",
+  mcp_call: "调用已连接 MCP 上的工具，传入 JSON 参数。",
+  mcp_import: "从外部 mcp.json 导入 MCP 配置到 AgenticX 工作区。",
+  skill_use: "将某个技能激活到当前对话上下文。",
+  skill_list: "列出本地/远程可用技能的摘要。",
+  skill_manage:
+    "在 ~/.agenticx/skills/ 下创建、修改或删除技能（SKILL.md）；支持 create / patch / delete（需显式开启环境开关）。",
+  todo_write: "更新当前会话的结构化任务列表。",
+  scratchpad_write: "将会话中间结果写入草稿板（scratchpad）。",
+  scratchpad_read: "读取草稿板某键内容，或列出全部键。",
+  memory_append: "向工作区日记或长期 MEMORY.md 追加一条记忆（跨会话保留）。",
+  memory_search: "用全文 / 向量 / 混合模式检索已索引的工作区记忆。",
+  session_search: "按关键词检索历史会话消息，空查询则返回最近会话。",
+  liteparse: "通过 LiteParse 解析 PDF、Office、图片等文档并提取文本。",
+  lsp_goto_definition: "在指定文件位置跳转到符号定义（LSP）。",
+  lsp_find_references: "查找符号在工程内的所有引用（LSP）。",
+  lsp_hover: "获取光标处符号的类型信息与文档说明（LSP）。",
+  lsp_diagnostics: "读取文件或已打开文件的诊断/类型与 Lint 信息（LSP）。",
+  schedule_task: "安排后台异步任务，即使用户未在聊天也会执行。",
+  list_scheduled_tasks: "列出所有后台/计划任务及其状态。",
+  cancel_scheduled_task: "按 task_id 取消后台任务。",
+  spawn_subagent: "为委派任务启动一个子智能体工作进程。",
+  cancel_subagent: "按 ID 或分身名取消正在运行的子智能体。",
+  retry_subagent: "对已完成或失败的子智能体重试，可附带修正后的任务描述。",
+  query_subagent_status: "查询单个或全部子智能体状态（支持 agent_id、分身名或 avatar_id）。",
+  check_resources: "在调度前查看当前主机资源占用情况。",
+  recommend_subagent_model: "根据任务复杂度与已配置 Provider 为子智能体推荐模型。",
+  list_skills: "列出 AgenticX 中所有可用技能及简介。",
+  list_mcps: "列出已配置的 MCP 服务及其连接状态。",
+  send_bug_report_email: "使用用户配置的 SMTP 发送问题反馈邮件。",
+  update_email_config: "在严格校验下更新 notifications.email.* 邮件通知配置。",
+  set_taskspace: "为当前会话设置或追加工作区（taskspace）路径，本回合结束后注册生效。",
+  delegate_to_avatar: "将任务委派给指定分身，在其独立工作区中执行。",
+  read_avatar_workspace: "不启动子智能体的情况下读取分身工作区中的文件。",
+  chat_with_avatar: "向分身发送内部问题并返回其回复，供元智能体汇总给用户。",
+};
+
+function toolDisplayDescription(name: string, apiDescription: string): string {
+  return TOOL_DESCRIPTIONS_ZH[name] ?? apiDescription;
+}
 
 function ToolsTab() {
   const [registry, setRegistry] = useState<RegistryTool[]>([]);
@@ -716,11 +769,16 @@ function ToolsTab() {
   const grouped = useMemo(() => {
     const q = search.toLowerCase().trim();
     const filtered = q
-      ? registry.filter((t) =>
-          t.name.toLowerCase().includes(q) ||
-          (TOOL_LABELS[t.name] ?? "").toLowerCase().includes(q) ||
-          t.description.toLowerCase().includes(q) ||
-          (CATEGORY_LABELS[t.category] ?? "").toLowerCase().includes(q))
+      ? registry.filter((t) => {
+          const descZh = toolDisplayDescription(t.name, t.description).toLowerCase();
+          return (
+            t.name.toLowerCase().includes(q) ||
+            (TOOL_LABELS[t.name] ?? "").toLowerCase().includes(q) ||
+            descZh.includes(q) ||
+            t.description.toLowerCase().includes(q) ||
+            (CATEGORY_LABELS[t.category] ?? "").toLowerCase().includes(q)
+          );
+        })
       : registry;
     const map = new Map<string, RegistryTool[]>();
     for (const t of filtered) {
@@ -775,7 +833,7 @@ function ToolsTab() {
                             <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-[10px] text-amber-300">禁用时需要人工审批</span>
                           ) : null}
                         </div>
-                        <div className="mt-0.5 text-xs text-text-muted">{t.description}</div>
+                        <div className="mt-0.5 text-xs text-text-muted">{toolDisplayDescription(t.name, t.description)}</div>
                       </div>
                       <SettingsSwitch
                         checked={enabled}
