@@ -90,6 +90,15 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npx electron-builder --mac --${{ matrix.arch }} --publish never
 
+      - name: Verify bundled backend in app
+        working-directory: desktop
+        run: |
+          APP_DIR="release/mac-${{ matrix.arch }}/Machi.app/Contents/Resources/backend"
+          test -x "${APP_DIR}/agx-server"
+          test -x "${APP_DIR}/agx-wechat-sidecar"
+          echo "Verified backend binaries in ${APP_DIR}:"
+          ls -l "${APP_DIR}"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
@@ -169,6 +178,15 @@ jobs:
           DEBUG: electron-builder
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npx electron-builder --mac --${{ env.ARCH }} --publish never
+
+      - name: Verify bundled backend in app
+        working-directory: desktop
+        run: |
+          APP_DIR="release/mac-${{ env.ARCH }}/Machi.app/Contents/Resources/backend"
+          test -x "${APP_DIR}/agx-server"
+          test -x "${APP_DIR}/agx-wechat-sidecar"
+          echo "Verified backend binaries in ${APP_DIR}:"
+          ls -l "${APP_DIR}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
