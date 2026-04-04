@@ -1517,6 +1517,38 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     });
   }, [visibleMessages, streamedAssistantText]);
 
+  const highlightJumpKeyRef = useRef<string>("");
+  useEffect(() => {
+    const terms = (pane.historySearchTerms ?? []).filter((t) => String(t || "").trim().length > 0);
+    if (!pane.sessionId || terms.length === 0) {
+      highlightJumpKeyRef.current = "";
+      return;
+    }
+    const key = `${pane.sessionId}::${terms.join("|")}::${visibleMessages.length}`;
+    if (highlightJumpKeyRef.current === key) return;
+    let cancelled = false;
+    const run = (attempt = 0) => {
+      if (cancelled) return;
+      const root = listRef.current;
+      if (!root) return;
+      const first = root.querySelector(".agx-keyword-highlight") as HTMLElement | null;
+      if (first) {
+        highlightJumpKeyRef.current = key;
+        first.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+        return;
+      }
+      if (attempt < 3) {
+        window.setTimeout(() => run(attempt + 1), 90);
+      }
+    };
+    requestAnimationFrame(() => {
+      window.setTimeout(() => run(0), 20);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pane.sessionId, pane.historySearchTerms, visibleMessages.length]);
+
   useEffect(() => {
     return () => {
       stopRecording();
@@ -2169,6 +2201,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             )}
             <MessageRenderer
               message={message}
+              highlightTerms={pane.historySearchTerms}
               assistantBadge={message.role === "assistant" ? <ModelBadge provider={message.provider} model={message.model} /> : undefined}
               onRevealPath={(path) => void revealFileInTaskspace(path)}
               assistantName={paneAvatarMeta.name}
@@ -2211,6 +2244,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         ) : (
           <ImBubble
             message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
+            highlightTerms={pane.historySearchTerms}
             badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
             assistantName={paneAvatarMeta.name}
             assistantAvatarUrl={paneAvatarMeta.url}
