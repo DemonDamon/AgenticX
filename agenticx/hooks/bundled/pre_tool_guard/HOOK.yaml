@@ -1,0 +1,6 @@
+name: pre-tool-guard
+description: 工具执行前的安全闸门，按模式拦截危险 shell 命令（如 rm -rf、DROP TABLE）。
+events:
+  - tool:before_call
+export: handle
+enabled: true

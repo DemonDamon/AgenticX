@@ -1,0 +1,6 @@
+name: session-evaluator
+description: 会话结束后轻量分析本轮工具调用与交互模式，写入可复用的经验记录。
+events:
+  - agent:stop
+export: handle
+enabled: true

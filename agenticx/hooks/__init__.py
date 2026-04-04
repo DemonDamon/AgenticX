@@ -27,8 +27,20 @@ from .types import (
     HookHandler,
 )
 from .registry import HookRegistry, get_global_hook_registry
-from .loader import discover_hooks, load_hooks
+from .loader import (
+    discover_hooks,
+    discover_declarative_hooks,
+    load_hooks,
+    build_hook_search_paths,
+    get_hook_settings_from_config,
+)
 from .status import build_hook_status
+from .declarative import (
+    DeclarativeHookConfig,
+    DeclarativeHookExecutor,
+    DeclarativeAgentHook,
+    create_declarative_agent_hook,
+)
 
 from .llm_hooks import (
     LLMCallHookContext,
@@ -101,6 +113,13 @@ __all__ = [
     "discover_hooks",
     "build_hook_status",
     "load_discovered_hooks",
+    "discover_declarative_hooks",
+    "build_hook_search_paths",
+    "get_hook_settings_from_config",
+    "DeclarativeHookConfig",
+    "DeclarativeHookExecutor",
+    "DeclarativeAgentHook",
+    "create_declarative_agent_hook",
     "register_hook",
     "unregister_hook",
     "clear_hooks",
