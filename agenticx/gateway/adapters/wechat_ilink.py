@@ -240,8 +240,10 @@ class WeChatILinkAdapter:
             len(media_paths),
         )
 
+        # Prefer Desktop-bound AGX session id. WeChat sidecar session_id is
+        # transport/session metadata and may not exist in Studio session store.
         bound_session_id = self._resolve_bound_session()
-        effective_session_id = session_id or bound_session_id
+        effective_session_id = bound_session_id or session_id
 
         try:
             reply = await self._chat_turn(
