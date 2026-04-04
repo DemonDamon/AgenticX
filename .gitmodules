@@ -1,0 +1,3 @@
+[submodule "FinnewsHunter"]
+	path = examples/agenticx-for-finance/FinnewsHunter
+	url = https://github.com/DemonDamon/FinnewsHunter.git
