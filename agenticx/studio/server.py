@@ -861,7 +861,7 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="session not found")
         setattr(managed.studio_session, "taskspaces", list(managed.taskspaces or []))
         manager.touch(payload.session_id)
-        if not managed.session_name:
+        if manager.session_title_needs_auto_fill(managed.session_name):
             manager.auto_title_session(payload.session_id, payload.user_input)
 
         session = managed.studio_session

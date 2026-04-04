@@ -3694,7 +3694,10 @@ export function SettingsPanel({
                     </select>
                   </label>
                 </Panel>
-                <Panel title="我的档案">
+                <Panel title="用户档案">
+                  <p className="mb-3 text-[11px] leading-relaxed text-text-subtle">
+                    仅关于「你」在应用中的身份与展示（称呼、用户消息头像），与智能体人设无关。
+                  </p>
                   <label className="block text-sm text-text-muted">
                     我的称呼（用于所有对话）
                     <input
@@ -3757,8 +3760,13 @@ export function SettingsPanel({
                       <p className="mt-1 text-[11px] text-text-subtle">{userAvatarMessage}</p>
                     ) : null}
                   </div>
-                  <div className="mt-4">
-                    <div className="text-sm text-text-muted">Machi 头像（Meta-Agent）</div>
+                </Panel>
+                <Panel title="元智能体（Machi）">
+                  <p className="mb-3 text-[11px] leading-relaxed text-text-subtle">
+                    配置元智能体 Machi 的外观与行为：头像、对话偏好注入、全局人格（SOUL.md）。
+                  </p>
+                  <div>
+                    <div className="text-sm text-text-muted">Machi 头像</div>
                     <div className="mt-2 flex items-center gap-3">
                       {metaAvatarUrl ? (
                         <img
@@ -3806,7 +3814,7 @@ export function SettingsPanel({
                     ) : null}
                   </div>
                   <label className="mt-4 block text-sm text-text-muted">
-                    个人偏好与风格
+                    对话偏好与风格（注入系统提示）
                     <textarea
                       className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
                       rows={4}
@@ -3817,7 +3825,7 @@ export function SettingsPanel({
                     />
                   </label>
                   <p className="mt-1 text-[11px] text-text-subtle">
-                    {`${userPreference.length}/500 字。此偏好会注入到每次对话的系统提示中，对所有 agent 生效。`}
+                    {`${userPreference.length}/500 字。会注入每次对话的系统提示，对所有 agent 的回复方式生效。`}
                   </p>
                   <label className="mt-4 block text-sm text-text-muted">
                     Meta-Agent SOUL（全局人格）
@@ -4527,7 +4535,7 @@ export function SettingsPanel({
                                   ws.close();
                                   void (async () => {
                                     try {
-                                      const createRes = await window.agenticxDesktop.createSession({ name: "微信会话" });
+                                      const createRes = await window.agenticxDesktop.createSession({});
                                       if (createRes.ok && createRes.session_id) {
                                         await window.agenticxDesktop.saveWechatDesktopBinding({
                                           sessionId: createRes.session_id,
