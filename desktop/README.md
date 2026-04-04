@@ -83,6 +83,19 @@ npm run dev
 
 ## 打包
 
+### 图标规范化（保证 dev 与 DMG 一致）
+
+使用同一母图导出 `icon.png`（Dock/dev）与 `icon.icns`（DMG/App），避免两套图标视觉尺寸不一致：
+
+```bash
+cd desktop
+npm run icons:sync
+# 或指定母图
+bash ./scripts/sync-icons.sh assets/icon-master.png
+```
+
+建议母图为 `1024x1024` 的正方形 PNG，并控制主体留白一致（推荐主体占比 80%~85%）。
+
 ### 自包含 DMG（内嵌 Python 后端，用户无需安装 agx）
 
 在仓库根目录执行（需 Python ≥3.10、Node 20；首次会创建 `packaging/.venv-packaging`）：
