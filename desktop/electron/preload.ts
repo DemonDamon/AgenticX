@@ -144,6 +144,14 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   },
 
   listSessions: async (avatarId?: string) => ipcRenderer.invoke("list-sessions", avatarId),
+  searchSessions: async (payload: { q: string; avatarId?: string }) => {
+    const params = new URLSearchParams();
+    params.set("q", (payload.q || "").trim());
+    if (payload.avatarId) params.set("avatar_id", payload.avatarId);
+    return desktopApiFetch<{ ok: boolean; hits?: Array<{ session_id: string; snippet: string }>; error?: string }>(
+      `/api/sessions/search?${params.toString()}`
+    );
+  },
   createSession: async (payload: { avatar_id?: string; name?: string; inherit_from_session_id?: string }) =>
     ipcRenderer.invoke("create-session", payload),
   renameSession: async (payload: { sessionId: string; name: string }) =>

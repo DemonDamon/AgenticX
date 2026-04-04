@@ -2103,6 +2103,26 @@ def create_studio_app() -> FastAPI:
         sessions = manager.list_sessions(avatar_id=avatar_id)
         return {"ok": True, "sessions": sessions}
 
+    @app.get("/api/sessions/search")
+    async def search_sessions_by_messages(
+        q: str = Query(default=""),
+        avatar_id: str | None = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=100),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        t_aid = (str(avatar_id).strip() if avatar_id is not None else "")
+        aid = t_aid or None
+        raw_q = str(q or "").strip()
+        if not raw_q:
+            return {"ok": True, "hits": []}
+        hits = manager.search_sessions_by_message_text(
+            raw_q,
+            avatar_id=aid,
+            limit_sessions=limit,
+        )
+        return {"ok": True, "hits": hits}
+
     @app.post("/api/sessions")
     async def create_session(
         payload: dict,

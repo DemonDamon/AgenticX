@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, type ChatPane, type Message } from "../store";
 import { attachmentsFromSessionRow } from "../utils/session-message-map";
 import { FeishuBadge } from "./FeishuBadge";
@@ -91,6 +91,65 @@ function sessionHistoryLabel(item: SessionRow): string {
   return hint ? `·${hint}` : item.session_id.slice(0, 6);
 }
 
+/** English / 中文 aliases so e.g. "Feishu" matches 飞书 binding rows. */
+function expandedSearchNeedles(query: string): string[] {
+  const q = query.trim();
+  if (!q) return [];
+  const lower = q.toLowerCase();
+  const needles = new Set<string>([q, lower]);
+  const hasFeishu =
+    /\bfeishu\b/i.test(q) || /\blark\b/i.test(q) || q.includes("飞书");
+  const hasWechat =
+    /\bwechat\b/i.test(q) || /\bweixin\b/i.test(q) || q.includes("微信");
+  if (hasFeishu) {
+    ["feishu", "lark", "飞书", "飞书绑定"].forEach((x) => needles.add(x.toLowerCase()));
+  }
+  if (hasWechat) {
+    ["wechat", "weixin", "微信", "微信绑定"].forEach((x) => needles.add(x.toLowerCase()));
+  }
+  return Array.from(needles);
+}
+
+function sessionSearchHaystack(
+  item: SessionRow,
+  feishuSessionId: string | null,
+  wechatSessionId: string | null
+): string {
+  const parts = [
+    item.session_name,
+    sessionHistoryLabel(item),
+    item.avatar_name,
+    item.session_id,
+    item.session_id.replace(/-/g, ""),
+    item.avatar_id,
+  ]
+    .filter((x): x is string => typeof x === "string" && x.length > 0)
+    .join(" ");
+  let extra = "";
+  if (feishuSessionId && item.session_id === feishuSessionId) {
+    extra += " 飞书 feishu lark 飞书绑定 绑定";
+  }
+  if (wechatSessionId && item.session_id === wechatSessionId) {
+    extra += " 微信 wechat weixin 微信绑定 绑定";
+  }
+  return `${parts}${extra}`.toLowerCase();
+}
+
+function sessionMatchesQuery(
+  item: SessionRow,
+  needles: string[],
+  feishuSessionId: string | null,
+  wechatSessionId: string | null
+): boolean {
+  if (needles.length === 0) return true;
+  const hay = sessionSearchHaystack(item, feishuSessionId, wechatSessionId);
+  return needles.some((n) => {
+    const t = n.trim();
+    if (!t) return false;
+    return hay.includes(t.toLowerCase());
+  });
+}
+
 function normalizeSessionRows(input: unknown): SessionRow[] {
   if (!Array.isArray(input)) return [];
   const rows: SessionRow[] = [];
@@ -132,18 +191,45 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const [selectMode, setSelectMode] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
+  const [sessionSearchQuery, setSessionSearchQuery] = useState("");
+  const [messageSearchSnippets, setMessageSearchSnippets] = useState<Record<string, string>>({});
+  const messageSearchReq = useRef(0);
 
   const title = useMemo(() => (pane.avatarName || "Machi").trim(), [pane.avatarName]);
   const feishuMarkedSessionId = feishuBoundSessionId;
   const wechatMarkedSessionId = wechatBoundSessionId;
 
+  const sessionSearchTrim = sessionSearchQuery.trim();
+  const sessionSearchNeedles = useMemo(
+    () => expandedSearchNeedles(sessionSearchTrim),
+    [sessionSearchTrim]
+  );
+
+  const sessionsMatchingSearch = useMemo(() => {
+    if (!sessionSearchTrim) return sessions;
+    const contentHitIds = new Set(Object.keys(messageSearchSnippets));
+    return sessions.filter(
+      (item) =>
+        sessionMatchesQuery(item, sessionSearchNeedles, feishuMarkedSessionId, wechatMarkedSessionId) ||
+        contentHitIds.has(item.session_id)
+    );
+  }, [
+    sessions,
+    sessionSearchTrim,
+    sessionSearchNeedles,
+    feishuMarkedSessionId,
+    wechatMarkedSessionId,
+    messageSearchSnippets,
+  ]);
+
   const groupedSessions = useMemo<GroupedSessions>(() => {
+    const pool = sessionsMatchingSearch;
     const specialIds = new Set<string>();
     if (feishuMarkedSessionId) specialIds.add(feishuMarkedSessionId);
     if (wechatMarkedSessionId) specialIds.add(wechatMarkedSessionId);
     const visibleSessions = specialIds.size > 0
-      ? sessions.filter((item) => !specialIds.has(item.session_id))
-      : sessions;
+      ? pool.filter((item) => !specialIds.has(item.session_id))
+      : pool;
     const now = new Date();
     const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
     const startPrevious7Days = startToday - 7 * 24 * 3600;
@@ -168,7 +254,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       }
     }
     return grouped;
-  }, [sessions, feishuMarkedSessionId, wechatMarkedSessionId]);
+  }, [sessionsMatchingSearch, feishuMarkedSessionId, wechatMarkedSessionId]);
 
   const loadSessions = async () => {
     try {
@@ -188,6 +274,47 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     if (!pane.historyOpen) return;
     void loadSessions();
   }, [pane.historyOpen, pane.avatarId, pane.sessionId]);
+
+  useEffect(() => {
+    if (!pane.historyOpen) setSessionSearchQuery("");
+  }, [pane.historyOpen]);
+
+  useEffect(() => {
+    if (!pane.historyOpen) return;
+    if (!sessionSearchTrim) {
+      setMessageSearchSnippets({});
+      return;
+    }
+    setMessageSearchSnippets({});
+    const myId = ++messageSearchReq.current;
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const avatarRaw = pane.avatarId;
+          const avatarId =
+            typeof avatarRaw === "string" && avatarRaw.length > 0 ? avatarRaw : undefined;
+          const res = await window.agenticxDesktop.searchSessions({
+            q: sessionSearchTrim,
+            avatarId,
+          });
+          if (myId !== messageSearchReq.current) return;
+          const next: Record<string, string> = {};
+          const hits = Array.isArray(res.hits) ? res.hits : [];
+          for (const h of hits) {
+            const sid = String(h.session_id || "").trim();
+            if (!sid) continue;
+            const snip = String(h.snippet || "").trim();
+            next[sid] = snip || "（消息命中）";
+          }
+          setMessageSearchSnippets(next);
+        } catch {
+          if (myId !== messageSearchReq.current) return;
+          setMessageSearchSnippets({});
+        }
+      })();
+    }, 320);
+    return () => window.clearTimeout(handle);
+  }, [pane.historyOpen, sessionSearchTrim, pane.avatarId]);
 
   useEffect(() => {
     if (!pane.historyOpen) return;
@@ -352,9 +479,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   };
 
   const toggleSelectAll = () => {
+    const pool = sessionsMatchingSearch;
     setSelectedSessionIds((prev) => {
-      if (prev.length >= sessions.length && sessions.length > 0) return [];
-      return sessions.map((s) => s.session_id);
+      if (prev.length >= pool.length && pool.length > 0) return [];
+      return pool.map((s) => s.session_id);
     });
   };
 
@@ -456,7 +584,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     }
   };
 
-  const renderSessionItem = (item: SessionRow) => {
+  const renderSessionItem = (item: SessionRow, contentSnippet?: string) => {
     if (!item || !item.session_id) return null;
     const active = item.session_id === pane.sessionId;
     const label = sessionHistoryLabel(item);
@@ -527,6 +655,11 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               ) : null}
               {unread ? <span className="inline-block h-1.5 w-1.5 rounded-full bg-text-muted" /> : null}
             </span>
+            {contentSnippet ? (
+              <span className="mt-0.5 line-clamp-2 w-full text-[9px] leading-snug text-text-subtle" title={contentSnippet}>
+                {contentSnippet}
+              </span>
+            ) : null}
             <span className="mt-0.5 truncate w-full text-[9px] text-text-faint">
               {timeAgo(createdAt)}
             </span>
@@ -541,7 +674,12 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     return (
       <div className="mb-2">
         <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-text-faint">{groupTitle}</div>
-        {items.map((item) => renderSessionItem(item))}
+        {items.map((item) =>
+          renderSessionItem(
+            item,
+            sessionSearchTrim ? messageSearchSnippets[item.session_id] : undefined
+          )
+        )}
       </div>
     );
   };
@@ -668,9 +806,43 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     }
   };
 
+  const showFeishuBindSection =
+    !!feishuSession &&
+    (!sessionSearchTrim ||
+      sessionMatchesQuery(
+        feishuSession,
+        sessionSearchNeedles,
+        feishuMarkedSessionId,
+        wechatMarkedSessionId
+      ) ||
+      Boolean(sessionSearchTrim && messageSearchSnippets[feishuSession.session_id]));
+  const showWechatBindSection =
+    !!wechatSession &&
+    (!sessionSearchTrim ||
+      sessionMatchesQuery(
+        wechatSession,
+        sessionSearchNeedles,
+        feishuMarkedSessionId,
+        wechatMarkedSessionId
+      ) ||
+      Boolean(sessionSearchTrim && messageSearchSnippets[wechatSession.session_id]));
+
+  const searchHasAnyMatch =
+    !sessionSearchTrim ||
+    showFeishuBindSection ||
+    showWechatBindSection ||
+    groupedSessions.pinned.length +
+      groupedSessions.today.length +
+      groupedSessions.previous7Days.length +
+      groupedSessions.older.length >
+      0;
+
   return (
-    <div className="h-full w-[220px] shrink-0 border-l border-border bg-surface-card" style={tintColor ? { backgroundColor: tintColor } : undefined}>
-      <div className="border-b border-border px-3 py-2 text-xs text-text-subtle">
+    <div
+      className="flex h-full w-[220px] shrink-0 flex-col border-l border-border bg-surface-card"
+      style={tintColor ? { backgroundColor: tintColor } : undefined}
+    >
+      <div className="shrink-0 border-b border-border px-3 py-2 text-xs text-text-subtle">
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5">
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0" title={title}>
@@ -702,7 +874,9 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                   disabled={batchDeleting}
                   title="全选或取消全选"
                 >
-                  {selectedSessionIds.length >= sessions.length && sessions.length > 0 ? "取消全选" : "全选"}
+                  {selectedSessionIds.length >= sessionsMatchingSearch.length && sessionsMatchingSearch.length > 0
+                    ? "取消全选"
+                    : "全选"}
                 </button>
                 <button
                   className="rounded border border-red-500/50 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/10 disabled:opacity-50"
@@ -738,14 +912,30 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           </div>
         </div>
       </div>
-      <div className="max-h-[calc(100%-35px)] overflow-y-auto px-2 py-2">
+      <div className="shrink-0 px-2 pt-2">
+        <input
+          type="search"
+          value={sessionSearchQuery}
+          onChange={(e) => setSessionSearchQuery(e.target.value)}
+          placeholder="Search Sessions..."
+          autoComplete="off"
+          spellCheck={false}
+          aria-label="搜索历史会话"
+          className="w-full rounded-md border border-border bg-surface-hover px-2 py-1.5 text-[11px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
+        />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {sessions.length === 0 ? (
           <div className="rounded border border-dashed border-border p-2 text-center text-xs text-text-faint">
             暂无会话
           </div>
+        ) : !searchHasAnyMatch ? (
+          <div className="rounded border border-dashed border-border p-2 text-center text-xs text-text-faint">
+            未找到匹配会话
+          </div>
         ) : (
           <>
-            {feishuSession ? (
+            {showFeishuBindSection && feishuSession ? (
               <div className="mb-2">
                 <div className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-[#3370FF]">
                   <span>飞书绑定</span>
@@ -756,10 +946,13 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                     唯一
                   </span>
                 </div>
-                {renderSessionItem(feishuSession)}
+                {renderSessionItem(
+                  feishuSession,
+                  sessionSearchTrim ? messageSearchSnippets[feishuSession.session_id] : undefined
+                )}
               </div>
             ) : null}
-            {wechatSession ? (
+            {showWechatBindSection && wechatSession ? (
               <div className="mb-2">
                 <div className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-[#25D366]">
                   <span>微信绑定</span>
@@ -770,7 +963,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                     唯一
                   </span>
                 </div>
-                {renderSessionItem(wechatSession)}
+                {renderSessionItem(
+                  wechatSession,
+                  sessionSearchTrim ? messageSearchSnippets[wechatSession.session_id] : undefined
+                )}
               </div>
             ) : null}
             {renderGroup("Pinned", groupedSessions.pinned)}

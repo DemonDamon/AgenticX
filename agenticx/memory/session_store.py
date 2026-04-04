@@ -422,6 +422,55 @@ class SessionStore:
             )
         return out
 
+    def _search_session_messages_like_sync(
+        self,
+        query: str,
+        allowed_session_ids: frozenset[str],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """Substring search in message bodies for allowed sessions (FTS fallback, CJK-friendly)."""
+        raw = (query or "").strip()
+        if not raw or not allowed_session_ids:
+            return []
+        if len(raw) > 500:
+            raw = raw[:500]
+        esc = raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{esc}%"
+        n = max(1, min(int(limit), 400))
+        ids = [sid for sid in allowed_session_ids if sid]
+        out: List[Dict[str, Any]] = []
+        chunk_size = 80
+        with self._connect() as conn:
+            for i in range(0, len(ids), chunk_size):
+                part = ids[i : i + chunk_size]
+                if not part:
+                    break
+                placeholders = ",".join("?" * len(part))
+                sql = f"""
+                    SELECT id, session_id, role, content, timestamp
+                    FROM session_messages
+                    WHERE session_id IN ({placeholders}) AND content LIKE ? ESCAPE '\\'
+                    ORDER BY timestamp DESC NULLS LAST, id DESC
+                    LIMIT ?
+                """
+                try:
+                    cur = conn.execute(sql, (*part, pattern, n - len(out)))
+                except sqlite3.OperationalError:
+                    continue
+                for row in cur.fetchall():
+                    out.append(
+                        {
+                            "id": int(row["id"]),
+                            "session_id": str(row["session_id"]),
+                            "role": str(row["role"]),
+                            "content": str(row["content"] or ""),
+                            "timestamp": row["timestamp"],
+                        }
+                    )
+                    if len(out) >= n:
+                        return out
+        return out
+
     async def backfill_from_sessions_root(
         self,
         sessions_root: Path | str,
