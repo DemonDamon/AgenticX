@@ -3622,7 +3622,7 @@ export function SettingsPanel({
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-none">
       {/* 固定为视口比例，避免切换 tab 时随内容伸缩；长内容在右侧滚动区内滚动 */}
       <div
-        className="flex h-[min(85vh,calc(100dvh-2rem))] w-[min(90vw,51.25rem)] max-w-[calc(100vw-2rem)] shrink-0 overflow-hidden rounded-2xl border border-border shadow-2xl"
+        className="agx-settings-panel flex h-[min(85vh,calc(100dvh-2rem))] w-[min(90vw,51.25rem)] max-w-[calc(100vw-2rem)] shrink-0 overflow-hidden rounded-2xl border border-border shadow-2xl"
         style={{ backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
       >
         {/* Left: tab navigation */}
@@ -3696,7 +3696,7 @@ export function SettingsPanel({
                 </Panel>
                 <Panel title="用户档案">
                   <p className="mb-3 text-[11px] leading-relaxed text-text-subtle">
-                    仅关于「你」在应用中的身份与展示（称呼、用户消息头像），与智能体人设无关。
+                    「你」的身份与展示，以及希望各对话如何围绕你展开（称呼、头像、用户偏好）。全局人格（SOUL）仍在下方 Machi 区块。
                   </p>
                   <label className="block text-sm text-text-muted">
                     我的称呼（用于所有对话）
@@ -3760,10 +3760,24 @@ export function SettingsPanel({
                       <p className="mt-1 text-[11px] text-text-subtle">{userAvatarMessage}</p>
                     ) : null}
                   </div>
+                  <label className="mt-4 block text-sm text-text-muted">
+                    用户偏好与风格（注入系统提示）
+                    <textarea
+                      className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
+                      rows={4}
+                      value={userPreference}
+                      onChange={(e) => setUserPreference(e.target.value)}
+                      placeholder={"例：我不喜欢绕弯子，请直接给结论；偏好表格而非长段落；遇到歧义先问我再执行。"}
+                      maxLength={500}
+                    />
+                  </label>
+                  <p className="mt-1 text-[11px] text-text-subtle">
+                    {`${userPreference.length}/500 字。会注入每次对话的系统提示，对所有 agent 的回复方式生效。`}
+                  </p>
                 </Panel>
                 <Panel title="元智能体（Machi）">
                   <p className="mb-3 text-[11px] leading-relaxed text-text-subtle">
-                    配置元智能体 Machi 的外观与行为：头像、对话偏好注入、全局人格（SOUL.md）。
+                    仅 Machi 元智能体：自定义头像与全局人格（SOUL.md）。用户偏好见上方「用户档案」。
                   </p>
                   <div>
                     <div className="text-sm text-text-muted">Machi 头像</div>
@@ -3813,20 +3827,6 @@ export function SettingsPanel({
                       <p className="mt-1 text-[11px] text-text-subtle">{metaAvatarMessage}</p>
                     ) : null}
                   </div>
-                  <label className="mt-4 block text-sm text-text-muted">
-                    对话偏好与风格（注入系统提示）
-                    <textarea
-                      className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary placeholder:text-text-faint"
-                      rows={4}
-                      value={userPreference}
-                      onChange={(e) => setUserPreference(e.target.value)}
-                      placeholder={"例：我不喜欢绕弯子，请直接给结论；偏好表格而非长段落；遇到歧义先问我再执行。"}
-                      maxLength={500}
-                    />
-                  </label>
-                  <p className="mt-1 text-[11px] text-text-subtle">
-                    {`${userPreference.length}/500 字。会注入每次对话的系统提示，对所有 agent 的回复方式生效。`}
-                  </p>
                   <label className="mt-4 block text-sm text-text-muted">
                     Meta-Agent SOUL（全局人格）
                     <textarea

@@ -123,3 +123,19 @@ body {
 .xterm .xterm-viewport {
   background-color: transparent !important;
 }
+
+/* Settings modal: Chromium/Electron often ignores padding for the native <select> chevron.
+   Strip native chrome and draw our own chevron with a fixed inset from the right edge. */
+.agx-settings-panel select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-inline-end: 2.25rem !important;
+  background-repeat: no-repeat;
+  background-size: 1rem 1rem;
+  background-position: right 0.65rem center;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' viewBox='0 0 24 24'%3E%3Cpath stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+
+:root[data-theme="light"] .agx-settings-panel select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' viewBox='0 0 24 24'%3E%3Cpath stroke='%23475569' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
