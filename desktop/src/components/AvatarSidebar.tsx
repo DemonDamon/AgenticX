@@ -4,6 +4,7 @@ import { useAppStore, type Avatar, type GroupChat } from "../store";
 import { avatarBgClass, avatarDotColor, groupColorByIndex } from "../utils/avatar-color";
 import { AvatarCreateDialog } from "./AvatarCreateDialog";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
+import { TaskFormPanel } from "./automation/TaskFormPanel";
 import type { AutomationTask } from "./automation/types";
 
 function avatarInitials(name: string): string {
@@ -59,6 +60,7 @@ type ContextMenuState =
   | { x: number; y: number; target: "machi" }
   | null;
 type GroupContextMenuState = { x: number; y: number; groupId: string } | null;
+type AutomationContextMenuState = { x: number; y: number; taskId: string } | null;
 
 export function AvatarSidebar() {
   const avatars = useAppStore((s) => s.avatars);
@@ -80,6 +82,8 @@ export function AvatarSidebar() {
   const [groupEditTarget, setGroupEditTarget] = useState<GroupChat | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [groupContextMenu, setGroupContextMenu] = useState<GroupContextMenuState>(null);
+  const [automationContextMenu, setAutomationContextMenu] = useState<AutomationContextMenuState>(null);
+  const [automationFormInitial, setAutomationFormInitial] = useState<AutomationTask | null>(null);
   const [automationTasks, setAutomationTasks] = useState<AutomationTask[]>([]);
   const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(new Set());
   const [avatarsCollapsed, setAvatarsCollapsed] = useState(false);
@@ -92,6 +96,7 @@ export function AvatarSidebar() {
   >(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const groupMenuRef = useRef<HTMLDivElement>(null);
+  const automationMenuRef = useRef<HTMLDivElement>(null);
   const openingRef = useRef(false);
 
   const refreshAvatars = useCallback(async () => {
@@ -210,6 +215,39 @@ export function AvatarSidebar() {
       window.removeEventListener("keydown", dismissByEsc);
     };
   }, [groupContextMenu]);
+
+  useEffect(() => {
+    if (!automationContextMenu) return;
+    const dismiss = (e: MouseEvent) => {
+      if (automationMenuRef.current && !automationMenuRef.current.contains(e.target as Node)) {
+        setAutomationContextMenu(null);
+      }
+    };
+    const dismissByEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAutomationContextMenu(null);
+    };
+    window.addEventListener("mousedown", dismiss);
+    window.addEventListener("keydown", dismissByEsc);
+    return () => {
+      window.removeEventListener("mousedown", dismiss);
+      window.removeEventListener("keydown", dismissByEsc);
+    };
+  }, [automationContextMenu]);
+
+  const handleAutomationFormSave = useCallback(
+    async (task: AutomationTask) => {
+      const result = await window.agenticxDesktop.saveAutomationTask(task);
+      if (result?.ok) {
+        setAutomationFormInitial(null);
+        void refreshAutomationTasks();
+      }
+      return {
+        ok: Boolean(result?.ok),
+        error: result?.error != null ? String(result.error) : undefined,
+      };
+    },
+    [refreshAutomationTasks],
+  );
 
   const handleCreate = async (data: {
     name: string;
@@ -455,6 +493,7 @@ export function AvatarSidebar() {
           onContextMenu={(e) => {
             e.preventDefault();
             setGroupContextMenu(null);
+            setAutomationContextMenu(null);
             setContextMenu({ x: e.clientX, y: e.clientY, target: "machi" });
           }}
         >
@@ -515,6 +554,7 @@ export function AvatarSidebar() {
                       onContextMenu={(e) => {
                         e.preventDefault();
                         setGroupContextMenu(null);
+                        setAutomationContextMenu(null);
                         setContextMenu({ x: e.clientX, y: e.clientY, target: "avatar", avatarId: avatar.id });
                       }}
                     >
@@ -591,6 +631,7 @@ export function AvatarSidebar() {
                       onContextMenu={(e) => {
                         e.preventDefault();
                         setContextMenu(null);
+                        setAutomationContextMenu(null);
                         setGroupContextMenu({ x: e.clientX, y: e.clientY, groupId: group.id });
                       }}
                     >
@@ -656,12 +697,20 @@ export function AvatarSidebar() {
                   return (
                     <button
                       key={task.id}
+                      type="button"
                       className={`mx-2 flex w-[calc(100%-16px)] items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left transition-all ${
                         isActive
                           ? "bg-surface-card text-text-strong"
                           : "text-text-muted hover:bg-surface-card hover:text-text-strong"
                       }`}
                       onClick={() => void openOrFocusAutomationPane(task)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setContextMenu(null);
+                        setGroupContextMenu(null);
+                        setAutomationContextMenu({ x: e.clientX, y: e.clientY, taskId: task.id });
+                      }}
                     >
                       <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] bg-surface-card">
                         {isRunning ? (
@@ -752,6 +801,35 @@ export function AvatarSidebar() {
             查看群聊
           </button>
         </div>
+      )}
+
+      {automationContextMenu && (
+        <div
+          ref={automationMenuRef}
+          className="fixed z-50 min-w-[120px] rounded-lg border border-border bg-surface-panel py-1 shadow-xl"
+          style={{ left: automationContextMenu.x, top: automationContextMenu.y }}
+        >
+          <button
+            type="button"
+            className="w-full px-3 py-1.5 text-left text-xs text-text-muted transition hover:bg-surface-hover"
+            onClick={() => {
+              const { taskId } = automationContextMenu;
+              setAutomationContextMenu(null);
+              const t = automationTasks.find((item) => item.id === taskId);
+              if (t) setAutomationFormInitial({ ...t });
+            }}
+          >
+            编辑
+          </button>
+        </div>
+      )}
+
+      {automationFormInitial && (
+        <TaskFormPanel
+          initial={automationFormInitial}
+          onSave={handleAutomationFormSave}
+          onCancel={() => setAutomationFormInitial(null)}
+        />
       )}
 
       <AvatarCreateDialog
