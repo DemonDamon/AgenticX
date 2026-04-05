@@ -117,6 +117,7 @@ type SkillInstallPolicyConfig = {
 
 const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.yaml");
+const AUTOMATION_TASKS_PATH = path.join(CONFIG_DIR, "automation_tasks.json");
 const WORKSPACE_DIR = path.join(CONFIG_DIR, "workspace");
 const META_SOUL_PATH = path.join(WORKSPACE_DIR, "SOUL.md");
 const AVATARS_DIR = path.join(CONFIG_DIR, "avatars");
@@ -219,6 +220,160 @@ function applyPreventSleepFromConfig(cfg: AgxConfig): void {
     preventSleepBlockerId = null;
   }
 }
+
+// ── Automation Tasks ──
+
+type AutomationFrequency =
+  | { type: "daily"; time: string; days: number[] }
+  | { type: "interval"; hours: number; days: number[] }
+  | { type: "once"; time: string; date: string };
+
+interface AutomationTaskData {
+  id: string;
+  name: string;
+  prompt: string;
+  workspace?: string;
+  frequency: AutomationFrequency;
+  effectiveDateRange?: { start?: string; end?: string };
+  enabled: boolean;
+  createdAt: string;
+  lastRunAt?: string;
+  lastRunStatus?: "success" | "error";
+  fromTemplate?: string;
+}
+
+function loadAutomationTasks(): AutomationTaskData[] {
+  try {
+    if (!fs.existsSync(AUTOMATION_TASKS_PATH)) return [];
+    const raw = fs.readFileSync(AUTOMATION_TASKS_PATH, "utf-8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAutomationTasks(tasks: AutomationTaskData[]): void {
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(AUTOMATION_TASKS_PATH, JSON.stringify(tasks, null, 2), "utf-8");
+}
+
+class AutomationScheduler {
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private lastCheckMinute = "";
+
+  start(): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => this.tick(), 30_000);
+    this.tick();
+  }
+
+  stop(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  reload(): void {
+    /* no-op: we load from disk each tick */
+  }
+
+  private tick(): void {
+    const now = new Date();
+    const minuteKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    if (minuteKey === this.lastCheckMinute) return;
+    this.lastCheckMinute = minuteKey;
+
+    const tasks = loadAutomationTasks();
+    const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); // 1=Mon..7=Sun
+    const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const currentDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+    let dirty = false;
+    for (const task of tasks) {
+      if (!task.enabled) continue;
+      if (!this.isWithinDateRange(task, currentDate)) continue;
+      if (!this.shouldRun(task, currentTime, currentDate, dayOfWeek)) continue;
+      if (task.lastRunAt && task.lastRunAt.startsWith(minuteKey)) continue;
+
+      task.lastRunAt = now.toISOString();
+      dirty = true;
+      void this.executeTask(task);
+    }
+    if (dirty) saveAutomationTasks(tasks);
+  }
+
+  private isWithinDateRange(task: AutomationTaskData, currentDate: string): boolean {
+    const range = task.effectiveDateRange;
+    if (!range) return true;
+    if (range.start && currentDate < range.start) return false;
+    if (range.end && currentDate > range.end) return false;
+    return true;
+  }
+
+  private shouldRun(task: AutomationTaskData, currentTime: string, currentDate: string, dayOfWeek: number): boolean {
+    const freq = task.frequency;
+    switch (freq.type) {
+      case "daily":
+        return freq.time === currentTime && freq.days.includes(dayOfWeek);
+      case "interval": {
+        if (!freq.days.includes(dayOfWeek)) return false;
+        const hour = new Date().getHours();
+        return hour % freq.hours === 0 && currentTime.endsWith(":00");
+      }
+      case "once":
+        return freq.date === currentDate && freq.time === currentTime;
+      default:
+        return false;
+    }
+  }
+
+  private async executeTask(task: AutomationTaskData): Promise<void> {
+    try {
+      const portFile = path.join(CONFIG_DIR, "serve.port");
+      const tokenFile = path.join(CONFIG_DIR, "serve.token");
+      if (!fs.existsSync(portFile)) return;
+      const port = fs.readFileSync(portFile, "utf-8").trim();
+      const token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, "utf-8").trim() : "";
+      const base = `http://127.0.0.1:${port}`;
+
+      const body: Record<string, unknown> = {
+        message: task.prompt,
+        stream: false,
+      };
+      if (task.workspace) {
+        body.taskspaces = [task.workspace];
+      }
+
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["x-agx-desktop-token"] = token;
+
+      const resp = await fetch(`${base}/api/chat`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      const tasks = loadAutomationTasks();
+      const found = tasks.find((t) => t.id === task.id);
+      if (found) {
+        found.lastRunStatus = resp.ok ? "success" : "error";
+        found.lastRunAt = new Date().toISOString();
+        saveAutomationTasks(tasks);
+      }
+    } catch {
+      const tasks = loadAutomationTasks();
+      const found = tasks.find((t) => t.id === task.id);
+      if (found) {
+        found.lastRunStatus = "error";
+        saveAutomationTasks(tasks);
+      }
+    }
+  }
+}
+
+const automationScheduler = new AutomationScheduler();
 
 const KNOWN_BASE_URLS: Record<string, string> = {
   openai: "https://api.openai.com/v1",
@@ -2151,6 +2306,84 @@ function registerIpc(): void {
     }
   });
 
+  // ── Automation Tasks CRUD ──
+
+  ipcMain.handle("load-automation-tasks", async () => {
+    try {
+      return { ok: true, tasks: loadAutomationTasks() };
+    } catch (err) {
+      return { ok: false, error: String(err), tasks: [] };
+    }
+  });
+
+  ipcMain.handle("save-automation-task", async (_event, payload: unknown) => {
+    if (!payload || typeof payload !== "object") return { ok: false, error: "invalid payload" };
+    const task = payload as AutomationTaskData;
+    if (!task.id || !task.name) return { ok: false, error: "task must have id and name" };
+    try {
+      const tasks = loadAutomationTasks();
+      const idx = tasks.findIndex((t) => t.id === task.id);
+      if (idx >= 0) {
+        tasks[idx] = task;
+      } else {
+        tasks.unshift(task);
+      }
+      saveAutomationTasks(tasks);
+      automationScheduler.reload();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("delete-automation-task", async (_event, taskId: unknown) => {
+    if (typeof taskId !== "string") return { ok: false, error: "taskId must be a string" };
+    try {
+      const tasks = loadAutomationTasks().filter((t) => t.id !== taskId);
+      saveAutomationTasks(tasks);
+      automationScheduler.reload();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("run-automation-task-now", async (_event, taskId: unknown) => {
+    if (typeof taskId !== "string") return { ok: false, error: "taskId must be a string" };
+    try {
+      const tasks = loadAutomationTasks();
+      const task = tasks.find((t) => t.id === taskId);
+      if (!task) return { ok: false, error: "task not found" };
+
+      const portFile = path.join(CONFIG_DIR, "serve.port");
+      const tokenFile = path.join(CONFIG_DIR, "serve.token");
+      if (!fs.existsSync(portFile)) return { ok: false, error: "agx serve not running" };
+      const port = fs.readFileSync(portFile, "utf-8").trim();
+      const token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, "utf-8").trim() : "";
+      const base = `http://127.0.0.1:${port}`;
+
+      const body: Record<string, unknown> = { message: task.prompt, stream: false };
+      if (task.workspace) body.taskspaces = [task.workspace];
+
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["x-agx-desktop-token"] = token;
+
+      const resp = await fetch(`${base}/api/chat`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      task.lastRunAt = new Date().toISOString();
+      task.lastRunStatus = resp.ok ? "success" : "error";
+      saveAutomationTasks(tasks);
+
+      return { ok: resp.ok, error: resp.ok ? undefined : `HTTP ${resp.status}` };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("load-skill-install-policy", async () => {
     const cfg = loadAgxConfig();
     return { ok: true, config: loadSkillInstallPolicyFromAgx(cfg) };
@@ -3034,6 +3267,7 @@ if (!gotTheLock) {
 
       registerIpc();
       applyPreventSleepFromConfig(loadAgxConfig());
+      automationScheduler.start();
       createWindow();
       startSkillsDirWatcher();
       createTray();
@@ -3059,6 +3293,7 @@ if (!gotTheLock) {
 
   app.on("before-quit", () => {
     isQuitting = true;
+    automationScheduler.stop();
     stopSkillsDirWatcher();
     killAllTerminalSessions();
     stopFeishuProcess();
