@@ -56,6 +56,7 @@ type AutomationTaskData = {
   name: string;
   prompt: string;
   workspace?: string;
+  sessionId?: string;
   frequency: AutomationFrequencyData;
   effectiveDateRange?: { start?: string; end?: string };
   enabled: boolean;
@@ -63,6 +64,16 @@ type AutomationTaskData = {
   lastRunAt?: string;
   lastRunStatus?: "success" | "error";
   fromTemplate?: string;
+};
+
+type AutomationTaskProgress = {
+  taskId: string;
+  taskName: string;
+  trigger: "schedule" | "manual";
+  phase: "queued" | "running" | "success" | "error";
+  sessionId?: string;
+  message?: string;
+  ts: number;
 };
 
 type SkillInstallPolicyConfig = {
@@ -323,6 +334,7 @@ declare global {
 
       onOpenSettings: (cb: () => void) => void;
       onSkillsChanged: (cb: () => void) => () => void;
+      onAutomationTaskProgress: (cb: (payload: AutomationTaskProgress) => void) => () => void;
 
       listAvatars: () => Promise<{ ok: boolean; avatars: AvatarItem[] }>;
       createAvatar: (payload: {
@@ -424,7 +436,9 @@ declare global {
       loadAutomationTasks: () => Promise<{ ok: boolean; tasks: AutomationTaskData[]; error?: string }>;
       saveAutomationTask: (task: AutomationTaskData) => Promise<{ ok: boolean; error?: string }>;
       deleteAutomationTask: (taskId: string) => Promise<{ ok: boolean; error?: string }>;
-      runAutomationTaskNow: (taskId: string) => Promise<{ ok: boolean; error?: string }>;
+      runAutomationTaskNow: (
+        payload: string | { taskId: string; sessionId?: string },
+      ) => Promise<{ ok: boolean; error?: string }>;
       loadSkillInstallPolicy: () => Promise<{ ok: boolean; config?: SkillInstallPolicyConfig; error?: string }>;
       saveSkillInstallPolicy: (payload: SkillInstallPolicyConfig) => Promise<{ ok: boolean; error?: string }>;
       loadEmailConfig: () => Promise<{ ok: boolean; config: EmailConfig; error?: string }>;
