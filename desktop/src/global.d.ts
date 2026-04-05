@@ -46,6 +46,25 @@ type AutomationConfig = {
   prevent_sleep: boolean;
 };
 
+type AutomationFrequencyData =
+  | { type: "daily"; time: string; days: number[] }
+  | { type: "interval"; hours: number; days: number[] }
+  | { type: "once"; time: string; date: string };
+
+type AutomationTaskData = {
+  id: string;
+  name: string;
+  prompt: string;
+  workspace?: string;
+  frequency: AutomationFrequencyData;
+  effectiveDateRange?: { start?: string; end?: string };
+  enabled: boolean;
+  createdAt: string;
+  lastRunAt?: string;
+  lastRunStatus?: "success" | "error";
+  fromTemplate?: string;
+};
+
 type SkillInstallPolicyConfig = {
   non_high_risk_auto_install: boolean;
 };
@@ -402,6 +421,10 @@ declare global {
       saveTrinityConfig: (payload: TrinityConfig) => Promise<{ ok: boolean; error?: string }>;
       loadAutomationConfig: () => Promise<{ ok: boolean; config?: AutomationConfig; error?: string }>;
       saveAutomationConfig: (payload: AutomationConfig) => Promise<{ ok: boolean; error?: string }>;
+      loadAutomationTasks: () => Promise<{ ok: boolean; tasks: AutomationTaskData[]; error?: string }>;
+      saveAutomationTask: (task: AutomationTaskData) => Promise<{ ok: boolean; error?: string }>;
+      deleteAutomationTask: (taskId: string) => Promise<{ ok: boolean; error?: string }>;
+      runAutomationTaskNow: (taskId: string) => Promise<{ ok: boolean; error?: string }>;
       loadSkillInstallPolicy: () => Promise<{ ok: boolean; config?: SkillInstallPolicyConfig; error?: string }>;
       saveSkillInstallPolicy: (payload: SkillInstallPolicyConfig) => Promise<{ ok: boolean; error?: string }>;
       loadEmailConfig: () => Promise<{ ok: boolean; config: EmailConfig; error?: string }>;

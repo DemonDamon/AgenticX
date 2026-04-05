@@ -12,9 +12,9 @@ import {
   Trash2,
   Wrench,
   Loader2,
-  Zap,
   ChevronRight,
   Anchor,
+  Clock,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import type { Avatar, ChatPane, ChatStyle, GroupChat } from "../store";
@@ -23,6 +23,7 @@ import { RECOMMENDED_SKILLS } from "../data/recommended-skills";
 import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
+import { AutomationTab } from "./automation/AutomationTab";
 
 export type FavoriteForwardContext = {
   sourceSessionId: string;
@@ -519,7 +520,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "tools", label: "工具", icon: Wrench },
   { id: "skills", label: "技能", icon: Sparkles },
   { id: "hooks", label: "钩子", icon: Anchor },
-  { id: "automation", label: "自动化", icon: Zap },
+  { id: "automation", label: "自动化", icon: Clock },
   { id: "email", label: "邮件通知", icon: Mail },
   { id: "workspace", label: "工作区", icon: FolderOpen },
   { id: "favorites", label: "收藏", icon: Bookmark },
@@ -3790,86 +3791,6 @@ function SettingsToggleCard(props: {
   );
 }
 
-function AutomationPreventSleepPanel() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [enabled, setEnabled] = useState(false);
-  const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    let disposed = false;
-    const load = async () => {
-      setLoading(true);
-      setMessage("");
-      try {
-        const result = await window.agenticxDesktop.loadAutomationConfig();
-        if (!disposed && result?.ok && result.config) {
-          setEnabled(Boolean(result.config.prevent_sleep));
-        }
-      } catch {
-        if (!disposed) setMessage("读取自动化配置失败。");
-      } finally {
-        if (!disposed) setLoading(false);
-      }
-    };
-    void load();
-    return () => {
-      disposed = true;
-    };
-  }, []);
-
-  const persist = async (next: boolean) => {
-    setSaving(true);
-    setMessage("");
-    try {
-      const result = await window.agenticxDesktop.saveAutomationConfig({ prevent_sleep: next });
-      if (!result?.ok) {
-        setMessage(result?.error ? String(result.error) : "保存失败。");
-        setEnabled(!next);
-        return;
-      }
-      setEnabled(next);
-      setMessage("已保存。只要本应用还在跑，系统会更不容易自动睡眠。");
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "保存失败。");
-      setEnabled(!next);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <Panel title="自动化">
-        <div className="py-2 text-sm text-text-faint">加载中…</div>
-      </Panel>
-    );
-  }
-
-  return (
-    <Panel title="自动化">
-      <p className="mb-3 text-xs text-text-faint">
-        写入本机 <code className="text-text-subtle">~/.agenticx/config.yaml</code> 中的{" "}
-        <code className="text-text-subtle">automation.prevent_sleep</code>。
-      </p>
-      <SettingsToggleCard
-        title="抑制系统睡眠"
-        description="向系统申请「推迟睡眠」，减少长跑任务、合盖挂机或远程串联时被系统挂起的概率；退出 Machi 后不再拦截。"
-        checked={enabled}
-        disabled={saving}
-        onChange={(next) => void persist(next)}
-      />
-      {message ? (
-        <div
-          className={`mt-2 text-xs ${message.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}
-        >
-          {message}
-        </div>
-      ) : null}
-    </Panel>
-  );
-}
-
 function WorkspaceSettingsTab() {
   return (
     <div className="space-y-4">
@@ -4860,11 +4781,7 @@ export function SettingsPanel({
             {/* === HOOKS TAB === */}
             {tab === "hooks" && <HooksTab />}
 
-            {tab === "automation" && (
-              <div className="space-y-4">
-                <AutomationPreventSleepPanel />
-              </div>
-            )}
+            {tab === "automation" && <AutomationTab />}
 
             {/* === EMAIL TAB === */}
             {tab === "email" && <EmailSettingsTab />}

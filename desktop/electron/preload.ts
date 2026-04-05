@@ -229,6 +229,18 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadAutomationConfig: async () => ipcRenderer.invoke("load-automation-config"),
   saveAutomationConfig: async (payload: { prevent_sleep: boolean }) =>
     ipcRenderer.invoke("save-automation-config", payload),
+  loadAutomationTasks: async () =>
+    ipcRenderer.invoke("load-automation-tasks") as Promise<{
+      ok: boolean;
+      tasks: Array<Record<string, unknown>>;
+      error?: string;
+    }>,
+  saveAutomationTask: async (task: Record<string, unknown>) =>
+    ipcRenderer.invoke("save-automation-task", task) as Promise<{ ok: boolean; error?: string }>,
+  deleteAutomationTask: async (taskId: string) =>
+    ipcRenderer.invoke("delete-automation-task", taskId) as Promise<{ ok: boolean; error?: string }>,
+  runAutomationTaskNow: async (taskId: string) =>
+    ipcRenderer.invoke("run-automation-task-now", taskId) as Promise<{ ok: boolean; error?: string }>,
   loadSkillInstallPolicy: async () => ipcRenderer.invoke("load-skill-install-policy"),
   saveSkillInstallPolicy: async (payload: { non_high_risk_auto_install: boolean }) =>
     ipcRenderer.invoke("save-skill-install-policy", payload),
