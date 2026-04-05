@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, type ChatPane, type Message } from "../store";
+import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import { attachmentsFromSessionRow } from "../utils/session-message-map";
 import { FeishuBadge } from "./FeishuBadge";
 
@@ -208,8 +209,24 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const messageSearchReq = useRef(0);
 
   const title = useMemo(() => (pane.avatarName || "Machi").trim(), [pane.avatarName]);
-  const feishuMarkedSessionId = feishuBoundSessionId;
-  const wechatMarkedSessionId = wechatBoundSessionId;
+
+  const feishuMarkedSessionId = useMemo(() => {
+    if (isAutomationPaneAvatarId(pane.avatarId)) return null;
+    const sid = feishuBoundSessionId;
+    if (!sid) return null;
+    const row = sessions.find((s) => s.session_id === sid);
+    if (row && isAutomationPaneAvatarId(row.avatar_id)) return null;
+    return sid;
+  }, [pane.avatarId, feishuBoundSessionId, sessions]);
+
+  const wechatMarkedSessionId = useMemo(() => {
+    if (isAutomationPaneAvatarId(pane.avatarId)) return null;
+    const sid = wechatBoundSessionId;
+    if (!sid) return null;
+    const row = sessions.find((s) => s.session_id === sid);
+    if (row && isAutomationPaneAvatarId(row.avatar_id)) return null;
+    return sid;
+  }, [pane.avatarId, wechatBoundSessionId, sessions]);
 
   const sessionSearchTrim = sessionSearchQuery.trim();
   const sessionSearchNeedles = useMemo(
@@ -340,7 +357,12 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           if (!cancelled) setFeishuBoundSessionId(null);
           return;
         }
-        const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
+        const desk = r.bindings["_desktop"] as { session_id?: string; avatar_id?: string | null } | undefined;
+        if (isAutomationPaneAvatarId(desk?.avatar_id)) {
+          await window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
+          if (!cancelled) setFeishuBoundSessionId(null);
+          return;
+        }
         const sid = typeof desk?.session_id === "string" ? desk.session_id.trim() : "";
         setFeishuBoundSessionId(sid || null);
       } catch {
@@ -358,7 +380,12 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           if (!cancelled) setWechatBoundSessionId(null);
           return;
         }
-        const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
+        const desk = r.bindings["_desktop"] as { session_id?: string; avatar_id?: string | null } | undefined;
+        if (isAutomationPaneAvatarId(desk?.avatar_id)) {
+          await window.agenticxDesktop.saveWechatDesktopBinding({ sessionId: null });
+          if (!cancelled) setWechatBoundSessionId(null);
+          return;
+        }
         const sid = typeof desk?.session_id === "string" ? desk.session_id.trim() : "";
         setWechatBoundSessionId(sid || null);
       } catch {
@@ -703,6 +730,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     const item = contextMenu.item;
     setContextMenu(null);
     if (action === "toggle_feishu_binding") {
+      if (isAutomationPaneAvatarId(pane.avatarId) || isAutomationPaneAvatarId(item.avatar_id)) return;
       const currentBound = (feishuBoundSessionId || "").trim();
       const target = (item.session_id || "").trim();
       if (!target) return;
@@ -721,6 +749,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       return;
     }
     if (action === "toggle_wechat_binding") {
+      if (isAutomationPaneAvatarId(pane.avatarId) || isAutomationPaneAvatarId(item.avatar_id)) return;
       const currentBound = (wechatBoundSessionId || "").trim();
       const target = (item.session_id || "").trim();
       if (!target) return;
@@ -1003,18 +1032,22 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           >
             {contextMenu.item.pinned ? "取消置顶" : "置顶"}
           </button>
-          <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
-            onClick={() => void runContextAction("toggle_feishu_binding")}
-          >
-            {feishuBoundSessionId === contextMenu.item.session_id ? "取消绑定飞书会话" : "绑定为飞书会话"}
-          </button>
-          <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
-            onClick={() => void runContextAction("toggle_wechat_binding")}
-          >
-            {wechatBoundSessionId === contextMenu.item.session_id ? "取消绑定微信会话" : "绑定为微信会话"}
-          </button>
+          {!isAutomationPaneAvatarId(pane.avatarId) && !isAutomationPaneAvatarId(contextMenu.item.avatar_id) ? (
+            <>
+              <button
+                className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+                onClick={() => void runContextAction("toggle_feishu_binding")}
+              >
+                {feishuBoundSessionId === contextMenu.item.session_id ? "取消绑定飞书会话" : "绑定为飞书会话"}
+              </button>
+              <button
+                className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+                onClick={() => void runContextAction("toggle_wechat_binding")}
+              >
+                {wechatBoundSessionId === contextMenu.item.session_id ? "取消绑定微信会话" : "绑定为微信会话"}
+              </button>
+            </>
+          ) : null}
           <button
             className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("fork")}
