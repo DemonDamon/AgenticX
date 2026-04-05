@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Settings } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock3, Loader2, Settings } from "lucide-react";
 import { useAppStore, type Avatar, type GroupChat } from "../store";
 import { avatarBgClass, avatarDotColor, groupColorByIndex } from "../utils/avatar-color";
 import { AvatarCreateDialog } from "./AvatarCreateDialog";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
+import type { AutomationTask } from "./automation/types";
 
 function avatarInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -79,6 +80,11 @@ export function AvatarSidebar() {
   const [groupEditTarget, setGroupEditTarget] = useState<GroupChat | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [groupContextMenu, setGroupContextMenu] = useState<GroupContextMenuState>(null);
+  const [automationTasks, setAutomationTasks] = useState<AutomationTask[]>([]);
+  const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(new Set());
+  const [avatarsCollapsed, setAvatarsCollapsed] = useState(false);
+  const [groupsCollapsed, setGroupsCollapsed] = useState(false);
+  const [automationCollapsed, setAutomationCollapsed] = useState(false);
   const [settingsPanel, setSettingsPanel] = useState<
     | { mode: "avatar"; avatarId: string }
     | { mode: "machi" }
@@ -121,10 +127,53 @@ export function AvatarSidebar() {
     }
   }, [setGroups]);
 
+  const refreshAutomationTasks = useCallback(async () => {
+    const result = await window.agenticxDesktop.loadAutomationTasks().catch(() => ({
+      ok: false,
+      tasks: [] as AutomationTask[],
+    }));
+    if (!result?.ok || !Array.isArray(result.tasks)) return;
+    setAutomationTasks(
+      [...result.tasks].sort((a, b) => {
+        const ta = Number(new Date(a.createdAt ?? 0).getTime()) || 0;
+        const tb = Number(new Date(b.createdAt ?? 0).getTime()) || 0;
+        return tb - ta;
+      })
+    );
+  }, []);
+
   useEffect(() => {
     void refreshAvatars();
     void refreshGroups();
-  }, [refreshAvatars, refreshGroups]);
+    void refreshAutomationTasks();
+  }, [refreshAvatars, refreshGroups, refreshAutomationTasks]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void refreshAutomationTasks();
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [refreshAutomationTasks]);
+
+  useEffect(() => {
+    const off = window.agenticxDesktop.onAutomationTaskProgress((payload) => {
+      const taskId = String(payload.taskId ?? "").trim();
+      if (!taskId) return;
+      setRunningTaskIds((prev) => {
+        const next = new Set(prev);
+        if (payload.phase === "queued" || payload.phase === "running") {
+          next.add(taskId);
+        } else {
+          next.delete(taskId);
+        }
+        return next;
+      });
+      if (payload.phase === "success" || payload.phase === "error") {
+        void refreshAutomationTasks();
+      }
+    });
+    return () => off();
+  }, [refreshAutomationTasks]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -263,6 +312,70 @@ export function AvatarSidebar() {
     })();
   };
 
+  const openOrFocusAutomationPane = (task: AutomationTask) => {
+    const automationAvatarId = `automation:${task.id}`;
+    const paneTitle = `定时 · ${task.name}`;
+    const existing = panes.find((item) => item.avatarId === automationAvatarId);
+    if (existing) {
+      setActivePaneId(existing.id);
+      setActiveAvatarId(null);
+      return;
+    }
+    if (openingRef.current) return;
+    openingRef.current = true;
+    const paneId = addPane(automationAvatarId, paneTitle, "");
+    setActivePaneId(paneId);
+    setActiveAvatarId(null);
+
+    void (async () => {
+      try {
+        const sid = String(task.sessionId ?? "").trim();
+        if (sid) {
+          setPaneSessionId(paneId, sid);
+          return;
+        }
+        const listed = await window.agenticxDesktop
+          .listSessions(automationAvatarId)
+          .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
+        const recentSid =
+          listed.ok && Array.isArray(listed.sessions)
+            ? pickMostRecentSessionId(listed.sessions, automationAvatarId)
+            : undefined;
+        if (recentSid) {
+          setPaneSessionId(paneId, recentSid);
+          const updateTask: AutomationTask = {
+            ...task,
+            sessionId: recentSid,
+          };
+          const saved = await window.agenticxDesktop.saveAutomationTask(updateTask);
+          if (!saved?.ok) {
+            console.warn("[automation] failed to persist recovered sessionId", task.id, saved?.error);
+          }
+          await refreshAutomationTasks();
+          return;
+        }
+        const created = await window.agenticxDesktop.createSession({
+          avatar_id: automationAvatarId,
+          name: task.name,
+        });
+        if (created.ok && created.session_id) {
+          setPaneSessionId(paneId, created.session_id);
+          const updateTask: AutomationTask = {
+            ...task,
+            sessionId: created.session_id,
+          };
+          const saved = await window.agenticxDesktop.saveAutomationTask(updateTask);
+          if (!saved?.ok) {
+            console.warn("[automation] failed to persist created sessionId", task.id, saved?.error);
+          }
+          await refreshAutomationTasks();
+        }
+      } finally {
+        openingRef.current = false;
+      }
+    })();
+  };
+
   const handleContextAction = async (action: string) => {
     if (!contextMenu) return;
     const avatarId = contextMenu.target === "avatar" ? contextMenu.avatarId : "";
@@ -362,134 +475,216 @@ export function AvatarSidebar() {
           </div>
         </button>
 
-        {/* Avatar list */}
-        <div className="flex items-center justify-between px-4 py-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-text-faint">分身 ({avatars.length})</span>
-          <button
-            className="rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-            onClick={() => setCreateOpen(true)}
-          >
-            + 新建
-          </button>
-        </div>
-
         <div className="flex-1 overflow-y-auto py-1">
-          {sortedAvatars.length === 0 && (
-            <div className="px-3 py-6 text-center text-xs text-text-faint">
-              暂无分身，点击上方"新建"创建
-            </div>
-          )}
-          {sortedAvatars.map((avatar) => {
-            const isActive = activeAvatarId === avatar.id;
-            const hasPane = panes.some((item) => item.avatarId === avatar.id);
-            return (
-              <div key={avatar.id}>
-                <button
-                  className={`mx-2 flex w-[calc(100%-16px)] items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition-all ${
-                    isActive
-                      ? "bg-surface-card text-text-strong"
-                      : "text-text-muted hover:bg-surface-card hover:text-text-strong"
-                  }`}
-                  onClick={() => void openOrFocusPane(avatar.id, avatar.name)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setGroupContextMenu(null);
-                    setContextMenu({ x: e.clientX, y: e.clientY, target: "avatar", avatarId: avatar.id });
-                  }}
-                >
-                  {/* 方形圆角头像 + 右下角在线圆圈 */}
-                  <div className="relative shrink-0">
-                    {avatar.avatarUrl ? (
-                      <img
-                        src={avatar.avatarUrl}
-                        alt={avatar.name}
-                        className="h-8 w-8 rounded-[6px] object-cover"
-                      />
-                    ) : (
-                      <div
-                        className={`flex h-8 w-8 items-center justify-center rounded-[6px] text-xs font-bold text-white ${avatarColor(avatar.id)}`}
-                      >
-                        {avatarInitials(avatar.name)}
-                      </div>
-                    )}
-                    {hasPane && (
-                      <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface-sidebar bg-emerald-500" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1">
-                      <span className="truncate text-sm">{avatar.name}</span>
-                      {avatar.pinned && <span className="text-[10px] text-amber-400">*</span>}
-                    </div>
-                    {avatar.role && (
-                      <div className="truncate text-[10px] text-text-faint">{avatar.role}</div>
-                    )}
-                  </div>
-                </button>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Group chats */}
-        <div className="mt-2">
+          {/* Avatar list */}
           <div className="flex items-center justify-between px-4 py-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-text-faint">群聊 ({groups.length})</span>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-text-faint hover:text-text-subtle"
+              onClick={() => setAvatarsCollapsed((v) => !v)}
+            >
+              {avatarsCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              <span>分身 ({avatars.length})</span>
+            </button>
             <button
               className="rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-              onClick={() => setGroupCreateOpen(true)}
+              onClick={() => setCreateOpen(true)}
             >
               + 新建
             </button>
           </div>
-          <div className="overflow-y-auto pb-2">
-            {groups.map((group, groupIndex) => {
-              const groupAvatarId = `group:${group.id}`;
-              const hasPane = panes.some((item) => item.avatarId === groupAvatarId);
-              const isActive = panes.some(
-                (item) => item.avatarId === groupAvatarId && item.id === activePaneId
-              );
-              const { iconBg, dotColor } = groupColorByIndex(groupIndex);
-              return (
-                <button
-                  key={group.id}
-                  className={`mx-2 flex w-[calc(100%-16px)] items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left transition-all ${
-                    isActive
-                      ? "bg-surface-card text-text-strong"
-                      : "text-text-muted hover:bg-surface-card hover:text-text-strong"
-                  }`}
-                  onClick={() => void openOrFocusGroupPane(group)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setContextMenu(null);
-                    setGroupContextMenu({ x: e.clientX, y: e.clientY, groupId: group.id });
-                  }}
-                >
-                  <div className="relative shrink-0">
-                    <div
-                      className="flex h-8 w-8 items-center justify-center rounded-[6px] text-[10px] font-bold text-white"
-                      style={{ backgroundColor: iconBg }}
+          {!avatarsCollapsed && (
+            <div className="pb-1">
+              {sortedAvatars.length === 0 && (
+                <div className="px-3 py-4 text-center text-xs text-text-faint">
+                  暂无分身，点击上方「新建」创建
+                </div>
+              )}
+              {sortedAvatars.map((avatar) => {
+                const isActive = activeAvatarId === avatar.id;
+                const hasPane = panes.some((item) => item.avatarId === avatar.id);
+                return (
+                  <div key={avatar.id}>
+                    <button
+                      className={`mx-2 flex w-[calc(100%-16px)] items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition-all ${
+                        isActive
+                          ? "bg-surface-card text-text-strong"
+                          : "text-text-muted hover:bg-surface-card hover:text-text-strong"
+                      }`}
+                      onClick={() => void openOrFocusPane(avatar.id, avatar.name)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setGroupContextMenu(null);
+                        setContextMenu({ x: e.clientX, y: e.clientY, target: "avatar", avatarId: avatar.id });
+                      }}
                     >
-                      {group.name.slice(0, 1).toUpperCase()}
-                    </div>
-                    {hasPane && (
-                      <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface-sidebar bg-emerald-500" />
-                    )}
+                      <div className="relative shrink-0">
+                        {avatar.avatarUrl ? (
+                          <img
+                            src={avatar.avatarUrl}
+                            alt={avatar.name}
+                            className="h-8 w-8 rounded-[6px] object-cover"
+                          />
+                        ) : (
+                          <div
+                            className={`flex h-8 w-8 items-center justify-center rounded-[6px] text-xs font-bold text-white ${avatarColor(avatar.id)}`}
+                          >
+                            {avatarInitials(avatar.name)}
+                          </div>
+                        )}
+                        {hasPane && (
+                          <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface-sidebar bg-emerald-500" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1">
+                          <span className="truncate text-sm">{avatar.name}</span>
+                          {avatar.pinned && <span className="text-[10px] text-amber-400">*</span>}
+                        </div>
+                        {avatar.role && (
+                          <div className="truncate text-[10px] text-text-faint">{avatar.role}</div>
+                        )}
+                      </div>
+                    </button>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1">
-                      <div className="truncate text-xs">{group.name}</div>
-                    </div>
-                    <div className="truncate text-[10px] text-text-faint">
-                      {group.avatarIds.length} avatars ·{" "}
-                      {group.avatarIds
-                        .map((id) => avatars.find((a) => a.id === id)?.name || id.slice(0, 4))
-                        .join(", ")}
-                    </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Group chats */}
+          <div className="mt-2">
+            <div className="flex items-center justify-between px-4 py-1.5">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-text-faint hover:text-text-subtle"
+                onClick={() => setGroupsCollapsed((v) => !v)}
+              >
+                {groupsCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                <span>群聊 ({groups.length})</span>
+              </button>
+              <button
+                className="rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                onClick={() => setGroupCreateOpen(true)}
+              >
+                + 新建
+              </button>
+            </div>
+            {!groupsCollapsed && (
+              <div className="pb-1">
+                {groups.map((group, groupIndex) => {
+                  const groupAvatarId = `group:${group.id}`;
+                  const hasPane = panes.some((item) => item.avatarId === groupAvatarId);
+                  const isActive = panes.some(
+                    (item) => item.avatarId === groupAvatarId && item.id === activePaneId
+                  );
+                  const { iconBg } = groupColorByIndex(groupIndex);
+                  return (
+                    <button
+                      key={group.id}
+                      className={`mx-2 flex w-[calc(100%-16px)] items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left transition-all ${
+                        isActive
+                          ? "bg-surface-card text-text-strong"
+                          : "text-text-muted hover:bg-surface-card hover:text-text-strong"
+                      }`}
+                      onClick={() => void openOrFocusGroupPane(group)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setContextMenu(null);
+                        setGroupContextMenu({ x: e.clientX, y: e.clientY, groupId: group.id });
+                      }}
+                    >
+                      <div className="relative shrink-0">
+                        <div
+                          className="flex h-8 w-8 items-center justify-center rounded-[6px] text-[10px] font-bold text-white"
+                          style={{ backgroundColor: iconBg }}
+                        >
+                          {group.name.slice(0, 1).toUpperCase()}
+                        </div>
+                        {hasPane && (
+                          <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface-sidebar bg-emerald-500" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs">{group.name}</div>
+                        <div className="truncate text-[10px] text-text-faint">
+                          {group.avatarIds.length} avatars ·{" "}
+                          {group.avatarIds
+                            .map((id) => avatars.find((a) => a.id === id)?.name || id.slice(0, 4))
+                            .join(", ")}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Scheduled tasks */}
+          <div className="mt-2 pb-2">
+            <div className="flex items-center justify-between px-4 py-1.5">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-text-faint hover:text-text-subtle"
+                onClick={() => setAutomationCollapsed((v) => !v)}
+              >
+                {automationCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                <span>定时 ({automationTasks.length})</span>
+              </button>
+              <button
+                className="rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                onClick={() => openSettings()}
+              >
+                管理
+              </button>
+            </div>
+            {!automationCollapsed && (
+              <div className="pb-1">
+                {automationTasks.length === 0 && (
+                  <div className="px-3 py-4 text-center text-xs text-text-faint">
+                    暂无定时任务，可在「设置 - 自动化」创建
                   </div>
-                </button>
-              );
-            })}
+                )}
+                {automationTasks.map((task) => {
+                  const automationAvatarId = `automation:${task.id}`;
+                  const hasPane = panes.some((item) => item.avatarId === automationAvatarId);
+                  const isActive = panes.some(
+                    (item) => item.avatarId === automationAvatarId && item.id === activePaneId
+                  );
+                  const isRunning = runningTaskIds.has(task.id);
+                  return (
+                    <button
+                      key={task.id}
+                      className={`mx-2 flex w-[calc(100%-16px)] items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left transition-all ${
+                        isActive
+                          ? "bg-surface-card text-text-strong"
+                          : "text-text-muted hover:bg-surface-card hover:text-text-strong"
+                      }`}
+                      onClick={() => void openOrFocusAutomationPane(task)}
+                    >
+                      <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] bg-surface-card">
+                        {isRunning ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+                        ) : (
+                          <Clock3 className="h-4 w-4 text-text-muted" />
+                        )}
+                        {hasPane && (
+                          <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface-sidebar bg-emerald-500" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs">{task.name}</div>
+                        <div className="truncate text-[10px] text-text-faint">
+                          {isRunning ? "运行中..." : task.enabled ? "已启用" : "已暂停"}
+                          {task.lastRunStatus === "error" ? " · 最近失败" : ""}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 

@@ -61,7 +61,7 @@ export function FrequencyPicker({ value, onChange }: Props) {
             type="button"
             className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
               activeType === t
-                ? "bg-surface-card-strong text-text-strong"
+                ? "bg-surface-card text-text-strong"
                 : "text-text-muted hover:bg-surface-card hover:text-text-primary"
             }`}
             onClick={() => switchType(t)}
@@ -77,7 +77,7 @@ export function FrequencyPicker({ value, onChange }: Props) {
             type="time"
             value={value.time}
             onChange={(e) => onChange({ ...value, time: e.target.value })}
-            className="rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
+            className="rounded-md border border-border bg-surface-card px-2 py-1.5 text-sm text-text-primary"
           />
           <div className="flex flex-wrap gap-1">
             {DAY_LABELS.map((d) => (
@@ -87,7 +87,7 @@ export function FrequencyPicker({ value, onChange }: Props) {
                 className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
                   value.days.includes(d.value)
                     ? "bg-text-strong text-surface-panel"
-                    : "bg-surface-card text-text-muted hover:bg-surface-card-strong"
+                    : "bg-surface-card text-text-muted hover:bg-surface-hover"
                 }`}
                 onClick={() => toggleDay(d.value)}
               >
@@ -108,7 +108,7 @@ export function FrequencyPicker({ value, onChange }: Props) {
               max={24}
               value={value.hours}
               onChange={(e) => onChange({ ...value, hours: Math.max(1, Math.min(24, Number(e.target.value) || 1)) })}
-              className="w-16 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-center text-sm text-text-primary"
+              className="w-16 rounded-md border border-border bg-surface-card px-2 py-1.5 text-center text-sm text-text-primary"
             />
             <span className="text-xs text-text-muted">小时</span>
           </div>
@@ -120,7 +120,7 @@ export function FrequencyPicker({ value, onChange }: Props) {
                 className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
                   value.days.includes(d.value)
                     ? "bg-text-strong text-surface-panel"
-                    : "bg-surface-card text-text-muted hover:bg-surface-card-strong"
+                    : "bg-surface-card text-text-muted hover:bg-surface-hover"
                 }`}
                 onClick={() => toggleDay(d.value)}
               >
@@ -137,13 +137,13 @@ export function FrequencyPicker({ value, onChange }: Props) {
             type="time"
             value={value.time}
             onChange={(e) => onChange({ ...value, time: e.target.value })}
-            className="rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
+            className="rounded-md border border-border bg-surface-card px-2 py-1.5 text-sm text-text-primary"
           />
           <input
             type="date"
             value={value.date}
             onChange={(e) => onChange({ ...value, date: e.target.value })}
-            className="rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
+            className="rounded-md border border-border bg-surface-card px-2 py-1.5 text-sm text-text-primary"
           />
         </div>
       )}

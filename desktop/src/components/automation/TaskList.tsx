@@ -7,7 +7,7 @@ interface Props {
   onToggle: (taskId: string, enabled: boolean) => void;
   onEdit: (task: AutomationTask) => void;
   onDelete: (taskId: string) => void;
-  onRunNow: (taskId: string) => void;
+  onRunNow: (task: AutomationTask) => void;
 }
 
 function SettingsSwitch({
@@ -27,7 +27,7 @@ function SettingsSwitch({
       disabled={disabled}
       onClick={() => { if (!disabled) onChange(!checked); }}
       className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${
-        checked ? "bg-text-strong" : "bg-surface-card-strong"
+        checked ? "bg-emerald-500" : "bg-surface-hover"
       } ${disabled ? "opacity-50" : ""}`}
     >
       <span
@@ -69,9 +69,9 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
 
-  const handleRunNow = (taskId: string) => {
-    setRunningId(taskId);
-    onRunNow(taskId);
+  const handleRunNow = (task: AutomationTask) => {
+    setRunningId(task.id);
+    onRunNow(task);
     setTimeout(() => setRunningId(null), 3000);
   };
 
@@ -112,7 +112,7 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
                   title="立即执行"
                   disabled={runningId === task.id}
                   className="rounded-md p-1 text-text-faint transition hover:bg-surface-panel hover:text-text-primary disabled:opacity-40"
-                  onClick={() => handleRunNow(task.id)}
+                  onClick={() => handleRunNow(task)}
                 >
                   <Play className="h-3.5 w-3.5" />
                 </button>
@@ -132,10 +132,15 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
-                <SettingsSwitch
-                  checked={task.enabled}
-                  onChange={(next) => onToggle(task.id, next)}
-                />
+                <div className="flex items-center gap-1.5 pl-0.5">
+                  <span className="whitespace-nowrap text-[10px] text-text-faint" title="启用后按计划触发">
+                    启用
+                  </span>
+                  <SettingsSwitch
+                    checked={task.enabled}
+                    onChange={(next) => onToggle(task.id, next)}
+                  />
+                </div>
               </div>
             </div>
             {expanded && (
@@ -155,6 +160,14 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
                         ({task.lastRunStatus === "success" ? "成功" : "失败"})
                       </span>
                     )}
+                    {task.lastRunStatus === "error" && task.lastRunError ? (
+                      <div
+                        className="mt-1 line-clamp-3 break-words text-[11px] leading-snug text-rose-300/95"
+                        title={task.lastRunError}
+                      >
+                        {task.lastRunError}
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>
