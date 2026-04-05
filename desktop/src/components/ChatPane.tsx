@@ -31,6 +31,8 @@ import {
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
+import { isAutomationPaneAvatarId } from "../utils/automation-pane";
+import type { AutomationTask } from "./automation/types";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
@@ -1125,6 +1127,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const userPreference = useAppStore((s) => s.userPreference);
   const userBubbleLabel = useMemo(() => userNickname.trim() || "我", [userNickname]);
   const isGroupPane = Boolean(pane?.avatarId?.startsWith("group:"));
+  const isAutomationTaskPane = isAutomationPaneAvatarId(pane?.avatarId);
   const groupChatId = isGroupPane && pane?.avatarId ? pane.avatarId.slice("group:".length) : "";
   const activeGroup = useMemo(
     () => (isGroupPane ? groups.find((g) => g.id === groupChatId) : undefined),
@@ -1184,6 +1187,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [feishuDesktopBound, setFeishuDesktopBound] = useState(false);
   const [hasAnyFeishuDesktopBinding, setHasAnyFeishuDesktopBinding] = useState(false);
   const [wechatDesktopBound, setWechatDesktopBound] = useState(false);
+  const [automationTaskErrorHint, setAutomationTaskErrorHint] = useState<string | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
   useEffect(() => {
@@ -1225,6 +1229,42 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }),
     [isGroupPane, pane?.messages]
   );
+
+  useEffect(() => {
+    if (!isAutomationTaskPane || !pane?.avatarId?.startsWith("automation:")) {
+      setAutomationTaskErrorHint(null);
+      return;
+    }
+    if (visibleMessages.length > 0) {
+      setAutomationTaskErrorHint(null);
+      return;
+    }
+    const taskId = pane.avatarId.slice("automation:".length);
+    let cancelled = false;
+    const loadErr = async () => {
+      try {
+        const r = await window.agenticxDesktop.loadAutomationTasks();
+        if (!r?.ok || cancelled) return;
+        const list = Array.isArray(r.tasks) ? (r.tasks as AutomationTask[]) : [];
+        const task = list.find((t) => t.id === taskId);
+        if (cancelled) return;
+        if (task?.lastRunStatus === "error" && task.lastRunError) {
+          setAutomationTaskErrorHint(task.lastRunError);
+        } else {
+          setAutomationTaskErrorHint(null);
+        }
+      } catch {
+        if (!cancelled) setAutomationTaskErrorHint(null);
+      }
+    };
+    void loadErr();
+    const timer = window.setInterval(loadErr, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isAutomationTaskPane, pane?.avatarId, visibleMessages.length]);
+
   const paneSubAgents = useMemo(() => {
     const sid = (pane?.sessionId ?? "").trim();
     if (!sid) return [];
@@ -1249,7 +1289,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (!sid) return null;
     return panes.find((p) => p.sessionId === sid)?.id ?? null;
   }, [panes, pane?.sessionId]);
-  const shouldShowBoundFeishuBadge = feishuDesktopBound && primaryPaneForSessionId === pane.id;
+  const shouldShowBoundFeishuBadge =
+    feishuDesktopBound && primaryPaneForSessionId === pane.id && !isAutomationTaskPane;
   const shouldShowDefaultMetaFeishuBadge =
     !hasAnyFeishuDesktopBinding &&
     !pane.avatarId &&
@@ -1423,7 +1464,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   ]);
 
   useEffect(() => {
-    if (isGroupPane || !pane?.sessionId) {
+    if (isGroupPane || !pane?.sessionId || isAutomationTaskPane) {
       setFeishuDesktopBound(false);
       setHasAnyFeishuDesktopBinding(false);
       setWechatDesktopBound(false);
@@ -1476,10 +1517,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [isGroupPane, pane?.sessionId]);
+  }, [isGroupPane, isAutomationTaskPane, pane?.sessionId]);
 
   const toggleFeishuDesktopBinding = useCallback(async () => {
-    if (isGroupPane || !pane?.sessionId) return;
+    if (isGroupPane || !pane?.sessionId || isAutomationTaskPane) return;
     try {
       if (feishuDesktopBound) {
         await window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
@@ -1496,7 +1537,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     } catch {
       /* ignore */
     }
-  }, [feishuDesktopBound, isGroupPane, pane?.sessionId, pane?.avatarId, pane?.avatarName]);
+  }, [feishuDesktopBound, isAutomationTaskPane, isGroupPane, pane?.sessionId, pane?.avatarId, pane?.avatarName]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -2165,11 +2206,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (!resp.ok) {
         throw new Error(`HTTP ${resp.status}`);
       }
-      const selectedIds = new Set(selectedMessages.map((m) => m.id));
-      setPaneMessages(
-        pane.id,
-        (pane.messages ?? []).filter((m) => !selectedIds.has(m.id))
-      );
+      const data = (await resp.json()) as { ok?: boolean; removed?: number; requested?: number };
+      const removed = typeof data.removed === "number" ? data.removed : 0;
+      const requested =
+        typeof data.requested === "number" ? data.requested : selectedMessages.length;
+      if (!data.ok || removed < requested) {
+        const result = await window.agenticxDesktop.loadSessionMessages(pane.sessionId);
+        if (result.ok && Array.isArray(result.messages)) {
+          const mapped = result.messages.map((item, idx) =>
+            mapLoadedSessionMessage(item as LoadedSessionMessage, pane.sessionId, idx)
+          );
+          setPaneMessages(pane.id, mapped);
+        }
+      } else {
+        const selectedIds = new Set(selectedMessages.map((m) => m.id));
+        setPaneMessages(
+          pane.id,
+          (pane.messages ?? []).filter((m) => !selectedIds.has(m.id))
+        );
+      }
       setSelectedMessageIds(new Set());
     } catch (err) {
       console.error("[ChatPane] delete selected messages failed:", err);
@@ -3411,7 +3466,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 </svg>
               </button>
             ) : null}
-            {!isGroupPane && pane.sessionId ? (() => {
+            {!isGroupPane && !isAutomationTaskPane && pane.sessionId ? (() => {
               const isImSession = pane.sessionId.startsWith("im-");
               const isDefaultMetaRoute =
                 !hasAnyFeishuDesktopBinding &&
@@ -3491,7 +3546,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               </button>
             </div>
           ) : visibleMessages.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-xs text-text-faint">暂无消息</div>
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-xs">
+              <span className="text-text-faint">暂无消息</span>
+              {isAutomationTaskPane && automationTaskErrorHint ? (
+                <div className="max-w-md rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-rose-200/95">
+                  <div className="mb-1 font-medium text-rose-300">上次定时执行失败</div>
+                  {automationTaskErrorHint}
+                </div>
+              ) : null}
+            </div>
           ) : (
             <div className="min-w-0 space-y-2">
               {renderedMessages}
