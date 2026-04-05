@@ -233,14 +233,34 @@ interface AutomationTaskData {
   name: string;
   prompt: string;
   workspace?: string;
+  sessionId?: string;
   frequency: AutomationFrequency;
   effectiveDateRange?: { start?: string; end?: string };
   enabled: boolean;
   createdAt: string;
   lastRunAt?: string;
   lastRunStatus?: "success" | "error";
+  lastRunError?: string;
   fromTemplate?: string;
 }
+
+function sanitizeAutomationRunError(raw: unknown): string | undefined {
+  const s = String(raw ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!s) return undefined;
+  return s.length > 280 ? `${s.slice(0, 277)}...` : s;
+}
+
+type AutomationTaskProgressPayload = {
+  taskId: string;
+  taskName: string;
+  trigger: "schedule" | "manual";
+  phase: "queued" | "running" | "success" | "error";
+  sessionId?: string;
+  message?: string;
+  ts: number;
+};
 
 function loadAutomationTasks(): AutomationTaskData[] {
   try {
@@ -256,6 +276,169 @@ function loadAutomationTasks(): AutomationTaskData[] {
 function saveAutomationTasks(tasks: AutomationTaskData[]): void {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(AUTOMATION_TASKS_PATH, JSON.stringify(tasks, null, 2), "utf-8");
+}
+
+function resolveAutomationSessionId(task: AutomationTaskData, override?: string): string {
+  const o = String(override ?? "").trim();
+  if (o) return o;
+  return String(task.sessionId ?? "").trim();
+}
+
+async function drainSseChatResponse(resp: Response): Promise<{ ok: boolean; error?: string }> {
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => "");
+    return { ok: false, error: `HTTP ${resp.status}: ${t.slice(0, 400)}` };
+  }
+  const reader = resp.body?.getReader();
+  if (!reader) return { ok: true };
+  const dec = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += dec.decode(value, { stream: true });
+      while (true) {
+        const sep = buffer.indexOf("\n\n");
+        if (sep === -1) break;
+        const chunk = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        for (const line of chunk.split("\n")) {
+          const m = line.match(/^data:\s*(.+)$/);
+          if (!m) continue;
+          try {
+            const obj = JSON.parse(m[1]) as { type?: string; data?: { text?: string } };
+            if (obj.type === "error") {
+              const msg = String(obj.data?.text ?? "Agent 流式错误");
+              return { ok: false, error: msg.slice(0, 800) };
+            }
+          } catch {
+            /* ignore non-JSON sse lines */
+          }
+        }
+      }
+      if (buffer.length > 4_000_000) break;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return { ok: true };
+}
+
+async function invokeAutomationUserTurn(
+  base: string,
+  token: string,
+  sessionId: string,
+  userInput: string,
+  workspacePath?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["x-agx-desktop-token"] = token;
+  const pathTrim = String(workspacePath ?? "").trim();
+  if (pathTrim) {
+    try {
+      await fetch(`${base}/api/taskspace/workspaces`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ session_id: sessionId, path: pathTrim }),
+      });
+    } catch {
+      /* workspace attach is best-effort */
+    }
+  }
+  const resp = await fetch(`${base}/api/chat`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      session_id: sessionId,
+      user_input: userInput,
+      // interactive：不把任务提示词包进 AutoSolve 长模板写入历史；避免与飞书/Machi 会话混淆且便于删除持久化
+      mode: "interactive",
+    }),
+  });
+  return drainSseChatResponse(resp);
+}
+
+async function createAutomationTaskSession(
+  base: string,
+  token: string,
+  task: AutomationTaskData,
+): Promise<string | undefined> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["x-agx-desktop-token"] = token;
+  const resp = await fetch(`${base}/api/sessions`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      avatar_id: `automation:${task.id}`,
+      name: task.name,
+    }),
+  });
+  if (!resp.ok) return undefined;
+  const data = (await resp.json()) as { session_id?: unknown };
+  const sid = String(data.session_id ?? "").trim();
+  return sid || undefined;
+}
+
+function persistAutomationTaskSession(taskId: string, sessionId: string): void {
+  const tid = String(taskId ?? "").trim();
+  const sid = String(sessionId ?? "").trim();
+  if (!tid || !sid) return;
+  const tasks = loadAutomationTasks();
+  const found = tasks.find((t) => t.id === tid);
+  if (!found) return;
+  found.sessionId = sid;
+  saveAutomationTasks(tasks);
+}
+
+async function runAutomationTaskHttp(
+  task: AutomationTaskData,
+  options?: { sessionIdOverride?: string },
+): Promise<{ ok: boolean; error?: string; sessionId?: string }> {
+  const portFile = path.join(CONFIG_DIR, "serve.port");
+  const tokenFile = path.join(CONFIG_DIR, "serve.token");
+  if (!fs.existsSync(portFile)) {
+    return { ok: false, error: "agx serve 未运行（缺少 serve.port）" };
+  }
+  const port = fs.readFileSync(portFile, "utf-8").trim();
+  const token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, "utf-8").trim() : "";
+  const base = `http://127.0.0.1:${port}`;
+  const sessionId = resolveAutomationSessionId(task, options?.sessionIdOverride);
+  if (!sessionId) {
+    return {
+      ok: false,
+      error:
+        "未绑定专属会话：请在侧栏「定时」中点击该任务打开对应聊天窗格（会自动创建并写入会话），再保存或启用定时。",
+    };
+  }
+  const prompt = String(task.prompt ?? "").trim();
+  if (!prompt) return { ok: false, error: "任务提示词为空" };
+  const first = await invokeAutomationUserTurn(base, token, sessionId, prompt, task.workspace);
+  if (first.ok) return { ...first, sessionId };
+
+  const firstErr = String(first.error ?? "");
+  if (!/HTTP\s*404/i.test(firstErr) && !/session not found/i.test(firstErr)) {
+    return { ...first, sessionId };
+  }
+
+  const repairedSid = await createAutomationTaskSession(base, token, task);
+  if (!repairedSid) {
+    return {
+      ok: false,
+      sessionId,
+      error: `会话失效且自动重建失败：${sanitizeAutomationRunError(firstErr) ?? "session not found"}`,
+    };
+  }
+
+  task.sessionId = repairedSid;
+  persistAutomationTaskSession(task.id, repairedSid);
+  const second = await invokeAutomationUserTurn(base, token, repairedSid, prompt, task.workspace);
+  if (second.ok) return { ...second, sessionId: repairedSid };
+  return {
+    ...second,
+    sessionId: repairedSid,
+    error: `会话已自动重建，但执行失败：${sanitizeAutomationRunError(second.error) ?? "未知错误"}`,
+  };
 }
 
 class AutomationScheduler {
@@ -299,6 +482,14 @@ class AutomationScheduler {
 
       task.lastRunAt = now.toISOString();
       dirty = true;
+      emitAutomationTaskProgress({
+        taskId: task.id,
+        taskName: task.name,
+        trigger: "schedule",
+        phase: "queued",
+        sessionId: resolveAutomationSessionId(task) || undefined,
+        ts: Date.now(),
+      });
       void this.executeTask(task);
     }
     if (dirty) saveAutomationTasks(tasks);
@@ -331,44 +522,54 @@ class AutomationScheduler {
 
   private async executeTask(task: AutomationTaskData): Promise<void> {
     try {
-      const portFile = path.join(CONFIG_DIR, "serve.port");
-      const tokenFile = path.join(CONFIG_DIR, "serve.token");
-      if (!fs.existsSync(portFile)) return;
-      const port = fs.readFileSync(portFile, "utf-8").trim();
-      const token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, "utf-8").trim() : "";
-      const base = `http://127.0.0.1:${port}`;
-
-      const body: Record<string, unknown> = {
-        message: task.prompt,
-        stream: false,
-      };
-      if (task.workspace) {
-        body.taskspaces = [task.workspace];
-      }
-
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers["x-agx-desktop-token"] = token;
-
-      const resp = await fetch(`${base}/api/chat`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
+      emitAutomationTaskProgress({
+        taskId: task.id,
+        taskName: task.name,
+        trigger: "schedule",
+        phase: "running",
+        sessionId: resolveAutomationSessionId(task) || undefined,
+        ts: Date.now(),
       });
-
+      const result = await runAutomationTaskHttp(task);
       const tasks = loadAutomationTasks();
       const found = tasks.find((t) => t.id === task.id);
       if (found) {
-        found.lastRunStatus = resp.ok ? "success" : "error";
+        found.lastRunStatus = result.ok ? "success" : "error";
         found.lastRunAt = new Date().toISOString();
+        if (result.ok) {
+          delete found.lastRunError;
+        } else {
+          found.lastRunError = sanitizeAutomationRunError(result.error) ?? "执行失败";
+        }
         saveAutomationTasks(tasks);
       }
-    } catch {
+      emitAutomationTaskProgress({
+        taskId: task.id,
+        taskName: task.name,
+        trigger: "schedule",
+        phase: result.ok ? "success" : "error",
+        sessionId: result.sessionId || resolveAutomationSessionId(task) || undefined,
+        message: result.error,
+        ts: Date.now(),
+      });
+    } catch (err) {
       const tasks = loadAutomationTasks();
       const found = tasks.find((t) => t.id === task.id);
       if (found) {
         found.lastRunStatus = "error";
+        found.lastRunAt = new Date().toISOString();
+        found.lastRunError = sanitizeAutomationRunError(err) ?? "执行异常";
         saveAutomationTasks(tasks);
       }
+      emitAutomationTaskProgress({
+        taskId: task.id,
+        taskName: task.name,
+        trigger: "schedule",
+        phase: "error",
+        sessionId: resolveAutomationSessionId(task) || undefined,
+        message: String(err),
+        ts: Date.now(),
+      });
     }
   }
 }
@@ -629,6 +830,13 @@ function emitSkillsChanged(): void {
       mainWindow.webContents.send("skills-changed");
     }
   }, 300);
+}
+
+function emitAutomationTaskProgress(payload: AutomationTaskProgressPayload): void {
+  const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+  for (const win of wins) {
+    win.webContents.send("automation-task-progress", payload);
+  }
 }
 
 function buildSkillWatchRoots(): string[] {
@@ -2319,7 +2527,11 @@ function registerIpc(): void {
   ipcMain.handle("save-automation-task", async (_event, payload: unknown) => {
     if (!payload || typeof payload !== "object") return { ok: false, error: "invalid payload" };
     const task = payload as AutomationTaskData;
-    if (!task.id || !task.name) return { ok: false, error: "task must have id and name" };
+    const id = String(task.id ?? "").trim();
+    const name = String(task.name ?? "").trim();
+    if (!id || !name) return { ok: false, error: "task must have id and name" };
+    task.id = id;
+    task.name = name;
     try {
       const tasks = loadAutomationTasks();
       const idx = tasks.findIndex((t) => t.id === task.id);
@@ -2348,38 +2560,75 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("run-automation-task-now", async (_event, taskId: unknown) => {
-    if (typeof taskId !== "string") return { ok: false, error: "taskId must be a string" };
+  ipcMain.handle("run-automation-task-now", async (_event, payload: unknown) => {
+    let taskId = "";
+    let sessionOverride = "";
+    if (typeof payload === "string") {
+      taskId = payload.trim();
+    } else if (payload && typeof payload === "object") {
+      const p = payload as { taskId?: unknown; sessionId?: unknown };
+      taskId = String(p.taskId ?? "").trim();
+      sessionOverride = String(p.sessionId ?? "").trim();
+    }
+    if (!taskId) return { ok: false, error: "taskId 无效" };
     try {
       const tasks = loadAutomationTasks();
       const task = tasks.find((t) => t.id === taskId);
-      if (!task) return { ok: false, error: "task not found" };
+      if (!task) return { ok: false, error: "未找到任务" };
 
-      const portFile = path.join(CONFIG_DIR, "serve.port");
-      const tokenFile = path.join(CONFIG_DIR, "serve.token");
-      if (!fs.existsSync(portFile)) return { ok: false, error: "agx serve not running" };
-      const port = fs.readFileSync(portFile, "utf-8").trim();
-      const token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, "utf-8").trim() : "";
-      const base = `http://127.0.0.1:${port}`;
-
-      const body: Record<string, unknown> = { message: task.prompt, stream: false };
-      if (task.workspace) body.taskspaces = [task.workspace];
-
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers["x-agx-desktop-token"] = token;
-
-      const resp = await fetch(`${base}/api/chat`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
+      emitAutomationTaskProgress({
+        taskId: task.id,
+        taskName: task.name,
+        trigger: "manual",
+        phase: "running",
+        sessionId: resolveAutomationSessionId(task, sessionOverride) || undefined,
+        ts: Date.now(),
+      });
+      const result = await runAutomationTaskHttp(task, {
+        sessionIdOverride: sessionOverride || undefined,
       });
 
       task.lastRunAt = new Date().toISOString();
-      task.lastRunStatus = resp.ok ? "success" : "error";
+      task.lastRunStatus = result.ok ? "success" : "error";
+      if (result.ok) {
+        delete task.lastRunError;
+      } else {
+        task.lastRunError = sanitizeAutomationRunError(result.error) ?? "执行失败";
+      }
       saveAutomationTasks(tasks);
+      emitAutomationTaskProgress({
+        taskId: task.id,
+        taskName: task.name,
+        trigger: "manual",
+        phase: result.ok ? "success" : "error",
+        sessionId: result.sessionId || resolveAutomationSessionId(task, sessionOverride) || undefined,
+        message: result.error,
+        ts: Date.now(),
+      });
 
-      return { ok: resp.ok, error: resp.ok ? undefined : `HTTP ${resp.status}` };
+      return {
+        ok: result.ok,
+        error: result.ok ? undefined : (result.error ?? "执行失败"),
+      };
     } catch (err) {
+      const tasks = loadAutomationTasks();
+      const task = tasks.find((t) => t.id === taskId);
+      if (task) {
+        task.lastRunStatus = "error";
+        task.lastRunAt = new Date().toISOString();
+        task.lastRunError = sanitizeAutomationRunError(err) ?? "执行异常";
+        saveAutomationTasks(tasks);
+      }
+      const sidFromTask = task ? resolveAutomationSessionId(task, sessionOverride) : "";
+      emitAutomationTaskProgress({
+        taskId: taskId,
+        taskName: task?.name ?? "自动化任务",
+        trigger: "manual",
+        phase: "error",
+        sessionId: sidFromTask || undefined,
+        message: String(err),
+        ts: Date.now(),
+      });
       return { ok: false, error: String(err) };
     }
   });

@@ -90,6 +90,32 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.on("skills-changed", handler);
     return () => ipcRenderer.removeListener("skills-changed", handler);
   },
+  onAutomationTaskProgress: (
+    cb: (payload: {
+      taskId: string;
+      taskName: string;
+      trigger: "schedule" | "manual";
+      phase: "queued" | "running" | "success" | "error";
+      sessionId?: string;
+      message?: string;
+      ts: number;
+    }) => void
+  ): (() => void) => {
+    const handler = (
+      _event: unknown,
+      payload: {
+        taskId: string;
+        taskName: string;
+        trigger: "schedule" | "manual";
+        phase: "queued" | "running" | "success" | "error";
+        sessionId?: string;
+        message?: string;
+        ts: number;
+      }
+    ) => cb(payload);
+    ipcRenderer.on("automation-task-progress", handler);
+    return () => ipcRenderer.removeListener("automation-task-progress", handler);
+  },
 
   listAvatars: async () => ipcRenderer.invoke("list-avatars"),
   createAvatar: async (payload: {
@@ -239,8 +265,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("save-automation-task", task) as Promise<{ ok: boolean; error?: string }>,
   deleteAutomationTask: async (taskId: string) =>
     ipcRenderer.invoke("delete-automation-task", taskId) as Promise<{ ok: boolean; error?: string }>,
-  runAutomationTaskNow: async (taskId: string) =>
-    ipcRenderer.invoke("run-automation-task-now", taskId) as Promise<{ ok: boolean; error?: string }>,
+  runAutomationTaskNow: async (payload: string | { taskId: string; sessionId?: string }) =>
+    ipcRenderer.invoke("run-automation-task-now", payload) as Promise<{ ok: boolean; error?: string }>,
   loadSkillInstallPolicy: async () => ipcRenderer.invoke("load-skill-install-policy"),
   saveSkillInstallPolicy: async (payload: { non_high_risk_auto_install: boolean }) =>
     ipcRenderer.invoke("save-skill-install-policy", payload),
