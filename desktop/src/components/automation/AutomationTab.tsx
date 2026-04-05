@@ -90,6 +90,7 @@ export function AutomationTab() {
   const [loading, setLoading] = useState(true);
   const [editingTask, setEditingTask] = useState<AutomationTask | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [runHint, setRunHint] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const loadTasks = useCallback(async () => {
     try {
@@ -103,13 +104,24 @@ export function AutomationTab() {
 
   useEffect(() => { void loadTasks(); }, [loadTasks]);
 
+  useEffect(() => {
+    if (!runHint) return;
+    const t = window.setTimeout(() => setRunHint(null), 10_000);
+    return () => window.clearTimeout(t);
+  }, [runHint]);
+
   const handleSave = useCallback(async (task: AutomationTask) => {
-    const result = await window.agenticxDesktop.saveAutomationTask(task);
+    const toSave: AutomationTask = { ...task };
+    const result = await window.agenticxDesktop.saveAutomationTask(toSave);
     if (result?.ok) {
       setShowForm(false);
       setEditingTask(null);
       void loadTasks();
     }
+    return {
+      ok: Boolean(result?.ok),
+      error: result?.error != null ? String(result.error) : undefined,
+    };
   }, [loadTasks]);
 
   const handleDelete = useCallback(async (taskId: string) => {
@@ -125,9 +137,18 @@ export function AutomationTab() {
     if (result?.ok) void loadTasks();
   }, [tasks, loadTasks]);
 
-  const handleRunNow = useCallback(async (taskId: string) => {
-    await window.agenticxDesktop.runAutomationTaskNow(taskId);
-    setTimeout(() => void loadTasks(), 1000);
+  const handleRunNow = useCallback(async (task: AutomationTask) => {
+    const sessionId = (task.sessionId ?? "").trim();
+    const r = await window.agenticxDesktop.runAutomationTaskNow({
+      taskId: task.id,
+      sessionId: sessionId || undefined,
+    });
+    setRunHint(
+      r.ok
+        ? { kind: "ok", text: "已触发执行，请在该会话的对话窗口查看进度。" }
+        : { kind: "err", text: r.error ?? "执行失败" },
+    );
+    setTimeout(() => void loadTasks(), 1500);
   }, [loadTasks]);
 
   const handleTemplateSelect = useCallback((tpl: AutomationTemplate) => {
@@ -183,6 +204,17 @@ export function AutomationTab() {
           </button>
         }
       >
+        {runHint ? (
+          <div
+            className={`mb-2 rounded-lg border px-3 py-2 text-xs ${
+              runHint.kind === "ok"
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                : "border-rose-500/30 bg-rose-500/10 text-rose-200"
+            }`}
+          >
+            {runHint.text}
+          </div>
+        ) : null}
         {loading ? (
           <div className="py-4 text-center text-sm text-text-faint">加载中…</div>
         ) : (
@@ -200,7 +232,7 @@ export function AutomationTab() {
       {showForm && (
         <TaskFormPanel
           initial={editingTask}
-          onSave={(task) => void handleSave(task)}
+          onSave={handleSave}
           onCancel={() => { setShowForm(false); setEditingTask(null); }}
         />
       )}

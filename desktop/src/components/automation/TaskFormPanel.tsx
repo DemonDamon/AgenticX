@@ -5,7 +5,7 @@ import type { AutomationTask, AutomationFrequency } from "./types";
 
 interface Props {
   initial?: AutomationTask | null;
-  onSave: (task: AutomationTask) => void;
+  onSave: (task: AutomationTask) => Promise<{ ok: boolean; error?: string }>;
   onCancel: () => void;
 }
 
@@ -24,11 +24,30 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
   const [dateStart, setDateStart] = useState(initial?.effectiveDateRange?.start ?? "");
   const [dateEnd, setDateEnd] = useState(initial?.effectiveDateRange?.end ?? "");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const [workspaceDirs, setWorkspaceDirs] = useState<string[]>([]);
   const [wsDropdown, setWsDropdown] = useState(false);
   const [wsFilter, setWsFilter] = useState("");
+  const [wsHint, setWsHint] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const pickWorkspaceFolder = useCallback(async () => {
+    setWsHint("");
+    try {
+      const r = await window.agenticxDesktop.chooseDirectory();
+      if (r?.ok && r.path) {
+        setWorkspace(r.path);
+        setWsDropdown(false);
+        setWsFilter("");
+        return;
+      }
+      if (r?.canceled) return;
+      setWsHint(r?.error ? String(r.error) : "未选择目录");
+    } catch (e) {
+      setWsHint(e instanceof Error ? e.message : "选择目录失败");
+    }
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -62,21 +81,30 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
   const handleSave = useCallback(async () => {
     if (!name.trim() || !prompt.trim()) return;
     setSaving(true);
+    setSaveError("");
     try {
+      const id = initial?.id?.trim() ? initial.id.trim() : generateId();
+      const createdAt = initial?.createdAt?.trim() ? initial.createdAt.trim() : new Date().toISOString();
+      const sid = (initial?.sessionId ?? "").trim() || undefined;
       const task: AutomationTask = {
-        id: initial?.id ?? generateId(),
+        id,
         name: name.trim(),
         prompt: prompt.trim(),
         workspace: workspace || undefined,
+        sessionId: sid,
         frequency,
         effectiveDateRange: dateRangeEnabled ? { start: dateStart || undefined, end: dateEnd || undefined } : undefined,
         enabled: initial?.enabled ?? true,
-        createdAt: initial?.createdAt ?? new Date().toISOString(),
+        createdAt,
         lastRunAt: initial?.lastRunAt,
         lastRunStatus: initial?.lastRunStatus,
+        lastRunError: initial?.lastRunError,
         fromTemplate: initial?.fromTemplate,
       };
-      onSave(task);
+      const res = await onSave(task);
+      if (!res.ok) setSaveError(res.error?.trim() || "保存失败，请重试。");
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "保存失败");
     } finally {
       setSaving(false);
     }
@@ -87,12 +115,12 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="relative flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border border-border bg-surface-panel shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm">
+      <div className="relative isolate flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border border-border bg-[var(--surface-base-fallback)] shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-5 py-3">
           <h3 className="text-sm font-semibold text-text-strong">
-            {initial?.id ? "编辑自动化任务" : "添加自动化任务"}
+            {initial?.id?.trim() ? "编辑自动化任务" : "添加自动化任务"}
           </h3>
           <button
             type="button"
@@ -113,7 +141,7 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="例如：每日 AI 新闻推送"
-              className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-text-subtle focus:outline-none"
+              className="mt-1 w-full rounded-md border border-border bg-surface-card px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-text-subtle focus:outline-none"
             />
           </label>
 
@@ -121,19 +149,30 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
           <div className="relative" ref={dropdownRef}>
             <span className="text-sm font-medium text-text-strong">工作空间</span>
             <span className="ml-1 text-xs text-text-faint">（可选）</span>
-            <button
-              type="button"
-              className="mt-1 flex w-full items-center gap-2 rounded-md border border-border bg-surface-panel px-3 py-2 text-left text-sm transition hover:border-text-faint"
-              onClick={() => setWsDropdown(!wsDropdown)}
-            >
-              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-text-faint" />
-              <span className={`flex-1 truncate ${workspace ? "text-text-primary" : "text-text-faint"}`}>
-                {workspace || "选择工作区..."}
-              </span>
-              <ChevronDown className={`h-3.5 w-3.5 text-text-faint transition ${wsDropdown ? "rotate-180" : ""}`} />
-            </button>
+            <div className="mt-1 flex gap-2">
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-surface-card px-3 py-2 text-left text-sm transition hover:border-text-faint"
+                onClick={() => setWsDropdown(!wsDropdown)}
+              >
+                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-text-faint" />
+                <span className={`min-w-0 flex-1 truncate ${workspace ? "text-text-primary" : "text-text-faint"}`}>
+                  {workspace || "从已添加工作区选择…"}
+                </span>
+                <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-text-faint transition ${wsDropdown ? "rotate-180" : ""}`} />
+              </button>
+              <button
+                type="button"
+                title="在系统中浏览并选择文件夹"
+                className="shrink-0 rounded-md border border-border bg-surface-card px-3 py-2 text-xs font-medium text-text-muted transition hover:border-text-faint hover:text-text-primary"
+                onClick={() => void pickWorkspaceFolder()}
+              >
+                浏览文件夹
+              </button>
+            </div>
+            {wsHint ? <p className="mt-1 text-xs text-rose-400">{wsHint}</p> : null}
             {wsDropdown && (
-              <div className="absolute left-0 top-full z-10 mt-1 w-full rounded-md border border-border bg-surface-panel shadow-lg">
+              <div className="absolute left-0 top-full z-20 mt-1 w-full rounded-md border border-border bg-[var(--surface-base-fallback)] shadow-xl">
                 <div className="border-b border-border px-2 py-1.5">
                   <input
                     type="text"
@@ -185,7 +224,7 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
               onChange={(e) => setPrompt(e.target.value)}
               rows={4}
               placeholder="描述 Machi 应该执行的任务..."
-              className="mt-1 w-full resize-y rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-text-subtle focus:outline-none"
+              className="mt-1 w-full resize-y rounded-md border border-border bg-surface-card px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-text-subtle focus:outline-none"
             />
           </label>
 
@@ -208,7 +247,7 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
                   type="date"
                   value={dateStart}
                   onChange={(e) => setDateStart(e.target.value)}
-                  className="rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
+                  className="rounded-md border border-border bg-surface-card px-2 py-1.5 text-sm text-text-primary"
                   placeholder="开始日期"
                 />
                 <span className="text-xs text-text-faint">至</span>
@@ -216,7 +255,7 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
                   type="date"
                   value={dateEnd}
                   onChange={(e) => setDateEnd(e.target.value)}
-                  className="rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
+                  className="rounded-md border border-border bg-surface-card px-2 py-1.5 text-sm text-text-primary"
                   placeholder="结束日期"
                 />
               </div>
@@ -225,7 +264,13 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
+        <div className="flex flex-col gap-2 border-t border-border px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+          {saveError ? (
+            <p className="order-2 text-xs text-rose-400 sm:order-1 sm:min-w-0 sm:flex-1 sm:pr-2">{saveError}</p>
+          ) : (
+            <span className="hidden sm:block sm:order-1 sm:flex-1" />
+          )}
+          <div className="order-1 flex justify-end gap-2 sm:order-2 sm:shrink-0">
           <button
             type="button"
             onClick={onCancel}
@@ -241,6 +286,7 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
           >
             {saving ? "保存中…" : "保存"}
           </button>
+          </div>
         </div>
       </div>
     </div>

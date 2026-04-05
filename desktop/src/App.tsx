@@ -254,6 +254,9 @@ export function App() {
   }>>([]);
   const autoReportingRef = useRef(false);
   const directNoticeSentRef = useRef<Set<string>>(new Set());
+  // Track live automation-triggered sessions; used to poll and refresh tool/message progress.
+  const automationRunningRef = useRef<Map<string, Set<string>>>(new Map());
+  const automationPollTimerRef = useRef<number | null>(null);
   const activePaneSessionId = useMemo(
     () => panes.find((pane) => pane.id === activePaneId)?.sessionId ?? sessionId,
     [activePaneId, panes, sessionId]
@@ -1343,6 +1346,110 @@ export function App() {
     ]
   );
 
+  useEffect(() => {
+    const refreshSessionMessages = async (targetSessionId: string) => {
+      const sid = String(targetSessionId ?? "").trim();
+      if (!sid) return;
+      const state = useAppStore.getState();
+      const targetPane = state.panes.find((pane) => String(pane.sessionId ?? "").trim() === sid);
+      if (!targetPane) return;
+      try {
+        const result = await window.agenticxDesktop.loadSessionMessages(sid);
+        if (!result.ok || !Array.isArray(result.messages)) return;
+        const mapped = result.messages.map((item, idx) =>
+          mapLoadedSessionMessage(item as LoadedSessionMessage, sid, idx)
+        );
+        setPaneMessages(targetPane.id, mapped);
+      } catch {
+        // keep current pane state; next poll may recover
+      }
+    };
+
+    const ensureAutomationPane = (payload: {
+      taskId: string;
+      taskName: string;
+      sessionId?: string;
+    }): string | null => {
+      const sid = String(payload.sessionId ?? "").trim();
+      if (!sid) return null;
+      const avatarId = `automation:${payload.taskId}`;
+      const paneTitle = `定时 · ${payload.taskName || "自动化任务"}`;
+      const state = useAppStore.getState();
+      const existingByAvatar = state.panes.find((pane) => pane.avatarId === avatarId);
+      if (existingByAvatar) {
+        if ((existingByAvatar.sessionId || "").trim() !== sid) {
+          setPaneSessionId(existingByAvatar.id, sid);
+        }
+        return existingByAvatar.id;
+      }
+      const existingBySession = state.panes.find((pane) => (pane.sessionId || "").trim() === sid);
+      if (existingBySession) return existingBySession.id;
+      const paneId = addPane(avatarId, paneTitle, sid);
+      setPaneSessionId(paneId, sid);
+      return paneId;
+    };
+
+    const startAutomationPoll = () => {
+      if (automationPollTimerRef.current !== null) return;
+      automationPollTimerRef.current = window.setInterval(() => {
+        const runningSessions = Array.from(automationRunningRef.current.keys());
+        if (runningSessions.length === 0) return;
+        for (const sid of runningSessions) {
+          void refreshSessionMessages(sid);
+        }
+      }, 1400);
+    };
+
+    const stopAutomationPollIfIdle = () => {
+      if (automationRunningRef.current.size > 0) return;
+      if (automationPollTimerRef.current !== null) {
+        window.clearInterval(automationPollTimerRef.current);
+        automationPollTimerRef.current = null;
+      }
+    };
+
+    const off = window.agenticxDesktop.onAutomationTaskProgress((payload) => {
+      const sid = String(payload.sessionId ?? "").trim();
+      const paneId = ensureAutomationPane(payload);
+      if (paneId) {
+        setActivePaneId(paneId);
+        const openedPane = useAppStore.getState().panes.find((pane) => pane.id === paneId);
+        const aid = String(openedPane?.avatarId ?? "").trim();
+        setActiveAvatarId(aid.startsWith("automation:") ? null : (openedPane?.avatarId ?? null));
+      }
+      if (!sid) return;
+      const taskKey = String(payload.taskId ?? "").trim() || `ts:${Date.now()}`;
+      if (payload.phase === "queued" || payload.phase === "running") {
+        const runningSet = automationRunningRef.current.get(sid) ?? new Set<string>();
+        runningSet.add(taskKey);
+        automationRunningRef.current.set(sid, runningSet);
+        startAutomationPoll();
+        void refreshSessionMessages(sid);
+        return;
+      }
+      const runningSet = automationRunningRef.current.get(sid);
+      if (runningSet) {
+        runningSet.delete(taskKey);
+        if (runningSet.size === 0) {
+          automationRunningRef.current.delete(sid);
+        } else {
+          automationRunningRef.current.set(sid, runningSet);
+        }
+      }
+      void refreshSessionMessages(sid);
+      stopAutomationPollIfIdle();
+    });
+
+    return () => {
+      off();
+      if (automationPollTimerRef.current !== null) {
+        window.clearInterval(automationPollTimerRef.current);
+        automationPollTimerRef.current = null;
+      }
+      automationRunningRef.current.clear();
+    };
+  }, [addPane, setActiveAvatarId, setActivePaneId, setPaneMessages, setPaneSessionId]);
+
   // Watch feishu_binding.json for _desktop key changes — auto-switch pane when /bind fires
   const feishuBindingSidRef = useRef<string>("");
   useEffect(() => {
@@ -1356,6 +1463,12 @@ export function App() {
         if (!r.ok || cancelled) return;
         const desk = r.bindings["_desktop"] as { session_id?: string; avatar_id?: string; avatar_name?: string } | undefined;
         const newSid = (desk?.session_id ?? "").trim();
+        const deskAvatar = (desk?.avatar_id ?? "").trim();
+        if (newSid && deskAvatar.startsWith("automation:")) {
+          void window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
+          feishuBindingSidRef.current = "";
+          return;
+        }
 
         if (newSid === feishuBindingSidRef.current) return;
         const prevSid = feishuBindingSidRef.current;
