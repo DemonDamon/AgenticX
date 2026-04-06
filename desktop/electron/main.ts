@@ -2658,6 +2658,50 @@ function registerIpc(): void {
 
   // ── Automation Tasks CRUD ──
 
+  ipcMain.handle("confirm-dialog", async (_event, payload: unknown) => {
+    const p = (payload && typeof payload === "object")
+      ? (payload as {
+          title?: unknown;
+          message?: unknown;
+          detail?: unknown;
+          confirmText?: unknown;
+          cancelText?: unknown;
+          destructive?: unknown;
+        })
+      : {};
+    const title = String(p.title ?? "").trim() || "确认操作";
+    const message = String(p.message ?? "").trim() || "请确认是否继续";
+    const detail = String(p.detail ?? "").trim();
+    const confirmText = String(p.confirmText ?? "").trim() || "确认";
+    const cancelText = String(p.cancelText ?? "").trim() || "取消";
+    const destructive = Boolean(p.destructive);
+    try {
+      const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
+      const iconPath = app.isPackaged
+        ? path.join(process.resourcesPath, "assets", "icon.png")
+        : path.resolve(process.cwd(), "assets", "icon.png");
+      const icon = fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : undefined;
+      const dialogType: "warning" | "question" = destructive ? "warning" : "question";
+      const options: Electron.MessageBoxOptions = {
+        type: dialogType,
+        title,
+        message,
+        detail: detail || undefined,
+        buttons: [cancelText, confirmText],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+        icon,
+      };
+      const { response } = focused
+        ? await dialog.showMessageBox(focused, options)
+        : await dialog.showMessageBox(options);
+      return { ok: true, confirmed: response === 1 };
+    } catch (err) {
+      return { ok: false, confirmed: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("load-automation-tasks", async () => {
     try {
       return { ok: true, tasks: loadAutomationTasks() };

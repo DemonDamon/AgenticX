@@ -255,6 +255,19 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadAutomationConfig: async () => ipcRenderer.invoke("load-automation-config"),
   saveAutomationConfig: async (payload: { prevent_sleep: boolean }) =>
     ipcRenderer.invoke("save-automation-config", payload),
+  confirmDialog: async (payload: {
+    title?: string;
+    message: string;
+    detail?: string;
+    confirmText?: string;
+    cancelText?: string;
+    destructive?: boolean;
+  }) =>
+    ipcRenderer.invoke("confirm-dialog", payload) as Promise<{
+      ok: boolean;
+      confirmed: boolean;
+      error?: string;
+    }>,
   loadAutomationTasks: async () =>
     ipcRenderer.invoke("load-automation-tasks") as Promise<{
       ok: boolean;

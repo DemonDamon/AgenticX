@@ -433,6 +433,14 @@ declare global {
       saveTrinityConfig: (payload: TrinityConfig) => Promise<{ ok: boolean; error?: string }>;
       loadAutomationConfig: () => Promise<{ ok: boolean; config?: AutomationConfig; error?: string }>;
       saveAutomationConfig: (payload: AutomationConfig) => Promise<{ ok: boolean; error?: string }>;
+      confirmDialog: (payload: {
+        title?: string;
+        message: string;
+        detail?: string;
+        confirmText?: string;
+        cancelText?: string;
+        destructive?: boolean;
+      }) => Promise<{ ok: boolean; confirmed: boolean; error?: string }>;
       loadAutomationTasks: () => Promise<{ ok: boolean; tasks: AutomationTaskData[]; error?: string }>;
       saveAutomationTask: (task: AutomationTaskData) => Promise<{ ok: boolean; error?: string }>;
       deleteAutomationTask: (
