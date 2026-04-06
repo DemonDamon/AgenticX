@@ -263,8 +263,21 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     }>,
   saveAutomationTask: async (task: Record<string, unknown>) =>
     ipcRenderer.invoke("save-automation-task", task) as Promise<{ ok: boolean; error?: string }>,
-  deleteAutomationTask: async (taskId: string) =>
-    ipcRenderer.invoke("delete-automation-task", taskId) as Promise<{ ok: boolean; error?: string }>,
+  deleteAutomationTask: async (
+    taskIdOrOpts: string | { taskId: string; removeCrontaskDir?: boolean },
+  ) =>
+    ipcRenderer.invoke("delete-automation-task", taskIdOrOpts) as Promise<{
+      ok: boolean;
+      error?: string;
+    }>,
+  automationCrontaskDirInfo: async (taskId: string) =>
+    ipcRenderer.invoke("automation-crontask-dir-info", taskId) as Promise<{
+      ok: boolean;
+      path: string;
+      exists: boolean;
+    }>,
+  cancelAutomationTaskRun: async (taskId: string) =>
+    ipcRenderer.invoke("cancel-automation-task-run", taskId) as Promise<{ ok: boolean; error?: string }>,
   runAutomationTaskNow: async (payload: string | { taskId: string; sessionId?: string }) =>
     ipcRenderer.invoke("run-automation-task-now", payload) as Promise<{ ok: boolean; error?: string }>,
   loadSkillInstallPolicy: async () => ipcRenderer.invoke("load-skill-install-policy"),

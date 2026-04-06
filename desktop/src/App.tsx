@@ -1351,15 +1351,20 @@ export function App() {
       const sid = String(targetSessionId ?? "").trim();
       if (!sid) return;
       const state = useAppStore.getState();
-      const targetPane = state.panes.find((pane) => String(pane.sessionId ?? "").trim() === sid);
-      if (!targetPane) return;
+      const sameSid = state.panes.filter((pane) => String(pane.sessionId ?? "").trim() === sid);
+      if (sameSid.length === 0) return;
+      // 定时任务会话只应刷新 automation:* 窗格，避免与 Machi 窗格误绑同一 sessionId 时被错误覆盖
+      const autoPanes = sameSid.filter((p) => String(p.avatarId ?? "").startsWith("automation:"));
+      const targets = autoPanes.length > 0 ? autoPanes : sameSid;
       try {
         const result = await window.agenticxDesktop.loadSessionMessages(sid);
         if (!result.ok || !Array.isArray(result.messages)) return;
         const mapped = result.messages.map((item, idx) =>
           mapLoadedSessionMessage(item as LoadedSessionMessage, sid, idx)
         );
-        setPaneMessages(targetPane.id, mapped);
+        for (const pane of targets) {
+          setPaneMessages(pane.id, mapped);
+        }
       } catch {
         // keep current pane state; next poll may recover
       }
@@ -1382,7 +1387,10 @@ export function App() {
         }
         return existingByAvatar.id;
       }
-      const existingBySession = state.panes.find((pane) => (pane.sessionId || "").trim() === sid);
+      // 必须与当前任务的 automation:<id> 一致，不能把 Machi/分身窗格当成定时窗格复用
+      const existingBySession = state.panes.find(
+        (pane) => (pane.sessionId || "").trim() === sid && pane.avatarId === avatarId
+      );
       if (existingBySession) return existingBySession.id;
       const paneId = addPane(avatarId, paneTitle, sid);
       setPaneSessionId(paneId, sid);

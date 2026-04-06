@@ -2,18 +2,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { X, FolderOpen, ChevronDown } from "lucide-react";
 import { FrequencyPicker } from "./FrequencyPicker";
 import type { AutomationTask, AutomationFrequency } from "./types";
+import { deleteAutomationTaskWithConfirm } from "../../utils/automation-delete";
 
 interface Props {
   initial?: AutomationTask | null;
   onSave: (task: AutomationTask) => Promise<{ ok: boolean; error?: string }>;
   onCancel: () => void;
+  /** 删除成功后回调（刷新列表、关闭表单等） */
+  onAfterDelete?: () => void | Promise<void>;
 }
 
 function generateId(): string {
   return `atask_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
+export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Props) {
   const [name, setName] = useState(initial?.name ?? "");
   const [prompt, setPrompt] = useState(initial?.prompt ?? "");
   const [workspace, setWorkspace] = useState(initial?.workspace ?? "");
@@ -25,6 +28,8 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
   const [dateEnd, setDateEnd] = useState(initial?.effectiveDateRange?.end ?? "");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const editingId = initial?.id?.trim() ?? "";
+  const canDelete = Boolean(editingId);
 
   const [workspaceDirs, setWorkspaceDirs] = useState<string[]>([]);
   const [wsDropdown, setWsDropdown] = useState(false);
@@ -110,6 +115,25 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
     }
   }, [name, prompt, workspace, frequency, dateRangeEnabled, dateStart, dateEnd, initial, onSave]);
 
+  const handleDeleteClick = useCallback(async () => {
+    if (!canDelete || !editingId) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      const res = await deleteAutomationTaskWithConfirm(editingId);
+      if (res.cancelled) return;
+      if (!res.ok) {
+        setSaveError(res.error?.trim() || "删除失败，请重试。");
+        return;
+      }
+      await onAfterDelete?.();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "删除失败");
+    } finally {
+      setSaving(false);
+    }
+  }, [canDelete, editingId, onAfterDelete]);
+
   const filteredDirs = workspaceDirs.filter((d) =>
     d.toLowerCase().includes(wsFilter.toLowerCase()),
   );
@@ -148,7 +172,9 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
           {/* Workspace */}
           <div className="relative" ref={dropdownRef}>
             <span className="text-sm font-medium text-text-strong">工作空间</span>
-            <span className="ml-1 text-xs text-text-faint">（可选）</span>
+            <span className="ml-1 text-xs text-text-faint">
+              （可选；留空则保存为 ~/.agenticx/crontask/&lt;任务ID&gt;）
+            </span>
             <div className="mt-1 flex gap-2">
               <button
                 type="button"
@@ -270,22 +296,33 @@ export function TaskFormPanel({ initial, onSave, onCancel }: Props) {
           ) : (
             <span className="hidden sm:block sm:order-1 sm:flex-1" />
           )}
-          <div className="order-1 flex justify-end gap-2 sm:order-2 sm:shrink-0">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-md px-4 py-1.5 text-sm text-text-muted transition hover:bg-surface-card hover:text-text-primary"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            disabled={!name.trim() || !prompt.trim() || saving}
-            onClick={() => void handleSave()}
-            className="rounded-md bg-text-strong px-4 py-1.5 text-sm font-medium text-surface-panel transition hover:opacity-90 disabled:opacity-40"
-          >
-            {saving ? "保存中…" : "保存"}
-          </button>
+          <div className="order-1 flex flex-wrap items-center justify-end gap-2 sm:order-2 sm:shrink-0">
+            {canDelete ? (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void handleDeleteClick()}
+                className="mr-auto rounded-md px-3 py-1.5 text-sm text-rose-400 transition hover:bg-rose-500/10 hover:text-rose-300 disabled:opacity-40 sm:mr-0"
+              >
+                删除任务
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={saving}
+              className="rounded-md px-4 py-1.5 text-sm text-text-muted transition hover:bg-surface-card hover:text-text-primary disabled:opacity-40"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              disabled={!name.trim() || !prompt.trim() || saving}
+              onClick={() => void handleSave()}
+              className="rounded-md bg-text-strong px-4 py-1.5 text-sm font-medium text-surface-panel transition hover:opacity-90 disabled:opacity-40"
+            >
+              {saving ? "处理中…" : "保存"}
+            </button>
           </div>
         </div>
       </div>

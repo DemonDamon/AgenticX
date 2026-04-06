@@ -7,7 +7,7 @@
   "productName": "Machi",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "concurrently \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"wait-on tcp:5173 && electron .\"",
+    "dev": "concurrently \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"wait-on tcp:5173 dist-electron/main.js && electron .\"",
     "icons:sync": "bash ./scripts/sync-icons.sh",
     "build": "vite build && tsc -p electron/tsconfig.json",
     "start": "electron .",

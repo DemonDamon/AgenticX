@@ -584,12 +584,58 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "schedule_task",
-            "description": "Schedule a background task to run asynchronously. The task will execute even while the user is not actively chatting.",
+            "description": (
+                "Create a persistent scheduled/automated task. "
+                "The task is saved to disk and executed automatically by the Desktop scheduler at the specified time. "
+                "The user can also view, edit and manage the task in the sidebar '定时' section. "
+                "Before calling this tool: if the task runs Python scripts, prepare the runtime under the task root only — "
+                "the root is the user-provided workspace if set, else ~/.agenticx/crontask/<task_id>/. "
+                "Create <task_root>/.venv, pip install there, smoke-run with <task_root>/.venv/bin/python, and reference that path in instruction."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Human-readable task name"},
-                    "instruction": {"type": "string", "description": "Task instructions for the agent to execute"},
+                    "name": {"type": "string", "description": "Human-readable task name (e.g. 'A股大盘收盘价日报')"},
+                    "instruction": {
+                        "type": "string",
+                        "description": (
+                            "Prompt for the automation runner on each trigger. Must use the same Python/paths as verified during setup. "
+                            "Meta-Agent should have already installed deps (pip) in the task workspace or a dedicated venv and confirmed the script runs."
+                        ),
+                    },
+                    "frequency_type": {
+                        "type": "string",
+                        "enum": ["daily", "interval", "once"],
+                        "description": "Schedule type. 'daily' = run at a fixed time on selected days; 'interval' = every N hours; 'once' = one-time on a specific date. Default: 'daily'",
+                    },
+                    "time": {
+                        "type": "string",
+                        "description": "Trigger time in HH:MM 24h format (e.g. '22:15'). Required for 'daily' and 'once'. Default: '09:00'",
+                    },
+                    "days": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Days of week to run (1=Mon … 7=Sun). Default: [1,2,3,4,5,6,7] (every day). For 'once' this is ignored.",
+                    },
+                    "interval_hours": {
+                        "type": "integer",
+                        "description": "For frequency_type='interval': run every N hours. Default: 4",
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "For frequency_type='once': the date in YYYY-MM-DD format",
+                    },
+                    "workspace": {
+                        "type": "string",
+                        "description": (
+                            "Task root directory: all scripts, venv (.venv inside this path), logs, and temp files for this job belong here. "
+                            "If omitted, defaults to ~/.agenticx/crontask/<task_id>/ (one directory per task, created automatically)."
+                        ),
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "Whether the task is enabled immediately. Default: true",
+                    },
                 },
                 "required": ["name", "instruction"],
             },
@@ -599,7 +645,7 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_scheduled_tasks",
-            "description": "List all background/scheduled tasks and their status.",
+            "description": "List all persistent scheduled/automated tasks from disk, including their status, frequency and last run info.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -607,11 +653,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "cancel_scheduled_task",
-            "description": "Cancel a background task by task_id.",
+            "description": "Disable or remove a scheduled task by task_id. The task will no longer execute automatically.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "task_id": {"type": "string", "description": "ID of the task to cancel"},
+                    "task_id": {"type": "string", "description": "ID of the task to disable/cancel"},
                 },
                 "required": ["task_id"],
             },

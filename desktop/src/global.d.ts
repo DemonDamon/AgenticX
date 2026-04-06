@@ -435,7 +435,13 @@ declare global {
       saveAutomationConfig: (payload: AutomationConfig) => Promise<{ ok: boolean; error?: string }>;
       loadAutomationTasks: () => Promise<{ ok: boolean; tasks: AutomationTaskData[]; error?: string }>;
       saveAutomationTask: (task: AutomationTaskData) => Promise<{ ok: boolean; error?: string }>;
-      deleteAutomationTask: (taskId: string) => Promise<{ ok: boolean; error?: string }>;
+      deleteAutomationTask: (
+        taskIdOrOpts: string | { taskId: string; removeCrontaskDir?: boolean },
+      ) => Promise<{ ok: boolean; error?: string }>;
+      automationCrontaskDirInfo: (
+        taskId: string,
+      ) => Promise<{ ok: boolean; path: string; exists: boolean }>;
+      cancelAutomationTaskRun: (taskId: string) => Promise<{ ok: boolean; error?: string }>;
       runAutomationTaskNow: (
         payload: string | { taskId: string; sessionId?: string },
       ) => Promise<{ ok: boolean; error?: string }>;

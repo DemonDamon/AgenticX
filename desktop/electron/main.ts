@@ -118,6 +118,12 @@ type SkillInstallPolicyConfig = {
 const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.yaml");
 const AUTOMATION_TASKS_PATH = path.join(CONFIG_DIR, "automation_tasks.json");
+/** 默认定时任务根目录：~/.agenticx/crontask/<taskId>/，与用户指定 workspace 二选一；venv/脚本均应落在任务根下 */
+const AUTOMATION_CRONTASK_DIR = path.join(CONFIG_DIR, "crontask");
+
+function defaultAutomationCrontaskPath(taskId: string): string {
+  return path.join(AUTOMATION_CRONTASK_DIR, String(taskId ?? "").trim());
+}
 const WORKSPACE_DIR = path.join(CONFIG_DIR, "workspace");
 const META_SOUL_PATH = path.join(WORKSPACE_DIR, "SOUL.md");
 const AVATARS_DIR = path.join(CONFIG_DIR, "avatars");
@@ -278,6 +284,18 @@ function saveAutomationTasks(tasks: AutomationTaskData[]): void {
   fs.writeFileSync(AUTOMATION_TASKS_PATH, JSON.stringify(tasks, null, 2), "utf-8");
 }
 
+/** Max wait for one automation /api/chat SSE (ms). Prevents sidebar spinner stuck if stream never closes. */
+function resolveAutomationChatTimeoutMs(): number {
+  const raw = String(process.env.AGX_AUTOMATION_CHAT_TIMEOUT_MS ?? "").trim();
+  if (!raw) return 1_800_000; // 30 min
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 60_000 ? n : 1_800_000;
+}
+
+/** In-flight automation run (scheduled or「立即执行」) — user can abort via IPC. */
+const automationRunControllers = new Map<string, AbortController>();
+const automationRunUserCancelled = new Set<string>();
+
 function resolveAutomationSessionId(task: AutomationTaskData, override?: string): string {
   const o = String(override ?? "").trim();
   if (o) return o;
@@ -312,6 +330,9 @@ async function drainSseChatResponse(resp: Response): Promise<{ ok: boolean; erro
               const msg = String(obj.data?.text ?? "Agent 流式错误");
               return { ok: false, error: msg.slice(0, 800) };
             }
+            if (obj.type === "done") {
+              return { ok: true };
+            }
           } catch {
             /* ignore non-JSON sse lines */
           }
@@ -325,38 +346,66 @@ async function drainSseChatResponse(resp: Response): Promise<{ ok: boolean; erro
   return { ok: true };
 }
 
-async function invokeAutomationUserTurn(
+async function invokeAutomationUserTurnWithSignal(
   base: string,
   token: string,
   sessionId: string,
   userInput: string,
-  workspacePath?: string,
+  workspacePath: string | undefined,
+  signal: AbortSignal,
+  taskId: string,
+  timeoutMs: number,
 ): Promise<{ ok: boolean; error?: string }> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["x-agx-desktop-token"] = token;
   const pathTrim = String(workspacePath ?? "").trim();
   if (pathTrim) {
     try {
-      await fetch(`${base}/api/taskspace/workspaces`, {
+      const wsResp = await fetch(`${base}/api/taskspace/workspaces`, {
         method: "POST",
         headers,
         body: JSON.stringify({ session_id: sessionId, path: pathTrim }),
       });
-    } catch {
-      /* workspace attach is best-effort */
+      if (!wsResp.ok) {
+        const t = await wsResp.text().catch(() => "");
+        console.warn(
+          `[automation] taskspace attach failed: HTTP ${wsResp.status} ${t.slice(0, 240)} (session=${sessionId})`,
+        );
+      }
+    } catch (e) {
+      console.warn("[automation] taskspace attach error:", e);
     }
   }
-  const resp = await fetch(`${base}/api/chat`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      session_id: sessionId,
-      user_input: userInput,
-      // interactive：不把任务提示词包进 AutoSolve 长模板写入历史；避免与飞书/Machi 会话混淆且便于删除持久化
-      mode: "interactive",
-    }),
-  });
-  return drainSseChatResponse(resp);
+  try {
+    const resp = await fetch(`${base}/api/chat`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        session_id: sessionId,
+        user_input: userInput,
+        // interactive：不把任务提示词包进 AutoSolve 长模板写入历史；避免与飞书/Machi 会话混淆且便于删除持久化
+        mode: "interactive",
+      }),
+      signal,
+    });
+    return await drainSseChatResponse(resp);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const name = e instanceof Error ? e.name : "";
+    const aborted =
+      name === "AbortError" || /aborted|AbortError/i.test(msg);
+    if (aborted) {
+      if (automationRunUserCancelled.has(taskId)) {
+        return { ok: false, error: "已手动终止本次自动化执行。" };
+      }
+      const mins = Math.max(1, Math.round(timeoutMs / 60_000));
+      return {
+        ok: false,
+        error: `自动化执行超时（>${mins} 分钟）。侧栏已停止转圈；可缩短提示词、换模型或设置环境变量 AGX_AUTOMATION_CHAT_TIMEOUT_MS 调大上限。`,
+      };
+    }
+    return { ok: false, error: msg.slice(0, 800) };
+  }
 }
 
 async function createAutomationTaskSession(
@@ -391,6 +440,39 @@ function persistAutomationTaskSession(taskId: string, sessionId: string): void {
   saveAutomationTasks(tasks);
 }
 
+type AutomationSessionBindCheck =
+  | { kind: "match" }
+  | { kind: "mismatch"; avatarLabel: string }
+  | { kind: "unknown" };
+
+async function checkAutomationSessionBinding(
+  base: string,
+  token: string,
+  taskId: string,
+  sessionId: string,
+): Promise<AutomationSessionBindCheck> {
+  const tid = String(taskId ?? "").trim();
+  if (!tid) return { kind: "unknown" };
+  const expected = `automation:${tid}`;
+  try {
+    const headers: Record<string, string> = {};
+    if (token) headers["x-agx-desktop-token"] = token;
+    const resp = await fetch(
+      `${base}/api/session?session_id=${encodeURIComponent(sessionId)}`,
+      { headers },
+    );
+    if (!resp.ok) return { kind: "unknown" };
+    const data = (await resp.json()) as { avatar_id?: string | null };
+    const av = data.avatar_id;
+    const avs = av == null ? "" : String(av).trim();
+    if (avs === expected) return { kind: "match" };
+    const label = avs.length > 0 ? avs : "（空/元智能体会话）";
+    return { kind: "mismatch", avatarLabel: label };
+  } catch {
+    return { kind: "unknown" };
+  }
+}
+
 async function runAutomationTaskHttp(
   task: AutomationTaskData,
   options?: { sessionIdOverride?: string },
@@ -403,42 +485,93 @@ async function runAutomationTaskHttp(
   const port = fs.readFileSync(portFile, "utf-8").trim();
   const token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, "utf-8").trim() : "";
   const base = `http://127.0.0.1:${port}`;
-  const sessionId = resolveAutomationSessionId(task, options?.sessionIdOverride);
+  let sessionId = resolveAutomationSessionId(task, options?.sessionIdOverride);
   if (!sessionId) {
-    return {
-      ok: false,
-      error:
-        "未绑定专属会话：请在侧栏「定时」中点击该任务打开对应聊天窗格（会自动创建并写入会话），再保存或启用定时。",
-    };
+    const newSid = await createAutomationTaskSession(base, token, task);
+    if (!newSid) {
+      return {
+        ok: false,
+        error:
+          "无法自动创建定时任务专属会话：请确认本机 agx serve 已启动。若仍失败，可在侧栏「定时」中点击该任务打开聊天窗格后再试。",
+      };
+    }
+    task.sessionId = newSid;
+    persistAutomationTaskSession(task.id, newSid);
+    sessionId = newSid;
+  }
+  const bind = await checkAutomationSessionBinding(base, token, task.id, sessionId);
+  if (bind.kind === "mismatch") {
+    const repairedSid = await createAutomationTaskSession(base, token, task);
+    if (!repairedSid) {
+      return {
+        ok: false,
+        sessionId,
+        error: `会话与定时任务不匹配（当前绑定：${bind.avatarLabel}），自动创建 automation 专属会话失败。请在侧栏「定时」中打开该任务后再试。`,
+      };
+    }
+    task.sessionId = repairedSid;
+    persistAutomationTaskSession(task.id, repairedSid);
+    sessionId = repairedSid;
   }
   const prompt = String(task.prompt ?? "").trim();
   if (!prompt) return { ok: false, error: "任务提示词为空" };
-  const first = await invokeAutomationUserTurn(base, token, sessionId, prompt, task.workspace);
-  if (first.ok) return { ...first, sessionId };
+  const tid = String(task.id ?? "").trim();
+  if (!tid) return { ok: false, error: "任务 id 无效" };
 
-  const firstErr = String(first.error ?? "");
-  if (!/HTTP\s*404/i.test(firstErr) && !/session not found/i.test(firstErr)) {
-    return { ...first, sessionId };
-  }
-
-  const repairedSid = await createAutomationTaskSession(base, token, task);
-  if (!repairedSid) {
-    return {
-      ok: false,
+  const ac = new AbortController();
+  automationRunControllers.set(tid, ac);
+  const timeoutMs = resolveAutomationChatTimeoutMs();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const first = await invokeAutomationUserTurnWithSignal(
+      base,
+      token,
       sessionId,
-      error: `会话失效且自动重建失败：${sanitizeAutomationRunError(firstErr) ?? "session not found"}`,
-    };
-  }
+      prompt,
+      task.workspace,
+      ac.signal,
+      tid,
+      timeoutMs,
+    );
+    if (first.ok) return { ...first, sessionId };
 
-  task.sessionId = repairedSid;
-  persistAutomationTaskSession(task.id, repairedSid);
-  const second = await invokeAutomationUserTurn(base, token, repairedSid, prompt, task.workspace);
-  if (second.ok) return { ...second, sessionId: repairedSid };
-  return {
-    ...second,
-    sessionId: repairedSid,
-    error: `会话已自动重建，但执行失败：${sanitizeAutomationRunError(second.error) ?? "未知错误"}`,
-  };
+    const firstErr = String(first.error ?? "");
+    if (!/HTTP\s*404/i.test(firstErr) && !/session not found/i.test(firstErr)) {
+      return { ...first, sessionId };
+    }
+
+    const repairedSid = await createAutomationTaskSession(base, token, task);
+    if (!repairedSid) {
+      return {
+        ok: false,
+        sessionId,
+        error: `会话失效且自动重建失败：${sanitizeAutomationRunError(firstErr) ?? "session not found"}`,
+      };
+    }
+
+    task.sessionId = repairedSid;
+    persistAutomationTaskSession(task.id, repairedSid);
+    const second = await invokeAutomationUserTurnWithSignal(
+      base,
+      token,
+      repairedSid,
+      prompt,
+      task.workspace,
+      ac.signal,
+      tid,
+      timeoutMs,
+    );
+    if (second.ok) return { ...second, sessionId: repairedSid };
+    return {
+      ...second,
+      sessionId: repairedSid,
+      error: `会话已自动重建，但执行失败：${sanitizeAutomationRunError(second.error) ?? "未知错误"}`,
+    };
+  } finally {
+    clearTimeout(timer);
+    automationRunControllers.delete(tid);
+    automationRunUserCancelled.delete(tid);
+  }
 }
 
 class AutomationScheduler {
@@ -1594,6 +1727,20 @@ function registerEarlyIpc(): void {
       activeModel: cfg.active_model ?? "",
     };
   });
+
+  // Session list: renderer may call this as soon as the window loads; register before agx serve / registerIpc().
+  ipcMain.handle("list-sessions", async (_event, avatarId?: string) => {
+    try {
+      const params = avatarId ? `?avatar_id=${encodeURIComponent(avatarId)}` : "";
+      const resp = await fetch(`${getStudioUrl()}/api/sessions${params}`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      if (!resp.ok) return { ok: false, sessions: [] };
+      return await resp.json();
+    } catch {
+      return { ok: false, sessions: [] };
+    }
+  });
 }
 
 function registerIpc(): void {
@@ -2029,19 +2176,6 @@ function registerIpc(): void {
         message: String(err),
       });
       return { ok: false, error: String(err) };
-    }
-  });
-
-  ipcMain.handle("list-sessions", async (_event, avatarId?: string) => {
-    try {
-      const params = avatarId ? `?avatar_id=${encodeURIComponent(avatarId)}` : "";
-      const resp = await fetch(`${getStudioUrl()}/api/sessions${params}`, {
-        headers: { "x-agx-desktop-token": getStudioToken() },
-      });
-      if (!resp.ok) return { ok: false, sessions: [] };
-      return await resp.json();
-    } catch {
-      return { ok: false, sessions: [] };
     }
   });
 
@@ -2532,6 +2666,24 @@ function registerIpc(): void {
     if (!id || !name) return { ok: false, error: "task must have id and name" };
     task.id = id;
     task.name = name;
+    const wsTrim = String(task.workspace ?? "").trim();
+    // 未指定 workspace → 独占目录 crontask/<id>；指定 → 用户目录。执行时 task.workspace 会挂到会话 taskspace。
+    if (!wsTrim) {
+      const dir = defaultAutomationCrontaskPath(id);
+      task.workspace = dir;
+      try {
+        fs.mkdirSync(AUTOMATION_CRONTASK_DIR, { recursive: true });
+        fs.mkdirSync(dir, { recursive: true });
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    } else {
+      try {
+        fs.mkdirSync(wsTrim, { recursive: true });
+      } catch {
+        /* best-effort */
+      }
+    }
     try {
       const tasks = loadAutomationTasks();
       const idx = tasks.findIndex((t) => t.id === task.id);
@@ -2548,9 +2700,25 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("delete-automation-task", async (_event, taskId: unknown) => {
-    if (typeof taskId !== "string") return { ok: false, error: "taskId must be a string" };
+  ipcMain.handle("delete-automation-task", async (_event, payload: unknown) => {
+    let taskId = "";
+    let removeCrontaskDir = false;
+    if (typeof payload === "string") {
+      taskId = payload.trim();
+    } else if (payload && typeof payload === "object") {
+      const p = payload as { taskId?: unknown; removeCrontaskDir?: unknown };
+      taskId = String(p.taskId ?? "").trim();
+      removeCrontaskDir = Boolean(p.removeCrontaskDir);
+    }
+    if (!taskId) return { ok: false, error: "taskId required" };
     try {
+      if (removeCrontaskDir) {
+        const crontaskPath = path.resolve(defaultAutomationCrontaskPath(taskId));
+        const root = path.resolve(AUTOMATION_CRONTASK_DIR);
+        if (fs.existsSync(crontaskPath) && crontaskPath !== root && crontaskPath.startsWith(root + path.sep)) {
+          fs.rmSync(crontaskPath, { recursive: true, force: true });
+        }
+      }
       const tasks = loadAutomationTasks().filter((t) => t.id !== taskId);
       saveAutomationTasks(tasks);
       automationScheduler.reload();
@@ -2558,6 +2726,32 @@ function registerIpc(): void {
     } catch (err) {
       return { ok: false, error: String(err) };
     }
+  });
+
+  ipcMain.handle("automation-crontask-dir-info", async (_event, taskId: unknown) => {
+    const id = typeof taskId === "string" ? taskId.trim() : "";
+    if (!id) return { ok: false, path: "", exists: false };
+    const p = defaultAutomationCrontaskPath(id);
+    try {
+      return { ok: true, path: p, exists: fs.existsSync(p) };
+    } catch {
+      return { ok: true, path: p, exists: false };
+    }
+  });
+
+  ipcMain.handle("cancel-automation-task-run", async (_event, taskId: unknown) => {
+    const id = typeof taskId === "string" ? taskId.trim() : "";
+    if (!id) return { ok: false, error: "taskId required" };
+    automationRunUserCancelled.add(id);
+    const c = automationRunControllers.get(id);
+    if (c) {
+      try {
+        c.abort();
+      } catch {
+        /* ignore */
+      }
+    }
+    return { ok: true };
   });
 
   ipcMain.handle("run-automation-task-now", async (_event, payload: unknown) => {

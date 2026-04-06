@@ -259,6 +259,8 @@ type AppState = {
   setActivePaneId: (id: string) => void;
   addPane: (avatarId: string | null, avatarName: string, sessionId: string) => string;
   removePane: (paneId: string) => void;
+  /** 删除定时任务后移除所有绑定该任务的窗格（avatarId 为 automation:<taskId>）。 */
+  removePanesForAutomationTaskId: (taskId: string) => void;
   reorderPanes: (fromIndex: number, toIndex: number) => void;
   addPaneMessage: (
     paneId: string,
@@ -694,6 +696,42 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...(provider && model
           ? { activeProvider: provider, activeModel: model }
           : {}),
+      };
+    }),
+  removePanesForAutomationTaskId: (taskId) =>
+    set((state) => {
+      const tid = String(taskId ?? "").trim();
+      if (!tid) return state;
+      const aid = `automation:${tid}`;
+      const nextPanes = state.panes.filter((p) => p.avatarId !== aid);
+      if (nextPanes.length === state.panes.length) return state;
+      if (nextPanes.length === 0) {
+        const fresh = makeDefaultPane();
+        return {
+          panes: [fresh],
+          activePaneId: fresh.id,
+          activeAvatarId: null,
+        };
+      }
+      const removedActive = !nextPanes.some((p) => p.id === state.activePaneId);
+      const nextActive = removedActive
+        ? (nextPanes[nextPanes.length - 1]?.id ?? nextPanes[0].id)
+        : state.activePaneId;
+      const activePane = nextPanes.find((p) => p.id === nextActive) ?? nextPanes[0];
+      const provider = (activePane?.modelProvider || "").trim();
+      const model = (activePane?.modelName || "").trim();
+      const nextAv = activePane?.avatarId ?? null;
+      const activeAvatarId =
+        nextAv &&
+        !String(nextAv).startsWith("automation:") &&
+        !String(nextAv).startsWith("group:")
+          ? String(nextAv)
+          : null;
+      return {
+        panes: nextPanes,
+        activePaneId: nextActive,
+        activeAvatarId,
+        ...(provider && model ? { activeProvider: provider, activeModel: model } : {}),
       };
     }),
   reorderPanes: (fromIndex, toIndex) =>
