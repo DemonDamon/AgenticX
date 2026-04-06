@@ -189,6 +189,15 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
   return sortSessionRows(rows);
 }
 
+function isSessionVisibleInPane(row: SessionRow, paneAvatarId: string | null): boolean {
+  const paneAid = String(paneAvatarId ?? "").trim();
+  const rowAid = String(row.avatar_id ?? "").trim();
+  // Meta pane: only show meta/unbound sessions; never mix in automation/group/avatar sessions.
+  if (!paneAid) return rowAid.length === 0;
+  // Avatar/group/automation panes: strict same-avatar binding only.
+  return rowAid === paneAid;
+}
+
 export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onClose, tintColor }: Props) {
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
@@ -290,7 +299,9 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       const avatarId = pane.avatarId ?? undefined;
       const result = await window.agenticxDesktop.listSessions(avatarId);
       if (!result.ok) return;
-      const rows = normalizeSessionRows(result.sessions);
+      const rows = normalizeSessionRows(result.sessions).filter((row) =>
+        isSessionVisibleInPane(row, pane.avatarId ?? null)
+      );
       setSessions(rows);
       setUnreadSessionIds((prev) => prev.filter((id) => rows.some((r) => r.session_id === id)));
       setSelectedSessionIds((prev) => prev.filter((id) => rows.some((r) => r.session_id === id)));
