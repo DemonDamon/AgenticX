@@ -138,7 +138,7 @@ def get_all_skill_summaries(
     *,
     bound_avatar_id: Optional[str] = None,
 ) -> List[Dict[str, str]]:
-    """Get name+description for skills allowed for the session (global + avatar filters)."""
+    """Get summaries for skills allowed for the session (global + avatar filters)."""
     from agenticx.avatar.registry import AvatarRegistry
     from agenticx.tools.skill_bundle import (
         SkillBundleLoader,
@@ -159,4 +159,14 @@ def get_all_skill_summaries(
         disabled_names=disabled,
         avatar_skills_enabled=avatar_map,
     )
-    return [{"name": s.name, "description": s.description} for s in filtered]
+    return [
+        {
+            "name": s.name,
+            "description": s.description,
+            "source": s.source,
+            "location": s.location,
+            "base_dir": str(s.base_dir),
+            "skill_md_path": str(s.skill_md_path),
+        }
+        for s in filtered
+    ]

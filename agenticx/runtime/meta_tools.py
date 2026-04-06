@@ -346,7 +346,12 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
             "description": "List configured MCP servers and their connection status.",
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "reload": {
+                        "type": "boolean",
+                        "description": "Whether to reload MCP configs from disk before listing (default: true).",
+                    },
+                },
                 "additionalProperties": False,
             },
         },
@@ -775,9 +780,19 @@ def _mcp_tool_names_by_server(session: "StudioSession") -> Dict[str, List[str]]:
     return by_server
 
 
-def _list_mcps_payload(session: Optional["StudioSession"]) -> Dict[str, Any]:
+def _list_mcps_payload(
+    session: Optional["StudioSession"],
+    *,
+    reload: bool = True,
+) -> Dict[str, Any]:
     if session is None:
         return {"ok": True, "count": 0, "connected_count": 0, "servers": []}
+
+    if reload:
+        try:
+            session.mcp_configs = load_available_servers()
+        except Exception as exc:
+            _meta_log.warning("list_mcps reload failed: %s", exc)
 
     configs = session.mcp_configs if isinstance(session.mcp_configs, dict) else {}
     connected = (
@@ -785,6 +800,12 @@ def _list_mcps_payload(session: Optional["StudioSession"]) -> Dict[str, Any]:
         if isinstance(session.connected_servers, set)
         else set(session.connected_servers or [])
     )
+    # Keep session connection snapshot coherent when config files changed on disk.
+    stale_connected = connected - set(configs.keys())
+    if stale_connected and isinstance(session.connected_servers, set):
+        session.connected_servers.difference_update(stale_connected)
+        connected = set(session.connected_servers)
+
     tools_by_server = _mcp_tool_names_by_server(session)
     servers: List[Dict[str, Any]] = []
     for name, cfg in sorted(configs.items()):
@@ -805,9 +826,102 @@ def _list_mcps_payload(session: Optional["StudioSession"]) -> Dict[str, Any]:
         "servers": servers,
         "hint": (
             "对每个已连接服务器，`mcp_tool_names` 为可用 `mcp_call.tool_name`；"
-            "勿编造 list_pages、browse_to、list_tools 等名称。"
+            "勿编造 list_pages、browse_to、list_tools、web.fetch.* 等名称。"
         ),
     }
+
+
+def _automation_task_mcp_preflight(
+    *,
+    session: Optional["StudioSession"],
+    instruction: str,
+) -> Dict[str, Any]:
+    """Run lightweight MCP feasibility checks before persisting a scheduled task."""
+    if session is None:
+        return {
+            "ok": False,
+            "reason": "no_session",
+            "connected_servers": [],
+            "strategy": "",
+            "hints": ["schedule_task called without session context"],
+        }
+
+    tools_by_server = _mcp_tool_names_by_server(session)
+    connected_servers = sorted(tools_by_server.keys())
+    firecrawl_tools = set(tools_by_server.get("firecrawl", []))
+    basic_tools = set(tools_by_server.get("basic-web-crawler", []))
+    instruction_lower = instruction.lower()
+
+    strategy = ""
+    hints: List[str] = []
+
+    # Catch the most common misuse from logs: treating firecrawl_scrape as batch API.
+    if (
+        "firecrawl_scrape" in instruction_lower
+        and re.search(r"(批量|urls?\b|url\s*列表|19\s*个|多站点)", instruction_lower, re.IGNORECASE)
+    ):
+        hints.append("firecrawl_scrape supports single url only; do not pass urls array")
+
+    if "batch_browser_extract" in basic_tools:
+        strategy = (
+            "Use basic-web-crawler batch_browser_extract for site-list pages first; "
+            "then filter items by last 7 days and extract details."
+        )
+    elif "firecrawl_crawl" in firecrawl_tools:
+        strategy = (
+            "Use firecrawl_crawl per site list page; collect entries and filter by last 7 days."
+        )
+    elif "firecrawl_map" in firecrawl_tools and "firecrawl_scrape" in firecrawl_tools:
+        strategy = (
+            "Use firecrawl_map to discover list links, then iterate firecrawl_scrape with single url."
+        )
+    elif "firecrawl_scrape" in firecrawl_tools:
+        strategy = (
+            "Iterate firecrawl_scrape with single url only; no urls array."
+        )
+
+    ok = bool(strategy)
+    if not ok:
+        hints.append(
+            "No suitable crawler tool found. Connect firecrawl/basic-web-crawler first."
+        )
+
+    return {
+        "ok": ok,
+        "connected_servers": connected_servers,
+        "firecrawl_tools": sorted(firecrawl_tools),
+        "basic_web_crawler_tools": sorted(basic_tools),
+        "strategy": strategy,
+        "hints": hints,
+    }
+
+
+def _augment_automation_instruction_with_contract(
+    instruction: str,
+    *,
+    preflight: Dict[str, Any],
+) -> str:
+    """Inject a strict execution contract to reduce runtime ask-backs."""
+    strategy = str(preflight.get("strategy", "")).strip()
+    hints = preflight.get("hints", [])
+    if not isinstance(hints, list):
+        hints = []
+    hint_lines = [f"- {str(h).strip()}" for h in hints if str(h).strip()]
+    strategy_line = strategy or "Use connected crawler MCP tools only."
+    block_lines = [
+        "## Execution Contract (Auto Injected)",
+        "- 这是执行任务，不是方案讨论。禁止输出“是否按此方案执行”。",
+        "- 禁止把 MCP 工具名当作 bash 命令执行（例如 firecrawl_scrape）。",
+        "- mcp_call 参数字段优先使用 arguments；调用前核对目标工具 schema。",
+        "- 若某工具参数校验失败，立即按 schema 修正并继续执行；不要向用户追问。",
+        f"- Preflight strategy: {strategy_line}",
+        "- 时间窗口必须严格限定在最近 7 天，无法解析日期的条目直接丢弃。",
+    ]
+    if hint_lines:
+        block_lines.append("- Preflight hints:")
+        block_lines.extend(hint_lines)
+    contract = "\n".join(block_lines).strip()
+    return f"{contract}\n\n{instruction.strip()}"
 
 
 def _model_capability_score(provider: str, model: str) -> int:
@@ -1897,7 +2011,12 @@ async def dispatch_meta_tool_async(
         return json.dumps(_list_skills_payload(session), ensure_ascii=False)
 
     if name == "list_mcps":
-        return json.dumps(_list_mcps_payload(session), ensure_ascii=False)
+        reload = arguments.get("reload", True)
+        should_reload = True if reload is None else bool(reload)
+        return json.dumps(
+            _list_mcps_payload(session, reload=should_reload),
+            ensure_ascii=False,
+        )
 
     if name == "set_taskspace":
         raw_path = str(arguments.get("path", "")).strip()
@@ -2191,6 +2310,24 @@ async def dispatch_meta_tool_async(
             if not task_name or not instruction:
                 return json.dumps({"ok": False, "error": "name and instruction are required"}, ensure_ascii=False)
 
+            preflight = _automation_task_mcp_preflight(
+                session=session,
+                instruction=instruction,
+            )
+            if not bool(preflight.get("ok")):
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "error": "automation preflight failed: no suitable connected crawler MCP tools",
+                        "preflight": preflight,
+                    },
+                    ensure_ascii=False,
+                )
+            instruction = _augment_automation_instruction_with_contract(
+                instruction,
+                preflight=preflight,
+            )
+
             freq_type = str(arguments.get("frequency_type", "daily")).strip()
             time_str = str(arguments.get("time", "09:00")).strip()
             days = arguments.get("days")
@@ -2244,6 +2381,7 @@ async def dispatch_meta_tool_async(
                     "task_id": task_id,
                     "name": task_name,
                     "frequency": frequency,
+                    "preflight": preflight,
                     "message": "已创建定时任务，可在侧栏「定时」区域查看和编辑。",
                 },
                 ensure_ascii=False,

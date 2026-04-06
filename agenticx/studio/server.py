@@ -144,15 +144,21 @@ def _build_automation_runner_system_prompt(
     lines: list[str] = [
         "# 定时 / 自动化任务执行器",
         "你是 Machi 的**定时任务执行器**。本轮用户输入即任务说明（含输出格式、数据来源与失败处理等硬性要求）。",
+        "- **当前是执行阶段，不是建任务阶段**：禁止询问执行频率、日期、时间等调度参数；这些参数已由调度器确定。",
         "## 任务根目录（与 Desktop 配置一致）",
         "- **定义**：用户在自动化设置里填写的 **工作区**；若留空，则为 `~/.agenticx/crontask/<task_id>`（每个定时任务独占一个子目录，与对话一一对应）。",
         "- **Python 虚拟环境**：必须在**任务根目录**下维护，标准路径为 **`<任务根>/.venv`**。安装依赖用 `<任务根>/.venv/bin/pip install …`，执行脚本用 `<任务根>/.venv/bin/python …`（不要在未约定的仓库 `.venv`、全局 python 里装定时任务专属依赖，除非用户显式把该路径设为工作区）。",
         "- **脚本与产物**：与本任务相关的脚本、数据、日志、临时文件、辅助工具**一律**放在任务根目录或其子目录内；不要将定时任务专属文件散落到仓库根、`~/.agenticx/scripts` 等路径（除非该路径就是用户指定的任务根目录）。",
         "## 必须遵守",
         "- **先执行再输出**：需要数据或脚本时，必须调用 `bash_exec`、`file_write` 等工具真实执行；禁止只给出示例代码或操作步骤而不实际跑通。",
+        "- **禁止伪执行**：若本轮没有产生真实工具结果（`tool_result`），禁止输出“已抓取/已生成/已保存/已完成”等完成态结论。",
+        "- **禁止方案确认追问**：不得输出“是否按此方案执行/是否继续”等询问句，必须直接执行并交付结果。",
         "- **最终回复只面向用户**：严格按任务正文要求的版式与字段输出；**禁止**在最终回复里粘贴工具调用的原始 JSON、`schedule_task` 返回体或冗长教程。",
         "- **禁止**在正文中手写 `{\"command\": \"...\"}`、`{\"name\":\"bash_exec\",...}` 等**伪工具调用**；真实命令只能通过 `bash_exec` 发起，执行结果由界面上的工具卡片展示，你只需用自然语言概括 `exit_code` / `stderr` 要点（勿重复整段 stdout）。",
         "- **失败时**：只说明具体错误（接口 / 库 / 网络 / 权限），**不超过 5 行**，不要反问；若已调用 `bash_exec`，必须依据工具返回的 `stderr` 原文措辞，**禁止**把 `path escapes workspace`、`CANCELLED`、超时等概括成「虚拟环境损坏」。",
+        "- **落盘真实性**：只有在 `file_write` 成功，或 `bash_exec` 的落盘命令返回 `exit_code=0` 后，才允许声明“已保存到 <路径>”；否则只能报告“未保存”。",
+        "- **联网真实性**：涉及网页巡检/新闻抓取任务时，若未调用 `mcp_call`（或明确联网工具）取得结果，禁止生成“今日巡检结果”。",
+        "- **约束冲突处理**：当任务文本内出现时间窗口冲突（如“过去一周”与“24小时内”并存），禁止自行拍脑袋改写；必须按用户最后一次明确口径执行，并在输出首行注明采用的口径。",
         "- **依赖**：若缺 Python 包，在 **`<任务根>/.venv`** 下用 `pip install` 后重试。",
         "## 工作目录（taskspace 挂载，应与任务根一致）",
     ]
@@ -177,6 +183,7 @@ def _build_automation_runner_system_prompt(
         [
             "## 其他",
             "- 不要调用 `delegate_to_avatar`。",
+            "- 禁止调用 `schedule_task` / `list_scheduled_tasks` / `cancel_scheduled_task`（防止递归建任务）。",
         ]
     )
     return "\n".join(lines)
@@ -331,7 +338,8 @@ def create_studio_app() -> FastAPI:
         except Exception:
             value = None
         if value is None:
-            return []
+            # Default to local web extraction path when user has not configured policy.
+            return ["firecrawl"]
         if isinstance(value, str):
             lowered = value.strip().lower()
             if lowered in {"", "none", "off", "false", "0"}:
@@ -1269,9 +1277,22 @@ def create_studio_app() -> FastAPI:
                 prompt += f"\n## 工作目录\n- {ws}\n"
             return prompt
 
-        effective_tools_source: list = list(META_AGENT_TOOLS) if not is_avatar_session else [
-            t for t in META_AGENT_TOOLS if t.get("function", {}).get("name") != "delegate_to_avatar"
-        ]
+        if is_automation_session:
+            # Automation avatar is an execution worker, not a scheduler author.
+            # Keep runtime/file/mcp tools, but block task-management meta tools to
+            # prevent recursive "create another schedule_task" behavior.
+            _blocked = {"schedule_task", "list_scheduled_tasks", "cancel_scheduled_task", "delegate_to_avatar"}
+            effective_tools_source: list = [
+                t
+                for t in META_AGENT_TOOLS
+                if t.get("function", {}).get("name") not in _blocked
+            ]
+        elif is_avatar_session:
+            effective_tools_source = [
+                t for t in META_AGENT_TOOLS if t.get("function", {}).get("name") != "delegate_to_avatar"
+            ]
+        else:
+            effective_tools_source = list(META_AGENT_TOOLS)
         effective_tools: list = _filter_tools_by_policy(
             effective_tools_source,
             avatar_tools_enabled=avatar_tools_enabled,
