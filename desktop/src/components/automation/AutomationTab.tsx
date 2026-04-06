@@ -3,6 +3,7 @@ import { Plus } from "lucide-react";
 import { Panel } from "../ds/Panel";
 import { TemplateGrid } from "./TemplateGrid";
 import { TaskFormPanel } from "./TaskFormPanel";
+import { deleteAutomationTaskWithConfirm } from "../../utils/automation-delete";
 import { TaskList } from "./TaskList";
 import type { AutomationTask, AutomationTemplate } from "./types";
 
@@ -125,8 +126,9 @@ export function AutomationTab() {
   }, [loadTasks]);
 
   const handleDelete = useCallback(async (taskId: string) => {
-    const result = await window.agenticxDesktop.deleteAutomationTask(taskId);
-    if (result?.ok) void loadTasks();
+    const result = await deleteAutomationTaskWithConfirm(taskId);
+    if (result.cancelled) return;
+    if (result.ok) void loadTasks();
   }, [loadTasks]);
 
   const handleToggle = useCallback(async (taskId: string, enabled: boolean) => {
@@ -234,6 +236,11 @@ export function AutomationTab() {
           initial={editingTask}
           onSave={handleSave}
           onCancel={() => { setShowForm(false); setEditingTask(null); }}
+          onAfterDelete={async () => {
+            setShowForm(false);
+            setEditingTask(null);
+            void loadTasks();
+          }}
         />
       )}
     </div>

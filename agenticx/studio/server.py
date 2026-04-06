@@ -45,7 +45,7 @@ from agenticx.cli.studio_mcp import (
     set_mcp_extra_search_paths_config,
 )
 from agenticx.llms.provider_resolver import ProviderResolver
-from agenticx.runtime import AgentRuntime
+from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.loop_controller import LoopController
@@ -124,6 +124,62 @@ def _zhipu_glm5_family_no_vision(model_name: str) -> bool:
     if "vl" in raw or "vision" in raw or "4v" in raw or "5v" in raw:
         return False
     return raw == "glm-5" or raw.startswith("glm-5-")
+
+
+def _build_automation_runner_system_prompt(
+    automation_avatar_id: str,
+    taskspaces: list[Any] | None,
+    session_workspace_dir: str,
+) -> str:
+    """System prompt for Desktop automation sessions (avatar_id automation:<task_id>)."""
+    task_id = ""
+    if automation_avatar_id.startswith("automation:"):
+        task_id = automation_avatar_id.split(":", 1)[1].strip()
+    default_dir = (
+        str(Path.home() / ".agenticx" / "crontask" / task_id)
+        if task_id
+        else str(Path.home() / ".agenticx" / "crontask")
+    )
+
+    lines: list[str] = [
+        "# 定时 / 自动化任务执行器",
+        "你是 Machi 的**定时任务执行器**。本轮用户输入即任务说明（含输出格式、数据来源与失败处理等硬性要求）。",
+        "## 任务根目录（与 Desktop 配置一致）",
+        "- **定义**：用户在自动化设置里填写的 **工作区**；若留空，则为 `~/.agenticx/crontask/<task_id>`（每个定时任务独占一个子目录，与对话一一对应）。",
+        "- **Python 虚拟环境**：必须在**任务根目录**下维护，标准路径为 **`<任务根>/.venv`**。安装依赖用 `<任务根>/.venv/bin/pip install …`，执行脚本用 `<任务根>/.venv/bin/python …`（不要在未约定的仓库 `.venv`、全局 python 里装定时任务专属依赖，除非用户显式把该路径设为工作区）。",
+        "- **脚本与产物**：与本任务相关的脚本、数据、日志、临时文件、辅助工具**一律**放在任务根目录或其子目录内；不要将定时任务专属文件散落到仓库根、`~/.agenticx/scripts` 等路径（除非该路径就是用户指定的任务根目录）。",
+        "## 必须遵守",
+        "- **先执行再输出**：需要数据或脚本时，必须调用 `bash_exec`、`file_write` 等工具真实执行；禁止只给出示例代码或操作步骤而不实际跑通。",
+        "- **最终回复只面向用户**：严格按任务正文要求的版式与字段输出；**禁止**在最终回复里粘贴工具调用的原始 JSON、`schedule_task` 返回体或冗长教程。",
+        "- **禁止**在正文中手写 `{\"command\": \"...\"}`、`{\"name\":\"bash_exec\",...}` 等**伪工具调用**；真实命令只能通过 `bash_exec` 发起，执行结果由界面上的工具卡片展示，你只需用自然语言概括 `exit_code` / `stderr` 要点（勿重复整段 stdout）。",
+        "- **失败时**：只说明具体错误（接口 / 库 / 网络 / 权限），**不超过 5 行**，不要反问；若已调用 `bash_exec`，必须依据工具返回的 `stderr` 原文措辞，**禁止**把 `path escapes workspace`、`CANCELLED`、超时等概括成「虚拟环境损坏」。",
+        "- **依赖**：若缺 Python 包，在 **`<任务根>/.venv`** 下用 `pip install` 后重试。",
+        "## 工作目录（taskspace 挂载，应与任务根一致）",
+    ]
+    paths: list[str] = []
+    for item in taskspaces or []:
+        if isinstance(item, dict):
+            p = str(item.get("path") or "").strip()
+            if p:
+                paths.append(p)
+    if paths:
+        for p in paths:
+            lines.append(f"- {p}")
+    else:
+        lines.append(f"- （本会话尚未附加 taskspace；请直接使用）{default_dir}")
+    sw = str(session_workspace_dir or "").strip()
+    if sw and sw not in paths:
+        lines.append(f"- 会话 workspace_dir：{sw}")
+    lines.append(
+        f"- 若列表与任务根不一致，以**已附加的 taskspace** 为当前 shell/文件工具的 cwd 基准；默认任务根为：`{default_dir}`"
+    )
+    lines.extend(
+        [
+            "## 其他",
+            "- 不要调用 `delegate_to_avatar`。",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def create_studio_app() -> FastAPI:
@@ -1130,14 +1186,21 @@ def create_studio_app() -> FastAPI:
             list(team_manager._agents.keys()) if team_manager else [],
         )
         setattr(session, "_session_id", payload.session_id)
+        active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
+        is_automation_session = active_avatar_id.startswith("automation:")
         try:
             load_discovered_hooks()
         except Exception as exc:
             logger.debug("Skipping discovered hooks loading for chat: %s", exc)
+        # Desktop 定时/立即执行由主进程拉 SSE，无法像 ChatPane 那样响应 confirm_required；
+        # 无人值守会话必须自动放行 bash_exec 等工具确认，否则会永久卡住。
+        meta_confirm_gate = (
+            AutoApproveConfirmGate() if is_automation_session else managed.get_confirm_gate("meta")
+        )
         try:
             runtime = AgentRuntime(
                 llm,
-                managed.get_confirm_gate("meta"),
+                meta_confirm_gate,
                 team_manager=team_manager,
                 max_tool_rounds=_resolve_max_tool_rounds(),
             )
@@ -1145,12 +1208,11 @@ def create_studio_app() -> FastAPI:
             # Backward-compatible fallback for test doubles / legacy signatures.
             runtime = AgentRuntime(
                 llm,
-                managed.get_confirm_gate("meta"),
+                meta_confirm_gate,
             )
         avatar_context: dict[str, str] | None = None
         avatar_tools_enabled: dict[str, bool] = {}
         global_tools_enabled = _load_global_tools_policy()
-        active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
         is_avatar_session = bool(active_avatar_id and not active_avatar_id.startswith("group:"))
         if is_avatar_session:
             avatar_cfg = avatar_registry.get_avatar(active_avatar_id)
@@ -1244,17 +1306,24 @@ def create_studio_app() -> FastAPI:
                             f"原始请求：{payload.user_input}"
                         )
                     if is_avatar_session:
-                        sys_prompt = _build_avatar_direct_prompt()
-                        try:
-                            from agenticx.cli.studio_skill import get_all_skill_summaries
-                            from agenticx.runtime.prompts.meta_agent import _build_skills_context
-
-                            _av_skill_summaries = get_all_skill_summaries(
-                                bound_avatar_id=active_avatar_id,
+                        if is_automation_session:
+                            sys_prompt = _build_automation_runner_system_prompt(
+                                active_avatar_id,
+                                getattr(managed, "taskspaces", None) or [],
+                                str(getattr(session, "workspace_dir", "") or ""),
                             )
-                            sys_prompt += "\n\n" + _build_skills_context(_av_skill_summaries)
-                        except Exception:
-                            pass
+                        else:
+                            sys_prompt = _build_avatar_direct_prompt()
+                            try:
+                                from agenticx.cli.studio_skill import get_all_skill_summaries
+                                from agenticx.runtime.prompts.meta_agent import _build_skills_context
+
+                                _av_skill_summaries = get_all_skill_summaries(
+                                    bound_avatar_id=active_avatar_id,
+                                )
+                                sys_prompt += "\n\n" + _build_skills_context(_av_skill_summaries)
+                            except Exception:
+                                pass
                     else:
                         _u_nickname = str(getattr(payload, "user_nickname", None) or "").strip()
                         _u_preference = str(getattr(payload, "user_preference", None) or "").strip()

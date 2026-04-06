@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Clock3, Loader2, Settings } from "lucide-react";
+import { Ban, ChevronDown, ChevronRight, Clock3, Loader2, Settings } from "lucide-react";
 import { useAppStore, type Avatar, type GroupChat } from "../store";
 import { avatarBgClass, avatarDotColor, groupColorByIndex } from "../utils/avatar-color";
 import { AvatarCreateDialog } from "./AvatarCreateDialog";
@@ -367,10 +367,31 @@ export function AvatarSidebar() {
 
     void (async () => {
       try {
-        const sid = String(task.sessionId ?? "").trim();
+        let sid = String(task.sessionId ?? "").trim();
         if (sid) {
-          setPaneSessionId(paneId, sid);
-          return;
+          const listedForAutomation = await window.agenticxDesktop
+            .listSessions(automationAvatarId)
+            .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
+          const sessionsForTask =
+            listedForAutomation.ok && Array.isArray(listedForAutomation.sessions)
+              ? listedForAutomation.sessions
+              : [];
+          const sidBelongsToAutomation = sessionsForTask.some(
+            (row) =>
+              String(row.session_id ?? "").trim() === sid &&
+              isSessionAvatarMatch(row, automationAvatarId)
+          );
+          if (sidBelongsToAutomation) {
+            setPaneSessionId(paneId, sid);
+            return;
+          }
+          const stripped: AutomationTask = { ...task };
+          delete stripped.sessionId;
+          const savedStrip = await window.agenticxDesktop.saveAutomationTask(stripped);
+          if (savedStrip?.ok) {
+            await refreshAutomationTasks();
+          }
+          sid = "";
         }
         const listed = await window.agenticxDesktop
           .listSessions(automationAvatarId)
@@ -695,41 +716,59 @@ export function AvatarSidebar() {
                   );
                   const isRunning = runningTaskIds.has(task.id);
                   return (
-                    <button
+                    <div
                       key={task.id}
-                      type="button"
-                      className={`mx-2 flex w-[calc(100%-16px)] items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left transition-all ${
-                        isActive
-                          ? "bg-surface-card text-text-strong"
-                          : "text-text-muted hover:bg-surface-card hover:text-text-strong"
-                      }`}
-                      onClick={() => void openOrFocusAutomationPane(task)}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setContextMenu(null);
-                        setGroupContextMenu(null);
-                        setAutomationContextMenu({ x: e.clientX, y: e.clientY, taskId: task.id });
-                      }}
+                      className="mx-2 flex w-[calc(100%-16px)] items-center gap-0.5 rounded-[10px] px-0.5 py-0.5"
                     >
-                      <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] bg-surface-card">
-                        {isRunning ? (
-                          <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
-                        ) : (
-                          <Clock3 className="h-4 w-4 text-text-muted" />
-                        )}
-                        {hasPane && (
-                          <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface-sidebar bg-emerald-500" />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-xs">{task.name}</div>
-                        <div className="truncate text-[10px] text-text-faint">
-                          {isRunning ? "运行中..." : task.enabled ? "已启用" : "已暂停"}
-                          {task.lastRunStatus === "error" ? " · 最近失败" : ""}
+                      <button
+                        type="button"
+                        className={`flex min-w-0 flex-1 items-center gap-2 rounded-[8px] px-2 py-1.5 text-left transition-all ${
+                          isActive
+                            ? "bg-surface-card text-text-strong"
+                            : "text-text-muted hover:bg-surface-card hover:text-text-strong"
+                        }`}
+                        onClick={() => void openOrFocusAutomationPane(task)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setContextMenu(null);
+                          setGroupContextMenu(null);
+                          setAutomationContextMenu({ x: e.clientX, y: e.clientY, taskId: task.id });
+                        }}
+                      >
+                        <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] bg-surface-card">
+                          {isRunning ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+                          ) : (
+                            <Clock3 className="h-4 w-4 text-text-muted" />
+                          )}
+                          {hasPane && (
+                            <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface-sidebar bg-emerald-500" />
+                          )}
                         </div>
-                      </div>
-                    </button>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs">{task.name}</div>
+                          <div className="truncate text-[10px] text-text-faint">
+                            {isRunning ? "运行中..." : task.enabled ? "已启用" : "已暂停"}
+                            {task.lastRunStatus === "error" ? " · 最近失败" : ""}
+                          </div>
+                        </div>
+                      </button>
+                      {isRunning ? (
+                        <button
+                          type="button"
+                          title="终止本次执行"
+                          className="shrink-0 rounded-md p-1.5 text-text-faint transition hover:bg-rose-500/15 hover:text-rose-400"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            void window.agenticxDesktop.cancelAutomationTaskRun(task.id);
+                          }}
+                        >
+                          <Ban className="h-3.5 w-3.5" aria-hidden />
+                        </button>
+                      ) : null}
+                    </div>
                   );
                 })}
               </div>
@@ -829,6 +868,10 @@ export function AvatarSidebar() {
           initial={automationFormInitial}
           onSave={handleAutomationFormSave}
           onCancel={() => setAutomationFormInitial(null)}
+          onAfterDelete={async () => {
+            setAutomationFormInitial(null);
+            void refreshAutomationTasks();
+          }}
         />
       )}
 

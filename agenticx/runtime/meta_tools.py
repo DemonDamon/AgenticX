@@ -2177,14 +2177,13 @@ async def dispatch_meta_tool_async(
         )
         return json.dumps(payload, ensure_ascii=False)
 
-    # --- Task scheduler tools (Dispatch-inspired background tasks) ---
+    # --- Persistent automation task tools (bridged to Desktop AutomationScheduler) ---
     if name in ("schedule_task", "list_scheduled_tasks", "cancel_scheduled_task"):
-        from agenticx.runtime.task_scheduler import TaskScheduler
-        scheduler: TaskScheduler = getattr(session, "_task_scheduler", None)  # type: ignore[assignment]
-        if scheduler is None:
-            scheduler = TaskScheduler()
-            if session is not None:
-                setattr(session, "_task_scheduler", scheduler)
+        from agenticx.runtime._automation_tasks_io import (
+            load_automation_tasks,
+            save_automation_tasks,
+            generate_task_id,
+        )
 
         if name == "schedule_task":
             task_name = str(arguments.get("name", "")).strip()
@@ -2192,29 +2191,95 @@ async def dispatch_meta_tool_async(
             if not task_name or not instruction:
                 return json.dumps({"ok": False, "error": "name and instruction are required"}, ensure_ascii=False)
 
-            async def _background_handler(ctx: dict) -> str:
-                return f"Background task '{ctx.get('name', '')}' executed with instruction: {ctx.get('instruction', '')}"
+            freq_type = str(arguments.get("frequency_type", "daily")).strip()
+            time_str = str(arguments.get("time", "09:00")).strip()
+            days = arguments.get("days")
+            if not isinstance(days, list) or not days:
+                days = [1, 2, 3, 4, 5, 6, 7]
+            days = [int(d) for d in days if isinstance(d, (int, float))]
 
-            task_id = await scheduler.schedule(
-                name=task_name,
-                handler=_background_handler,
-                context={"name": task_name, "instruction": instruction},
+            if freq_type == "interval":
+                interval_hours = int(arguments.get("interval_hours", 4) or 4)
+                frequency: dict = {"type": "interval", "hours": interval_hours, "days": days}
+            elif freq_type == "once":
+                date_str = str(arguments.get("date", "")).strip()
+                if not date_str:
+                    from datetime import date as _date_cls
+                    date_str = _date_cls.today().isoformat()
+                frequency = {"type": "once", "time": time_str, "date": date_str}
+            else:
+                frequency = {"type": "daily", "time": time_str, "days": days}
+
+            enabled = arguments.get("enabled")
+            if not isinstance(enabled, bool):
+                enabled = True
+
+            task_id = generate_task_id()
+            task_obj = {
+                "id": task_id,
+                "name": task_name,
+                "prompt": instruction,
+                "frequency": frequency,
+                "enabled": enabled,
+                "createdAt": datetime.now().isoformat(),
+            }
+            ws = str(arguments.get("workspace", "") or "").strip()
+            if ws:
+                task_obj["workspace"] = ws
+            else:
+                # 与 Desktop 一致：每任务独占 ~/.agenticx/crontask/<id>/
+                default_ws = str(Path.home() / ".agenticx" / "crontask" / task_id)
+                task_obj["workspace"] = default_ws
+                Path(default_ws).mkdir(parents=True, exist_ok=True)
+            # 不写入 sessionId：若绑定 Machi/当前对话的会话 ID，侧栏打开「定时」窗格会错误加载该会话历史。
+            # 专属会话应在 Desktop 侧栏点击该任务时由 automation:<task_id> 创建并回写。
+
+            tasks = load_automation_tasks()
+            tasks.insert(0, task_obj)
+            save_automation_tasks(tasks)
+
+            return json.dumps(
+                {
+                    "ok": True,
+                    "task_id": task_id,
+                    "name": task_name,
+                    "frequency": frequency,
+                    "message": "已创建定时任务，可在侧栏「定时」区域查看和编辑。",
+                },
+                ensure_ascii=False,
             )
-            return json.dumps({"ok": True, "task_id": task_id, "name": task_name, "status": "running"}, ensure_ascii=False)
 
         if name == "list_scheduled_tasks":
-            tasks = scheduler.list_tasks()
-            items = [
-                {"task_id": t.task_id, "name": t.name, "status": t.status.value, "error": t.error}
-                for t in tasks
-            ]
+            tasks = load_automation_tasks()
+            items = []
+            for t in tasks:
+                items.append({
+                    "task_id": t.get("id", ""),
+                    "name": t.get("name", ""),
+                    "enabled": t.get("enabled", False),
+                    "frequency": t.get("frequency"),
+                    "lastRunAt": t.get("lastRunAt"),
+                    "lastRunStatus": t.get("lastRunStatus"),
+                    "lastRunError": t.get("lastRunError"),
+                })
             return json.dumps({"ok": True, "tasks": items}, ensure_ascii=False)
 
         if name == "cancel_scheduled_task":
             task_id = str(arguments.get("task_id", "")).strip()
             if not task_id:
                 return json.dumps({"ok": False, "error": "task_id is required"}, ensure_ascii=False)
-            cancelled = scheduler.cancel_task(task_id)
-            return json.dumps({"ok": cancelled, "task_id": task_id}, ensure_ascii=False)
+            tasks = load_automation_tasks()
+            found = False
+            for t in tasks:
+                if t.get("id") == task_id:
+                    t["enabled"] = False
+                    found = True
+                    break
+            if found:
+                save_automation_tasks(tasks)
+            return json.dumps(
+                {"ok": found, "task_id": task_id, "message": "已禁用该定时任务。" if found else "未找到该任务。"},
+                ensure_ascii=False,
+            )
 
     return json.dumps({"ok": False, "error": f"unknown meta tool: {name}"}, ensure_ascii=False)
