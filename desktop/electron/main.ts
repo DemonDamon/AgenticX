@@ -1488,7 +1488,15 @@ async function startWechatSidecar(): Promise<void> {
   try {
     const port = await findFreePort();
     const dataDir = path.join(os.homedir(), ".agenticx");
-    wechatSidecarProcess = spawn(binaryPath, ["--port", String(port), "--data-dir", dataDir], {
+    const args = ["--port", String(port), "--data-dir", dataDir];
+    // Minimal spawn context for diagnosing unknown runtime flags.
+    console.info("[wechat-sidecar] spawn command", {
+      binaryPath,
+      args,
+      nodeOptions: process.env.NODE_OPTIONS ?? "",
+      electronRunAsNode: process.env.ELECTRON_RUN_AS_NODE ?? "",
+    });
+    wechatSidecarProcess = spawn(binaryPath, args, {
       cwd: os.homedir(),
       stdio: ["ignore", "pipe", "pipe"],
     });
