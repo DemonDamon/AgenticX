@@ -127,7 +127,8 @@ def _resolve_mcp_auto_connect_setting() -> Optional[List[str]]:
     except Exception:
         value = None
     if value is None:
-        return []
+        # Default to local web extraction path when user has not configured policy.
+        return ["firecrawl"]
     if isinstance(value, str):
         lowered = value.strip().lower()
         if lowered in {"", "none", "off", "false", "0"}:

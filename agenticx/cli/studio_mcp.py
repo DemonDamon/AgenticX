@@ -85,11 +85,23 @@ def _exception_detail_for_mcp_call(exc: BaseException, *, max_chain: int = 4) ->
     return " | ".join(parts)
 
 
-# Shipped default for first-time Machi / agx users (no secrets on disk; env inherits os.environ).
-_DEFAULT_BROWSER_USE_MCP_ENTRY: Dict[str, Any] = {
-    "command": "uvx",
-    "args": ["browser-use[cli]", "--mcp"],
-    "timeout": 600.0,
+# Shipped defaults for first-time Machi / agx users
+# (no secrets on disk; env inherits os.environ).
+_DEFAULT_MCP_ENTRIES: Dict[str, Dict[str, Any]] = {
+    "browser-use": {
+        "command": "uvx",
+        "args": ["browser-use[cli]", "--mcp"],
+        "timeout": 600.0,
+    },
+    "firecrawl": {
+        "command": "npx",
+        "args": ["-y", "firecrawl-mcp"],
+        "env": {
+            # Local self-host mode by default; no cloud API key required.
+            "FIRECRAWL_API_URL": "http://127.0.0.1:3002",
+        },
+        "timeout": 120.0,
+    },
 }
 
 
@@ -213,12 +225,12 @@ def all_mcp_config_search_paths() -> List[Path]:
 
 
 def ensure_default_agenticx_mcp_json() -> bool:
-    """Ensure ~/.agenticx/mcp.json contains a default ``browser-use`` MCP server.
+    """Ensure ~/.agenticx/mcp.json contains default bundled MCP servers.
 
-    - If the file is missing: creates it with only ``browser-use``.
-    - If the file exists but has no ``browser-use`` entry (common: user only uses
-      ``~/.cursor/mcp.json``): **merges** in the default entry without removing others.
-    - Never replaces an existing ``browser-use`` block.
+    - If the file is missing: creates it with bundled defaults.
+    - If the file exists but has missing bundled entries (common: user only uses
+      ``~/.cursor/mcp.json``): **merges** the missing entries without removing others.
+    - Never replaces existing server blocks.
 
     Returns True if a new file was created or updated.
     """
@@ -228,12 +240,12 @@ def ensure_default_agenticx_mcp_json() -> bool:
     except OSError:
         return False
 
-    entry = dict(_DEFAULT_BROWSER_USE_MCP_ENTRY)
+    entries = {name: dict(payload) for name, payload in _DEFAULT_MCP_ENTRIES.items()}
 
     if not target.exists():
         try:
             target.write_text(
-                json.dumps({"browser-use": entry}, ensure_ascii=False, indent=2) + "\n",
+                json.dumps(entries, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
         except OSError:
@@ -243,7 +255,7 @@ def ensure_default_agenticx_mcp_json() -> bool:
     try:
         raw = json.loads(target.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("skip browser-use merge: cannot read %s: %s", target, exc)
+        logger.warning("skip bundled MCP merge: cannot read %s: %s", target, exc)
         return False
 
     if not isinstance(raw, dict):
@@ -252,13 +264,15 @@ def ensure_default_agenticx_mcp_json() -> bool:
     changed = False
     if "mcpServers" in raw and isinstance(raw["mcpServers"], dict):
         servers = raw["mcpServers"]
-        if "browser-use" not in servers:
-            servers["browser-use"] = entry
-            changed = True
+        for server_name, entry in entries.items():
+            if server_name not in servers:
+                servers[server_name] = entry
+                changed = True
     else:
-        if "browser-use" not in raw:
-            raw["browser-use"] = entry
-            changed = True
+        for server_name, entry in entries.items():
+            if server_name not in raw:
+                raw[server_name] = entry
+                changed = True
 
     if not changed:
         return False
@@ -701,7 +715,9 @@ async def mcp_call_tool_async(
         echo: If True, print status and result to the Rich console (REPL). If False, only return.
     """
     if not hub._tool_routing:
-        msg = _format_mcp_call_error("no MCP tools connected")
+        msg = _format_mcp_call_error(
+            "no MCP tools connected; call list_mcps first, then mcp_connect a server"
+        )
         if echo:
             console.print("[yellow]暂无已连接的 MCP 工具。[/yellow]")
         return msg
@@ -722,6 +738,7 @@ async def mcp_call_tool_async(
             detail += f"; available: {available}"
         else:
             detail += "; available: (none)"
+        detail += "; hint: call list_mcps and use mcp_tool_names exactly"
         msg = _format_mcp_call_error(detail)
         if echo:
             console.print(f"[red]工具 '{tool_name}' 不存在。[/red]")

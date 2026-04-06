@@ -351,7 +351,9 @@ def _build_context_files_block(session: StudioSession) -> str:
             preview = preview[:MAX_CONTEXT_FILE_CHARS] + "\n...(truncated)"
         parts.append(f"--- {fpath} ---\n{preview}")
     parts.append(
-        "\n提示：上述文件路径为绝对路径，可直接用于 file_read 等工具调用。"
+        "\n提示：上述条目中，普通文件路径通常为绝对路径，可直接用于 file_read 等工具调用。"
+        "若条目以 `skill:` 开头（如 `skill:tech-daily-news`），它是技能内容的虚拟键，不是磁盘路径；"
+        "请直接使用其内容，不要用 bash/file_read 去猜测或拼接 SKILL.md 文件路径。"
         "若用户在消息中 @某文件名，请优先使用此处列出的完整路径。\n"
     )
     return "\n\n".join(parts)
@@ -497,6 +499,8 @@ def build_meta_agent_system_prompt(
         "- 需要用户决策时，明确给出选项（A/B/C），但仅限业务方案选择。\n\n"
         "## MCP 工具管理闭环\n"
         "- 当任务需要 MCP 能力时，先调用 `list_mcps` 查看配置与连接状态。\n"
+        "- `mcp_call.tool_name` 必须来自 `list_mcps` 返回的 `mcp_tool_names`，禁止臆造工具名（如 `web.fetch.*`、`list_tools`）。\n"
+        "- `mcp_call` 参数对象字段应使用 `arguments`（兼容 `args`）；调用前先核对目标工具所需字段。\n"
         "- 若存在配置但未连接，先明确告知用户需在 MCP 管理接口完成连接。\n"
         "- 若用户明确提供外部 mcp.json 路径，先调用 `mcp_import` 导入，再连接。\n"
         "- MCP 连接失败时，要求子智能体进入闭环：读取错误 -> 诊断原因 -> 执行修复 -> 重试连接（最多 3 轮）。\n"
@@ -509,6 +513,8 @@ def build_meta_agent_system_prompt(
         "- 任何 `spawn_subagent` 之前都必须先调用一次 `recommend_subagent_model`，禁止跳过。\n"
         "- 在拿到工具结果前，不要输出长段解释；优先输出工具事件与结果。\n"
         "- 若当前不需要启动子智能体，就直接给最终答复，不要进入无意义等待。\n"
+        "- **创建定时任务特例**：当用户已给出（或你已确认）任务名称 + 频率/时间/日期 + instruction + workspace 后，必须在同一轮直接调用 `schedule_task`；禁止先输出“我先加载某个 skill/脚本再创建”。\n"
+        "- **创建定时任务特例**：除非用户明确要求复用某个 skill 源码，否则不要把 `~/.cursor/skills/*` 下的大文件 `file_read` 当作前置步骤；优先直接构造 `instruction` 并 `schedule_task`。\n"
         "- 当「当前子智能体状态」章节列出了 running/pending 的子智能体时，用户问进度可调用一次 `query_subagent_status`；拿到结果后必须直接回答，不得在同一轮再次调用。\n\n"
         "- 连续 2 次工具失败后，先做一次失败归因并调整方案；禁止在同一错误模式下重复试错超过 2 次。\n"
         "- 对 MCP 连接问题，优先走最短闭环：`file_read(mcp.json)` -> `mcp_import` -> `mcp_connect` -> 若失败仅补充 1 次最小验证（命令可执行性）；随后给出明确结论与下一步，不要无限深挖。\n\n"

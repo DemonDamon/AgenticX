@@ -37,6 +37,7 @@ from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.memory.session_store import SessionStore
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.skills.guard import scan_skill, should_allow
+from agenticx.tools.skill_bundle import SkillBundleLoader
 from agenticx.runtime.confirm import AsyncConfirmGate, ConfirmGate, SyncConfirmGate
 from agenticx.workspace.loader import (
     append_daily_memory,
@@ -255,7 +256,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "mcp_call",
-            "description": "Call one connected MCP tool by name with JSON arguments.",
+            "description": (
+                "Call one connected MCP tool by exact name with JSON arguments. "
+                "Before using this, call list_mcps and pick tool_name from returned mcp_tool_names; "
+                "do not invent names like web.fetch.* or list_tools."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -263,6 +268,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "arguments": {
                         "type": "object",
                         "description": "Tool arguments object.",
+                        "additionalProperties": True,
+                    },
+                    "args": {
+                        "type": "object",
+                        "description": "Alias of arguments; accepted for compatibility.",
                         "additionalProperties": True,
                     },
                 },
@@ -290,7 +300,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "skill_use",
-            "description": "Activate a skill into current context.",
+            "description": (
+                "Activate a skill into current context_files (key: skill:<name>). "
+                "After calling this tool, use the injected content directly; do not guess paths or run bash to cat SKILL.md."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -305,7 +318,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "skill_list",
-            "description": "List available local/remote skill summaries.",
+            "description": (
+                "List available skills with source/location/path metadata. "
+                "Use these returned paths when you must inspect files; avoid hardcoded ~/.agenticx/skills guesses."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -996,6 +1012,24 @@ async def _tool_bash_exec(
         return "ERROR: empty command"
 
     command_name = Path(parts[0]).name
+    if command_name.startswith("firecrawl_"):
+        return (
+            f"ERROR: '{command_name}' is an MCP tool name, not a shell command. "
+            "Use mcp_call with JSON arguments, e.g. "
+            "{\"tool_name\":\"firecrawl_scrape\",\"arguments\":{\"url\":\"https://example.com\"}}. "
+            "For multiple URLs, iterate single-url calls or use firecrawl_crawl/firecrawl_map."
+        )
+    if session is not None and getattr(session, "mcp_hub", None) is not None:
+        try:
+            routed = getattr(session.mcp_hub, "_tool_routing", {}) or {}
+            if command_name in routed:
+                return (
+                    f"ERROR: '{command_name}' is an MCP tool name, not a shell command. "
+                    "Use mcp_call with JSON arguments. "
+                    "Tip: call list_mcps and copy tool_name from mcp_tool_names."
+                )
+        except Exception:
+            pass
     if command_name == "cd":
         target = str(parts[1]) if len(parts) > 1 else "~"
         try:
@@ -1453,9 +1487,25 @@ async def _tool_mcp_call_async(arguments: Dict[str, Any], session: StudioSession
     tool_name = str(arguments.get("tool_name", "")).strip()
     if not tool_name:
         return "ERROR: missing tool_name"
-    args_obj = arguments.get("arguments", {})
+
+    raw_args = arguments.get("arguments", None)
+    if raw_args is None and "args" in arguments:
+        raw_args = arguments.get("args")
+    args_obj = raw_args if raw_args is not None else {}
     if not isinstance(args_obj, dict):
-        return "ERROR: arguments must be an object"
+        return "ERROR: arguments/args must be an object"
+
+    # Firecrawl scrape is a single-url API. Guard common misuse early.
+    if (
+        tool_name == "firecrawl_scrape"
+        and "url" not in args_obj
+        and isinstance(args_obj.get("urls"), list)
+    ):
+        return (
+            "ERROR: firecrawl_scrape expects a single 'url' string, not 'urls' array. "
+            "Use: {\"url\":\"https://example.com\"}. "
+            "For multiple pages, iterate firecrawl_scrape per URL or use firecrawl_crawl/firecrawl_map."
+        )
     repeat_guard_error = _check_mcp_repeat_guard(session, tool_name, args_obj)
     if repeat_guard_error:
         return repeat_guard_error
@@ -1498,7 +1548,18 @@ def _tool_skill_use(arguments: Dict[str, Any], session: StudioSession) -> str:
     ok = studio_skill_use(
         session.context_files, name, bound_avatar_id=bound, quiet=True
     )
-    return "OK" if ok else "ERROR: skill activation failed"
+    if not ok:
+        return "ERROR: skill activation failed"
+
+    meta = SkillBundleLoader().get_skill(name)
+    if meta is None:
+        # Activation succeeded; metadata may be unavailable only in edge cases.
+        return f"OK: activated skill '{name}' into context_files key 'skill:{name}'"
+    return (
+        f"OK: activated skill '{name}' into context_files key 'skill:{name}'. "
+        f"source={meta.source}, location={meta.location}, "
+        f"base_dir={meta.base_dir}, skill_md={meta.skill_md_path}"
+    )
 
 
 def _tool_skill_list(session: StudioSession) -> str:
@@ -1509,7 +1570,15 @@ def _tool_skill_list(session: StudioSession) -> str:
         return f"ERROR: list skill failed: {exc}"
     if not summaries:
         return "No skills found."
-    lines = [f"- {item['name']}: {item['description']}" for item in summaries]
+    lines = []
+    for item in summaries:
+        source = str(item.get("source", "unknown"))
+        location = str(item.get("location", "unknown"))
+        base_dir = str(item.get("base_dir", ""))
+        lines.append(
+            f"- {item['name']}: {item['description']} "
+            f"[source={source}, location={location}, base_dir={base_dir}]"
+        )
     return "\n".join(lines)
 
 
