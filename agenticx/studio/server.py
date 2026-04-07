@@ -190,6 +190,8 @@ def _build_automation_runner_system_prompt(
 
 
 def create_studio_app() -> FastAPI:
+    _pending_mcp_autoconnect_tasks: set[asyncio.Task[Any]] = set()
+
     @contextlib.asynccontextmanager
     async def _studio_lifespan(app: FastAPI):
         gw_task: asyncio.Task | None = None
@@ -234,6 +236,11 @@ def create_studio_app() -> FastAPI:
                 await gw_task
             except asyncio.CancelledError:
                 pass
+        for task in list(_pending_mcp_autoconnect_tasks):
+            task.cancel()
+        for task in list(_pending_mcp_autoconnect_tasks):
+            with contextlib.suppress(asyncio.CancelledError, TimeoutError, Exception):
+                await asyncio.wait_for(task, timeout=1.0)
 
     app = FastAPI(title="AgenticX Studio Service", version="0.1.0", lifespan=_studio_lifespan)
     default_origins = [
@@ -367,6 +374,39 @@ def create_studio_app() -> FastAPI:
         if auto_connect_names is None:
             return [name for name in mcp_configs.keys() if name != "browser-use"]
         return [name for name in auto_connect_names if name != "browser-use"]
+
+    def _schedule_mcp_autoconnect_for_new_session(
+        managed: Any,
+        scoped_auto_connect_names: list[str] | None,
+    ) -> None:
+        """Start MCP auto-connect in background so session creation returns quickly."""
+        if not managed.studio_session.mcp_configs or scoped_auto_connect_names == []:
+            return
+
+        managed.studio_session.mcp_hub = MCPHub(clients=[], auto_mode=False)
+
+        async def _run_autoconnect() -> None:
+            try:
+                await auto_connect_servers_async(
+                    managed.studio_session.mcp_hub,
+                    managed.studio_session.mcp_configs,
+                    managed.studio_session.connected_servers,
+                    scoped_auto_connect_names,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "MCP auto-connect failed for new session %s: %s",
+                    managed.session_id,
+                    exc,
+                )
+
+        task = asyncio.create_task(_run_autoconnect())
+        _pending_mcp_autoconnect_tasks.add(task)
+
+        def _cleanup(done: asyncio.Task[Any]) -> None:
+            _pending_mcp_autoconnect_tasks.discard(done)
+
+        task.add_done_callback(_cleanup)
 
     def _flush_taskspace_hint(session_id: str, session_obj: Any) -> bool:
         scratchpad = getattr(session_obj, "scratchpad", None)
@@ -729,8 +769,11 @@ def create_studio_app() -> FastAPI:
             else:
                 managed.studio_session.workspace_dir = os.getenv("AGX_WORKSPACE_ROOT", "").strip() or os.getcwd()
             manager.rebind_default_taskspace_to_workspace(managed)
-            managed.avatar_id = avatar_id or None
-            managed.avatar_name = avatar_cfg.name if avatar_cfg else None
+            manager.apply_avatar_binding(
+                managed,
+                avatar_id=avatar_id or None,
+                avatar_name=avatar_cfg.name if avatar_cfg else None,
+            )
             try:
                 managed.studio_session.mcp_configs = load_available_servers()
             except Exception as exc:
@@ -2274,8 +2317,11 @@ def create_studio_app() -> FastAPI:
         else:
             managed.studio_session.workspace_dir = os.getenv("AGX_WORKSPACE_ROOT", "").strip() or os.getcwd()
         manager.rebind_default_taskspace_to_workspace(managed)
-        managed.avatar_id = avatar_id
-        managed.avatar_name = avatar_cfg.name if avatar_cfg else None
+        manager.apply_avatar_binding(
+            managed,
+            avatar_id=avatar_id,
+            avatar_name=avatar_cfg.name if avatar_cfg else None,
+        )
         managed.session_name = session_name
 
         if inherited_summary:
@@ -2297,17 +2343,7 @@ def create_studio_app() -> FastAPI:
             auto_connect_names,
             mcp_configs=managed.studio_session.mcp_configs,
         )
-        if managed.studio_session.mcp_configs and scoped_auto_connect_names != []:
-            managed.studio_session.mcp_hub = MCPHub(clients=[], auto_mode=False)
-            try:
-                await auto_connect_servers_async(
-                    managed.studio_session.mcp_hub,
-                    managed.studio_session.mcp_configs,
-                    managed.studio_session.connected_servers,
-                    scoped_auto_connect_names,
-                )
-            except Exception as exc:
-                logger.warning("MCP auto-connect failed for new session %s: %s", managed.session_id, exc)
+        _schedule_mcp_autoconnect_for_new_session(managed, scoped_auto_connect_names)
         return {
             "ok": True,
             "session_id": managed.session_id,

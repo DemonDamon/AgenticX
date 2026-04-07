@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Dict, List
 
 from fastapi.testclient import TestClient
@@ -144,6 +145,39 @@ def test_get_session_meta_query_does_not_reuse_avatar_session() -> None:
     assert r.status_code == 200
     assert r.json()["session_id"] != avatar_sid
     assert not r.json().get("avatar_id")
+
+
+def test_create_session_returns_without_waiting_for_mcp_autoconnect(monkeypatch) -> None:
+    from agenticx.studio import server as server_module
+
+    async def _slow_auto_connect(*_args, **_kwargs):
+        await __import__("asyncio").sleep(0.25)
+        return {"slow-mcp": True}
+
+    monkeypatch.setattr(
+        server_module,
+        "load_available_servers",
+        lambda: {
+            "slow-mcp": {
+                "command": "python",
+                "args": ["-c", "print('ok')"],
+                "timeout": 30.0,
+            }
+        },
+    )
+    monkeypatch.setattr(server_module, "auto_connect_servers_async", _slow_auto_connect)
+
+    app = create_studio_app()
+    client = TestClient(app)
+
+    start = time.perf_counter()
+    created = client.post("/api/sessions", json={})
+    elapsed = time.perf_counter() - start
+
+    assert created.status_code == 200
+    assert created.json().get("session_id")
+    # Regression guard: response should not block on a slow MCP auto-connect.
+    assert elapsed < 0.2
 
 
 def test_delete_selected_session_messages() -> None:

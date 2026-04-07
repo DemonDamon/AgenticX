@@ -113,6 +113,8 @@ class ManagedSession:
 
 
 class SessionManager:
+    _META_TASKSPACE_SCOPE = "meta"
+
     def __init__(self, *, ttl_seconds: int = 3600) -> None:
         self.ttl_seconds = ttl_seconds
         self._sessions: Dict[str, ManagedSession] = {}
@@ -519,6 +521,7 @@ class SessionManager:
             raise KeyError("session not found")
         self._ensure_default_taskspace(managed)
         self._sync_taskspaces_with_global(managed)
+        scope_key = self._taskspace_scope_key_for_managed(managed)
         default_taskspace = self._get_taskspace(managed, "default")
         resolved_path = (
             self._resolve_taskspace_path(path)
@@ -528,7 +531,7 @@ class SessionManager:
         for item in managed.taskspaces:
             if item.get("path") == resolved_path:
                 return dict(item)
-        globals_rows = self._load_global_taskspaces()
+        globals_rows = self._load_global_taskspaces(scope_key=scope_key)
         if len(globals_rows) >= max(0, self.max_taskspaces - 1):
             raise ValueError(f"taskspace limit reached ({self.max_taskspaces})")
         clean_label = (label or "").strip() or Path(resolved_path).name or "taskspace"
@@ -538,9 +541,11 @@ class SessionManager:
             "path": resolved_path,
         }
         globals_rows.append(taskspace)
-        self._save_global_taskspaces(globals_rows)
-        self._sync_all_sessions_from_global()
+        self._save_global_taskspaces(globals_rows, scope_key=scope_key)
+        self._sync_all_sessions_from_global(scope_key=scope_key)
         for sid, each in self._sessions.items():
+            if self._taskspace_scope_key_for_managed(each) != scope_key:
+                continue
             each.updated_at = time.time()
             self._persist_session_state(sid, each.studio_session)
         return dict(taskspace)
@@ -551,14 +556,17 @@ class SessionManager:
             return False
         if str(taskspace_id).strip() == "default":
             return False
-        globals_rows = self._load_global_taskspaces()
+        scope_key = self._taskspace_scope_key_for_managed(managed)
+        globals_rows = self._load_global_taskspaces(scope_key=scope_key)
         before = len(globals_rows)
         globals_rows = [item for item in globals_rows if item.get("id") != taskspace_id]
         if len(globals_rows) == before:
             return False
-        self._save_global_taskspaces(globals_rows)
-        self._sync_all_sessions_from_global()
+        self._save_global_taskspaces(globals_rows, scope_key=scope_key)
+        self._sync_all_sessions_from_global(scope_key=scope_key)
         for sid, each in self._sessions.items():
+            if self._taskspace_scope_key_for_managed(each) != scope_key:
+                continue
             each.updated_at = time.time()
             self._persist_session_state(sid, each.studio_session)
         return True
@@ -1073,7 +1081,9 @@ class SessionManager:
 
     def _sync_taskspaces_with_global(self, managed: ManagedSession) -> None:
         self._ensure_default_taskspace(managed)
-        globals_rows = self._load_global_taskspaces()
+        globals_rows = self._load_global_taskspaces(
+            scope_key=self._taskspace_scope_key_for_managed(managed)
+        )
         default_item = self._get_taskspace(managed, "default")
         if default_item is None:
             return
@@ -1095,22 +1105,29 @@ class SessionManager:
                 break
         managed.taskspaces = merged
 
-    def _sync_all_sessions_from_global(self) -> None:
+    def _sync_all_sessions_from_global(self, scope_key: str | None = None) -> None:
         for managed in self._sessions.values():
+            if (
+                scope_key is not None
+                and self._taskspace_scope_key_for_managed(managed) != scope_key
+            ):
+                continue
             self._sync_taskspaces_with_global(managed)
 
     def _global_taskspaces_path(self) -> str:
         return os.path.join(self._taskspaces_root, "global_workspaces.json")
 
-    def _load_global_taskspaces(self) -> list[dict[str, str]]:
-        path = self._global_taskspaces_path()
-        if not os.path.exists(path):
-            return []
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                payload = json.load(fh)
-        except Exception:
-            return []
+    @staticmethod
+    def _taskspace_scope_key_from_avatar_id(avatar_id: Optional[str]) -> str:
+        normalized = normalize_session_avatar_binding(avatar_id)
+        if normalized is None:
+            return SessionManager._META_TASKSPACE_SCOPE
+        return f"avatar:{normalized}"
+
+    def _taskspace_scope_key_for_managed(self, managed: ManagedSession) -> str:
+        return self._taskspace_scope_key_from_avatar_id(getattr(managed, "avatar_id", None))
+
+    def _normalize_global_taskspace_rows(self, payload: Any) -> list[dict[str, str]]:
         if not isinstance(payload, list):
             return []
         rows: list[dict[str, str]] = []
@@ -1128,7 +1145,9 @@ class SessionManager:
             rows.append(
                 {
                     "id": taskspace_id,
-                    "label": str(item.get("label", "")).strip() or Path(resolved_path).name or "taskspace",
+                    "label": str(item.get("label", "")).strip()
+                    or Path(resolved_path).name
+                    or "taskspace",
                     "path": resolved_path,
                 }
             )
@@ -1137,9 +1156,57 @@ class SessionManager:
                 break
         return rows
 
-    def _save_global_taskspaces(self, rows: list[dict[str, str]]) -> None:
+    def _load_global_taskspace_scopes(self) -> dict[str, list[dict[str, str]]]:
         path = self._global_taskspaces_path()
-        atomic_write_json(path, rows)
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except Exception:
+            return {}
+
+        # Backward compatibility: old payload was a plain list shared by all sessions.
+        if isinstance(payload, list):
+            return {
+                self._META_TASKSPACE_SCOPE: self._normalize_global_taskspace_rows(payload)
+            }
+
+        if not isinstance(payload, dict):
+            return {}
+        raw_scopes = payload.get("scopes", payload)
+        if not isinstance(raw_scopes, dict):
+            return {}
+
+        scopes: dict[str, list[dict[str, str]]] = {}
+        for key, rows in raw_scopes.items():
+            scope_key = str(key or "").strip()
+            if not scope_key:
+                continue
+            normalized_rows = self._normalize_global_taskspace_rows(rows)
+            if normalized_rows:
+                scopes[scope_key] = normalized_rows
+        return scopes
+
+    def _load_global_taskspaces(self, scope_key: str | None = None) -> list[dict[str, str]]:
+        key = (scope_key or "").strip() or self._META_TASKSPACE_SCOPE
+        scopes = self._load_global_taskspace_scopes()
+        return [dict(item) for item in scopes.get(key, [])]
+
+    def _save_global_taskspaces(
+        self,
+        rows: list[dict[str, str]],
+        scope_key: str | None = None,
+    ) -> None:
+        key = (scope_key or "").strip() or self._META_TASKSPACE_SCOPE
+        scopes = self._load_global_taskspace_scopes()
+        normalized_rows = self._normalize_global_taskspace_rows(rows)
+        if normalized_rows:
+            scopes[key] = normalized_rows
+        else:
+            scopes.pop(key, None)
+        path = self._global_taskspaces_path()
+        atomic_write_json(path, {"scopes": scopes})
 
     def _resolve_taskspace_path(self, path: str) -> str:
         root = Path(str(path).strip()).expanduser()
@@ -1167,6 +1234,22 @@ class SessionManager:
                     Path(resolved).mkdir(parents=True, exist_ok=True)
                     ts["path"] = resolved
                 return
+
+    def apply_avatar_binding(
+        self,
+        managed: ManagedSession,
+        *,
+        avatar_id: Optional[str],
+        avatar_name: Optional[str] = None,
+    ) -> None:
+        """Bind session avatar identity and immediately rescope taskspaces.
+
+        New sessions are created before avatar_id is known in some API flows. If we only
+        set avatar_id later without re-sync, taskspaces can stay in the wrong scope.
+        """
+        managed.avatar_id = normalize_session_avatar_binding(avatar_id)
+        managed.avatar_name = (str(avatar_name).strip() or None) if avatar_name is not None else None
+        self._sync_taskspaces_with_global(managed)
 
     def _sanitize_taskspaces(self, session_id: str, payload: Any) -> list[dict[str, str]]:
         rows: list[dict[str, str]] = []

@@ -42,7 +42,10 @@ def test_atomic_snapshot_writes_and_cleanup(manager: SessionManager, tmp_path: P
     assert json.loads(messages_path.read_text(encoding="utf-8")) == [{"role": "user", "content": "hello"}]
     assert len(json.loads(agent_messages_path.read_text(encoding="utf-8"))) == 40
     assert json.loads(refs_path.read_text(encoding="utf-8")) == [str(tmp_path / "a.txt")]
-    assert json.loads(global_path.read_text(encoding="utf-8"))[0]["id"] == "d"
+    payload = json.loads(global_path.read_text(encoding="utf-8"))
+    scopes = payload.get("scopes", {}) if isinstance(payload, dict) else {}
+    meta_rows = scopes.get("meta", [])
+    assert meta_rows and meta_rows[0]["id"] == "d"
 
     tmp_files = list(Path(manager._sessions_root).rglob("*.agx.tmp"))
     assert not tmp_files
