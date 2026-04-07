@@ -457,15 +457,37 @@ async function checkAutomationSessionBinding(
   try {
     const headers: Record<string, string> = {};
     if (token) headers["x-agx-desktop-token"] = token;
-    const resp = await fetch(
-      `${base}/api/session?session_id=${encodeURIComponent(sessionId)}`,
+
+    // IMPORTANT: never call /api/session here.
+    // /api/session has "get-or-create" semantics, which can accidentally create
+    // a brand-new unbound(meta) session when the old sessionId has expired.
+    // That side effect is exactly what pollutes Meta history with short-id rows.
+    const matchResp = await fetch(
+      `${base}/api/sessions?avatar_id=${encodeURIComponent(expected)}`,
       { headers },
     );
-    if (!resp.ok) return { kind: "unknown" };
-    const data = (await resp.json()) as { avatar_id?: string | null };
-    const av = data.avatar_id;
-    const avs = av == null ? "" : String(av).trim();
-    if (avs === expected) return { kind: "match" };
+    if (!matchResp.ok) return { kind: "unknown" };
+    const matchData = (await matchResp.json()) as {
+      sessions?: Array<{ session_id?: string | null }>;
+    };
+    const boundRows = Array.isArray(matchData.sessions) ? matchData.sessions : [];
+    const sid = String(sessionId ?? "").trim();
+    if (
+      boundRows.some((row) => String(row?.session_id ?? "").trim() === sid)
+    ) {
+      return { kind: "match" };
+    }
+
+    // Not in expected automation bucket. Check global list once to infer label.
+    const allResp = await fetch(`${base}/api/sessions`, { headers });
+    if (!allResp.ok) return { kind: "unknown" };
+    const allData = (await allResp.json()) as {
+      sessions?: Array<{ session_id?: string | null; avatar_id?: string | null }>;
+    };
+    const allRows = Array.isArray(allData.sessions) ? allData.sessions : [];
+    const current = allRows.find((row) => String(row?.session_id ?? "").trim() === sid);
+    if (!current) return { kind: "unknown" };
+    const avs = String(current.avatar_id ?? "").trim();
     const label = avs.length > 0 ? avs : "（空/元智能体会话）";
     return { kind: "mismatch", avatarLabel: label };
   } catch {
