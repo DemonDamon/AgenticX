@@ -8,6 +8,7 @@ import { PaneManager } from "./components/PaneManager";
 import { SidebarResizer } from "./components/SidebarResizer";
 import { Topbar } from "./components/Topbar";
 import type { ForwardConfirmPayload } from "./components/ForwardPicker";
+import { rememberSessionForAvatar } from "./utils/avatar-last-session";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/session-message-map";
 import type { Message } from "./store";
 import { useAppStore } from "./store";
@@ -261,6 +262,13 @@ export function App() {
     () => panes.find((pane) => pane.id === activePaneId)?.sessionId ?? sessionId,
     [activePaneId, panes, sessionId]
   );
+
+  useEffect(() => {
+    const activePane = panes.find((pane) => pane.id === activePaneId);
+    const sid = String(activePane?.sessionId ?? "").trim();
+    if (!sid) return;
+    rememberSessionForAvatar(activePane?.avatarId ?? null, sid);
+  }, [activePaneId, panes]);
   const resolvePaneForSession = useCallback((sid: string, fallbackAgentId?: string) => {
     const store = useAppStore.getState();
     let pane = store.panes.find((p) => p.sessionId === sid);
