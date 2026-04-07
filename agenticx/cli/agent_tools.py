@@ -710,6 +710,13 @@ async def _confirm(
     payload_context = dict(context or {})
     request_id = str(payload_context.get("request_id") or uuid.uuid4())
     payload_context["request_id"] = request_id
+    _log.info(
+        "[confirm] requested id=%s question=%s risk=%s tool=%s",
+        request_id,
+        question,
+        payload_context.get("risk"),
+        payload_context.get("tool"),
+    )
     if emit_event is not None:
         await emit_event(
             {
@@ -722,6 +729,7 @@ async def _confirm(
             }
         )
     approved = await confirm_gate.request_confirm(question, payload_context)
+    _log.info("[confirm] resolved id=%s approved=%s", request_id, approved)
     if emit_event is not None:
         await emit_event(
             {

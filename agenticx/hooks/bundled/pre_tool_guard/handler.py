@@ -44,6 +44,11 @@ _DANGEROUS_PATTERNS = [
     re.compile(r">\s*/dev/sd[a-z]", re.IGNORECASE),
     re.compile(r"\bmkfs\b", re.IGNORECASE),
     re.compile(r"\bdd\s+.*\bof=/dev/", re.IGNORECASE),
+    # Download-and-execute via shell pipe (classic remote script execution).
+    re.compile(r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:bash|sh|zsh)\b", re.IGNORECASE),
+    # Reverse shell-ish patterns.
+    re.compile(r"/dev/tcp/\d{1,3}(?:\.\d{1,3}){3}/\d{1,5}", re.IGNORECASE),
+    re.compile(r"\b(?:nc|ncat|netcat)\b[^\n]*\s(?:-e|--exec)\b", re.IGNORECASE),
 ]
 
 

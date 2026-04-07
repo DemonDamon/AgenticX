@@ -57,7 +57,7 @@ class AsyncConfirmGate(ConfirmGate):
     def __init__(
         self,
         timeout_seconds: Optional[float] = None,
-        timeout_action: str = "approve",
+        timeout_action: str = "reject",
     ) -> None:
         self._pending: Dict[str, asyncio.Future[bool]] = {}
         self.last_request: Optional[Dict[str, Any]] = None
