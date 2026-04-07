@@ -4,8 +4,10 @@ This module provides the WorkflowEngine class that executes GUI workflows
 with state management, observability, and error handling.
 """
 
+import ast
 import asyncio
 import logging
+import operator
 from typing import Dict, Any, Optional, List, Callable, Union
 from datetime import datetime
 from pydantic import BaseModel, Field  # type: ignore
@@ -15,6 +17,67 @@ from .workflow import GUIWorkflow
 from agenticx.embodiment.core.context import GUIAgentContext
 from agenticx.embodiment.core.models import GUIAgentResult
 from agenticx.embodiment.tools.base import GUIActionTool
+
+_CMP_OPS = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+    ast.Is: operator.is_,
+    ast.IsNot: operator.is_not,
+}
+
+
+def _build_condition_env(context_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge workflow context the same way as the legacy eval() path (metadata then flat dict)."""
+    return {
+        "result": True,
+        "True": True,
+        "False": False,
+        **context_dict.get("metadata", {}),
+        **context_dict,
+    }
+
+
+def _eval_condition_expr(node: ast.AST, env: Dict[str, Any]) -> Any:
+    """Evaluate a restricted expression tree: constants, names, compare chains, and/or/not."""
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id not in env:
+            raise ValueError(f"unknown name in condition: {node.id!r}")
+        return env[node.id]
+    if isinstance(node, ast.Compare):
+        left = _eval_condition_expr(node.left, env)
+        for op, comp in zip(node.ops, node.comparators):
+            right = _eval_condition_expr(comp, env)
+            fn = _CMP_OPS.get(type(op))
+            if fn is None:
+                raise ValueError(f"unsupported compare op: {type(op).__name__}")
+            if not fn(left, right):
+                return False
+            left = right
+        return True
+    if isinstance(node, ast.BoolOp):
+        if isinstance(node.op, ast.And):
+            return all(bool(_eval_condition_expr(v, env)) for v in node.values)
+        if isinstance(node.op, ast.Or):
+            return any(bool(_eval_condition_expr(v, env)) for v in node.values)
+        raise ValueError(f"unsupported BoolOp: {type(node.op).__name__}")
+    if isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.Not):
+            return not bool(_eval_condition_expr(node.operand, env))
+        raise ValueError(f"unsupported UnaryOp: {type(node.op).__name__}")
+    raise ValueError(f"disallowed syntax in condition: {type(node).__name__}")
+
+
+def _safe_condition_eval(condition: str, context_dict: Dict[str, Any]) -> bool:
+    """Parse and evaluate a workflow edge condition without arbitrary code execution."""
+    tree = ast.parse(condition.strip(), mode="eval")
+    env = _build_condition_env(context_dict)
+    return bool(_eval_condition_expr(tree.body, env))
 
 
 class NodeExecution(BaseModel):
@@ -293,25 +356,8 @@ class WorkflowEngine(Component):
         to use a more sophisticated expression evaluator.
         """
         try:
-            # Handle simple boolean conditions
-            if condition.strip() == "True":
-                return True
-            elif condition.strip() == "False":
-                return False
-            
-            # For more complex conditions, create a safe evaluation context
             context_dict = context.dict()
-            # Add metadata variables and common variables that might be used in conditions
-            eval_context = {
-                "__builtins__": {},
-                "result": True,  # Default result for testing
-                "True": True,
-                "False": False,
-                **context_dict.get("metadata", {}),  # Add metadata variables
-                **context_dict
-            }
-            
-            return bool(eval(condition, eval_context))
+            return _safe_condition_eval(condition, context_dict)
         except Exception as e:
             self.logger.warning(f"Condition evaluation failed: {condition} - {str(e)}")
             return False

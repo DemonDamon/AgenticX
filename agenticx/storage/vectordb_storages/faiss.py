@@ -6,8 +6,10 @@ FAISS向量存储实现，支持高效的向量相似性搜索。
 
 import numpy as np
 from typing import Any, Dict, List, Optional
-import pickle
 import os
+import pickle
+
+from agenticx.utils.safe_pickle import safe_pickle_load
 
 from .base import (
     BaseVectorStorage,
@@ -41,7 +43,7 @@ class FaissStorage(BaseVectorStorage):
         try:
             if os.path.exists(f"{self.index_path}.pkl"):
                 with open(f"{self.index_path}.pkl", "rb") as f:
-                    self.vectors = pickle.load(f)
+                    self.vectors = safe_pickle_load(f)
         except Exception as e:
             print(f"加载FAISS索引失败: {e}")
             self.vectors = []

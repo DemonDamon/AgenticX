@@ -2,6 +2,8 @@ import logging
 import os
 import pickle
 import uuid
+
+from agenticx.utils.safe_pickle import safe_pickle_load
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -85,7 +87,7 @@ class FAISS(VectorStoreBase):
         try:
             self.index = faiss.read_index(index_path)
             with open(docstore_path, "rb") as f:
-                self.docstore, self.index_to_id = pickle.load(f)
+                self.docstore, self.index_to_id = safe_pickle_load(f)
             logger.info(f"Loaded FAISS index from {index_path} with {self.index.ntotal} vectors")
         except Exception as e:
             logger.warning(f"Failed to load FAISS index: {e}")
