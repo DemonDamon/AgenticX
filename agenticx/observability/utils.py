@@ -9,6 +9,8 @@ import csv
 import pickle
 import statistics
 from typing import Dict, Any, List, Optional, Union, Tuple, Callable
+
+from agenticx.utils.safe_pickle import safe_pickle_load
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
 from collections import defaultdict, deque
@@ -544,14 +546,14 @@ class DataExporter:
             raise
     
     def import_from_pickle(self, filename: str) -> Any:
-        """从Pickle文件导入数据"""
+        """从Pickle文件导入数据（使用受限反序列化器）"""
         try:
             with open(filename, 'rb') as f:
-                data = pickle.load(f)
+                data = safe_pickle_load(f)
             logger.info(f"从Pickle文件导入数据: {filename}")
             return data
         except Exception as e:
-            logger.error(f"导入Pickle文件失败: {e}")
+            logger.error(f"导入Pickle文件失败: {filename}")
             raise
     
     def import_trajectory_from_json(self, filename: str) -> ExecutionTrajectory:

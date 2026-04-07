@@ -72,6 +72,8 @@ SAFE_COMMANDS = {
 }
 
 MAX_READ_CHARS = 20_000
+# Cap bash_exec command string size (defense in depth; matches audit remediation).
+MAX_BASH_EXEC_COMMAND_CHARS = 65536
 PATH_GUARDED_READ_COMMANDS = {"cat", "head", "tail", "grep", "find", "wc", "ls", "tree"}
 
 
@@ -993,6 +995,8 @@ async def _tool_bash_exec(
     command = str(arguments.get("command", "")).strip()
     if not command:
         return "ERROR: missing command"
+    if len(command) > MAX_BASH_EXEC_COMMAND_CHARS:
+        return f"ERROR: command exceeds maximum length ({MAX_BASH_EXEC_COMMAND_CHARS} characters)"
 
     timeout_sec = int(arguments.get("timeout_sec", 30) or 30)
     cwd_arg = arguments.get("cwd")
@@ -1122,9 +1126,8 @@ async def _tool_bash_exec(
         if use_shell:
             proc = await asyncio.to_thread(
                 subprocess.run,
-                command,
-                shell=True,
-                executable="/bin/bash",
+                ["/bin/bash", "-c", command],
+                shell=False,
                 cwd=str(cwd) if cwd else None,
                 capture_output=True,
                 text=True,

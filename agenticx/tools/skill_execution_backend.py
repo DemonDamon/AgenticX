@@ -1,243 +1,271 @@
-"""
-Skill Execution Backend
+"""Skill Execution Backend.
 
 Provides an abstraction layer for executing skills with different backends
 (local process, sandbox isolation, etc.).
 
 This module enables SkillBundle to flexibly choose how skills are executed,
 supporting both direct local execution and sandboxed execution for security.
+
+Author: Damon Li
 """
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from __future__ import annotations
+
 import logging
+import time
+from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+_SAFE_BUILTINS = {
+    "abs": abs,
+    "all": all,
+    "any": any,
+    "bool": bool,
+    "dict": dict,
+    "enumerate": enumerate,
+    "filter": filter,
+    "float": float,
+    "format": format,
+    "frozenset": frozenset,
+    "getattr": getattr,
+    "hasattr": hasattr,
+    "hash": hash,
+    "int": int,
+    "isinstance": isinstance,
+    "issubclass": issubclass,
+    "iter": iter,
+    "len": len,
+    "list": list,
+    "map": map,
+    "max": max,
+    "min": min,
+    "next": next,
+    "print": print,
+    "range": range,
+    "repr": repr,
+    "reversed": reversed,
+    "round": round,
+    "set": set,
+    "slice": slice,
+    "sorted": sorted,
+    "str": str,
+    "sum": sum,
+    "tuple": tuple,
+    "type": type,
+    "zip": zip,
+}
+
+for _exc in (
+    BaseException,
+    Exception,
+    ValueError,
+    TypeError,
+    KeyError,
+    IndexError,
+    RuntimeError,
+    AttributeError,
+    ImportError,
+    OSError,
+    StopIteration,
+    AssertionError,
+    ZeroDivisionError,
+    NotImplementedError,
+    LookupError,
+    ArithmeticError,
+):
+    _SAFE_BUILTINS[_exc.__name__] = _exc
+
+_SAFE_MODULES = ("json", "re", "math", "datetime", "collections", "itertools", "functools")
+
 
 class SkillExecutionBackend(ABC):
-    """
-    Abstract base class for skill execution backends.
-    
-    Defines the interface for executing skill code with different execution strategies.
-    """
-    
+    """Abstract base class for skill execution backends."""
+
     @abstractmethod
-    def execute(self, 
-                code: str,
-                skill_name: str,
-                timeout: Optional[float] = None,
-                **kwargs: Any) -> Dict[str, Any]:
-        """
-        Execute skill code.
-        
-        Args:
-            code: Python code to execute
-            skill_name: Name of the skill being executed
-            timeout: Optional timeout in seconds
-            **kwargs: Additional parameters for the backend
-            
+    def execute(
+        self,
+        code: str,
+        skill_name: str,
+        timeout: Optional[float] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Execute skill code.
+
         Returns:
-            Dict with execution result containing:
-                - success: bool indicating if execution succeeded
-                - output: The execution output (stdout/result)
-                - error: Error message if execution failed
-                - execution_time: Execution time in seconds
+            Dict with keys: success, output, error, execution_time, skill_name
         """
         pass
 
 
 class LocalSkillBackend(SkillExecutionBackend):
+    """Local process execution backend.
+
+    Executes skills in the current Python process with a restricted
+    global namespace.  The ``__builtins__`` are limited to a curated
+    safe subset; only explicitly whitelisted standard-library modules
+    are importable via a guarded ``__import__``.
     """
-    Local process execution backend.
-    
-    Executes skills directly in the current Python process.
-    Fast but no isolation.
-    """
-    
-    def __init__(self, allow_globals: bool = True):
-        """
-        Initialize local backend.
-        
-        Args:
-            allow_globals: Whether to allow access to global namespace
-        """
-        self.allow_globals = allow_globals
-    
-    def execute(self, 
-                code: str,
-                skill_name: str,
-                timeout: Optional[float] = None,
-                **kwargs: Any) -> Dict[str, Any]:
-        """
-        Execute skill code locally.
-        
-        Args:
-            code: Python code to execute
-            skill_name: Name of the skill
-            timeout: Optional timeout (not enforced in local execution)
-            **kwargs: Additional parameters
-            
-        Returns:
-            Execution result dict
-        """
+
+    def execute(
+        self,
+        code: str,
+        skill_name: str,
+        timeout: Optional[float] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
         import sys
         from io import StringIO
-        import time
-        
-        # Capture output
+
         old_stdout = sys.stdout
         old_stderr = sys.stderr
         output_buffer = StringIO()
-        
+
         try:
+            import builtins
+
             sys.stdout = output_buffer
             sys.stderr = output_buffer
-            
+
             start_time = time.time()
-            
-            # Prepare execution environment
-            exec_globals = {}
-            if self.allow_globals:
-                exec_globals.update(globals())
-            
-            # Execute code
-            exec(code, exec_globals)
-            
+
+            def _guarded_import(name: str, *args: Any, **kw: Any) -> Any:
+                if name.split(".")[0] not in _SAFE_MODULES:
+                    raise ImportError(
+                        f"Module '{name}' is not in the skill execution allowlist"
+                    )
+                return builtins.__import__(name, *args, **kw)
+
+            exec_globals: Dict[str, Any] = {
+                "__builtins__": {**_SAFE_BUILTINS, "__import__": _guarded_import},
+            }
+
+            exec(code, exec_globals)  # noqa: S102
+
             execution_time = time.time() - start_time
             output = output_buffer.getvalue()
-            
+
             return {
                 "success": True,
                 "output": output,
                 "error": None,
                 "execution_time": execution_time,
-                "skill_name": skill_name
+                "skill_name": skill_name,
             }
-            
+
         except Exception as e:
             execution_time = time.time() - start_time
             output = output_buffer.getvalue()
-            error_msg = str(e)
-            
+
             return {
                 "success": False,
                 "output": output,
-                "error": error_msg,
+                "error": str(e),
                 "execution_time": execution_time,
-                "skill_name": skill_name
+                "skill_name": skill_name,
             }
-            
+
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
 
+_SANDBOX_TYPE_MAP = {
+    "code_interpreter": "CODE_INTERPRETER",
+    "browser": "BROWSER",
+    "aio": "AIO",
+}
+
+
 class SandboxSkillBackend(SkillExecutionBackend):
+    """Sandbox execution backend.
+
+    Executes skills in an isolated sandbox environment using the
+    ``agenticx.sandbox`` module.  The ``sandbox_type`` must be one of the
+    values defined in ``agenticx.sandbox.types.SandboxType``
+    (``code_interpreter``, ``browser``, ``aio``).
+
+    Unknown types raise ``ValueError`` immediately — no silent fallback.
     """
-    Sandbox execution backend.
-    
-    Executes skills in isolated sandbox environment for security.
-    Uses AgenticX Sandbox module.
-    """
-    
-    def __init__(self, sandbox_type: str = "subprocess", **sandbox_kwargs: Any):
-        """
-        Initialize sandbox backend.
-        
-        Args:
-            sandbox_type: Type of sandbox ("subprocess", "docker", "microsandbox")
-            **sandbox_kwargs: Additional arguments for sandbox configuration
-        """
+
+    def __init__(self, sandbox_type: str = "code_interpreter", **sandbox_kwargs: Any):
+        if sandbox_type not in _SANDBOX_TYPE_MAP:
+            raise ValueError(
+                f"Unsupported sandbox_type: {sandbox_type!r}. "
+                f"Allowed: {list(_SANDBOX_TYPE_MAP.keys())}"
+            )
         self.sandbox_type = sandbox_type
         self.sandbox_kwargs = sandbox_kwargs
-        self._sandbox = None
-    
-    def execute(self, 
-                code: str,
-                skill_name: str,
-                timeout: Optional[float] = None,
-                **kwargs: Any) -> Dict[str, Any]:
-        """
-        Execute skill code in sandbox.
-        
-        Args:
-            code: Python code to execute
-            skill_name: Name of the skill
-            timeout: Optional timeout in seconds
-            **kwargs: Additional parameters
-            
-        Returns:
-            Execution result dict
-        """
+
+    def execute(
+        self,
+        code: str,
+        skill_name: str,
+        timeout: Optional[float] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        import asyncio
+
         try:
-            # Import here to avoid hard dependency
-            from agenticx.sandbox import Sandbox
-            from agenticx.sandbox.types import SandboxType, ExecutionRequest
-            
-            # Map string type to SandboxType
-            type_map = {
-                "subprocess": SandboxType.SUBPROCESS,
-                "docker": SandboxType.DOCKER,
-                "microsandbox": SandboxType.MICROSANDBOX,
-            }
-            
-            sandbox_type = type_map.get(self.sandbox_type, SandboxType.SUBPROCESS)
-            
-            # Create execution request
-            request = ExecutionRequest(
-                code=code,
-                language="python",
-                timeout=timeout
-            )
-            
-            # Create and execute in sandbox
-            with Sandbox.create(
-                sandbox_type=sandbox_type,
-                **self.sandbox_kwargs
-            ) as sandbox:
-                result = sandbox.execute(request)
-                
-                return {
-                    "success": result.success,
-                    "output": result.stdout or "",
-                    "error": result.error or (result.stderr if not result.success else None),
-                    "execution_time": result.execution_time or 0.0,
-                    "skill_name": skill_name
-                }
-                
+            from agenticx.sandbox.types import SandboxType
+
+            sb_type = SandboxType(_SANDBOX_TYPE_MAP[self.sandbox_type].lower())
+
+            async def _run() -> Dict[str, Any]:
+                from agenticx.sandbox import Sandbox
+
+                async with Sandbox.create(type=sb_type, **self.sandbox_kwargs) as sandbox:
+                    result = await sandbox.execute(code, language="python", timeout=timeout)
+                    return {
+                        "success": result.success,
+                        "output": result.stdout or "",
+                        "error": result.stderr if not result.success else None,
+                        "execution_time": result.duration_ms / 1000.0,
+                        "skill_name": skill_name,
+                    }
+
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(asyncio.run, _run())
+                    return future.result(timeout=timeout or 300)
+            else:
+                return asyncio.run(_run())
+
         except Exception as e:
             import traceback
+
             logger.error(f"Sandbox execution failed for {skill_name}: {e}")
             return {
                 "success": False,
                 "output": "",
-                "error": f"Sandbox execution failed: {str(e)}\n{traceback.format_exc()}",
+                "error": f"Sandbox execution failed: {e}\n{traceback.format_exc()}",
                 "execution_time": 0.0,
-                "skill_name": skill_name
+                "skill_name": skill_name,
             }
 
 
 def get_default_backend() -> SkillExecutionBackend:
-    """
-    Get the default execution backend.
-    
-    Returns:
-        A LocalSkillBackend instance as the default
-    """
+    """Get the default execution backend (local with restricted globals)."""
     return LocalSkillBackend()
 
 
 def get_backend(backend_type: str = "local", **kwargs: Any) -> SkillExecutionBackend:
-    """
-    Factory function to get execution backend.
-    
+    """Factory function to get execution backend.
+
     Args:
-        backend_type: "local" or "sandbox"
+        backend_type: ``"local"`` or ``"sandbox"``
         **kwargs: Arguments passed to backend constructor
-        
-    Returns:
-        SkillExecutionBackend instance
+
+    Raises:
+        ValueError: If backend_type is unknown.
     """
     if backend_type == "local":
         return LocalSkillBackend(**kwargs)
