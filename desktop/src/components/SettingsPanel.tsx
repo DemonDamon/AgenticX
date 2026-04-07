@@ -44,6 +44,7 @@ type ProviderEntry = {
   baseUrl: string;
   model: string;
   models: string[];
+  enabled: boolean;
   dropParams: boolean;
 };
 
@@ -3955,6 +3956,7 @@ export function SettingsPanel({
         baseUrl: saved?.baseUrl ?? "",
         model: saved?.model ?? "",
         models: saved?.models ?? [],
+        enabled: saved?.enabled !== false,
         dropParams: saved?.dropParams === true,
       };
     }
@@ -3965,6 +3967,7 @@ export function SettingsPanel({
           baseUrl: saved?.baseUrl ?? "",
           model: saved?.model ?? "",
           models: saved?.models ?? [],
+          enabled: saved?.enabled !== false,
           dropParams: saved?.dropParams === true,
         };
       }
@@ -4114,7 +4117,7 @@ export function SettingsPanel({
   );
 
   const current = useMemo(
-    () => draft[active] ?? { apiKey: "", baseUrl: "", model: "", models: [], dropParams: false },
+    () => draft[active] ?? { apiKey: "", baseUrl: "", model: "", models: [], enabled: true, dropParams: false },
     [draft, active]
   );
 
@@ -4542,6 +4545,24 @@ export function SettingsPanel({
                 <div className="flex-1 space-y-3">
                   {!showModelPanel ? (
                     <>
+                      <div className="flex items-center justify-between rounded-md border border-border bg-surface-panel px-3 py-2">
+                        <div className="text-xs text-text-subtle">
+                          <span className="text-text-primary">{active}</span>
+                          <span className="ml-2">{current.enabled ? "已启用" : "已禁用"}</span>
+                        </div>
+                        <button
+                          type="button"
+                          aria-label={current.enabled ? `关闭 ${active}` : `启用 ${active}`}
+                          className={`inline-flex min-w-[58px] items-center justify-center rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
+                            current.enabled
+                              ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
+                              : "border-border bg-surface-card text-text-faint hover:text-text-subtle"
+                          }`}
+                          onClick={() => updateField("enabled", !current.enabled)}
+                        >
+                          {current.enabled ? "ON" : "OFF"}
+                        </button>
+                      </div>
                       <label className="block text-sm text-text-muted">
                         API 密钥
                         <div className="mt-1 flex gap-2">

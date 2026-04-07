@@ -162,6 +162,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   const options = useMemo(() => {
     const result: { provider: string; model: string; label: string }[] = [];
     for (const [provName, entry] of Object.entries(settings.providers)) {
+      if (entry.enabled === false) continue;
       if (!entry.apiKey) continue;
       if (entry.models.length > 0) {
         for (const m of entry.models) result.push({ provider: provName, model: m, label: `${provName}/${m}` });

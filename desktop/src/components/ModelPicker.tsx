@@ -16,6 +16,7 @@ export function ModelPicker({ open, onSelect, onClose }: Props) {
   const options = useMemo<ModelOption[]>(() => {
     const result: ModelOption[] = [];
     for (const [provName, entry] of Object.entries(settings.providers)) {
+      if (entry.enabled === false) continue;
       if (!entry.apiKey) continue;
       if (entry.models.length > 0) {
         for (const m of entry.models) {
