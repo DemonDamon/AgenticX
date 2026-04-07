@@ -1468,6 +1468,7 @@ export function App() {
 
   // Watch feishu_binding.json for _desktop key changes — auto-switch pane when /bind fires
   const feishuBindingSidRef = useRef<string>("");
+  const feishuBindingHydratedRef = useRef(false);
   useEffect(() => {
     if (!apiBase || !onboardingCompleted) return;
     let cancelled = false;
@@ -1483,11 +1484,20 @@ export function App() {
         if (newSid && deskAvatar.startsWith("automation:")) {
           void window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
           feishuBindingSidRef.current = "";
+          feishuBindingHydratedRef.current = true;
           return;
         }
 
-        if (newSid === feishuBindingSidRef.current) return;
         const prevSid = feishuBindingSidRef.current;
+        // Startup hydration: only sync baseline binding value.
+        // Do not auto-switch pane on first successful read, so we keep
+        // the last active pane/session restored from workspace snapshot.
+        if (!feishuBindingHydratedRef.current) {
+          feishuBindingSidRef.current = newSid;
+          feishuBindingHydratedRef.current = true;
+          return;
+        }
+        if (newSid === prevSid) return;
         feishuBindingSidRef.current = newSid;
 
         if (!newSid) {
