@@ -2738,10 +2738,13 @@ function registerIpc(): void {
         : path.resolve(process.cwd(), "assets", "icon.png");
       const icon = (() => {
         if (destructive) {
+          // Use geometry only — SVG <text> often fails to rasterize in nativeImage.createFromDataURL,
+          // which makes macOS fall back to the app icon (the "atom" look users report).
           const warningSvg = `
             <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
               <rect width="128" height="128" fill="transparent"/>
-              <text x="64" y="88" text-anchor="middle" font-size="100" font-weight="800" fill="#FACC15">!</text>
+              <circle cx="64" cy="34" r="14" fill="#FACC15"/>
+              <rect x="52" y="56" width="24" height="58" rx="6" fill="#FACC15"/>
             </svg>
           `.trim();
           const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(warningSvg)}`;
