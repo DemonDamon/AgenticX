@@ -236,9 +236,21 @@ export function WorkspacePanel({
   };
 
   const removeTaskspace = async (taskspaceId: string) => {
-    const confirmed = window.confirm("确认移除该工作区吗？");
+    const desktop = window.agenticxDesktop;
+    const confirmResult =
+      typeof desktop.confirmDialog === "function"
+        ? await desktop.confirmDialog({
+            title: "确认移除工作区",
+            message: "确认移除该工作区吗？",
+            detail: "该操作仅移除关联，不会删除本地文件。",
+            confirmText: "移除",
+            cancelText: "取消",
+            destructive: true,
+          })
+        : { ok: true, confirmed: window.confirm("确认移除该工作区吗？") };
+    const confirmed = !!confirmResult.confirmed;
     if (!confirmed) return;
-    const result = await window.agenticxDesktop.removeTaskspace({ sessionId, taskspaceId });
+    const result = await desktop.removeTaskspace({ sessionId, taskspaceId });
     if (!result.ok) {
       setErrorText(result.error ?? "移除工作区失败");
       return;

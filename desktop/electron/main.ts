@@ -2736,8 +2736,20 @@ function registerIpc(): void {
       const iconPath = app.isPackaged
         ? path.join(process.resourcesPath, "assets", "icon.png")
         : path.resolve(process.cwd(), "assets", "icon.png");
-      const icon = fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : undefined;
-      const dialogType: "warning" | "question" = destructive ? "warning" : "question";
+      const icon = (() => {
+        if (destructive) {
+          const warningSvg = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+              <rect width="128" height="128" fill="transparent"/>
+              <text x="64" y="88" text-anchor="middle" font-size="100" font-weight="800" fill="#FACC15">!</text>
+            </svg>
+          `.trim();
+          const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(warningSvg)}`;
+          return nativeImage.createFromDataURL(dataUrl);
+        }
+        return fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : undefined;
+      })();
+      const dialogType: "none" | "question" = destructive ? "none" : "question";
       const options: Electron.MessageBoxOptions = {
         type: dialogType,
         title,

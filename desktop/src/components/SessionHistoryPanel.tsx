@@ -542,7 +542,18 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     if (typeof api.deleteSession !== "function") return;
     const targets = selectedSessionIds.filter(Boolean);
     if (targets.length === 0) return;
-    const confirmed = window.confirm(`确认删除已选择的 ${targets.length} 个会话？删除后不可恢复。`);
+    const confirmResult =
+      typeof api.confirmDialog === "function"
+        ? await api.confirmDialog({
+            title: "确认删除会话",
+            message: `确认删除已选择的 ${targets.length} 个会话？`,
+            detail: "删除后不可恢复。",
+            confirmText: "删除",
+            cancelText: "取消",
+            destructive: true,
+          })
+        : { ok: true, confirmed: window.confirm(`确认删除已选择的 ${targets.length} 个会话？删除后不可恢复。`) };
+    const confirmed = !!confirmResult.confirmed;
     if (!confirmed) return;
     const prevSessions = sessions;
     const remainingSessions = sessions.filter((row) => !targets.includes(row.session_id));
@@ -815,7 +826,18 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     if (action === "delete") {
       const api = window.agenticxDesktop;
       if (typeof api.deleteSession !== "function") return;
-      const confirmed = window.confirm("确认删除该会话？删除后不可恢复。");
+      const confirmResult =
+        typeof api.confirmDialog === "function"
+          ? await api.confirmDialog({
+              title: "确认删除会话",
+              message: "确认删除该会话？",
+              detail: "删除后不可恢复。",
+              confirmText: "删除",
+              cancelText: "取消",
+              destructive: true,
+            })
+          : { ok: true, confirmed: window.confirm("确认删除该会话？删除后不可恢复。") };
+      const confirmed = !!confirmResult.confirmed;
       if (!confirmed) return;
       const result = await api.deleteSession(item.session_id);
       if (result.ok) {
