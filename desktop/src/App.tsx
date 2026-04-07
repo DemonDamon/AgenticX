@@ -450,12 +450,12 @@ export function App() {
                 );
                 wantedSid = undefined;
               }
-              // When a concrete session id exists, restore by sid only.
-              // Passing avatar_id here can trigger avatar-binding mismatch and force-create a new session.
+              // Pass sessionId and avatarId together so /api/session can validate binding and
+              // create a correctly scoped session if the old sid is missing (restart / mismatch).
               const sid = await requestSession(
                 base,
                 token,
-                wantedSid ? { sessionId: wantedSid } : { avatarId: pane.avatarId }
+                { sessionId: wantedSid, avatarId: pane.avatarId }
               );
               claimedSessionIds.add(sid);
               hydratedPanes.push({ ...pane, sessionId: sid });
