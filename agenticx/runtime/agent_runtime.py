@@ -26,6 +26,8 @@ from agenticx.runtime.confirm import ConfirmGate
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.hooks import HookRegistry
 from agenticx.runtime.loop_detector import LoopDetector
+from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
+from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
 from agenticx.runtime.usage_metadata import usage_metadata_from_llm_response
 
 if TYPE_CHECKING:
@@ -629,6 +631,28 @@ def _extract_written_paths_from_result(result: str) -> List[str]:
     return paths
 
 
+def _resolve_mid_turn_persist_interval() -> float:
+    """Seconds between mid-turn incremental persists (0 to disable)."""
+    raw = os.environ.get("AGX_MID_TURN_PERSIST_INTERVAL_SEC", "").strip()
+    if raw:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+    return 30.0
+
+
+def _resolve_mid_turn_persist_tool_count() -> int:
+    """Number of tool calls between mid-turn persists (0 to disable)."""
+    raw = os.environ.get("AGX_MID_TURN_PERSIST_TOOL_COUNT", "").strip()
+    if raw:
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            pass
+    return 3
+
+
 class AgentRuntime:
     """LLM-driven runtime that emits structured events."""
 
@@ -642,6 +666,7 @@ class AgentRuntime:
         loop_critical_threshold: int = 8,
         hooks: Optional[HookRegistry] = None,
         team_manager: Optional[Any] = None,
+        mid_turn_persist: Optional[Callable[[], None]] = None,
     ) -> None:
         self.llm = llm
         self.confirm_gate = confirm_gate
@@ -653,6 +678,12 @@ class AgentRuntime:
             critical_threshold=loop_critical_threshold,
         )
         self.team_manager = team_manager
+        self.token_budget = TokenBudgetGuard()
+        self._mid_turn_persist = mid_turn_persist
+        self._persist_interval_sec = _resolve_mid_turn_persist_interval()
+        self._persist_tool_count = _resolve_mid_turn_persist_tool_count()
+        self._last_persist_time: float = 0.0
+        self._tools_since_persist: int = 0
         try:
             from agenticx.runtime.hooks.legacy_event_bridge_hook import LegacyEventBridgeHook
 
@@ -676,6 +707,27 @@ class AgentRuntime:
         except Exception:
             pass
 
+    def _maybe_mid_turn_persist(self) -> None:
+        """Fire incremental persist if interval or tool-count thresholds are met."""
+        if self._mid_turn_persist is None:
+            return
+        now = time.time()
+        interval_ok = (
+            self._persist_interval_sec > 0
+            and (now - self._last_persist_time) >= self._persist_interval_sec
+        )
+        count_ok = (
+            self._persist_tool_count > 0
+            and self._tools_since_persist >= self._persist_tool_count
+        )
+        if interval_ok or count_ok:
+            try:
+                self._mid_turn_persist()
+            except Exception:
+                pass
+            self._last_persist_time = now
+            self._tools_since_persist = 0
+
     async def run_turn(
         self,
         user_input: str,
@@ -698,6 +750,10 @@ class AgentRuntime:
                 return bool(result)
             except Exception:
                 return False
+
+        self.token_budget.reset_turn()
+        self._last_persist_time = time.time()
+        self._tools_since_persist = 0
 
         current_system_prompt = system_prompt or _build_agent_system_prompt(session)
         active_tools: Sequence[Dict[str, Any]] = STUDIO_TOOLS if tools is None else tools
@@ -1070,9 +1126,14 @@ class AgentRuntime:
                                 raise last_exc
                             raise
 
+                    _retry_policy = LLMRetryPolicy()
+
+                    def _invoke_with_retry() -> Any:
+                        return _retry_policy.call_sync_with_retry(_invoke_once_with_fallback)
+
                     invoke_task = asyncio.create_task(
                         asyncio.to_thread(
-                            _invoke_once_with_fallback,
+                            _invoke_with_retry,
                         )
                     )
                     wait_started_at = asyncio.get_running_loop().time()
@@ -1097,6 +1158,36 @@ class AgentRuntime:
                             raise asyncio.TimeoutError()
                         await asyncio.sleep(0.1)
                 await self.hooks.run_after_model(response, session)
+
+                _round_usage = usage_metadata_from_llm_response(response)
+                self.token_budget.record(_round_usage)
+                budget_level, budget_source, budget_current, budget_max = self.token_budget.check_with_source()
+                if budget_level == BudgetLevel.EXCEEDED:
+                    yield RuntimeEvent(
+                        type=EventType.ERROR.value,
+                        data={
+                            "text": (
+                                "Token budget exceeded "
+                                f"({budget_current}/{budget_max}, source={budget_source}). "
+                                "Stopping to preserve results."
+                            ),
+                            "detector": "token_budget",
+                        },
+                        agent_id=agent_id,
+                    )
+                    return
+                if budget_level == BudgetLevel.COMPRESS:
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "<budget_compress>Please compress context aggressively and focus on "
+                                "final deliverable only. Avoid exploratory loops.</budget_compress>"
+                            ),
+                        }
+                    )
+                if budget_level == BudgetLevel.WARNING:
+                    messages.append({"role": "user", "content": self.token_budget.convergence_hint()})
             except asyncio.TimeoutError:
                 provider_hint = provider_name or "(unknown)"
                 model_hint = model_name or "(unknown)"
@@ -1702,6 +1793,10 @@ class AgentRuntime:
                     session.chat_history.append(
                         {"role": "tool", "content": f"工具结果({tool_name}):\n{result}"}
                     )
+
+                self._tools_since_persist += 1
+                self._maybe_mid_turn_persist()
+
                 yield RuntimeEvent(
                     type=EventType.TOOL_RESULT.value,
                     data={"name": tool_name, "result": result, "tool_call_id": tool_call_id},
