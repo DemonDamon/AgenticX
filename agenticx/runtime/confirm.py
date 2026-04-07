@@ -7,9 +7,28 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import uuid
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
+
+_log = logging.getLogger(__name__)
+
+_VALID_TIMEOUT_ACTIONS = frozenset({"approve", "reject", "skip"})
+
+
+def _resolve_confirm_timeout_seconds() -> float:
+    """Read confirm timeout from env AGX_CONFIRM_TIMEOUT_SEC, default 120."""
+    raw = os.environ.get("AGX_CONFIRM_TIMEOUT_SEC", "").strip()
+    if raw:
+        try:
+            val = float(raw)
+            if val > 0:
+                return val
+        except ValueError:
+            pass
+    return 120.0
 
 
 class ConfirmGate(ABC):
@@ -29,11 +48,31 @@ class SyncConfirmGate(ConfirmGate):
 
 
 class AsyncConfirmGate(ConfirmGate):
-    """Async gate for service adapters (SSE + HTTP callback)."""
+    """Async gate for service adapters (SSE + HTTP callback).
 
-    def __init__(self) -> None:
+    Supports configurable timeout so long-running tasks do not hang
+    indefinitely when the user does not respond.
+    """
+
+    def __init__(
+        self,
+        timeout_seconds: Optional[float] = None,
+        timeout_action: str = "approve",
+    ) -> None:
         self._pending: Dict[str, asyncio.Future[bool]] = {}
         self.last_request: Optional[Dict[str, Any]] = None
+        self.last_timeout_info: Optional[Dict[str, Any]] = None
+
+        action = timeout_action.strip().lower()
+        if action not in _VALID_TIMEOUT_ACTIONS:
+            raise ValueError(
+                f"timeout_action must be one of {sorted(_VALID_TIMEOUT_ACTIONS)}, got {timeout_action!r}"
+            )
+        self.timeout_action = action
+        self.timeout_seconds = (
+            timeout_seconds if timeout_seconds is not None and timeout_seconds > 0
+            else _resolve_confirm_timeout_seconds()
+        )
 
     async def request_confirm(self, question: str, context: Optional[Dict[str, Any]] = None) -> bool:
         payload = dict(context or {})
@@ -48,7 +87,25 @@ class AsyncConfirmGate(ConfirmGate):
             "context": payload,
         }
         try:
-            return await future
+            return await asyncio.wait_for(future, timeout=self.timeout_seconds)
+        except asyncio.TimeoutError:
+            approved = self.timeout_action == "approve"
+            self.last_timeout_info = {
+                "request_id": request_id,
+                "question": question,
+                "action_taken": self.timeout_action,
+                "approved": approved,
+                "timeout_seconds": self.timeout_seconds,
+            }
+            _log.warning(
+                "Confirm gate timed out after %.1fs for request %s, action=%s",
+                self.timeout_seconds,
+                request_id,
+                self.timeout_action,
+            )
+            if not future.done():
+                future.cancel()
+            return approved
         finally:
             self._pending.pop(request_id, None)
 
@@ -65,7 +122,6 @@ class AutoApproveConfirmGate(ConfirmGate):
     """Always approve confirmation requests (best for autonomous sub-agents)."""
 
     def __init__(self) -> None:
-        # Keep the same public attributes as AsyncConfirmGate for compatibility.
         self._pending: Dict[str, asyncio.Future[bool]] = {}
         self.last_request: Optional[Dict[str, Any]] = None
 

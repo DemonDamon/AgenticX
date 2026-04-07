@@ -81,6 +81,7 @@ class ManagedSession:
     pinned: bool = False
     archived: bool = False
     taskspaces: list[dict[str, str]] = field(default_factory=list)
+    execution_state: str = "idle"  # idle | running | interrupted
 
     def get_confirm_gate(self, agent_id: str = "meta") -> AsyncConfirmGate:
         if not agent_id or agent_id == "meta":
@@ -182,6 +183,67 @@ class SessionManager:
         if managed is None:
             return False
         self._persist_session_state(session_id, managed.studio_session)
+        return True
+
+    def set_execution_state(self, session_id: str, state: str) -> None:
+        """Update execution_state for a session (idle | running | interrupted)."""
+        managed = self._sessions.get(session_id)
+        if managed is not None:
+            managed.execution_state = state
+            managed.updated_at = time.time()
+
+    def scan_interrupted_sessions(self) -> list[str]:
+        """Scan persisted sessions for those left in 'running' state.
+
+        Called at startup to detect sessions that were interrupted by a crash.
+        Marks them as 'interrupted' and returns their session IDs.
+        """
+        interrupted: list[str] = []
+        try:
+            rows = self._session_store._list_latest_sessions_sync(limit=0)
+        except Exception:
+            return interrupted
+        for row in rows:
+            sid = str(row.get("session_id", "")).strip()
+            if not sid:
+                continue
+            meta = row.get("metadata")
+            if not isinstance(meta, dict):
+                continue
+            state = str(meta.get("execution_state", "idle")).strip()
+            if state == "running":
+                interrupted.append(sid)
+                try:
+                    self._session_store._save_session_summary_sync(
+                        sid,
+                        str(row.get("summary", "")),
+                        {**meta, "execution_state": "interrupted"},
+                    )
+                except Exception:
+                    pass
+        if interrupted:
+            _log.info("Found %d interrupted sessions on startup: %s", len(interrupted), interrupted[:5])
+        return interrupted
+
+    def incremental_persist(self, session_id: str) -> bool:
+        """Lightweight mid-turn persist: only flush messages + agent_messages.
+
+        Skips SQLite summary / FTS / context-refs to minimize I/O overhead
+        during active tool loops.  Called by AgentRuntime between tool calls
+        to guard against crash data loss.
+        """
+        managed = self._sessions.get(session_id)
+        if managed is None:
+            return False
+        session = managed.studio_session
+        try:
+            self._save_messages_snapshot(session_id, session.chat_history or [])
+            self._save_agent_messages_snapshot(
+                session_id, getattr(session, "agent_messages", None) or [],
+            )
+        except Exception:
+            _log.debug("incremental_persist failed for %s (non-fatal)", session_id)
+            return False
         return True
 
     @staticmethod
@@ -636,6 +698,12 @@ class SessionManager:
             managed.avatar_name = (
                 None if raw_name is None else (str(raw_name).strip() or None)
             )
+        if "execution_state" in metadata:
+            raw_state = str(metadata.get("execution_state", "idle")).strip().lower()
+            if raw_state in ("idle", "running", "interrupted"):
+                managed.execution_state = raw_state
+            else:
+                managed.execution_state = "idle"
 
     def _persist_session_state(self, session_id: str, session: StudioSession) -> None:
         self._ensure_session_title_from_chat_history(session_id, session)
@@ -645,19 +713,21 @@ class SessionManager:
             self._session_store._save_todos_sync(session_id, todos)
             self._session_store._save_scratchpad_sync(session_id, scratchpad)
             summary = self._build_session_summary(session)
+            managed_ref = self._sessions.get(session_id)
             metadata = {
                 "provider": session.provider_name or "",
                 "model": session.model_name or "",
                 "chat_messages": len(session.chat_history),
                 "artifacts": len(session.artifacts),
-                "session_name": getattr(self._sessions.get(session_id), "session_name", None),
-                "avatar_id": getattr(self._sessions.get(session_id), "avatar_id", None),
-                "avatar_name": getattr(self._sessions.get(session_id), "avatar_name", None),
-                "created_at": getattr(self._sessions.get(session_id), "created_at", time.time()),
-                "updated_at": getattr(self._sessions.get(session_id), "updated_at", time.time()),
-                "pinned": bool(getattr(self._sessions.get(session_id), "pinned", False)),
-                "archived": bool(getattr(self._sessions.get(session_id), "archived", False)),
-                "taskspaces": list(getattr(self._sessions.get(session_id), "taskspaces", []) or []),
+                "session_name": getattr(managed_ref, "session_name", None),
+                "avatar_id": getattr(managed_ref, "avatar_id", None),
+                "avatar_name": getattr(managed_ref, "avatar_name", None),
+                "created_at": getattr(managed_ref, "created_at", time.time()),
+                "updated_at": getattr(managed_ref, "updated_at", time.time()),
+                "pinned": bool(getattr(managed_ref, "pinned", False)),
+                "archived": bool(getattr(managed_ref, "archived", False)),
+                "taskspaces": list(getattr(managed_ref, "taskspaces", []) or []),
+                "execution_state": getattr(managed_ref, "execution_state", "idle"),
             }
             self._session_store._save_session_summary_sync(session_id, summary, metadata)
             self._save_messages_snapshot(session_id, session.chat_history or [])

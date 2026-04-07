@@ -259,6 +259,7 @@ def create_studio_app() -> FastAPI:
     app.state.session_manager = manager
     app.state.avatar_registry = avatar_registry
     app.state.group_registry = group_registry
+    app.state.interrupted_sessions = manager.scan_interrupted_sessions()
     desktop_token = os.getenv("AGX_DESKTOP_TOKEN", "").strip()
 
     def _meta_group_chat_payload(
@@ -1205,15 +1206,23 @@ def create_studio_app() -> FastAPI:
         meta_confirm_gate = (
             AutoApproveConfirmGate() if is_automation_session else managed.get_confirm_gate("meta")
         )
+        manager.set_execution_state(payload.session_id, "running")
+
+        def _mid_turn_persist_cb() -> None:
+            try:
+                manager.incremental_persist(payload.session_id)
+            except Exception:
+                pass
+
         try:
             runtime = AgentRuntime(
                 llm,
                 meta_confirm_gate,
                 team_manager=team_manager,
                 max_tool_rounds=_resolve_max_tool_rounds(),
+                mid_turn_persist=_mid_turn_persist_cb,
             )
         except TypeError:
-            # Backward-compatible fallback for test doubles / legacy signatures.
             runtime = AgentRuntime(
                 llm,
                 meta_confirm_gate,
@@ -1419,6 +1428,7 @@ def create_studio_app() -> FastAPI:
                 if runtime_task is not None and not runtime_task.done():
                     runtime_task.cancel()
                 _flush_taskspace_hint(payload.session_id, session)
+                manager.set_execution_state(payload.session_id, "idle")
                 manager.persist(payload.session_id)
             yield 'data: {"type":"done","data":{}}\n\n'
 
@@ -1454,12 +1464,20 @@ def create_studio_app() -> FastAPI:
             logger.debug("Skipping discovered hooks loading for loop: %s", exc)
         llm = ProviderResolver.resolve(provider_name=session.provider_name, model=session.model_name)
         loop_tm = managed.team_manager
+
+        def _loop_persist_cb() -> None:
+            try:
+                manager.incremental_persist(session_id)
+            except Exception:
+                pass
+
         try:
             runtime = AgentRuntime(
                 llm,
                 managed.get_confirm_gate("meta"),
                 team_manager=loop_tm,
                 max_tool_rounds=_resolve_max_tool_rounds(),
+                mid_turn_persist=_loop_persist_cb,
             )
         except TypeError:
             runtime = AgentRuntime(
@@ -2919,6 +2937,31 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.warning("put_skill_settings error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # -- Health Probe & Recovery ------------------------------------------------
+
+    _health_probe: Optional[Any] = None
+
+    @app.get("/api/health/providers")
+    async def health_providers(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ):
+        nonlocal _health_probe
+        _verify_desktop_token(x_agx_desktop_token)
+        if _health_probe is None:
+            from agenticx.runtime.health_probe import HealthProbeManager
+            _health_probe = HealthProbeManager()
+        return {"providers": _health_probe.statuses}
+
+    @app.get("/api/sessions/interrupted")
+    async def list_interrupted_sessions(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ):
+        _verify_desktop_token(x_agx_desktop_token)
+        interrupted = getattr(app.state, "interrupted_sessions", []) or []
+        return {"sessions": interrupted, "count": len(interrupted)}
+
+    # -- Skills ----------------------------------------------------------------
 
     @app.get("/api/skills")
     async def list_skills(

@@ -90,6 +90,17 @@ class SpawnConfig:
     mode: str = "run"  # run | session
 
 
+def _resolve_max_escalation() -> int:
+    """Max failure-escalation attempts before final circuit-break."""
+    raw = os.environ.get("AGX_SUBAGENT_MAX_ESCALATION", "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return 3
+
+
 @dataclass
 class SubAgentContext:
     agent_id: str
@@ -122,6 +133,8 @@ class SubAgentContext:
     workspace_dir: str = ""
     persona_prompt: str = ""
     avatar_id: str = ""
+    failure_count: int = 0
+    escalation_level: int = 0
 
 
 class AgentTeamManager:
@@ -1095,6 +1108,17 @@ class AgentTeamManager:
             context.output_files = self._extract_output_files_from_messages(context.agent_messages)
             context.result_summary = self._build_result_summary(context)
             produced_files = self._merge_output_files(context)
+            if (
+                context.status == SubAgentStatus.COMPLETED
+                and self._task_expects_file_output(context.task)
+                and not produced_files
+            ):
+                context.status = SubAgentStatus.FAILED
+                context.error_text = (
+                    "Task completed without file artifact. Expected an output file "
+                    "but none was detected from tool results."
+                )
+                context.result_summary = self._build_result_summary(context)
             self.base_session.scratchpad[f"subagent_result::{context.agent_id}"] = (
                 f"[{context.name}] 状态={context.status.value}, "
                 f"摘要: {(context.result_summary or '(无)')[:500]}, "
@@ -1107,6 +1131,11 @@ class AgentTeamManager:
             self._archive_context(context)
             if context.cleanup == "delete":
                 self._agents.pop(context.agent_id, None)
+            if context.status == SubAgentStatus.FAILED:
+                escalated = await self._auto_escalate(context, allowed_tools=allowed_tools)
+                if escalated:
+                    return
+
             if self.summary_sink is not None:
                 await self.summary_sink(context.result_summary, context)
             event_type = (
@@ -1126,6 +1155,132 @@ class AgentTeamManager:
                     agent_id=context.agent_id,
                 )
             )
+
+    @staticmethod
+    def _task_expects_file_output(task: str) -> bool:
+        """Heuristic: whether a task explicitly asks for a file artifact."""
+        t = str(task or "").lower()
+        if not t:
+            return False
+        indicators = (
+            ".md",
+            ".markdown",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".html",
+            ".csv",
+            ".pdf",
+            "report",
+            "save to",
+            "write to",
+            "output file",
+            "生成报告",
+            "保存到",
+            "输出文件",
+            "落盘",
+        )
+        return any(key in t for key in indicators)
+
+    async def _auto_escalate(
+        self,
+        context: SubAgentContext,
+        *,
+        allowed_tools: Sequence[Dict[str, Any]],
+    ) -> bool:
+        """Automatic failure escalation: retry -> escalate model -> circuit-break.
+
+        Returns True if an escalation retry was launched (caller should return
+        early to avoid emitting a duplicate completion event).
+        """
+        max_escalation = _resolve_max_escalation()
+        context.failure_count += 1
+
+        if context.failure_count > max_escalation:
+            _log.warning(
+                "Sub-agent %s circuit-breaker tripped after %d failures",
+                context.agent_id, context.failure_count,
+            )
+            context.error_text = (
+                f"Circuit-breaker: {context.failure_count} consecutive failures. "
+                f"Last error: {context.error_text}"
+            )
+            return False
+
+        context.escalation_level += 1
+        error_summary = (context.error_text or "unknown error")[:300]
+
+        if context.failure_count <= 2:
+            _log.info(
+                "Sub-agent %s failed (attempt %d/%d), retrying with focused scope",
+                context.agent_id, context.failure_count, max_escalation,
+            )
+            retry_task = (
+                f"RETRY (attempt {context.failure_count}/{max_escalation}): "
+                f"Previous attempt failed with: {error_summary}\n\n"
+                f"Original task: {context.task}\n\n"
+                "Focus on the core objective. Simplify your approach and avoid "
+                "repeating the actions that caused the failure."
+            )
+            context.status = SubAgentStatus.RUNNING
+            context.error_text = ""
+            context.final_text = ""
+            context.recent_events.clear()
+            context.updated_at = time.time()
+            self._tasks[context.agent_id] = asyncio.create_task(
+                self._run_subagent(
+                    context,
+                    allowed_tools=allowed_tools,
+                    resume_input=retry_task,
+                )
+            )
+            await self._emit(
+                RuntimeEvent(
+                    type=EventType.SUBAGENT_PROGRESS.value,
+                    data={
+                        "agent_id": context.agent_id,
+                        "text": f"Retry {context.failure_count}/{max_escalation}: re-attempting with focused scope",
+                    },
+                    agent_id=context.agent_id,
+                )
+            )
+            return True
+
+        _log.info(
+            "Sub-agent %s escalating (attempt %d/%d), spawning stronger replacement",
+            context.agent_id, context.failure_count, max_escalation,
+        )
+        escalation_task = (
+            f"ESCALATION (attempt {context.failure_count}/{max_escalation}): "
+            f"Previous {context.failure_count - 1} attempts all failed.\n"
+            f"Last error: {error_summary}\n\n"
+            f"Original task: {context.task}\n\n"
+            "This is an escalated retry. Take a completely different approach. "
+            "Analyze why previous attempts failed and devise a new strategy."
+        )
+        context.status = SubAgentStatus.RUNNING
+        context.error_text = ""
+        context.final_text = ""
+        context.recent_events.clear()
+        context.updated_at = time.time()
+        self._tasks[context.agent_id] = asyncio.create_task(
+            self._run_subagent(
+                context,
+                allowed_tools=allowed_tools,
+                resume_input=escalation_task,
+            )
+        )
+        await self._emit(
+            RuntimeEvent(
+                type=EventType.SUBAGENT_PROGRESS.value,
+                data={
+                    "agent_id": context.agent_id,
+                    "text": f"Escalation {context.failure_count}/{max_escalation}: trying different approach",
+                },
+                agent_id=context.agent_id,
+            )
+        )
+        return True
 
     def _build_result_summary(self, context: SubAgentContext) -> str:
         file_list = self._merge_output_files(context)
