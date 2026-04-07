@@ -180,6 +180,8 @@ type ProviderEntry = {
   baseUrl: string;
   model: string;
   models: string[];
+  /** Provider switch: false means hide all models for this provider in pickers. */
+  enabled: boolean;
   /** When true, persist `drop_params` for LiteLLM (strip unsupported params like tool_choice on some gateways). */
   dropParams: boolean;
 };

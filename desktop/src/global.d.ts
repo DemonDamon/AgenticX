@@ -492,6 +492,7 @@ declare global {
         baseUrl?: string;
         model?: string;
         models?: string[];
+        enabled?: boolean;
         dropParams?: boolean;
       }) => Promise<{ ok: boolean }>;
       setDefaultProvider: (name: string) => Promise<{ ok: boolean }>;

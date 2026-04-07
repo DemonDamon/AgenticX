@@ -42,14 +42,15 @@ type PersistedWorkspaceState = {
   panes: PersistedPaneState[];
 };
 
-function toProviderEntries(raw: Record<string, { api_key?: string; base_url?: string; model?: string; models?: string[]; drop_params?: boolean }>) {
-  const result: Record<string, { apiKey: string; baseUrl: string; model: string; models: string[]; dropParams: boolean }> = {};
+function toProviderEntries(raw: Record<string, { api_key?: string; base_url?: string; model?: string; models?: string[]; enabled?: boolean; drop_params?: boolean }>) {
+  const result: Record<string, { apiKey: string; baseUrl: string; model: string; models: string[]; enabled: boolean; dropParams: boolean }> = {};
   for (const [name, cfg] of Object.entries(raw)) {
     result[name] = {
       apiKey: cfg.api_key ?? "",
       baseUrl: cfg.base_url ?? "",
       model: cfg.model ?? "",
       models: cfg.models ?? [],
+      enabled: cfg.enabled !== false,
       dropParams: cfg.drop_params === true,
     };
   }
@@ -1161,16 +1162,30 @@ export function App() {
 
   const handleSettingsSave = async (result: {
     defaultProvider: string;
-    providers: Record<string, { apiKey: string; baseUrl: string; model: string; models: string[]; dropParams: boolean }>;
+    providers: Record<string, { apiKey: string; baseUrl: string; model: string; models: string[]; enabled: boolean; dropParams: boolean }>;
   }) => {
+    const resolveFallbackModel = (): { provider: string; model: string } | null => {
+      const candidates = Object.entries(result.providers)
+        .filter(([, entry]) => entry.enabled !== false)
+        .map(([provider, entry]) => {
+          const model = entry.model || entry.models[0] || "";
+          return { provider, model };
+        })
+        .filter((row) => row.model);
+      if (candidates.length === 0) return null;
+      const preferred = candidates.find((row) => row.provider === result.defaultProvider);
+      return preferred ?? candidates[0];
+    };
+
     for (const [name, entry] of Object.entries(result.providers)) {
-      if (!entry.apiKey && !entry.model && !entry.baseUrl && entry.models.length === 0) continue;
+      if (!entry.apiKey && !entry.model && !entry.baseUrl && entry.models.length === 0 && entry.enabled !== false) continue;
       await window.agenticxDesktop.saveProvider({
         name,
         apiKey: entry.apiKey || undefined,
         baseUrl: entry.baseUrl || undefined,
         model: entry.model || undefined,
         models: entry.models.length > 0 ? entry.models : undefined,
+        enabled: entry.enabled,
         dropParams: entry.dropParams,
       });
     }
@@ -1188,11 +1203,18 @@ export function App() {
     // Only switch active model if user hasn't manually chosen a different one yet
     const curProvider = useAppStore.getState().activeProvider;
     const curModel = useAppStore.getState().activeModel;
-    if (!curProvider || !curModel) {
-      if (result.defaultProvider && defEntry?.model) {
-        setActiveModel(result.defaultProvider, defEntry.model);
-          const currentPaneId = useAppStore.getState().activePaneId;
-          setPaneModel(currentPaneId, result.defaultProvider, defEntry.model);
+    const currentEntry = result.providers[curProvider];
+    const currentModelStillVisible =
+      !!curProvider &&
+      !!curModel &&
+      currentEntry?.enabled !== false &&
+      (currentEntry?.model === curModel || currentEntry?.models.includes(curModel));
+    if (!currentModelStillVisible) {
+      const fallback = resolveFallbackModel();
+      if (fallback) {
+        setActiveModel(fallback.provider, fallback.model);
+        const currentPaneId = useAppStore.getState().activePaneId;
+        setPaneModel(currentPaneId, fallback.provider, fallback.model);
       }
     }
     await window.agenticxDesktop.saveConfig({

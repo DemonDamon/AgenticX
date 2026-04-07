@@ -31,6 +31,7 @@ type ProviderConfig = {
   base_url?: string;
   model?: string;
   models?: string[];
+  enabled?: boolean;
   drop_params?: boolean;
 };
 
@@ -3229,6 +3230,7 @@ function registerIpc(): void {
     baseUrl?: string;
     model?: string;
     models?: string[];
+    enabled?: boolean;
     dropParams?: boolean;
   }) => {
     const cfg = loadAgxConfig();
@@ -3241,6 +3243,11 @@ function registerIpc(): void {
       model: payload.model ?? prev.model,
       models: payload.models ?? prev.models,
     };
+    if (payload.enabled === true || payload.enabled === false) {
+      next.enabled = payload.enabled;
+    } else if (typeof next.enabled !== "boolean") {
+      next.enabled = true;
+    }
     if (payload.dropParams === true) {
       next.drop_params = true;
     } else if (payload.dropParams === false) {
