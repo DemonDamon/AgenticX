@@ -1603,8 +1603,30 @@ function escapeHtmlText(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function parseHttpUrl(value: string): URL | null {
+  try {
+    const u = new URL(value);
+    if (u.protocol === "http:" || u.protocol === "https:") return u;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldOpenInExternalBrowser(targetUrl: string, appUrl: string): boolean {
+  const target = parseHttpUrl(targetUrl);
+  if (!target) return false;
+  const appParsed = parseHttpUrl(appUrl);
+  if (!appParsed) return true;
+  return target.origin !== appParsed.origin;
+}
+
 function createWindow(): void {
   const vibrancyEnabled = process.env.AGX_ENABLE_VIBRANCY === "1";
+  const devUrl = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
+  const appEntryUrl = app.isPackaged
+    ? `file://${path.join(__dirname, "..", "dist", "index.html")}`
+    : devUrl;
   mainWindow = new BrowserWindow({
     width: 900,
     height: 700,
@@ -1621,6 +1643,19 @@ function createWindow(): void {
     webPreferences: {
       preload: path.join(__dirname, "preload.js")
     }
+  });
+  const tryOpenExternalBrowser = (targetUrl: string): boolean => {
+    if (!shouldOpenInExternalBrowser(targetUrl, appEntryUrl)) return false;
+    void shell.openExternal(targetUrl);
+    return true;
+  };
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (tryOpenExternalBrowser(url)) return { action: "deny" };
+    return { action: "allow" };
+  });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (!tryOpenExternalBrowser(url)) return;
+    event.preventDefault();
   });
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
@@ -1640,7 +1675,6 @@ function createWindow(): void {
         });
     });
   } else {
-    const devUrl = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
     void mainWindow.loadURL(devUrl).catch(() => {
       const distFallback = path.join(__dirname, "..", "dist", "index.html");
       if (fs.existsSync(distFallback)) {
