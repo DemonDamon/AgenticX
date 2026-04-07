@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ban, ChevronDown, ChevronRight, Clock3, Loader2, Settings } from "lucide-react";
 import { useAppStore, type Avatar, type GroupChat } from "../store";
+import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { avatarBgClass, avatarDotColor, groupColorByIndex } from "../utils/avatar-color";
 import { AvatarCreateDialog } from "./AvatarCreateDialog";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
@@ -277,6 +278,33 @@ export function AvatarSidebar() {
     if (existing) {
       setActivePaneId(existing.id);
       setActiveAvatarId(avatarId);
+      if (!String(existing.sessionId ?? "").trim()) {
+        void (async () => {
+          const listed = await window.agenticxDesktop
+            .listSessions(avatarId ?? undefined)
+            .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
+          const rememberedSid = getRememberedSessionForAvatar(avatarId);
+          const rememberedValid =
+            !!rememberedSid &&
+            listed.ok &&
+            Array.isArray(listed.sessions) &&
+            listed.sessions.some(
+              (item) =>
+                String(item.session_id ?? "").trim() === rememberedSid &&
+                isSessionAvatarMatch(item, avatarId)
+            );
+          const recentSid =
+            listed.ok && Array.isArray(listed.sessions)
+              ? pickMostRecentSessionId(listed.sessions, avatarId)
+              : undefined;
+          const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
+          if (preferredSid) {
+            const latestPane = useAppStore.getState().panes.find((item) => item.id === existing.id);
+            const latestSid = String(latestPane?.sessionId ?? "").trim();
+            if (!latestSid) setPaneSessionId(existing.id, preferredSid);
+          }
+        })();
+      }
       return;
     }
 
@@ -293,12 +321,23 @@ export function AvatarSidebar() {
         const listed = await window.agenticxDesktop
           .listSessions(avatarId ?? undefined)
           .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
+        const rememberedSid = getRememberedSessionForAvatar(avatarId);
+        const rememberedValid =
+          !!rememberedSid &&
+          listed.ok &&
+          Array.isArray(listed.sessions) &&
+          listed.sessions.some(
+            (item) =>
+              String(item.session_id ?? "").trim() === rememberedSid &&
+              isSessionAvatarMatch(item, avatarId)
+          );
         const recentSid =
           listed.ok && Array.isArray(listed.sessions)
             ? pickMostRecentSessionId(listed.sessions, avatarId)
             : undefined;
-        if (recentSid) {
-          setPaneSessionId(paneId, recentSid);
+        const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
+        if (preferredSid) {
+          setPaneSessionId(paneId, preferredSid);
           return;
         }
         const created = await window.agenticxDesktop.createSession({ avatar_id: avatarId ?? undefined });
