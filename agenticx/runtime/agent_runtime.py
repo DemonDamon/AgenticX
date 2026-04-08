@@ -13,6 +13,7 @@ import inspect
 import logging
 import os
 import re
+from pathlib import Path
 import threading
 import time
 import uuid
@@ -22,6 +23,7 @@ from agenticx.cli.agent_tools import STUDIO_TOOLS, dispatch_tool_async
 from agenticx.cli.studio_mcp import build_mcp_tools_context
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.compactor import ContextCompactor
+from agenticx.runtime.tool_orchestrator import partition_tool_calls
 from agenticx.runtime.confirm import ConfirmGate
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.hooks import HookRegistry
@@ -37,6 +39,57 @@ else:
 
 
 MAX_TOOL_ROUNDS = 10
+
+
+def _session_disk_dir(session: Any) -> Optional[Path]:
+    sid = getattr(session, "_session_id", None) or getattr(session, "_owner_session_id", None)
+    text = str(sid or "").strip()
+    if not text:
+        return None
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", text).strip("_") or text
+    return Path.home() / ".agenticx" / "sessions" / safe
+
+
+def _env_int_runtime(key: str, default: int) -> int:
+    raw = os.environ.get(key, "").strip()
+    if raw:
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            pass
+    return default
+
+
+def _maybe_persist_large_tool_result(
+    session: Any,
+    tool_call_id: str,
+    tool_name: str,
+    result: str,
+) -> str:
+    threshold = _env_int_runtime("AGX_TOOL_RESULT_PERSIST_THRESHOLD", 8000)
+    text = str(result or "")
+    if len(text) <= threshold:
+        return text
+    base = _session_disk_dir(session)
+    if base is None:
+        return text
+    sub = base / "tool-results"
+    try:
+        sub.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return text
+    safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", tool_call_id).strip("_") or uuid.uuid4().hex[:12]
+    out_path = sub / f"{safe_id}.txt"
+    try:
+        out_path.write_text(text, encoding="utf-8")
+    except OSError:
+        return text
+    preview = text[:2000]
+    return (
+        f"[Tool result persisted to disk: {out_path}]\n"
+        f"{preview}\n"
+        f"... ({len(text)} chars total, see file for full content)"
+    )
 
 
 def _parallel_tools_enabled() -> bool:
@@ -763,7 +816,11 @@ class AgentRuntime:
             if isinstance(tool, dict)
         }
         history = _sanitize_context_messages(session.agent_messages)
-        compacted_history, did_compact, compact_summary, compacted_count = await self.compactor.maybe_compact(history)
+        compact_model = str(getattr(session, "model_name", "") or "")
+        compacted_history, did_compact, compact_summary, compacted_count = await self.compactor.maybe_compact(
+            history,
+            model=compact_model,
+        )
         messages: List[Dict[str, Any]] = [{"role": "system", "content": current_system_prompt}]
         messages.extend(compacted_history)
         if did_compact:
@@ -1177,15 +1234,39 @@ class AgentRuntime:
                     )
                     return
                 if budget_level == BudgetLevel.COMPRESS:
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": (
-                                "<budget_compress>Please compress context aggressively and focus on "
-                                "final deliverable only. Avoid exploratory loops.</budget_compress>"
-                            ),
-                        }
+                    hist_compact = _sanitize_context_messages(session.agent_messages)
+                    react_hist, did_react, react_summary, react_count = await self.compactor.maybe_compact(
+                        hist_compact,
+                        force=True,
+                        model=model_name,
                     )
+                    if did_react:
+                        session.agent_messages = react_hist
+                        messages[:] = [{"role": "system", "content": current_system_prompt}, *list(react_hist)]
+                        yield RuntimeEvent(
+                            type=EventType.COMPACTION.value,
+                            data={
+                                "compacted_count": react_count,
+                                "summary": react_summary,
+                                "reactive": True,
+                            },
+                            agent_id=agent_id,
+                        )
+                        try:
+                            await self.hooks.run_on_compaction(react_count, react_summary, session)
+                        except Exception:
+                            pass
+                    budget_level, budget_source, budget_current, budget_max = self.token_budget.check_with_source()
+                    if budget_level == BudgetLevel.COMPRESS:
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "<budget_compress>Please compress context aggressively and focus on "
+                                    "final deliverable only. Avoid exploratory loops.</budget_compress>"
+                                ),
+                            },
+                        )
                 if budget_level == BudgetLevel.WARNING:
                     messages.append({"role": "user", "content": self.token_budget.convergence_hint()})
             except asyncio.TimeoutError:
@@ -1311,6 +1392,11 @@ class AgentRuntime:
                 session.chat_history.append({"role": "tool", "content": tool_call_text})
 
             _parallel_mode = _parallel_tools_enabled() and len(tool_calls) > 1
+            if _parallel_mode:
+                logger.debug(
+                    "tool parallel partition batch sizes: %s",
+                    [len(b) for b in partition_tool_calls(tool_calls)],
+                )
 
             for call in tool_calls:
                 if await _check_should_stop():
@@ -1698,6 +1784,8 @@ class AgentRuntime:
                         status_query_total = max(0, status_query_total - 1)
                         repeated_status_query_count = 0
                 result = await self.hooks.run_after_tool_call(tool_name, result, session)
+                result = _maybe_persist_large_tool_result(session, tool_call_id, tool_name, str(result))
+                result = self.compactor.micro_compact_tool_result(tool_name, str(result))
                 if tool_name == "todo_write":
                     rounds_without_todo = 0
                 else:
