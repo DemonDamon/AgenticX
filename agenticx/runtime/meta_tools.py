@@ -302,6 +302,25 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "send_message_to_agent",
+            "description": (
+                "Send a follow-up instruction to a running or completed sub-agent or delegation (sa-* or dlg-*). "
+                "Use the agent_id returned by spawn_subagent or delegate_to_avatar."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "Sub-agent ID (sa-*) or delegation ID (dlg-*)."},
+                    "message": {"type": "string", "description": "Follow-up instruction for the agent."},
+                },
+                "required": ["agent_id", "message"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "check_resources",
             "description": "Inspect current host resource usage before scheduling.",
             "parameters": {
@@ -1534,6 +1553,18 @@ async def _run_delegation_in_avatar_session(
     if workspace_hint:
         delegation_system_prompt += f"\n## 工作目录\n- {workspace_hint}\n"
 
+    running_info: Dict[str, Any] = {
+        "delegation_id": delegation_id,
+        "task": task,
+        "status": "running",
+        "delegation_system_prompt": delegation_system_prompt,
+        "avatar_session_id": avatar_managed.session_id,
+    }
+    prev_info = getattr(avatar_managed, "_delegation_info", None)
+    if isinstance(prev_info, dict):
+        running_info = {**prev_info, **running_info}
+    setattr(avatar_managed, "_delegation_info", running_info)
+
     delegated_input = f"[委派任务] 来自「{meta_display_name}」:\n{task}"
     path_hints = _collect_path_hints(source_session)
     if path_hints:
@@ -1626,6 +1657,7 @@ async def _run_delegation_in_avatar_session(
             "error": error_text,
             "avatar_session_id": avatar_managed.session_id,
             "completed_at": time.time(),
+            "delegation_system_prompt": delegation_system_prompt,
         }
     )
     setattr(avatar_managed, "_delegation_info", info)
@@ -1655,6 +1687,162 @@ async def _run_delegation_in_avatar_session(
             _meta_log.debug("emit delegation terminal event failed", exc_info=True)
 
     session_manager.persist(avatar_managed.session_id)
+
+
+async def _run_delegation_followup_turn(
+    *,
+    avatar_managed: Any,
+    delegation_id: str,
+    user_message: str,
+    delegation_system_prompt: str,
+    session_manager: Any,
+    meta_team_manager: Optional[AgentTeamManager],
+    meta_scratchpad: Dict[str, Any],
+) -> None:
+    """Resume a completed delegation with a new user message on the avatar session."""
+    from agenticx.runtime.agent_runtime import AgentRuntime
+    from agenticx.runtime.events import EventType, RuntimeEvent
+
+    avatar_session = avatar_managed.studio_session
+    provider_name = str(getattr(avatar_session, "provider_name", "") or "").strip()
+    model_name = str(getattr(avatar_session, "model_name", "") or "").strip()
+    if not provider_name or not model_name:
+        _meta_log.warning("delegation follow-up skipped: missing provider/model")
+        return
+    llm = ProviderResolver.resolve(provider_name=provider_name, model=model_name)
+    team_manager = avatar_managed.get_or_create_team(
+        llm_factory=lambda: ProviderResolver.resolve(provider_name=provider_name, model=model_name),
+        event_emitter=None,
+        summary_sink=None,
+    )
+    setattr(avatar_session, "_team_manager", team_manager)
+    runtime = AgentRuntime(
+        llm,
+        avatar_managed.get_confirm_gate("meta"),
+        team_manager=team_manager,
+    )
+    final_text = ""
+    error_text = ""
+    try:
+        async for event in runtime.run_turn(
+            user_message,
+            avatar_session,
+            should_stop=lambda: False,
+            agent_id=delegation_id,
+            tools=[t for t in META_AGENT_TOOLS if t.get("function", {}).get("name") != "delegate_to_avatar"],
+            system_prompt=delegation_system_prompt,
+        ):
+            if event.type == EventType.FINAL.value:
+                final_text = str(event.data.get("text", "") or "").strip()
+            elif event.type == EventType.ERROR.value:
+                error_text = str(event.data.get("text", "") or "").strip()
+    except Exception as exc:
+        error_text = str(exc)
+    summary = final_text or _extract_recent_assistant_text(avatar_session) or "跟进任务完成"
+    status = "failed" if error_text and not final_text else "completed"
+    info = getattr(avatar_managed, "_delegation_info", None)
+    if not isinstance(info, dict):
+        info = {}
+    info.update(
+        {
+            "delegation_id": delegation_id,
+            "status": status,
+            "summary": summary,
+            "error": error_text,
+            "completed_at": time.time(),
+            "delegation_system_prompt": delegation_system_prompt,
+        }
+    )
+    setattr(avatar_managed, "_delegation_info", info)
+    avatar_managed.updated_at = time.time()
+    meta_scratchpad[f"delegation_result::{delegation_id}"] = (
+        f"[follow-up] 状态={status}, 摘要: {summary[:500]}"
+    )
+    try:
+        session_manager.persist(avatar_managed.session_id)
+    except Exception:
+        pass
+    if meta_team_manager is not None:
+        try:
+            evt_type = (
+                EventType.SUBAGENT_COMPLETED.value if status == "completed" else EventType.SUBAGENT_ERROR.value
+            )
+            await meta_team_manager._emit(
+                RuntimeEvent(
+                    type=evt_type,
+                    data={
+                        "agent_id": delegation_id,
+                        "status": status,
+                        "summary": summary,
+                        "text": error_text or summary,
+                        "delegation": True,
+                        "avatar_session_id": avatar_managed.session_id,
+                    },
+                    agent_id="meta",
+                )
+            )
+        except Exception:
+            _meta_log.debug("emit follow-up delegation event failed", exc_info=True)
+
+
+async def _send_message_to_delegation(
+    agent_id: str,
+    message: str,
+    *,
+    session: Any,
+    team_manager: AgentTeamManager,
+) -> str:
+    sm = getattr(session, "_session_manager", None)
+    sessions_dict = getattr(sm, "_sessions", None) if sm is not None else None
+    if not isinstance(sessions_dict, dict):
+        return json.dumps({"ok": False, "error": "no_session_manager"}, ensure_ascii=False)
+    target = None
+    needle = agent_id.strip().lower()
+    for managed in sessions_dict.values():
+        if getattr(managed, "archived", False):
+            continue
+        info = getattr(managed, "_delegation_info", None)
+        if not isinstance(info, dict):
+            continue
+        did = str(info.get("delegation_id", "")).strip().lower()
+        if did != needle:
+            continue
+        target = managed
+        break
+    if target is None:
+        return json.dumps({"ok": False, "error": "delegation_not_found"}, ensure_ascii=False)
+    avatar_session = getattr(target, "studio_session", None)
+    info = getattr(target, "_delegation_info", None) or {}
+    sys_prompt = str(info.get("delegation_system_prompt", "") or "").strip()
+    if avatar_session is None:
+        return json.dumps({"ok": False, "error": "no_avatar_session"}, ensure_ascii=False)
+    text = message.strip()
+    if not text:
+        return json.dumps({"ok": False, "error": "empty_message"}, ensure_ascii=False)
+    avatar_session.agent_messages.append({"role": "user", "content": text})
+    avatar_session.chat_history.append({"role": "user", "content": text})
+    existing = getattr(target, "_delegation_task", None)
+    if existing is not None and not existing.done():
+        return json.dumps({"ok": True, "queued": True, "agent_id": agent_id}, ensure_ascii=False)
+    if not sys_prompt:
+        return json.dumps({"ok": False, "error": "missing_delegation_prompt"}, ensure_ascii=False)
+    scratch = getattr(session, "scratchpad", None)
+    if not isinstance(scratch, dict):
+        scratch = {}
+
+    async def _resume() -> None:
+        await _run_delegation_followup_turn(
+            avatar_managed=target,
+            delegation_id=agent_id,
+            user_message=text,
+            delegation_system_prompt=sys_prompt,
+            session_manager=sm,
+            meta_team_manager=team_manager,
+            meta_scratchpad=scratch,
+        )
+
+    setattr(target, "_delegation_task", asyncio.create_task(_resume()))
+    return json.dumps({"ok": True, "resumed": True, "agent_id": agent_id}, ensure_ascii=False)
 
 
 def _lookup_avatar_session_status(session_manager: Any, query: str) -> Optional[Dict[str, Any]]:
@@ -1812,6 +2000,19 @@ async def dispatch_meta_tool_async(
             workspace_dir=str(arguments.get("workspace_dir", "")).strip() or None,
             system_prompt=str(arguments.get("system_prompt", "")).strip() or None,
         )
+        return json.dumps(result, ensure_ascii=False)
+
+    if name == "send_message_to_agent":
+        agent_key = str(arguments.get("agent_id", "")).strip()
+        msg = str(arguments.get("message", "")).strip()
+        if not agent_key or not msg:
+            return json.dumps(
+                {"ok": False, "error": "missing_fields", "message": "agent_id and message are required"},
+                ensure_ascii=False,
+            )
+        if agent_key.lower().startswith("dlg-"):
+            return await _send_message_to_delegation(agent_key, msg, session=session, team_manager=team_manager)
+        result = await team_manager.send_message_to_subagent(agent_key, msg)
         return json.dumps(result, ensure_ascii=False)
 
     if name == "cancel_subagent":

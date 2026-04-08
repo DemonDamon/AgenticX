@@ -530,6 +530,14 @@ class BaseTool(ABC):
             是否为长时间运行工具
         """
         return getattr(self, '_is_long_running', False)
+
+    def is_read_only(self, input_args: dict) -> bool:
+        """Whether this invocation has no side effects (default: not read-only)."""
+        return False
+
+    def is_concurrency_safe(self, input_args: dict) -> bool:
+        """Whether this specific invocation can run in parallel with other safe tools."""
+        return self.is_read_only(input_args)
     
     # ========== 结束 ADK 借鉴的新方法 ==========
     
