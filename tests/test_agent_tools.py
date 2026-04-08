@@ -433,3 +433,52 @@ def test_liteparse_returns_extracted_text(monkeypatch, tmp_path: Path) -> None:
 
     result = agent_tools.dispatch_tool("liteparse", {"path": "doc.pdf"}, StudioSession())
     assert result == "parsed result"
+
+
+def test_session_workspace_roots_put_user_taskspaces_before_default(tmp_path: Path) -> None:
+    """Desktop merges default (avatar workspace) first; tools must still prefer user-bound folders."""
+    default_dir = tmp_path / "avatar_workspace"
+    user_dir = tmp_path / "user_bound"
+    default_dir.mkdir()
+    user_dir.mkdir()
+    (user_dir / "marker.txt").write_text("here", encoding="utf-8")
+
+    session = StudioSession()
+    session.workspace_dir = str(default_dir)
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(default_dir)},
+        {"id": "ts-abc12345", "label": "和创投资", "path": str(user_dir)},
+    ]
+
+    roots = agent_tools._session_workspace_roots(session)
+    assert roots[0] == user_dir.resolve()
+
+    resolved = agent_tools._resolve_workspace_path(".", session, pick_existing=True)
+    assert resolved == user_dir.resolve()
+
+
+def test_session_workspace_roots_honors_active_taskspace_id(tmp_path: Path) -> None:
+    """When multiple user taskspaces exist, active_taskspace_id must match the selected tab."""
+    dir_a = tmp_path / "folder_a"
+    dir_b = tmp_path / "folder_b"
+    default_dir = tmp_path / "default_ws"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    default_dir.mkdir()
+    (dir_a / "a.txt").write_text("a", encoding="utf-8")
+    (dir_b / "b.txt").write_text("b", encoding="utf-8")
+
+    session = StudioSession()
+    session.workspace_dir = str(default_dir)
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(default_dir)},
+        {"id": "ts-11111111", "label": "A", "path": str(dir_a)},
+        {"id": "ts-22222222", "label": "B", "path": str(dir_b)},
+    ]
+    session.active_taskspace_id = "ts-22222222"
+
+    roots = agent_tools._session_workspace_roots(session)
+    assert roots[0] == dir_b.resolve()
+
+    resolved = agent_tools._resolve_workspace_path(".", session, pick_existing=True)
+    assert resolved == dir_b.resolve()

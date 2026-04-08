@@ -88,7 +88,12 @@ def _workspace_root() -> Path:
 
 
 def _session_workspace_roots(session: Optional[StudioSession]) -> List[Path]:
-    """Ordered filesystem roots for this session (taskspaces, then avatar workspace, then env/cwd)."""
+    """Ordered filesystem roots for this session.
+
+    User-added taskspaces (id != \"default\") are listed before the default taskspace
+    so tools like list_files(\".\") and relative file_read resolve to the folder the
+    user bound in the Desktop workspace panel, not only ~/.agenticx/avatars/.../workspace.
+    """
     roots: List[Path] = []
     seen: set[str] = set()
 
@@ -109,14 +114,52 @@ def _session_workspace_roots(session: Optional[StudioSession]) -> List[Path]:
     if session is not None:
         taskspaces = getattr(session, "taskspaces", None)
         if isinstance(taskspaces, list):
+            extra_paths: List[str] = []
+            default_paths: List[str] = []
             for item in taskspaces:
-                if isinstance(item, dict):
-                    _add_path_str(str(item.get("path", "")))
+                if not isinstance(item, dict):
+                    continue
+                raw_path = str(item.get("path", "") or "").strip()
+                if not raw_path:
+                    continue
+                ts_id = str(item.get("id", "") or "").strip()
+                if ts_id == "default":
+                    default_paths.append(raw_path)
+                else:
+                    extra_paths.append(raw_path)
+            for p in extra_paths:
+                _add_path_str(p)
+            for p in default_paths:
+                _add_path_str(p)
         _add_path_str(str(getattr(session, "workspace_dir", "") or ""))
 
     _add_path_str(str(_workspace_root()))
     if not roots:
         roots.append(Path.cwd().resolve(strict=False))
+
+    # Desktop: user-selected workspace tab must win over merge order (multiple non-default taskspaces).
+    if session is not None:
+        raw_active = getattr(session, "active_taskspace_id", None)
+        active_id = str(raw_active).strip() if raw_active is not None else ""
+        if active_id:
+            taskspaces_active = getattr(session, "taskspaces", None)
+            if isinstance(taskspaces_active, list):
+                for item in taskspaces_active:
+                    if not isinstance(item, dict):
+                        continue
+                    if str(item.get("id", "") or "").strip() != active_id:
+                        continue
+                    raw_path = str(item.get("path", "") or "").strip()
+                    if not raw_path:
+                        break
+                    try:
+                        target = Path(raw_path).expanduser().resolve(strict=False)
+                    except Exception:
+                        break
+                    tkey = str(target)
+                    roots = [r for r in roots if str(r.resolve(strict=False)) != tkey]
+                    roots.insert(0, target)
+                    break
     return roots
 
 
