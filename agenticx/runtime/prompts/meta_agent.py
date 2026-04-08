@@ -331,7 +331,10 @@ def _build_taskspaces_context(taskspaces: list[dict[str, str]] | None) -> str:
     lines.append(
         "提示：用户在 UI 中添加的工作区路径即为项目根目录。"
         "执行 bash_exec / file_read / file_write 时，请基于上述路径操作，"
-        "无需再询问用户项目位置。\n"
+        "无需再询问用户项目位置。"
+        "相对路径（如 list_files(\".\")）会优先落在用户附加的工作区（非「默认工作区」）下；"
+        "若侧栏选中了某一工作区标签，该轮对话会以该标签对应路径为最高优先。"
+        "若仅绑定默认目录，则与分身 workspace 一致。\n"
     )
     return "\n".join(lines) + "\n"
 

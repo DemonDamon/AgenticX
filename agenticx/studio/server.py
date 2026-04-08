@@ -51,7 +51,7 @@ from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.loop_controller import LoopController
 from agenticx.cli.agent_tools import META_TOOL_NAMES, STUDIO_TOOLS
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS, META_LEADER_LABEL_SCRATCH_KEY
-from agenticx.runtime.prompts.meta_agent import build_meta_agent_system_prompt
+from agenticx.runtime.prompts.meta_agent import _build_taskspaces_context, build_meta_agent_system_prompt
 from agenticx.runtime.group_router import (
     META_LEADER_AGENT_ID,
     GroupChatRouter,
@@ -969,6 +969,8 @@ def create_studio_app() -> FastAPI:
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
         setattr(managed.studio_session, "taskspaces", list(managed.taskspaces or []))
+        active_ts = str(payload.active_taskspace_id or "").strip() or None
+        setattr(managed.studio_session, "active_taskspace_id", active_ts)
         manager.touch(payload.session_id)
         if manager.session_title_needs_auto_fill(managed.session_name):
             manager.auto_title_session(payload.session_id, payload.user_input)
@@ -1387,6 +1389,12 @@ def create_studio_app() -> FastAPI:
                             )
                         else:
                             sys_prompt = _build_avatar_direct_prompt()
+                            # Same taskspace list as Meta-Agent / Desktop workspace panel (managed.taskspaces).
+                            _ts_ctx = _build_taskspaces_context(
+                                list(getattr(managed, "taskspaces", None) or [])
+                            )
+                            if _ts_ctx:
+                                sys_prompt += "\n\n" + _ts_ctx
                             try:
                                 from agenticx.cli.studio_skill import get_all_skill_summaries
                                 from agenticx.runtime.prompts.meta_agent import _build_skills_context

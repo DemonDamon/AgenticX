@@ -2558,6 +2558,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
     try {
       const body: Record<string, unknown> = { session_id: requestSessionId, user_input: messageText };
+      const ats = (pane.activeTaskspaceId || "").trim();
+      if (ats) body.active_taskspace_id = ats;
       if (quoteTarget) {
         body.quoted_message_id = quoteTarget.message.id;
         body.quoted_content = `${quoteTarget.message.avatarName || quoteTarget.message.agentId || quoteTarget.message.role}: ${quoteTarget.body}`;
