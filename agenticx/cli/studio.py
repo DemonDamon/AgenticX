@@ -42,6 +42,7 @@ from agenticx.cli.studio_skill import (
     skill_info,
     get_all_skill_summaries,
 )
+from agenticx.runtime.file_state import FileStateTracker
 from agenticx.runtime.todo_manager import TodoManager
 from agenticx.workspace.loader import ensure_workspace
 
@@ -70,6 +71,7 @@ class StudioSession:
     connected_servers: set = field(default_factory=set)
     todo_manager: TodoManager = field(default_factory=TodoManager)
     scratchpad: Dict[str, str] = field(default_factory=dict)
+    file_state_tracker: FileStateTracker = field(default_factory=FileStateTracker)
 
 
 @dataclass

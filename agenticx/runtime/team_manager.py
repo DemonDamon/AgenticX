@@ -611,7 +611,25 @@ class AgentTeamManager:
 
         context = self._agents.get(agent_id)
         if context is None:
-            _log.warning("send_message_to_subagent: agent_id=%s not in _agents (keys=%s)", agent_id, list(self._agents.keys()))
+            archived = self._archived_agents.pop(agent_id, None)
+            if archived is not None:
+                self._agents[agent_id] = archived
+                context = archived
+        if context is None:
+            context = self._find_by_name_or_avatar(agent_id)
+            if context is not None:
+                aid = context.agent_id
+                if aid in self._archived_agents:
+                    self._archived_agents.pop(aid, None)
+                if aid not in self._agents:
+                    self._agents[aid] = context
+                agent_id = aid
+        if context is None:
+            _log.warning(
+                "send_message_to_subagent: agent_id=%s not in _agents (keys=%s)",
+                agent_id,
+                list(self._agents.keys()),
+            )
             return {"ok": False, "error": "not_found", "message": f"未找到子智能体: {agent_id}"}
         text = message.strip()
         if not text:

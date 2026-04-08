@@ -76,6 +76,55 @@ MAX_READ_CHARS = 20_000
 MAX_BASH_EXEC_COMMAND_CHARS = 65536
 PATH_GUARDED_READ_COMMANDS = {"cat", "head", "tail", "grep", "find", "wc", "ls", "tree"}
 
+# Tools safe to run concurrently when appearing in the same assistant tool_calls batch.
+_CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
+    {
+        "file_read",
+        "skill_list",
+        "scratchpad_read",
+        "memory_search",
+        "session_search",
+        "list_files",
+        "liteparse",
+        "lsp_goto_definition",
+        "lsp_find_references",
+        "lsp_hover",
+        "lsp_diagnostics",
+        "list_scheduled_tasks",
+    }
+)
+
+
+def _bash_exec_is_read_only(arguments: Dict[str, Any]) -> bool:
+    """Heuristic: treat obvious mutating shell patterns as non-read-only."""
+    cmd = str(arguments.get("command", "") or "")
+    if not cmd.strip():
+        return True
+    if ">>" in cmd:
+        return False
+    # Single `>` redirect (not `>=` etc.)
+    for i, ch in enumerate(cmd):
+        if ch == ">" and (i == 0 or cmd[i - 1] not in ">="):
+            return False
+    lowered = " " + cmd.lower() + " "
+    for needle in (" rm ", " mv ", " mkdir ", " touch ", " tee ", "git push", "git commit"):
+        if needle in lowered:
+            return False
+    stripped = cmd.strip().lower()
+    if stripped.startswith(("rm ", "mv ", "mkdir ", "touch ")):
+        return False
+    return True
+
+
+def studio_tool_is_concurrency_safe(tool_name: str, arguments: Dict[str, Any]) -> bool:
+    """Return True if this invocation may run in parallel with other safe tools."""
+    name = str(tool_name or "").strip().lower()
+    if not name or name == "none":
+        return False
+    if name == "bash_exec":
+        return _bash_exec_is_read_only(arguments)
+    return name in _CONCURRENCY_SAFE_STUDIO_TOOLS
+
 
 def _workspace_root() -> Path:
     configured = os.getenv("AGX_WORKSPACE_ROOT", "").strip()
@@ -731,6 +780,7 @@ META_TOOL_NAMES = {
     "cancel_subagent",
     "retry_subagent",
     "query_subagent_status",
+    "send_message_to_agent",
     "check_resources",
     "recommend_subagent_model",
     "list_skills",
@@ -1236,8 +1286,14 @@ def _tool_file_read(arguments: Dict[str, Any], session: Optional[StudioSession] 
         return "\n".join(numbered)
 
     if len(content) > MAX_READ_CHARS:
-        return content[:MAX_READ_CHARS] + f"\n... (truncated, total {len(content)} chars)"
-    return content
+        out = content[:MAX_READ_CHARS] + f"\n... (truncated, total {len(content)} chars)"
+    else:
+        out = content
+    if session is not None:
+        tracker = getattr(session, "file_state_tracker", None)
+        if tracker is not None and start_line is None and end_line is None:
+            tracker.record_read(str(path), content)
+    return out
 
 
 async def _tool_file_write(
@@ -1323,6 +1379,12 @@ async def _tool_file_edit(
         return "ERROR: occurrence must be >= 1"
     if not path.exists() or not path.is_file():
         return f"ERROR: file not found: {path}"
+
+    tracker = getattr(session, "file_state_tracker", None) if session is not None else None
+    if tracker is not None:
+        stale = tracker.check_staleness(str(path))
+        if stale:
+            return stale
 
     try:
         old_text = path.read_text(encoding="utf-8", errors="replace")
