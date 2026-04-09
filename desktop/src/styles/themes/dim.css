@@ -7,12 +7,12 @@
   --text-faint: rgba(225, 229, 236, 0.42);
 
   --surface-base: transparent;
-  --surface-base-fallback: #121720;
-  --surface-panel: rgba(18, 22, 31, 0.75);
-  --surface-sidebar: rgba(20, 20, 24, 0.68);
-  --surface-topbar: rgba(20, 20, 24, 0.68);
+  --surface-base-fallback: #181818;
+  --surface-panel: rgba(24, 24, 24, 0.75);
+  --surface-sidebar: rgba(30, 30, 30, 0.68);
+  --surface-topbar: rgba(30, 30, 30, 0.68);
   --surface-messages: transparent;
-  --surface-composer: rgba(16, 20, 28, 0.62);
+  --surface-composer: rgba(26, 26, 26, 0.62);
   --surface-card: rgba(255, 255, 255, 0.035);
   --surface-card-strong: rgba(255, 255, 255, 0.1);
   --surface-hover: rgba(255, 255, 255, 0.075);
