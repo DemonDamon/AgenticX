@@ -128,8 +128,13 @@ type ToolInstallProgress = {
   install_command?: string;
 };
 
+type ToolsOptionsPayload = {
+  bash_exec?: { default_timeout_sec?: number };
+};
+
 type ToolsPolicy = {
   tools_enabled: Record<string, boolean>;
+  tools_options?: ToolsOptionsPayload;
 };
 
 type GroupItem = {
@@ -359,8 +364,18 @@ declare global {
       deleteAvatar: (id: string) => Promise<{ ok: boolean; error?: string }>;
       getToolsStatus: () => Promise<{ ok: boolean; tools: ToolStatusItem[]; error?: string }>;
       getToolsRegistry: () => Promise<{ ok: boolean; tools: Array<{ name: string; description: string; category: string; is_meta: boolean }>; error?: string }>;
-      getToolsPolicy: () => Promise<{ ok: boolean; tools_enabled: Record<string, boolean>; error?: string }>;
-      saveToolsPolicy: (payload: ToolsPolicy) => Promise<{ ok: boolean; tools_enabled?: Record<string, boolean>; error?: string }>;
+      getToolsPolicy: () => Promise<{
+        ok: boolean;
+        tools_enabled: Record<string, boolean>;
+        tools_options?: ToolsOptionsPayload;
+        error?: string;
+      }>;
+      saveToolsPolicy: (payload: ToolsPolicy) => Promise<{
+        ok: boolean;
+        tools_enabled?: Record<string, boolean>;
+        tools_options?: ToolsOptionsPayload;
+        error?: string;
+      }>;
       installTool: (payload: { requestId: string; toolId: string }) => Promise<{ ok: boolean; error?: string }>;
       onToolInstallProgress: (cb: (payload: ToolInstallProgress) => void) => () => void;
 

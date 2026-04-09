@@ -91,6 +91,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "lsp_hover",
         "lsp_diagnostics",
         "list_scheduled_tasks",
+        "cc_bridge_list",
     }
 )
 
@@ -342,6 +343,109 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "name": {"type": "string", "description": "MCP server name from config."},
                 },
                 "required": ["name"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cc_bridge_start",
+            "description": (
+                "Start a local Claude Code headless session via the CC bridge HTTP server "
+                "(agx cc-bridge serve). Requires matching AGX_CC_BRIDGE_TOKEN / cc_bridge.token."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cwd": {
+                        "type": "string",
+                        "description": "Working directory for claude child; defaults to session workspace_dir.",
+                    },
+                    "auto_allow_permissions": {
+                        "type": "boolean",
+                        "description": "If true, bridge auto-approves can_use_tool control_request lines.",
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cc_bridge_send",
+            "description": (
+                "Send a user turn to an existing CC bridge session and wait for a result/success NDJSON line "
+                "or timeout. Bridge must be running (127.0.0.1 by default)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Bridge session UUID."},
+                    "prompt": {"type": "string", "description": "User message text."},
+                    "wait_seconds": {
+                        "type": "number",
+                        "description": "Max wait for stream-json result success line (default 120).",
+                    },
+                },
+                "required": ["session_id", "prompt"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cc_bridge_list",
+            "description": "List active CC bridge sessions (pid, cwd) from the local bridge HTTP server.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cc_bridge_stop",
+            "description": "Terminate a CC bridge session by session_id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Bridge session UUID."},
+                },
+                "required": ["session_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cc_bridge_permission",
+            "description": (
+                "Reply to a pending can_use_tool control_request when auto_allow is off. "
+                "Use request_id from bridge logs or captured NDJSON."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "request_id": {"type": "string"},
+                    "allow": {"type": "boolean"},
+                    "deny_message": {"type": "string", "description": "Used when allow is false."},
+                    "tool_use_id": {"type": "string", "description": "Optional; echo from control_request."},
+                    "tool_input": {
+                        "type": "object",
+                        "description": "When allow is true, pass the tool input object from control_request.",
+                        "additionalProperties": True,
+                    },
+                },
+                "required": ["session_id", "request_id", "allow"],
                 "additionalProperties": False,
             },
         },
@@ -1086,6 +1190,21 @@ def _extract_python_script_arg(parts: List[str]) -> Optional[str]:
     return None
 
 
+def _bash_exec_default_timeout_sec() -> int:
+    """Studio global default for bash_exec when the model omits timeout_sec."""
+    try:
+        raw = ConfigManager.get_value("tools_options.bash_exec.default_timeout_sec")
+    except Exception:
+        raw = None
+    if raw is None:
+        return 30
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        return 30
+    return max(30, min(3600, v))
+
+
 async def _tool_bash_exec(
     arguments: Dict[str, Any],
     session: Optional[StudioSession] = None,
@@ -1099,7 +1218,17 @@ async def _tool_bash_exec(
     if len(command) > MAX_BASH_EXEC_COMMAND_CHARS:
         return f"ERROR: command exceeds maximum length ({MAX_BASH_EXEC_COMMAND_CHARS} characters)"
 
-    timeout_sec = int(arguments.get("timeout_sec", 30) or 30)
+    raw_timeout = arguments.get("timeout_sec")
+    if raw_timeout is None:
+        timeout_sec = _bash_exec_default_timeout_sec()
+    elif isinstance(raw_timeout, str) and not str(raw_timeout).strip():
+        timeout_sec = _bash_exec_default_timeout_sec()
+    else:
+        try:
+            timeout_sec = int(raw_timeout)
+        except (TypeError, ValueError):
+            timeout_sec = _bash_exec_default_timeout_sec()
+    timeout_sec = max(1, min(3600, timeout_sec))
     cwd_arg = arguments.get("cwd")
     if cwd_arg:
         try:
@@ -1506,6 +1635,139 @@ def _tool_mcp_connect(arguments: Dict[str, Any], session: StudioSession) -> str:
         return "OK"
     d = (detail or "").strip()
     return f"ERROR: connect failed: {d}" if d else "ERROR: connect failed"
+
+
+def _session_default_cwd_for_cc_bridge(session: StudioSession) -> str:
+    w = str(getattr(session, "workspace_dir", "") or "").strip()
+    if w:
+        return str(Path(w).expanduser().resolve(strict=False))
+    return str(Path.cwd().resolve(strict=False))
+
+
+async def _tool_cc_bridge_http(
+    session: StudioSession,
+    method: str,
+    path: str,
+    json_body: Optional[Dict[str, Any]] = None,
+    *,
+    timeout_sec: float = 300.0,
+) -> str:
+    _ = session
+    from agenticx.cc_bridge.settings import (
+        cc_bridge_base_url,
+        cc_bridge_token,
+        validate_bridge_url_for_studio,
+    )
+
+    try:
+        import httpx
+    except ImportError:
+        return "ERROR: httpx is required for cc_bridge tools"
+
+    base = cc_bridge_base_url()
+    err = validate_bridge_url_for_studio(base)
+    if err:
+        return f"ERROR: {err}"
+    token = cc_bridge_token()
+    if not token:
+        return (
+            "ERROR: CC bridge token missing. Set AGX_CC_BRIDGE_TOKEN or config cc_bridge.token "
+            "(must match CC_BRIDGE_TOKEN on the bridge process)."
+        )
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"{base}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=timeout_sec) as client:
+            m = method.upper()
+            if m == "GET":
+                r = await client.get(url, headers=headers)
+            elif m == "POST":
+                r = await client.post(url, headers=headers, json=json_body)
+            elif m == "DELETE":
+                r = await client.delete(url, headers=headers)
+            else:
+                return f"ERROR: unsupported HTTP method {method}"
+    except httpx.HTTPError as exc:
+        return f"ERROR: bridge HTTP failed: {exc}"
+    text = r.text
+    if r.status_code >= 400:
+        return f"ERROR: bridge {r.status_code}: {text[:2000]}"
+    return text
+
+
+async def _tool_cc_bridge_start(arguments: Dict[str, Any], session: StudioSession) -> str:
+    cwd = str(arguments.get("cwd", "") or "").strip()
+    if not cwd:
+        cwd = _session_default_cwd_for_cc_bridge(session)
+    auto = bool(arguments.get("auto_allow_permissions", False))
+    return await _tool_cc_bridge_http(
+        session,
+        "POST",
+        "/v1/sessions",
+        {"cwd": cwd, "auto_allow_permissions": auto},
+        timeout_sec=60.0,
+    )
+
+
+async def _tool_cc_bridge_send(arguments: Dict[str, Any], session: StudioSession) -> str:
+    sid = str(arguments.get("session_id", "")).strip()
+    prompt = str(arguments.get("prompt", "") or "")
+    if not sid or not prompt:
+        return "ERROR: session_id and prompt are required"
+    wait = arguments.get("wait_seconds", 120.0)
+    try:
+        wait_f = float(wait)
+    except (TypeError, ValueError):
+        wait_f = 120.0
+    wait_f = max(1.0, min(3600.0, wait_f))
+    return await _tool_cc_bridge_http(
+        session,
+        "POST",
+        f"/v1/sessions/{sid}/message",
+        {"text": prompt, "wait_seconds": wait_f},
+        timeout_sec=wait_f + 45.0,
+    )
+
+
+async def _tool_cc_bridge_list(arguments: Dict[str, Any], session: StudioSession) -> str:
+    _ = arguments
+    return await _tool_cc_bridge_http(session, "GET", "/v1/sessions", None, timeout_sec=30.0)
+
+
+async def _tool_cc_bridge_stop(arguments: Dict[str, Any], session: StudioSession) -> str:
+    sid = str(arguments.get("session_id", "") or "").strip()
+    if not sid:
+        return "ERROR: session_id required"
+    return await _tool_cc_bridge_http(session, "DELETE", f"/v1/sessions/{sid}", None, timeout_sec=30.0)
+
+
+async def _tool_cc_bridge_permission(arguments: Dict[str, Any], session: StudioSession) -> str:
+    sid = str(arguments.get("session_id", "") or "").strip()
+    rid = str(arguments.get("request_id", "") or "").strip()
+    if not sid or not rid:
+        return "ERROR: session_id and request_id are required"
+    if "allow" not in arguments:
+        return "ERROR: allow is required"
+    allow = bool(arguments.get("allow"))
+    deny_message = str(arguments.get("deny_message", "") or "Denied by operator")
+    body: Dict[str, Any] = {
+        "request_id": rid,
+        "allow": allow,
+        "deny_message": deny_message,
+    }
+    tuid = arguments.get("tool_use_id")
+    if tuid is not None and str(tuid).strip():
+        body["tool_use_id"] = str(tuid).strip()
+    tin = arguments.get("tool_input")
+    if isinstance(tin, dict):
+        body["tool_input"] = tin
+    return await _tool_cc_bridge_http(
+        session,
+        "POST",
+        f"/v1/sessions/{sid}/permission",
+        body,
+        timeout_sec=30.0,
+    )
 
 
 _SCREENSHOT_TOOL_NAMES = frozenset({
@@ -2260,6 +2522,16 @@ async def dispatch_tool_async(
             return await _tool_codegen(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "mcp_connect":
             return _tool_mcp_connect(arguments, session)
+        if name == "cc_bridge_start":
+            return await _tool_cc_bridge_start(arguments, session)
+        if name == "cc_bridge_send":
+            return await _tool_cc_bridge_send(arguments, session)
+        if name == "cc_bridge_list":
+            return await _tool_cc_bridge_list(arguments, session)
+        if name == "cc_bridge_stop":
+            return await _tool_cc_bridge_stop(arguments, session)
+        if name == "cc_bridge_permission":
+            return await _tool_cc_bridge_permission(arguments, session)
         if name == "mcp_call":
             return await _tool_mcp_call_async(arguments, session)
         if name == "mcp_import":

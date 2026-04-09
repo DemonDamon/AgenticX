@@ -2126,23 +2126,35 @@ function registerIpc(): void {
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
-        return { ok: false, tools_enabled: {}, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+        return { ok: false, tools_enabled: {}, tools_options: {}, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
       }
       return await resp.json();
     } catch (err) {
-      return { ok: false, tools_enabled: {}, error: String(err) };
+      return { ok: false, tools_enabled: {}, tools_options: {}, error: String(err) };
     }
   });
 
-  ipcMain.handle("save-tools-policy", async (_event, payload: { tools_enabled?: Record<string, boolean> }) => {
+  ipcMain.handle(
+    "save-tools-policy",
+    async (
+      _event,
+      payload: {
+        tools_enabled?: Record<string, boolean>;
+        tools_options?: Record<string, unknown>;
+      },
+    ) => {
     try {
+      const body: Record<string, unknown> = { tools_enabled: payload?.tools_enabled ?? {} };
+      if (payload && "tools_options" in payload) {
+        body.tools_options = payload.tools_options;
+      }
       const resp = await fetch(`${getStudioUrl()}/api/tools/policy`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
           "x-agx-desktop-token": getStudioToken(),
         },
-        body: JSON.stringify({ tools_enabled: payload?.tools_enabled ?? {} }),
+        body: JSON.stringify(body),
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");

@@ -141,8 +141,10 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   getToolsStatus: async () => ipcRenderer.invoke("get-tools-status"),
   getToolsRegistry: async () => ipcRenderer.invoke("get-tools-registry"),
   getToolsPolicy: async () => ipcRenderer.invoke("get-tools-policy"),
-  saveToolsPolicy: async (payload: { tools_enabled: Record<string, boolean> }) =>
-    ipcRenderer.invoke("save-tools-policy", payload),
+  saveToolsPolicy: async (payload: {
+    tools_enabled: Record<string, boolean>;
+    tools_options?: Record<string, unknown>;
+  }) => ipcRenderer.invoke("save-tools-policy", payload),
   installTool: async (payload: { requestId: string; toolId: string }) =>
     ipcRenderer.invoke("install-tool", payload),
   onToolInstallProgress: (cb: (payload: {
