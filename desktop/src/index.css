@@ -100,7 +100,14 @@ body {
   color: inherit;
 }
 
-/* Custom scrollbar */
+/* Logo invert behavior per theme */
+:root[data-theme="light"] .theme-invert-logo {
+  filter: none;
+}
+:root[data-theme="dark"] .theme-invert-logo,
+:root[data-theme="dim"] .theme-invert-logo {
+  filter: invert(1);
+}
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
