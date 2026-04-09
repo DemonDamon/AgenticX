@@ -36,6 +36,7 @@ import type { AutomationTask } from "./automation/types";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
+import machiEmptyState from "../assets/machi-empty-state.png";
 
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
 const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
@@ -3549,8 +3550,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               </button>
             </div>
           ) : visibleMessages.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-xs">
-              <span className="text-text-faint">暂无消息</span>
+            <div className="flex h-full flex-col items-center justify-center gap-5 px-4 text-center text-xs">
+              <img
+                src={machiEmptyState}
+                alt="Machi Empty State"
+                className="w-32 opacity-[0.85] mix-blend-luminosity dark:mix-blend-screen select-none"
+                style={{ filter: "grayscale(100%) contrast(1.15)" }}
+                draggable={false}
+              />
+              <div className="space-y-1.5 select-none">
+                <div className="text-[15px] font-medium text-text-primary tracking-wide">
+                  Absolute Rationality Engineer
+                </div>
+                <div className="text-text-faint tracking-wider uppercase text-[11px]">
+                  Triggered Anywhere, Completed Locally
+                </div>
+              </div>
               {isAutomationTaskPane && automationTaskErrorHint ? (
                 <div className="max-w-md rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-rose-200/95">
                   <div className="mb-1 font-medium text-rose-300">上次定时执行失败</div>
