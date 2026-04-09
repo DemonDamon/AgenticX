@@ -116,6 +116,16 @@ def _get_config_app():
         raise typer.Exit(1)
 
 
+def _get_cc_bridge_app():
+    """Lazy import cc-bridge sub-application."""
+    try:
+        from agenticx.cli.cc_bridge_commands import cc_bridge_app
+        return cc_bridge_app
+    except ImportError:
+        console.print("[bold red]错误:[/bold red] 无法导入 cc_bridge 模块")
+        raise typer.Exit(1)
+
+
 def _get_generate_app():
     """Lazy import generate sub-application."""
     try:
@@ -419,6 +429,13 @@ except Exception:
 try:
     config_app = _get_config_app()
     app.add_typer(config_app)
+except Exception:
+    pass
+
+# 注册 cc-bridge 子命令 (延迟加载)
+try:
+    cc_bridge_app = _get_cc_bridge_app()
+    app.add_typer(cc_bridge_app)
 except Exception:
     pass
 

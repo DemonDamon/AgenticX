@@ -48,6 +48,32 @@ type ProviderEntry = {
   dropParams: boolean;
 };
 
+/** 至少填写了密钥或自定义 API 地址之一，才视为已配置（与「留空使用默认」的隐式地址区分）。 */
+function providerCredentialed(e: Pick<ProviderEntry, "apiKey" | "baseUrl"> | undefined): boolean {
+  if (!e) return false;
+  return !!(e.apiKey ?? "").trim() || !!(e.baseUrl ?? "").trim();
+}
+
+function providerEffectiveOn(e: ProviderEntry | undefined): boolean {
+  if (!e) return false;
+  return e.enabled !== false && providerCredentialed(e);
+}
+
+function providerEntryFromSaved(saved: Partial<ProviderEntry> | undefined): ProviderEntry {
+  const apiKey = String(saved?.apiKey ?? "");
+  const baseUrl = String(saved?.baseUrl ?? "");
+  const cred = providerCredentialed({ apiKey, baseUrl });
+  const models = saved?.models;
+  return {
+    apiKey,
+    baseUrl,
+    model: String(saved?.model ?? ""),
+    models: Array.isArray(models) ? models : [],
+    enabled: cred && saved?.enabled !== false,
+    dropParams: saved?.dropParams === true,
+  };
+}
+
 type McpServer = {
   name: string;
   connected: boolean;
@@ -1213,9 +1239,23 @@ function PermissionsAdvancedPanel() {
 // Tools Tab
 // ---------------------------------------------------------------------------
 
+/** 与 `GET/PUT /api/tools/policy` 的 tools_options 字段对齐（仅含 UI 用到的键）。 */
+type StudioToolsOptions = {
+  bash_exec?: { default_timeout_sec?: number };
+};
+
+/** 预授权工具卡片下展示「高级设置」白名单（与后端 tools_options 白名单对齐）。 */
+const ADVANCED_TOOL_POLICY_NAMES = new Set<string>(["bash_exec"]);
+const BASH_DEFAULT_TIMEOUT_MIN = 30;
+const BASH_DEFAULT_TIMEOUT_MAX = 3600;
+
 function ToolsTab() {
   const [registry, setRegistry] = useState<RegistryTool[]>([]);
   const [policy, setPolicy] = useState<Record<string, boolean>>({});
+  const [toolsOptions, setToolsOptions] = useState<StudioToolsOptions>({});
+  const [advOpenByTool, setAdvOpenByTool] = useState<Record<string, boolean>>({});
+  /** 用字符串受控，避免 type=number + 每键 Number() 导致前导 0 与「0600」类显示问题 */
+  const [bashTimeoutInput, setBashTimeoutInput] = useState("30");
   const [envTools, setEnvTools] = useState<ToolStatusItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -1233,7 +1273,17 @@ function ToolsTab() {
       ]);
       if (regResult?.ok) setRegistry(Array.isArray(regResult.tools) ? regResult.tools : []);
       else setError(regResult?.error ?? "加载工具注册表失败");
-      if (policyResult?.ok) setPolicy(policyResult.tools_enabled ?? {});
+      if (policyResult?.ok) {
+        setPolicy(policyResult.tools_enabled ?? {});
+        const opts = policyResult.tools_options ?? {};
+        setToolsOptions(opts);
+        const d = opts.bash_exec?.default_timeout_sec;
+        const n =
+          typeof d === "number" && Number.isFinite(d)
+            ? Math.max(BASH_DEFAULT_TIMEOUT_MIN, Math.min(BASH_DEFAULT_TIMEOUT_MAX, Math.round(d)))
+            : 30;
+        setBashTimeoutInput(String(n));
+      }
       if (statusResult?.ok) setEnvTools(Array.isArray(statusResult.tools) ? statusResult.tools : []);
     } catch (err) {
       setError(String(err));
@@ -1273,6 +1323,28 @@ function ToolsTab() {
     setPolicy(next);
     await window.agenticxDesktop.saveToolsPolicy({ tools_enabled: next });
   }, [policy]);
+
+  const saveBashDefaultTimeout = useCallback(async () => {
+    const trimmed = bashTimeoutInput.trim();
+    let sec = trimmed === "" ? BASH_DEFAULT_TIMEOUT_MIN : parseInt(trimmed, 10);
+    if (!Number.isFinite(sec)) sec = BASH_DEFAULT_TIMEOUT_MIN;
+    sec = Math.max(BASH_DEFAULT_TIMEOUT_MIN, Math.min(BASH_DEFAULT_TIMEOUT_MAX, sec));
+    setBashTimeoutInput(String(sec));
+    const nextOpts: StudioToolsOptions = {
+      ...toolsOptions,
+      bash_exec: { default_timeout_sec: sec },
+    };
+    setToolsOptions(nextOpts);
+    const res = await window.agenticxDesktop.saveToolsPolicy({
+      tools_enabled: policy,
+      tools_options: nextOpts,
+    });
+    if (res?.ok && res.tools_options?.bash_exec?.default_timeout_sec != null) {
+      const synced = res.tools_options.bash_exec.default_timeout_sec;
+      setBashTimeoutInput(String(synced));
+      setToolsOptions(res.tools_options);
+    }
+  }, [bashTimeoutInput, policy, toolsOptions]);
 
   const startInstall = async (tool: ToolStatusItem) => {
     if (!tool.auto_installable) {
@@ -1330,6 +1402,9 @@ function ToolsTab() {
       <div className="text-sm text-text-subtle">
         管理 Agent 可调用工具的全局启停状态。关闭后 Agent 将无法调用该工具。
       </div>
+      <div className="text-xs text-text-faint">
+        仅部分工具提供可折叠的「高级设置」；其余工具仅支持启用/停用。
+      </div>
       {error ? (
         <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">{error}</div>
       ) : null}
@@ -1353,8 +1428,13 @@ function ToolsTab() {
                 {catTools.map((t) => {
                   const enabled = policy[t.name] !== false;
                   const autoAdded = !(t.name in policy) || policy[t.name] === true;
+                  const showAdvanced = ADVANCED_TOOL_POLICY_NAMES.has(t.name);
+                  const advOpen = Boolean(advOpenByTool[t.name]);
                   return (
-                    <div key={t.name} className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface-card px-3 py-2">
+                    <div
+                      key={t.name}
+                      className="flex items-start justify-between gap-2 rounded-md border border-border bg-surface-card px-3 py-2"
+                    >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium text-text-primary">{TOOL_LABELS[t.name] ?? t.name}</span>
@@ -1365,12 +1445,59 @@ function ToolsTab() {
                           ) : null}
                         </div>
                         <div className="mt-0.5 text-xs text-text-muted">{toolDisplayDescription(t.name, t.description)}</div>
+                        {showAdvanced ? (
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              className="flex items-center gap-1 text-xs text-text-subtle transition hover:text-text-primary"
+                              onClick={() =>
+                                setAdvOpenByTool((prev) => ({ ...prev, [t.name]: !prev[t.name] }))
+                              }
+                              aria-expanded={advOpen}
+                            >
+                              <ChevronRight
+                                className={`h-3.5 w-3.5 shrink-0 transition-transform ${advOpen ? "rotate-90" : ""}`}
+                                aria-hidden
+                              />
+                              高级设置
+                            </button>
+                            {advOpen && t.name === "bash_exec" ? (
+                              <div className="mt-2 space-y-1.5 pl-1">
+                                <label className="block text-[11px] font-medium text-text-muted" htmlFor={`bash-timeout-${t.name}`}>
+                                  默认超时（秒）
+                                </label>
+                                <input
+                                  id={`bash-timeout-${t.name}`}
+                                  type="text"
+                                  inputMode="numeric"
+                                  autoComplete="off"
+                                  className="w-32 rounded-md border border-border bg-surface-panel px-2 py-1 text-xs text-text-primary"
+                                  value={bashTimeoutInput}
+                                  onChange={(e) => {
+                                    const raw = e.target.value.replace(/\D/g, "").slice(0, 4);
+                                    setBashTimeoutInput(raw);
+                                  }}
+                                  onBlur={() => void saveBashDefaultTimeout()}
+                                />
+                                <p className="max-w-md text-[10px] leading-relaxed text-text-faint">
+                                  模型仍可在单次调用中传{" "}
+                                  <code className="rounded bg-surface-panel px-0.5">timeout_sec</code>{" "}
+                                  覆盖；未传时使用此处默认值（范围 {BASH_DEFAULT_TIMEOUT_MIN}–{BASH_DEFAULT_TIMEOUT_MAX}{" "}
+                                  秒）。保存后下一轮 <code className="rounded bg-surface-panel px-0.5">bash_exec</code>{" "}
+                                  起生效。
+                                </p>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
-                      <SettingsSwitch
-                        checked={enabled}
-                        onChange={(next) => void toggleTool(t.name, next)}
-                        aria-label={`启用工具 ${t.name}`}
-                      />
+                      <div className="mt-0.5 shrink-0">
+                        <SettingsSwitch
+                          checked={enabled}
+                          onChange={(next) => void toggleTool(t.name, next)}
+                          aria-label={`启用工具 ${t.name}`}
+                        />
+                      </div>
                     </div>
                   );
                 })}
@@ -3848,6 +3975,7 @@ export function SettingsPanel({
   const [fetchingModels, setFetchingModels] = useState(false);
   const [showModelPanel, setShowModelPanel] = useState(false);
   const [newModelInput, setNewModelInput] = useState("");
+  const [providerEnableHint, setProviderEnableHint] = useState<string | null>(null);
   const [mcpExtraPaths, setMcpExtraPaths] = useState<string[]>([]);
   const [mcpAutoConnectHint, setMcpAutoConnectHint] = useState<string[]>([]);
   const [mcpBusy, setMcpBusy] = useState(false);
@@ -3950,29 +4078,15 @@ export function SettingsPanel({
 
     const merged: Record<string, ProviderEntry> = {};
     for (const name of ALL_PROVIDERS) {
-      const saved = providers[name];
-      merged[name] = {
-        apiKey: saved?.apiKey ?? "",
-        baseUrl: saved?.baseUrl ?? "",
-        model: saved?.model ?? "",
-        models: saved?.models ?? [],
-        enabled: saved?.enabled !== false,
-        dropParams: saved?.dropParams === true,
-      };
+      merged[name] = providerEntryFromSaved(providers[name]);
     }
     for (const [name, saved] of Object.entries(providers)) {
       if (!merged[name]) {
-        merged[name] = {
-          apiKey: saved?.apiKey ?? "",
-          baseUrl: saved?.baseUrl ?? "",
-          model: saved?.model ?? "",
-          models: saved?.models ?? [],
-          enabled: saved?.enabled !== false,
-          dropParams: saved?.dropParams === true,
-        };
+        merged[name] = providerEntryFromSaved(saved);
       }
     }
     setDraft(merged);
+    setProviderEnableHint(null);
     setDefProv(defaultProvider || ALL_PROVIDERS[0]);
     setActive(defaultProvider || ALL_PROVIDERS[0]);
     setKeyStatus({});
@@ -4117,13 +4231,34 @@ export function SettingsPanel({
   );
 
   const current = useMemo(
-    () => draft[active] ?? { apiKey: "", baseUrl: "", model: "", models: [], enabled: true, dropParams: false },
+    () => draft[active] ?? { apiKey: "", baseUrl: "", model: "", models: [], enabled: false, dropParams: false },
     [draft, active]
   );
 
+  const currentEffectiveOn = useMemo(() => providerEffectiveOn(draft[active]), [draft, active]);
+
   const updateField = useCallback(
     (field: keyof ProviderEntry, value: string | string[] | boolean) => {
-      setDraft((prev) => ({ ...prev, [active]: { ...prev[active], [field]: value } }));
+      setDraft((prev) => {
+        const prevEntry = prev[active] ?? {
+          apiKey: "",
+          baseUrl: "",
+          model: "",
+          models: [],
+          enabled: false,
+          dropParams: false,
+        };
+        const next: ProviderEntry = { ...prevEntry, [field]: value as never };
+        if (field === "apiKey" || field === "baseUrl") {
+          const k = (field === "apiKey" ? String(value) : next.apiKey).trim();
+          const u = (field === "baseUrl" ? String(value) : next.baseUrl).trim();
+          if (!k && !u) next.enabled = false;
+        }
+        return { ...prev, [active]: next };
+      });
+      if (field === "apiKey" || field === "baseUrl") {
+        setProviderEnableHint(null);
+      }
     },
     [active]
   );
@@ -4524,16 +4659,21 @@ export function SettingsPanel({
                 {/* Provider sub-list */}
                 <div className="w-[140px] shrink-0 space-y-0.5 overflow-y-auto rounded-md border border-border bg-surface-card py-1">
                   {providerNames.map((name) => {
-                    const hasKey = !!draft[name]?.apiKey;
+                    const entry = draft[name];
+                    const dotClass = providerEffectiveOn(entry) ? "bg-emerald-400" : "bg-rose-400";
                     return (
                       <button
                         key={name}
                         className={`flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs transition ${
                           active === name ? "bg-[var(--settings-accent-row-bg)] text-[var(--settings-accent-fg)]" : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
                         }`}
-                        onClick={() => { setActive(name); setShowModelPanel(false); }}
+                        onClick={() => {
+                          setActive(name);
+                          setShowModelPanel(false);
+                          setProviderEnableHint(null);
+                        }}
                       >
-                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${hasKey ? "bg-emerald-400" : "bg-surface-hover"}`} />
+                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} />
                         <span className="truncate">{name}</span>
                         {name === defProv && <span className="ml-auto shrink-0 rounded bg-[var(--settings-accent-badge-bg)] px-1 text-[9px] text-[var(--settings-accent-fg)]">默认</span>}
                       </button>
@@ -4545,23 +4685,38 @@ export function SettingsPanel({
                 <div className="flex-1 space-y-3">
                   {!showModelPanel ? (
                     <>
-                      <div className="flex items-center justify-between rounded-md border border-border bg-surface-panel px-3 py-2">
-                        <div className="text-xs text-text-subtle">
-                          <span className="text-text-primary">{active}</span>
-                          <span className="ml-2">{current.enabled ? "已启用" : "已禁用"}</span>
+                      <div className="space-y-1 rounded-md border border-border bg-surface-panel px-3 py-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs text-text-subtle">
+                            <span className="text-text-primary">{active}</span>
+                            <span className="ml-2">{currentEffectiveOn ? "已启用" : "已禁用"}</span>
+                          </div>
+                          <button
+                            type="button"
+                            aria-label={currentEffectiveOn ? `关闭 ${active}` : `启用 ${active}`}
+                            className={`inline-flex min-w-[58px] items-center justify-center rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
+                              currentEffectiveOn
+                                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
+                                : "border-border bg-surface-card text-text-faint hover:text-text-subtle"
+                            }`}
+                            onClick={() => {
+                              if (currentEffectiveOn) {
+                                updateField("enabled", false);
+                                setProviderEnableHint(null);
+                              } else if (!providerCredentialed(current)) {
+                                setProviderEnableHint("请先填写 API 密钥或 API 地址后再启用");
+                              } else {
+                                updateField("enabled", true);
+                                setProviderEnableHint(null);
+                              }
+                            }}
+                          >
+                            {currentEffectiveOn ? "ON" : "OFF"}
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          aria-label={current.enabled ? `关闭 ${active}` : `启用 ${active}`}
-                          className={`inline-flex min-w-[58px] items-center justify-center rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
-                            current.enabled
-                              ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
-                              : "border-border bg-surface-card text-text-faint hover:text-text-subtle"
-                          }`}
-                          onClick={() => updateField("enabled", !current.enabled)}
-                        >
-                          {current.enabled ? "ON" : "OFF"}
-                        </button>
+                        {providerEnableHint ? (
+                          <div className="text-[11px] text-rose-400">{providerEnableHint}</div>
+                        ) : null}
                       </div>
                       <label className="block text-sm text-text-muted">
                         API 密钥

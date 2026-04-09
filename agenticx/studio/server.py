@@ -588,6 +588,38 @@ def create_studio_app() -> FastAPI:
     def _save_global_tools_policy(tools_enabled: dict[str, bool]) -> None:
         ConfigManager.set_value("tools_enabled", _sanitize_tools_enabled(tools_enabled), scope="global")
 
+    def _sanitize_tools_options(raw: Any) -> dict[str, Any]:
+        """Whitelist tool runtime options; unknown keys dropped."""
+        if not isinstance(raw, dict):
+            return {}
+        out: dict[str, Any] = {}
+        bash_raw = raw.get("bash_exec")
+        if isinstance(bash_raw, dict):
+            dts = bash_raw.get("default_timeout_sec")
+            if dts is not None:
+                try:
+                    v = int(dts)
+                except (TypeError, ValueError):
+                    v = None
+                if v is not None:
+                    v = max(30, min(3600, v))
+                    out["bash_exec"] = {"default_timeout_sec": v}
+        return out
+
+    def _load_global_tools_options() -> dict[str, Any]:
+        try:
+            raw = ConfigManager.get_value("tools_options")
+        except Exception:
+            raw = {}
+        return _sanitize_tools_options(raw)
+
+    def _save_global_tools_options(tools_options: dict[str, Any]) -> None:
+        ConfigManager.set_value(
+            "tools_options",
+            _sanitize_tools_options(tools_options),
+            scope="global",
+        )
+
     def _filter_tools_by_policy(
         tools: list[dict[str, Any]],
         *,
@@ -2037,7 +2069,11 @@ def create_studio_app() -> FastAPI:
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
-        return {"ok": True, "tools_enabled": _load_global_tools_policy()}
+        return {
+            "ok": True,
+            "tools_enabled": _load_global_tools_policy(),
+            "tools_options": _load_global_tools_options(),
+        }
 
     @app.put("/api/tools/policy")
     async def save_tools_policy(
@@ -2047,7 +2083,10 @@ def create_studio_app() -> FastAPI:
         _check_token(x_agx_desktop_token)
         tools_enabled = _sanitize_tools_enabled(payload.get("tools_enabled"))
         _save_global_tools_policy(tools_enabled)
-        return {"ok": True, "tools_enabled": tools_enabled}
+        if "tools_options" in payload:
+            _save_global_tools_options(payload.get("tools_options"))
+        tools_options = _load_global_tools_options()
+        return {"ok": True, "tools_enabled": tools_enabled, "tools_options": tools_options}
 
     @app.post("/api/tools/install")
     async def install_tool(
