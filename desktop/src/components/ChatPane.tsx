@@ -36,7 +36,7 @@ import type { AutomationTask } from "./automation/types";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
-import machiEmptyState from "../assets/machi-empty-state.png";
+import machiEmptyState from "../assets/machi-logo-transparent.png";
 
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
 const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
@@ -3554,8 +3554,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               <img
                 src={machiEmptyState}
                 alt="Machi Empty State"
-                className="w-32 opacity-[0.85] mix-blend-luminosity dark:mix-blend-screen select-none"
-                style={{ filter: "grayscale(100%) contrast(1.15)" }}
+                className="w-[13.2rem] max-w-[42vw] select-none opacity-[0.85] theme-invert-logo"
                 draggable={false}
               />
               <div className="space-y-1.5 select-none">
