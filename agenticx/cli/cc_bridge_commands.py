@@ -7,7 +7,6 @@ Author: Damon Li
 from __future__ import annotations
 
 import os
-import secrets
 from typing import Optional
 
 import typer
@@ -25,21 +24,30 @@ def cc_bridge_serve(
     token: Optional[str] = typer.Option(
         None,
         "--token",
-        help="Bearer token for HTTP clients. Defaults to env CC_BRIDGE_TOKEN or a generated secret.",
+        help="Bearer token for HTTP clients. Else CC_BRIDGE_TOKEN / AGX_CC_BRIDGE_TOKEN / ~/.agenticx/config.yaml cc_bridge.token / auto-generate.",
     ),
 ) -> None:
     """Start FastAPI bridge: spawns `claude` children with stream-json stdio."""
     if token and token.strip():
         os.environ["CC_BRIDGE_TOKEN"] = token.strip()
-    if not os.environ.get("CC_BRIDGE_TOKEN", "").strip():
-        generated = secrets.token_urlsafe(32)
-        os.environ["CC_BRIDGE_TOKEN"] = generated
-        console.print(
-            "[yellow]CC_BRIDGE_TOKEN was unset; generated ephemeral token (set env to reuse across restarts):[/yellow]"
-        )
-        console.print(generated)
+    elif not os.environ.get("CC_BRIDGE_TOKEN", "").strip():
+        agx = os.environ.get("AGX_CC_BRIDGE_TOKEN", "").strip()
+        if agx:
+            os.environ["CC_BRIDGE_TOKEN"] = agx
+        else:
+            from agenticx.cc_bridge.settings import ensure_cc_bridge_token_persisted
+
+            resolved = ensure_cc_bridge_token_persisted()
+            os.environ["CC_BRIDGE_TOKEN"] = resolved
+            console.print(
+                "[dim]Using token from ~/.agenticx/config.yaml (cc_bridge.token) or newly generated; "
+                "Machi cc_bridge_* tools use the same value.[/dim]"
+            )
     console.print(f"[green]CC bridge listening[/green] http://{host}:{port}")
-    console.print("Export the same value as AGX_CC_BRIDGE_TOKEN for Studio tools.")
+    console.print(
+        "[dim]HTTP clients send Authorization: Bearer <token>. "
+        "Match AGX_CC_BRIDGE_TOKEN or cc_bridge.token in config.[/dim]"
+    )
     uvicorn.run(
         "agenticx.cc_bridge.http_app:app",
         host=host,

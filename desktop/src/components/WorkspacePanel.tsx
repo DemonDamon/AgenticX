@@ -608,7 +608,7 @@ export function WorkspacePanel({
                   }`}
                   aria-hidden={!isVisible}
                 >
-                  <TerminalEmbed tabId={tab.id} cwd={tab.cwd} />
+                  <TerminalEmbed tabId={tab.id} cwd={tab.cwd} ccBridgePty={tab.ccBridgePty} />
                 </div>
               );
             })

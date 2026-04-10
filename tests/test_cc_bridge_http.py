@@ -48,6 +48,17 @@ def test_list_sessions_ok(client: TestClient) -> None:
     body = r.json()
     assert "sessions" in body
     assert isinstance(body["sessions"], list)
+    for item in body["sessions"]:
+        assert "mode" in item
+
+
+def test_create_session_invalid_mode(client: TestClient) -> None:
+    r = client.post(
+        "/v1/sessions",
+        headers={"Authorization": "Bearer test-secret-token"},
+        json={"cwd": os.getcwd(), "mode": "bogus"},
+    )
+    assert r.status_code == 400
 
 
 def test_invalid_session_id_rejected(client: TestClient) -> None:

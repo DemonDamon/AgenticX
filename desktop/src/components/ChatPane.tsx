@@ -54,6 +54,10 @@ function resolveQuoteBody(message: Message, selectedText?: string): string {
   return message.content;
 }
 
+function shellSingleQuote(input: string): string {
+  return `'${input.replace(/'/g, `'\"'\"'`)}'`;
+}
+
 const FALLBACK_PANE: ChatPaneState = {
   id: "fallback-pane",
   avatarId: null,
@@ -447,6 +451,30 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
     const cleaned = resultText.replace(/\s+\n/g, "\n").trim();
     if (/^\[[ xX]\]/m.test(cleaned)) {
       return { content: `🗂 任务清单更新\n${cleaned}`, silent: false };
+    }
+  }
+  if (toolName === "cc_bridge_send") {
+    try {
+      const parsed = JSON.parse(resultText) as Record<string, unknown>;
+      const mode = String(parsed.mode ?? "headless");
+      const ok = Boolean(parsed.ok);
+      const pr = String(parsed.parsed_response ?? "").trim();
+      const conf = Number(parsed.parse_confidence ?? 0);
+      if (mode === "visible_tui") {
+        if (pr && ok) {
+          return {
+            content: `✅ Claude Code（Visible TUI，解析置信度 ${Math.round(Math.min(1, conf) * 100)}%）\n\n${pr}`,
+            silent: false,
+          };
+        }
+        const tail = String(parsed.tail ?? "").slice(0, 900);
+        return {
+          content: `⏳ Visible TUI：${ok ? "本轮已结束" : "未完成或解析置信度较低"}。请在右侧「claude-code」内嵌交互终端查看；若未自动连接，请确认 cc-bridge 已启动且配置 token 有效。\n${tail ? `\n---\n${tail}` : ""}`,
+          silent: false,
+        };
+      }
+    } catch {
+      // fall through
     }
   }
   if (toolName === "query_subagent_status") {
@@ -1094,6 +1122,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const togglePaneHistory = useAppStore((s) => s.togglePaneHistory);
   const cycleSidePanel = useAppStore((s) => s.cycleSidePanel);
   const openSidePanel = useAppStore((s) => s.openSidePanel);
+  const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const addPaneMessage = useAppStore((s) => s.addPaneMessage);
   const clearPaneMessages = useAppStore((s) => s.clearPaneMessages);
@@ -1187,6 +1216,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [favoriteToastOpen, setFavoriteToastOpen] = useState(false);
   const [favoriteToastMsg, setFavoriteToastMsg] = useState("");
   const [feishuDesktopBound, setFeishuDesktopBound] = useState(false);
+  const ccBridgeVisibleLaunchGuardRef = useRef<Map<string, number>>(new Map());
+  const ccBridgeTailGuardRef = useRef<Map<string, number>>(new Map());
   const [hasAnyFeishuDesktopBinding, setHasAnyFeishuDesktopBinding] = useState(false);
   const [wechatDesktopBound, setWechatDesktopBound] = useState(false);
   const [automationTaskErrorHint, setAutomationTaskErrorHint] = useState<string | null>(null);
@@ -1734,6 +1765,156 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           .slice(0, 8);
     setAtCandidates([...avatarCandidates, ...filteredFolders, ...filteredFiles].slice(0, 24));
   };
+
+  const triggerCcBridgeVisibleTerminal = useCallback(
+    async (toolCallKey: string) => {
+      if (!pane.sessionId) return;
+      const now = Date.now();
+      const last = ccBridgeVisibleLaunchGuardRef.current.get(toolCallKey) ?? 0;
+      if (now - last < 20_000) return;
+      ccBridgeVisibleLaunchGuardRef.current.set(toolCallKey, now);
+      // Keep guard map bounded.
+      if (ccBridgeVisibleLaunchGuardRef.current.size > 32) {
+        const cutoff = now - 120_000;
+        for (const [k, ts] of ccBridgeVisibleLaunchGuardRef.current.entries()) {
+          if (ts < cutoff) ccBridgeVisibleLaunchGuardRef.current.delete(k);
+        }
+      }
+
+      const wsResp = await window.agenticxDesktop.listTaskspaces(pane.sessionId);
+      if (!wsResp.ok || !Array.isArray(wsResp.workspaces) || wsResp.workspaces.length === 0) return;
+      const activeWorkspace =
+        (pane.activeTaskspaceId
+          ? wsResp.workspaces.find((item) => item.id === pane.activeTaskspaceId)
+          : undefined) ?? wsResp.workspaces[0];
+      if (!activeWorkspace?.path) return;
+      if (!pane.activeTaskspaceId || pane.activeTaskspaceId !== activeWorkspace.id) {
+        setActiveTaskspace(pane.id, activeWorkspace.id);
+      }
+
+      openSidePanel(pane.id, "workspace");
+      addPaneTerminalTab(pane.id, activeWorkspace.path, "cc-bridge");
+
+      let bridgeUrl = "http://127.0.0.1:9742";
+      try {
+        const headers: Record<string, string> = {};
+        if (apiToken) headers["x-agx-desktop-token"] = apiToken;
+        const res = await fetch(`${apiBase}/api/cc-bridge/config`, { headers });
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : {};
+        const parsedUrl = typeof data?.url === "string" ? data.url.trim() : "";
+        if (parsedUrl) bridgeUrl = parsedUrl;
+      } catch {
+        // keep fallback URL
+      }
+
+      let launchCmd =
+        'lsof -nP -iTCP:9742 -sTCP:LISTEN >/dev/null 2>&1 && echo "[cc-bridge] already listening on 127.0.0.1:9742" || agx cc-bridge serve --host 127.0.0.1 --port 9742';
+      try {
+        const parsed = new URL(bridgeUrl);
+        const host = (parsed.hostname || "").trim();
+        const lowerHost = host.toLowerCase();
+        const loopback = lowerHost === "127.0.0.1" || lowerHost === "localhost" || lowerHost === "::1";
+        const parsedPort = parsed.port ? Number(parsed.port) : parsed.protocol === "https:" ? 443 : 80;
+        const safePort = Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : 9742;
+        if (loopback) {
+          launchCmd = [
+            `lsof -nP -iTCP:${safePort} -sTCP:LISTEN >/dev/null 2>&1`,
+            `&& echo "[cc-bridge] already listening on ${host || "127.0.0.1"}:${safePort}"`,
+            `|| agx cc-bridge serve --host ${shellSingleQuote(host || "127.0.0.1")} --port ${safePort}`,
+          ].join(" ");
+        } else {
+          launchCmd = `echo "[cc-bridge] configured remote URL: ${bridgeUrl}. Skip local autostart."`;
+        }
+      } catch {
+        // keep fallback launch command
+      }
+
+      const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+      const latestPane = useAppStore.getState().panes.find((item) => item.id === pane.id);
+      const terminalTabId = latestPane?.activeTerminalTabId;
+      if (!terminalTabId) return;
+      for (let i = 0; i < 20; i += 1) {
+        const latestPane = useAppStore.getState().panes.find((item) => item.id === pane.id);
+        if (!latestPane) return;
+        const writeRes = await window.agenticxDesktop.terminalWriteByTab({
+          tabId: terminalTabId,
+          data: `${launchCmd}\n`,
+        });
+        if (writeRes?.ok) return;
+        await sleep(180);
+      }
+    },
+    [pane.id, pane.sessionId, pane.activeTaskspaceId, apiBase, apiToken, setActiveTaskspace, openSidePanel, addPaneTerminalTab]
+  );
+
+  const triggerCcBridgeTailTerminal = useCallback(
+    async (sessionId: string) => {
+      const sid = sessionId.trim();
+      if (!/^[0-9a-fA-F-]{36}$/.test(sid) || !pane.sessionId) return;
+      const now = Date.now();
+      const last = ccBridgeTailGuardRef.current.get(sid) ?? 0;
+      if (now - last < 60_000) return;
+      ccBridgeTailGuardRef.current.set(sid, now);
+
+      const wsResp = await window.agenticxDesktop.listTaskspaces(pane.sessionId);
+      if (!wsResp.ok || !Array.isArray(wsResp.workspaces) || wsResp.workspaces.length === 0) return;
+      const activeWorkspace =
+        (pane.activeTaskspaceId
+          ? wsResp.workspaces.find((item) => item.id === pane.activeTaskspaceId)
+          : undefined) ?? wsResp.workspaces[0];
+      if (!activeWorkspace?.path) return;
+      openSidePanel(pane.id, "workspace");
+
+      let bridgeUrl = "http://127.0.0.1:9742";
+      let bridgeToken = "";
+      try {
+        const headers: Record<string, string> = {};
+        if (apiToken) headers["x-agx-desktop-token"] = apiToken;
+        const res = await fetch(`${apiBase}/api/cc-bridge/config`, { headers });
+        const data = res.ok ? await res.json() : {};
+        const u = typeof data?.url === "string" ? data.url.trim() : "";
+        if (u) bridgeUrl = u.replace(/\/$/, "");
+        bridgeToken = typeof data?.token === "string" ? data.token : "";
+      } catch {
+        /* use defaults */
+      }
+
+      if (bridgeToken) {
+        addPaneTerminalTab(pane.id, activeWorkspace.path, "claude-code", {
+          sessionId: sid,
+          baseUrl: bridgeUrl,
+          token: bridgeToken,
+        });
+        return;
+      }
+
+      addPaneTerminalTab(pane.id, activeWorkspace.path, "claude-code");
+      const logPath = `$HOME/.agenticx/logs/cc-bridge/${sid}.log`;
+      const tailCmd = [
+        `LOG_FILE="${logPath}"`,
+        `echo "[claude-code] tailing $LOG_FILE"`,
+        'if [ ! -f "$LOG_FILE" ]; then echo "[claude-code] waiting for log file..."; fi',
+        'while [ ! -f "$LOG_FILE" ]; do sleep 0.5; done',
+        'echo "[claude-code] log file detected."',
+        'tail -n 200 -f "$LOG_FILE"',
+      ].join("; ");
+
+      const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+      const latestPane = useAppStore.getState().panes.find((item) => item.id === pane.id);
+      const terminalTabId = latestPane?.activeTerminalTabId;
+      if (!terminalTabId) return;
+      for (let i = 0; i < 20; i += 1) {
+        const writeRes = await window.agenticxDesktop.terminalWriteByTab({
+          tabId: terminalTabId,
+          data: `${tailCmd}\n`,
+        });
+        if (writeRes?.ok) return;
+        await sleep(180);
+      }
+    },
+    [pane.id, pane.sessionId, pane.activeTaskspaceId, apiBase, apiToken, openSidePanel, addPaneTerminalTab]
+  );
 
   const updateAtStateFromText = useCallback(
     (value: string) => {
@@ -2821,9 +3002,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             if (payload.type === "tool_progress") {
               const name = String(payload.data?.name ?? "tool");
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
-              const waitLabel = Number.isFinite(sec)
-                ? `⏳ ${name} 执行中…（已等待 ${sec}s）`
-                : `⏳ ${name} 执行中…`;
+              const waitLabel = (() => {
+                if (name === "cc_bridge_send") {
+                  return Number.isFinite(sec)
+                    ? `⏳ ${name} 执行中…（已等待 ${sec}s；可见模式下请在右侧「claude-code」交互终端操作或确认权限）`
+                    : `⏳ ${name} 执行中…（可见模式下请查看右侧「claude-code」交互终端）`;
+                }
+                return Number.isFinite(sec)
+                  ? `⏳ ${name} 执行中…（已等待 ${sec}s）`
+                  : `⏳ ${name} 执行中…`;
+              })();
               if (eventAgentId === "meta") {
                 setStreamedAssistantText(waitLabel);
               } else {
@@ -2856,6 +3044,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             if (payload.type === "tool_call") {
               const toolName = payload.data?.name ?? "tool";
               const toolArgs = payload.data?.arguments ?? payload.data?.args ?? {};
+              if (eventAgentId === "meta" && toolName === "cc_bridge_start") {
+                const toolCallId = String(payload.data?.id ?? "").trim();
+                const callKey = toolCallId || `${requestSessionId || "session"}:cc_bridge_start`;
+                void triggerCcBridgeVisibleTerminal(callKey);
+              }
               // Filter out internal housekeeping tools that add no user-visible signal
               const SILENT_TOOLS = new Set(["check_resources"]);
               if (!SILENT_TOOLS.has(toolName)) {
@@ -2922,6 +3115,36 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 isSetTaskspaceToolSuccess(payload.data?.result)
               ) {
                 setTaskspaceAutoRefreshKey((prev) => prev + 1);
+              }
+              if (eventAgentId === "meta" && toolName === "cc_bridge_start") {
+                try {
+                  const resultRaw = payload.data?.result;
+                  const resultObj = typeof resultRaw === "string" ? JSON.parse(resultRaw) : resultRaw;
+                  const sid = typeof resultObj?.session_id === "string" ? resultObj.session_id : "";
+                  if (sid) void triggerCcBridgeTailTerminal(sid);
+                } catch {
+                  // ignore parse errors
+                }
+              }
+              if (eventAgentId === "meta" && toolName === "cc_bridge_send") {
+                try {
+                  const resultRaw = payload.data?.result;
+                  const resultObj = typeof resultRaw === "string" ? JSON.parse(resultRaw) : resultRaw;
+                  if (
+                    resultObj?.mode === "visible_tui" &&
+                    resultObj?.ok === true &&
+                    String(resultObj?.parsed_response ?? "").trim().length > 0
+                  ) {
+                    addPaneMessage(
+                      pane.id,
+                      "assistant",
+                      String(resultObj.parsed_response),
+                      "meta",
+                    );
+                  }
+                } catch {
+                  /* ignore */
+                }
               }
             }
             if (payload.type === "confirm_required") {

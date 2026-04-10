@@ -402,8 +402,23 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
 
   terminalSpawn: async (payload: { id: string; cwd: string; cols?: number; rows?: number }) =>
     ipcRenderer.invoke("terminal-spawn", payload) as Promise<{ ok: boolean; id?: string; error?: string }>,
+  terminalBridgeAttach: async (payload: {
+    id: string;
+    sessionId: string;
+    baseUrl: string;
+    token: string;
+    cols?: number;
+    rows?: number;
+  }) =>
+    ipcRenderer.invoke("terminal-bridge-attach", payload) as Promise<{
+      ok: boolean;
+      id?: string;
+      error?: string;
+    }>,
   terminalWrite: async (payload: { id: string; data: string }) =>
     ipcRenderer.invoke("terminal-write", payload) as Promise<{ ok: boolean }>,
+  terminalWriteByTab: async (payload: { tabId: string; data: string }) =>
+    ipcRenderer.invoke("terminal-write-by-tab", payload) as Promise<{ ok: boolean; id?: string }>,
   terminalResize: async (payload: { id: string; cols: number; rows: number }) =>
     ipcRenderer.invoke("terminal-resize", payload) as Promise<{ ok: boolean }>,
   terminalKill: async (id: string) => ipcRenderer.invoke("terminal-kill", id) as Promise<{ ok: boolean }>,

@@ -122,6 +122,110 @@ def test_bash_exec_uses_shell_false_and_argv(monkeypatch) -> None:
     assert captured["kwargs"]["shell"] is False
 
 
+def test_bash_exec_peels_cd_then_and_sets_cwd(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    sub = workspace / "sub"
+    sub.mkdir()
+    monkeypatch.chdir(workspace)
+    captured: dict = {}
+
+    def _fake_run(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return _DummyProcess(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
+    session = StudioSession()
+    session.workspace_dir = str(workspace)
+    result = agent_tools.dispatch_tool("bash_exec", {"command": "cd sub && ls"}, session)
+    assert "exit_code=0" in result
+    assert captured["kwargs"]["cwd"] == str(sub.resolve())
+    assert captured["args"][0] == ["ls"]
+    assert captured["kwargs"]["shell"] is False
+
+
+def test_cc_bridge_http_autostarts_on_connect_error(monkeypatch) -> None:
+    import httpx
+    from agenticx.cc_bridge import settings as cc_settings
+
+    class _Resp:
+        status_code = 200
+        text = '{"ok": true}'
+
+    class _Client:
+        calls = 0
+
+        def __init__(self, *args, **kwargs) -> None:
+            _ = (args, kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            _ = (exc_type, exc, tb)
+            return False
+
+        async def get(self, *args, **kwargs):
+            _ = (args, kwargs)
+            _Client.calls += 1
+            if _Client.calls == 1:
+                raise httpx.ConnectError("boom")
+            return _Resp()
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(cc_settings, "cc_bridge_base_url", lambda: "http://127.0.0.1:9742")
+    monkeypatch.setattr(cc_settings, "cc_bridge_token", lambda: "tok")
+    monkeypatch.setattr(cc_settings, "validate_bridge_url_for_studio", lambda _u: None)
+    monkeypatch.setattr(agent_tools, "_ensure_cc_bridge_local_process", lambda _b, _t: (True, "started"))
+
+    result = agent_tools.dispatch_tool("cc_bridge_list", {}, StudioSession())
+    assert '"ok": true' in result
+    assert "[cc-bridge] autostarted in background." in result
+
+
+def test_cc_bridge_http_recovers_from_502(monkeypatch) -> None:
+    import httpx
+    from agenticx.cc_bridge import settings as cc_settings
+
+    class _Resp:
+        def __init__(self, code: int, text: str) -> None:
+            self.status_code = code
+            self.text = text
+
+    class _Client:
+        calls = 0
+
+        def __init__(self, *args, **kwargs) -> None:
+            _ = (args, kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            _ = (exc_type, exc, tb)
+            return False
+
+        async def get(self, url, *args, **kwargs):
+            _ = (args, kwargs)
+            _Client.calls += 1
+            if url.endswith("/health"):
+                return _Resp(200, "ok")
+            if _Client.calls == 1:
+                return _Resp(502, "")
+            return _Resp(200, '{"ok": true}')
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(cc_settings, "cc_bridge_base_url", lambda: "http://127.0.0.1:9742")
+    monkeypatch.setattr(cc_settings, "cc_bridge_token", lambda: "tok")
+    monkeypatch.setattr(cc_settings, "validate_bridge_url_for_studio", lambda _u: None)
+    monkeypatch.setattr(agent_tools, "_ensure_cc_bridge_local_process", lambda _b, _t: (True, "started"))
+
+    result = agent_tools.dispatch_tool("cc_bridge_list", {}, StudioSession())
+    assert '"ok": true' in result
+    assert "[cc-bridge] autostarted in background." in result
+
+
 def test_bash_exec_rejects_cwd_outside_workspace(monkeypatch, tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

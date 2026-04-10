@@ -575,7 +575,16 @@ declare global {
         cols?: number;
         rows?: number;
       }) => Promise<{ ok: boolean; id?: string; error?: string }>;
+      terminalBridgeAttach: (payload: {
+        id: string;
+        sessionId: string;
+        baseUrl: string;
+        token: string;
+        cols?: number;
+        rows?: number;
+      }) => Promise<{ ok: boolean; id?: string; error?: string }>;
       terminalWrite: (payload: { id: string; data: string }) => Promise<{ ok: boolean }>;
+      terminalWriteByTab: (payload: { tabId: string; data: string }) => Promise<{ ok: boolean; id?: string }>;
       terminalResize: (payload: { id: string; cols: number; rows: number }) => Promise<{ ok: boolean }>;
       terminalKill: (id: string) => Promise<{ ok: boolean }>;
       onTerminalData: (cb: (payload: { id: string; data: string }) => void) => () => void;

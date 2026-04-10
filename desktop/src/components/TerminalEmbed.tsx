@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { useAppStore, type ThemeMode } from "../store";
+import { useAppStore, type PaneTerminalTab, type ThemeMode } from "../store";
 
 type Props = {
   tabId: string;
   cwd: string;
+  ccBridgePty?: PaneTerminalTab["ccBridgePty"];
 };
 
 /** Read the computed background color of the nearest ancestor with a solid bg. */
@@ -111,7 +112,7 @@ function newPtySessionId(tabId: string): string {
   return `${tabId}:${suffix}`;
 }
 
-export function TerminalEmbed({ tabId, cwd }: Props) {
+export function TerminalEmbed({ tabId, cwd, ccBridgePty }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const themeMode = useAppStore((s) => s.theme);
@@ -141,7 +142,9 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
 
     // Unique id per effect run so kill/exit from a previous session never matches
     // this listener (fixes Strict Mode + parent re-render races).
-    const ptySessionId = newPtySessionId(tabId);
+    const ptySessionId = ccBridgePty
+      ? `${tabId}:bridge:${ccBridgePty.sessionId.trim()}`
+      : newPtySessionId(tabId);
 
     setExited(false);
     setSpawnError(null);
@@ -200,6 +203,29 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
 
     void (async () => {
       scheduleFit();
+      if (ccBridgePty) {
+        const res = await window.agenticxDesktop.terminalBridgeAttach({
+          id: ptySessionId,
+          sessionId: ccBridgePty.sessionId.trim(),
+          baseUrl: ccBridgePty.baseUrl.trim().replace(/\/$/, ""),
+          token: ccBridgePty.token,
+          cols: term.cols,
+          rows: term.rows,
+        });
+        if (disposed) return;
+        if (!res.ok) {
+          setSpawnError(res.error ?? "无法连接到 cc-bridge PTY 流");
+          return;
+        }
+        spawnedRef.current = true;
+        scheduleFit();
+        void window.agenticxDesktop.terminalResize({
+          id: ptySessionId,
+          cols: term.cols,
+          rows: term.rows,
+        });
+        return;
+      }
       const res = await window.agenticxDesktop.terminalSpawn({
         id: ptySessionId,
         cwd,
@@ -236,7 +262,7 @@ export function TerminalEmbed({ tabId, cwd }: Props) {
     };
   // spawnGen drives re-mount / re-spawn when user clicks restart
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabId, cwd, spawnGen]);
+  }, [tabId, cwd, spawnGen, ccBridgePty?.sessionId, ccBridgePty?.baseUrl, ccBridgePty?.token]);
 
   useEffect(() => {
     if (!termRef.current || !containerRef.current) return;

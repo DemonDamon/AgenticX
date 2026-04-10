@@ -61,6 +61,12 @@ export type PaneTerminalTab = {
   id: string;
   cwd: string;
   label: string;
+  /** When set, embed PTY stream from local cc-bridge (visible_tui) instead of a local shell. */
+  ccBridgePty?: {
+    sessionId: string;
+    baseUrl: string;
+    token: string;
+  };
 };
 
 export type ChatPane = {
@@ -301,7 +307,12 @@ type AppState = {
   setSpawnsColumnOpen: (paneId: string, open: boolean) => void;
   dismissSpawnsColumn: (paneId: string, baselineSubAgentIds: string[]) => void;
   clearSpawnsColumnSuppress: (paneId: string) => void;
-  addPaneTerminalTab: (paneId: string, cwd: string, labelHint?: string) => void;
+  addPaneTerminalTab: (
+    paneId: string,
+    cwd: string,
+    labelHint?: string,
+    ccBridgePty?: PaneTerminalTab["ccBridgePty"]
+  ) => void;
   removePaneTerminalTab: (paneId: string, tabId: string) => void;
   setActivePaneTerminalTab: (paneId: string, tabId: string | null) => void;
   accumulatePaneTokens: (paneId: string, input: number, output: number) => void;
@@ -905,7 +916,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           : pane
       ),
     })),
-  addPaneTerminalTab: (paneId, cwd, labelHint) =>
+  addPaneTerminalTab: (paneId, cwd, labelHint, ccBridgePty) =>
     set((state) => {
       const pane = state.panes.find((p) => p.id === paneId);
       if (!pane) return state;
@@ -915,12 +926,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       const sameCwd = pane.terminalTabs.filter((t) => t.cwd === trimmed).length;
       const label = sameCwd === 0 ? baseRaw : `${baseRaw} (#${sameCwd + 1})`;
       const id = uid();
+      const tab: PaneTerminalTab = ccBridgePty
+        ? { id, cwd: trimmed, label, ccBridgePty }
+        : { id, cwd: trimmed, label };
       return {
         panes: state.panes.map((p) =>
           p.id === paneId
             ? {
                 ...p,
-                terminalTabs: [...p.terminalTabs, { id, cwd: trimmed, label }],
+                terminalTabs: [...p.terminalTabs, tab],
                 activeTerminalTabId: id,
               }
             : p
