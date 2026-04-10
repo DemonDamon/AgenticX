@@ -3188,6 +3188,113 @@ def create_studio_app() -> FastAPI:
             logger.warning("put_permissions error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    # --- CC Bridge (local Claude Code HTTP) config ---
+
+    @app.get("/api/cc-bridge/config")
+    async def get_cc_bridge_config(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Return bridge URL and token (Desktop-only; requires desktop token)."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.cc_bridge.settings import (
+                cc_bridge_base_url,
+                cc_bridge_mode,
+                ensure_cc_bridge_token_persisted,
+            )
+
+            url = cc_bridge_base_url()
+            token = ensure_cc_bridge_token_persisted()
+            mode = cc_bridge_mode()
+            raw_idle = ConfigManager.get_value("cc_bridge.idle_stop_seconds")
+            try:
+                idle = int(raw_idle) if raw_idle is not None else 600
+            except (TypeError, ValueError):
+                idle = 600
+            idle = max(0, min(86400, idle))
+            return {"ok": True, "url": url, "token": token, "idle_stop_seconds": idle, "mode": mode}
+        except Exception as exc:
+            logger.warning("get_cc_bridge_config error: %s", exc)
+            return {
+                "ok": False,
+                "url": "http://127.0.0.1:9742",
+                "token": "",
+                "idle_stop_seconds": 600,
+                "mode": "headless",
+                "error": str(exc),
+            }
+
+    @app.put("/api/cc-bridge/config")
+    async def put_cc_bridge_config(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.cc_bridge.settings import (
+                cc_bridge_base_url,
+                cc_bridge_mode,
+                ensure_cc_bridge_token_persisted,
+                validate_bridge_url_for_studio,
+            )
+
+            if "url" in payload:
+                u = str(payload.get("url") or "").strip().rstrip("/")
+                if u:
+                    err = validate_bridge_url_for_studio(u)
+                    if err:
+                        raise HTTPException(status_code=400, detail=err)
+                    ConfigManager.set_value("cc_bridge.url", u, scope="global")
+            if "token" in payload:
+                t = str(payload.get("token") or "").strip()
+                ConfigManager.set_value("cc_bridge.token", t, scope="global")
+            if "idle_stop_seconds" in payload:
+                try:
+                    idle = int(payload.get("idle_stop_seconds"))
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail="idle_stop_seconds must be integer") from None
+                idle = max(0, min(86400, idle))
+                ConfigManager.set_value("cc_bridge.idle_stop_seconds", idle, scope="global")
+            if "mode" in payload:
+                m = str(payload.get("mode") or "").strip().lower()
+                if m not in {"headless", "visible_tui"}:
+                    raise HTTPException(status_code=400, detail="mode must be headless or visible_tui") from None
+                ConfigManager.set_value("cc_bridge.mode", m, scope="global")
+
+            raw_idle = ConfigManager.get_value("cc_bridge.idle_stop_seconds")
+            try:
+                idle_now = int(raw_idle) if raw_idle is not None else 600
+            except (TypeError, ValueError):
+                idle_now = 600
+            idle_now = max(0, min(86400, idle_now))
+            return {
+                "ok": True,
+                "url": cc_bridge_base_url(),
+                "token": ensure_cc_bridge_token_persisted(),
+                "idle_stop_seconds": idle_now,
+                "mode": cc_bridge_mode(),
+            }
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("put_cc_bridge_config error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/api/cc-bridge/token/regenerate")
+    async def regenerate_cc_bridge_token(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        import secrets
+
+        try:
+            tok = secrets.token_urlsafe(32)
+            ConfigManager.set_value("cc_bridge.token", tok, scope="global")
+            return {"ok": True, "token": tok}
+        except Exception as exc:
+            logger.warning("regenerate_cc_bridge_token error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     # --- Hooks API ---
 
     @app.get("/api/hooks")

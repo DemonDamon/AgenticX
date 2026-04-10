@@ -1583,10 +1583,22 @@ function stopWechatHealthCheck(): void {
   }
 }
 
-type TerminalSession = {
+type PtyTerminalSession = {
+  kind: "pty";
   pty: import("node-pty").IPty;
   wc: Electron.WebContents;
 };
+
+type BridgeTerminalSession = {
+  kind: "bridge";
+  wc: Electron.WebContents;
+  baseUrl: string;
+  token: string;
+  sessionId: string;
+  abort: AbortController;
+};
+
+type TerminalSession = PtyTerminalSession | BridgeTerminalSession;
 
 const terminalSessions = new Map<string, TerminalSession>();
 
@@ -1603,12 +1615,20 @@ function requireNodePty(): typeof import("node-pty") | null {
 function killTerminalSession(id: string): void {
   const sess = terminalSessions.get(id);
   if (!sess) return;
+  terminalSessions.delete(id);
+  if (sess.kind === "bridge") {
+    try {
+      sess.abort.abort();
+    } catch {
+      // noop
+    }
+    return;
+  }
   try {
     sess.pty.kill();
   } catch {
     // noop
   }
-  terminalSessions.delete(id);
 }
 
 function killAllTerminalSessions(): void {
@@ -3698,7 +3718,7 @@ function registerIpc(): void {
             return { ...rest, TERM: "xterm-256color" } as Record<string, string>;
           })(),
         });
-        terminalSessions.set(id, { pty: ptyProcess, wc });
+        terminalSessions.set(id, { kind: "pty", pty: ptyProcess, wc });
         ptyProcess.onData((data) => {
           if (!wc.isDestroyed()) {
             wc.send("terminal-data", { id, data });
@@ -3717,9 +3737,25 @@ function registerIpc(): void {
     }
   );
 
-  ipcMain.handle("terminal-write", (_event, payload: { id: string; data: string }) => {
+  ipcMain.handle("terminal-write", async (_event, payload: { id: string; data: string }) => {
     const sess = terminalSessions.get(payload.id);
     if (!sess) return { ok: false };
+    if (sess.kind === "bridge") {
+      const url = `${sess.baseUrl}/v1/sessions/${encodeURIComponent(sess.sessionId)}/write`;
+      try {
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${sess.token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ data: payload.data }),
+        });
+        return { ok: resp.ok };
+      } catch {
+        return { ok: false };
+      }
+    }
     try {
       sess.pty.write(payload.data);
       return { ok: true };
@@ -3728,19 +3764,145 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("terminal-resize", (_event, payload: { id: string; cols: number; rows: number }) => {
+  ipcMain.handle("terminal-write-by-tab", async (_event, payload: { tabId: string; data: string }) => {
+    const tabId = (payload.tabId || "").trim();
+    if (!tabId) return { ok: false };
+    const prefix = `${tabId}:`;
+    for (const [id, sess] of terminalSessions.entries()) {
+      if (!id.startsWith(prefix)) continue;
+      if (sess.kind === "bridge") {
+        const url = `${sess.baseUrl}/v1/sessions/${encodeURIComponent(sess.sessionId)}/write`;
+        try {
+          const resp = await fetch(url, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${sess.token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ data: payload.data }),
+          });
+          return { ok: resp.ok, id };
+        } catch {
+          return { ok: false };
+        }
+      }
+      try {
+        sess.pty.write(payload.data);
+        return { ok: true, id };
+      } catch {
+        return { ok: false };
+      }
+    }
+    return { ok: false };
+  });
+
+  ipcMain.handle("terminal-resize", async (_event, payload: { id: string; cols: number; rows: number }) => {
     const sess = terminalSessions.get(payload.id);
     if (!sess) return { ok: false };
+    const cols = Math.max(2, Math.min(300, Math.floor(payload.cols)));
+    const rows = Math.max(2, Math.min(200, Math.floor(payload.rows)));
+    if (sess.kind === "bridge") {
+      const url = `${sess.baseUrl}/v1/sessions/${encodeURIComponent(sess.sessionId)}/resize`;
+      try {
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${sess.token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ cols, rows }),
+        });
+        return { ok: resp.ok };
+      } catch {
+        return { ok: false };
+      }
+    }
     try {
-      sess.pty.resize(
-        Math.max(2, Math.min(300, Math.floor(payload.cols))),
-        Math.max(2, Math.min(200, Math.floor(payload.rows)))
-      );
+      sess.pty.resize(cols, rows);
       return { ok: true };
     } catch {
       return { ok: false };
     }
   });
+
+  ipcMain.handle(
+    "terminal-bridge-attach",
+    async (
+      event,
+      payload: {
+        id: string;
+        sessionId: string;
+        baseUrl: string;
+        token: string;
+        cols?: number;
+        rows?: number;
+      }
+    ) => {
+      const id = (payload.id || "").trim();
+      const sessionId = (payload.sessionId || "").trim();
+      const baseUrl = (payload.baseUrl || "").trim().replace(/\/$/, "");
+      const token = (payload.token || "").trim();
+      if (!id || !sessionId || !baseUrl || !token) {
+        return { ok: false as const, error: "missing id, sessionId, baseUrl, or token" };
+      }
+      const wc = event.sender;
+      killTerminalSession(id);
+      const cols = Math.max(40, Math.min(300, Number(payload.cols) || 80));
+      const rows = Math.max(10, Math.min(200, Number(payload.rows) || 24));
+      const abort = new AbortController();
+      const streamUrl = `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/stream`;
+      const resizeUrl = `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/resize`;
+
+      terminalSessions.set(id, { kind: "bridge", wc, baseUrl, token, sessionId, abort });
+
+      void (async () => {
+        try {
+          await fetch(resizeUrl, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ cols, rows }),
+            signal: abort.signal,
+          }).catch(() => {
+            /* best-effort */
+          });
+          const resp = await fetch(streamUrl, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: abort.signal,
+          });
+          if (!resp.ok || !resp.body) {
+            return;
+          }
+          const reader = resp.body.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value && value.length > 0 && !wc.isDestroyed()) {
+              let s = "";
+              for (let i = 0; i < value.length; i += 1) {
+                s += String.fromCharCode(value[i]);
+              }
+              wc.send("terminal-data", { id, data: s });
+            }
+          }
+        } catch (err) {
+          const name = err && typeof err === "object" && "name" in err ? String((err as { name?: string }).name) : "";
+          if (name !== "AbortError") {
+            console.error("[terminal-bridge-attach] stream error:", err);
+          }
+        } finally {
+          terminalSessions.delete(id);
+          if (!wc.isDestroyed()) {
+            wc.send("terminal-exit", { id });
+          }
+        }
+      })();
+
+      return { ok: true as const, id };
+    }
+  );
 
   ipcMain.handle("terminal-kill", (_event, id: string) => {
     killTerminalSession((id || "").trim());

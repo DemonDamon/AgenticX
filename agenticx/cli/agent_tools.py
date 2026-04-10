@@ -16,9 +16,11 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 import uuid
+from urllib.parse import urlparse
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.cli.codegen_engine import CodeGenEngine, infer_output_path, write_generated_file
@@ -51,6 +53,9 @@ else:
     StudioSession = Any
 
 _log = logging.getLogger(__name__)
+_CC_BRIDGE_AUTO_PROC: Optional[subprocess.Popen[str]] = None
+_CC_BRIDGE_IDLE_TASK: Optional[asyncio.Task[Any]] = None
+_CC_BRIDGE_LAST_ACTIVE_MONO: float = 0.0
 
 
 SAFE_COMMANDS = {
@@ -242,12 +247,17 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "bash_exec",
-            "description": "Execute a shell command in current workspace.",
+            "description": (
+                "Execute a shell command in the session workspace. Prefer the cwd parameter for the working "
+                "directory instead of leading `cd ... &&` (cd && is auto-peeled when cwd is omitted). "
+                "After headless `claude -p` / codegen, verify artifacts with list_files or `test -f` — do not "
+                "trust exit_code alone."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {"type": "string", "description": "Command to execute."},
-                    "cwd": {"type": "string", "description": "Optional working directory."},
+                    "cwd": {"type": "string", "description": "Working directory (preferred over cd in command)."},
                     "timeout_sec": {"type": "integer", "description": "Timeout seconds, default 30."},
                 },
                 "required": ["command"],
@@ -352,8 +362,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "cc_bridge_start",
             "description": (
-                "Start a local Claude Code headless session via the CC bridge HTTP server "
-                "(agx cc-bridge serve). Requires matching AGX_CC_BRIDGE_TOKEN / cc_bridge.token."
+                "Start a local Claude Code headless session via the CC bridge HTTP server (run "
+                "`agx cc-bridge serve` in another terminal). Token is read from AGX_CC_BRIDGE_TOKEN or "
+                "~/.agenticx/config.yaml cc_bridge.token (auto-generated on first use). Then cc_bridge_send "
+                "with the returned session_id; verify output files on disk afterward."
             ),
             "parameters": {
                 "type": "object",
@@ -378,7 +390,8 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "name": "cc_bridge_send",
             "description": (
                 "Send a user turn to an existing CC bridge session and wait for a result/success NDJSON line "
-                "or timeout. Bridge must be running (127.0.0.1 by default)."
+                "or timeout. Requires bridge at cc_bridge.url (default 127.0.0.1:9742) and matching bearer token. "
+                "Afterward confirm any expected files with file_read or bash_exec test -f."
             ),
             "parameters": {
                 "type": "object",
@@ -1205,6 +1218,32 @@ def _bash_exec_default_timeout_sec() -> int:
     return max(30, min(3600, v))
 
 
+def _try_peel_cd_prefix_parts(
+    parts: List[str],
+    session: Optional[StudioSession],
+) -> Optional[Tuple[Path, List[str]]]:
+    """If argv is ``cd <path> && ...`` or ``cd <path>; ...``, return cwd + remaining argv."""
+    if len(parts) < 4:
+        return None
+    if parts[0].lower() != "cd":
+        return None
+    if parts[2] not in ("&&", ";"):
+        return None
+    rest = parts[3:]
+    if not rest:
+        return None
+    try:
+        resolved = _resolve_workspace_path(parts[1], session)
+    except ValueError:
+        return None
+    try:
+        if not resolved.is_dir():
+            return None
+    except OSError:
+        return None
+    return (resolved, rest)
+
+
 async def _tool_bash_exec(
     arguments: Dict[str, Any],
     session: Optional[StudioSession] = None,
@@ -1244,6 +1283,12 @@ async def _tool_bash_exec(
         return f"ERROR: command parse failed: {exc}"
     if not parts:
         return "ERROR: empty command"
+
+    if cwd is None:
+        peeled = _try_peel_cd_prefix_parts(parts, session)
+        if peeled:
+            cwd, parts = peeled
+            command = shlex.join(parts)
 
     command_name = Path(parts[0]).name
     if command_name.startswith("firecrawl_"):
@@ -1644,6 +1689,190 @@ def _session_default_cwd_for_cc_bridge(session: StudioSession) -> str:
     return str(Path.cwd().resolve(strict=False))
 
 
+def _cc_bridge_is_loopback_base(base_url: str) -> tuple[bool, str, int]:
+    """Parse bridge URL and return (is_loopback, host, port)."""
+    try:
+        parsed = urlparse(base_url)
+    except ValueError:
+        return (False, "127.0.0.1", 9742)
+    host = (parsed.hostname or "").strip().lower()
+    port = int(parsed.port or 9742)
+    is_loopback = host in {"127.0.0.1", "localhost", "::1", "[::1]"}
+    return (is_loopback, host or "127.0.0.1", port)
+
+
+def _cc_bridge_http_client_kwargs(base_url: str, timeout_sec: float) -> Dict[str, Any]:
+    """Build httpx client kwargs; bypass env proxies for localhost bridge calls."""
+    kwargs: Dict[str, Any] = {"timeout": timeout_sec}
+    is_loopback, _host, _port = _cc_bridge_is_loopback_base(base_url)
+    if is_loopback:
+        # Avoid SOCKS/HTTP proxy hijacking localhost requests (common source of bridge 502).
+        kwargs["transport"] = __import__("httpx").AsyncHTTPTransport()
+        kwargs["trust_env"] = False
+    return kwargs
+
+
+def _cc_bridge_proc_running() -> bool:
+    global _CC_BRIDGE_AUTO_PROC
+    return _CC_BRIDGE_AUTO_PROC is not None and _CC_BRIDGE_AUTO_PROC.poll() is None
+
+
+def _cc_bridge_idle_stop_seconds() -> int:
+    """Idle timeout for auto-started local bridge (0 disables auto-stop)."""
+    raw = os.getenv("AGX_CC_BRIDGE_IDLE_STOP_SECONDS", "").strip()
+    if not raw:
+        try:
+            cfg = ConfigManager.get_value("cc_bridge.idle_stop_seconds")
+        except Exception:
+            cfg = None
+        if cfg is not None:
+            raw = str(cfg).strip()
+    if not raw:
+        return 600
+    try:
+        v = int(raw)
+    except ValueError:
+        return 600
+    return max(0, min(86400, v))
+
+
+async def _cc_bridge_has_active_sessions(base_url: str, token: str) -> bool:
+    try:
+        import httpx
+    except ImportError:
+        return True
+    try:
+        async with httpx.AsyncClient(**_cc_bridge_http_client_kwargs(base_url, 5.0)) as client:
+            r = await client.get(
+                f"{base_url}/v1/sessions",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+    except Exception:
+        return True
+    if r.status_code != 200:
+        return True
+    try:
+        body = r.json()
+    except Exception:
+        return True
+    sessions = body.get("sessions")
+    return isinstance(sessions, list) and len(sessions) > 0
+
+
+async def _cc_bridge_idle_reaper(base_url: str, token: str, idle_sec: int) -> None:
+    global _CC_BRIDGE_AUTO_PROC
+    global _CC_BRIDGE_LAST_ACTIVE_MONO
+    if idle_sec <= 0:
+        return
+    await asyncio.sleep(float(idle_sec))
+    if not _cc_bridge_proc_running():
+        return
+    if (time.monotonic() - _CC_BRIDGE_LAST_ACTIVE_MONO) < float(idle_sec):
+        return
+    if await _cc_bridge_has_active_sessions(base_url, token):
+        return
+    proc = _CC_BRIDGE_AUTO_PROC
+    if proc is None:
+        return
+    try:
+        proc.terminate()
+        try:
+            await asyncio.to_thread(proc.wait, 3)
+        except Exception:
+            proc.kill()
+    except Exception:
+        pass
+    _CC_BRIDGE_AUTO_PROC = None
+
+
+def _touch_cc_bridge_activity(base_url: str, token: str) -> None:
+    global _CC_BRIDGE_IDLE_TASK
+    global _CC_BRIDGE_LAST_ACTIVE_MONO
+    if not _cc_bridge_proc_running():
+        return
+    idle_sec = _cc_bridge_idle_stop_seconds()
+    if idle_sec <= 0:
+        return
+    _CC_BRIDGE_LAST_ACTIVE_MONO = time.monotonic()
+    if _CC_BRIDGE_IDLE_TASK is not None and not _CC_BRIDGE_IDLE_TASK.done():
+        _CC_BRIDGE_IDLE_TASK.cancel()
+    _CC_BRIDGE_IDLE_TASK = asyncio.create_task(
+        _cc_bridge_idle_reaper(base_url, token, idle_sec)
+    )
+
+
+def _ensure_cc_bridge_local_process(base_url: str, token: str) -> tuple[bool, str]:
+    """Best-effort lazy autostart for local cc-bridge process."""
+    global _CC_BRIDGE_AUTO_PROC
+    if _cc_bridge_proc_running():
+        return (True, "already running")
+    is_loopback, host, port = _cc_bridge_is_loopback_base(base_url)
+    if not is_loopback:
+        return (False, "non-loopback URL; skip autostart")
+
+    visible = os.getenv("AGX_CC_BRIDGE_AUTOSTART_VISIBLE_TERMINAL", "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    if visible and sys.platform == "darwin":
+        try:
+            agx_path = shutil.which("agx") or "agx"
+            cmd = (
+                f"export CC_BRIDGE_TOKEN={shlex.quote(token)} AGX_CC_BRIDGE_TOKEN={shlex.quote(token)}; "
+                f"if command -v {shlex.quote(agx_path)} >/dev/null 2>&1; then "
+                f"{shlex.quote(agx_path)} cc-bridge serve --host {shlex.quote(host)} --port {port}; "
+                f"else {shlex.quote(sys.executable)} -m agenticx.cli.main cc-bridge serve "
+                f"--host {shlex.quote(host)} --port {port}; fi"
+            )
+            cmd_escaped = cmd.replace("\\", "\\\\").replace('"', '\\"')
+            script = (
+                'tell application "Terminal"\n'
+                "activate\n"
+                f'do script "{cmd_escaped}"\n'
+                "end tell\n"
+            )
+            subprocess.Popen(
+                ["osascript", "-e", script],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+                text=True,
+            )
+            return (True, "started in visible Terminal.app")
+        except Exception as exc:
+            _log.warning("visible cc-bridge terminal launch failed: %s", exc)
+
+    env = os.environ.copy()
+    if token:
+        env.setdefault("CC_BRIDGE_TOKEN", token)
+        env.setdefault("AGX_CC_BRIDGE_TOKEN", token)
+
+    candidates: list[list[str]] = []
+    agx_bin = shutil.which("agx")
+    if agx_bin:
+        candidates.append([agx_bin, "cc-bridge", "serve", "--host", host, "--port", str(port)])
+    candidates.append([sys.executable, "-m", "agenticx.cli.main", "cc-bridge", "serve", "--host", host, "--port", str(port)])
+
+    last_err = "unknown"
+    for cmd in candidates:
+        try:
+            _CC_BRIDGE_AUTO_PROC = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                env=env,
+                start_new_session=True,
+                text=True,
+            )
+            return (True, f"started pid={_CC_BRIDGE_AUTO_PROC.pid}")
+        except Exception as exc:  # pragma: no cover - platform/env specific
+            last_err = str(exc)
+            continue
+    _CC_BRIDGE_AUTO_PROC = None
+    return (False, f"failed to spawn bridge process: {last_err}")
+
+
 async def _tool_cc_bridge_http(
     session: StudioSession,
     method: str,
@@ -1669,33 +1898,104 @@ async def _tool_cc_bridge_http(
     if err:
         return f"ERROR: {err}"
     token = cc_bridge_token()
-    if not token:
-        return (
-            "ERROR: CC bridge token missing. Set AGX_CC_BRIDGE_TOKEN or config cc_bridge.token "
-            "(must match CC_BRIDGE_TOKEN on the bridge process)."
-        )
     headers = {"Authorization": f"Bearer {token}"}
     url = f"{base}{path}"
-    try:
-        async with httpx.AsyncClient(timeout=timeout_sec) as client:
+    client_kwargs = _cc_bridge_http_client_kwargs(base, timeout_sec)
+
+    async def _do_request() -> Any:
+        async with httpx.AsyncClient(**client_kwargs) as client:
             m = method.upper()
             if m == "GET":
-                r = await client.get(url, headers=headers)
+                return await client.get(url, headers=headers)
             elif m == "POST":
-                r = await client.post(url, headers=headers, json=json_body)
+                return await client.post(url, headers=headers, json=json_body)
             elif m == "DELETE":
-                r = await client.delete(url, headers=headers)
+                return await client.delete(url, headers=headers)
             else:
                 return f"ERROR: unsupported HTTP method {method}"
+    tried_autostart = False
+    try:
+        r = await _do_request()
+        if isinstance(r, str):
+            return r
+    except httpx.ConnectError as exc:
+        started, detail = _ensure_cc_bridge_local_process(base, token)
+        if started:
+            tried_autostart = True
+            await asyncio.sleep(0.9)
+            try:
+                r = await _do_request()
+                if isinstance(r, str):
+                    return r
+            except httpx.ConnectError as exc2:
+                return (
+                    "ERROR: CC bridge not reachable and autostart did not become healthy. "
+                    f"Autostart: {detail}. URL: {base}. Details: {exc2}"
+                )
+            except httpx.TimeoutException as exc2:
+                return f"ERROR: CC bridge autostart succeeded but HTTP timed out: {exc2}"
+            except httpx.HTTPError as exc2:
+                return f"ERROR: bridge HTTP failed after autostart: {exc2}"
+        else:
+            return (
+                "ERROR: CC bridge not reachable (connection refused). "
+                f"Autostart skipped/failed: {detail}. "
+                "You can still start manually: agx cc-bridge serve "
+                f"(expects {base}). Details: {exc}"
+            )
+    except httpx.TimeoutException as exc:
+        return f"ERROR: CC bridge HTTP timed out: {exc}"
     except httpx.HTTPError as exc:
         return f"ERROR: bridge HTTP failed: {exc}"
+    # Bridge may be reachable but unhealthy (e.g., stale process / boot race / reverse proxy 5xx).
+    if r.status_code >= 500:
+        started, detail = _ensure_cc_bridge_local_process(base, token)
+        if started:
+            tried_autostart = True
+            await asyncio.sleep(0.9)
+            try:
+                r2 = await _do_request()
+                if isinstance(r2, str):
+                    return r2
+                r = r2
+            except httpx.HTTPError as exc:
+                return f"ERROR: bridge HTTP failed after 5xx recovery: {exc}"
+            except Exception as exc:
+                return f"ERROR: bridge 5xx recovery failed: {exc}"
+        if r.status_code >= 500:
+            # one-shot lightweight diagnostics for clearer operator message
+            health_hint = ""
+            try:
+                async with httpx.AsyncClient(**_cc_bridge_http_client_kwargs(base, 5.0)) as client:
+                    hr = await client.get(f"{base}/health")
+                    health_hint = f"health={hr.status_code}"
+            except Exception:
+                health_hint = "health=unreachable"
+            body = (r.text or "").strip()
+            if not body:
+                body = "<empty>"
+            return (
+                f"ERROR: bridge {r.status_code}: {body[:400]} "
+                f"(diag: {health_hint}, autostart={detail})"
+            )
     text = r.text
+    if r.status_code in (401, 403):
+        return (
+            f"ERROR: CC bridge auth rejected (HTTP {r.status_code}). "
+            "Use the same token on the bridge as in ~/.agenticx/config.yaml (cc_bridge.token) "
+            f"or set matching CC_BRIDGE_TOKEN / AGX_CC_BRIDGE_TOKEN. Body: {text[:800]}"
+        )
     if r.status_code >= 400:
         return f"ERROR: bridge {r.status_code}: {text[:2000]}"
+    _touch_cc_bridge_activity(base, token)
+    if tried_autostart:
+        return f"{text}\n\n[cc-bridge] autostarted in background."
     return text
 
 
 async def _tool_cc_bridge_start(arguments: Dict[str, Any], session: StudioSession) -> str:
+    from agenticx.cc_bridge.settings import cc_bridge_mode
+
     cwd = str(arguments.get("cwd", "") or "").strip()
     if not cwd:
         cwd = _session_default_cwd_for_cc_bridge(session)
@@ -1704,7 +2004,7 @@ async def _tool_cc_bridge_start(arguments: Dict[str, Any], session: StudioSessio
         session,
         "POST",
         "/v1/sessions",
-        {"cwd": cwd, "auto_allow_permissions": auto},
+        {"cwd": cwd, "auto_allow_permissions": auto, "mode": cc_bridge_mode()},
         timeout_sec=60.0,
     )
 

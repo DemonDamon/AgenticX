@@ -1249,6 +1249,282 @@ const ADVANCED_TOOL_POLICY_NAMES = new Set<string>(["bash_exec"]);
 const BASH_DEFAULT_TIMEOUT_MIN = 30;
 const BASH_DEFAULT_TIMEOUT_MAX = 3600;
 
+function CcBridgeSettingsPanel() {
+  const apiToken = useAppStore((s) => s.apiToken);
+  const backendUrl = useAppStore((s) => s.backendUrl);
+  const [url, setUrl] = useState("");
+  const [token, setToken] = useState("");
+  const [mode, setMode] = useState<"headless" | "visible_tui">("headless");
+  const [showToken, setShowToken] = useState(false);
+  const [idleStopSeconds, setIdleStopSeconds] = useState("600");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const authHeaders = useCallback((): Record<string, string> => {
+    const h: Record<string, string> = {};
+    if (apiToken) h["x-agx-desktop-token"] = apiToken;
+    return h;
+  }, [apiToken]);
+
+  const parseJsonOrError = useCallback(async (res: Response): Promise<any> => {
+    const text = await res.text();
+    try {
+      return text ? JSON.parse(text) : {};
+    } catch {
+      const short = text.slice(0, 120).replace(/\s+/g, " ");
+      throw new Error(
+        `后端返回非 JSON（可能是 API 地址不正确或未连到 agx serve）：HTTP ${res.status}，响应片段：${short}`,
+      );
+    }
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setMsg("");
+    try {
+      const token = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
+      const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
+      const headers: Record<string, string> = {};
+      if (token) headers["x-agx-desktop-token"] = token;
+      const res = await fetch(`${effectiveBase}/api/cc-bridge/config`, { headers });
+      const data = (await parseJsonOrError(res)) as {
+        ok?: boolean;
+        url?: string;
+        token?: string;
+        idle_stop_seconds?: number;
+        mode?: string;
+        error?: string;
+      };
+      if (data.ok) {
+        setUrl((data.url || "http://127.0.0.1:9742").trim());
+        setToken(data.token || "");
+        const m = (data.mode || "headless").toLowerCase();
+        setMode(m === "visible_tui" ? "visible_tui" : "headless");
+        const idle = Number.isFinite(data.idle_stop_seconds as number)
+          ? Math.max(0, Math.min(86400, Math.round(Number(data.idle_stop_seconds))))
+          : 600;
+        setIdleStopSeconds(String(idle));
+      } else {
+        setMsg(data.error || "加载失败");
+      }
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [apiToken, backendUrl, parseJsonOrError]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async () => {
+    setBusy(true);
+    setMsg("");
+    try {
+      const tokenHeader = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
+      const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (tokenHeader) headers["x-agx-desktop-token"] = tokenHeader;
+      const res = await fetch(`${effectiveBase}/api/cc-bridge/config`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({
+          url: url.trim(),
+          token,
+          mode,
+          idle_stop_seconds: Math.max(0, Math.min(86400, parseInt(idleStopSeconds || "600", 10) || 600)),
+        }),
+      });
+      const data = (await parseJsonOrError(res)) as {
+        ok?: boolean;
+        url?: string;
+        token?: string;
+        idle_stop_seconds?: number;
+        mode?: string;
+        detail?: unknown;
+      };
+      if (data.ok) {
+        setUrl((data.url || url).trim());
+        setToken(data.token || token);
+        const m = (data.mode || mode).toLowerCase();
+        setMode(m === "visible_tui" ? "visible_tui" : "headless");
+        const idle = Number.isFinite(data.idle_stop_seconds as number)
+          ? Math.max(0, Math.min(86400, Math.round(Number(data.idle_stop_seconds))))
+          : 600;
+        setIdleStopSeconds(String(idle));
+        setMsg("已保存");
+      } else {
+        const d = data.detail;
+        setMsg(typeof d === "string" ? d : d != null ? JSON.stringify(d) : "保存失败");
+      }
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const regen = async () => {
+    setBusy(true);
+    setMsg("");
+    try {
+      const tokenHeader = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
+      const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
+      const headers: Record<string, string> = {};
+      if (tokenHeader) headers["x-agx-desktop-token"] = tokenHeader;
+      const res = await fetch(`${effectiveBase}/api/cc-bridge/token/regenerate`, {
+        method: "POST",
+        headers,
+      });
+      const data = (await parseJsonOrError(res)) as { ok?: boolean; token?: string; detail?: unknown };
+      if (data.ok && data.token) {
+        setToken(data.token);
+        setMsg("已重新生成 token。请重启本机 `agx cc-bridge serve`（或下次启动 bridge）以使用相同 token。");
+      } else {
+        const d = data.detail;
+        setMsg(typeof d === "string" ? d : d != null ? JSON.stringify(d) : "重新生成失败");
+      }
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Panel title="Claude Code 本机 Bridge">
+        <div className="py-4 text-center text-xs text-text-faint">加载中…</div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="Claude Code 本机 Bridge">
+      <div className="mb-2 space-y-1 text-xs text-text-subtle">
+        <p>
+          与终端中运行的 <code className="rounded bg-surface-panel px-0.5">agx cc-bridge serve</code>{" "}
+          通信。首次使用会在本机配置中自动生成 token（与 Machi 工具 <code className="rounded bg-surface-panel px-0.5">cc_bridge_*</code>{" "}
+          一致）。
+        </p>
+        <p className="text-text-faint">
+          方式 B：先 <code className="rounded bg-surface-panel px-0.5">cc_bridge_start</code>，再{" "}
+          <code className="rounded bg-surface-panel px-0.5">cc_bridge_send</code>；完成后用{" "}
+          <code className="rounded bg-surface-panel px-0.5">test -f</code> / file_read 验收落盘。
+        </p>
+      </div>
+      <div className="space-y-2">
+        <div>
+          <span className="mb-0.5 block text-[11px] font-medium text-text-muted">运行模式</span>
+          <div className="flex flex-wrap gap-3 text-xs text-text-subtle">
+            <label className="inline-flex cursor-pointer items-center gap-1.5">
+              <input
+                type="radio"
+                name="cc-bridge-mode"
+                checked={mode === "headless"}
+                disabled={busy}
+                onChange={() => setMode("headless")}
+              />
+              Headless（stream-json，稳定）
+            </label>
+            <label className="inline-flex cursor-pointer items-center gap-1.5">
+              <input
+                type="radio"
+                name="cc-bridge-mode"
+                checked={mode === "visible_tui"}
+                disabled={busy}
+                onChange={() => setMode("visible_tui")}
+              />
+              Visible TUI（交互界面，日志解析回填）
+            </label>
+          </div>
+        </div>
+        <div>
+          <label className="mb-0.5 block text-[11px] font-medium text-text-muted" htmlFor="cc-bridge-url">
+            Bridge URL
+          </label>
+          <input
+            id="cc-bridge-url"
+            type="text"
+            className="w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-xs text-text-primary"
+            value={url}
+            disabled={busy}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="http://127.0.0.1:9742"
+          />
+        </div>
+        <div>
+          <div className="mb-0.5 flex items-center justify-between gap-2">
+            <label className="text-[11px] font-medium text-text-muted" htmlFor="cc-bridge-token">
+              Bearer token
+            </label>
+            <button
+              type="button"
+              className="text-[10px] text-text-subtle underline hover:text-text-primary"
+              onClick={() => setShowToken((v) => !v)}
+            >
+              {showToken ? "隐藏" : "显示"}
+            </button>
+          </div>
+          <input
+            id="cc-bridge-token"
+            type={showToken ? "text" : "password"}
+            autoComplete="off"
+            className="w-full rounded-md border border-border bg-surface-panel px-2 py-1 font-mono text-xs text-text-primary"
+            value={token}
+            disabled={busy}
+            onChange={(e) => setToken(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="mb-0.5 block text-[11px] font-medium text-text-muted" htmlFor="cc-bridge-idle-seconds">
+            空闲自动停止（秒，0=关闭）
+          </label>
+          <input
+            id="cc-bridge-idle-seconds"
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            className="w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-xs text-text-primary"
+            value={idleStopSeconds}
+            disabled={busy}
+            onChange={(e) => setIdleStopSeconds(e.target.value.replace(/\D/g, "").slice(0, 5))}
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+            disabled={busy}
+            onClick={() => void save()}
+          >
+            保存
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-amber-200 disabled:opacity-40"
+            disabled={busy}
+            onClick={() => void regen()}
+          >
+            重新生成 token
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+            disabled={busy}
+            onClick={() => void load()}
+          >
+            重新加载
+          </button>
+        </div>
+        {msg ? <div className="text-xs text-text-subtle">{msg}</div> : null}
+      </div>
+    </Panel>
+  );
+}
+
 function ToolsTab() {
   const [registry, setRegistry] = useState<RegistryTool[]>([]);
   const [policy, setPolicy] = useState<Record<string, boolean>>({});
@@ -1579,6 +1855,8 @@ function ToolsTab() {
           })}
         </div>
       </Panel>
+
+      <CcBridgeSettingsPanel />
     </div>
   );
 }

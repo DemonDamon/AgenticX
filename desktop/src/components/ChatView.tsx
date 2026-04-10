@@ -88,6 +88,30 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
       return { content: `🗂 任务清单更新\n${cleaned}`, silent: false };
     }
   }
+  if (toolName === "cc_bridge_send") {
+    try {
+      const parsed = JSON.parse(resultText) as Record<string, unknown>;
+      const mode = String(parsed.mode ?? "headless");
+      const ok = Boolean(parsed.ok);
+      const pr = String(parsed.parsed_response ?? "").trim();
+      const conf = Number(parsed.parse_confidence ?? 0);
+      if (mode === "visible_tui") {
+        if (pr && ok) {
+          return {
+            content: `✅ Claude Code（Visible TUI，解析置信度 ${Math.round(Math.min(1, conf) * 100)}%）\n\n${pr}`,
+            silent: false,
+          };
+        }
+        const tail = String(parsed.tail ?? "").slice(0, 900);
+        return {
+          content: `⏳ Visible TUI：${ok ? "本轮已结束" : "未完成或解析置信度较低"}。请在右侧「claude-code」内嵌交互终端查看；若未自动连接，请确认 cc-bridge 已启动且配置 token 有效。\n${tail ? `\n---\n${tail}` : ""}`,
+          silent: false,
+        };
+      }
+    } catch {
+      // fall through
+    }
+  }
   if (toolName === "query_subagent_status") {
     try {
       const parsed = JSON.parse(resultText) as Record<string, unknown>;
@@ -795,8 +819,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             if (payload.type === "tool_result") {
               const toolName = payload.data?.name ?? "tool";
               let resultText = String(payload.data?.result ?? "");
+              let resultObjForCc: Record<string, unknown> | null = null;
               try {
                 const parsed = JSON.parse(resultText);
+                resultObjForCc = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
                 resultText = JSON.stringify(parsed, null, 2);
               } catch {
                 // Keep original plain text if not JSON.
@@ -811,6 +837,16 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                   const prev = sub?.liveOutput ?? "";
                   updateSubAgent(eventAgentId, { liveOutput: `${prev}\n\n# ${toolName} applied`.slice(-12000) });
                 }
+              }
+              if (
+                eventAgentId === "meta" &&
+                toolName === "cc_bridge_send" &&
+                resultObjForCc &&
+                resultObjForCc.mode === "visible_tui" &&
+                resultObjForCc.ok === true &&
+                String(resultObjForCc.parsed_response ?? "").trim().length > 0
+              ) {
+                addMessage("assistant", String(resultObjForCc.parsed_response), "meta", activeProvider, activeModel);
               }
             }
             if (payload.type === "confirm_required") {

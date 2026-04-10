@@ -7,12 +7,29 @@ Author: Damon Li
 from __future__ import annotations
 
 import os
+import secrets
 from typing import Optional
 from urllib.parse import urlparse
 
 from agenticx.cli.config_manager import ConfigManager
 
 _DEFAULT_URL = "http://127.0.0.1:9742"
+
+_CC_BRIDGE_MODES = frozenset({"headless", "visible_tui"})
+
+
+def cc_bridge_mode() -> str:
+    """Global CC bridge session mode: headless (stream-json) or visible_tui (interactive PTY)."""
+    raw = os.environ.get("AGX_CC_BRIDGE_MODE", "").strip().lower()
+    if raw in _CC_BRIDGE_MODES:
+        return raw
+    try:
+        from_yaml = ConfigManager.get_value("cc_bridge.mode")
+    except Exception:
+        from_yaml = None
+    if isinstance(from_yaml, str) and from_yaml.strip().lower() in _CC_BRIDGE_MODES:
+        return from_yaml.strip().lower()
+    return "headless"
 
 
 def cc_bridge_base_url() -> str:
@@ -25,14 +42,29 @@ def cc_bridge_base_url() -> str:
     return _DEFAULT_URL
 
 
-def cc_bridge_token() -> str:
-    raw = os.environ.get("AGX_CC_BRIDGE_TOKEN", "").strip()
-    if raw:
-        return raw
-    from_yaml = ConfigManager.get_value("cc_bridge.token")
+def ensure_cc_bridge_token_persisted() -> str:
+    """Return bearer token for Studio CC bridge HTTP client.
+
+    Priority: ``AGX_CC_BRIDGE_TOKEN`` env (never written to disk) >
+    ``cc_bridge.token`` in ~/.agenticx/config.yaml > generate, persist, return.
+    """
+    env_tok = os.environ.get("AGX_CC_BRIDGE_TOKEN", "").strip()
+    if env_tok:
+        return env_tok
+    try:
+        from_yaml = ConfigManager.get_value("cc_bridge.token")
+    except Exception:
+        from_yaml = None
     if isinstance(from_yaml, str) and from_yaml.strip():
         return from_yaml.strip()
-    return ""
+    generated = secrets.token_urlsafe(32)
+    ConfigManager.set_value("cc_bridge.token", generated, scope="global")
+    return generated
+
+
+def cc_bridge_token() -> str:
+    """Resolved token for bridge HTTP calls (may persist a new token on first use)."""
+    return ensure_cc_bridge_token_persisted()
 
 
 def cc_bridge_nonlocal_allowed() -> bool:
