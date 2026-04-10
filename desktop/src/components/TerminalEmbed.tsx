@@ -270,9 +270,25 @@ export function TerminalEmbed({ tabId, cwd, ccBridgePty }: Props) {
     termRef.current.options.theme = { background: panelBg, ...getTerminalAnsi(themeMode) };
   }, [themeMode]);
 
+  const focusTerminal = useCallback(() => {
+    try {
+      termRef.current?.focus();
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   return (
-    <div className="relative h-full min-h-0 w-full overflow-hidden">
-      <div ref={containerRef} className="h-full min-h-0 w-full overflow-hidden px-1 py-1" />
+    <div
+      className="relative h-full min-h-0 w-full overflow-hidden outline-none"
+      tabIndex={-1}
+      onPointerDownCapture={(e) => {
+        if (exited || spawnError) return;
+        if (e.button !== 0) return;
+        focusTerminal();
+      }}
+    >
+      <div ref={containerRef} className="h-full min-h-0 w-full cursor-text overflow-hidden px-1 py-1" />
       {(exited || spawnError) && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-card backdrop-blur-sm">
           <span className="text-xs text-status-warning">

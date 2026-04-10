@@ -368,7 +368,6 @@ class BridgeSessionManager:
             stdout=slave_fd,
             stderr=slave_fd,
             env=env,
-            start_new_session=True,
             close_fds=False,
         )
         os.close(slave_fd)
