@@ -592,13 +592,26 @@ export function WorkspacePanel({
             +
           </button>
         </div>
-        <div className="min-h-0 flex-1 bg-surface-card">
-          {activeTab ? (
-            <TerminalEmbed key={activeTab.id} tabId={activeTab.id} cwd={activeTab.cwd} />
-          ) : (
+        <div className="relative min-h-0 flex-1 bg-surface-card">
+          {terminalTabs.length === 0 ? (
             <div className="flex h-full items-center justify-center overflow-hidden px-3 text-center text-[11px] leading-relaxed text-text-faint">
               <span className="break-words">右键工作区标签选择「在此目录下打开终端」，或点击 + 使用当前工作区目录</span>
             </div>
+          ) : (
+            terminalTabs.map((tab) => {
+              const isVisible = activeTab && tab.id === activeTab.id;
+              return (
+                <div
+                  key={tab.id}
+                  className={`absolute inset-0 flex min-h-0 flex-col ${
+                    isVisible ? "z-10" : "invisible pointer-events-none z-0"
+                  }`}
+                  aria-hidden={!isVisible}
+                >
+                  <TerminalEmbed tabId={tab.id} cwd={tab.cwd} />
+                </div>
+              );
+            })
           )}
         </div>
       </div>
