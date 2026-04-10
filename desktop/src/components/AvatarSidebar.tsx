@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ban, ChevronDown, ChevronRight, Clock3, Loader2, Settings } from "lucide-react";
 import { useAppStore, type Avatar, type GroupChat } from "../store";
+import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { avatarBgClass, avatarDotColor, groupColorByIndex } from "../utils/avatar-color";
 import { AvatarCreateDialog } from "./AvatarCreateDialog";
@@ -557,17 +558,11 @@ export function AvatarSidebar() {
             setContextMenu({ x: e.clientX, y: e.clientY, target: "machi" });
           }}
         >
-          {metaAvatarUrl ? (
-            <img
-              src={metaAvatarUrl}
-              alt="Machi"
-              className="h-8 w-8 shrink-0 rounded-full object-cover"
-            />
-          ) : (
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 text-xs font-bold text-white">
-              M
-            </div>
-          )}
+          <img
+            src={metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL}
+            alt="Machi"
+            className="h-8 w-8 shrink-0 rounded-full object-cover"
+          />
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium">Machi</div>
             <div className="truncate text-[10px] text-text-faint">全局调度</div>
