@@ -189,21 +189,30 @@ class BridgeSessionManager:
         with self._global_lock:
             out = []
             for sid, s in self._sessions.items():
-                poll = s.proc.poll()
-                running = poll is None
-                out.append(
-                    {
-                        "session_id": sid,
-                        "cwd": s.cwd,
-                        "pid": s.proc.pid,
-                        "poll": poll,
-                        "log_path": s.log_path,
-                        "mode": s.session_kind,
-                        "state": "running" if running else "stopped",
-                        "interactive_waiting": bool(s.session_kind == "visible_tui" and running),
-                    }
-                )
+                out.append(self._session_to_dict(sid, s))
             return out
+
+    def describe_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Return authoritative mode/cwd/state for a single session (or None if unknown)."""
+        with self._global_lock:
+            s = self._sessions.get(session_id)
+            if s is None:
+                return None
+            return self._session_to_dict(session_id, s)
+
+    def _session_to_dict(self, sid: str, s: BridgeSession) -> Dict[str, Any]:
+        poll = s.proc.poll()
+        running = poll is None
+        return {
+            "session_id": sid,
+            "cwd": s.cwd,
+            "pid": s.proc.pid,
+            "poll": poll,
+            "log_path": s.log_path,
+            "mode": s.session_kind,
+            "state": "running" if running else "stopped",
+            "interactive_waiting": bool(s.session_kind == "visible_tui" and running),
+        }
 
     def get(self, session_id: str) -> Optional[BridgeSession]:
         with self._global_lock:

@@ -238,6 +238,9 @@ type AppState = {
   groups: GroupChat[];
   panes: ChatPane[];
   activePaneId: string;
+  /** Incremented when local session list should refresh (e.g. new session created). SessionHistoryPanel subscribes. */
+  sessionCatalogRevision: number;
+  bumpSessionCatalogRevision: () => void;
   /** After merge-forward, target pane runs one normal /api/chat with this text (cleared when consumed). */
   forwardAutoReply: { paneId: string; sessionId: string; text: string } | null;
   setForwardAutoReply: (job: { paneId: string; sessionId: string; text: string } | null) => void;
@@ -531,6 +534,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   groups: [],
   panes: [makeDefaultPane()],
   activePaneId: "pane-meta",
+  sessionCatalogRevision: 0,
+  bumpSessionCatalogRevision: () =>
+    set((state) => ({ sessionCatalogRevision: state.sessionCatalogRevision + 1 })),
   forwardAutoReply: null,
   subAgents: [],
   selectedSubAgent: null,

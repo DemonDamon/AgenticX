@@ -440,13 +440,20 @@ export function App() {
           const claimedSessionIds = new Set<string>();
           for (const pane of saved.panes) {
             try {
-              let wantedSid = (pane.sessionId || "").trim() || undefined;
+              const isGroupPane = String(pane.avatarId ?? "").startsWith("group:");
+              const isAutomationTaskPane = String(pane.avatarId ?? "").startsWith("automation:");
+              const lazyEligible = !isGroupPane && !isAutomationTaskPane;
+
+              let wantedSid = String(pane.sessionId ?? "").trim();
               if (wantedSid && !(await isSessionCompatible(wantedSid, pane.avatarId))) {
-                wantedSid = undefined;
+                wantedSid = "";
               }
-              if (!wantedSid) {
-                wantedSid = await getRecentSessionId(pane.avatarId ?? undefined);
+
+              if (!wantedSid && !lazyEligible) {
+                const recent = await getRecentSessionId(pane.avatarId ?? undefined);
+                wantedSid = String(recent ?? "").trim();
               }
+
               if (wantedSid && claimedSessionIds.has(wantedSid)) {
                 console.warn(
                   "[App init] duplicate sessionId %s across panes — forcing new session for pane %s (avatar=%s)",
@@ -454,8 +461,27 @@ export function App() {
                   pane.id,
                   pane.avatarId,
                 );
-                wantedSid = undefined;
+                if (lazyEligible) {
+                  wantedSid = "";
+                } else {
+                  const sid = await requestSession(base, token, { avatarId: pane.avatarId });
+                  claimedSessionIds.add(sid);
+                  hydratedPanes.push({ ...pane, sessionId: sid });
+                  continue;
+                }
               }
+
+              if (!wantedSid) {
+                if (lazyEligible) {
+                  hydratedPanes.push({ ...pane, sessionId: "" });
+                  continue;
+                }
+                const sid = await requestSession(base, token, { avatarId: pane.avatarId });
+                claimedSessionIds.add(sid);
+                hydratedPanes.push({ ...pane, sessionId: sid });
+                continue;
+              }
+
               // Pass sessionId and avatarId together so /api/session can validate binding and
               // create a correctly scoped session if the old sid is missing (restart / mismatch).
               const sid = await requestSession(

@@ -518,6 +518,7 @@ def build_meta_agent_system_prompt(
         "- 若当前不需要启动子智能体，就直接给最终答复，不要进入无意义等待。\n"
         "- **cc_bridge 可见模式强约束**：当 `cc_bridge_send` 返回 `mode=visible_tui` 且 `interactive=true` 时，表示任务已投递到交互终端、等待用户在终端继续操作；此时禁止再调用 `bash_exec` 轮询 cc-bridge 日志、禁止重复 `cc_bridge_send` 追问进度、禁止擅自 `cc_bridge_stop` 终止会话。你必须直接向用户报告“已投递并等待终端交互”。\n"
         "- **cc_bridge 证据门禁**：若 `cc_bridge_send` 结果未给出可验证最终文本（如 `parsed_response` 为空、`ok=false`、仅有 tail/log 片段），禁止输出“分析完成”或结构化结论，只能汇报当前状态、阻塞原因与下一步操作。\n"
+        "- **cc_bridge 模式路由**：路由必须以当前 `session_id` 对应会话的真实模式为准（headless 走 `/message`，visible_tui 走 `/write`）。若返回中出现 `write is only for visible_tui` 等模式失配错误，工具层至多纠偏一次（结果中可能出现 `mode_corrected`）；**禁止**在同一失败点上连续多次重试 `cc_bridge_send`，应改报原因并给出下一步（如确认 `cc_bridge_start` 的 `mode=headless`、或检查 bridge 版本）。\n"
         "- **创建定时任务特例**：当用户已给出（或你已确认）任务名称 + 频率/时间/日期 + instruction + workspace 后，必须在同一轮直接调用 `schedule_task`；禁止先输出“我先加载某个 skill/脚本再创建”。\n"
         "- **创建定时任务特例**：除非用户明确要求复用某个 skill 源码，否则不要把 `~/.cursor/skills/*` 下的大文件 `file_read` 当作前置步骤；优先直接构造 `instruction` 并 `schedule_task`。\n"
         "- 当「当前子智能体状态」章节列出了 running/pending 的子智能体时，用户问进度可调用一次 `query_subagent_status`；拿到结果后必须直接回答，不得在同一轮再次调用。\n\n"

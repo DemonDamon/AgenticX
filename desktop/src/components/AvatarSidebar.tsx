@@ -341,10 +341,7 @@ export function AvatarSidebar() {
           setPaneSessionId(paneId, preferredSid);
           return;
         }
-        const created = await window.agenticxDesktop.createSession({ avatar_id: avatarId ?? undefined });
-        if (created.ok && created.session_id) {
-          setPaneSessionId(paneId, created.session_id);
-        }
+        // Lazy session: first real send in ChatPane will createSession (align Machi meta pane).
       } finally {
         openingRef.current = false;
       }

@@ -314,3 +314,24 @@ def test_list_sessions_excludes_empty_persisted_sessions(tmp_path: Path) -> None
     ids = {row["session_id"] for row in listed}
     assert "real-session" in ids
     assert "empty-session" not in ids
+
+
+def test_list_sessions_excludes_in_memory_sessions_with_empty_chat_history(tmp_path: Path) -> None:
+    """Memory-only sessions that never received a message should not appear (lazy-create UX)."""
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    managed = manager.create(session_id="empty-memory-session")
+    assert managed.studio_session.chat_history == [] or len(managed.studio_session.chat_history) == 0
+
+    listed = manager.list_sessions()
+    ids = {row["session_id"] for row in listed}
+    assert "empty-memory-session" not in ids
+
+    managed.studio_session.chat_history = [{"id": "u1", "role": "user", "content": "hi"}]
+    listed2 = manager.list_sessions()
+    ids2 = {row["session_id"] for row in listed2}
+    assert "empty-memory-session" in ids2

@@ -37,6 +37,9 @@ _PLACEHOLDER_SESSION_TITLE_CF: frozenset[str] = frozenset(
     )
 )
 
+# One-shot flag in StudioSession.scratchpad: after first Meta assistant FINAL we may call LLM titling.
+LLM_TITLE_SCRATCH_KEY = "__agx_llm_title_done__"
+
 from agenticx.cli.studio import StudioSession
 from agenticx.memory.session_store import SessionStore, session_fts_enabled
 from agenticx.runtime import AsyncConfirmGate
@@ -441,6 +444,84 @@ class SessionManager:
         managed.updated_at = time.time()
         self._persist_session_state(session_id, managed.studio_session)
         return True
+
+    @staticmethod
+    def _text_from_chat_history_item(item: Any) -> str:
+        if not isinstance(item, dict):
+            return ""
+        raw = item.get("content")
+        if isinstance(raw, str):
+            return raw.strip()
+        if isinstance(raw, list):
+            parts: list[str] = []
+            for block in raw:
+                if isinstance(block, dict) and str(block.get("type") or "") == "text":
+                    parts.append(str(block.get("text") or ""))
+            return "".join(parts).strip()
+        return ""
+
+    def session_has_user_and_assistant_for_llm_title(self, session: StudioSession) -> bool:
+        hist = getattr(session, "chat_history", None) or []
+        has_user = False
+        has_asst = False
+        for item in hist:
+            role = str(item.get("role") or "")
+            text = self._text_from_chat_history_item(item)
+            if not text:
+                continue
+            if role == "user":
+                has_user = True
+            elif role == "assistant":
+                has_asst = True
+        return has_user and has_asst
+
+    def claim_llm_title_slot(self, session_id: str, snapshot_session_name: str) -> bool:
+        """Reserve one-shot LLM title upgrade; returns True if background job should run."""
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False
+        managed = self._sessions.get(sid)
+        if managed is None:
+            return False
+        session = managed.studio_session
+        sp = session.scratchpad
+        if not isinstance(sp, dict):
+            session.scratchpad = {}
+            sp = session.scratchpad
+        if sp.get(LLM_TITLE_SCRATCH_KEY):
+            return False
+        if not self.session_has_user_and_assistant_for_llm_title(session):
+            return False
+        cur = str(managed.session_name or "").strip()
+        snap = str(snapshot_session_name or "").strip()
+        if snap and cur != snap:
+            return False
+        sp[LLM_TITLE_SCRATCH_KEY] = True
+        self._persist_session_state(sid, session)
+        return True
+
+    @staticmethod
+    def _sanitize_llm_session_title(raw: Any) -> str | None:
+        s = str(raw or "").strip()
+        if not s:
+            return None
+        s = s.splitlines()[0].strip()
+        for ch in ('"', "'", "「", "」", "『", "』", "《", "》"):
+            s = s.replace(ch, "")
+        s = s.strip(" \t.:：。；;，,")
+        if len(s) > 40:
+            s = s[:40].rstrip()
+        return s or None
+
+    def apply_llm_suggested_session_title(self, session_id: str, raw_title: str | None) -> None:
+        sid = str(session_id or "").strip()
+        if not sid:
+            return
+        cleaned = self._sanitize_llm_session_title(raw_title)
+        if cleaned:
+            self.rename_session(sid, cleaned)
+        else:
+            self.persist(sid)
 
     def pin_session(self, session_id: str, pinned: bool) -> bool:
         managed = self._sessions.get(session_id)

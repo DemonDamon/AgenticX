@@ -1230,6 +1230,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const ccBridgeTailGuardRef = useRef<Map<string, number>>(new Map());
   const [hasAnyFeishuDesktopBinding, setHasAnyFeishuDesktopBinding] = useState(false);
   const [wechatDesktopBound, setWechatDesktopBound] = useState(false);
+  /** Meta/分身窗格「新对话 · 继承上下文」时，首条发送前再 createSession 并带上此 id。 */
+  const pendingInheritFromSessionIdRef = useRef<string | null>(null);
   const [automationTaskErrorHint, setAutomationTaskErrorHint] = useState<string | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
@@ -2707,17 +2709,53 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       return messageText.includes(`@${name}`);
     });
     const hasReadyAttachments = userAttachments.length > 0;
-    if ((!text && !hasReadyAttachments) || !apiBase || !pane.sessionId) return;
+    if ((!text && !hasReadyAttachments) || !apiBase) return;
     if (streaming) return;
 
+    const useLazySession = !isGroupPane && !isAutomationTaskPane;
+    let requestSessionId = (pane.sessionId || "").trim();
+
+    if (!requestSessionId) {
+      if (!useLazySession) return;
+      try {
+        const avatarId =
+          pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
+        const inheritFrom = pendingInheritFromSessionIdRef.current;
+        pendingInheritFromSessionIdRef.current = null;
+        const created = await window.agenticxDesktop.createSession({
+          avatar_id: avatarId,
+          ...(inheritFrom ? { inherit_from_session_id: inheritFrom } : {}),
+        });
+        if (!created.ok || !created.session_id) {
+          addPaneMessage(
+            pane.id,
+            "tool",
+            `⚠️ 无法创建会话：${created.error || "未知错误"}。请检查后端服务。`,
+            "meta"
+          );
+          return;
+        }
+        requestSessionId = created.session_id;
+        setPaneSessionId(pane.id, requestSessionId);
+        if (created.inherited) {
+          setPaneContextInherited(pane.id, true);
+        }
+        useAppStore.getState().bumpSessionCatalogRevision();
+        window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
+      } catch (err) {
+        addPaneMessage(pane.id, "tool", `⚠️ 创建会话失败：${String(err)}`, "meta");
+        return;
+      }
+    }
+
     const otherPanesWithSameSession = panes.filter(
-      (p) => p.id !== pane.id && p.sessionId === pane.sessionId
+      (p) => p.id !== pane.id && (p.sessionId || "").trim() === requestSessionId && requestSessionId.length > 0
     );
     if (otherPanesWithSameSession.length > 0) {
       console.warn(
         "[ChatPane] session collision detected: pane %s shares session %s with %d other pane(s); creating isolated session",
         pane.id,
-        pane.sessionId,
+        requestSessionId,
         otherPanesWithSameSession.length,
       );
       try {
@@ -2725,7 +2763,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
         const created = await window.agenticxDesktop.createSession({ avatar_id: avatarId });
         if (created.ok && created.session_id) {
-          setPaneSessionId(pane.id, created.session_id);
+          requestSessionId = created.session_id;
+          setPaneSessionId(pane.id, requestSessionId);
           addPaneMessage(pane.id, "tool", "⚠️ 检测到会话冲突，已自动切换到独立会话。", "meta");
         }
       } catch (err) {
@@ -2733,8 +2772,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
       return;
     }
-
-    let requestSessionId = pane.sessionId;
     const selectedIsPaneSubagent =
       !!selectedSubAgent && paneSubAgents.some((item) => item.id === selectedSubAgent);
     const targetAgentId = selectedIsPaneSubagent ? selectedSubAgent : "meta";
@@ -3423,6 +3460,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       setStreamedAssistantText("");
       setStreamingModel(null);
       setContextFiles({});
+      useAppStore.getState().bumpSessionCatalogRevision();
+      window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 500);
     }
   };
 
@@ -3450,6 +3489,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         if (result.inherited) {
           setPaneContextInherited(pane.id, true);
         }
+        useAppStore.getState().bumpSessionCatalogRevision();
+        window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
         return;
       }
       console.error("[ChatPane] createSession returned error:", result.error);
@@ -3464,11 +3505,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   };
 
   const createNewTopic = (inherit = true) => {
-    const prevSessionId = pane.sessionId;
+    const prevSessionId = (pane.sessionId || "").trim();
     clearPaneMessages(pane.id);
-    setPaneSessionId(pane.id, "");
     setPaneContextInherited(pane.id, false);
-    void initSession(inherit, prevSessionId);
+    if (isGroupPane || isAutomationTaskPane) {
+      setPaneSessionId(pane.id, "");
+      void initSession(inherit, prevSessionId || undefined);
+      return;
+    }
+    pendingInheritFromSessionIdRef.current = inherit && prevSessionId ? prevSessionId : null;
+    setPaneSessionId(pane.id, "");
   };
 
   const maxTaskspaceWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.4)) : 480;
@@ -3692,7 +3738,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 )}
               </div>
               <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">
-                <span>session: {pane.sessionId ? pane.sessionId.slice(0, 8) + "…" : "-"}</span>
+                <span>
+                  session:{" "}
+                  {pane.sessionId
+                    ? pane.sessionId.slice(0, 8) + "…"
+                    : !isGroupPane && !isAutomationTaskPane
+                      ? "未创建（发送首条消息后建立）"
+                      : "-"}
+                </span>
                 {visibleMessages.length > 0 && (
                   <span className="rounded bg-surface-card px-1 text-text-subtle">{visibleMessages.length} 条</span>
                 )}
@@ -3832,7 +3885,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           ref={listRef}
           className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-3"
         >
-          {!pane.sessionId ? (
+          {!pane.sessionId && (isGroupPane || isAutomationTaskPane) ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-xs text-text-faint">
               <span className="animate-pulse">正在初始化会话...</span>
               <button
@@ -3842,7 +3895,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 重试
               </button>
             </div>
-          ) : visibleMessages.length === 0 ? (
+          ) : (!pane.sessionId && !isGroupPane && !isAutomationTaskPane) ||
+            (pane.sessionId && visibleMessages.length === 0) ? (
             <div className="flex h-full flex-col items-center justify-center gap-5 px-4 text-center text-xs">
               <img
                 src={machiEmptyState}
@@ -3858,6 +3912,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   Orchestrated by Machi · Executed by AgenticX
                 </div>
               </div>
+              {!pane.sessionId && !isGroupPane && !isAutomationTaskPane ? (
+                <p className="max-w-sm text-[11px] leading-relaxed text-text-subtle">
+                  发送首条消息后将创建会话并出现在历史列表；标题会先使用你的问题，助手回复后会尝试生成更短摘要标题。
+                </p>
+              ) : null}
               {isAutomationTaskPane && automationTaskErrorHint ? (
                 <div className="max-w-md rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-rose-200/95">
                   <div className="mb-1 font-medium text-rose-300">上次定时执行失败</div>
@@ -3907,7 +3966,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               );
             })()}
             <span className="shrink-0 truncate rounded border border-border bg-surface-card px-2 py-0.5" style={{ maxWidth: "45%" }}>
-              {pane.sessionId ? `${pane.sessionId.slice(0, 8)}…` : "-"}
+              {pane.sessionId
+                ? `${pane.sessionId.slice(0, 8)}…`
+                : !isGroupPane && !isAutomationTaskPane
+                  ? "未创建"
+                  : "-"}
             </span>
             {chatProvider && chatModel ? (
               <span className="min-w-0 truncate rounded border border-border bg-surface-card px-2 py-0.5" style={{ maxWidth: "55%" }} title={`${chatProvider}/${chatModel}`}>

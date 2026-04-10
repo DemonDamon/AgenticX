@@ -20,3 +20,21 @@ export function FeishuBadge({ prefix, className = "", variant = "list" }: Props)
     </span>
   );
 }
+
+type WechatProps = {
+  className?: string;
+};
+
+export function WechatBadge({ className = "" }: WechatProps) {
+  const base = "text-[#25D366]";
+  const style = { backgroundColor: "rgba(37,211,102,0.15)" };
+
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center rounded-sm px-1 py-px text-[9px] font-medium leading-tight ${base} ${className}`.trim()}
+      style={style}
+    >
+      微信
+    </span>
+  );
+}
