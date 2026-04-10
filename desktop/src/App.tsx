@@ -65,6 +65,12 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return false;
 }
 
+/** xterm 内部（含隐藏 textarea / canvas）；避免全局快捷键抢走内嵌终端按键。 */
+function isInsideXterm(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest(".xterm"));
+}
+
 function extractOutputFiles(summary?: string): string[] {
   if (!summary) return [];
   const marker = "产出文件:";
@@ -1093,7 +1099,7 @@ export function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      if (isEditableTarget(event.target)) return;
+      if (isEditableTarget(event.target) || isInsideXterm(event.target)) return;
       const action = matchKeybinding(event, userMode);
       if (!action) return;
       event.preventDefault();

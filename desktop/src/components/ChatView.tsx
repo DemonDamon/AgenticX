@@ -774,9 +774,16 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               if (!isCurrentRequest()) continue;
               const name = String(payload.data?.name ?? "tool");
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
-              const waitLabel = Number.isFinite(sec)
-                ? `⏳ ${name} 执行中…（已等待 ${sec}s）`
-                : `⏳ ${name} 执行中…`;
+              const waitLabel = (() => {
+                if (name === "cc_bridge_send") {
+                  return Number.isFinite(sec)
+                    ? `⏳ ${name} 执行中…（已等待 ${sec}s；可见模式：请先单击右侧工作区「claude-code」终端内部，再按键盘操作）`
+                    : `⏳ ${name} 执行中…（可见模式：先单击右侧「claude-code」终端再按键）`;
+                }
+                return Number.isFinite(sec)
+                  ? `⏳ ${name} 执行中…（已等待 ${sec}s）`
+                  : `⏳ ${name} 执行中…`;
+              })();
               if (eventAgentId === "meta") {
                 setStreamedAssistantText(waitLabel);
               } else {

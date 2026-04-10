@@ -24,7 +24,137 @@ import net from "node:net";
 import os from "node:os";
 import fs from "node:fs";
 import crypto from "node:crypto";
+import http from "node:http";
+import https from "node:https";
 import yaml from "js-yaml";
+
+/** Node fetch honors HTTP_PROXY; localhost cc-bridge POSTs then fail (e.g. 502) and PTY input never reaches Claude. */
+function ccBridgeUrlIsLoopback(urlStr: string): boolean {
+  try {
+    const u = new URL(urlStr);
+    const h = (u.hostname || "").toLowerCase();
+    return h === "127.0.0.1" || h === "localhost" || h === "::1";
+  } catch {
+    return false;
+  }
+}
+
+async function ccBridgeHttpPostJson(
+  fullUrl: string,
+  token: string,
+  jsonBody: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<boolean> {
+  const payload = JSON.stringify(jsonBody);
+  if (!ccBridgeUrlIsLoopback(fullUrl)) {
+    try {
+      const resp = await fetch(fullUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: payload,
+        signal,
+      });
+      return resp.ok;
+    } catch {
+      return false;
+    }
+  }
+  const buf = Buffer.from(payload, "utf8");
+  let u: URL;
+  try {
+    u = new URL(fullUrl);
+  } catch {
+    return false;
+  }
+  return await new Promise((resolve) => {
+    const lib = u.protocol === "https:" ? https : http;
+    const req = lib.request(
+      {
+        hostname: u.hostname,
+        port: u.port || (u.protocol === "https:" ? 443 : 80),
+        path: u.pathname + u.search,
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "Content-Length": String(buf.length),
+        },
+      },
+      (res) => {
+        res.resume();
+        const c = res.statusCode || 0;
+        resolve(c >= 200 && c < 300);
+      }
+    );
+    req.on("error", () => resolve(false));
+    if (signal) {
+      const onAbort = () => {
+        req.destroy();
+        resolve(false);
+      };
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    req.write(buf);
+    req.end();
+  });
+}
+
+async function ccBridgeHttpGetStreamLoopback(
+  fullUrl: string,
+  token: string,
+  signal: AbortSignal,
+  onData: (chunk: Buffer) => void
+): Promise<boolean> {
+  let u: URL;
+  try {
+    u = new URL(fullUrl);
+  } catch {
+    return false;
+  }
+  return await new Promise((resolve, reject) => {
+    const lib = u.protocol === "https:" ? https : http;
+    const req = lib.request(
+      {
+        hostname: u.hostname,
+        port: u.port || (u.protocol === "https:" ? 443 : 80),
+        path: u.pathname + u.search,
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      },
+      (res) => {
+        const code = res.statusCode || 0;
+        if (code < 200 || code >= 300) {
+          res.resume();
+          resolve(false);
+          return;
+        }
+        res.on("data", (chunk: Buffer) => {
+          onData(chunk);
+        });
+        res.on("end", () => resolve(true));
+        res.on("error", reject);
+      }
+    );
+    req.on("error", reject);
+    const onAbort = () => {
+      req.destroy();
+      reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+    };
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+    req.end();
+  });
+}
 
 type ProviderConfig = {
   api_key?: string;
@@ -3742,19 +3872,8 @@ function registerIpc(): void {
     if (!sess) return { ok: false };
     if (sess.kind === "bridge") {
       const url = `${sess.baseUrl}/v1/sessions/${encodeURIComponent(sess.sessionId)}/write`;
-      try {
-        const resp = await fetch(url, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${sess.token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ data: payload.data }),
-        });
-        return { ok: resp.ok };
-      } catch {
-        return { ok: false };
-      }
+      const ok = await ccBridgeHttpPostJson(url, sess.token, { data: payload.data });
+      return { ok };
     }
     try {
       sess.pty.write(payload.data);
@@ -3772,19 +3891,8 @@ function registerIpc(): void {
       if (!id.startsWith(prefix)) continue;
       if (sess.kind === "bridge") {
         const url = `${sess.baseUrl}/v1/sessions/${encodeURIComponent(sess.sessionId)}/write`;
-        try {
-          const resp = await fetch(url, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${sess.token}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ data: payload.data }),
-          });
-          return { ok: resp.ok, id };
-        } catch {
-          return { ok: false };
-        }
+        const ok = await ccBridgeHttpPostJson(url, sess.token, { data: payload.data });
+        return { ok, id };
       }
       try {
         sess.pty.write(payload.data);
@@ -3803,19 +3911,8 @@ function registerIpc(): void {
     const rows = Math.max(2, Math.min(200, Math.floor(payload.rows)));
     if (sess.kind === "bridge") {
       const url = `${sess.baseUrl}/v1/sessions/${encodeURIComponent(sess.sessionId)}/resize`;
-      try {
-        const resp = await fetch(url, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${sess.token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ cols, rows }),
-        });
-        return { ok: resp.ok };
-      } catch {
-        return { ok: false };
-      }
+      const ok = await ccBridgeHttpPostJson(url, sess.token, { cols, rows });
+      return { ok };
     }
     try {
       sess.pty.resize(cols, rows);
@@ -3857,34 +3954,49 @@ function registerIpc(): void {
 
       void (async () => {
         try {
-          await fetch(resizeUrl, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ cols, rows }),
-            signal: abort.signal,
-          }).catch(() => {
+          await ccBridgeHttpPostJson(resizeUrl, token, { cols, rows }, abort.signal).catch(() => {
             /* best-effort */
           });
-          const resp = await fetch(streamUrl, {
-            headers: { Authorization: `Bearer ${token}` },
-            signal: abort.signal,
-          });
-          if (!resp.ok || !resp.body) {
-            return;
-          }
-          const reader = resp.body.getReader();
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (value && value.length > 0 && !wc.isDestroyed()) {
-              let s = "";
-              for (let i = 0; i < value.length; i += 1) {
-                s += String.fromCharCode(value[i]);
+          const utf8Decoder = new TextDecoder("utf-8", { fatal: false, ignoreBOM: true });
+          if (ccBridgeUrlIsLoopback(streamUrl)) {
+            const streamOk = await ccBridgeHttpGetStreamLoopback(streamUrl, token, abort.signal, (chunk) => {
+              if (wc.isDestroyed()) return;
+              const s = utf8Decoder.decode(chunk, { stream: true });
+              if (s) {
+                wc.send("terminal-data", { id, data: s });
               }
-              wc.send("terminal-data", { id, data: s });
+            });
+            if (!streamOk) {
+              return;
+            }
+            const tail = utf8Decoder.decode();
+            if (tail && !wc.isDestroyed()) {
+              wc.send("terminal-data", { id, data: tail });
+            }
+          } else {
+            const resp = await fetch(streamUrl, {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: abort.signal,
+            });
+            if (!resp.ok || !resp.body) {
+              return;
+            }
+            const reader = resp.body.getReader();
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) {
+                const tailRemote = utf8Decoder.decode();
+                if (tailRemote && !wc.isDestroyed()) {
+                  wc.send("terminal-data", { id, data: tailRemote });
+                }
+                break;
+              }
+              if (value && value.length > 0 && !wc.isDestroyed()) {
+                const s = utf8Decoder.decode(value, { stream: true });
+                if (s) {
+                  wc.send("terminal-data", { id, data: s });
+                }
+              }
             }
           }
         } catch (err) {

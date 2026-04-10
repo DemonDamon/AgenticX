@@ -3005,8 +3005,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const waitLabel = (() => {
                 if (name === "cc_bridge_send") {
                   return Number.isFinite(sec)
-                    ? `⏳ ${name} 执行中…（已等待 ${sec}s；可见模式下请在右侧「claude-code」交互终端操作或确认权限）`
-                    : `⏳ ${name} 执行中…（可见模式下请查看右侧「claude-code」交互终端）`;
+                    ? `⏳ ${name} 执行中…（已等待 ${sec}s；可见模式：请先单击右侧工作区「claude-code」终端内部，再按键盘选允许/拒绝——焦点若在聊天输入框，按键进不了终端）`
+                    : `⏳ ${name} 执行中…（可见模式：先单击右侧「claude-code」终端再按键操作）`;
                 }
                 return Number.isFinite(sec)
                   ? `⏳ ${name} 执行中…（已等待 ${sec}s）`
