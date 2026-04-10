@@ -130,6 +130,43 @@ def test_api_cc_bridge_config_put_mode(
     assert r2.json().get("mode") == "headless"
 
 
+def test_api_cc_bridge_put_mode_syncs_project_overlay(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Project .agenticx/config.yaml must not win over Studio after a save."""
+    gpath = tmp_path / "global.yaml"
+    ppath = tmp_path / "project.yaml"
+    monkeypatch.setattr(ConfigManager, "GLOBAL_CONFIG_PATH", gpath)
+    monkeypatch.setattr(ConfigManager, "PROJECT_CONFIG_PATH", ppath)
+    monkeypatch.delenv("AGX_DESKTOP_TOKEN", raising=False)
+    monkeypatch.delenv("AGX_CC_BRIDGE_MODE", raising=False)
+
+    gpath.write_text(
+        "cc_bridge:\n"
+        "  url: http://127.0.0.1:9742\n"
+        "  token: testtok123456789012345678901234\n",
+        encoding="utf-8",
+    )
+    ppath.write_text("cc_bridge:\n  mode: visible_tui\n", encoding="utf-8")
+
+    assert ConfigManager.get_value("cc_bridge.mode") == "visible_tui"
+
+    client = TestClient(create_studio_app())
+    g = client.get("/api/cc-bridge/config")
+    assert g.status_code == 200
+    tok = g.json()["token"]
+    r = client.put(
+        "/api/cc-bridge/config",
+        json={"url": "http://127.0.0.1:9742", "token": tok, "mode": "headless"},
+    )
+    assert r.status_code == 200
+    assert r.json().get("mode") == "headless"
+    assert ConfigManager.get_value("cc_bridge.mode") == "headless"
+    proj = ConfigManager._load_yaml(ppath)
+    assert proj.get("cc_bridge", {}).get("mode") == "headless"
+
+
 def test_api_cc_bridge_config_put_invalid_mode(
     studio_client_no_desktop_token: TestClient,
 ) -> None:

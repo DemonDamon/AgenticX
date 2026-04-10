@@ -335,6 +335,26 @@ class ConfigManager:
         return path
 
     @classmethod
+    def set_cc_bridge_field(cls, field: str, value: Any) -> Path:
+        """Write ``cc_bridge.<field>`` to global config.
+
+        Merged config is global deep-merged with ``.agenticx/config.yaml``. If the
+        project file also defines the same dotted key, update it so Studio saves
+        match what ``ConfigManager.get_value`` returns (avoids project overlay
+        silently overriding UI changes).
+        """
+        dotted = f"cc_bridge.{field}"
+        global_data = cls._load_yaml(cls.GLOBAL_CONFIG_PATH)
+        cls._set_nested(global_data, dotted, value)
+        cls._dump_yaml(cls.GLOBAL_CONFIG_PATH, global_data)
+
+        project_data = cls._load_yaml(cls.PROJECT_CONFIG_PATH)
+        if cls._get_nested(project_data, dotted) is not None:
+            cls._set_nested(project_data, dotted, value)
+            cls._dump_yaml(cls.PROJECT_CONFIG_PATH, project_data)
+        return cls.GLOBAL_CONFIG_PATH
+
+    @classmethod
     def get_value(cls, key: str) -> Any:
         """Get a dotted key from merged global+project YAML.
 

@@ -18,17 +18,35 @@ _DEFAULT_URL = "http://127.0.0.1:9742"
 _CC_BRIDGE_MODES = frozenset({"headless", "visible_tui"})
 
 
-def cc_bridge_mode() -> str:
-    """Global CC bridge session mode: headless (stream-json) or visible_tui (interactive PTY)."""
+def cc_bridge_mode_env_override() -> Optional[str]:
+    """Return env override mode if explicitly set and valid, else None."""
     raw = os.environ.get("AGX_CC_BRIDGE_MODE", "").strip().lower()
     if raw in _CC_BRIDGE_MODES:
         return raw
+    return None
+
+
+def cc_bridge_mode_configured() -> Optional[str]:
+    """Return persisted config mode from yaml, without env override."""
     try:
         from_yaml = ConfigManager.get_value("cc_bridge.mode")
     except Exception:
         from_yaml = None
-    if isinstance(from_yaml, str) and from_yaml.strip().lower() in _CC_BRIDGE_MODES:
-        return from_yaml.strip().lower()
+    if isinstance(from_yaml, str):
+        m = from_yaml.strip().lower()
+        if m in _CC_BRIDGE_MODES:
+            return m
+    return None
+
+
+def cc_bridge_mode() -> str:
+    """Global CC bridge session mode: headless (stream-json) or visible_tui (interactive PTY)."""
+    env_m = cc_bridge_mode_env_override()
+    if env_m:
+        return env_m
+    cfg_m = cc_bridge_mode_configured()
+    if cfg_m:
+        return cfg_m
     return "headless"
 
 
@@ -58,7 +76,7 @@ def ensure_cc_bridge_token_persisted() -> str:
     if isinstance(from_yaml, str) and from_yaml.strip():
         return from_yaml.strip()
     generated = secrets.token_urlsafe(32)
-    ConfigManager.set_value("cc_bridge.token", generated, scope="global")
+    ConfigManager.set_cc_bridge_field("token", generated)
     return generated
 
 

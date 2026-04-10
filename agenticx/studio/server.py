@@ -3199,20 +3199,33 @@ def create_studio_app() -> FastAPI:
         try:
             from agenticx.cc_bridge.settings import (
                 cc_bridge_base_url,
+                cc_bridge_mode_configured,
+                cc_bridge_mode_env_override,
                 cc_bridge_mode,
                 ensure_cc_bridge_token_persisted,
             )
 
             url = cc_bridge_base_url()
             token = ensure_cc_bridge_token_persisted()
-            mode = cc_bridge_mode()
+            mode_effective = cc_bridge_mode()
+            mode_configured = cc_bridge_mode_configured()
+            env_override = cc_bridge_mode_env_override()
+            mode = mode_configured or mode_effective
             raw_idle = ConfigManager.get_value("cc_bridge.idle_stop_seconds")
             try:
                 idle = int(raw_idle) if raw_idle is not None else 600
             except (TypeError, ValueError):
                 idle = 600
             idle = max(0, min(86400, idle))
-            return {"ok": True, "url": url, "token": token, "idle_stop_seconds": idle, "mode": mode}
+            return {
+                "ok": True,
+                "url": url,
+                "token": token,
+                "idle_stop_seconds": idle,
+                "mode": mode,
+                "mode_effective": mode_effective,
+                "mode_env_override": env_override or "",
+            }
         except Exception as exc:
             logger.warning("get_cc_bridge_config error: %s", exc)
             return {
@@ -3233,6 +3246,8 @@ def create_studio_app() -> FastAPI:
         try:
             from agenticx.cc_bridge.settings import (
                 cc_bridge_base_url,
+                cc_bridge_mode_configured,
+                cc_bridge_mode_env_override,
                 cc_bridge_mode,
                 ensure_cc_bridge_token_persisted,
                 validate_bridge_url_for_studio,
@@ -3244,22 +3259,22 @@ def create_studio_app() -> FastAPI:
                     err = validate_bridge_url_for_studio(u)
                     if err:
                         raise HTTPException(status_code=400, detail=err)
-                    ConfigManager.set_value("cc_bridge.url", u, scope="global")
+                    ConfigManager.set_cc_bridge_field("url", u)
             if "token" in payload:
                 t = str(payload.get("token") or "").strip()
-                ConfigManager.set_value("cc_bridge.token", t, scope="global")
+                ConfigManager.set_cc_bridge_field("token", t)
             if "idle_stop_seconds" in payload:
                 try:
                     idle = int(payload.get("idle_stop_seconds"))
                 except (TypeError, ValueError):
                     raise HTTPException(status_code=400, detail="idle_stop_seconds must be integer") from None
                 idle = max(0, min(86400, idle))
-                ConfigManager.set_value("cc_bridge.idle_stop_seconds", idle, scope="global")
+                ConfigManager.set_cc_bridge_field("idle_stop_seconds", idle)
             if "mode" in payload:
                 m = str(payload.get("mode") or "").strip().lower()
                 if m not in {"headless", "visible_tui"}:
                     raise HTTPException(status_code=400, detail="mode must be headless or visible_tui") from None
-                ConfigManager.set_value("cc_bridge.mode", m, scope="global")
+                ConfigManager.set_cc_bridge_field("mode", m)
 
             raw_idle = ConfigManager.get_value("cc_bridge.idle_stop_seconds")
             try:
@@ -3272,7 +3287,9 @@ def create_studio_app() -> FastAPI:
                 "url": cc_bridge_base_url(),
                 "token": ensure_cc_bridge_token_persisted(),
                 "idle_stop_seconds": idle_now,
-                "mode": cc_bridge_mode(),
+                "mode": cc_bridge_mode_configured() or cc_bridge_mode(),
+                "mode_effective": cc_bridge_mode(),
+                "mode_env_override": cc_bridge_mode_env_override() or "",
             }
         except HTTPException:
             raise
@@ -3289,7 +3306,7 @@ def create_studio_app() -> FastAPI:
 
         try:
             tok = secrets.token_urlsafe(32)
-            ConfigManager.set_value("cc_bridge.token", tok, scope="global")
+            ConfigManager.set_cc_bridge_field("token", tok)
             return {"ok": True, "token": tok}
         except Exception as exc:
             logger.warning("regenerate_cc_bridge_token error: %s", exc)
