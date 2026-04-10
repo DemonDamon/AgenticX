@@ -3782,10 +3782,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               />
               <div className="space-y-1.5 select-none">
                 <div className="text-[15px] font-medium text-text-primary tracking-wide">
-                  Absolute Rationality Engineer
+                  Machi
                 </div>
                 <div className="text-text-faint tracking-wider uppercase text-[11px]">
-                  Triggered Anywhere, Completed Locally
+                  Orchestrated by Machi · Executed by AgenticX
                 </div>
               </div>
               {isAutomationTaskPane && automationTaskErrorHint ? (
