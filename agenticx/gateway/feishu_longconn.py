@@ -20,10 +20,18 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
+
+from agenticx.gateway.im_confirm import (
+    PendingConfirm,
+    PendingConfirmStore,
+    format_pending_hint,
+    parse_confirm_command,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +39,9 @@ _PORT_FILE = os.path.expanduser("~/.agenticx/serve.port")
 _TOKEN_FILE = os.path.expanduser("~/.agenticx/serve.token")
 _BINDING_FILE = os.path.expanduser("~/.agenticx/feishu_binding.json")
 _DESKTOP_BINDING_KEY = "_desktop"
+_BINDING_SCOPE_ENV = "AGX_FEISHU_BINDING_SCOPE"
+_CONFIRM_TTL_SEC = float(os.getenv("AGX_IM_CONFIRM_TIMEOUT_SEC", "300") or "300")
+_PENDING_CONFIRMS = PendingConfirmStore(ttl_seconds=_CONFIRM_TTL_SEC)
 
 
 def _read_serve_info() -> tuple[str, str]:
@@ -275,24 +286,44 @@ def _write_bindings_file(data: Dict[str, Any]) -> None:
     os.replace(tmp, _BINDING_FILE)
 
 
-def _resolve_binding_for_sender(_open_id: str) -> Optional[Dict[str, Any]]:
-    """Return the global desktop binding.
+def _binding_scope() -> str:
+    """Resolve Feishu binding policy.
 
-    The desktop integration uses a single global binding key (`_desktop`) as the
-    source of truth, so Feishu routing and Desktop badge always point to the same
-    session at any given time.
+    Supported values:
+      - sender: bind per sender open_id (recommended for multi-user IM)
+      - desktop_global: always use _desktop global binding
+      - hybrid: sender first, then fallback to _desktop
     """
+    raw = os.getenv(_BINDING_SCOPE_ENV, "hybrid").strip().lower()
+    if raw in {"sender", "desktop_global", "hybrid"}:
+        return raw
+    return "hybrid"
+
+
+def _extract_binding(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    sid = str(raw.get("session_id") or "").strip()
+    if not sid:
+        return None
+    return {
+        "session_id": sid,
+        "avatar_id": (str(raw.get("avatar_id") or "").strip() or None),
+        "avatar_name": (str(raw.get("avatar_name") or "").strip() or None),
+    }
+
+
+def _resolve_binding_for_sender(open_id: str) -> Optional[Dict[str, Any]]:
+    """Resolve binding by configured policy (sender / desktop_global / hybrid)."""
     data = _read_bindings_file()
-    desk = data.get(_DESKTOP_BINDING_KEY)
-    if isinstance(desk, dict):
-        sid = str(desk.get("session_id") or "").strip()
-        if sid:
-            return {
-                "session_id": sid,
-                "avatar_id": (str(desk.get("avatar_id") or "").strip() or None),
-                "avatar_name": (str(desk.get("avatar_name") or "").strip() or None),
-            }
-    return None
+    sender_binding = _extract_binding(data.get(open_id)) if open_id else None
+    desktop_binding = _extract_binding(data.get(_DESKTOP_BINDING_KEY))
+    scope = _binding_scope()
+    if scope == "sender":
+        return sender_binding
+    if scope == "desktop_global":
+        return desktop_binding
+    return sender_binding or desktop_binding
 
 
 def _write_binding_key(key: str, binding: Dict[str, Any]) -> None:
@@ -308,6 +339,15 @@ def _clear_binding_key(key: str) -> None:
     if key in data:
         del data[key]
         _write_bindings_file(data)
+
+
+def _save_binding(open_id: str, binding_payload: Dict[str, Any]) -> None:
+    """Persist binding according to policy."""
+    scope = _binding_scope()
+    if scope in {"sender", "hybrid"} and open_id:
+        _write_binding_key(open_id, binding_payload)
+    if scope in {"desktop_global", "hybrid"}:
+        _write_binding_key(_DESKTOP_BINDING_KEY, binding_payload)
 
 
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
@@ -509,8 +549,7 @@ async def _feishu_cmd_reply(
             "avatar_id": aid_s or None,
             "avatar_name": aname,
         }
-        _write_binding_key(open_id, binding_payload)
-        _write_binding_key(_DESKTOP_BINDING_KEY, binding_payload)
+        _save_binding(open_id, binding_payload)
         return (
             f"已绑定到会话 `{sid}`"
             + (f"（分身：{aname or aid_s}）" if (aname or aid_s) else "（Meta）")
@@ -570,8 +609,7 @@ async def _feishu_cmd_reply(
             "avatar_id": avatar_id,
             "avatar_name": avatar_name or None,
         }
-        _write_binding_key(open_id, binding_payload)
-        _write_binding_key(_DESKTOP_BINDING_KEY, binding_payload)
+        _save_binding(open_id, binding_payload)
         return (
             f"已绑定到分身「{avatar_name}」的最近会话：\n`{sid}`"
         )
@@ -579,11 +617,78 @@ async def _feishu_cmd_reply(
     return "未知指令。"
 
 
+async def _submit_confirm(
+    studio_base: str,
+    headers: Dict[str, str],
+    session_id: str,
+    request_id: str,
+    approved: bool,
+    agent_id: str,
+) -> Tuple[bool, str]:
+    async with _no_proxy_client(timeout=30.0) as client:
+        resp = await client.post(
+            f"{studio_base}/api/confirm",
+            headers=headers,
+            json={
+                "session_id": session_id,
+                "request_id": request_id,
+                "approved": approved,
+                "agent_id": agent_id or "meta",
+            },
+        )
+        if resp.status_code >= 400:
+            return False, resp.text[:200]
+    return True, ""
+
+
+async def _handle_im_confirm_command(
+    studio_base: str,
+    headers: Dict[str, str],
+    sender_key: str,
+    action: str,
+    request_id: Optional[str],
+    deny_reason: Optional[str],
+) -> str:
+    if action == "pending":
+        rows = _PENDING_CONFIRMS.list_for_sender(sender_key)
+        if not rows:
+            return "当前没有待确认任务。"
+        lines = ["待确认任务："]
+        for row in rows[:5]:
+            lines.append(f"- `{row.request_id}` ({row.agent_id}) {row.question[:80]}")
+        return "\n".join(lines)
+
+    pending = _PENDING_CONFIRMS.get(sender_key, request_id=request_id)
+    if pending is None:
+        if request_id:
+            return f"未找到 request_id `{request_id}` 的待确认任务（可能已过期或已处理）。"
+        return "当前没有待确认任务。先发 `/pending` 查看。"
+
+    approved = action == "approve"
+    ok, err = await _submit_confirm(
+        studio_base,
+        headers,
+        session_id=pending.session_id,
+        request_id=pending.request_id,
+        approved=approved,
+        agent_id=pending.agent_id,
+    )
+    if not ok:
+        return f"确认提交失败：{err}"
+
+    _PENDING_CONFIRMS.remove(sender_key, pending.request_id)
+    if approved:
+        return f"已确认继续执行（request_id: `{pending.request_id}`）。"
+    reason = deny_reason or "Denied from IM"
+    return f"已拒绝执行（request_id: `{pending.request_id}`）。原因：{reason}"
+
+
 async def _chat_turn(
     studio_base: str,
     session_id: str,
     text: str,
     sender_name: str,
+    sender_key: str,
     headers: Dict[str, str],
     avatar_id: Optional[str] = None,
 ) -> Tuple[str, str]:
@@ -601,7 +706,8 @@ async def _chat_turn(
             "user_display_name": sender_name,
         }
         final_text = ""
-        confirmed_request_ids: set[str] = set()
+        progress_lines: List[str] = []
+        saw_final = False
         async with client.stream(
             "POST",
             f"{studio_base}/api/chat",
@@ -631,33 +737,62 @@ async def _chat_turn(
                             t = str(data.get("text") or "")
                             if t:
                                 final_text = t
+                            saw_final = True
+                        elif et == "tool_call":
+                            tname = str(data.get("tool_name") or data.get("name") or "tool")
+                            progress_lines.append(f"开始：{tname}")
+                        elif et == "tool_result":
+                            tname = str(data.get("tool_name") or data.get("name") or "tool")
+                            progress_lines.append(f"完成：{tname}")
+                        elif et == "tool_progress":
+                            tname = str(data.get("name") or "tool")
+                            elapsed = data.get("elapsed_seconds")
+                            if isinstance(elapsed, (int, float)):
+                                sec = int(float(elapsed))
+                                if sec in {1, 3, 5} or sec % 15 == 0:
+                                    progress_lines.append(f"进行中：{tname} ({sec}s)")
                         elif et == "confirm_required":
                             request_id = str(data.get("id") or data.get("request_id") or "").strip()
                             if not request_id:
                                 continue
-                            if request_id in confirmed_request_ids:
-                                continue
+                            question = str(data.get("question") or "需要你确认后继续执行。").strip()
                             confirm_agent_id = str(data.get("agent_id") or "meta").strip() or "meta"
-                            confirm_resp = await client.post(
-                                f"{studio_base}/api/confirm",
-                                headers=headers,
-                                json={
-                                    "session_id": target_sid,
-                                    "request_id": request_id,
-                                    "approved": True,
-                                    "agent_id": confirm_agent_id,
-                                },
+                            _PENDING_CONFIRMS.upsert(
+                                sender_key,
+                                PendingConfirm(
+                                    request_id=request_id,
+                                    agent_id=confirm_agent_id,
+                                    session_id=target_sid,
+                                    question=question,
+                                    created_at=time.time(),
+                                ),
                             )
-                            if confirm_resp.status_code >= 400:
-                                err = confirm_resp.text[:200]
-                                raise RuntimeError(
-                                    "confirm submit failed: "
-                                    f"{confirm_resp.status_code} {err}"
+                            status_prefix = ""
+                            if progress_lines:
+                                status_prefix = "执行进度：\n" + "\n".join(
+                                    f"- {line}" for line in progress_lines[-6:]
                                 )
-                            confirmed_request_ids.add(request_id)
+                            hint = format_pending_hint(
+                                PendingConfirm(
+                                    request_id=request_id,
+                                    agent_id=confirm_agent_id,
+                                    session_id=target_sid,
+                                    question=question,
+                                    created_at=time.time(),
+                                )
+                            )
+                            return ((status_prefix + "\n\n") if status_prefix else "") + hint, target_sid
                         elif et == "error":
                             raise RuntimeError(str(data.get("text") or "chat error"))
-    return final_text.strip() or "（无文本回复）", target_sid
+    out = final_text.strip()
+    if progress_lines:
+        unique_progress = list(dict.fromkeys(progress_lines))
+        progress_block = "执行进度：\n" + "\n".join(f"- {line}" for line in unique_progress[-6:])
+        if out:
+            out = f"{progress_block}\n\n{out}"
+        elif saw_final:
+            out = progress_block
+    return out or "（无文本回复）", target_sid
 
 
 # ---------------------------------------------------------------------------
@@ -869,9 +1004,24 @@ class FeishuLongConnRunner:
         binding = _resolve_binding_for_sender(open_id)
         effective_sid = binding["session_id"] if binding else default_sid
         effective_avatar = binding.get("avatar_id") if binding else None
+        sender_key = f"feishu:{open_id or chat_id or 'unknown'}"
 
         cmd = _parse_feishu_command(text)
-        if cmd is not None:
+        confirm_action, confirm_rid, deny_reason = parse_confirm_command(text)
+        if confirm_action != "none":
+            try:
+                reply = await _handle_im_confirm_command(
+                    self._studio_base,
+                    headers,
+                    sender_key=sender_key,
+                    action=confirm_action,
+                    request_id=confirm_rid,
+                    deny_reason=deny_reason,
+                )
+            except Exception as exc:
+                logger.exception("feishu confirm command failed: %s", exc)
+                reply = f"[Machi] 确认指令执行出错：{exc}"
+        elif cmd is not None:
             cname, carg = cmd
             try:
                 reply = await _feishu_cmd_reply(
@@ -897,6 +1047,7 @@ class FeishuLongConnRunner:
                     effective_sid,
                     text,
                     sender_name,
+                    sender_key,
                     headers,
                     avatar_id=effective_avatar,
                 )
@@ -907,9 +1058,7 @@ class FeishuLongConnRunner:
                             "avatar_id": effective_avatar,
                             "avatar_name": binding.get("avatar_name"),
                         }
-                        if open_id:
-                            _write_binding_key(open_id, rebound_payload)
-                        _write_binding_key(_DESKTOP_BINDING_KEY, rebound_payload)
+                        _save_binding(open_id, rebound_payload)
                     except Exception as bind_exc:
                         logger.warning("feishu binding rebound failed: %s", bind_exc)
             except Exception as exc:

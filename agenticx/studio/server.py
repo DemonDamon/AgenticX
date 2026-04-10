@@ -88,10 +88,98 @@ def _runtime_event_to_sse_lines(event: RuntimeEvent) -> list[str]:
         usage_meta = event_data.pop("usage_metadata", None)
     sse = SseEvent(type=event.type, data=event_data)
     lines = [f"data: {json.dumps(sse.model_dump(), ensure_ascii=False)}\n\n"]
+    cc_status = _extract_cc_bridge_status_event(event.type, event_data)
+    if cc_status is not None:
+        cse = SseEvent(type="cc_bridge_status", data=cc_status)
+        lines.append(f"data: {json.dumps(cse.model_dump(), ensure_ascii=False)}\n\n")
     if event.type == EventType.FINAL.value and usage_meta:
         tu = SseEvent(type="token_usage", data=usage_meta)
         lines.append(f"data: {json.dumps(tu.model_dump(), ensure_ascii=False)}\n\n")
     return lines
+
+
+def _extract_cc_bridge_status_event(event_type: str, event_data: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize cc_bridge lifecycle into a stable SSE event for UI/adapters."""
+    tool_name = str(event_data.get("name") or "").strip()
+    if event_type == EventType.TOOL_CALL.value and tool_name in {
+        "cc_bridge_start",
+        "cc_bridge_send",
+        "cc_bridge_stop",
+    }:
+        return {
+            "tool": tool_name,
+            "phase": "calling",
+            "state": "in_progress",
+            "agent_id": str(event_data.get("agent_id") or "meta"),
+        }
+
+    if event_type != EventType.TOOL_RESULT.value:
+        return None
+    if tool_name not in {"cc_bridge_start", "cc_bridge_send", "cc_bridge_stop"}:
+        return None
+
+    parsed: dict[str, Any] = {}
+    raw_result = event_data.get("result")
+    if isinstance(raw_result, str):
+        try:
+            obj = json.loads(raw_result)
+            if isinstance(obj, dict):
+                parsed = obj
+        except Exception:
+            parsed = {}
+
+    payload: dict[str, Any] = {
+        "tool": tool_name,
+        "phase": "result",
+        "agent_id": str(event_data.get("agent_id") or "meta"),
+    }
+
+    if tool_name == "cc_bridge_start":
+        payload.update(
+            {
+                "state": "session_started",
+                "session_id": str(parsed.get("session_id") or ""),
+                "mode": str(parsed.get("mode") or ""),
+                "interactive_waiting": str(parsed.get("mode") or "") == "visible_tui",
+            }
+        )
+        return payload
+
+    if tool_name == "cc_bridge_send":
+        mode = str(parsed.get("mode") or "")
+        interactive = bool(parsed.get("interactive", False))
+        ok = bool(parsed.get("ok", False))
+        if mode == "visible_tui" and interactive:
+            payload.update(
+                {
+                    "state": "awaiting_user_terminal_input",
+                    "mode": mode,
+                    "interactive": True,
+                    "final_available": bool(parsed.get("final_available", False)),
+                    "must_not_summarize_as_complete": bool(
+                        parsed.get("must_not_summarize_as_complete", True)
+                    ),
+                }
+            )
+        else:
+            payload.update(
+                {
+                    "state": "completed" if ok else "failed",
+                    "mode": mode or "headless",
+                    "ok": ok,
+                }
+            )
+        return payload
+
+    # cc_bridge_stop
+    status = str(parsed.get("status") or "").strip().lower()
+    payload.update(
+        {
+            "state": "session_stopped" if status in {"stopped", "ok"} else "stop_failed",
+            "status": status or "unknown",
+        }
+    )
+    return payload
 
 
 def _minimax_m2_family_no_vision(model_name: str) -> bool:
