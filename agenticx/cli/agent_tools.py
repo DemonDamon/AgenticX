@@ -378,6 +378,14 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                         "type": "boolean",
                         "description": "If true, bridge auto-approves can_use_tool control_request lines.",
                     },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["headless", "visible_tui"],
+                        "description": (
+                            "Optional explicit mode override. If omitted, runtime auto-selects by intent: "
+                            "autonomous/report tasks prefer headless; interactive terminal tasks prefer visible_tui."
+                        ),
+                    },
                 },
                 "required": [],
                 "additionalProperties": False,
@@ -389,8 +397,9 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "cc_bridge_send",
             "description": (
-                "Send a user turn to an existing CC bridge session and wait for a result/success NDJSON line "
-                "or timeout. Requires bridge at cc_bridge.url (default 127.0.0.1:9742) and matching bearer token. "
+                "Send a user turn to an existing CC bridge session. In headless mode it waits for result/timeout; "
+                "in visible_tui mode it only writes input to PTY and returns immediately (no final result inference). "
+                "Requires bridge at cc_bridge.url (default 127.0.0.1:9742) and matching bearer token. "
                 "Afterward confirm any expected files with file_read or bash_exec test -f."
             ),
             "parameters": {
@@ -430,6 +439,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "session_id": {"type": "string", "description": "Bridge session UUID."},
+                    "force": {
+                        "type": "boolean",
+                        "description": "Force stop even when visible_tui is still active.",
+                    },
                 },
                 "required": ["session_id"],
                 "additionalProperties": False,
@@ -1994,22 +2007,86 @@ async def _tool_cc_bridge_http(
 
 
 async def _tool_cc_bridge_start(arguments: Dict[str, Any], session: StudioSession) -> str:
-    from agenticx.cc_bridge.settings import cc_bridge_mode
+    from agenticx.cc_bridge.settings import cc_bridge_mode, cc_bridge_mode_configured
+
+    explicit_mode = str(arguments.get("mode", "") or "").strip().lower()
+    if explicit_mode not in {"", "headless", "visible_tui"}:
+        return "ERROR: mode must be one of: headless, visible_tui"
+
+    def _latest_user_intent() -> str:
+        hist = getattr(session, "chat_history", None) or []
+        for msg in reversed(hist):
+            if str(msg.get("role", "")) == "user":
+                return str(msg.get("content", "") or "")
+        return ""
+
+    def _choose_mode(config_mode: str, configured_mode: str | None) -> str:
+        if explicit_mode in {"headless", "visible_tui"}:
+            return explicit_mode
+        sid = str(getattr(session, "session_id", "") or "").strip().lower()
+        if sid.startswith("im-"):
+            return "headless"
+        # Respect explicit user config from Settings first; only auto-infer when
+        # no persisted mode is set.
+        if configured_mode in {"headless", "visible_tui"}:
+            return configured_mode
+        intent = _latest_user_intent().lower()
+        interactive_hints = (
+            "visible_tui",
+            "visible tui",
+            "可见",
+            "交互",
+            "终端",
+            "手动",
+            "按键",
+            "点击确认",
+            "在cc里",
+        )
+        autonomous_hints = (
+            "自动",
+            "直接给我结果",
+            "报告",
+            "摘要",
+            "总结",
+            "分析",
+            "不要改代码",
+            "无需交互",
+            "无需确认",
+            "session_id +",
+        )
+        if any(k in intent for k in interactive_hints):
+            return "visible_tui"
+        if any(k in intent for k in autonomous_hints):
+            return "headless"
+        return config_mode
 
     cwd = str(arguments.get("cwd", "") or "").strip()
     if not cwd:
         cwd = _session_default_cwd_for_cc_bridge(session)
     auto = bool(arguments.get("auto_allow_permissions", False))
+    resolved_mode = _choose_mode(cc_bridge_mode(), cc_bridge_mode_configured())
     return await _tool_cc_bridge_http(
         session,
         "POST",
         "/v1/sessions",
-        {"cwd": cwd, "auto_allow_permissions": auto, "mode": cc_bridge_mode()},
+        {"cwd": cwd, "auto_allow_permissions": auto, "mode": resolved_mode},
         timeout_sec=60.0,
     )
 
 
 async def _tool_cc_bridge_send(arguments: Dict[str, Any], session: StudioSession) -> str:
+    from agenticx.cc_bridge.settings import (
+        cc_bridge_base_url,
+        cc_bridge_mode,
+        cc_bridge_token,
+        validate_bridge_url_for_studio,
+    )
+
+    try:
+        import httpx
+    except ImportError:
+        return "ERROR: httpx is required for cc_bridge tools"
+
     sid = str(arguments.get("session_id", "")).strip()
     prompt = str(arguments.get("prompt", "") or "")
     if not sid or not prompt:
@@ -2020,13 +2097,88 @@ async def _tool_cc_bridge_send(arguments: Dict[str, Any], session: StudioSession
     except (TypeError, ValueError):
         wait_f = 120.0
     wait_f = max(1.0, min(3600.0, wait_f))
-    return await _tool_cc_bridge_http(
+    resolved_mode = cc_bridge_mode()
+    if resolved_mode != "visible_tui":
+        # Fallback probe: UI config may be out-of-sync with runtime config,
+        # so detect the real session mode from bridge list before deciding.
+        base = cc_bridge_base_url()
+        err = validate_bridge_url_for_studio(base)
+        if not err:
+            token = cc_bridge_token()
+            headers = {"Authorization": f"Bearer {token}"}
+            list_url = f"{base}/v1/sessions"
+            try:
+                async with httpx.AsyncClient(**_cc_bridge_http_client_kwargs(base, 15.0)) as client:
+                    r = await client.get(list_url, headers=headers)
+                if r.status_code < 400:
+                    payload = r.json() if r.content else {}
+                    if isinstance(payload, dict):
+                        sessions = payload.get("sessions")
+                        if isinstance(sessions, list):
+                            for item in sessions:
+                                if isinstance(item, dict) and str(item.get("session_id", "")).strip() == sid:
+                                    mode_value = str(item.get("mode", "")).strip().lower()
+                                    if mode_value:
+                                        resolved_mode = mode_value
+                                    break
+            except Exception:
+                # Keep configured mode as fallback.
+                pass
+
+    if resolved_mode == "visible_tui":
+        # visible_tui is interactive by design; return quickly so user can keep operating
+        # in the embedded terminal without waiting for parser heuristics.
+        write_res = await _tool_cc_bridge_http(
+            session,
+            "POST",
+            f"/v1/sessions/{sid}/write",
+            {"data": f"{prompt}\r"},
+            timeout_sec=30.0,
+        )
+        if write_res.startswith("ERROR:"):
+            return write_res
+        return json.dumps(
+            {
+                "ok": True,
+                "mode": "visible_tui",
+                "interactive": True,
+                "parsed_response": "",
+                "parse_confidence": 0.0,
+                "tail": "",
+                "status": "sent",
+                "final_available": False,
+                "evidence_level": "none",
+                "must_not_summarize_as_complete": True,
+                "message": "Prompt sent to visible TUI terminal",
+                "next_action": "wait_for_user_terminal_interaction",
+            },
+            ensure_ascii=False,
+        )
+    resp_text = await _tool_cc_bridge_http(
         session,
         "POST",
         f"/v1/sessions/{sid}/message",
         {"text": prompt, "wait_seconds": wait_f},
         timeout_sec=wait_f + 45.0,
     )
+    if resp_text.startswith("ERROR:"):
+        return resp_text
+    try:
+        obj = json.loads(resp_text)
+        if isinstance(obj, dict):
+            ok = bool(obj.get("ok", False))
+            if not ok:
+                obj.setdefault("final_available", False)
+                obj.setdefault("evidence_level", "low")
+                obj.setdefault("must_not_summarize_as_complete", True)
+                obj.setdefault(
+                    "message",
+                    "No verified final output from cc_bridge_send; report status and next action only.",
+                )
+                return json.dumps(obj, ensure_ascii=False)
+    except Exception:
+        pass
+    return resp_text
 
 
 async def _tool_cc_bridge_list(arguments: Dict[str, Any], session: StudioSession) -> str:
@@ -2035,9 +2187,49 @@ async def _tool_cc_bridge_list(arguments: Dict[str, Any], session: StudioSession
 
 
 async def _tool_cc_bridge_stop(arguments: Dict[str, Any], session: StudioSession) -> str:
+    from agenticx.cc_bridge.settings import (
+        cc_bridge_base_url,
+        cc_bridge_token,
+        validate_bridge_url_for_studio,
+    )
+
+    try:
+        import httpx
+    except ImportError:
+        return "ERROR: httpx is required for cc_bridge tools"
+
     sid = str(arguments.get("session_id", "") or "").strip()
+    force = bool(arguments.get("force", False))
     if not sid:
         return "ERROR: session_id required"
+    if not force:
+        base = cc_bridge_base_url()
+        err = validate_bridge_url_for_studio(base)
+        if not err:
+            token = cc_bridge_token()
+            headers = {"Authorization": f"Bearer {token}"}
+            try:
+                async with httpx.AsyncClient(**_cc_bridge_http_client_kwargs(base, 10.0)) as client:
+                    resp = await client.get(f"{base}/v1/sessions", headers=headers)
+                if resp.status_code < 400:
+                    payload = resp.json() if resp.content else {}
+                    rows = payload.get("sessions") if isinstance(payload, dict) else None
+                    if isinstance(rows, list):
+                        for row in rows:
+                            if not isinstance(row, dict):
+                                continue
+                            if str(row.get("session_id", "")).strip() != sid:
+                                continue
+                            mode = str(row.get("mode", "")).strip().lower()
+                            poll = row.get("poll")
+                            if mode == "visible_tui" and poll is None:
+                                return (
+                                    "ERROR: visible_tui session is still active; stopping now may lose interactive state. "
+                                    "Only stop after user confirms terminal flow is done, or call cc_bridge_stop with force=true."
+                                )
+                            break
+            except Exception:
+                pass
     return await _tool_cc_bridge_http(session, "DELETE", f"/v1/sessions/{sid}", None, timeout_sec=30.0)
 
 

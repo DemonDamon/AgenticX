@@ -458,9 +458,17 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
       const parsed = JSON.parse(resultText) as Record<string, unknown>;
       const mode = String(parsed.mode ?? "headless");
       const ok = Boolean(parsed.ok);
+      const interactive = Boolean(parsed.interactive);
       const pr = String(parsed.parsed_response ?? "").trim();
       const conf = Number(parsed.parse_confidence ?? 0);
       if (mode === "visible_tui") {
+        if (interactive && ok) {
+          return {
+            content:
+              "✅ 已发送到 Claude Code（Visible TUI）。请继续在右侧「claude-code」终端交互；如出现权限提示，直接在终端内按键确认。",
+            silent: false,
+          };
+        }
         if (pr && ok) {
           return {
             content: `✅ Claude Code（Visible TUI，解析置信度 ${Math.round(Math.min(1, conf) * 100)}%）\n\n${pr}`,

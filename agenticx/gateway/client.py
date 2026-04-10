@@ -11,16 +11,25 @@ import hashlib
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import httpx
 
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.gateway.im_confirm import (
+    PendingConfirm,
+    PendingConfirmStore,
+    format_pending_hint,
+    parse_confirm_command,
+)
 from agenticx.gateway.models import GatewayMessage, GatewayReply
 from agenticx.gateway.user_device_map import UserDeviceMap
 
 logger = logging.getLogger(__name__)
+_CONFIRM_TTL_SEC = float(os.getenv("AGX_IM_CONFIRM_TIMEOUT_SEC", "300") or "300")
+_PENDING_CONFIRMS = PendingConfirmStore(ttl_seconds=_CONFIRM_TTL_SEC)
 
 try:
     import websockets
@@ -216,6 +225,15 @@ class GatewayClient:
             return "当前版本请在本机 Machi 取消进行中的任务。"
 
         session_id = _session_id_for_im(msg)
+        sender_key = f"{msg.source}:{msg.sender_id}"
+        action, request_id, deny_reason = parse_confirm_command(text)
+        if action != "none":
+            return await self._handle_confirm_command(
+                sender_key=sender_key,
+                action=action,
+                request_id=request_id,
+                deny_reason=deny_reason,
+            )
         headers = {"x-agx-desktop-token": self._settings.desktop_token}
         timeout = httpx.Timeout(600.0, connect=30.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -233,7 +251,8 @@ class GatewayClient:
                 "user_display_name": msg.sender_name or msg.sender_id,
             }
             final_text = ""
-            confirmed_request_ids: set[str] = set()
+            progress_lines: list[str] = []
+            saw_final = False
             async with client.stream(
                 "POST",
                 f"{self._settings.studio_base_url}/api/chat",
@@ -263,34 +282,98 @@ class GatewayClient:
                                 t = str(data.get("text") or "")
                                 if t:
                                     final_text = t
+                                saw_final = True
+                            elif et == "tool_call":
+                                tname = str(data.get("tool_name") or data.get("name") or "tool")
+                                progress_lines.append(f"开始：{tname}")
+                            elif et == "tool_result":
+                                tname = str(data.get("tool_name") or data.get("name") or "tool")
+                                progress_lines.append(f"完成：{tname}")
+                            elif et == "tool_progress":
+                                tname = str(data.get("name") or "tool")
+                                elapsed = data.get("elapsed_seconds")
+                                if isinstance(elapsed, (int, float)):
+                                    sec = int(float(elapsed))
+                                    if sec in {1, 3, 5} or sec % 15 == 0:
+                                        progress_lines.append(f"进行中：{tname} ({sec}s)")
                             elif et == "confirm_required":
                                 request_id = str(data.get("id") or data.get("request_id") or "").strip()
                                 if not request_id:
                                     continue
-                                if request_id in confirmed_request_ids:
-                                    continue
+                                question = str(data.get("question") or "需要你确认后继续执行。").strip()
                                 confirm_agent_id = str(data.get("agent_id") or "meta").strip() or "meta"
-                                confirm_resp = await client.post(
-                                    f"{self._settings.studio_base_url}/api/confirm",
-                                    headers=headers,
-                                    json={
-                                        "session_id": session_id,
-                                        "request_id": request_id,
-                                        "approved": True,
-                                        "agent_id": confirm_agent_id,
-                                    },
+                                pending = PendingConfirm(
+                                    request_id=request_id,
+                                    agent_id=confirm_agent_id,
+                                    session_id=session_id,
+                                    question=question,
+                                    created_at=time.time(),
                                 )
-                                if confirm_resp.status_code >= 400:
-                                    err_body = confirm_resp.text[:200]
-                                    raise RuntimeError(
-                                        "confirm submit failed: "
-                                        f"{confirm_resp.status_code} {err_body}"
+                                _PENDING_CONFIRMS.upsert(sender_key, pending)
+                                prefix = ""
+                                if progress_lines:
+                                    prefix = "执行进度：\n" + "\n".join(
+                                        f"- {line}" for line in progress_lines[-6:]
                                     )
-                                confirmed_request_ids.add(request_id)
+                                hint = format_pending_hint(pending)
+                                return ((prefix + "\n\n") if prefix else "") + hint
                             elif et == "error":
                                 raise RuntimeError(str(data.get("text") or "chat error"))
             out = final_text.strip()
+            if progress_lines:
+                unique_progress = list(dict.fromkeys(progress_lines))
+                progress_block = "执行进度：\n" + "\n".join(f"- {line}" for line in unique_progress[-6:])
+                if out:
+                    out = f"{progress_block}\n\n{out}"
+                elif saw_final:
+                    out = progress_block
             return out or "（无文本回复）"
+
+    async def _handle_confirm_command(
+        self,
+        *,
+        sender_key: str,
+        action: str,
+        request_id: Optional[str],
+        deny_reason: Optional[str],
+    ) -> str:
+        if action == "pending":
+            rows = _PENDING_CONFIRMS.list_for_sender(sender_key)
+            if not rows:
+                return "当前没有待确认任务。"
+            lines = ["待确认任务："]
+            for row in rows[:5]:
+                lines.append(f"- `{row.request_id}` ({row.agent_id}) {row.question[:80]}")
+            return "\n".join(lines)
+
+        pending = _PENDING_CONFIRMS.get(sender_key, request_id=request_id)
+        if pending is None:
+            if request_id:
+                return f"未找到 request_id `{request_id}` 的待确认任务（可能已过期或已处理）。"
+            return "当前没有待确认任务。先发 `/pending` 查看。"
+
+        approved = action == "approve"
+        headers = {"x-agx-desktop-token": self._settings.desktop_token}
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            confirm_resp = await client.post(
+                f"{self._settings.studio_base_url}/api/confirm",
+                headers=headers,
+                json={
+                    "session_id": pending.session_id,
+                    "request_id": pending.request_id,
+                    "approved": approved,
+                    "agent_id": pending.agent_id or "meta",
+                },
+            )
+            if confirm_resp.status_code >= 400:
+                err_body = confirm_resp.text[:200]
+                return f"确认提交失败：{err_body}"
+        _PENDING_CONFIRMS.remove(sender_key, pending.request_id)
+        if approved:
+            return f"已确认继续执行（request_id: `{pending.request_id}`）。"
+        reason = deny_reason or "Denied from IM"
+        return f"已拒绝执行（request_id: `{pending.request_id}`）。原因：{reason}"
 
     async def _delete_session(self, session_id: str) -> None:
         headers = {"x-agx-desktop-token": self._settings.desktop_token}

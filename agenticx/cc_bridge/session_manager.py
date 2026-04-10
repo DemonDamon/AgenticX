@@ -189,14 +189,18 @@ class BridgeSessionManager:
         with self._global_lock:
             out = []
             for sid, s in self._sessions.items():
+                poll = s.proc.poll()
+                running = poll is None
                 out.append(
                     {
                         "session_id": sid,
                         "cwd": s.cwd,
                         "pid": s.proc.pid,
-                        "poll": s.proc.poll(),
+                        "poll": poll,
                         "log_path": s.log_path,
                         "mode": s.session_kind,
+                        "state": "running" if running else "stopped",
+                        "interactive_waiting": bool(s.session_kind == "visible_tui" and running),
                     }
                 )
             return out
@@ -426,7 +430,7 @@ class BridgeSessionManager:
             session._tui_last_activity_mono = session._tui_send_started
             session.append_line(anchor)
             session.append_log(anchor)
-            self._write_stdin(session, text + "\n")
+            self._write_stdin(session, text + "\r")
             return
         line = build_user_message_line(text)
         self._write_stdin(session, line)

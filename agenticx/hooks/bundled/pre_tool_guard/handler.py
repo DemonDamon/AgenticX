@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+import httpx
+
 from agenticx.hooks.types import HookEvent
 
 _SHELL_TOOL_NAMES = frozenset(
@@ -51,6 +53,11 @@ _DANGEROUS_PATTERNS = [
     re.compile(r"\b(?:nc|ncat|netcat)\b[^\n]*\s(?:-e|--exec)\b", re.IGNORECASE),
 ]
 
+_CC_BRIDGE_LOG_TAIL_PATTERN = re.compile(
+    r"\btail\b[^\n]*\.agenticx/logs/cc-bridge/.*\.log",
+    re.IGNORECASE,
+)
+
 
 def _resolve_shell_command(event: HookEvent) -> str:
     """Extract shell command text from the event context.
@@ -87,6 +94,36 @@ def _extract_command_from_input(ti: dict) -> str:
     return ""
 
 
+async def _has_active_visible_tui_session() -> bool:
+    """Return True when cc-bridge has running visible_tui sessions."""
+    try:
+        from agenticx.cc_bridge.settings import cc_bridge_base_url, cc_bridge_token
+
+        base = cc_bridge_base_url()
+        token = cc_bridge_token()
+        headers = {"Authorization": f"Bearer {token}"}
+        timeout = httpx.Timeout(5.0, connect=2.0)
+        transport = httpx.AsyncHTTPTransport()
+        async with httpx.AsyncClient(transport=transport, timeout=timeout) as client:
+            resp = await client.get(f"{base}/v1/sessions", headers=headers)
+        if resp.status_code >= 400:
+            return False
+        payload = resp.json() if resp.content else {}
+        rows = payload.get("sessions") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            return False
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            mode = str(row.get("mode") or "").strip().lower()
+            poll = row.get("poll")
+            if mode == "visible_tui" and poll is None:
+                return True
+        return False
+    except Exception:
+        return False
+
+
 async def handle(event: HookEvent) -> Optional[bool]:
     if event.type != "tool" or event.action != "before_call":
         return True
@@ -94,6 +131,10 @@ async def handle(event: HookEvent) -> Optional[bool]:
     command = _resolve_shell_command(event)
     if not command.strip():
         return True
+
+    if _CC_BRIDGE_LOG_TAIL_PATTERN.search(command):
+        if await _has_active_visible_tui_session():
+            return False
 
     for pattern in _DANGEROUS_PATTERNS:
         if pattern.search(command):

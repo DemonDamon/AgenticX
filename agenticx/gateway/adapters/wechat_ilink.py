@@ -20,9 +20,18 @@ from typing import Any, Callable, Coroutine, Dict, Optional
 
 import httpx
 
+from agenticx.gateway.im_confirm import (
+    PendingConfirm,
+    PendingConfirmStore,
+    format_pending_hint,
+    parse_confirm_command,
+)
+
 logger = logging.getLogger(__name__)
 
 _AGX_DIR = Path.home() / ".agenticx"
+_CONFIRM_TTL_SEC = float(os.getenv("AGX_IM_CONFIRM_TIMEOUT_SEC", "300") or "300")
+_PENDING_CONFIRMS = PendingConfirmStore(ttl_seconds=_CONFIRM_TTL_SEC)
 
 _RE_BOLD = re.compile(r"\*\*(.+?)\*\*")
 _RE_ITALIC = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
@@ -244,10 +253,37 @@ class WeChatILinkAdapter:
         # transport/session metadata and may not exist in Studio session store.
         bound_session_id = self._resolve_bound_session()
         effective_session_id = bound_session_id or session_id
+        sender_key = f"wechat:{sender or group_id or session_id or 'unknown'}"
+
+        action, request_id, deny_reason = parse_confirm_command(text)
+        if action != "none":
+            try:
+                cmd_reply = await self._handle_confirm_command(
+                    sender_key=sender_key,
+                    action=action,
+                    request_id=request_id,
+                    deny_reason=deny_reason,
+                )
+            except Exception:
+                logger.exception("WeChat confirm command failed")
+                cmd_reply = "确认指令处理失败，请稍后重试。"
+            if cmd_reply:
+                await self._send_reply(
+                    sidecar_url=sidecar_url,
+                    text=cmd_reply,
+                    context_token=context_token,
+                    sender=sender,
+                    session_id=session_id,
+                    group_id=group_id,
+                )
+            return
 
         try:
             reply = await self._chat_turn(
-                user_input, sender, session_id=effective_session_id
+                user_input,
+                sender,
+                session_id=effective_session_id,
+                sender_key=sender_key,
             )
         except Exception as exc:
             recovered_session_id = ""
@@ -325,6 +361,71 @@ class WeChatILinkAdapter:
             pass
         return ""
 
+    async def _submit_confirm(
+        self,
+        *,
+        session_id: str,
+        request_id: str,
+        approved: bool,
+        agent_id: str,
+    ) -> tuple[bool, str]:
+        studio_base, headers = self._resolve_studio()
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(
+            transport=httpx.AsyncHTTPTransport(), timeout=timeout
+        ) as client:
+            resp = await client.post(
+                f"{studio_base}/api/confirm",
+                headers=headers,
+                json={
+                    "session_id": session_id,
+                    "request_id": request_id,
+                    "approved": approved,
+                    "agent_id": agent_id or "meta",
+                },
+            )
+            if resp.status_code >= 400:
+                return False, resp.text[:200]
+        return True, ""
+
+    async def _handle_confirm_command(
+        self,
+        *,
+        sender_key: str,
+        action: str,
+        request_id: str | None,
+        deny_reason: str | None,
+    ) -> str:
+        if action == "pending":
+            rows = _PENDING_CONFIRMS.list_for_sender(sender_key)
+            if not rows:
+                return "当前没有待确认任务。"
+            lines = ["待确认任务："]
+            for row in rows[:5]:
+                lines.append(f"- `{row.request_id}` ({row.agent_id}) {row.question[:80]}")
+            return "\n".join(lines)
+
+        pending = _PENDING_CONFIRMS.get(sender_key, request_id=request_id)
+        if pending is None:
+            if request_id:
+                return f"未找到 request_id `{request_id}` 的待确认任务（可能已过期或已处理）。"
+            return "当前没有待确认任务。先发 `/pending` 查看。"
+
+        approved = action == "approve"
+        ok, err = await self._submit_confirm(
+            session_id=pending.session_id,
+            request_id=pending.request_id,
+            approved=approved,
+            agent_id=pending.agent_id,
+        )
+        if not ok:
+            return f"确认提交失败：{err}"
+        _PENDING_CONFIRMS.remove(sender_key, pending.request_id)
+        if approved:
+            return f"已确认继续执行（request_id: `{pending.request_id}`）。"
+        reason = deny_reason or "Denied from IM"
+        return f"已拒绝执行（request_id: `{pending.request_id}`）。原因：{reason}"
+
     @staticmethod
     def _is_session_not_found_error(exc: Exception) -> bool:
         text = str(exc).lower()
@@ -382,7 +483,12 @@ class WeChatILinkAdapter:
             return ""
 
     async def _chat_turn(
-        self, text: str, sender_name: str, *, session_id: str = ""
+        self,
+        text: str,
+        sender_name: str,
+        *,
+        session_id: str = "",
+        sender_key: str = "",
     ) -> str:
         """Send message to agx serve /api/chat and collect reply."""
         studio_base, headers = self._resolve_studio()
@@ -398,7 +504,8 @@ class WeChatILinkAdapter:
             if session_id:
                 body["session_id"] = session_id
             final_text = ""
-            confirmed_request_ids: set[str] = set()
+            progress_lines: list[str] = []
+            saw_final = False
             async with client.stream(
                 "POST",
                 f"{studio_base}/api/chat",
@@ -434,35 +541,54 @@ class WeChatILinkAdapter:
                                 t = str(data.get("text") or "")
                                 if t:
                                     final_text = t
+                                saw_final = True
+                            elif et == "tool_call":
+                                tname = str(data.get("tool_name") or data.get("name") or "tool")
+                                progress_lines.append(f"开始：{tname}")
+                            elif et == "tool_result":
+                                tname = str(data.get("tool_name") or data.get("name") or "tool")
+                                progress_lines.append(f"完成：{tname}")
+                            elif et == "tool_progress":
+                                tname = str(data.get("name") or "tool")
+                                elapsed = data.get("elapsed_seconds")
+                                if isinstance(elapsed, (int, float)):
+                                    sec = int(float(elapsed))
+                                    if sec in {1, 3, 5} or sec % 15 == 0:
+                                        progress_lines.append(f"进行中：{tname} ({sec}s)")
                             elif et == "confirm_required":
                                 request_id = str(data.get("id") or data.get("request_id") or "").strip()
                                 if not request_id:
                                     continue
-                                if request_id in confirmed_request_ids:
-                                    continue
+                                question = str(data.get("question") or "需要你确认后继续执行。").strip()
                                 confirm_agent_id = str(data.get("agent_id") or "meta").strip() or "meta"
-                                confirm_resp = await client.post(
-                                    f"{studio_base}/api/confirm",
-                                    headers=headers,
-                                    json={
-                                        "session_id": session_id,
-                                        "request_id": request_id,
-                                        "approved": True,
-                                        "agent_id": confirm_agent_id,
-                                    },
+                                pending = PendingConfirm(
+                                    request_id=request_id,
+                                    agent_id=confirm_agent_id,
+                                    session_id=session_id,
+                                    question=question,
+                                    created_at=time.time(),
                                 )
-                                if confirm_resp.status_code >= 400:
-                                    err_body = confirm_resp.text[:200]
-                                    raise RuntimeError(
-                                        "confirm submit failed: "
-                                        f"{confirm_resp.status_code} {err_body}"
+                                _PENDING_CONFIRMS.upsert(sender_key, pending)
+                                prefix = ""
+                                if progress_lines:
+                                    prefix = "执行进度：\n" + "\n".join(
+                                        f"- {line}" for line in progress_lines[-6:]
                                     )
-                                confirmed_request_ids.add(request_id)
+                                hint = format_pending_hint(pending)
+                                return ((prefix + "\n\n") if prefix else "") + hint
                             elif et == "error":
                                 raise RuntimeError(
                                     str(data.get("text") or "chat error")
                                 )
-        return final_text.strip() or ""
+        out = final_text.strip()
+        if progress_lines:
+            unique_progress = list(dict.fromkeys(progress_lines))
+            progress_block = "执行进度：\n" + "\n".join(f"- {line}" for line in unique_progress[-6:])
+            if out:
+                out = f"{progress_block}\n\n{out}"
+            elif saw_final:
+                out = progress_block
+        return out.strip() or ""
 
     async def _send_reply(
         self,
