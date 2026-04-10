@@ -27,6 +27,7 @@ import {
 import { Panel } from "./ds/Panel";
 import type { Avatar, ChatPane, ChatStyle, GroupChat } from "../store";
 import { useAppStore } from "../store";
+import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { RECOMMENDED_SKILLS } from "../data/recommended-skills";
 import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
@@ -4301,6 +4302,7 @@ export function SettingsPanel({
   const userPreference = useAppStore((s) => s.userPreference);
   const setUserPreference = useAppStore((s) => s.setUserPreference);
   const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
+  const effectiveMetaAvatarUrl = metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL;
   const setMetaAvatarUrl = useAppStore((s) => s.setMetaAvatarUrl);
   const initializedForOpenRef = useRef(false);
   const toolsTabRef = useRef<ToolsTabHandle>(null);
@@ -4894,17 +4896,11 @@ export function SettingsPanel({
                   <div>
                     <div className="text-sm text-text-muted">Machi 头像</div>
                     <div className="mt-2 flex items-center gap-3">
-                      {metaAvatarUrl ? (
-                        <img
-                          src={metaAvatarUrl}
-                          alt="Machi 头像"
-                          className="h-12 w-12 rounded-full border border-border object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-gradient-to-br from-cyan-500 to-blue-600 text-sm font-semibold text-white">
-                          M
-                        </div>
-                      )}
+                      <img
+                        src={effectiveMetaAvatarUrl}
+                        alt="Machi 头像"
+                        className="h-12 w-12 rounded-full border border-border object-cover"
+                      />
                       <div className="flex flex-wrap items-center gap-2">
                         <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong">
                           上传图片

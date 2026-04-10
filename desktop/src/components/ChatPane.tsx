@@ -37,6 +37,7 @@ import { parseReasoningContent } from "./messages/reasoning-parser";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
 import machiEmptyState from "../assets/machi-logo-transparent.png";
+import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
 const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
@@ -1188,7 +1189,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       // avatarId 为空即为 Machi 窗格；勿依赖 avatarName===「Machi」才给 meta 头像（飞书绑定曾错误写入「分身」）
       const paneName = (pane?.avatarName ?? "").trim();
       const name = paneName && paneName !== "分身" ? paneName : "Machi";
-      return { name, url: metaAvatarUrl || undefined };
+      return { name, url: metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL };
     }
     if (aid.startsWith("group:")) return { name: pane?.avatarName || "AI", url: undefined };
     const found = avatars.find((a) => a.id === aid);
