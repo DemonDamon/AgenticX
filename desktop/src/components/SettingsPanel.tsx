@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Settings2,
   Cpu,
@@ -1249,7 +1257,17 @@ const ADVANCED_TOOL_POLICY_NAMES = new Set<string>(["bash_exec"]);
 const BASH_DEFAULT_TIMEOUT_MIN = 30;
 const BASH_DEFAULT_TIMEOUT_MAX = 3600;
 
-function CcBridgeSettingsPanel() {
+type CcBridgePanelHandle = {
+  save: () => Promise<{ ok: boolean; error?: string }>;
+};
+
+type ToolsTabHandle = {
+  /** 持久化工具页内待提交的项（bash 默认超时 + CC Bridge 配置）。 */
+  saveAll: () => Promise<{ ok: boolean; error?: string }>;
+};
+
+const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, never>>(
+  function CcBridgeSettingsPanel(_props, ref) {
   const apiToken = useAppStore((s) => s.apiToken);
   const backendUrl = useAppStore((s) => s.backendUrl);
   const [url, setUrl] = useState("");
@@ -1294,6 +1312,8 @@ function CcBridgeSettingsPanel() {
         token?: string;
         idle_stop_seconds?: number;
         mode?: string;
+        mode_effective?: string;
+        mode_env_override?: string;
         error?: string;
       };
       if (data.ok) {
@@ -1301,6 +1321,11 @@ function CcBridgeSettingsPanel() {
         setToken(data.token || "");
         const m = (data.mode || "headless").toLowerCase();
         setMode(m === "visible_tui" ? "visible_tui" : "headless");
+        const effective = String(data.mode_effective || "").toLowerCase();
+        const envOverride = String(data.mode_env_override || "").trim();
+        if (effective && effective !== m && envOverride) {
+          setMsg(`检测到环境变量覆盖：AGX_CC_BRIDGE_MODE=${envOverride}（当前生效模式：${effective}）`);
+        }
         const idle = Number.isFinite(data.idle_stop_seconds as number)
           ? Math.max(0, Math.min(86400, Math.round(Number(data.idle_stop_seconds))))
           : 600;
@@ -1319,52 +1344,73 @@ function CcBridgeSettingsPanel() {
     void load();
   }, [load]);
 
-  const save = async () => {
-    setBusy(true);
-    setMsg("");
-    try {
-      const tokenHeader = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
-      const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (tokenHeader) headers["x-agx-desktop-token"] = tokenHeader;
-      const res = await fetch(`${effectiveBase}/api/cc-bridge/config`, {
-        method: "PUT",
-        headers,
-        body: JSON.stringify({
-          url: url.trim(),
-          token,
-          mode,
-          idle_stop_seconds: Math.max(0, Math.min(86400, parseInt(idleStopSeconds || "600", 10) || 600)),
-        }),
-      });
-      const data = (await parseJsonOrError(res)) as {
-        ok?: boolean;
-        url?: string;
-        token?: string;
-        idle_stop_seconds?: number;
-        mode?: string;
-        detail?: unknown;
-      };
-      if (data.ok) {
-        setUrl((data.url || url).trim());
-        setToken(data.token || token);
-        const m = (data.mode || mode).toLowerCase();
-        setMode(m === "visible_tui" ? "visible_tui" : "headless");
-        const idle = Number.isFinite(data.idle_stop_seconds as number)
-          ? Math.max(0, Math.min(86400, Math.round(Number(data.idle_stop_seconds))))
-          : 600;
-        setIdleStopSeconds(String(idle));
-        setMsg("已保存");
-      } else {
-        const d = data.detail;
-        setMsg(typeof d === "string" ? d : d != null ? JSON.stringify(d) : "保存失败");
-      }
-    } catch (e) {
-      setMsg(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  useImperativeHandle(
+    ref,
+    () => ({
+      async save() {
+        if (loading) {
+          return { ok: false, error: "Bridge 配置仍在加载，请稍后再点窗口底部「保存」。" };
+        }
+        setBusy(true);
+        setMsg("");
+        try {
+          const tokenHeader = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
+          const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          if (tokenHeader) headers["x-agx-desktop-token"] = tokenHeader;
+          const res = await fetch(`${effectiveBase}/api/cc-bridge/config`, {
+            method: "PUT",
+            headers,
+            body: JSON.stringify({
+              url: url.trim(),
+              token,
+              mode,
+              idle_stop_seconds: Math.max(0, Math.min(86400, parseInt(idleStopSeconds || "600", 10) || 600)),
+            }),
+          });
+          const data = (await parseJsonOrError(res)) as {
+            ok?: boolean;
+            url?: string;
+            token?: string;
+            idle_stop_seconds?: number;
+            mode?: string;
+            mode_effective?: string;
+            mode_env_override?: string;
+            detail?: unknown;
+          };
+          if (data.ok) {
+            setUrl((data.url || url).trim());
+            setToken(data.token || token);
+            const m = (data.mode || mode).toLowerCase();
+            setMode(m === "visible_tui" ? "visible_tui" : "headless");
+            const effective = String(data.mode_effective || "").toLowerCase();
+            const envOverride = String(data.mode_env_override || "").trim();
+            const idle = Number.isFinite(data.idle_stop_seconds as number)
+              ? Math.max(0, Math.min(86400, Math.round(Number(data.idle_stop_seconds))))
+              : 600;
+            setIdleStopSeconds(String(idle));
+            const hint =
+              effective && effective !== m && envOverride
+                ? `已保存（但当前被 AGX_CC_BRIDGE_MODE=${envOverride} 覆盖，生效模式：${effective}）`
+                : "已保存";
+            setMsg(hint);
+            return { ok: true };
+          }
+          const d = data.detail;
+          const errText = typeof d === "string" ? d : d != null ? JSON.stringify(d) : "保存失败";
+          setMsg(errText);
+          return { ok: false, error: errText };
+        } catch (e) {
+          const errText = String(e);
+          setMsg(errText);
+          return { ok: false, error: errText };
+        } finally {
+          setBusy(false);
+        }
+      },
+    }),
+    [apiToken, backendUrl, idleStopSeconds, loading, mode, parseJsonOrError, token, url],
+  );
 
   const regen = async () => {
     setBusy(true);
@@ -1493,15 +1539,10 @@ function CcBridgeSettingsPanel() {
             onChange={(e) => setIdleStopSeconds(e.target.value.replace(/\D/g, "").slice(0, 5))}
           />
         </div>
+        <p className="text-[11px] text-text-faint">
+          运行模式、URL、token、空闲时间修改后，请点击窗口底部「保存」与「工具」页其它项一并写入本机配置。
+        </p>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-            disabled={busy}
-            onClick={() => void save()}
-          >
-            保存
-          </button>
           <button
             type="button"
             className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-amber-200 disabled:opacity-40"
@@ -1523,9 +1564,10 @@ function CcBridgeSettingsPanel() {
       </div>
     </Panel>
   );
-}
+});
 
-function ToolsTab() {
+const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function ToolsTab(_props, ref) {
+  const ccBridgePanelRef = useRef<CcBridgePanelHandle>(null);
   const [registry, setRegistry] = useState<RegistryTool[]>([]);
   const [policy, setPolicy] = useState<Record<string, boolean>>({});
   const [toolsOptions, setToolsOptions] = useState<StudioToolsOptions>({});
@@ -1622,6 +1664,24 @@ function ToolsTab() {
     }
   }, [bashTimeoutInput, policy, toolsOptions]);
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      async saveAll() {
+        if (loading) {
+          return { ok: false, error: "工具列表仍在加载，请稍后再点窗口底部「保存」。" };
+        }
+        await saveBashDefaultTimeout();
+        const bridge = ccBridgePanelRef.current;
+        if (!bridge) {
+          return { ok: false, error: "Claude Code Bridge 区块未就绪，请稍后再试。" };
+        }
+        return bridge.save();
+      },
+    }),
+    [loading, saveBashDefaultTimeout],
+  );
+
   const startInstall = async (tool: ToolStatusItem) => {
     if (!tool.auto_installable) {
       const command = tool.install_command || "请参考官方文档安装";
@@ -1679,7 +1739,7 @@ function ToolsTab() {
         管理 Agent 可调用工具的全局启停状态。关闭后 Agent 将无法调用该工具。
       </div>
       <div className="text-xs text-text-faint">
-        仅部分工具提供可折叠的「高级设置」；其余工具仅支持启用/停用。
+        仅部分工具提供可折叠的「高级设置」；其余工具仅支持启用/停用。页面底部的「保存」会一并提交本页 bash 默认超时与 Claude Code Bridge 配置。
       </div>
       {error ? (
         <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">{error}</div>
@@ -1856,10 +1916,10 @@ function ToolsTab() {
         </div>
       </Panel>
 
-      <CcBridgeSettingsPanel />
+      <CcBridgeSettingsPanel ref={ccBridgePanelRef} />
     </div>
   );
-}
+});
 
 function pinSkillFirst(skills: SkillItem[], pin: string | null): SkillItem[] {
   if (!pin || skills.length === 0) return skills;
@@ -4243,6 +4303,7 @@ export function SettingsPanel({
   const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
   const setMetaAvatarUrl = useAppStore((s) => s.setMetaAvatarUrl);
   const initializedForOpenRef = useRef(false);
+  const toolsTabRef = useRef<ToolsTabHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
   const [draft, setDraft] = useState<Record<string, ProviderEntry>>({});
@@ -4587,6 +4648,13 @@ export function SettingsPanel({
   };
 
   const handleSave = async () => {
+    if (tab === "tools") {
+      const toolsRes = await toolsTabRef.current?.saveAll();
+      if (toolsRes && !toolsRes.ok) {
+        window.alert(toolsRes.error || "工具页保存失败");
+        return;
+      }
+    }
     const normalized: Record<string, ProviderEntry> = {};
     for (const [name, entry] of Object.entries(draft)) {
       normalized[name] = { ...entry, baseUrl: normalizeBaseUrl(entry.baseUrl) };
@@ -5222,7 +5290,7 @@ export function SettingsPanel({
             )}
 
             {/* === SKILLS TAB === */}
-            {tab === "tools" && <ToolsTab />}
+            {tab === "tools" && <ToolsTab ref={toolsTabRef} />}
 
             {/* === SKILLS TAB === */}
             {tab === "skills" && (
