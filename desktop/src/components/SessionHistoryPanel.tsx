@@ -765,6 +765,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           sessionId: target,
           avatarId: aid.startsWith("group:") ? null : (aid || null),
           avatarName: item.avatar_name || null,
+          provider: pane.modelProvider || null,
+          model: pane.modelName || null,
         });
         setFeishuBoundSessionId(target);
       }
@@ -784,6 +786,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           sessionId: target,
           avatarId: aid.startsWith("group:") ? null : (aid || null),
           avatarName: item.avatar_name || null,
+          provider: pane.modelProvider || null,
+          model: pane.modelName || null,
         });
         setWechatBoundSessionId(target);
       }

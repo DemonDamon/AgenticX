@@ -2080,6 +2080,8 @@ function registerIpc(): void {
     sessionId: string | null;
     avatarId?: string | null;
     avatarName?: string | null;
+    provider?: string | null;
+    model?: string | null;
   }) => {
     let data: Record<string, unknown> = {};
     try {
@@ -2094,10 +2096,14 @@ function registerIpc(): void {
     } else {
       const aid = (payload.avatarId ?? "").toString().trim();
       const aname = (payload.avatarName ?? "").toString().trim();
+      const provider = (payload.provider ?? "").toString().trim();
+      const model = (payload.model ?? "").toString().trim();
       data[FEISHU_DESKTOP_BINDING_KEY] = {
         session_id: sid,
         avatar_id: aid || null,
         avatar_name: aname || null,
+        provider: provider || null,
+        model: model || null,
         bound_at: new Date().toISOString(),
       };
     }
@@ -2136,6 +2142,8 @@ function registerIpc(): void {
     sessionId: string | null;
     avatarId?: string | null;
     avatarName?: string | null;
+    provider?: string | null;
+    model?: string | null;
   }) => {
     let data: Record<string, unknown> = {};
     try {
@@ -2150,10 +2158,14 @@ function registerIpc(): void {
     } else {
       const aid = (payload.avatarId ?? "").toString().trim();
       const aname = (payload.avatarName ?? "").toString().trim();
+      const provider = (payload.provider ?? "").toString().trim();
+      const model = (payload.model ?? "").toString().trim();
       data[WECHAT_DESKTOP_BINDING_KEY] = {
         session_id: sid,
         avatar_id: aid || null,
         avatar_name: aname || null,
+        provider: provider || null,
+        model: model || null,
         bound_at: new Date().toISOString(),
       };
     }

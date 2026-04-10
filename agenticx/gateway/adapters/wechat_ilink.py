@@ -32,6 +32,16 @@ logger = logging.getLogger(__name__)
 _AGX_DIR = Path.home() / ".agenticx"
 _CONFIRM_TTL_SEC = float(os.getenv("AGX_IM_CONFIRM_TIMEOUT_SEC", "300") or "300")
 _PENDING_CONFIRMS = PendingConfirmStore(ttl_seconds=_CONFIRM_TTL_SEC)
+_IM_FALLBACK_ENABLED = (
+    os.getenv("AGX_IM_MODEL_FALLBACK_ENABLED", "1").strip().lower()
+    not in {"0", "false", "off", "no"}
+)
+_IM_FALLBACK_PROVIDER = (
+    os.getenv("AGX_IM_FALLBACK_PROVIDER", "openai").strip() or "openai"
+)
+_IM_FALLBACK_MODEL = (
+    os.getenv("AGX_IM_FALLBACK_MODEL", "gpt-5-chat").strip() or "gpt-5-chat"
+)
 
 _RE_BOLD = re.compile(r"\*\*(.+?)\*\*")
 _RE_ITALIC = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
@@ -83,6 +93,17 @@ def _markdown_to_wechat_text(md: str) -> str:
     while "\n\n\n" in text:
         text = text.replace("\n\n\n", "\n\n")
     return text.strip()
+
+
+def _is_model_param_compat_error(exc: Exception) -> bool:
+    text = str(exc or "").lower()
+    return (
+        "invalid chat setting" in text
+        or "invalid params" in text
+        or "unsupportedparamserror" in text
+        or "unsupported params" in text
+        or "tool_choice" in text
+    )
 
 
 def _indent_code(code: str) -> str:
@@ -251,7 +272,7 @@ class WeChatILinkAdapter:
 
         # Prefer Desktop-bound AGX session id. WeChat sidecar session_id is
         # transport/session metadata and may not exist in Studio session store.
-        bound_session_id = self._resolve_bound_session()
+        bound_session_id, bound_provider, bound_model = self._resolve_bound_session()
         effective_session_id = bound_session_id or session_id
         sender_key = f"wechat:{sender or group_id or session_id or 'unknown'}"
 
@@ -284,6 +305,8 @@ class WeChatILinkAdapter:
                 sender,
                 session_id=effective_session_id,
                 sender_key=sender_key,
+                provider=bound_provider,
+                model=bound_model,
             )
         except Exception as exc:
             recovered_session_id = ""
@@ -294,12 +317,50 @@ class WeChatILinkAdapter:
             if recovered_session_id:
                 try:
                     reply = await self._chat_turn(
-                        user_input, sender, session_id=recovered_session_id
+                        user_input,
+                        sender,
+                        session_id=recovered_session_id,
+                        sender_key=sender_key,
+                        provider=bound_provider,
+                        model=bound_model,
                     )
                 except Exception:
                     logger.exception(
                         "chat_turn retry failed for recovered WeChat session"
                     )
+                    reply = "处理消息时出错，请稍后重试。"
+            elif (
+                _IM_FALLBACK_ENABLED
+                and _is_model_param_compat_error(exc)
+                and not (
+                    (bound_provider or "").lower() == _IM_FALLBACK_PROVIDER.lower()
+                    and (bound_model or "").lower() == _IM_FALLBACK_MODEL.lower()
+                )
+            ):
+                try:
+                    logger.warning(
+                        "WeChat IM model incompatible (%s/%s): %s; fallback to %s/%s",
+                        bound_provider or "-",
+                        bound_model or "-",
+                        str(exc)[:200],
+                        _IM_FALLBACK_PROVIDER,
+                        _IM_FALLBACK_MODEL,
+                    )
+                    fallback_reply = await self._chat_turn(
+                        user_input,
+                        sender,
+                        session_id=effective_session_id,
+                        sender_key=sender_key,
+                        provider=_IM_FALLBACK_PROVIDER,
+                        model=_IM_FALLBACK_MODEL,
+                    )
+                    notice = (
+                        "⚠️ 当前模型不兼容，已自动回退到 "
+                        f"`{_IM_FALLBACK_PROVIDER}/{_IM_FALLBACK_MODEL}`。"
+                    )
+                    reply = f"{notice}\n\n{fallback_reply}" if fallback_reply else notice
+                except Exception:
+                    logger.exception("chat_turn fallback failed for WeChat message")
                     reply = "处理消息时出错，请稍后重试。"
             else:
                 logger.exception("chat_turn failed for WeChat message")
@@ -347,8 +408,8 @@ class WeChatILinkAdapter:
             logger.exception("media download error")
             return None
 
-    def _resolve_bound_session(self) -> str:
-        """Read wechat_binding.json _desktop.session_id."""
+    def _resolve_bound_session(self) -> tuple[str, Optional[str], Optional[str]]:
+        """Read wechat_binding.json _desktop session/model binding."""
         binding_file = _AGX_DIR / "wechat_binding.json"
         try:
             import json as _json
@@ -356,10 +417,14 @@ class WeChatILinkAdapter:
             data = _json.loads(binding_file.read_text("utf-8"))
             desk = data.get("_desktop")
             if isinstance(desk, dict):
-                return str(desk.get("session_id") or "").strip()
+                return (
+                    str(desk.get("session_id") or "").strip(),
+                    (str(desk.get("provider") or "").strip() or None),
+                    (str(desk.get("model") or "").strip() or None),
+                )
         except (FileNotFoundError, ValueError, KeyError):
             pass
-        return ""
+        return "", None, None
 
     async def _submit_confirm(
         self,
@@ -489,6 +554,8 @@ class WeChatILinkAdapter:
         *,
         session_id: str = "",
         sender_key: str = "",
+        provider: str | None = None,
+        model: str | None = None,
     ) -> str:
         """Send message to agx serve /api/chat and collect reply."""
         studio_base, headers = self._resolve_studio()
@@ -503,6 +570,10 @@ class WeChatILinkAdapter:
             }
             if session_id:
                 body["session_id"] = session_id
+            if provider:
+                body["provider"] = provider
+            if model:
+                body["model"] = model
             final_text = ""
             progress_lines: list[str] = []
             saw_final = False

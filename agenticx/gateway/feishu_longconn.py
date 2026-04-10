@@ -42,6 +42,16 @@ _DESKTOP_BINDING_KEY = "_desktop"
 _BINDING_SCOPE_ENV = "AGX_FEISHU_BINDING_SCOPE"
 _CONFIRM_TTL_SEC = float(os.getenv("AGX_IM_CONFIRM_TIMEOUT_SEC", "300") or "300")
 _PENDING_CONFIRMS = PendingConfirmStore(ttl_seconds=_CONFIRM_TTL_SEC)
+_IM_FALLBACK_ENABLED = (
+    os.getenv("AGX_IM_MODEL_FALLBACK_ENABLED", "1").strip().lower()
+    not in {"0", "false", "off", "no"}
+)
+_IM_FALLBACK_PROVIDER = (
+    os.getenv("AGX_IM_FALLBACK_PROVIDER", "openai").strip() or "openai"
+)
+_IM_FALLBACK_MODEL = (
+    os.getenv("AGX_IM_FALLBACK_MODEL", "gpt-5-chat").strip() or "gpt-5-chat"
+)
 
 
 def _read_serve_info() -> tuple[str, str]:
@@ -263,6 +273,17 @@ def _is_status(text: str) -> bool:
     return t in ("状态", "status", "/status", "/ping", "ping")
 
 
+def _is_model_param_compat_error(exc: Exception) -> bool:
+    text = str(exc or "").lower()
+    return (
+        "invalid chat setting" in text
+        or "invalid params" in text
+        or "unsupportedparamserror" in text
+        or "unsupported params" in text
+        or "tool_choice" in text
+    )
+
+
 # ---------------------------------------------------------------------------
 # Feishu ↔ Machi session binding (shared with Desktop via JSON file)
 # ---------------------------------------------------------------------------
@@ -310,6 +331,8 @@ def _extract_binding(raw: Any) -> Optional[Dict[str, Any]]:
         "session_id": sid,
         "avatar_id": (str(raw.get("avatar_id") or "").strip() or None),
         "avatar_name": (str(raw.get("avatar_name") or "").strip() or None),
+        "provider": (str(raw.get("provider") or "").strip() or None),
+        "model": (str(raw.get("model") or "").strip() or None),
     }
 
 
@@ -418,10 +441,10 @@ async def _bootstrap_session(
     session_id: str,
     headers: Dict[str, str],
     avatar_id: Optional[str] = None,
-) -> str:
+) -> Tuple[str, Optional[str], Optional[str]]:
     """GET /api/session to ensure session exists; pass avatar_id when session is avatar-bound.
 
-    Returns the actual session_id from the response (may differ from input when creating new).
+    Returns (session_id, provider, model) from current session state.
     """
     timeout = httpx.Timeout(60.0, connect=30.0)
     params: Dict[str, str] = {}
@@ -442,9 +465,11 @@ async def _bootstrap_session(
         try:
             data = r.json()
             actual_sid = str(data.get("session_id") or "").strip()
-            return actual_sid if actual_sid else sid
+            provider = str(data.get("provider") or "").strip() or None
+            model = str(data.get("model") or "").strip() or None
+            return (actual_sid if actual_sid else sid), provider, model
         except Exception:
-            return sid
+            return sid, None, None
 
 
 async def _list_sessions_api(
@@ -535,8 +560,12 @@ async def _feishu_cmd_reply(
         aid_s = str(aid).strip() if aid else ""
         aname = str(match.get("avatar_name") or "").strip() or None
         try:
-            _ = await _bootstrap_session(studio_base, sid, headers,
-                                         avatar_id=aid_s or None)
+            _, _, _ = await _bootstrap_session(
+                studio_base,
+                sid,
+                headers,
+                avatar_id=aid_s or None,
+            )
         except Exception as exc:
             return f"无法打开该会话：{exc}"
         if not open_id:
@@ -548,6 +577,8 @@ async def _feishu_cmd_reply(
             "session_id": sid,
             "avatar_id": aid_s or None,
             "avatar_name": aname,
+            "provider": (str(match.get("provider") or "").strip() or None),
+            "model": (str(match.get("model") or "").strip() or None),
         }
         _save_binding(open_id, binding_payload)
         return (
@@ -591,7 +622,12 @@ async def _feishu_cmd_reply(
 
         try:
             # If no existing session, pass empty sid so backend auto-creates one
-            actual_sid = await _bootstrap_session(studio_base, sid, headers, avatar_id=avatar_id)
+            actual_sid, _, _ = await _bootstrap_session(
+                studio_base,
+                sid,
+                headers,
+                avatar_id=avatar_id,
+            )
             if actual_sid:
                 sid = actual_sid
         except Exception as exc:
@@ -608,6 +644,8 @@ async def _feishu_cmd_reply(
             "session_id": sid,
             "avatar_id": avatar_id,
             "avatar_name": avatar_name or None,
+            "provider": (str(found.get("default_provider") or "").strip() or None),
+            "model": (str(found.get("default_model") or "").strip() or None),
         }
         _save_binding(open_id, binding_payload)
         return (
@@ -691,20 +729,26 @@ async def _chat_turn(
     sender_key: str,
     headers: Dict[str, str],
     avatar_id: Optional[str] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Send one message to local agx serve and collect the final reply."""
-    timeout = httpx.Timeout(600.0, connect=30.0)
-    async with _no_proxy_client(timeout=timeout) as client:
-        actual_sid = await _bootstrap_session(
-            studio_base, session_id, headers, avatar_id=avatar_id
-        )
-        target_sid = (actual_sid or session_id or "").strip()
 
-        body = {
+    async def _chat_once(
+        client: httpx.AsyncClient,
+        target_sid: str,
+        req_provider: Optional[str],
+        req_model: Optional[str],
+    ) -> str:
+        body: Dict[str, Any] = {
             "session_id": target_sid,
             "user_input": text,
             "user_display_name": sender_name,
         }
+        if req_provider:
+            body["provider"] = req_provider
+        if req_model:
+            body["model"] = req_model
         final_text = ""
         progress_lines: List[str] = []
         saw_final = False
@@ -781,18 +825,59 @@ async def _chat_turn(
                                     created_at=time.time(),
                                 )
                             )
-                            return ((status_prefix + "\n\n") if status_prefix else "") + hint, target_sid
+                            return ((status_prefix + "\n\n") if status_prefix else "") + hint
                         elif et == "error":
                             raise RuntimeError(str(data.get("text") or "chat error"))
-    out = final_text.strip()
-    if progress_lines:
-        unique_progress = list(dict.fromkeys(progress_lines))
-        progress_block = "执行进度：\n" + "\n".join(f"- {line}" for line in unique_progress[-6:])
-        if out:
-            out = f"{progress_block}\n\n{out}"
-        elif saw_final:
-            out = progress_block
-    return out or "（无文本回复）", target_sid
+        out = final_text.strip()
+        if progress_lines:
+            unique_progress = list(dict.fromkeys(progress_lines))
+            progress_block = "执行进度：\n" + "\n".join(f"- {line}" for line in unique_progress[-6:])
+            if out:
+                out = f"{progress_block}\n\n{out}"
+            elif saw_final:
+                out = progress_block
+        return out or "（无文本回复）"
+
+    timeout = httpx.Timeout(600.0, connect=30.0)
+    async with _no_proxy_client(timeout=timeout) as client:
+        actual_sid, session_provider, session_model = await _bootstrap_session(
+            studio_base, session_id, headers, avatar_id=avatar_id
+        )
+        target_sid = (actual_sid or session_id or "").strip()
+        req_provider = (provider or session_provider or "").strip() or None
+        req_model = (model or session_model or "").strip() or None
+        try:
+            out = await _chat_once(client, target_sid, req_provider, req_model)
+            return out, target_sid
+        except Exception as exc:
+            if (
+                _IM_FALLBACK_ENABLED
+                and _is_model_param_compat_error(exc)
+                and not (
+                    (req_provider or "").lower() == _IM_FALLBACK_PROVIDER.lower()
+                    and (req_model or "").lower() == _IM_FALLBACK_MODEL.lower()
+                )
+            ):
+                logger.warning(
+                    "Feishu IM model incompatible (%s/%s): %s; fallback to %s/%s",
+                    req_provider or "-",
+                    req_model or "-",
+                    str(exc)[:200],
+                    _IM_FALLBACK_PROVIDER,
+                    _IM_FALLBACK_MODEL,
+                )
+                out = await _chat_once(
+                    client,
+                    target_sid,
+                    _IM_FALLBACK_PROVIDER,
+                    _IM_FALLBACK_MODEL,
+                )
+                notice = (
+                    f"⚠️ 当前模型不兼容，已自动回退到 "
+                    f"`{_IM_FALLBACK_PROVIDER}/{_IM_FALLBACK_MODEL}`。"
+                )
+                return (f"{notice}\n\n{out}" if out else notice), target_sid
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -1004,6 +1089,8 @@ class FeishuLongConnRunner:
         binding = _resolve_binding_for_sender(open_id)
         effective_sid = binding["session_id"] if binding else default_sid
         effective_avatar = binding.get("avatar_id") if binding else None
+        effective_provider = binding.get("provider") if binding else None
+        effective_model = binding.get("model") if binding else None
         sender_key = f"feishu:{open_id or chat_id or 'unknown'}"
 
         cmd = _parse_feishu_command(text)
@@ -1050,6 +1137,8 @@ class FeishuLongConnRunner:
                     sender_key,
                     headers,
                     avatar_id=effective_avatar,
+                    provider=effective_provider,
+                    model=effective_model,
                 )
                 if binding and used_sid and used_sid != effective_sid:
                     try:
@@ -1057,6 +1146,8 @@ class FeishuLongConnRunner:
                             "session_id": used_sid,
                             "avatar_id": effective_avatar,
                             "avatar_name": binding.get("avatar_name"),
+                            "provider": effective_provider,
+                            "model": effective_model,
                         }
                         _save_binding(open_id, rebound_payload)
                     except Exception as bind_exc:

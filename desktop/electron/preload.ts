@@ -65,6 +65,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     sessionId: string | null;
     avatarId?: string | null;
     avatarName?: string | null;
+    provider?: string | null;
+    model?: string | null;
   }) => ipcRenderer.invoke("save-feishu-desktop-binding", payload),
 
   loadWechatBinding: async () =>
@@ -73,6 +75,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     sessionId: string | null;
     avatarId?: string | null;
     avatarName?: string | null;
+    provider?: string | null;
+    model?: string | null;
   }) => ipcRenderer.invoke("save-wechat-desktop-binding", payload),
 
   wechatSidecarStart: async () =>

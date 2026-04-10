@@ -324,6 +324,8 @@ declare global {
         sessionId: string | null;
         avatarId?: string | null;
         avatarName?: string | null;
+        provider?: string | null;
+        model?: string | null;
       }) => Promise<{ ok: boolean }>;
 
       loadWechatBinding: () => Promise<{ ok: boolean; bindings: Record<string, unknown> }>;
@@ -331,6 +333,8 @@ declare global {
         sessionId: string | null;
         avatarId?: string | null;
         avatarName?: string | null;
+        provider?: string | null;
+        model?: string | null;
       }) => Promise<{ ok: boolean }>;
 
       wechatSidecarStart: () => Promise<{ ok: boolean; port: number }>;
