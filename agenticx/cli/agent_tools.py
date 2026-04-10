@@ -1695,10 +1695,30 @@ def _tool_mcp_connect(arguments: Dict[str, Any], session: StudioSession) -> str:
     return f"ERROR: connect failed: {d}" if d else "ERROR: connect failed"
 
 
+def _find_git_root_for_cc_bridge(start: Path, *, max_up: int = 48) -> Optional[Path]:
+    """Walk upward from start looking for a `.git` directory."""
+    cur = start
+    for _ in range(max_up):
+        try:
+            if (cur / ".git").exists():
+                return cur
+        except OSError:
+            break
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+    return None
+
+
 def _session_default_cwd_for_cc_bridge(session: StudioSession) -> str:
     w = str(getattr(session, "workspace_dir", "") or "").strip()
     if w:
-        return str(Path(w).expanduser().resolve(strict=False))
+        base = Path(w).expanduser().resolve(strict=False)
+        git_root = _find_git_root_for_cc_bridge(base)
+        if git_root is not None:
+            return str(git_root)
+        return str(base)
     return str(Path.cwd().resolve(strict=False))
 
 
@@ -2074,7 +2094,11 @@ async def _tool_cc_bridge_start(arguments: Dict[str, Any], session: StudioSessio
     )
 
 
-async def _tool_cc_bridge_send(arguments: Dict[str, Any], session: StudioSession) -> str:
+async def _cc_bridge_resolve_session_mode(session: StudioSession, sid: str) -> Tuple[Optional[str], str]:
+    """Resolve headless|visible_tui for sid via GET /v1/sessions/{id}, then list fallback.
+
+    Returns (mode, ""). If session is missing, (None, error_text).
+    """
     from agenticx.cc_bridge.settings import (
         cc_bridge_base_url,
         cc_bridge_mode,
@@ -2085,8 +2109,59 @@ async def _tool_cc_bridge_send(arguments: Dict[str, Any], session: StudioSession
     try:
         import httpx
     except ImportError:
-        return "ERROR: httpx is required for cc_bridge tools"
+        return (None, "ERROR: httpx is required for cc_bridge tools")
 
+    detail = await _tool_cc_bridge_http(
+        session, "GET", f"/v1/sessions/{sid}", None, timeout_sec=15.0
+    )
+    if not detail.startswith("ERROR:"):
+        try:
+            obj = json.loads(detail)
+            if isinstance(obj, dict):
+                mv = str(obj.get("mode", "")).strip().lower()
+                if mv in {"headless", "visible_tui"}:
+                    return (mv, "")
+        except Exception:
+            pass
+    else:
+        err = detail
+        if "session not found" in err.lower():
+            return (None, err)
+
+    resolved_mode = str(cc_bridge_mode() or "headless").strip().lower()
+    if resolved_mode not in {"headless", "visible_tui"}:
+        resolved_mode = "headless"
+
+    base = cc_bridge_base_url()
+    err = validate_bridge_url_for_studio(base)
+    if not err:
+        token = cc_bridge_token()
+        headers = {"Authorization": f"Bearer {token}"}
+        list_url = f"{base}/v1/sessions"
+        try:
+            async with httpx.AsyncClient(**_cc_bridge_http_client_kwargs(base, 15.0)) as client:
+                r = await client.get(list_url, headers=headers)
+            if r.status_code < 400:
+                payload = r.json() if r.content else {}
+                if isinstance(payload, dict):
+                    sessions = payload.get("sessions")
+                    if isinstance(sessions, list):
+                        for item in sessions:
+                            if not isinstance(item, dict):
+                                continue
+                            if str(item.get("session_id", "")).strip() != sid:
+                                continue
+                            mode_value = str(item.get("mode", "")).strip().lower()
+                            if mode_value in {"headless", "visible_tui"}:
+                                return (mode_value, "")
+                            break
+        except Exception:
+            pass
+
+    return (resolved_mode, "")
+
+
+async def _tool_cc_bridge_send(arguments: Dict[str, Any], session: StudioSession) -> str:
     sid = str(arguments.get("session_id", "")).strip()
     prompt = str(arguments.get("prompt", "") or "")
     if not sid or not prompt:
@@ -2097,37 +2172,35 @@ async def _tool_cc_bridge_send(arguments: Dict[str, Any], session: StudioSession
     except (TypeError, ValueError):
         wait_f = 120.0
     wait_f = max(1.0, min(3600.0, wait_f))
-    resolved_mode = cc_bridge_mode()
-    if resolved_mode != "visible_tui":
-        # Fallback probe: UI config may be out-of-sync with runtime config,
-        # so detect the real session mode from bridge list before deciding.
-        base = cc_bridge_base_url()
-        err = validate_bridge_url_for_studio(base)
-        if not err:
-            token = cc_bridge_token()
-            headers = {"Authorization": f"Bearer {token}"}
-            list_url = f"{base}/v1/sessions"
-            try:
-                async with httpx.AsyncClient(**_cc_bridge_http_client_kwargs(base, 15.0)) as client:
-                    r = await client.get(list_url, headers=headers)
-                if r.status_code < 400:
-                    payload = r.json() if r.content else {}
-                    if isinstance(payload, dict):
-                        sessions = payload.get("sessions")
-                        if isinstance(sessions, list):
-                            for item in sessions:
-                                if isinstance(item, dict) and str(item.get("session_id", "")).strip() == sid:
-                                    mode_value = str(item.get("mode", "")).strip().lower()
-                                    if mode_value:
-                                        resolved_mode = mode_value
-                                    break
-            except Exception:
-                # Keep configured mode as fallback.
-                pass
+
+    resolved_mode, resolve_err = await _cc_bridge_resolve_session_mode(session, sid)
+    if resolved_mode is None:
+        return resolve_err
+
+    async def _post_message() -> str:
+        return await _tool_cc_bridge_http(
+            session,
+            "POST",
+            f"/v1/sessions/{sid}/message",
+            {"text": prompt, "wait_seconds": wait_f},
+            timeout_sec=wait_f + 45.0,
+        )
+
+    def _decorate_message_response(resp_text: str, *, mode_corrected: bool) -> str:
+        if not mode_corrected:
+            return resp_text
+        if resp_text.startswith("ERROR:"):
+            return resp_text
+        try:
+            obj = json.loads(resp_text)
+            if isinstance(obj, dict):
+                obj["mode_corrected"] = True
+                return json.dumps(obj, ensure_ascii=False)
+        except Exception:
+            pass
+        return f"{resp_text}\n[cc-bridge] mode_corrected=true"
 
     if resolved_mode == "visible_tui":
-        # visible_tui is interactive by design; return quickly so user can keep operating
-        # in the embedded terminal without waiting for parser heuristics.
         write_res = await _tool_cc_bridge_http(
             session,
             "POST",
@@ -2135,6 +2208,9 @@ async def _tool_cc_bridge_send(arguments: Dict[str, Any], session: StudioSession
             {"data": f"{prompt}\r"},
             timeout_sec=30.0,
         )
+        if write_res.startswith("ERROR:") and "write is only for visible_tui" in write_res.lower():
+            msg_res = await _post_message()
+            return _decorate_message_response(msg_res, mode_corrected=True)
         if write_res.startswith("ERROR:"):
             return write_res
         return json.dumps(
@@ -2154,13 +2230,8 @@ async def _tool_cc_bridge_send(arguments: Dict[str, Any], session: StudioSession
             },
             ensure_ascii=False,
         )
-    resp_text = await _tool_cc_bridge_http(
-        session,
-        "POST",
-        f"/v1/sessions/{sid}/message",
-        {"text": prompt, "wait_seconds": wait_f},
-        timeout_sec=wait_f + 45.0,
-    )
+
+    resp_text = await _post_message()
     if resp_text.startswith("ERROR:"):
         return resp_text
     try:

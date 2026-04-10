@@ -52,6 +52,67 @@ def test_list_sessions_ok(client: TestClient) -> None:
         assert "mode" in item
 
 
+def test_get_session_detail_not_found(client: TestClient) -> None:
+    missing = "00000000-0000-0000-0000-000000000001"
+    r = client.get(
+        f"/v1/sessions/{missing}",
+        headers={"Authorization": "Bearer test-secret-token"},
+    )
+    assert r.status_code == 404
+    assert "not found" in (r.json().get("detail") or "").lower()
+
+
+def test_get_session_detail_ok(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agenticx.cc_bridge import http_app as ha
+
+    sid = "11111111-1111-1111-1111-111111111111"
+
+    def fake_describe(session_id: str):
+        if session_id == sid:
+            return {
+                "session_id": sid,
+                "cwd": "/tmp",
+                "pid": 42,
+                "poll": None,
+                "log_path": "/tmp/x.log",
+                "mode": "headless",
+                "state": "running",
+                "interactive_waiting": False,
+            }
+        return None
+
+    monkeypatch.setattr(ha._manager, "describe_session", fake_describe)
+    r = client.get(f"/v1/sessions/{sid}", headers={"Authorization": "Bearer test-secret-token"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["session_id"] == sid
+    assert body["mode"] == "headless"
+    assert body["cwd"] == "/tmp"
+
+
+def test_headless_session_write_returns_400(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """PTY /write must reject headless sessions (regression for cc_bridge_send routing)."""
+    from agenticx.cc_bridge import http_app as ha
+
+    sid = "00000000-0000-0000-0000-000000000099"
+
+    class _FakeSess:
+        session_kind = "headless"
+        cwd = "/tmp"
+        proc = type("P", (), {"pid": 123, "poll": lambda self: None})()
+        log_path = ""
+
+    monkeypatch.setattr(ha._manager, "get", lambda _sid: _FakeSess() if _sid == sid else None)
+
+    r = client.post(
+        f"/v1/sessions/{sid}/write",
+        headers={"Authorization": "Bearer test-secret-token"},
+        json={"data": "x"},
+    )
+    assert r.status_code == 400
+    assert "visible_tui" in (r.json().get("detail") or "").lower()
+
+
 def test_create_session_invalid_mode(client: TestClient) -> None:
     r = client.post(
         "/v1/sessions",

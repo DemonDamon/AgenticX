@@ -214,6 +214,75 @@ def _zhipu_glm5_family_no_vision(model_name: str) -> bool:
     return raw == "glm-5" or raw.startswith("glm-5-")
 
 
+async def _llm_suggest_session_title_job(manager: SessionManager, session_id: str) -> None:
+    """Background: replace query-truncated title with a short LLM title (one-shot per session)."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    try:
+        managed = manager.get(sid, touch=False)
+        if managed is None:
+            return
+        session = managed.studio_session
+        override = (os.environ.get("AGX_SESSION_TITLE_MODEL") or "").strip()
+        try:
+            timeout_raw = os.environ.get("AGX_SESSION_TITLE_TIMEOUT_SECONDS", "28")
+            title_timeout = float(str(timeout_raw).strip() or "28")
+        except (TypeError, ValueError):
+            title_timeout = 28.0
+        if title_timeout <= 0:
+            title_timeout = 28.0
+        try:
+            if override:
+                llm = ProviderResolver.resolve(
+                    provider_name=session.provider_name,
+                    model=override,
+                )
+            else:
+                llm = ProviderResolver.resolve(
+                    provider_name=session.provider_name,
+                    model=session.model_name,
+                )
+        except Exception as exc:
+            logger.warning("[session_title] provider resolve failed session_id=%s: %s", sid, exc)
+            manager.apply_llm_suggested_session_title(sid, None)
+            return
+
+        hist = session.chat_history or []
+        first_user = ""
+        first_asst = ""
+        for item in hist:
+            role = str(item.get("role") or "")
+            text = SessionManager._text_from_chat_history_item(item)
+            if not text:
+                continue
+            if role == "user" and not first_user:
+                first_user = text
+            elif role == "assistant" and not first_asst:
+                first_asst = text
+            if first_user and first_asst:
+                break
+
+        system = (
+            "你是会话命名助手。根据用户首条问题与助手首条可见回复，输出一个简洁中文标题："
+            "单行，不超过20个汉字；不要引号或书名号；不要以冒号、句号结尾；不要复述整句用户原文。"
+        )
+        user_block = f"用户：{first_user[:600]}\n\n助手：{first_asst[:1200]}"
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_block},
+        ]
+        resp = await asyncio.wait_for(llm.ainvoke(messages), timeout=title_timeout)
+        raw = (resp.content or "").strip()
+        manager.apply_llm_suggested_session_title(sid, raw)
+    except Exception as exc:
+        logger.warning("[session_title] llm suggest failed session_id=%s: %s", sid, exc)
+        try:
+            manager.apply_llm_suggested_session_title(sid, None)
+        except Exception:
+            pass
+
+
 def _build_automation_runner_system_prompt(
     automation_avatar_id: str,
     taskspaces: list[Any] | None,
@@ -1585,6 +1654,12 @@ def create_studio_app() -> FastAPI:
                             logger.info("[sse] yielding %s agent=%s", event.type, event.agent_id)
                         for line in _runtime_event_to_sse_lines(event):
                             yield line
+                        if event.type == EventType.FINAL.value and event.agent_id == "meta":
+                            snap = str(getattr(managed, "session_name", None) or "").strip()
+                            if manager.claim_llm_title_slot(payload.session_id, snap):
+                                asyncio.create_task(
+                                    _llm_suggest_session_title_job(manager, payload.session_id)
+                                )
                     if not meta_done:
                         continue
                     # Do not block the main chat stream on background sub-agent execution.

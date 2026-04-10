@@ -8,6 +8,11 @@ import { CommandPalette } from "./CommandPalette";
 import { QuickActions } from "./QuickActions";
 import { ShortcutHints } from "./ShortcutHints";
 import { createPhase1Registry } from "../core/command-registry";
+import {
+  ccBridgeSendToolProgressLabel,
+  parseCcBridgeModeFromPayload,
+  type CcBridgeSessionModeHint,
+} from "../utils/cc-bridge-ui";
 import { KeybindingsPanel } from "./KeybindingsPanel";
 import { attachmentsFromSessionRow } from "../utils/session-message-map";
 import { MessageRenderer } from "./messages/MessageRenderer";
@@ -306,6 +311,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const polledEventSeenRef = useRef<Record<string, Set<string>>>({});
   const subAgentsRef = useRef(subAgents);
   const subAgentStatusRef = useRef<Record<string, string>>({});
+  const ccBridgeLastSessionModeRef = useRef<CcBridgeSessionModeHint>("");
   const isLite = mode === "lite";
   const applyUserMode = useCallback(
     async (nextMode: "pro" | "lite") => {
@@ -410,6 +416,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     for (const item of subAgents) next[item.id] = item.status;
     subAgentStatusRef.current = next;
   }, [subAgents]);
+
+  useEffect(() => {
+    ccBridgeLastSessionModeRef.current = "";
+  }, [sessionId]);
 
   useEffect(() => {
     if (!commandPaletteOpen || isLite) return;
@@ -784,9 +794,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
               const waitLabel = (() => {
                 if (name === "cc_bridge_send") {
-                  return Number.isFinite(sec)
-                    ? `⏳ ${name} 执行中…（已等待 ${sec}s；可见模式：请先单击右侧工作区「claude-code」终端内部，再按键盘操作）`
-                    : `⏳ ${name} 执行中…（可见模式：先单击右侧「claude-code」终端再按键）`;
+                  return ccBridgeSendToolProgressLabel(sec, ccBridgeLastSessionModeRef.current);
                 }
                 return Number.isFinite(sec)
                   ? `⏳ ${name} 执行中…（已等待 ${sec}s）`
@@ -810,10 +818,20 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             }
             if (payload.type === "tool_call") {
               const toolName = payload.data?.name ?? "tool";
-              const toolArgs = payload.data?.arguments ?? payload.data?.args ?? {};
+              const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
+              if (eventAgentId === "meta" && toolName === "cc_bridge_start") {
+                const modeHint = parseCcBridgeModeFromPayload(toolArgs);
+                if (modeHint === "headless") {
+                  ccBridgeLastSessionModeRef.current = "headless";
+                } else if (modeHint === "visible_tui") {
+                  ccBridgeLastSessionModeRef.current = "visible_tui";
+                }
+              }
               const SILENT_TOOLS_SSE = new Set(["check_resources"]);
               if (!SILENT_TOOLS_SSE.has(toolName)) {
-                const content = `🔧 ${toolName}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
+                const content = `🔧 ${toolName}: ${JSON.stringify(
+                  payload.data?.arguments ?? payload.data?.args ?? {}
+                ).slice(0, 120)}`;
                 if (eventAgentId === "meta") {
                   commitCurrentStreamIfNeeded();
                   full = "";
@@ -841,6 +859,12 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                 resultText = JSON.stringify(parsed, null, 2);
               } catch {
                 // Keep original plain text if not JSON.
+              }
+              if (eventAgentId === "meta" && toolName === "cc_bridge_start" && resultObjForCc) {
+                const hint = parseCcBridgeModeFromPayload(resultObjForCc);
+                if (hint) {
+                  ccBridgeLastSessionModeRef.current = hint;
+                }
               }
               const formatted = formatToolResultMessage(toolName, resultText);
               if (formatted.silent) continue;

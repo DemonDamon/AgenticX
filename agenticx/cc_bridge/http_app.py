@@ -78,6 +78,19 @@ class MessageResponse(BaseModel):
     mode: str = "headless"
 
 
+class SessionDetailResponse(BaseModel):
+    """Authoritative single-session view for routing (cc_bridge_send, Desktop)."""
+
+    session_id: str
+    cwd: str
+    pid: Optional[int]
+    poll: Optional[int] = None
+    log_path: str = ""
+    mode: str = "headless"
+    state: str = "running"
+    interactive_waiting: bool = False
+
+
 class PermissionBody(BaseModel):
     request_id: str
     allow: bool
@@ -119,6 +132,20 @@ def create_session(body: SessionCreateBody) -> SessionCreateResponse:
 @app.get("/v1/sessions", dependencies=[Depends(verify_token)])
 def list_sessions() -> Dict[str, List[Dict[str, Any]]]:
     return {"sessions": _manager.list_sessions()}
+
+
+@app.get(
+    "/v1/sessions/{session_id}",
+    response_model=SessionDetailResponse,
+    dependencies=[Depends(verify_token)],
+)
+def get_session(session_id: str) -> SessionDetailResponse:
+    """Return authoritative mode/cwd for one session (used by cc_bridge_send routing)."""
+    session_id = _parse_session_id(session_id)
+    row = _manager.describe_session(session_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="session not found") from None
+    return SessionDetailResponse(**row)
 
 
 @app.post("/v1/sessions/{session_id}/message", response_model=MessageResponse, dependencies=[Depends(verify_token)])

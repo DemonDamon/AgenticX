@@ -199,6 +199,7 @@ function isSessionVisibleInPane(row: SessionRow, paneAvatarId: string | null): b
 }
 
 export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onClose, tintColor }: Props) {
+  const sessionCatalogRevision = useAppStore((s) => s.sessionCatalogRevision);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const setPaneHistorySearchTerms = useAppStore((s) => s.setPaneHistorySearchTerms);
@@ -313,7 +314,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   useEffect(() => {
     if (!pane.historyOpen) return;
     void loadSessions();
-  }, [pane.historyOpen, pane.avatarId, pane.sessionId]);
+  }, [pane.historyOpen, pane.avatarId, pane.sessionId, sessionCatalogRevision]);
 
   useEffect(() => {
     if (!pane.historyOpen) setSessionSearchQuery("");
@@ -646,7 +647,12 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     }
   };
 
-  const renderSessionItem = (item: SessionRow, contentSnippet?: string) => {
+  /** 置顶「飞书绑定 / 微信绑定」区块内同一 session 可能双渠道绑定，按区块只显示对应渠道徽标，避免两行都出现双标。 */
+  const renderSessionItem = (
+    item: SessionRow,
+    contentSnippet?: string,
+    imBadgeScope: "all" | "feishu-only" | "wechat-only" = "all"
+  ) => {
     if (!item || !item.session_id) return null;
     const active = item.session_id === pane.sessionId;
     const label = sessionHistoryLabel(item);
@@ -654,6 +660,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     const createdAt = getSessionCreatedTimestamp(item) || Date.now() / 1000;
     const feishuMarked = feishuMarkedSessionId === item.session_id;
     const wechatMarked = wechatMarkedSessionId === item.session_id;
+    const showFeishuChip =
+      imBadgeScope === "wechat-only" ? false : feishuMarked;
+    const showWechatChip =
+      imBadgeScope === "feishu-only" ? false : wechatMarked;
     return (
       <div key={item.session_id} className="mb-1">
         {editingId === item.session_id ? (
@@ -705,10 +715,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               ) : null}
               {item.pinned ? <span className="text-[10px] text-amber-300">pin</span> : null}
               <span className="truncate">{label}</span>
-              {feishuMarked ? (
+              {showFeishuChip ? (
                 <FeishuBadge />
               ) : null}
-              {wechatMarked ? (
+              {showWechatChip ? (
                 <span
                   className="inline-flex shrink-0 items-center rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
                   style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
@@ -1029,7 +1039,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 </div>
                 {renderSessionItem(
                   feishuSession,
-                  sessionSearchTrim ? messageSearchSnippets[feishuSession.session_id] : undefined
+                  sessionSearchTrim ? messageSearchSnippets[feishuSession.session_id] : undefined,
+                  "feishu-only"
                 )}
               </div>
             ) : null}
@@ -1046,7 +1057,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 </div>
                 {renderSessionItem(
                   wechatSession,
-                  sessionSearchTrim ? messageSearchSnippets[wechatSession.session_id] : undefined
+                  sessionSearchTrim ? messageSearchSnippets[wechatSession.session_id] : undefined,
+                  "wechat-only"
                 )}
               </div>
             ) : null}
