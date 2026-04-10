@@ -78,6 +78,7 @@ const FALLBACK_PANE: ChatPaneState = {
   terminalTabs: [],
   activeTerminalTabId: null,
   sessionTokens: { input: 0, output: 0 },
+  historySearchTerms: [],
 };
 
 function NewTopicIconButtons({ onNewTopic }: { onNewTopic: (inherit: boolean) => void }) {
@@ -1572,13 +1573,65 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           sessionId: pane.sessionId,
           avatarId: aid,
           avatarName: pane.avatarName || null,
+          provider: pane.modelProvider || null,
+          model: pane.modelName || null,
         });
         setFeishuDesktopBound(true);
       }
     } catch {
       /* ignore */
     }
-  }, [feishuDesktopBound, isAutomationTaskPane, isGroupPane, pane?.sessionId, pane?.avatarId, pane?.avatarName]);
+  }, [
+    feishuDesktopBound,
+    isAutomationTaskPane,
+    isGroupPane,
+    pane?.sessionId,
+    pane?.avatarId,
+    pane?.avatarName,
+    pane?.modelProvider,
+    pane?.modelName,
+  ]);
+
+  const bindingModelSyncRef = useRef<{ feishu: string; wechat: string }>({ feishu: "", wechat: "" });
+  useEffect(() => {
+    if (isGroupPane || isAutomationTaskPane || !pane?.sessionId) return;
+    const provider = (pane.modelProvider || "").trim();
+    const model = (pane.modelName || "").trim();
+    const signature = `${pane.sessionId}::${provider}::${model}`;
+    const aid = pane.avatarId?.startsWith("group:") ? null : pane.avatarId || null;
+    if (feishuDesktopBound && bindingModelSyncRef.current.feishu !== signature) {
+      bindingModelSyncRef.current.feishu = signature;
+      void window.agenticxDesktop.saveFeishuDesktopBinding({
+        sessionId: pane.sessionId,
+        avatarId: aid,
+        avatarName: pane.avatarName || null,
+        provider: provider || null,
+        model: model || null,
+      });
+    }
+    if (wechatDesktopBound && bindingModelSyncRef.current.wechat !== signature) {
+      bindingModelSyncRef.current.wechat = signature;
+      void window.agenticxDesktop.saveWechatDesktopBinding({
+        sessionId: pane.sessionId,
+        avatarId: aid,
+        avatarName: pane.avatarName || null,
+        provider: provider || null,
+        model: model || null,
+      });
+    }
+    if (!feishuDesktopBound) bindingModelSyncRef.current.feishu = "";
+    if (!wechatDesktopBound) bindingModelSyncRef.current.wechat = "";
+  }, [
+    feishuDesktopBound,
+    wechatDesktopBound,
+    isAutomationTaskPane,
+    isGroupPane,
+    pane?.sessionId,
+    pane?.avatarId,
+    pane?.avatarName,
+    pane?.modelProvider,
+    pane?.modelName,
+  ]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -2820,13 +2873,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           try {
             const rw = await window.agenticxDesktop.loadWechatBinding();
             const desk = rw.ok
-              ? (rw.bindings["_desktop"] as { session_id?: string; avatar_id?: string; avatar_name?: string } | undefined)
+              ? (rw.bindings["_desktop"] as {
+                  session_id?: string;
+                  avatar_id?: string;
+                  avatar_name?: string;
+                  provider?: string;
+                  model?: string;
+                } | undefined)
               : undefined;
             if (desk?.session_id === oldSessionId) {
               await window.agenticxDesktop.saveWechatDesktopBinding({
                 sessionId: requestSessionId,
                 avatarId: (desk.avatar_id ?? pane.avatarId ?? null) as string | null,
                 avatarName: (desk.avatar_name ?? pane.avatarName ?? null) as string | null,
+                provider: (desk.provider ?? pane.modelProvider ?? null) as string | null,
+                model: (desk.model ?? pane.modelName ?? null) as string | null,
               });
             }
           } catch {
