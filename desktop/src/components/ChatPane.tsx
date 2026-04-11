@@ -2361,6 +2361,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     async (targetPayload: ForwardConfirmPayload, followUpNote: string) => {
       if (!apiBase || !pane.sessionId || pendingForwardMessages.length === 0) return;
       const follow = followUpNote.trim();
+      /** 与自动追问一致；空则写入默认提示，保证持久化转发卡片里可见（避免仅 skip_user_history 追问在重载后消失）。 */
+      const defaultForwardFollowCue = "请阅读刚转发的聊天记录并继续回复。";
+      const effectiveFollowNote = follow || defaultForwardFollowCue;
       try {
         const { paneId: targetPaneId, sessionId: targetSessionId } = await resolveForwardTarget(targetPayload);
         const resp = await fetch(`${apiBase}/api/messages/forward`, {
@@ -2370,7 +2373,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             source_session_id: pane.sessionId,
             target_session_id: targetSessionId,
             messages: pendingForwardMessages,
-            follow_up_note: follow,
+            follow_up_note: effectiveFollowNote,
           }),
         });
         if (!resp.ok) {
@@ -2396,6 +2399,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         } catch {
           // keep server state; pane may refresh on next poll
         }
+        useAppStore.getState().setForwardAutoReply({
+          paneId: targetPaneId,
+          sessionId: targetSessionId,
+          text: effectiveFollowNote,
+        });
         useAppStore.getState().bumpSessionCatalogRevision();
         window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
       } catch (err) {
@@ -2734,19 +2742,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const sendChatRef = useRef<(
     text: string,
-    options?: { retryAttachments?: MessageAttachment[]; suppressUserEcho?: boolean }
+    options?: {
+      retryAttachments?: MessageAttachment[];
+      suppressUserEcho?: boolean;
+      skipUserHistory?: boolean;
+    }
   ) => Promise<void>>(
     async () => {}
   );
 
   const sendChat = async (
     userText: string,
-    options?: { retryAttachments?: MessageAttachment[]; suppressUserEcho?: boolean }
+    options?: {
+      retryAttachments?: MessageAttachment[];
+      suppressUserEcho?: boolean;
+      skipUserHistory?: boolean;
+    }
   ) => {
     const text = userText.trim();
     const messageText = text || ATTACHMENT_ONLY_USER_PROMPT;
     const retryAttachments = options?.retryAttachments;
     const suppressUserEcho = !!options?.suppressUserEcho;
+    const skipUserHistory = !!options?.skipUserHistory;
     const readyEntries = attachmentEntries.filter(([, file]) => file.status === "ready");
     const readyEntryMap = new Map(readyEntries);
     const composerAttachments: MessageAttachment[] = readyAttachments.map((file) => ({
@@ -2847,22 +2864,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         if (avatarId && !mentionedAvatarIds.includes(avatarId)) mentionedAvatarIds.push(avatarId);
       }
     }
-    if (targetAgentId === "meta" && !suppressUserEcho) {
-      addPaneMessage(
-        pane.id,
-        "user",
-        messageText,
-        "meta",
-        undefined,
-        undefined,
-        userAttachments,
-        quoteTarget
-          ? {
-              quotedMessageId: quoteTarget.message.id,
-              quotedContent: `${quoteTarget.message.avatarName || quoteTarget.message.agentId || quoteTarget.message.role}: ${quoteTarget.body.slice(0, 120)}`,
-            }
-          : undefined
-      );
+    if (targetAgentId === "meta") {
+      if (!suppressUserEcho) {
+        addPaneMessage(
+          pane.id,
+          "user",
+          messageText,
+          "meta",
+          undefined,
+          undefined,
+          userAttachments,
+          quoteTarget
+            ? {
+                quotedMessageId: quoteTarget.message.id,
+                quotedContent: `${quoteTarget.message.avatarName || quoteTarget.message.agentId || quoteTarget.message.role}: ${quoteTarget.body.slice(0, 120)}`,
+              }
+            : undefined
+        );
+      }
     } else {
       addSubAgentEvent(targetAgentId, { type: "user", content: messageText });
       addPaneMessage(pane.id, "tool", `🗣 发送给 ${targetAgentId}: ${messageText}`, "meta");
@@ -2923,6 +2942,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
     try {
       const body: Record<string, unknown> = { session_id: requestSessionId, user_input: messageText };
+      if (skipUserHistory) body.skip_user_history = true;
       const ats = (pane.activeTaskspaceId || "").trim();
       if (ats) body.active_taskspace_id = ats;
       if (quoteTarget) {
@@ -3576,7 +3596,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (forwardAutoReply.paneId !== paneId) return;
     if ((pane.sessionId || "").trim() !== forwardAutoReply.sessionId.trim()) return;
     useAppStore.getState().setForwardAutoReply(null);
-    void sendChatRef.current(forwardAutoReply.text, { suppressUserEcho: true });
+    void sendChatRef.current(forwardAutoReply.text, {
+      suppressUserEcho: true,
+      skipUserHistory: true,
+    });
   }, [forwardAutoReply, paneId, pane.sessionId]);
 
   const initSession = async (inherit = false, prevSessionId?: string) => {
