@@ -33,6 +33,7 @@ export type LoadedSessionMessage = {
   forwarded_history?: {
     title?: string;
     source_session?: string;
+    note?: string;
     items?: Array<{
       sender?: string;
       role?: string;
@@ -77,6 +78,7 @@ export function mapLoadedSessionMessage(item: LoadedSessionMessage, idPrefix: st
         ? {
             title: String(forwarded.title || "").trim() || "聊天记录",
             sourceSession: String(forwarded.source_session || "").trim(),
+            note: String(forwarded.note || "").trim() || undefined,
             items: forwardedItems,
           }
         : undefined,

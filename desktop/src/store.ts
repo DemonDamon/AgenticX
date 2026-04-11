@@ -127,6 +127,7 @@ export type ForwardedHistoryItem = {
 export type ForwardedHistoryCard = {
   title: string;
   sourceSession: string;
+  note?: string;
   items: ForwardedHistoryItem[];
 };
 
