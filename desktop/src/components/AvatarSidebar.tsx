@@ -506,8 +506,19 @@ export function AvatarSidebar() {
   };
 
   const handleGroupDelete = async (group: GroupChat) => {
-    const confirmed = window.confirm(`确定删除群聊「${group.name}」吗？此操作不可恢复。`);
-    if (!confirmed) return;
+    const api = window.agenticxDesktop;
+    const confirmResult =
+      typeof api.confirmDialog === "function"
+        ? await api.confirmDialog({
+            title: "确认删除群聊",
+            message: `确定删除群聊「${group.name}」吗？`,
+            detail: "此操作不可恢复。",
+            confirmText: "删除",
+            cancelText: "取消",
+            destructive: true,
+          })
+        : { ok: true, confirmed: window.confirm(`确定删除群聊「${group.name}」吗？此操作不可恢复。`) };
+    if (!confirmResult.confirmed) return;
     const groupPaneId = `group:${group.id}`;
     const groupPanes = panes.filter((item) => item.avatarId === groupPaneId);
     const nonGroupPanes = panes.filter((item) => item.avatarId !== groupPaneId);
