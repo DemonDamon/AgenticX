@@ -5,8 +5,6 @@ import type { Message, MessageAttachment } from "../../store";
 import { AttachmentCard } from "./AttachmentCard";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { parseReasoningContent } from "./reasoning-parser";
-import { ForwardedHistoryCard } from "./ForwardedHistoryCard";
-import { ForwardedHistoryModal } from "./ForwardedHistoryModal";
 import { getContainedSelectionText } from "../../utils/favorite-selection";
 import {
   chatMarkdownComponents,
@@ -27,7 +25,7 @@ type Props = {
   onQuoteMessage?: (message: Message, selectedText?: string) => void;
   onFavoriteMessage?: (message: Message, selectedText?: string) => void;
   onToggleSelectMessage?: (message: Message) => void;
-  onForwardMessage?: (message: Message) => void;
+  onForwardMessage?: (message: Message, selectedText?: string) => void;
   onRetryMessage?: (message: Message) => void;
   selectable?: boolean;
   selected?: boolean;
@@ -166,7 +164,6 @@ export function ImBubble({
         color: "var(--chat-im-assistant-text)",
       };
   const [menuOpen, setMenuOpen] = useState(false);
-  const [forwardedModalOpen, setForwardedModalOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement | null>(null);
   const msgContentRef = useRef<HTMLDivElement | null>(null);
@@ -179,6 +176,17 @@ export function ImBubble({
   const runQuote = () => {
     const picked = getContainedSelectionText(msgContentRef.current);
     onQuoteMessage?.(message, picked ?? undefined);
+  };
+
+  const runForward = () => {
+    const picked = getContainedSelectionText(msgContentRef.current);
+    onForwardMessage?.(message, picked ?? undefined);
+  };
+
+  const formatForwardSender = (sender?: string) => {
+    const raw = String(sender || "").trim();
+    if (!raw) return "AI";
+    return raw.toLowerCase() === "meta" ? "Machi" : raw;
   };
 
   useEffect(() => {
@@ -253,7 +261,26 @@ export function ImBubble({
                   </div>
                 ) : null}
                 {message.forwardedHistory ? (
-                  <ForwardedHistoryCard history={message.forwardedHistory} onOpen={() => setForwardedModalOpen(true)} />
+                  <div className="space-y-2">
+                    <div className="rounded-md border border-border bg-surface-panel/70 px-2 py-1 text-xs text-text-faint">
+                      {message.forwardedHistory.note ? (
+                        <div className="mb-1 break-words text-text-primary">{message.forwardedHistory.note}</div>
+                      ) : null}
+                      <div className="space-y-1">
+                        {message.forwardedHistory.items.slice(0, 2).map((item, index) => (
+                          <div
+                            key={`${item.sender}-${index}-${item.content.slice(0, 20)}`}
+                            className="line-clamp-2 break-words"
+                          >
+                            {formatForwardSender(item.sender)}: {item.content}
+                          </div>
+                        ))}
+                        {message.forwardedHistory.items.length > 2 ? (
+                          <div className="text-[11px] text-text-faint">...</div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
                 ) : isGroupTyping ? (
                   <span className="inline-flex items-baseline gap-0.5" aria-live="polite" aria-label="正在输入">
                     <span>正在输入</span>
@@ -303,7 +330,14 @@ export function ImBubble({
               >
                 收藏
               </button>
-              <button type="button" className="hover:text-text-strong" onClick={() => onForwardMessage?.(message)}>转发</button>
+              <button
+                type="button"
+                className="hover:text-text-strong"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={runForward}
+              >
+                转发
+              </button>
               {onRetryMessage ? (
                 <button type="button" className="hover:text-text-strong" onClick={() => onRetryMessage(message)}>重试</button>
               ) : null}
@@ -339,18 +373,22 @@ export function ImBubble({
           >
             收藏
           </button>
-          <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onForwardMessage?.(message); }}>转发</button>
+          <button
+            className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setMenuOpen(false);
+              runForward();
+            }}
+          >
+            转发
+          </button>
           {onRetryMessage ? (
             <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onRetryMessage(message); }}>重试</button>
           ) : null}
           <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onToggleSelectMessage?.(message); }}>多选</button>
         </div>
       ) : null}
-      <ForwardedHistoryModal
-        open={forwardedModalOpen}
-        history={message.forwardedHistory}
-        onClose={() => setForwardedModalOpen(false)}
-      />
     </div>
   );
 }

@@ -60,6 +60,13 @@ function resolveQuoteBody(message: Message, selectedText?: string): string {
   return message.content;
 }
 
+function resolveForwardSender(message: Message, userLabel = "我"): string {
+  if (message.role !== "assistant") return userLabel.trim() || "我";
+  const raw = String(message.avatarName || message.agentId || "AI").trim();
+  if (!raw) return "AI";
+  return raw.toLowerCase() === "meta" ? "Machi" : raw;
+}
+
 function shellSingleQuote(input: string): string {
   return `'${input.replace(/'/g, `'\"'\"'`)}'`;
 }
@@ -2340,6 +2347,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             source_session_id: pane.sessionId,
             target_session_id: targetSessionId,
             messages: pendingForwardMessages,
+            follow_up_note: follow,
           }),
         });
         if (!resp.ok) {
@@ -2355,11 +2363,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           setActiveAvatarId(aid ?? null);
         }
         const prompt = follow || "请阅读上一条转发的聊天记录并给出你的回应。";
-        useAppStore.getState().setForwardAutoReply({
-          paneId: targetPaneId,
-          sessionId: targetSessionId,
-          text: prompt,
-        });
         try {
           const result = await window.agenticxDesktop.loadSessionMessages(targetSessionId);
           if (result.ok && Array.isArray(result.messages)) {
@@ -2370,6 +2373,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           }
         } catch {
           // keep server state; pane may refresh on next poll
+        } finally {
+          useAppStore.getState().setForwardAutoReply({
+            paneId: targetPaneId,
+            sessionId: targetSessionId,
+            text: prompt,
+          });
         }
       } catch (err) {
         console.error("[ChatPane] forward failed:", err);
@@ -2390,33 +2399,34 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     ]
   );
 
-  const forwardOneMessage = useCallback((message: Message) => {
-    const sender = message.role === "assistant" ? message.avatarName || message.agentId || "AI" : "我";
+  const forwardOneMessage = useCallback((message: Message, selectedText?: string) => {
+    const sender = resolveForwardSender(message, userBubbleLabel);
+    const content = resolveQuoteBody(message, selectedText);
     setPendingForwardMessages([
       {
         sender,
         role: message.role,
-        content: message.content,
+        content,
         avatar_url: message.avatarUrl,
         timestamp: message.timestamp,
       },
     ]);
     setForwardPickerOpen(true);
-  }, []);
+  }, [userBubbleLabel]);
 
   const forwardSelectedMessages = useCallback(() => {
     if (selectedMessages.length === 0) return;
     setPendingForwardMessages(
       selectedMessages.map((message) => ({
-        sender: message.role === "assistant" ? message.avatarName || message.agentId || "AI" : "我",
+        sender: resolveForwardSender(message, userBubbleLabel),
         role: message.role,
-        content: message.content,
+        content: resolveQuoteBody(message),
         avatar_url: message.avatarUrl,
         timestamp: message.timestamp,
       }))
     );
     setForwardPickerOpen(true);
-  }, [selectedMessages]);
+  }, [selectedMessages, userBubbleLabel]);
 
   const deleteSelectedMessages = useCallback(async () => {
     if (selectedMessages.length === 0 || !apiBase || !pane.sessionId) return;
@@ -2704,14 +2714,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }, 5000);
   };
 
-  const sendChatRef = useRef<(text: string, options?: { retryAttachments?: MessageAttachment[] }) => Promise<void>>(
+  const sendChatRef = useRef<(
+    text: string,
+    options?: { retryAttachments?: MessageAttachment[]; suppressUserEcho?: boolean }
+  ) => Promise<void>>(
     async () => {}
   );
 
-  const sendChat = async (userText: string, options?: { retryAttachments?: MessageAttachment[] }) => {
+  const sendChat = async (
+    userText: string,
+    options?: { retryAttachments?: MessageAttachment[]; suppressUserEcho?: boolean }
+  ) => {
     const text = userText.trim();
     const messageText = text || ATTACHMENT_ONLY_USER_PROMPT;
     const retryAttachments = options?.retryAttachments;
+    const suppressUserEcho = !!options?.suppressUserEcho;
     const readyEntries = attachmentEntries.filter(([, file]) => file.status === "ready");
     const readyEntryMap = new Map(readyEntries);
     const composerAttachments: MessageAttachment[] = readyAttachments.map((file) => ({
@@ -2812,7 +2829,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         if (avatarId && !mentionedAvatarIds.includes(avatarId)) mentionedAvatarIds.push(avatarId);
       }
     }
-    if (targetAgentId === "meta") {
+    if (targetAgentId === "meta" && !suppressUserEcho) {
       addPaneMessage(
         pane.id,
         "user",
@@ -3541,7 +3558,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (forwardAutoReply.paneId !== paneId) return;
     if ((pane.sessionId || "").trim() !== forwardAutoReply.sessionId.trim()) return;
     useAppStore.getState().setForwardAutoReply(null);
-    void sendChatRef.current(forwardAutoReply.text);
+    void sendChatRef.current(forwardAutoReply.text, { suppressUserEcho: true });
   }, [forwardAutoReply, paneId, pane.sessionId]);
 
   const initSession = async (inherit = false, prevSessionId?: string) => {

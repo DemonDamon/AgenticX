@@ -968,7 +968,7 @@ export function App() {
           let full = "";
           let buffer = "";
           let placeholderAdded = false;
-          let metaResponded = false;
+          let reportResponded = false;
 
           while (true) {
             const { value: chunk, done } = await reader.read();
@@ -981,9 +981,11 @@ export function App() {
               if (!line) continue;
               try {
                 const payload = JSON.parse(line.slice(6));
-                if (payload.type === "token" && (payload.data?.agent_id ?? "meta") === "meta") {
-                  metaResponded = true;
-                  full += payload.data?.text ?? "";
+                if (payload.type === "token") {
+                  const tokenText = String(payload.data?.text ?? payload.data?.content ?? "");
+                  if (tokenText.length === 0) continue;
+                  reportResponded = true;
+                  full += tokenText;
                   const s = useAppStore.getState();
                   if (!placeholderAdded) {
                     s.addPaneMessage(matchingPane.id, "assistant", full, "meta");
@@ -992,10 +994,10 @@ export function App() {
                     s.updateLastPaneMessage(matchingPane.id, full);
                   }
                 }
-                if (payload.type === "final" && (payload.data?.agent_id ?? "meta") === "meta") {
-                  metaResponded = true;
-                  const finalText = String(payload.data?.text ?? "").trim();
+                if (payload.type === "final") {
+                  const finalText = String(payload.data?.text ?? payload.data?.content ?? "").trim();
                   if (finalText) {
+                    reportResponded = true;
                     const s = useAppStore.getState();
                     if (!placeholderAdded) {
                       s.addPaneMessage(matchingPane.id, "assistant", finalText, "meta");
@@ -1009,7 +1011,7 @@ export function App() {
               }
             }
           }
-          if (metaResponded) {
+          if (reportResponded) {
             console.debug("[auto-report] Meta responded for sid=%s, delivered=%d", sid, items.length);
             for (const it of items) deliveredAgentIds.add(it.agentId);
           } else {
@@ -1365,6 +1367,7 @@ export function App() {
           source_session_id: source,
           target_session_id: targetSessionId,
           messages: [{ sender, role: roleForForward, content: ctx.content }],
+          follow_up_note: follow,
         }),
       });
       if (!resp.ok) {
@@ -1380,11 +1383,6 @@ export function App() {
         setActiveAvatarId(aid ?? null);
       }
       const prompt = follow || "请阅读上一条转发的聊天记录并给出你的回应。";
-      setForwardAutoReply({
-        paneId: targetPaneId,
-        sessionId: targetSessionId,
-        text: prompt,
-      });
       try {
         const result = await window.agenticxDesktop.loadSessionMessages(targetSessionId);
         if (result.ok && Array.isArray(result.messages)) {
@@ -1395,6 +1393,12 @@ export function App() {
         }
       } catch {
         // keep server state; pane may refresh on next poll
+      } finally {
+        setForwardAutoReply({
+          paneId: targetPaneId,
+          sessionId: targetSessionId,
+          text: prompt,
+        });
       }
     },
     [

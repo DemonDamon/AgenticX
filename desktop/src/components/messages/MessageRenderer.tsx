@@ -22,7 +22,7 @@ type Props = {
   onQuoteMessage?: (message: Message, selectedText?: string) => void;
   onFavoriteMessage?: (message: Message, selectedText?: string) => void;
   onToggleSelectMessage?: (message: Message) => void;
-  onForwardMessage?: (message: Message) => void;
+  onForwardMessage?: (message: Message, selectedText?: string) => void;
   onRetryMessage?: (message: Message) => void;
   selectable?: boolean;
   selected?: boolean;

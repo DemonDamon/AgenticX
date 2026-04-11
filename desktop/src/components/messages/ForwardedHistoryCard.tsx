@@ -14,6 +14,11 @@ export function ForwardedHistoryCard({ history, onOpen }: Props) {
       onClick={onOpen}
     >
       <div className="break-words text-sm font-medium text-text-strong [overflow-wrap:anywhere]">{history.title}</div>
+      {history.note ? (
+        <div className="mt-1 break-words rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-xs text-cyan-200 [overflow-wrap:anywhere]">
+          附加说明：{history.note}
+        </div>
+      ) : null}
       <div className="mt-2 space-y-1">
         {preview.map((item, index) => (
           <div

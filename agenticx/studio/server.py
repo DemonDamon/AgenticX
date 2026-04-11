@@ -3046,6 +3046,7 @@ def create_studio_app() -> FastAPI:
         _check_token(x_agx_desktop_token)
         source_session_id = str(payload.get("source_session_id", "") or "").strip()
         target_session_id = str(payload.get("target_session_id", "") or "").strip()
+        follow_up_note = str(payload.get("follow_up_note", "") or "").strip()
         messages = payload.get("messages", [])
         if not source_session_id or not target_session_id:
             raise HTTPException(status_code=400, detail="source_session_id and target_session_id are required")
@@ -3091,6 +3092,8 @@ def create_studio_app() -> FastAPI:
             )
         preview_lines = [f"{item['sender']}: {item['content']}" for item in normalized_items[:2]]
         preview_text = "\n".join(preview_lines) if preview_lines else "聊天记录"
+        if follow_up_note:
+            preview_text = f"{preview_text}\n附加说明: {follow_up_note}"
         ts = int(datetime.now().timestamp() * 1000)
         forward_entry: dict[str, Any] = {
             "role": "user",
@@ -3099,6 +3102,7 @@ def create_studio_app() -> FastAPI:
             "forwarded_history": {
                 "title": f"聊天记录 · 来自 {source_name}",
                 "source_session": source_session_id,
+                "note": follow_up_note or None,
                 "items": normalized_items,
             },
         }

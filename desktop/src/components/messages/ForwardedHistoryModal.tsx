@@ -40,6 +40,12 @@ export function ForwardedHistoryModal({ open, history, onClose }: Props) {
           </button>
         </div>
         <div className="space-y-3 overflow-y-auto px-4 py-3">
+          {history.note ? (
+            <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-200">
+              <div className="mb-1 text-xs font-medium text-cyan-300">附加说明</div>
+              <div className="whitespace-pre-wrap break-words">{history.note}</div>
+            </div>
+          ) : null}
           {history.items.map((item, index) => (
             <div key={`${item.sender}-${index}-${item.content.slice(0, 20)}`} className="rounded-lg border border-border bg-surface-card px-3 py-2">
               <div className="mb-1 flex items-center justify-between gap-2 text-xs text-text-faint">
