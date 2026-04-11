@@ -1628,6 +1628,7 @@ def create_studio_app() -> FastAPI:
                         system_prompt=sys_prompt,
                         user_message_content=user_message_content,
                         history_user_attachments=history_user_attachments,
+                        persist_user_message=not bool(getattr(payload, "skip_user_history", False)),
                     ):
                         await event_queue.put(event)
                     await event_queue.put(None)
@@ -3047,6 +3048,10 @@ def create_studio_app() -> FastAPI:
         source_session_id = str(payload.get("source_session_id", "") or "").strip()
         target_session_id = str(payload.get("target_session_id", "") or "").strip()
         follow_up_note = str(payload.get("follow_up_note", "") or "").strip()
+        if not follow_up_note:
+            # Backward-compatible fallback: some clients may omit follow_up_note.
+            # Keep the forwarded card self-contained so reload still shows user follow-up intent.
+            follow_up_note = "请阅读刚转发的聊天记录并继续回复。"
         messages = payload.get("messages", [])
         if not source_session_id or not target_session_id:
             raise HTTPException(status_code=400, detail="source_session_id and target_session_id are required")
