@@ -1202,8 +1202,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [streaming, setStreaming] = useState(false);
   const [recording, setRecording] = useState(false);
   const [streamedAssistantText, setStreamedAssistantText] = useState("");
+  const [streamingSessionId, setStreamingSessionId] = useState("");
   const [streamingModel, setStreamingModel] = useState<{ provider: string; model: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const sessionAbortControllersRef = useRef<Record<string, AbortController>>({});
+  const sessionStreamStateRef = useRef<
+    Record<string, { active: boolean; text: string; provider: string; model: string }>
+  >({});
   const streamTextRef = useRef("");
   const streamCommittedRef = useRef(false);
   const streamRafRef = useRef<number | null>(null);
@@ -1226,6 +1231,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [favoriteToastOpen, setFavoriteToastOpen] = useState(false);
   const [favoriteToastMsg, setFavoriteToastMsg] = useState("");
   const [feishuDesktopBound, setFeishuDesktopBound] = useState(false);
+  const boundSessionIdRef = useRef<{ feishu: string; wechat: string }>({ feishu: "", wechat: "" });
   const ccBridgeVisibleLaunchGuardRef = useRef<Map<string, number>>(new Map());
   const ccBridgeTailGuardRef = useRef<Map<string, number>>(new Map());
   const [hasAnyFeishuDesktopBinding, setHasAnyFeishuDesktopBinding] = useState(false);
@@ -1336,11 +1342,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, [panes, pane?.sessionId]);
   const shouldShowBoundFeishuBadge =
     feishuDesktopBound && primaryPaneForSessionId === pane.id && !isAutomationTaskPane;
-  const shouldShowDefaultMetaFeishuBadge =
-    !hasAnyFeishuDesktopBinding &&
-    !pane.avatarId &&
-    primaryMetaPaneId === pane.id;
-  const shouldShowFeishuBadge = shouldShowBoundFeishuBadge || shouldShowDefaultMetaFeishuBadge;
+  const shouldShowFeishuBadge = shouldShowBoundFeishuBadge;
 
   useEffect(() => {
     if (paneSubAgents.length === 0) {
@@ -1510,6 +1512,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   useEffect(() => {
     if (isGroupPane || !pane?.sessionId || isAutomationTaskPane) {
+      boundSessionIdRef.current.feishu = "";
+      boundSessionIdRef.current.wechat = "";
       setFeishuDesktopBound(false);
       setHasAnyFeishuDesktopBinding(false);
       setWechatDesktopBound(false);
@@ -1525,17 +1529,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         if (cancelled) return;
         if (r.ok) {
           const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
+          const boundSid = typeof desk?.session_id === "string" ? desk.session_id.trim() : "";
+          boundSessionIdRef.current.feishu = boundSid;
           const hasDesktopBinding = Boolean(desk && typeof desk.session_id === "string" && desk.session_id.trim());
           setHasAnyFeishuDesktopBinding(hasDesktopBinding);
           setFeishuDesktopBound(
-            Boolean(desk && typeof desk.session_id === "string" && desk.session_id === sid)
+            Boolean(boundSid && boundSid === sid)
           );
         } else {
+          boundSessionIdRef.current.feishu = "";
           setFeishuDesktopBound(false);
           setHasAnyFeishuDesktopBinding(false);
         }
       } catch {
         if (!cancelled) {
+          boundSessionIdRef.current.feishu = "";
           setFeishuDesktopBound(false);
           setHasAnyFeishuDesktopBinding(false);
         }
@@ -1545,13 +1553,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         if (cancelled) return;
         if (rw.ok) {
           const deskW = rw.bindings["_desktop"] as { session_id?: string } | undefined;
+          const boundSidW = typeof deskW?.session_id === "string" ? deskW.session_id.trim() : "";
+          boundSessionIdRef.current.wechat = boundSidW;
           setWechatDesktopBound(
-            Boolean(deskW && typeof deskW.session_id === "string" && deskW.session_id === sid)
+            Boolean(boundSidW && boundSidW === sid)
           );
         } else if (!cancelled) {
+          boundSessionIdRef.current.wechat = "";
           setWechatDesktopBound(false);
         }
       } catch {
+        boundSessionIdRef.current.wechat = "";
         if (!cancelled) setWechatDesktopBound(false);
       }
     };
@@ -1569,6 +1581,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     try {
       if (feishuDesktopBound) {
         await window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
+        boundSessionIdRef.current.feishu = "";
         setFeishuDesktopBound(false);
       } else {
         const aid = pane.avatarId?.startsWith("group:") ? null : pane.avatarId || null;
@@ -1579,6 +1592,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           provider: pane.modelProvider || null,
           model: pane.modelName || null,
         });
+        boundSessionIdRef.current.feishu = (pane.sessionId || "").trim();
         setFeishuDesktopBound(true);
       }
     } catch {
@@ -1598,11 +1612,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const bindingModelSyncRef = useRef<{ feishu: string; wechat: string }>({ feishu: "", wechat: "" });
   useEffect(() => {
     if (isGroupPane || isAutomationTaskPane || !pane?.sessionId) return;
+    const currentSid = (pane.sessionId || "").trim();
     const provider = (pane.modelProvider || "").trim();
     const model = (pane.modelName || "").trim();
     const signature = `${pane.sessionId}::${provider}::${model}`;
     const aid = pane.avatarId?.startsWith("group:") ? null : pane.avatarId || null;
-    if (feishuDesktopBound && bindingModelSyncRef.current.feishu !== signature) {
+    const isFeishuBoundToCurrentSession =
+      feishuDesktopBound && boundSessionIdRef.current.feishu === currentSid;
+    if (isFeishuBoundToCurrentSession && bindingModelSyncRef.current.feishu !== signature) {
       bindingModelSyncRef.current.feishu = signature;
       void window.agenticxDesktop.saveFeishuDesktopBinding({
         sessionId: pane.sessionId,
@@ -1612,7 +1629,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         model: model || null,
       });
     }
-    if (wechatDesktopBound && bindingModelSyncRef.current.wechat !== signature) {
+    const isWechatBoundToCurrentSession =
+      wechatDesktopBound && boundSessionIdRef.current.wechat === currentSid;
+    if (isWechatBoundToCurrentSession && bindingModelSyncRef.current.wechat !== signature) {
       bindingModelSyncRef.current.wechat = signature;
       void window.agenticxDesktop.saveWechatDesktopBinding({
         sessionId: pane.sessionId,
@@ -2434,8 +2453,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const deleteSelectedMessages = useCallback(async () => {
     if (selectedMessages.length === 0 || !apiBase || !pane.sessionId) return;
-    const ok = window.confirm(`确认删除已选中的 ${selectedMessages.length} 条消息？`);
-    if (!ok) return;
+    const desktop = window.agenticxDesktop;
+    const confirmResult =
+      typeof desktop.confirmDialog === "function"
+        ? await desktop.confirmDialog({
+            title: "确认删除消息",
+            message: `确认删除已选中的 ${selectedMessages.length} 条消息？`,
+            detail: "删除后不可恢复。",
+            confirmText: "删除",
+            cancelText: "取消",
+            destructive: true,
+          })
+        : {
+            ok: true,
+            confirmed: window.confirm(`确认删除已选中的 ${selectedMessages.length} 条消息？删除后不可恢复。`),
+          };
+    if (!confirmResult.confirmed) return;
     try {
       const resp = await fetch(`${apiBase}/api/session/messages/delete`, {
         method: "POST",
@@ -2483,10 +2516,34 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     void sendChatRef.current(msg.content, { retryAttachments: msg.attachments ?? [] });
   }, []);
 
+  const isStreamingCurrentSession =
+    streaming &&
+    !isGroupPane &&
+    !!streamingSessionId &&
+    streamingSessionId === (pane.sessionId || "").trim();
+  const streamTextForCurrentSession = isStreamingCurrentSession ? (streamedAssistantText || "") : "";
+
+  const syncStreamingUiForCurrentSession = useCallback(() => {
+    const sid = (pane.sessionId || "").trim();
+    const st = sid ? sessionStreamStateRef.current[sid] : undefined;
+    const active = Boolean(st?.active);
+    setStreaming(active);
+    setStreamingSessionId(active ? sid : "");
+    setStreamedAssistantText(active ? st?.text || "" : "");
+    setStreamingModel(
+      active && st ? { provider: st.provider || "", model: st.model || "" } : null
+    );
+    abortRef.current = active ? sessionAbortControllersRef.current[sid] ?? null : null;
+  }, [pane.sessionId]);
+
+  useEffect(() => {
+    syncStreamingUiForCurrentSession();
+  }, [syncStreamingUiForCurrentSession]);
+
   const renderedMessages = useMemo(() => (
     <>
       {visibleMessages.map((message) => {
-        const canRetryThisUserMessage = message.role === "user" && !streaming;
+        const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
         const isSelecting = selectedMessageIds.size > 0;
         const isSelected = selectedMessageIds.has(message.id);
         return (
@@ -2532,20 +2589,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           assistantName={name}
         />
       ))}
-      {streaming && !isGroupPane ? (
+      {isStreamingCurrentSession ? (
         chatStyle === "terminal" ? (
           <TerminalLine
-            message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
+            message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
             badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
           />
         ) : chatStyle === "clean" ? (
           <CleanBlock
-            message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
+            message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
             badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
           />
         ) : (
           <ImBubble
-            message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
+            message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
             highlightTerms={pane.historySearchTerms}
             badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
             assistantName={paneAvatarMeta.name}
@@ -2554,7 +2611,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         )
       ) : null}
     </>
-  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, isGroupPane, paneAvatarMeta, resolveGroupInlineConfirm, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, streamedAssistantText, streaming, streamingModel, toggleSelectMessage, userAvatarUrl, userBubbleLabel, visibleMessages]);
+  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, isGroupPane, isStreamingCurrentSession, pane.historySearchTerms, paneAvatarMeta, resolveGroupInlineConfirm, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, streamTextForCurrentSession, streamingModel, toggleSelectMessage, userAvatarUrl, userBubbleLabel, visibleMessages]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -2710,7 +2767,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     });
     const hasReadyAttachments = userAttachments.length > 0;
     if ((!text && !hasReadyAttachments) || !apiBase) return;
-    if (streaming) return;
 
     const useLazySession = !isGroupPane && !isAutomationTaskPane;
     let requestSessionId = (pane.sessionId || "").trim();
@@ -2747,6 +2803,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         return;
       }
     }
+    if (sessionStreamStateRef.current[requestSessionId]?.active) return;
 
     const otherPanesWithSameSession = panes.filter(
       (p) => p.id !== pane.id && (p.sessionId || "").trim() === requestSessionId && requestSessionId.length > 0
@@ -2812,28 +2869,53 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setQuoteTarget(null);
     // Clear attachments immediately so chips do not linger until the stream ends (finally also clears).
     setContextFiles({});
-    setStreaming(true);
+    sessionStreamStateRef.current[requestSessionId] = {
+      active: true,
+      text: "",
+      provider: chatProvider,
+      model: chatModel,
+    };
+    if ((pane.sessionId || "").trim() === requestSessionId) {
+      syncStreamingUiForCurrentSession();
+    }
     cancelStreamRenderFrame();
     setStreamedAssistantText("");
-    setStreamingModel(chatModel ? { provider: chatProvider, model: chatModel } : null);
     streamTextRef.current = "";
     streamCommittedRef.current = false;
     const abortController = new AbortController();
-    abortRef.current = abortController;
+    sessionAbortControllersRef.current[requestSessionId] = abortController;
+    if ((pane.sessionId || "").trim() === requestSessionId) {
+      abortRef.current = abortController;
+    }
+    const isTargetSessionStillActive = () => {
+      const currentPane = useAppStore.getState().panes.find((p) => p.id === pane.id);
+      return (currentPane?.sessionId || "").trim() === requestSessionId;
+    };
+    const addPaneMessageIfSessionActive = (...args: Parameters<typeof addPaneMessage>) => {
+      if (!isTargetSessionStillActive()) return;
+      addPaneMessage(...args);
+    };
     const commitCurrentStreamIfNeeded = () => {
       const partial = streamTextRef.current.trim();
       if (!partial || isThinkingPlaceholderText(partial) || streamCommittedRef.current) return false;
-      addPaneMessage(pane.id, "assistant", streamTextRef.current, "meta", chatProvider, chatModel);
+      addPaneMessageIfSessionActive(pane.id, "assistant", streamTextRef.current, "meta", chatProvider, chatModel);
       streamCommittedRef.current = true;
       return true;
     };
     const scheduleStreamTextUpdate = (nextText: string) => {
       streamTextRef.current = nextText;
+      const state = sessionStreamStateRef.current[requestSessionId];
+      if (state) {
+        state.text = nextText;
+        sessionStreamStateRef.current[requestSessionId] = state;
+      }
       if (abortController.signal.aborted) return;
       if (streamRafRef.current !== null) return;
       streamRafRef.current = window.requestAnimationFrame(() => {
         streamRafRef.current = null;
-        if (!abortController.signal.aborted) setStreamedAssistantText(streamTextRef.current);
+        if (!abortController.signal.aborted && isTargetSessionStillActive()) {
+          setStreamedAssistantText(streamTextRef.current);
+        }
       });
     };
 
@@ -2932,7 +3014,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             // best-effort binding sync
           }
 
-          addPaneMessage(pane.id, "tool", "⚠️ 会话已失效，已自动迁移到新会话并重试。", "meta");
+          addPaneMessageIfSessionActive(pane.id, "tool", "⚠️ 会话已失效，已自动迁移到新会话并重试。", "meta");
           resp = await sendChatRequest(requestSessionId);
         }
       }
@@ -2972,7 +3054,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const prevText = lastGroupProgressRef.current[eventAgentId] ?? "";
               if (prevText === progressText) continue;
               lastGroupProgressRef.current[eventAgentId] = progressText;
-              addPaneMessage(
+              addPaneMessageIfSessionActive(
                 pane.id,
                 "tool",
                 `${avatarName}：${progressText}`,
@@ -3000,7 +3082,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               lastGroupProgressRef.current[eventAgentId] = blockedText;
               const strategy = useAppStore.getState().confirmStrategy;
               if (strategy === "auto" && requestId) {
-                addPaneMessage(
+                addPaneMessageIfSessionActive(
                   pane.id,
                   "tool",
                   `${avatarName}：确认通过，继续执行`,
@@ -3022,7 +3104,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 }).catch(() => {});
                 continue;
               }
-              addPaneMessage(
+              addPaneMessageIfSessionActive(
                 pane.id,
                 "tool",
                 `${avatarName}：⏸ ${blockedText}`,
@@ -3056,7 +3138,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 return next;
               });
               if (content.trim()) {
-                addPaneMessage(
+                addPaneMessageIfSessionActive(
                   pane.id,
                   "assistant",
                   content,
@@ -3067,7 +3149,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   { avatarName, avatarUrl: avatarUrl || undefined }
                 );
               } else if (errorText.trim()) {
-                addPaneMessage(
+                addPaneMessageIfSessionActive(
                   pane.id,
                   "assistant",
                   `${avatarName} 回复失败：${errorText}`,
@@ -3085,7 +3167,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const avatarUrl = String(payload.data?.avatar_url ?? "");
               const content = String(payload.data?.content ?? "");
               if (content.trim()) {
-                addPaneMessage(
+                addPaneMessageIfSessionActive(
                   pane.id,
                   "assistant",
                   content,
@@ -3120,7 +3202,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   : `⏳ ${name} 执行中…`;
               })();
               if (eventAgentId === "meta") {
-                setStreamedAssistantText(waitLabel);
+                scheduleStreamTextUpdate(waitLabel);
               } else {
                 updateSubAgent(eventAgentId, {
                   currentAction: Number.isFinite(sec) ? `${name} 执行中… (${sec}s)` : `${name} 执行中…`,
@@ -3167,9 +3249,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   full = "";
                   streamTextRef.current = "";
                   cancelStreamRenderFrame();
-                  setStreamedAssistantText("");
+                  scheduleStreamTextUpdate("");
                   streamCommittedRef.current = false;
-                  addPaneMessage(pane.id, "tool", content, "meta");
+                  addPaneMessageIfSessionActive(pane.id, "tool", content, "meta");
                 } else {
                   addSubAgentEvent(eventAgentId, { type: "tool_call", content });
                   const livePreview = buildToolCallLivePreview(toolName, toolArgs);
@@ -3186,7 +3268,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const toolName = String(payload.data?.name ?? "");
               const formatted = formatToolResultMessage(toolName, payload.data?.result);
               if (formatted.silent) continue;
-              if (eventAgentId === "meta") addPaneMessage(pane.id, "tool", formatted.content, "meta");
+              if (eventAgentId === "meta") addPaneMessageIfSessionActive(pane.id, "tool", formatted.content, "meta");
               else {
                 addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content });
                 if (toolName === "file_write" || toolName === "file_edit") {
@@ -3242,7 +3324,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     resultObj?.ok === true &&
                     String(resultObj?.parsed_response ?? "").trim().length > 0
                   ) {
-                    addPaneMessage(
+                    addPaneMessageIfSessionActive(
                       pane.id,
                       "assistant",
                       String(resultObj.parsed_response),
@@ -3434,7 +3516,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               }
             }
             if (payload.type === "error") {
-              addPaneMessage(pane.id, "tool", `❌ ${payload.data?.text ?? "未知错误"}`, "meta");
+              addPaneMessageIfSessionActive(pane.id, "tool", `❌ ${payload.data?.text ?? "未知错误"}`, "meta");
             }
           } catch {
             // Ignore malformed frame.
@@ -3443,22 +3525,29 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
 
       if (full.trim() && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
-        addPaneMessage(pane.id, "assistant", full, "meta", chatProvider, chatModel);
+        addPaneMessageIfSessionActive(pane.id, "assistant", full, "meta", chatProvider, chatModel);
         streamCommittedRef.current = true;
       }
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
-        addPaneMessage(pane.id, "tool", `❌ 请求失败: ${String(error)}`, "meta");
+        addPaneMessageIfSessionActive(pane.id, "tool", `❌ 请求失败: ${String(error)}`, "meta");
       }
     } finally {
+      delete sessionAbortControllersRef.current[requestSessionId];
+      const ended = sessionStreamStateRef.current[requestSessionId];
+      if (ended) {
+        ended.active = false;
+        ended.text = "";
+        sessionStreamStateRef.current[requestSessionId] = ended;
+      }
+      if ((pane.sessionId || "").trim() === requestSessionId) {
+        syncStreamingUiForCurrentSession();
+      }
       abortRef.current = null;
       cancelStreamRenderFrame();
       streamTextRef.current = "";
       streamCommittedRef.current = false;
       setGroupTyping({});
-      setStreaming(false);
-      setStreamedAssistantText("");
-      setStreamingModel(null);
       setContextFiles({});
       useAppStore.getState().bumpSessionCatalogRevision();
       window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 500);
@@ -3912,11 +4001,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   Orchestrated by Machi · Executed by AgenticX
                 </div>
               </div>
-              {!pane.sessionId && !isGroupPane && !isAutomationTaskPane ? (
-                <p className="max-w-sm text-[11px] leading-relaxed text-text-subtle">
-                  发送首条消息后将创建会话并出现在历史列表；标题会先使用你的问题，助手回复后会尝试生成更短摘要标题。
-                </p>
-              ) : null}
               {isAutomationTaskPane && automationTaskErrorHint ? (
                 <div className="max-w-md rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-rose-200/95">
                   <div className="mb-1 font-medium text-rose-300">上次定时执行失败</div>
@@ -4213,7 +4297,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               </div>
               <ActionCircleButton
                 hasInput={!!pane.sessionId && (!!input.trim() || readyAttachments.length > 0)}
-                streaming={streaming}
+                streaming={isStreamingCurrentSession}
                 recording={recording}
                 onSend={() => void sendChat(extractComposerText())}
                 onMic={onMicClick}
