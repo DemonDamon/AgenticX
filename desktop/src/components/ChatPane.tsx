@@ -32,6 +32,11 @@ import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
+import {
+  ccBridgeSendToolProgressLabel,
+  parseCcBridgeModeFromPayload,
+  type CcBridgeSessionModeHint,
+} from "../utils/cc-bridge-ui";
 import type { AutomationTask } from "./automation/types";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 import { usePaneSortableHandle } from "./pane-sortable-context";
@@ -1234,6 +1239,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const boundSessionIdRef = useRef<{ feishu: string; wechat: string }>({ feishu: "", wechat: "" });
   const ccBridgeVisibleLaunchGuardRef = useRef<Map<string, number>>(new Map());
   const ccBridgeTailGuardRef = useRef<Map<string, number>>(new Map());
+  /** Last resolved bridge session mode (cc_bridge_start), not global Settings radio. */
+  const ccBridgeLastSessionModeRef = useRef<CcBridgeSessionModeHint>("");
   const [hasAnyFeishuDesktopBinding, setHasAnyFeishuDesktopBinding] = useState(false);
   const [wechatDesktopBound, setWechatDesktopBound] = useState(false);
   /** Meta/分身窗格「新对话 · 继承上下文」时，首条发送前再 createSession 并带上此 id。 */
@@ -1246,6 +1253,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     const t = window.setTimeout(() => setFavoriteToastOpen(false), 1800);
     return () => window.clearTimeout(t);
   }, [favoriteToastOpen]);
+  useEffect(() => {
+    ccBridgeLastSessionModeRef.current = "";
+  }, [pane.sessionId]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [taskspaceAutoRefreshKey, setTaskspaceAutoRefreshKey] = useState(0);
   const [taskspaceWidth, setTaskspaceWidth] = useState(() => {
@@ -3193,9 +3203,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
               const waitLabel = (() => {
                 if (name === "cc_bridge_send") {
-                  return Number.isFinite(sec)
-                    ? `⏳ ${name} 执行中…（已等待 ${sec}s；可见模式：请先单击右侧工作区「claude-code」终端内部，再按键盘选允许/拒绝——焦点若在聊天输入框，按键进不了终端）`
-                    : `⏳ ${name} 执行中…（可见模式：先单击右侧「claude-code」终端再按键操作）`;
+                  return ccBridgeSendToolProgressLabel(sec, ccBridgeLastSessionModeRef.current);
                 }
                 return Number.isFinite(sec)
                   ? `⏳ ${name} 执行中…（已等待 ${sec}s）`
@@ -3232,11 +3240,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             }
             if (payload.type === "tool_call") {
               const toolName = payload.data?.name ?? "tool";
-              const toolArgs = payload.data?.arguments ?? payload.data?.args ?? {};
+              const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
               if (eventAgentId === "meta" && toolName === "cc_bridge_start") {
                 const toolCallId = String(payload.data?.id ?? "").trim();
                 const callKey = toolCallId || `${requestSessionId || "session"}:cc_bridge_start`;
-                void triggerCcBridgeVisibleTerminal(callKey);
+                const modeHint = parseCcBridgeModeFromPayload(toolArgs);
+                if (modeHint === "headless") {
+                  ccBridgeLastSessionModeRef.current = "headless";
+                } else if (modeHint === "visible_tui") {
+                  ccBridgeLastSessionModeRef.current = "visible_tui";
+                }
+                if (modeHint !== "headless") {
+                  void triggerCcBridgeVisibleTerminal(callKey);
+                }
               }
               // Filter out internal housekeeping tools that add no user-visible signal
               const SILENT_TOOLS = new Set(["check_resources"]);
@@ -3309,8 +3325,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 try {
                   const resultRaw = payload.data?.result;
                   const resultObj = typeof resultRaw === "string" ? JSON.parse(resultRaw) : resultRaw;
+                  const hint = parseCcBridgeModeFromPayload(resultObj);
+                  if (hint) {
+                    ccBridgeLastSessionModeRef.current = hint;
+                  }
                   const sid = typeof resultObj?.session_id === "string" ? resultObj.session_id : "";
-                  if (sid) void triggerCcBridgeTailTerminal(sid);
+                  if (sid && hint === "visible_tui") {
+                    void triggerCcBridgeTailTerminal(sid);
+                  }
                 } catch {
                   // ignore parse errors
                 }
