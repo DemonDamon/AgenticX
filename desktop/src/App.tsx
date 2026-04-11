@@ -1270,7 +1270,6 @@ export function App() {
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
-  const setForwardAutoReply = useAppStore((s) => s.setForwardAutoReply);
 
   const resolveForwardTargetForFavorite = useCallback(
     async (payload: ForwardConfirmPayload): Promise<{ paneId: string; sessionId: string }> => {
@@ -1382,7 +1381,6 @@ export function App() {
       } else {
         setActiveAvatarId(aid ?? null);
       }
-      const prompt = follow || "请阅读上一条转发的聊天记录并给出你的回应。";
       try {
         const result = await window.agenticxDesktop.loadSessionMessages(targetSessionId);
         if (result.ok && Array.isArray(result.messages)) {
@@ -1393,12 +1391,6 @@ export function App() {
         }
       } catch {
         // keep server state; pane may refresh on next poll
-      } finally {
-        setForwardAutoReply({
-          paneId: targetPaneId,
-          sessionId: targetSessionId,
-          text: prompt,
-        });
       }
     },
     [
@@ -1407,7 +1399,6 @@ export function App() {
       resolveForwardTargetForFavorite,
       setActiveAvatarId,
       setActivePaneId,
-      setForwardAutoReply,
       setPaneMessages,
     ]
   );
