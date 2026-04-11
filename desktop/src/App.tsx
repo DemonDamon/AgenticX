@@ -1294,6 +1294,16 @@ export function App() {
           setPaneSessionId(paneId, created.session_id);
           return { paneId, sessionId: created.session_id };
         }
+        if (payload.forceNewSession) {
+          const created = await window.agenticxDesktop.createSession({ avatar_id: payload.avatarId });
+          if (!created.ok || !created.session_id) {
+            throw new Error(created.error || "创建分身会话失败");
+          }
+          setPaneSessionId(pane.id, created.session_id);
+          setActivePaneId(pane.id);
+          setActiveAvatarId(payload.avatarId);
+          return { paneId: pane.id, sessionId: created.session_id };
+        }
         let sid = (pane.sessionId || "").trim();
         if (!sid) {
           const created = await window.agenticxDesktop.createSession({ avatar_id: payload.avatarId });
@@ -1321,6 +1331,19 @@ export function App() {
         }
         setPaneSessionId(paneId, created.session_id);
         return { paneId, sessionId: created.session_id };
+      }
+      if (payload.forceNewSession) {
+        const created = await window.agenticxDesktop.createSession({
+          avatar_id: groupAvatarId,
+          name: payload.displayName,
+        });
+        if (!created.ok || !created.session_id) {
+          throw new Error(created.error || "创建群聊会话失败");
+        }
+        setPaneSessionId(groupPane.id, created.session_id);
+        setActivePaneId(groupPane.id);
+        setActiveAvatarId(null);
+        return { paneId: groupPane.id, sessionId: created.session_id };
       }
       let sid = (groupPane.sessionId || "").trim();
       if (!sid) {
@@ -1392,6 +1415,8 @@ export function App() {
       } catch {
         // keep server state; pane may refresh on next poll
       }
+      useAppStore.getState().bumpSessionCatalogRevision();
+      window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
     },
     [
       apiBase,

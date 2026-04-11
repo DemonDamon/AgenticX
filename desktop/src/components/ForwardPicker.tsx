@@ -4,8 +4,8 @@ import type { Avatar, GroupChat } from "../store";
 /** Resolved on confirm: either an existing session or avatar/group to wake via createSession. */
 export type ForwardConfirmPayload =
   | { type: "session"; sessionId: string }
-  | { type: "avatar"; avatarId: string; displayName: string }
-  | { type: "group"; groupId: string; displayName: string };
+  | { type: "avatar"; avatarId: string; displayName: string; forceNewSession?: boolean }
+  | { type: "group"; groupId: string; displayName: string; forceNewSession?: boolean };
 
 type ForwardPickerProps = {
   open: boolean;
@@ -36,8 +36,8 @@ type ForwardTargetItem = {
 
 function payloadKey(payload: ForwardConfirmPayload): string {
   if (payload.type === "session") return `s:${payload.sessionId}`;
-  if (payload.type === "avatar") return `a:${payload.avatarId}`;
-  return `g:${payload.groupId}`;
+  if (payload.type === "avatar") return `a:${payload.avatarId}:${payload.forceNewSession ? "new" : "reuse"}`;
+  return `g:${payload.groupId}:${payload.forceNewSession ? "new" : "reuse"}`;
 }
 
 function TargetAvatar({ title, avatarUrl }: { title: string; avatarUrl?: string }) {
@@ -91,14 +91,14 @@ export function ForwardPicker({
       subtitle: "分身",
       avatarUrl: avatar.avatarUrl || undefined,
       avatarContextId: avatar.id,
-      newPayload: { type: "avatar", avatarId: avatar.id, displayName: avatar.name },
+      newPayload: { type: "avatar", avatarId: avatar.id, displayName: avatar.name, forceNewSession: true },
     }));
     const groupRows: ForwardTargetItem[] = groups.map((group) => ({
       key: `group:${group.id}`,
       title: group.name,
       subtitle: "群聊",
       avatarContextId: `group:${group.id}`,
-      newPayload: { type: "group", groupId: group.id, displayName: group.name },
+      newPayload: { type: "group", groupId: group.id, displayName: group.name, forceNewSession: true },
     }));
     return [...avatarRows, ...groupRows];
   }, [avatars, groups]);
