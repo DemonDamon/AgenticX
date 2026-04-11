@@ -2362,7 +2362,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         } else {
           setActiveAvatarId(aid ?? null);
         }
-        const prompt = follow || "请阅读上一条转发的聊天记录并给出你的回应。";
         try {
           const result = await window.agenticxDesktop.loadSessionMessages(targetSessionId);
           if (result.ok && Array.isArray(result.messages)) {
@@ -2373,12 +2372,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           }
         } catch {
           // keep server state; pane may refresh on next poll
-        } finally {
-          useAppStore.getState().setForwardAutoReply({
-            paneId: targetPaneId,
-            sessionId: targetSessionId,
-            text: prompt,
-          });
         }
       } catch (err) {
         console.error("[ChatPane] forward failed:", err);
