@@ -3,7 +3,7 @@ name: agenticx-skill-manager
 description: Guide for managing AgenticX skills including listing, searching, installing, uninstalling, publishing, and running a skill registry server. Use when the user wants to manage skills, find available skills, publish custom skills, set up a skill registry, or understand the skill ecosystem.
 metadata:
   author: AgenticX
-  version: "0.3.5"
+  version: "0.3.6"
 ---
 
 # AgenticX Skill Manager
