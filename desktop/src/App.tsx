@@ -1270,6 +1270,7 @@ export function App() {
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
+  const setForwardAutoReply = useAppStore((s) => s.setForwardAutoReply);
 
   const resolveForwardTargetForFavorite = useCallback(
     async (payload: ForwardConfirmPayload): Promise<{ paneId: string; sessionId: string }> => {
@@ -1375,6 +1376,8 @@ export function App() {
       const base = apiBase.replace(/\/$/, "");
       if (!base) throw new Error("未连接 Studio");
       const follow = followUpNote.trim();
+      const defaultForwardFollowCue = "请阅读刚转发的聊天记录并继续回复。";
+      const effectiveFollowNote = follow || defaultForwardFollowCue;
       const rawRole = (ctx.role || "assistant").trim().toLowerCase();
       const roleForForward =
         rawRole === "user" ? "user" : rawRole === "tool" ? "tool" : "assistant";
@@ -1389,7 +1392,7 @@ export function App() {
           source_session_id: source,
           target_session_id: targetSessionId,
           messages: [{ sender, role: roleForForward, content: ctx.content }],
-          follow_up_note: follow,
+          follow_up_note: effectiveFollowNote,
         }),
       });
       if (!resp.ok) {
@@ -1415,6 +1418,11 @@ export function App() {
       } catch {
         // keep server state; pane may refresh on next poll
       }
+      setForwardAutoReply({
+        paneId: targetPaneId,
+        sessionId: targetSessionId,
+        text: effectiveFollowNote,
+      });
       useAppStore.getState().bumpSessionCatalogRevision();
       window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
     },
@@ -1424,6 +1432,7 @@ export function App() {
       resolveForwardTargetForFavorite,
       setActiveAvatarId,
       setActivePaneId,
+      setForwardAutoReply,
       setPaneMessages,
     ]
   );
