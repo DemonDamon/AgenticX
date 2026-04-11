@@ -41,6 +41,8 @@ class ChatRequest(BaseModel):
     user_preference: Optional[str] = None
     # Desktop workspace panel: which taskspace tab is active (matches taskspace id from list_taskspaces).
     active_taskspace_id: Optional[str] = None
+    # Internal: when true, this user_input drives generation but is not persisted into chat history.
+    skip_user_history: Optional[bool] = False
 
 
 class ConfirmResponse(BaseModel):

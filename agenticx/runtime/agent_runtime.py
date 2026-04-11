@@ -792,6 +792,7 @@ class AgentRuntime:
         system_prompt: Optional[str] = None,
         user_message_content: Optional[Any] = None,
         history_user_attachments: Optional[list[dict[str, Any]]] = None,
+        persist_user_message: bool = True,
     ) -> AsyncGenerator[RuntimeEvent, None]:
         async def _check_should_stop() -> bool:
             if should_stop is None:
@@ -836,10 +837,11 @@ class AgentRuntime:
         _is_system_trigger = user_input.startswith("[系统通知]")
         user_content: Any = user_message_content if user_message_content is not None else user_input
         messages.append({"role": "user", "content": user_content})
-        session.agent_messages.append({"role": "user", "content": user_input})
+        if persist_user_message:
+            session.agent_messages.append({"role": "user", "content": user_input})
         await self.hooks.run_on_agent_start(session, agent_id, user_input)
         synced_session_message_count = len(session.agent_messages)
-        if not _is_system_trigger:
+        if persist_user_message and not _is_system_trigger:
             hist_user: dict[str, Any] = {"role": "user", "content": user_input}
             if history_user_attachments:
                 hist_user["attachments"] = list(history_user_attachments)
