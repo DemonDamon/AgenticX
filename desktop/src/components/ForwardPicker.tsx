@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import type { Avatar, ChatPane, GroupChat } from "../store";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Avatar, GroupChat } from "../store";
 
 /** Resolved on confirm: either an existing session or avatar/group to wake via createSession. */
 export type ForwardConfirmPayload =
@@ -10,7 +10,7 @@ export type ForwardConfirmPayload =
 type ForwardPickerProps = {
   open: boolean;
   currentSessionId: string;
-  panes: ChatPane[];
+  currentAvatarId?: string | null;
   avatars: Avatar[];
   groups: GroupChat[];
   onClose: () => void;
@@ -23,6 +23,15 @@ type ForwardRow = {
   subtitle: string;
   avatarUrl?: string;
   payload: ForwardConfirmPayload;
+};
+
+type ForwardTargetItem = {
+  key: string;
+  title: string;
+  subtitle: string;
+  avatarUrl?: string;
+  avatarContextId: string;
+  newPayload: ForwardConfirmPayload;
 };
 
 function payloadKey(payload: ForwardConfirmPayload): string {
@@ -45,97 +54,127 @@ function TargetAvatar({ title, avatarUrl }: { title: string; avatarUrl?: string 
 export function ForwardPicker({
   open,
   currentSessionId,
-  panes,
+  currentAvatarId,
   avatars,
   groups,
   onClose,
   onConfirm,
 }: ForwardPickerProps) {
-  const [search, setSearch] = useState("");
+  const [targetSearch, setTargetSearch] = useState("");
+  const [selectedTargetKey, setSelectedTargetKey] = useState<string | null>(null);
+  const [sessionRows, setSessionRows] = useState<ForwardRow[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsError, setSessionsError] = useState<string>("");
   const [selectedPayload, setSelectedPayload] = useState<ForwardConfirmPayload | null>(null);
   const [followUpNote, setFollowUpNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const lastTargetKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!open) {
-      setSearch("");
+      setTargetSearch("");
+      setSelectedTargetKey(null);
+      setSessionRows([]);
+      setSessionsLoading(false);
+      setSessionsError("");
       setSelectedPayload(null);
       setFollowUpNote("");
       setSubmitting(false);
+      lastTargetKeyRef.current = null;
     }
   }, [open]);
 
-  const recentTargets = useMemo<ForwardRow[]>(() => {
-    const seen = new Set<string>();
-    const rows: ForwardRow[] = [];
-    for (const pane of panes) {
-      const sessionId = String(pane.sessionId || "").trim();
-      if (!sessionId || sessionId === currentSessionId || seen.has(sessionId)) continue;
-      seen.add(sessionId);
-      rows.push({
-        key: `pane:${sessionId}`,
-        title: pane.avatarName || "会话",
-        subtitle: `session: ${sessionId}`,
-        payload: { type: "session", sessionId },
-      });
+  const targetItems = useMemo<ForwardTargetItem[]>(() => {
+    const avatarRows: ForwardTargetItem[] = avatars.map((avatar) => ({
+      key: `avatar:${avatar.id}`,
+      title: avatar.name,
+      subtitle: "分身",
+      avatarUrl: avatar.avatarUrl || undefined,
+      avatarContextId: avatar.id,
+      newPayload: { type: "avatar", avatarId: avatar.id, displayName: avatar.name },
+    }));
+    const groupRows: ForwardTargetItem[] = groups.map((group) => ({
+      key: `group:${group.id}`,
+      title: group.name,
+      subtitle: "群聊",
+      avatarContextId: `group:${group.id}`,
+      newPayload: { type: "group", groupId: group.id, displayName: group.name },
+    }));
+    return [...avatarRows, ...groupRows];
+  }, [avatars, groups]);
+
+  const selectedTarget = useMemo(
+    () => targetItems.find((item) => item.key === selectedTargetKey) ?? null,
+    [selectedTargetKey, targetItems]
+  );
+
+  useEffect(() => {
+    if (!open || selectedTargetKey) return;
+    const preferred =
+      (currentAvatarId ? targetItems.find((item) => item.avatarContextId === currentAvatarId) : null) ??
+      targetItems[0] ??
+      null;
+    if (!preferred) return;
+    setSelectedTargetKey(preferred.key);
+    setSelectedPayload(preferred.newPayload);
+    lastTargetKeyRef.current = preferred.key;
+  }, [currentAvatarId, open, selectedTargetKey, targetItems]);
+
+  useEffect(() => {
+    if (!open || !selectedTarget) return;
+    if (lastTargetKeyRef.current !== selectedTarget.key) {
+      setSelectedPayload(selectedTarget.newPayload);
+      lastTargetKeyRef.current = selectedTarget.key;
     }
-    return rows;
-  }, [currentSessionId, panes]);
+  }, [open, selectedTarget]);
 
-  const avatarTargets = useMemo<ForwardRow[]>(() => {
-    return avatars.map((avatar) => {
-      const pane = panes.find((item) => item.avatarId === avatar.id && String(item.sessionId || "").trim());
-      const sessionId = String(pane?.sessionId || "").trim();
-      const payload: ForwardConfirmPayload = sessionId
-        ? { type: "session", sessionId }
-        : { type: "avatar", avatarId: avatar.id, displayName: avatar.name };
-      return {
-        key: `avatar:${avatar.id}`,
-        title: avatar.name,
-        subtitle: sessionId ? `分身会话: ${sessionId}` : "未打开会话，确认后将创建并打开",
-        avatarUrl: avatar.avatarUrl || undefined,
-        payload,
-      };
-    });
-  }, [avatars, panes]);
+  useEffect(() => {
+    if (!open || !selectedTarget) return;
+    let cancelled = false;
+    setSessionsLoading(true);
+    setSessionsError("");
+    setSessionRows([]);
+    void window.agenticxDesktop
+      .listSessions(selectedTarget.avatarContextId)
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.ok) {
+          setSessionsError("读取历史会话失败，请稍后重试");
+          return;
+        }
+        const rows = (result.sessions || [])
+          .filter((row) => !row.archived)
+          .filter((row) => String(row.session_id || "").trim() && String(row.session_id || "").trim() !== currentSessionId)
+          .sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0))
+          .map<ForwardRow>((row) => {
+            const sid = String(row.session_id || "").trim();
+            return {
+              key: `session:${sid}`,
+              title: String(row.session_name || "").trim() || "未命名会话",
+              subtitle: `session: ${sid}`,
+              avatarUrl: selectedTarget.avatarUrl,
+              payload: { type: "session", sessionId: sid },
+            };
+          });
+        setSessionRows(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setSessionsError("读取历史会话失败，请稍后重试");
+      })
+      .finally(() => {
+        if (!cancelled) setSessionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSessionId, open, selectedTarget]);
 
-  const groupTargets = useMemo<ForwardRow[]>(() => {
-    return groups.map((group) => {
-      const groupAvatarId = `group:${group.id}`;
-      const pane = panes.find((item) => item.avatarId === groupAvatarId && String(item.sessionId || "").trim());
-      const sessionId = String(pane?.sessionId || "").trim();
-      const payload: ForwardConfirmPayload = sessionId
-        ? { type: "session", sessionId }
-        : { type: "group", groupId: group.id, displayName: group.name };
-      return {
-        key: `group:${group.id}`,
-        title: group.name,
-        subtitle: sessionId ? `群聊会话: ${sessionId}` : "未打开会话，确认后将创建并打开",
-        payload,
-      };
-    });
-  }, [groups, panes]);
-
-  const lowered = search.trim().toLowerCase();
-  const applyFilter = (rows: ForwardRow[]) =>
-    lowered
-      ? rows.filter((row) => {
-          const sid =
-            row.payload.type === "session"
-              ? row.payload.sessionId
-              : row.payload.type === "avatar"
-                ? row.payload.avatarId
-                : row.payload.groupId;
-          return (
-            row.title.toLowerCase().includes(lowered) ||
-            row.subtitle.toLowerCase().includes(lowered) ||
-            String(sid || "").toLowerCase().includes(lowered)
-          );
-        })
-      : rows;
-  const filteredRecent = applyFilter(recentTargets);
-  const filteredAvatars = applyFilter(avatarTargets);
-  const filteredGroups = applyFilter(groupTargets);
+  const lowered = targetSearch.trim().toLowerCase();
+  const filteredTargets = lowered
+    ? targetItems.filter(
+        (row) => row.title.toLowerCase().includes(lowered) || row.subtitle.toLowerCase().includes(lowered)
+      )
+    : targetItems;
 
   if (!open) return null;
 
@@ -149,19 +188,25 @@ export function ForwardPicker({
     "[html[data-theme=dim]_&]:border-white/35 [html[data-theme=dim]_&]:bg-white/[0.06] " +
     "text-text-strong";
 
-  const renderTarget = (target: ForwardRow) => {
-    const active = !!selectedPayload && payloadKey(selectedPayload) === payloadKey(target.payload);
+  const renderSelectableRow = (row: {
+    key: string;
+    title: string;
+    subtitle: string;
+    avatarUrl?: string;
+    onClick: () => void;
+    active: boolean;
+  }) => {
     return (
       <button
-        key={target.key}
+        key={row.key}
         type="button"
-        onClick={() => setSelectedPayload(target.payload)}
-        className={`${rowBase} ${active ? rowActive : rowInactive}`}
+        onClick={row.onClick}
+        className={`${rowBase} ${row.active ? rowActive : rowInactive}`}
       >
-        <TargetAvatar title={target.title} avatarUrl={target.avatarUrl} />
+        <TargetAvatar title={row.title} avatarUrl={row.avatarUrl} />
         <div className="min-w-0">
-          <div className="truncate text-sm text-text-strong">{target.title}</div>
-          <div className="truncate text-[11px] text-text-faint">{target.subtitle}</div>
+          <div className="truncate text-sm text-text-strong">{row.title}</div>
+          <div className="truncate text-[11px] text-text-faint">{row.subtitle}</div>
         </div>
       </button>
     );
@@ -180,40 +225,79 @@ export function ForwardPicker({
         <div className="border-b border-border px-4 py-3">
           <div className="text-sm font-semibold text-text-strong">选择转发目标</div>
           <div className="mt-1 text-xs text-text-faint">
-            支持已打开会话、分身与群聊。未打开的分身/群聊会在确认时自动创建会话并打开对应窗格（类似微信「发送给」）。
+            先选择分身/群聊，再决定是进入该目标的新会话，还是继续它的历史会话。
           </div>
           <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            value={targetSearch}
+            onChange={(event) => setTargetSearch(event.target.value)}
             className={
               "mt-2 h-9 w-full rounded-lg border border-border bg-surface-card px-3 text-sm text-text-primary outline-none placeholder:text-text-faint " +
               "focus:ring-2 focus:ring-offset-0 focus:ring-neutral-900/15 [html[data-theme=light]_&]:focus:border-neutral-900/55 " +
               "[html[data-theme=dark]_&]:focus:border-white/45 [html[data-theme=dark]_&]:focus:ring-white/12 " +
               "[html[data-theme=dim]_&]:focus:border-white/45 [html[data-theme=dim]_&]:focus:ring-white/12"
             }
-            placeholder="搜索名称 / session id"
+            placeholder="搜索分身或群聊名称"
           />
         </div>
         <div className="grid flex-1 min-h-0 grid-cols-2 gap-3 overflow-hidden p-4">
           <div className="min-h-0 overflow-y-auto">
-            <div className="mb-2 text-xs font-medium text-text-muted">最近会话</div>
+            <div className="mb-2 text-xs font-medium text-text-muted">分身 / 群聊</div>
             <div className="space-y-2">
-              {filteredRecent.length > 0 ? filteredRecent.map(renderTarget) : <div className="text-xs text-text-faint">暂无可选会话</div>}
+              {filteredTargets.length > 0 ? (
+                filteredTargets.map((target) =>
+                  renderSelectableRow({
+                    key: target.key,
+                    title: target.title,
+                    subtitle: target.subtitle,
+                    avatarUrl: target.avatarUrl,
+                    onClick: () => setSelectedTargetKey(target.key),
+                    active: selectedTargetKey === target.key,
+                  })
+                )
+              ) : (
+                <div className="text-xs text-text-faint">暂无匹配目标</div>
+              )}
             </div>
           </div>
           <div className="min-h-0 overflow-y-auto">
-            <div className="mb-2 text-xs font-medium text-text-muted">分身 / 群聊</div>
+            <div className="mb-2 text-xs font-medium text-text-muted">
+              {selectedTarget ? `${selectedTarget.title} · 历史会话` : "历史会话"}
+            </div>
             <div className="space-y-2">
-              {filteredAvatars.map(renderTarget)}
-              {filteredGroups.map(renderTarget)}
-              {filteredAvatars.length === 0 && filteredGroups.length === 0 ? (
-                <div className="text-xs text-text-faint">暂无匹配目标</div>
+              {selectedTarget
+                ? renderSelectableRow({
+                    key: `new:${selectedTarget.key}`,
+                    title: "在新会话中继续",
+                    subtitle: "默认新建一个会话并自动发送转发内容",
+                    avatarUrl: selectedTarget.avatarUrl,
+                    onClick: () => setSelectedPayload(selectedTarget.newPayload),
+                    active:
+                      !!selectedPayload && payloadKey(selectedPayload) === payloadKey(selectedTarget.newPayload),
+                  })
+                : null}
+              {sessionsLoading ? <div className="text-xs text-text-faint">正在加载历史会话...</div> : null}
+              {!sessionsLoading && sessionsError ? <div className="text-xs text-amber-400">{sessionsError}</div> : null}
+              {!sessionsLoading && !sessionsError
+                ? sessionRows.map((row) =>
+                    renderSelectableRow({
+                      key: row.key,
+                      title: row.title,
+                      subtitle: row.subtitle,
+                      avatarUrl: row.avatarUrl,
+                      onClick: () => setSelectedPayload(row.payload),
+                      active:
+                        !!selectedPayload && payloadKey(selectedPayload) === payloadKey(row.payload),
+                    })
+                  )
+                : null}
+              {!sessionsLoading && !sessionsError && selectedTarget && sessionRows.length === 0 ? (
+                <div className="text-xs text-text-faint">该目标暂无可继续的历史会话</div>
               ) : null}
             </div>
           </div>
         </div>
         <div className="border-t border-border px-4 py-2">
-          <div className="mb-1 text-xs font-medium text-text-muted">附加说明（可选）</div>
+          <div className="mb-1 text-xs font-medium text-text-muted">可补充一句说明（选填）</div>
           <textarea
             value={followUpNote}
             onChange={(e) => setFollowUpNote(e.target.value)}
