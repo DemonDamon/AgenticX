@@ -292,8 +292,8 @@ class SessionManager:
             if avatar_id and getattr(managed, "avatar_id", None) != avatar_id:
                 continue
             hist = getattr(managed.studio_session, "chat_history", None) or []
-            if len(hist) == 0:
-                continue
+            # 之前跳过 len(hist)==0 会把「刚创建、尚未写入首条消息」的会话从列表里藏起来，
+            # 桌面历史侧栏无法立刻显示当前会话；保留空会话条目以便 UI 及时对齐。
             seen_session_ids.add(sid)
             result.append({
                 "session_id": sid,
@@ -1040,6 +1040,15 @@ class SessionManager:
             except (TypeError, ValueError):
                 pass
             if chat_count <= 0:
+                # 元数据可能略滞后于磁盘 messages.json；有消息则仍应出现在会话列表中。
+                try:
+                    mp = Path(self._messages_path(sid))
+                    raw = mp.read_text(encoding="utf-8").strip()
+                    if raw and raw != "[]":
+                        chat_count = 1
+                except Exception:
+                    pass
+            if chat_count <= 0:
                 continue
             created_at = self._to_float(metadata.get("created_at"), self._iso_to_epoch(item.get("created_at")))
             updated_at = self._to_float(metadata.get("updated_at"), self._iso_to_epoch(item.get("created_at")))
@@ -1074,12 +1083,28 @@ class SessionManager:
                 except Exception:
                     continue
                 mtime = float(messages_path.stat().st_mtime)
+                fs_meta: dict[str, Any] = {}
+                try:
+                    loaded = self._session_store._load_latest_session_metadata_sync(sid)
+                    if isinstance(loaded, dict):
+                        fs_meta = loaded
+                except Exception:
+                    fs_meta = {}
+                raw_av = fs_meta.get("avatar_id")
+                av_norm = (
+                    None
+                    if raw_av is None
+                    else normalize_session_avatar_binding(str(raw_av))
+                )
+                raw_nm = fs_meta.get("avatar_name")
+                av_name = None if raw_nm is None else (str(raw_nm).strip() or None)
+                sess_nm = self._sanitize_session_name(fs_meta.get("session_name"))
                 rows.append(
                     {
                         "session_id": sid,
-                        "avatar_id": None,
-                        "avatar_name": None,
-                        "session_name": None,
+                        "avatar_id": av_norm,
+                        "avatar_name": av_name,
+                        "session_name": sess_nm,
                         "updated_at": mtime,
                         "created_at": mtime,
                         "pinned": False,

@@ -3609,7 +3609,7 @@ function FavoritesTab({
       <ForwardPicker
         open={forwardOpen}
         currentSessionId={forwardCtx?.sourceSessionId ?? sessionId}
-        panes={panes}
+        currentAvatarId={null}
         avatars={avatars}
         groups={groups}
         onClose={() => {
