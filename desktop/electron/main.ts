@@ -2911,25 +2911,11 @@ function registerIpc(): void {
       const iconPath = app.isPackaged
         ? path.join(process.resourcesPath, "assets", "icon.png")
         : path.resolve(process.cwd(), "assets", "icon.png");
-      const icon = (() => {
-        if (destructive) {
-          // Use geometry only — SVG <text> often fails to rasterize in nativeImage.createFromDataURL,
-          // which makes macOS fall back to the app icon (the "atom" look users report).
-          const warningSvg = `
-            <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-              <rect width="128" height="128" fill="transparent"/>
-              <circle cx="64" cy="34" r="14" fill="#FACC15"/>
-              <rect x="52" y="56" width="24" height="58" rx="6" fill="#FACC15"/>
-            </svg>
-          `.trim();
-          const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(warningSvg)}`;
-          return nativeImage.createFromDataURL(dataUrl);
-        }
-        return fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : undefined;
-      })();
-      const dialogType: "none" | "question" = destructive ? "none" : "question";
+      // Destructive: use OS warning style (yellow triangle + exclamation on Windows/Linux; NSAlert
+      // warning on macOS). Do not pass app icon — custom SVG rasterization often fails and falls
+      // back to the app logo.
       const options: Electron.MessageBoxOptions = {
-        type: dialogType,
+        type: destructive ? "warning" : "question",
         title,
         message,
         detail: detail || undefined,
@@ -2937,8 +2923,10 @@ function registerIpc(): void {
         defaultId: 0,
         cancelId: 0,
         noLink: true,
-        icon,
       };
+      if (!destructive && fs.existsSync(iconPath)) {
+        options.icon = nativeImage.createFromPath(iconPath);
+      }
       const { response } = focused
         ? await dialog.showMessageBox(focused, options)
         : await dialog.showMessageBox(options);
