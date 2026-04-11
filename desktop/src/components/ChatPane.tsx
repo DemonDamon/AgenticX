@@ -1241,7 +1241,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const ccBridgeTailGuardRef = useRef<Map<string, number>>(new Map());
   /** Last resolved bridge session mode (cc_bridge_start), not global Settings radio. */
   const ccBridgeLastSessionModeRef = useRef<CcBridgeSessionModeHint>("");
-  const [hasAnyFeishuDesktopBinding, setHasAnyFeishuDesktopBinding] = useState(false);
   const [wechatDesktopBound, setWechatDesktopBound] = useState(false);
   /** Meta/分身窗格「新对话 · 继承上下文」时，首条发送前再 createSession 并带上此 id。 */
   const pendingInheritFromSessionIdRef = useRef<string | null>(null);
@@ -1339,12 +1338,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         .join("\0"),
     [paneSubAgents]
   );
-  const primaryMetaPaneId = useMemo(() => {
-    const metaPanes = panes.filter((p) => !p.avatarId || p.avatarId === "");
-    if (metaPanes.length === 0) return null;
-    const preferred = metaPanes.find((p) => !((p.sessionId ?? "").startsWith("im-")));
-    return (preferred ?? metaPanes[0])?.id ?? null;
-  }, [panes]);
   const primaryPaneForSessionId = useMemo(() => {
     const sid = (pane?.sessionId ?? "").trim();
     if (!sid) return null;
@@ -1353,6 +1346,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const shouldShowBoundFeishuBadge =
     feishuDesktopBound && primaryPaneForSessionId === pane.id && !isAutomationTaskPane;
   const shouldShowFeishuBadge = shouldShowBoundFeishuBadge;
+  const shouldShowWechatBadge =
+    wechatDesktopBound && primaryPaneForSessionId === pane.id && !isAutomationTaskPane;
 
   useEffect(() => {
     if (paneSubAgents.length === 0) {
@@ -1525,7 +1520,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       boundSessionIdRef.current.feishu = "";
       boundSessionIdRef.current.wechat = "";
       setFeishuDesktopBound(false);
-      setHasAnyFeishuDesktopBinding(false);
       setWechatDesktopBound(false);
       return;
     }
@@ -1541,21 +1535,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           const desk = r.bindings["_desktop"] as { session_id?: string } | undefined;
           const boundSid = typeof desk?.session_id === "string" ? desk.session_id.trim() : "";
           boundSessionIdRef.current.feishu = boundSid;
-          const hasDesktopBinding = Boolean(desk && typeof desk.session_id === "string" && desk.session_id.trim());
-          setHasAnyFeishuDesktopBinding(hasDesktopBinding);
           setFeishuDesktopBound(
             Boolean(boundSid && boundSid === sid)
           );
         } else {
           boundSessionIdRef.current.feishu = "";
           setFeishuDesktopBound(false);
-          setHasAnyFeishuDesktopBinding(false);
         }
       } catch {
         if (!cancelled) {
           boundSessionIdRef.current.feishu = "";
           setFeishuDesktopBound(false);
-          setHasAnyFeishuDesktopBinding(false);
         }
       }
       try {
@@ -1585,39 +1575,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       window.clearInterval(timer);
     };
   }, [isGroupPane, isAutomationTaskPane, pane?.sessionId]);
-
-  const toggleFeishuDesktopBinding = useCallback(async () => {
-    if (isGroupPane || !pane?.sessionId || isAutomationTaskPane) return;
-    try {
-      if (feishuDesktopBound) {
-        await window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
-        boundSessionIdRef.current.feishu = "";
-        setFeishuDesktopBound(false);
-      } else {
-        const aid = pane.avatarId?.startsWith("group:") ? null : pane.avatarId || null;
-        await window.agenticxDesktop.saveFeishuDesktopBinding({
-          sessionId: pane.sessionId,
-          avatarId: aid,
-          avatarName: pane.avatarName || null,
-          provider: pane.modelProvider || null,
-          model: pane.modelName || null,
-        });
-        boundSessionIdRef.current.feishu = (pane.sessionId || "").trim();
-        setFeishuDesktopBound(true);
-      }
-    } catch {
-      /* ignore */
-    }
-  }, [
-    feishuDesktopBound,
-    isAutomationTaskPane,
-    isGroupPane,
-    pane?.sessionId,
-    pane?.avatarId,
-    pane?.avatarName,
-    pane?.modelProvider,
-    pane?.modelName,
-  ]);
 
   const bindingModelSyncRef = useRef<{ feishu: string; wechat: string }>({ feishu: "", wechat: "" });
   useEffect(() => {
@@ -3847,6 +3804,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 {shouldShowFeishuBadge && (
                   <FeishuBadge variant="topbar" />
                 )}
+                {shouldShowWechatBadge && (
+                  <span
+                    className="inline-flex shrink-0 items-center rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
+                    style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
+                  >
+                    微信
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">
                 <span>
@@ -3927,45 +3892,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 </svg>
               </button>
             ) : null}
-            {!isGroupPane && !isAutomationTaskPane && pane.sessionId ? (() => {
-              const isImSession = pane.sessionId.startsWith("im-");
-              const isDefaultMetaRoute =
-                !hasAnyFeishuDesktopBinding &&
-                !pane.avatarId &&
-                !isImSession &&
-                primaryMetaPaneId === pane.id;
-              const isFeishuActive = shouldShowFeishuBadge;
-              return (
-                <button
-                  type="button"
-                  className={`rounded px-2 py-0.5 text-[11px] transition ${
-                    isFeishuActive
-                      ? ""
-                      : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
-                  }`}
-                  style={isFeishuActive ? { backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" } : undefined}
-                  onClick={isImSession || isDefaultMetaRoute ? undefined : () => void toggleFeishuDesktopBinding()}
-                  title={
-                    isImSession
-                      ? "默认飞书会话（飞书消息未绑定分身时路由至此）"
-                      : isDefaultMetaRoute
-                      ? "默认飞书路由已回到 Machi（未绑定分身）"
-                      : feishuDesktopBound
-                      ? "已绑定飞书（点击解绑）"
-                      : "绑定飞书到此会话"
-                  }
-                >
-                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path
-                      d="M6.2 9.8a2.5 2.5 0 0 1 0-3.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-.4.4M9.8 6.2a2.5 2.5 0 0 1 0 3.5l-1 1a2.5 2.5 0 0 1-3.5-3.5l.4-.4"
-                      stroke="currentColor"
-                      strokeWidth="1.4"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
-              );
-            })() : null}
             <button
               className={`rounded px-2 py-0.5 text-[11px] transition ${
                 pane.historyOpen
