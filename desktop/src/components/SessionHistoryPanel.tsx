@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, type ChatPane, type Message } from "../store";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import { attachmentsFromSessionRow } from "../utils/session-message-map";
+import { getVisibleBoundSession, isSessionVisibleInPane } from "../utils/session-history-logic";
 import { FeishuBadge } from "./FeishuBadge";
 
 function timeAgo(ts: number): string {
@@ -187,15 +188,6 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
     });
   }
   return sortSessionRows(rows);
-}
-
-function isSessionVisibleInPane(row: SessionRow, paneAvatarId: string | null): boolean {
-  const paneAid = String(paneAvatarId ?? "").trim();
-  const rowAid = String(row.avatar_id ?? "").trim();
-  // Meta pane: only show meta/unbound sessions; never mix in automation/group/avatar sessions.
-  if (!paneAid) return rowAid.length === 0;
-  // Avatar/group/automation panes: strict same-avatar binding only.
-  return rowAid === paneAid;
 }
 
 export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onClose, tintColor }: Props) {
@@ -438,31 +430,28 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
 
   if (!pane.historyOpen) return null;
 
-  const feishuSession = feishuMarkedSessionId
-    ? sessions.find((item) => item.session_id === feishuMarkedSessionId) ??
-      ({
-        session_id: feishuMarkedSessionId,
-        avatar_id: pane.avatarId ?? null,
-        avatar_name: pane.avatarName ?? null,
-        session_name: null,
-        updated_at: Date.now() / 1000,
-        created_at: Date.now() / 1000,
-      } satisfies SessionRow)
-    : null;
+  const feishuSession = getVisibleBoundSession(
+    feishuMarkedSessionId,
+    sessions,
+    pane.avatarId ?? null
+  );
 
-  const wechatSession = wechatMarkedSessionId
-    ? sessions.find((item) => item.session_id === wechatMarkedSessionId) ??
-      ({
-        session_id: wechatMarkedSessionId,
-        avatar_id: pane.avatarId ?? null,
-        avatar_name: pane.avatarName ?? null,
-        session_name: null,
-        updated_at: Date.now() / 1000,
-        created_at: Date.now() / 1000,
-      } satisfies SessionRow)
-    : null;
+  const wechatSession = getVisibleBoundSession(
+    wechatMarkedSessionId,
+    sessions,
+    pane.avatarId ?? null
+  );
 
   const switchSession = async (sessionId: string, targetPaneId = pane.id, highlightTerms: string[] = []) => {
+    const targetRow = sessions.find((item) => item.session_id === sessionId) ?? null;
+    if (!targetRow || !isSessionVisibleInPane(targetRow, pane.avatarId ?? null)) {
+      console.warn("[SessionHistoryPanel] blocked cross-pane session switch", {
+        paneId: targetPaneId,
+        paneAvatarId: pane.avatarId ?? null,
+        sessionId,
+      });
+      return;
+    }
     setPaneSessionId(targetPaneId, sessionId);
     setPaneHistorySearchTerms(targetPaneId, highlightTerms);
     setUnreadSessionIds((prev) => prev.filter((id) => id !== sessionId));
@@ -651,11 +640,12 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const renderSessionItem = (
     item: SessionRow,
     contentSnippet?: string,
-    imBadgeScope: "all" | "feishu-only" | "wechat-only" = "all"
+    imBadgeScope: "all" | "feishu-only" | "wechat-only" = "all",
+    labelOverride?: string
   ) => {
     if (!item || !item.session_id) return null;
     const active = item.session_id === pane.sessionId;
-    const label = sessionHistoryLabel(item);
+    const label = (labelOverride || sessionHistoryLabel(item)).trim() || sessionHistoryLabel(item);
     const unread = unreadSessionIds.includes(item.session_id);
     const createdAt = getSessionCreatedTimestamp(item) || Date.now() / 1000;
     const feishuMarked = feishuMarkedSessionId === item.session_id;
@@ -778,6 +768,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           provider: pane.modelProvider || null,
           model: pane.modelName || null,
         });
+        if ((wechatBoundSessionId || "").trim() === target) {
+          await window.agenticxDesktop.saveWechatDesktopBinding({ sessionId: null });
+          setWechatBoundSessionId(null);
+        }
         setFeishuBoundSessionId(target);
       }
       return;
@@ -799,6 +793,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           provider: pane.modelProvider || null,
           model: pane.modelName || null,
         });
+        if ((feishuBoundSessionId || "").trim() === target) {
+          await window.agenticxDesktop.saveFeishuDesktopBinding({ sessionId: null });
+          setFeishuBoundSessionId(null);
+        }
         setWechatBoundSessionId(target);
       }
       return;
@@ -1040,7 +1038,15 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 {renderSessionItem(
                   feishuSession,
                   sessionSearchTrim ? messageSearchSnippets[feishuSession.session_id] : undefined,
-                  "feishu-only"
+                  "feishu-only",
+                  (() => {
+                    const base = sessionHistoryLabel(feishuSession);
+                    const sameLabelConflict =
+                      !!wechatSession &&
+                      wechatSession.session_id !== feishuSession.session_id &&
+                      sessionHistoryLabel(wechatSession) === base;
+                    return sameLabelConflict ? `${base} · 飞书` : base;
+                  })()
                 )}
               </div>
             ) : null}
@@ -1058,7 +1064,15 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 {renderSessionItem(
                   wechatSession,
                   sessionSearchTrim ? messageSearchSnippets[wechatSession.session_id] : undefined,
-                  "wechat-only"
+                  "wechat-only",
+                  (() => {
+                    const base = sessionHistoryLabel(wechatSession);
+                    const sameLabelConflict =
+                      !!feishuSession &&
+                      feishuSession.session_id !== wechatSession.session_id &&
+                      sessionHistoryLabel(feishuSession) === base;
+                    return sameLabelConflict ? `${base} · 微信` : base;
+                  })()
                 )}
               </div>
             ) : null}
