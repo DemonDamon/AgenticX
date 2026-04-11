@@ -139,6 +139,16 @@ export function ForwardPicker({
 
   if (!open) return null;
 
+  const rowBase =
+    "flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-left text-xs transition outline-none";
+  const rowInactive = "border-border bg-surface-panel text-text-subtle hover:bg-surface-hover";
+  /** 与设置面板侧栏选中态一致：浅色用深色描边，深色/暗灰用浅色描边 */
+  const rowActive =
+    "[html[data-theme=light]_&]:border-neutral-900/45 [html[data-theme=light]_&]:bg-neutral-900/[0.06] " +
+    "[html[data-theme=dark]_&]:border-white/35 [html[data-theme=dark]_&]:bg-white/[0.06] " +
+    "[html[data-theme=dim]_&]:border-white/35 [html[data-theme=dim]_&]:bg-white/[0.06] " +
+    "text-text-strong";
+
   const renderTarget = (target: ForwardRow) => {
     const active = !!selectedPayload && payloadKey(selectedPayload) === payloadKey(target.payload);
     return (
@@ -146,11 +156,7 @@ export function ForwardPicker({
         key={target.key}
         type="button"
         onClick={() => setSelectedPayload(target.payload)}
-        className={`flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-left text-xs transition ${
-          active
-            ? "border-cyan-500 bg-cyan-500/10 text-text-strong"
-            : "border-border bg-surface-panel text-text-subtle hover:bg-surface-hover"
-        }`}
+        className={`${rowBase} ${active ? rowActive : rowInactive}`}
       >
         <TargetAvatar title={target.title} avatarUrl={target.avatarUrl} />
         <div className="min-w-0">
@@ -162,9 +168,13 @@ export function ForwardPicker({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-none"
+      onClick={onClose}
+    >
       <div
-        className="flex h-[70vh] w-full max-w-3xl flex-col rounded-2xl border border-border bg-surface-panel shadow-2xl"
+        className="flex h-[70vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border shadow-2xl"
+        style={{ backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="border-b border-border px-4 py-3">
@@ -175,7 +185,12 @@ export function ForwardPicker({
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            className="mt-2 h-9 w-full rounded-lg border border-border bg-surface-card px-3 text-sm text-text-primary outline-none placeholder:text-text-faint focus:border-cyan-500"
+            className={
+              "mt-2 h-9 w-full rounded-lg border border-border bg-surface-card px-3 text-sm text-text-primary outline-none placeholder:text-text-faint " +
+              "focus:ring-2 focus:ring-offset-0 focus:ring-neutral-900/15 [html[data-theme=light]_&]:focus:border-neutral-900/55 " +
+              "[html[data-theme=dark]_&]:focus:border-white/45 [html[data-theme=dark]_&]:focus:ring-white/12 " +
+              "[html[data-theme=dim]_&]:focus:border-white/45 [html[data-theme=dim]_&]:focus:ring-white/12"
+            }
             placeholder="搜索名称 / session id"
           />
         </div>
@@ -204,7 +219,12 @@ export function ForwardPicker({
             onChange={(e) => setFollowUpNote(e.target.value)}
             rows={2}
             placeholder="例如：你怎么看？"
-            className="w-full resize-none rounded-lg border border-border bg-surface-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-faint focus:border-cyan-500"
+            className={
+              "w-full resize-none rounded-lg border border-border bg-surface-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-faint " +
+              "focus:ring-2 focus:ring-offset-0 focus:ring-neutral-900/15 [html[data-theme=light]_&]:focus:border-neutral-900/55 " +
+              "[html[data-theme=dark]_&]:focus:border-white/45 [html[data-theme=dark]_&]:focus:ring-white/12 " +
+              "[html[data-theme=dim]_&]:focus:border-white/45 [html[data-theme=dim]_&]:focus:ring-white/12"
+            }
           />
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
@@ -218,7 +238,7 @@ export function ForwardPicker({
           <button
             type="button"
             disabled={!selectedPayload || submitting}
-            className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50"
+            className="rounded-lg px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 bg-[var(--ui-btn-primary-bg)] text-[var(--ui-btn-primary-text)] hover:bg-[var(--ui-btn-primary-bg-hover)]"
             onClick={async () => {
               if (!selectedPayload) return;
               setSubmitting(true);
