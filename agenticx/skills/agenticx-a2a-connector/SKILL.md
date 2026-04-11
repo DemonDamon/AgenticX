@@ -3,7 +3,7 @@ name: agenticx-a2a-connector
 description: Guide for using the A2A (Agent-to-Agent) communication protocol in AgenticX including agent discovery, skill invocation, remote agent cards, and distributed agent systems. Use when the user wants agents to communicate with each other, set up distributed agent systems, invoke remote agent skills, or build agent-to-agent workflows.
 metadata:
   author: AgenticX
-  version: "0.3.5"
+  version: "0.3.6"
 ---
 
 # AgenticX A2A Connector
