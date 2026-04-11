@@ -4406,7 +4406,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       <ForwardPicker
         open={forwardPickerOpen}
         currentSessionId={pane.sessionId}
-        panes={panes}
+        currentAvatarId={pane.avatarId}
         avatars={avatars}
         groups={groups}
         onClose={() => {
