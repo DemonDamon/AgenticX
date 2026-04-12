@@ -21,9 +21,15 @@ mac:
       filter:
         - "**/*"
 win:
+  artifactName: "${productName}-${version}-win-x64.${ext}"
   target:
     - nsis
   icon: assets/icon.ico
+  extraResources:
+    - from: bundled-backend/win-amd64
+      to: backend
+      filter:
+        - "**/*"
 linux:
   target:
     - AppImage

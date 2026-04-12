@@ -1,3 +1,7 @@
 bundled-backend/arm64/agx-server
 bundled-backend/x64/agx-server
 bundled-backend/universal/agx-server
+bundled-backend/win-amd64/agx-server.exe
+bundled-backend/win-amd64/agx-wechat-sidecar.exe
+bundled-backend/win-arm64/agx-server.exe
+bundled-backend/win-arm64/agx-wechat-sidecar.exe

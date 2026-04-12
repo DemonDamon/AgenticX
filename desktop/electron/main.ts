@@ -1345,14 +1345,16 @@ function spawnAgx(
   return spawn(cmd, args, { ...options, shell: false });
 }
 
-/** Packaged macOS app: embedded PyInstaller binary under Resources/backend/agx-server */
+/** Packaged app: embedded PyInstaller binary under resources/backend (agx-server or agx-server.exe). */
 function resolveBundledBackend(): string | null {
-  if (!app.isPackaged || process.platform !== "darwin") {
-    return null;
+  if (!app.isPackaged) return null;
+  if (process.platform === "darwin") {
+    const binary = path.join(process.resourcesPath, "backend", "agx-server");
+    return fs.existsSync(binary) ? binary : null;
   }
-  const binary = path.join(process.resourcesPath, "backend", "agx-server");
-  if (fs.existsSync(binary)) {
-    return binary;
+  if (process.platform === "win32") {
+    const binary = path.join(process.resourcesPath, "backend", "agx-server.exe");
+    return fs.existsSync(binary) ? binary : null;
   }
   return null;
 }
@@ -1601,19 +1603,28 @@ function stopFeishuProcess(): void {
 
 function getWechatSidecarPath(): string {
   if (app.isPackaged) {
-    // electron-builder.yml: mac.extraResources maps bundled-backend/${arch} -> Resources/backend/
+    // electron-builder: mac/win extraResources map bundled-backend/... -> resources/backend/
+    const backendExe = path.join(process.resourcesPath, "backend", "agx-wechat-sidecar.exe");
+    if (fs.existsSync(backendExe)) return backendExe;
     const backendPath = path.join(process.resourcesPath, "backend", "agx-wechat-sidecar");
     if (fs.existsSync(backendPath)) return backendPath;
+    const resExe = path.join(process.resourcesPath, "agx-wechat-sidecar.exe");
+    if (fs.existsSync(resExe)) return resExe;
     const resPath = path.join(process.resourcesPath, "agx-wechat-sidecar");
     if (fs.existsSync(resPath)) return resPath;
     const arch = process.arch === "x64" ? "x64" : "arm64";
+    const bundledExe = path.join(process.resourcesPath, "bundled-backend", arch, "agx-wechat-sidecar.exe");
+    if (fs.existsSync(bundledExe)) return bundledExe;
     const bundled = path.join(process.resourcesPath, "bundled-backend", arch, "agx-wechat-sidecar");
     if (fs.existsSync(bundled)) return bundled;
-    return backendPath;
+    return process.platform === "win32" ? backendExe : backendPath;
   }
-  const devPath = path.join(__dirname, "..", "..", "packaging", "wechat-sidecar", "agx-wechat-sidecar");
+  const sidecarDir = path.join(__dirname, "..", "..", "packaging", "wechat-sidecar");
+  const devExe = path.join(sidecarDir, "agx-wechat-sidecar.exe");
+  if (fs.existsSync(devExe)) return devExe;
+  const devPath = path.join(sidecarDir, "agx-wechat-sidecar");
   if (fs.existsSync(devPath)) return devPath;
-  return "agx-wechat-sidecar";
+  return process.platform === "win32" ? "agx-wechat-sidecar.exe" : "agx-wechat-sidecar";
 }
 
 function findFreePort(): Promise<number> {
@@ -4091,12 +4102,15 @@ if (!gotTheLock) {
           const agxOk = await checkAgxCli();
           if (!agxOk) {
             const installDocsUrl = "https://www.agxbuilder.com/docs/getting-started/installation";
+            const ctxHint = app.isPackaged
+              ? "当前为发布版安装包但未内嵌后端，且未检测到 agx 命令。可选："
+              : "当前为开发构建，且未检测到 agx 命令。可选：";
             const { response } = await dialog.showMessageBox({
               type: "warning",
               title: "缺少 agx 命令行工具",
               message: "Machi 需要本地 agx CLI 或内嵌后端才能启动",
               detail: [
-                "当前为开发/未打包构建，且未检测到 agx 命令。可选：",
+                ctxHint,
                 "",
                 "1) 安装 agx（终端）：",
                 "   pip install agenticx",
@@ -4104,7 +4118,7 @@ if (!gotTheLock) {
                 "",
                 "2) 在「设置」中启用远程服务器模式，连接已部署的 agx serve",
                 "",
-                "3) 发布版 DMG：使用 packaging/build_dmg.sh 构建后会内嵌 agx-server",
+                "3) 发布版安装包会内嵌 agx-server：macOS 使用 packaging/build_dmg.sh；Windows 使用 packaging/build_windows_installer.ps1",
               ].join("\n"),
               buttons: ["查看安装说明", "退出"],
               defaultId: 0,
