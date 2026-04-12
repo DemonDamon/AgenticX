@@ -512,6 +512,30 @@ def create_studio_app() -> FastAPI:
         # Guardrail: too low hurts completion, too high risks runaway loops/costs.
         return max(10, min(120, value))
 
+    def _global_auto_confirm_enabled() -> bool:
+        """Whether global settings require bypassing confirm_required.
+
+        Keep compatibility with both:
+        - Desktop `confirm_strategy: auto`
+        - Legacy permissions mode values (`auto` / `full_auto`)
+        """
+        try:
+            strategy = str(ConfigManager.get_value("confirm_strategy") or "").strip().lower()
+        except Exception:
+            strategy = ""
+        if strategy == "auto":
+            return True
+        try:
+            mode = str(ConfigManager.get_value("permissions.mode") or "").strip().lower()
+        except Exception:
+            mode = ""
+        return mode in {"auto", "full_auto"}
+
+    def _resolve_confirm_gate(managed: Any, agent_id: str = "meta") -> Any:
+        if _global_auto_confirm_enabled():
+            return AutoApproveConfirmGate()
+        return managed.get_confirm_gate(agent_id)
+
     def _resolve_mcp_auto_connect_setting() -> list[str] | None:
         """Resolve mcp.auto_connect.
 
@@ -1311,7 +1335,7 @@ def create_studio_app() -> FastAPI:
                         llm_factory=llm_factory,
                         max_tool_rounds=_resolve_max_tool_rounds(),
                         meta_leader_display_name=meta_leader_label,
-                        confirm_gate_factory=lambda agent_id: managed.get_confirm_gate(agent_id),
+                        confirm_gate_factory=lambda agent_id: _resolve_confirm_gate(managed, agent_id),
                     )
                     quoted_content = str(payload.quoted_content or "")
                     quoted_message_id = str(payload.quoted_message_id or "")
@@ -1460,7 +1484,7 @@ def create_studio_app() -> FastAPI:
         # Desktop 定时/立即执行由主进程拉 SSE，无法像 ChatPane 那样响应 confirm_required；
         # 无人值守会话必须自动放行 bash_exec 等工具确认，否则会永久卡住。
         meta_confirm_gate = (
-            AutoApproveConfirmGate() if is_automation_session else managed.get_confirm_gate("meta")
+            AutoApproveConfirmGate() if is_automation_session else _resolve_confirm_gate(managed, "meta")
         )
         manager.set_execution_state(payload.session_id, "running")
 
@@ -1568,6 +1592,10 @@ def create_studio_app() -> FastAPI:
         async def _event_stream() -> AsyncGenerator[str, None]:
             runtime_task: "asyncio.Task[None] | None" = None
             meta_done = False
+            keep_runtime_after_disconnect = bool(
+                getattr(payload, "keep_runtime_after_disconnect", False)
+            )
+            client_disconnected = False
             try:
                 async def _produce_meta_events() -> None:
                     setattr(
@@ -1641,6 +1669,10 @@ def create_studio_app() -> FastAPI:
                         )
                     user_message_content: Any | None = None
                     history_user_attachments: list[dict[str, Any]] | None = None
+                    async def _runtime_should_stop() -> bool:
+                        if keep_runtime_after_disconnect:
+                            return False
+                        return await request.is_disconnected()
                     if image_inputs:
                         content_blocks: list[dict[str, Any]] = [{"type": "text", "text": effective_input}]
                         for image in image_inputs:
@@ -1655,7 +1687,7 @@ def create_studio_app() -> FastAPI:
                     async for event in runtime.run_turn(
                         effective_input,
                         session,
-                        should_stop=request.is_disconnected,
+                        should_stop=_runtime_should_stop,
                         agent_id="meta",
                         tools=effective_tools,
                         system_prompt=sys_prompt,
@@ -1670,7 +1702,9 @@ def create_studio_app() -> FastAPI:
 
                 while True:
                     if await request.is_disconnected():
-                        break
+                        if not keep_runtime_after_disconnect:
+                            break
+                        client_disconnected = True
                     timed_out = False
                     try:
                         event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
@@ -1686,8 +1720,9 @@ def create_studio_app() -> FastAPI:
                             _flush_taskspace_hint(payload.session_id, session)
                         if event.type in ("subagent_started", "subagent_completed", "subagent_error"):
                             logger.info("[sse] yielding %s agent=%s", event.type, event.agent_id)
-                        for line in _runtime_event_to_sse_lines(event):
-                            yield line
+                        if not client_disconnected:
+                            for line in _runtime_event_to_sse_lines(event):
+                                yield line
                         if event.type == EventType.FINAL.value and event.agent_id == "meta":
                             snap = str(getattr(managed, "session_name", None) or "").strip()
                             if manager.claim_llm_title_slot(payload.session_id, snap):
@@ -1703,14 +1738,25 @@ def create_studio_app() -> FastAPI:
                         break
             except Exception as exc:
                 err = SseEvent(type="error", data={"text": f"Runtime error: {exc}"})
-                yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                if not client_disconnected:
+                    yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
             finally:
                 if runtime_task is not None and not runtime_task.done():
-                    runtime_task.cancel()
+                    if keep_runtime_after_disconnect and client_disconnected:
+                        with contextlib.suppress(Exception):
+                            await asyncio.wait_for(runtime_task, timeout=1.0)
+                    if runtime_task is not None and not runtime_task.done():
+                        runtime_task.cancel()
+                    else:
+                        logger.info(
+                            "[chat] runtime finished after disconnect session=%s",
+                            payload.session_id,
+                        )
                 _flush_taskspace_hint(payload.session_id, session)
                 manager.set_execution_state(payload.session_id, "idle")
                 manager.persist(payload.session_id)
-            yield 'data: {"type":"done","data":{}}\n\n'
+            if not client_disconnected:
+                yield 'data: {"type":"done","data":{}}\n\n'
 
         return StreamingResponse(_event_stream(), media_type="text/event-stream")
 
@@ -1754,7 +1800,7 @@ def create_studio_app() -> FastAPI:
         try:
             runtime = AgentRuntime(
                 llm,
-                managed.get_confirm_gate("meta"),
+                _resolve_confirm_gate(managed, "meta"),
                 team_manager=loop_tm,
                 max_tool_rounds=_resolve_max_tool_rounds(),
                 mid_turn_persist=_loop_persist_cb,
@@ -1762,7 +1808,7 @@ def create_studio_app() -> FastAPI:
         except TypeError:
             runtime = AgentRuntime(
                 llm,
-                managed.get_confirm_gate("meta"),
+                _resolve_confirm_gate(managed, "meta"),
             )
         controller = LoopController(max_iterations=max_iterations, completion_promise=completion_promise)
 

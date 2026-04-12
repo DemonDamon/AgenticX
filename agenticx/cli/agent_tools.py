@@ -42,7 +42,12 @@ from agenticx.memory.session_store import SessionStore
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.skills.guard import scan_skill, should_allow
 from agenticx.tools.skill_bundle import SkillBundleLoader
-from agenticx.runtime.confirm import AsyncConfirmGate, ConfirmGate, SyncConfirmGate
+from agenticx.runtime.confirm import (
+    AsyncConfirmGate,
+    AutoApproveConfirmGate,
+    ConfirmGate,
+    SyncConfirmGate,
+)
 from agenticx.workspace.loader import (
     append_daily_memory,
     append_long_term_memory,
@@ -1309,7 +1314,11 @@ async def _confirm(
         payload_context.get("risk"),
         payload_context.get("tool"),
     )
-    if emit_event is not None:
+    # IMPORTANT: do not emit confirm_required when the gate auto-approves.
+    # Otherwise IM adapters (Feishu/WeChat) will still prompt /approve even though
+    # request_confirm() returns immediately (e.g. AutoApproveConfirmGate).
+    emit_prompt = emit_event is not None and isinstance(confirm_gate, AsyncConfirmGate)
+    if emit_prompt:
         await emit_event(
             {
                 "type": "confirm_required",
@@ -1322,7 +1331,7 @@ async def _confirm(
         )
     approved = await confirm_gate.request_confirm(question, payload_context)
     _log.info("[confirm] resolved id=%s approved=%s", request_id, approved)
-    if emit_event is not None:
+    if emit_prompt:
         await emit_event(
             {
                 "type": "confirm_response",
