@@ -1585,6 +1585,17 @@ def _extract_python_script_arg(parts: List[str]) -> Optional[str]:
     return None
 
 
+def _bash_exec_shell_argv(command: str) -> List[str]:
+    """Argv for ``subprocess.run(..., shell=False)`` to run ``command`` in a system shell.
+
+    On Windows, ``/bin/bash`` is not available; use ``cmd.exe`` (COMSPEC) with ``/d /s /c``.
+    """
+    if sys.platform == "win32":
+        comspec = os.environ.get("COMSPEC") or shutil.which("cmd.exe") or "cmd.exe"
+        return [comspec, "/d", "/s", "/c", command]
+    return ["/bin/bash", "-c", command]
+
+
 def _bash_exec_default_timeout_sec() -> int:
     """Studio global default for bash_exec when the model omits timeout_sec."""
     try:
@@ -1783,11 +1794,15 @@ async def _tool_bash_exec(
                 command,
             )
         ) or command.lstrip().startswith("export ")
+    if sys.platform == "win32" and not use_shell and parts:
+        resolved0 = shutil.which(parts[0])
+        if resolved0:
+            parts = [resolved0] + list(parts[1:])
     try:
         if use_shell:
             proc = await asyncio.to_thread(
                 subprocess.run,
-                ["/bin/bash", "-c", command],
+                _bash_exec_shell_argv(command),
                 shell=False,
                 cwd=str(cwd) if cwd else None,
                 capture_output=True,

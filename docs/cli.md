@@ -1716,6 +1716,7 @@ studio> /exit
 #### 安全机制
 
 - `bash_exec` 白名单：白名单命令可直接执行；非白名单命令会先弹确认（拒绝即取消执行）。
+- **Windows**：含 `&&`、管道、重定向等需「壳」解析时，由 **`cmd.exe`（`%COMSPEC%`，`/d /s /c`）** 执行整段命令，**不是** `/bin/bash`；与 bash 语法不完全一致。无壳元字符时首参数会经 `shutil.which` 解析为可执行文件路径（如 `go.exe`）。
 - 文件写入保护：`file_write` / `file_edit` 必须先展示 unified diff，再请求确认后才落盘。
 - 最大轮次保护：Agent Loop 默认最多 10 轮工具调用，超过后自动停止，避免无限循环。
 
