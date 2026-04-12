@@ -25,7 +25,7 @@ import {
   Clock,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
-import type { Avatar, ChatPane, ChatStyle, GroupChat } from "../store";
+import type { Avatar, ChatPane, ChatStyle, GroupChat, McpServer } from "../store";
 import { useAppStore } from "../store";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { RECOMMENDED_SKILLS } from "../data/recommended-skills";
@@ -83,13 +83,35 @@ function providerEntryFromSaved(saved: Partial<ProviderEntry> | undefined): Prov
   };
 }
 
-type McpServer = {
-  name: string;
-  connected: boolean;
-  command?: string;
-};
-
 const MCP_PRIMARY_CONFIG_PATH = "~/.agenticx/mcp.json";
+
+/** 与后端 `connection_state` 对齐；缺省时按 connected 推断（兼容旧 Studio） */
+function resolveMcpRowPresentation(server: McpServer): {
+  dotClass: string;
+  statusLine: string;
+  detail?: string;
+} {
+  const st =
+    server.connection_state || (server.connected ? "healthy" : "disconnected");
+  if (st === "error") {
+    return {
+      dotClass: "bg-rose-500",
+      statusLine: "错误 — 仍标记已连接但未注册到可用工具",
+      detail: server.error_detail?.trim(),
+    };
+  }
+  if (st === "healthy") {
+    const n = server.tool_count ?? 0;
+    return {
+      dotClass: "bg-emerald-400",
+      statusLine: n > 0 ? `已连接 · ${n} 个工具` : "已连接",
+    };
+  }
+  return {
+    dotClass: "bg-zinc-500",
+    statusLine: "未连接",
+  };
+}
 
 type SettingsTab =
   | "general"
@@ -4321,6 +4343,7 @@ export function SettingsPanel({
   const [mcpAutoConnectHint, setMcpAutoConnectHint] = useState<string[]>([]);
   const [mcpBusy, setMcpBusy] = useState(false);
   const [mcpMessage, setMcpMessage] = useState("");
+  const [mcpErrorInspect, setMcpErrorInspect] = useState<{ title: string; body: string } | null>(null);
 
   const [serverMode, setServerMode] = useState<"local" | "remote">("local");
   const [serverUrl, setServerUrl] = useState("");
@@ -4733,6 +4756,7 @@ export function SettingsPanel({
   const ks = keyStatus[active] ?? "idle";
 
   return (
+    <>
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-none">
       {/* 固定为视口比例，避免切换 tab 时随内容伸缩；长内容在右侧滚动区内滚动 */}
       <div
@@ -5255,6 +5279,10 @@ export function SettingsPanel({
                     <span className="text-text-subtle">{mcpAutoConnectHint.join("、")}</span>
                   </div>
                 ) : null}
+                <div className="text-[11px] leading-relaxed text-text-faint">
+                  状态点：绿=已连接且已注册工具；红=异常（例如子进程已退出但仍标记已连）；灰=未连接。与 Cursor
+                  类似，红色时请先看详情再重连。
+                </div>
                 {mcpMessage && <div className="text-xs text-text-subtle">{mcpMessage}</div>}
                 <div className="space-y-1.5">
                   {mcpServers.length === 0 ? (
@@ -5262,24 +5290,55 @@ export function SettingsPanel({
                       尚未发现 MCP 服务。请确认主配置或附加路径中的 mcp.json 有效。
                     </div>
                   ) : (
-                    mcpServers.map((server) => (
-                      <div key={server.name} className="flex items-center gap-2 rounded-md border border-border bg-surface-card px-3 py-2">
-                        <span className={`h-2 w-2 shrink-0 rounded-full ${server.connected ? "bg-emerald-400" : "bg-surface-hover"}`} />
-                        <span className="flex-1 truncate text-sm text-text-muted">{server.name}</span>
-                        <span className="max-w-[220px] truncate text-[10px] text-text-faint">{server.command ?? ""}</span>
-                        <SettingsSwitch
-                          checked={server.connected}
-                          disabled={mcpBusy || !sessionId}
-                          onChange={(next) => {
-                            if (next) void handleConnectMcp(server.name);
-                            else void handleDisconnectMcp(server.name);
-                          }}
-                          aria-label={
-                            server.connected ? `已连接 ${server.name}，关闭以断开` : `连接 ${server.name}`
-                          }
-                        />
-                      </div>
-                    ))
+                    mcpServers.map((server) => {
+                      const pres = resolveMcpRowPresentation(server);
+                      return (
+                        <div
+                          key={server.name}
+                          className="flex flex-col gap-1 rounded-md border border-border bg-surface-card px-3 py-2 sm:flex-row sm:items-center sm:gap-2"
+                        >
+                          <div className="flex min-w-0 flex-1 items-start gap-2">
+                            <span
+                              className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${pres.dotClass}`}
+                              title={pres.statusLine}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-medium text-text-muted">{server.name}</div>
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                <span className="text-[11px] text-text-subtle">{pres.statusLine}</span>
+                                {pres.detail ? (
+                                  <button
+                                    type="button"
+                                    className="text-[11px] text-rose-400 underline decoration-dotted hover:text-rose-300"
+                                    onClick={() =>
+                                      setMcpErrorInspect({ title: `${server.name} — 异常说明`, body: pres.detail! })
+                                    }
+                                  >
+                                    查看详情
+                                  </button>
+                                ) : null}
+                              </div>
+                              {server.command ? (
+                                <div className="truncate text-[10px] text-text-faint">{server.command}</div>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-center justify-end sm:pl-2">
+                            <SettingsSwitch
+                              checked={server.connected}
+                              disabled={mcpBusy || !sessionId}
+                              onChange={(next) => {
+                                if (next) void handleConnectMcp(server.name);
+                                else void handleDisconnectMcp(server.name);
+                              }}
+                              aria-label={
+                                server.connected ? `已连接 ${server.name}，关闭以断开` : `连接 ${server.name}`
+                              }
+                            />
+                          </div>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -5851,5 +5910,38 @@ export function SettingsPanel({
         </div>
       </div>
     </div>
+    {mcpErrorInspect ? (
+      <div
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mcp-error-inspect-title"
+        onClick={() => setMcpErrorInspect(null)}
+      >
+        <div
+          className="max-h-[min(70vh,32rem)] w-full max-w-lg overflow-hidden rounded-xl border border-border bg-surface-panel shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="border-b border-border px-4 py-3">
+            <h2 id="mcp-error-inspect-title" className="text-sm font-semibold text-text-strong">
+              {mcpErrorInspect.title}
+            </h2>
+          </div>
+          <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap break-words px-4 py-3 text-xs text-text-subtle">
+            {mcpErrorInspect.body}
+          </pre>
+          <div className="flex justify-end border-t border-border px-4 py-2.5">
+            <button
+              type="button"
+              className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text hover:bg-btnPrimary-hover"
+              onClick={() => setMcpErrorInspect(null)}
+            >
+              关闭
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }

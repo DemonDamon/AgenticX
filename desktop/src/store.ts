@@ -13,10 +13,15 @@ export type SubAgentStatus =
 export type ConfirmStrategy = "manual" | "semi-auto" | "auto";
 export type ThemeMode = "dark" | "light" | "dim";
 export type ChatStyle = "im" | "terminal" | "clean";
+/** MCP 列表展示态（与 Studio `/api/mcp/servers` 对齐，近似 Cursor 绿/红/灰语义） */
 export type McpServer = {
   name: string;
   connected: boolean;
   command?: string;
+  /** healthy=握手且已注册工具；error=仍标记已连但当前无工具（多为子进程失效）；disconnected=未连 */
+  connection_state?: "healthy" | "error" | "disconnected";
+  tool_count?: number;
+  error_detail?: string;
 };
 
 export type Avatar = {

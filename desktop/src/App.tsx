@@ -304,6 +304,9 @@ export function App() {
           name: item.name,
           connected: Boolean(item.connected),
           command: item.command,
+          connection_state: item.connection_state,
+          tool_count: typeof item.tool_count === "number" ? item.tool_count : undefined,
+          error_detail: item.error_detail,
         }))
       );
     }
@@ -1726,7 +1729,7 @@ export function App() {
         open={settings.open}
         defaultProvider={settings.defaultProvider}
         providers={settings.providers}
-        sessionId={sessionId}
+        sessionId={String((activePaneSessionId || sessionId || "").trim())}
         apiBase={apiBase}
         apiToken={apiToken}
         mcpServers={mcpServers}
