@@ -43,6 +43,8 @@ class ChatRequest(BaseModel):
     active_taskspace_id: Optional[str] = None
     # Internal: when true, this user_input drives generation but is not persisted into chat history.
     skip_user_history: Optional[bool] = False
+    # Internal: allow runtime to continue even if SSE client disconnects (IM confirm flow).
+    keep_runtime_after_disconnect: Optional[bool] = False
 
 
 class ConfirmResponse(BaseModel):

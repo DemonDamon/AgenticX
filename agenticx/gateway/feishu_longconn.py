@@ -679,6 +679,62 @@ async def _submit_confirm(
     return True, ""
 
 
+async def _latest_assistant_message_after(
+    studio_base: str,
+    headers: Dict[str, str],
+    session_id: str,
+    after_ts: int,
+) -> Optional[tuple[int, str]]:
+    async with _no_proxy_client(timeout=30.0) as client:
+        resp = await client.get(
+            f"{studio_base}/api/session/messages",
+            headers=headers,
+            params={"session_id": session_id},
+        )
+        if resp.status_code >= 400:
+            return None
+        data = resp.json() if resp.content else {}
+    items = data.get("messages") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return None
+    newest: Optional[tuple[int, str]] = None
+    for row in items:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("role") or "").strip() != "assistant":
+            continue
+        content = str(row.get("content") or "").strip()
+        if not content:
+            continue
+        try:
+            ts = int(row.get("timestamp") or 0)
+        except (TypeError, ValueError):
+            ts = 0
+        if ts <= after_ts:
+            continue
+        if newest is None or ts > newest[0]:
+            newest = (ts, content)
+    return newest
+
+
+async def _wait_assistant_followup(
+    studio_base: str,
+    headers: Dict[str, str],
+    session_id: str,
+    after_ts: int,
+    timeout_seconds: float = 120.0,
+) -> Optional[str]:
+    start = time.time()
+    while (time.time() - start) < timeout_seconds:
+        row = await _latest_assistant_message_after(
+            studio_base, headers, session_id, after_ts=after_ts
+        )
+        if row is not None:
+            return row[1]
+        await asyncio.sleep(1.0)
+    return None
+
+
 async def _handle_im_confirm_command(
     studio_base: str,
     headers: Dict[str, str],
@@ -703,6 +759,7 @@ async def _handle_im_confirm_command(
         return "当前没有待确认任务。先发 `/pending` 查看。"
 
     approved = action == "approve"
+    before_ts = int(time.time() * 1000)
     ok, err = await _submit_confirm(
         studio_base,
         headers,
@@ -716,7 +773,22 @@ async def _handle_im_confirm_command(
 
     _PENDING_CONFIRMS.remove(sender_key, pending.request_id)
     if approved:
-        return f"已确认继续执行（request_id: `{pending.request_id}`）。"
+        followup = await _wait_assistant_followup(
+            studio_base,
+            headers,
+            pending.session_id,
+            after_ts=before_ts,
+            timeout_seconds=120.0,
+        )
+        if followup:
+            return (
+                f"已确认继续执行（request_id: `{pending.request_id}`）。\n\n"
+                f"{followup}"
+            )
+        return (
+            f"已确认继续执行（request_id: `{pending.request_id}`）。\n"
+            "任务仍在后台执行，若未看到新结果可再发一句“继续汇报进展”。"
+        )
     reason = deny_reason or "Denied from IM"
     return f"已拒绝执行（request_id: `{pending.request_id}`）。原因：{reason}"
 
@@ -744,6 +816,8 @@ async def _chat_turn(
             "session_id": target_sid,
             "user_input": text,
             "user_display_name": sender_name,
+            # Keep runtime alive for IM confirm flows even when this SSE stream returns early.
+            "keep_runtime_after_disconnect": True,
         }
         if req_provider:
             body["provider"] = req_provider

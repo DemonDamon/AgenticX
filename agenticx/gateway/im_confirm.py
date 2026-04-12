@@ -78,9 +78,21 @@ def parse_confirm_command(text: str) -> Tuple[str, Optional[str], Optional[str]]
     Returns (action, request_id, reason):
       - action: approve | deny | pending | none
     """
-    t = (text or "").strip()
-    if not t.startswith("/"):
+    raw = str(text or "").replace("／", "/")
+    t = raw.strip()
+    if not t:
         return ("none", None, None)
+
+    # Some IM clients prepend reply-quote text before the actual command line.
+    # Extract first slash-command segment if the whole message does not start with "/".
+    if not t.startswith("/"):
+        m_any = re.search(
+            r"(?i)/(approve|ok|allow|yes|deny|reject|no|pending|confirm)\b[^\n\r]*",
+            t,
+        )
+        if not m_any:
+            return ("none", None, None)
+        t = m_any.group(0).strip()
 
     m = re.match(r"(?i)^/(approve|ok|allow|yes)(?:\s+([a-z0-9\-]+))?\s*$", t)
     if m:
