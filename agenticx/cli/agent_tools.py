@@ -7,6 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import base64
 import difflib
 import json
 import logging
@@ -215,6 +216,12 @@ def _session_workspace_roots(session: Optional[StudioSession]) -> List[Path]:
                     roots = [r for r in roots if str(r.resolve(strict=False)) != tkey]
                     roots.insert(0, target)
                     break
+    # Computer Use screenshots: always allow reading files under ~/.agenticx/desktop-use
+    try:
+        _agx_desktop = (Path.home() / ".agenticx" / "desktop-use").resolve(strict=False)
+        _add_path_str(str(_agx_desktop))
+    except Exception:
+        pass
     return roots
 
 
@@ -904,6 +911,346 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         },
     },
 ]
+
+# Desktop Computer Use tools (injected at runtime when ``computer_use.enabled`` in config).
+COMPUTER_USE_TOOLS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_screenshot",
+            "description": (
+                "Capture the entire primary display to a PNG under ~/.agenticx/desktop-use/ "
+                "(not the session project folder). On macOS uses ``screencapture``; elsewhere tries ``pyautogui`` if installed. "
+                "Prefer this over claiming you cannot screenshot when the user enabled 桌面操控."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "Optional basename only (e.g. cap.png); must end with .png.",
+                    },
+                    "include_base64": {
+                        "type": "boolean",
+                        "description": "If true (default), include image_base64 when file is under ~900KB.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_mouse_click",
+            "description": (
+                "Click at screen coordinates using pyautogui (requires ``pip install pyautogui``). "
+                "Coordinates are in **screen** pixels (origin top-left). High-risk: user confirmation required."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer", "description": "Screen X coordinate."},
+                    "y": {"type": "integer", "description": "Screen Y coordinate."},
+                    "clicks": {
+                        "type": "integer",
+                        "description": "Number of clicks (default 1).",
+                    },
+                    "button": {
+                        "type": "string",
+                        "enum": ["left", "right", "middle"],
+                        "description": "Mouse button (default left).",
+                    },
+                },
+                "required": ["x", "y"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_keyboard_type",
+            "description": (
+                "Type Unicode text as keyboard input using pyautogui (requires ``pip install pyautogui``). "
+                "High-risk: user confirmation required; never use for secrets unless the user explicitly asks."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Text to type."},
+                    "interval_sec": {
+                        "type": "number",
+                        "description": "Optional delay between keystrokes (default 0.02).",
+                    },
+                },
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+]
+
+COMPUTER_USE_TOOL_NAMES = frozenset(
+    name
+    for t in COMPUTER_USE_TOOLS
+    if isinstance(t, dict)
+    for name in (str(t.get("function", {}).get("name", "") or "").strip(),)
+    if name
+)
+
+
+def computer_use_config_enabled() -> bool:
+    """True when ``~/.agenticx/config.yaml`` has ``computer_use.enabled: true``."""
+    try:
+        return bool(ConfigManager.load().computer_use.enabled)
+    except Exception:
+        return False
+
+
+def merge_computer_use_tools_into(tool_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Append Computer Use tool specs when enabled; dedupe by function name."""
+    if not computer_use_config_enabled():
+        return tool_list
+    seen: set[str] = set()
+    for t in tool_list:
+        if not isinstance(t, dict):
+            continue
+        fn = t.get("function", {})
+        if isinstance(fn, dict):
+            n = str(fn.get("name", "") or "").strip()
+            if n:
+                seen.add(n)
+    out = list(tool_list)
+    for spec in COMPUTER_USE_TOOLS:
+        if not isinstance(spec, dict):
+            continue
+        fn = spec.get("function", {})
+        if not isinstance(fn, dict):
+            continue
+        name = str(fn.get("name", "") or "").strip()
+        if not name or name in seen:
+            continue
+        out.append(spec)
+        seen.add(name)
+    return out
+
+
+_MAX_DESKTOP_SCREENSHOT_BYTES_FOR_B64 = 950_000
+
+
+def _agenticx_desktop_use_dir() -> Path:
+    """Fixed directory for desktop screenshots (under ~/.agenticx, not session cwd)."""
+    d = (Path.home() / ".agenticx" / "desktop-use").resolve(strict=False)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _desktop_use_blocked_message() -> str:
+    return (
+        "ERROR: 桌面操控工具未启用。请在 Machi 设置中开启「桌面操控」（写入 ~/.agenticx/config.yaml 的 "
+        "computer_use.enabled）后完全重启 Machi。"
+    )
+
+
+def _desktop_screenshot_target_path(session: StudioSession, filename: str | None) -> Path:
+    base = _agenticx_desktop_use_dir()
+    name = str(filename or "").strip()
+    if name:
+        safe = os.path.basename(name).replace("..", "_")
+        if not safe.lower().endswith(".png"):
+            safe = f"{safe}.png" if safe else f"screen_{uuid.uuid4().hex[:10]}.png"
+    else:
+        safe = f"screen_{uuid.uuid4().hex[:10]}.png"
+    if not re.fullmatch(r"[A-Za-z0-9._-]+\.png", safe):
+        safe = f"screen_{uuid.uuid4().hex[:10]}.png"
+    return (base / safe).resolve(strict=False)
+
+
+async def _capture_display_to_png(out_path: Path) -> None:
+    """Write a full-screen PNG to ``out_path`` (blocking work in a thread)."""
+
+    def _darwin_screencapture() -> None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        proc = subprocess.run(
+            ["screencapture", "-x", "-t", "png", str(out_path)],
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip() or "screencapture failed"
+            raise RuntimeError(err)
+
+    def _pyautogui_capture() -> None:
+        import pyautogui  # type: ignore import-not-found
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        img = pyautogui.screenshot()
+        img.save(str(out_path))
+
+    if sys.platform == "darwin":
+        await asyncio.to_thread(_darwin_screencapture)
+        return
+    try:
+        await asyncio.to_thread(_pyautogui_capture)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Screenshot failed ({exc!r}). Install pyautogui (`pip install pyautogui`) "
+            "or use macOS where screencapture is available."
+        ) from exc
+
+
+async def _tool_desktop_screenshot(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession],
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
+    if not computer_use_config_enabled():
+        return _desktop_use_blocked_message()
+    if session is None:
+        return "ERROR: desktop_screenshot requires an active Studio session"
+    if not await _confirm(
+        "将在本机截取**全屏**并保存到 ~/.agenticx/desktop-use/ ，是否继续？",
+        confirm_gate=confirm_gate,
+        context={"tool": "desktop_screenshot", "risk": "computer_use"},
+        emit_event=emit_event,
+    ):
+        return "CANCELLED: user denied desktop screenshot"
+    include_b64 = arguments.get("include_base64")
+    if include_b64 is None:
+        include_b64 = True
+    include_b64 = bool(include_b64)
+    try:
+        out_path = _desktop_screenshot_target_path(session, str(arguments.get("filename") or ""))
+        await _capture_display_to_png(out_path)
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
+    try:
+        size = out_path.stat().st_size
+    except OSError as exc:
+        return json.dumps({"ok": False, "error": f"stat failed: {exc}"}, ensure_ascii=False)
+    payload: Dict[str, Any] = {
+        "ok": True,
+        "path": str(out_path),
+        "bytes": size,
+        "hint": "若模型支持多模态，可将该 PNG 路径作为图像输入；否则向用户说明文件路径。",
+    }
+    if include_b64 and size <= _MAX_DESKTOP_SCREENSHOT_BYTES_FOR_B64:
+        try:
+            raw = out_path.read_bytes()
+            payload["image_base64"] = base64.standard_b64encode(raw).decode("ascii")
+        except OSError as exc:
+            payload["base64_error"] = str(exc)
+    elif include_b64:
+        payload["note"] = "PNG 过大，未内联 base64；请使用 path 或压缩后再读。"
+    return json.dumps(payload, ensure_ascii=False)
+
+
+async def _tool_desktop_mouse_click(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession],
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
+    if not computer_use_config_enabled():
+        return _desktop_use_blocked_message()
+    if session is None:
+        return "ERROR: desktop_mouse_click requires an active Studio session"
+    try:
+        x = int(arguments.get("x"))
+        y = int(arguments.get("y"))
+    except (TypeError, ValueError):
+        return "ERROR: desktop_mouse_click requires integer x and y"
+    clicks_raw = arguments.get("clicks", 1)
+    try:
+        clicks = int(clicks_raw)
+    except (TypeError, ValueError):
+        clicks = 1
+    clicks = max(1, min(5, clicks))
+    button = str(arguments.get("button") or "left").strip().lower()
+    if button not in {"left", "right", "middle"}:
+        button = "left"
+    if not await _confirm(
+        f"将在屏幕坐标 ({x}, {y}) 用 pyautogui 执行 {clicks} 次 {button} 点击，是否继续？",
+        confirm_gate=confirm_gate,
+        context={"tool": "desktop_mouse_click", "risk": "computer_use", "x": x, "y": y},
+        emit_event=emit_event,
+    ):
+        return "CANCELLED: user denied desktop mouse click"
+
+    def _run() -> str:
+        import pyautogui  # type: ignore import-not-found
+
+        pyautogui.click(x=x, y=y, clicks=clicks, button=button)
+        return "ok"
+
+    try:
+        await asyncio.to_thread(_run)
+    except Exception as exc:
+        return json.dumps(
+            {
+                "ok": False,
+                "error": str(exc),
+                "hint": "需要安装 pyautogui：pip install pyautogui（并在 macOS 上授予辅助功能权限）。",
+            },
+            ensure_ascii=False,
+        )
+    return json.dumps({"ok": True, "x": x, "y": y, "clicks": clicks, "button": button}, ensure_ascii=False)
+
+
+async def _tool_desktop_keyboard_type(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession],
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
+    if not computer_use_config_enabled():
+        return _desktop_use_blocked_message()
+    if session is None:
+        return "ERROR: desktop_keyboard_type requires an active Studio session"
+    text = str(arguments.get("text", ""))
+    if not text:
+        return "ERROR: desktop_keyboard_type requires non-empty text"
+    if len(text) > 8000:
+        return "ERROR: text too long (max 8000 chars)"
+    interval_raw = arguments.get("interval_sec", 0.02)
+    try:
+        interval = float(interval_raw)
+    except (TypeError, ValueError):
+        interval = 0.02
+    interval = max(0.0, min(1.0, interval))
+    preview = text if len(text) <= 120 else text[:117] + "..."
+    if not await _confirm(
+        f"将通过 pyautogui 输入键盘文本（预览）：{preview!r} — 是否继续？",
+        confirm_gate=confirm_gate,
+        context={"tool": "desktop_keyboard_type", "risk": "computer_use"},
+        emit_event=emit_event,
+    ):
+        return "CANCELLED: user denied desktop keyboard typing"
+
+    def _run() -> None:
+        import pyautogui  # type: ignore import-not-found
+
+        pyautogui.write(text, interval=interval)
+
+    try:
+        await asyncio.to_thread(_run)
+    except Exception as exc:
+        return json.dumps(
+            {
+                "ok": False,
+                "error": str(exc),
+                "hint": "需要安装 pyautogui：pip install pyautogui（部分字符仅支持 ASCII；复杂输入考虑剪贴板方案）。",
+            },
+            ensure_ascii=False,
+        )
+    return json.dumps({"ok": True, "chars": len(text)}, ensure_ascii=False)
+
 
 META_TOOL_NAMES = {
     "spawn_subagent",
@@ -2965,6 +3312,12 @@ for _td in STUDIO_TOOLS:
     _req = _fn.get("parameters", {}).get("required", [])
     if _name and _req:
         _TOOL_REQUIRED_PARAMS[_name] = _req
+for _td in COMPUTER_USE_TOOLS:
+    _fn = _td.get("function", {})
+    _name = _fn.get("name", "")
+    _req = _fn.get("parameters", {}).get("required", [])
+    if _name and _req:
+        _TOOL_REQUIRED_PARAMS[_name] = _req
 
 
 def _repair_malformed_file_tool_arguments(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -3095,6 +3448,12 @@ async def dispatch_tool_async(
             return await _tool_cc_bridge_stop(arguments, session)
         if name == "cc_bridge_permission":
             return await _tool_cc_bridge_permission(arguments, session)
+        if name == "desktop_screenshot":
+            return await _tool_desktop_screenshot(arguments, session, confirm_gate=gate, emit_event=event_callback)
+        if name == "desktop_mouse_click":
+            return await _tool_desktop_mouse_click(arguments, session, confirm_gate=gate, emit_event=event_callback)
+        if name == "desktop_keyboard_type":
+            return await _tool_desktop_keyboard_type(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "mcp_call":
             return await _tool_mcp_call_async(arguments, session)
         if name == "mcp_import":

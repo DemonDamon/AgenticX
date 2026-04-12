@@ -123,6 +123,27 @@ def _build_workspace_context_block() -> str:
     return "\n\n".join(parts) + "\n"
 
 
+def _build_computer_use_capabilities_block() -> str:
+    """When ``computer_use.enabled``, tell the model about injected desktop tools."""
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        if not ConfigManager.load().computer_use.enabled:
+            return ""
+    except Exception:
+        return ""
+    return (
+        "## 桌面操控（Computer Use）\n"
+        "当前已启用 `computer_use.enabled`，以下工具已挂载到本会话工具列表：\n"
+        "- `desktop_screenshot`：截取**主显示器全屏**为 PNG，保存到 `~/.agenticx/desktop-use/`；"
+        "返回 JSON（含 `path`；较小文件时含 `image_base64`）。**用户要截图/看屏幕/桌面预览时须优先调用**，禁止回答「没有截图工具」。\n"
+        "- `desktop_mouse_click` / `desktop_keyboard_type`：基于 **pyautogui**（需 `pip install pyautogui`；"
+        "macOS 还需「辅助功能」等系统权限）；调用前会触发运行时确认（confirm_required）。\n"
+        "非 macOS 且未安装 pyautogui 时，截屏可能失败；请根据工具返回的 `error`/`hint` 指导用户安装依赖。\n"
+        "- 用户问「你有什么能力/工具」且本段存在时：必须在答复中**点名**上述桌面工具（可简述），不得忽略。\n\n"
+    )
+
+
 def _build_active_subagents_context(session: StudioSession) -> str:
     """Inject a live snapshot of active/recent sub-agents so the LLM never hallucinates empty status."""
     import logging
@@ -465,6 +486,7 @@ def build_meta_agent_system_prompt(
         if group_allowed is not None
         else ""
     )
+    computer_use_block = _build_computer_use_capabilities_block()
     base_prompt = (
         f"{workspace_context}\n"
         f"{avatar_block}"
@@ -474,6 +496,7 @@ def build_meta_agent_system_prompt(
         "- 简单/快速任务（查目录、读文件、执行单条命令、回答事实性问题）：直接使用工具完成，不要委派子智能体。\n"
         "- 复杂/多步骤任务（需多文件协作、长时间运行、需要专业角色）：拆解后通过 spawn_subagent 委派。\n\n"
         f"{mode_line}"
+        f"{computer_use_block}"
         "## 身份应答策略\n"
         "- 当用户询问“你是谁/你的定位”时，优先基于“身份与长期上下文”简洁回答（身份、职责、边界）。\n"
         "- 回答身份问题时不要罗列完整 skills/MCP 清单，除非用户明确要求查看能力清单。\n\n"

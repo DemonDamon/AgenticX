@@ -17,7 +17,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
-from agenticx.cli.agent_tools import STUDIO_TOOLS
+from agenticx.cli.agent_tools import STUDIO_TOOLS, merge_computer_use_tools_into
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.cli.studio import StudioSession
 from agenticx.llms.provider_resolver import ProviderResolver
@@ -393,17 +393,17 @@ class AgentTeamManager:
 
     def _build_toolset(self, allowed_names: Optional[Sequence[str]]) -> Sequence[Dict[str, Any]]:
         if allowed_names is None:
-            return STUDIO_TOOLS
+            return merge_computer_use_tools_into(list(STUDIO_TOOLS))
         allowed = {name.strip() for name in allowed_names if name and name.strip()}
         if not allowed:
-            return STUDIO_TOOLS
+            return merge_computer_use_tools_into(list(STUDIO_TOOLS))
         filtered = [tool for tool in STUDIO_TOOLS if tool.get("function", {}).get("name") in allowed]
         if not filtered:
             _log.warning(
                 "tools whitelist %s matched nothing in STUDIO_TOOLS; falling back to full toolset",
                 allowed,
             )
-            return STUDIO_TOOLS
+            return merge_computer_use_tools_into(list(STUDIO_TOOLS))
         return filtered
 
     def _get_depth(self, agent_id: str) -> int:
