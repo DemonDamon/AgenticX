@@ -168,7 +168,14 @@ type TaskspaceFileItem = {
   modified: number;
 };
 
-type McpServerItem = { name: string; connected: boolean; command?: string };
+type McpServerItem = {
+  name: string;
+  connected: boolean;
+  command?: string;
+  connection_state?: "healthy" | "error" | "disconnected";
+  tool_count?: number;
+  error_detail?: string;
+};
 type McpStatusResult = {
   ok: boolean;
   count?: number;
