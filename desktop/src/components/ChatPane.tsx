@@ -1223,6 +1223,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   >({});
   const streamTextRef = useRef("");
   const streamCommittedRef = useRef(false);
+  /** Text last committed at a tool_call boundary; avoids duplicating the same assistant bubble at stream end. */
+  const lastMidStreamAssistantCommitRef = useRef<string | null>(null);
   const streamRafRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const autoScrollPinnedRef = useRef(true);
@@ -2525,6 +2527,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     !!streamingSessionId &&
     streamingSessionId === (pane.sessionId || "").trim();
   const streamTextForCurrentSession = isStreamingCurrentSession ? (streamedAssistantText || "") : "";
+  /** Mid-turn commit can persist assistant text while SSE keeps streaming the same body — hide __stream__ so we don't show two identical bubbles (store still has correct count). */
+  const hideStreamOverlayAsDuplicate = useMemo(() => {
+    if (!isStreamingCurrentSession) return false;
+    const t = streamTextForCurrentSession.trim();
+    if (!t) return false;
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      const m = visibleMessages[i];
+      if (m.role === "user") break;
+      if (m.role === "assistant" && (!m.agentId || m.agentId === "meta")) {
+        return String(m.content ?? "").trim() === t;
+      }
+    }
+    return false;
+  }, [isStreamingCurrentSession, streamTextForCurrentSession, visibleMessages]);
 
   const syncStreamingUiForCurrentSession = useCallback(() => {
     const sid = (pane.sessionId || "").trim();
@@ -2592,7 +2608,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           assistantName={name}
         />
       ))}
-      {isStreamingCurrentSession ? (
+      {isStreamingCurrentSession && !hideStreamOverlayAsDuplicate ? (
         chatStyle === "terminal" ? (
           <TerminalLine
             message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
@@ -2614,7 +2630,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         )
       ) : null}
     </>
-  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, isGroupPane, isStreamingCurrentSession, pane.historySearchTerms, paneAvatarMeta, resolveGroupInlineConfirm, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, streamTextForCurrentSession, streamingModel, toggleSelectMessage, userAvatarUrl, userBubbleLabel, visibleMessages]);
+  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, hideStreamOverlayAsDuplicate, isGroupPane, isStreamingCurrentSession, pane.historySearchTerms, paneAvatarMeta, resolveGroupInlineConfirm, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, streamTextForCurrentSession, streamingModel, toggleSelectMessage, userAvatarUrl, userBubbleLabel, visibleMessages]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -2903,6 +2919,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setStreamedAssistantText("");
     streamTextRef.current = "";
     streamCommittedRef.current = false;
+    lastMidStreamAssistantCommitRef.current = null;
     const abortController = new AbortController();
     sessionAbortControllersRef.current[requestSessionId] = abortController;
     if ((pane.sessionId || "").trim() === requestSessionId) {
@@ -2921,6 +2938,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (!partial || isThinkingPlaceholderText(partial) || streamCommittedRef.current) return false;
       addPaneMessageIfSessionActive(pane.id, "assistant", streamTextRef.current, "meta", chatProvider, chatModel);
       streamCommittedRef.current = true;
+      lastMidStreamAssistantCommitRef.current = partial;
       return true;
     };
     const scheduleStreamTextUpdate = (nextText: string) => {
@@ -3558,9 +3576,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         }
       }
 
-      if (full.trim() && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
-        addPaneMessageIfSessionActive(pane.id, "assistant", full, "meta", chatProvider, chatModel);
-        streamCommittedRef.current = true;
+      const trimmedFull = full.trim();
+      if (trimmedFull && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
+        const mid = lastMidStreamAssistantCommitRef.current;
+        if (mid !== null && trimmedFull === mid) {
+          streamCommittedRef.current = true;
+        } else {
+          addPaneMessageIfSessionActive(pane.id, "assistant", full, "meta", chatProvider, chatModel);
+          streamCommittedRef.current = true;
+        }
       }
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
