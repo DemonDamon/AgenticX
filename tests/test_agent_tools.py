@@ -122,6 +122,77 @@ def test_bash_exec_uses_shell_false_and_argv(monkeypatch) -> None:
     assert captured["kwargs"]["shell"] is False
 
 
+async def _confirm_yes(*_a, **_k) -> bool:
+    return True
+
+
+def test_bash_exec_shell_mode_uses_cmd_on_win32(monkeypatch) -> None:
+    captured: dict = {}
+
+    def _fake_run(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return _DummyProcess(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(agent_tools, "_confirm", _confirm_yes)
+    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
+    monkeypatch.setattr(agent_tools.sys, "platform", "win32")
+    monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+
+    cmd = "echo a && echo b"
+    result = agent_tools.dispatch_tool("bash_exec", {"command": cmd}, StudioSession())
+    assert "exit_code=0" in result
+    argv = captured["args"][0]
+    assert argv[0] == r"C:\Windows\System32\cmd.exe"
+    assert argv[1:4] == ["/d", "/s", "/c"]
+    assert argv[4] == cmd
+    assert captured["kwargs"]["shell"] is False
+
+
+def test_bash_exec_shell_mode_uses_bash_on_posix(monkeypatch) -> None:
+    captured: dict = {}
+
+    def _fake_run(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return _DummyProcess(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(agent_tools, "_confirm", _confirm_yes)
+    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
+    monkeypatch.setattr(agent_tools.sys, "platform", "linux")
+
+    cmd = "echo a && echo b"
+    result = agent_tools.dispatch_tool("bash_exec", {"command": cmd}, StudioSession())
+    assert "exit_code=0" in result
+    assert captured["args"][0] == ["/bin/bash", "-c", cmd]
+    assert captured["kwargs"]["shell"] is False
+
+
+def test_bash_exec_win32_resolves_executable_via_which(monkeypatch) -> None:
+    captured: dict = {}
+
+    def _fake_run(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return _DummyProcess(returncode=0, stdout="ok", stderr="")
+
+    real_which = agent_tools.shutil.which
+
+    def _which(cmd: str, path=None):
+        if cmd == "ls":
+            return r"C:\Program Files\Git\usr\bin\ls.exe"
+        return real_which(cmd, path=path)
+
+    monkeypatch.setattr(agent_tools.shutil, "which", _which)
+    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
+    monkeypatch.setattr(agent_tools.sys, "platform", "win32")
+
+    result = agent_tools.dispatch_tool("bash_exec", {"command": "ls -la"}, StudioSession())
+    assert "exit_code=0" in result
+    assert captured["args"][0][0] == r"C:\Program Files\Git\usr\bin\ls.exe"
+    assert captured["args"][0][1:] == ["-la"]
+
+
 def test_bash_exec_peels_cd_then_and_sets_cwd(monkeypatch, tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     workspace.mkdir()

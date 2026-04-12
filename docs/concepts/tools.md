@@ -72,6 +72,10 @@ Studio sessions use `STUDIO_TOOLS` in `agenticx.cli.agent_tools`: a list of Open
 | `memory_append`, `memory_search` | Lightweight memory helpers |
 | `lsp_goto_definition`, `lsp_find_references`, `lsp_hover`, `lsp_diagnostics` | LSP-backed navigation and diagnostics |
 
+### `bash_exec` on Windows
+
+Commands that require a shell (metacharacters such as `&&`, `|`, `>`, `$(...)`, etc.) are executed via **`cmd.exe`** using `%COMSPEC%` with `/d /s /c`, not `/bin/bash`. Bash-specific syntax may not match `cmd` rules; prefer the `cwd` argument plus simple, single-invocation commands when possible. For argv-style commands (no shell), the first token is resolved with `shutil.which` on Windows so tools like `go`/`python` resolve to `*.exe` when on `PATH`.
+
 Meta-only tools (delegation, resource checks, etc.) are defined separately (`META_AGENT_TOOLS`); avatars typically receive the Studio subset above.
 
 !!! warning "Destructive writes"
