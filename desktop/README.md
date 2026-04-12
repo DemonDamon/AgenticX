@@ -122,6 +122,40 @@ SKIP_BACKEND=1 ./packaging/build_dmg.sh arm64
 **可选：签名与公证**（分发给别人时建议配置）  
 在构建环境中设置 `APPLE_ID`、`APPLE_ID_PASSWORD`（App 专用密码）、`APPLE_TEAM_ID`，以及 `CSC_LINK` / `CSC_KEY_PASSWORD`（Developer ID 证书）。未设置时脚本会跳过公证（`desktop/scripts/mac/notarize.js` 会打印 skip）。
 
+### Windows 自包含 NSIS（内嵌 agx-server.exe + 微信 sidecar）
+
+| 项目 | macOS | Windows（本方案） |
+|------|--------|-------------------|
+| 一体脚本 | `packaging/build_dmg.sh` | `packaging/build_windows_installer.ps1` |
+| 预置目录 | `desktop/bundled-backend/<arch>/` | `desktop/bundled-backend/win-amd64/` |
+| 产物 | `.dmg` | `Machi-<version>-win-x64.exe`（NSIS） |
+| 本机要求 | bash、Python、Node、Go | **Windows**、PowerShell 7+（`pwsh`）、Python ≥3.10、Node 20、Go 1.22+；`curl.exe`（系统自带）用于冒烟 |
+
+在**仓库根目录**打开 PowerShell：
+
+```powershell
+# 首次会创建 packaging\.venv-packaging 并执行 PyInstaller + Go + electron-builder
+./packaging/build_windows_installer.ps1
+```
+
+或在 `desktop` 目录：
+
+```powershell
+cd desktop
+npm run build:win:bundled
+```
+
+仅复用已构建的 `packaging\dist\win-amd64\agx-server.exe`、跳过 PyInstaller（仍会冒烟并重新打 sidecar 与安装包）：
+
+```powershell
+$env:SKIP_BACKEND = '1'
+./packaging/build_windows_installer.ps1
+```
+
+**注意**：`electron-builder` 的 `win.extraResources` 指向 `bundled-backend/win-amd64`。若未先运行上述脚本就执行 `npm run build:win`，会因缺少该目录而打包失败——与 mac 侧未预置 `bundled-backend/<arch>` 时类似。
+
+**CI**：推送 `v*` tag 或手动 `workflow_dispatch` 选择 `windows-amd64` 时，会运行同一脚本并上传 `Machi-*-win-x64.exe` 构件。Windows 代码签名未接入（与 mac 无证书构建一致）。
+
 ### 仅 Electron 壳（不含内嵌后端）
 
 分架构单独打包（需本机已安装 `agx`）：
@@ -139,12 +173,14 @@ npm run build:mac:all
 ```
 
 产物均在 `desktop/release/`。  
-如需 Windows/Linux：
+如需 Windows/Linux（**不含**内嵌后端，需本机已安装 `agx`）：
 
 ```bash
 npm run build:win
 npm run build:linux
 ```
+
+Windows 若要内嵌后端，请使用上一节 `build:win:bundled` 或 `packaging/build_windows_installer.ps1`。
 
 ## 架构说明
 

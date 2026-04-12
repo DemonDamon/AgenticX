@@ -16,6 +16,7 @@
     "build:mac:x64": "npm run build && electron-builder --mac --x64",
     "build:mac:all": "npm run build && electron-builder --mac --arm64 && electron-builder --mac --x64",
     "build:win": "npm run build && electron-builder --win",
+    "build:win:bundled": "pwsh -NoProfile -File ../packaging/build_windows_installer.ps1",
     "build:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
