@@ -304,6 +304,8 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const streamTextRef = useRef("");
   const streamRafRef = useRef<number | null>(null);
   const streamCommittedRef = useRef(false);
+  /** Text last committed at a tool_call boundary; avoids duplicating the same assistant bubble at stream end. */
+  const lastMidStreamAssistantCommitRef = useRef<string | null>(null);
   const abortedByUserRef = useRef(false);
   const activeRequestIdRef = useRef(0);
   const modelBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -376,6 +378,20 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     () => messages.filter((item) => !item.agentId || item.agentId === "meta"),
     [messages]
   );
+  /** Avoid showing __stream__ on top of an already-committed assistant bubble with identical text. */
+  const hideStreamOverlayAsDuplicate = useMemo(() => {
+    if (!streaming) return false;
+    const t = (streamedAssistantText || "").trim();
+    if (!t) return false;
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      const m = visibleMessages[i];
+      if (m.role === "user") break;
+      if (m.role === "assistant" && (!m.agentId || m.agentId === "meta")) {
+        return String(m.content ?? "").trim() === t;
+      }
+    }
+    return false;
+  }, [streaming, streamedAssistantText, visibleMessages]);
 
   const modelLabel = activeModel
     ? (activeProvider ? `${activeProvider} / ${activeModel}` : activeModel)
@@ -717,6 +733,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       if (!partial || isThinkingPlaceholderText(partial) || streamCommittedRef.current) return false;
       appendAssistantMessage(streamTextRef.current);
       streamCommittedRef.current = true;
+      lastMidStreamAssistantCommitRef.current = partial;
       return true;
     };
     const scheduleStreamTextUpdate = (nextText: string) => {
@@ -752,6 +769,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     setStreamingModel(reqModel ? { provider: reqProvider, model: reqModel } : null);
     streamTextRef.current = "";
     streamCommittedRef.current = false;
+    lastMidStreamAssistantCommitRef.current = null;
     abortedByUserRef.current = false;
     const abortController = new AbortController();
     abortRef.current = abortController;
@@ -1033,9 +1051,15 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
         scrollToBottom();
       }
 
-      if (isCurrentRequest() && full && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
-        appendAssistantMessage(full);
-        streamCommittedRef.current = true;
+      const trimmedFull = full.trim();
+      if (isCurrentRequest() && trimmedFull && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
+        const mid = lastMidStreamAssistantCommitRef.current;
+        if (mid !== null && trimmedFull === mid) {
+          streamCommittedRef.current = true;
+        } else {
+          appendAssistantMessage(full);
+          streamCommittedRef.current = true;
+        }
         void speak(full);
       }
     } catch (err) {
@@ -1333,7 +1357,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               )}
             </div>
           ))}
-          {streaming && (
+          {streaming && !hideStreamOverlayAsDuplicate && (
             <div className={`${isLite ? "text-[15px]" : "text-sm"}`}>
               {chatStyle === "terminal" ? (
                 <TerminalLine
