@@ -414,6 +414,25 @@ def _build_user_profile_block(nickname: str, preference: str) -> str:
     return "\n".join(parts) + "\n\n"
 
 
+def _build_provider_hard_failure_block(session: StudioSession) -> str:
+    """Inject session-scoped provider denylist for Meta (G1)."""
+    raw = getattr(session, "provider_hard_failure_providers", None)
+    if not raw:
+        return ""
+    try:
+        names = sorted({str(x).strip() for x in raw if str(x).strip()})
+    except TypeError:
+        return ""
+    if not names:
+        return ""
+    joined = ", ".join(names)
+    return (
+        "## 本会话 Provider 硬失败隔离（计费/鉴权）\n"
+        f"- 以下 provider 已临时不可用，禁止对其重复 spawn_subagent 或期待立即自愈：{joined}\n"
+        "- 请使用 recommend_subagent_model 并改用其他 provider/model。\n\n"
+    )
+
+
 def build_meta_agent_system_prompt(
     session: StudioSession,
     *,
@@ -487,8 +506,10 @@ def build_meta_agent_system_prompt(
         else ""
     )
     computer_use_block = _build_computer_use_capabilities_block()
+    provider_fault_block = _build_provider_hard_failure_block(session)
     base_prompt = (
         f"{workspace_context}\n"
+        f"{provider_fault_block}"
         f"{avatar_block}"
         f"{group_block}"
         f"{identity_line}"

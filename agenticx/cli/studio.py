@@ -14,7 +14,7 @@ from pathlib import Path
 import re as _re
 import subprocess
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from rich.console import Console
 from rich.panel import Panel
@@ -72,6 +72,8 @@ class StudioSession:
     todo_manager: TodoManager = field(default_factory=TodoManager)
     scratchpad: Dict[str, str] = field(default_factory=dict)
     file_state_tracker: FileStateTracker = field(default_factory=FileStateTracker)
+    # Session-scoped providers blocked after hard LLM failures (billing/auth); see docs/adr/0001-*.md
+    provider_hard_failure_providers: Set[str] = field(default_factory=set)
 
 
 @dataclass

@@ -24,6 +24,7 @@ from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio_mcp import import_mcp_config, load_available_servers
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.llms.provider_fault import is_provider_session_blocked
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.runtime.team_manager import AgentTeamManager
@@ -1282,6 +1283,15 @@ def _recommend_subagent_model_payload(
     except Exception:
         configured_candidates = []
 
+    configured_candidates = [
+        item
+        for item in configured_candidates
+        if not (
+            str(item.get("provider", "") or "").strip()
+            and is_provider_session_blocked(session, str(item.get("provider", "")))
+        )
+    ]
+
     current_provider = str(getattr(session, "provider_name", "") or "").strip()
     current_model = str(getattr(session, "model_name", "") or "").strip()
     current_score = (
@@ -1305,6 +1315,14 @@ def _recommend_subagent_model_payload(
                 }
             )
     all_candidates.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
+    all_candidates = [
+        item
+        for item in all_candidates
+        if not (
+            str(item.get("provider", "") or "").strip()
+            and is_provider_session_blocked(session, str(item.get("provider", "")))
+        )
+    ]
 
     target_score = 40 if level == "low" else (60 if level == "medium" else 75)
     chosen: Optional[Dict[str, Any]] = None
@@ -1314,6 +1332,29 @@ def _recommend_subagent_model_payload(
             break
     if chosen is None and all_candidates:
         chosen = all_candidates[0]
+
+    if not all_candidates:
+        return {
+            "ok": True,
+            "complexity": {
+                "score": complexity_score,
+                "level": level,
+                "reasons": reasons[:5],
+            },
+            "current": {
+                "provider": current_provider,
+                "model": current_model,
+                "score": current_score,
+            },
+            "recommended": {
+                "provider": "",
+                "model": "",
+                "score": 0,
+                "reason": "本会话内全部候选 provider 均因计费/鉴权硬失败被列入临时不可用；请用户检查配置或更换 provider。",
+            },
+            "alternatives": [],
+            "note": "无可推荐模型时请勿 spawn_subagent 到已拉黑 provider。",
+        }
 
     recommendation = {
         "provider": current_provider or "",
@@ -1980,6 +2021,18 @@ async def dispatch_meta_tool_async(
         category = str(arguments.get("category", "deep") or "deep").strip().lower()
         requested_provider = str(arguments.get("provider", "")).strip()
         requested_model = str(arguments.get("model", "")).strip()
+        if requested_provider and is_provider_session_blocked(session, requested_provider):
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "provider_session_blocked",
+                    "message": (
+                        f"Provider「{requested_provider}」在本会话因计费/鉴权硬失败已列入临时不可用，"
+                        "请勿重复 spawn。请调用 recommend_subagent_model 或改用其他已配置 provider。"
+                    ),
+                },
+                ensure_ascii=False,
+            )
         if not requested_provider and not requested_model:
             routed = _resolve_model_for_category(category=category, session=session)
             requested_provider = routed.get("provider", "")
