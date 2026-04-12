@@ -49,7 +49,7 @@ from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.loop_controller import LoopController
-from agenticx.cli.agent_tools import META_TOOL_NAMES, STUDIO_TOOLS
+from agenticx.cli.agent_tools import META_TOOL_NAMES, STUDIO_TOOLS, merge_computer_use_tools_into
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS, META_LEADER_LABEL_SCRATCH_KEY
 from agenticx.runtime.prompts.meta_agent import _build_taskspaces_context, build_meta_agent_system_prompt
 from agenticx.runtime.group_router import (
@@ -77,6 +77,28 @@ from agenticx.workspace.loader import (
 )
 
 logger = logging.getLogger(__name__)
+
+_ERR_STALE_MCP = (
+    "会话标记为已连接，但当前未注册任何 MCP 工具；子进程可能已退出或握手不完整。"
+    "请先关闭开关再重新打开以重连。"
+)
+
+
+def _mcp_tool_counts_for_session(studio_session: Any) -> dict[str, int]:
+    """Count routed MCP tools per configured server name."""
+    hub = getattr(studio_session, "mcp_hub", None)
+    routing = getattr(hub, "_tool_routing", None) if hub is not None else None
+    if not routing:
+        return {}
+    counts: dict[str, int] = {}
+    for _routed_name, route in routing.items():
+        try:
+            srv = route.client.server_config.name
+        except Exception:
+            continue
+        key = str(srv)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _runtime_event_to_sse_lines(event: RuntimeEvent) -> list[str]:
@@ -1536,6 +1558,7 @@ def create_studio_app() -> FastAPI:
             ]
         else:
             effective_tools_source = list(META_AGENT_TOOLS)
+        effective_tools_source = merge_computer_use_tools_into(effective_tools_source)
         effective_tools: list = _filter_tools_by_policy(
             effective_tools_source,
             avatar_tools_enabled=avatar_tools_enabled,
@@ -1578,6 +1601,16 @@ def create_studio_app() -> FastAPI:
                             )
                         else:
                             sys_prompt = _build_avatar_direct_prompt()
+                            try:
+                                from agenticx.runtime.prompts.meta_agent import (
+                                    _build_computer_use_capabilities_block,
+                                )
+
+                                _cu_ctx = _build_computer_use_capabilities_block()
+                                if _cu_ctx:
+                                    sys_prompt += "\n\n" + _cu_ctx
+                            except Exception:
+                                pass
                             # Same taskspace list as Meta-Agent / Desktop workspace panel (managed.taskspaces).
                             _ts_ctx = _build_taskspaces_context(
                                 list(getattr(managed, "taskspaces", None) or [])
@@ -1741,6 +1774,7 @@ def create_studio_app() -> FastAPI:
             if loop_avatar_cfg is not None:
                 loop_avatar_tools_enabled = _sanitize_tools_enabled(loop_avatar_cfg.tools_enabled)
         loop_tools_source: list = list(STUDIO_TOOLS) if loop_is_avatar else list(META_AGENT_TOOLS)
+        loop_tools_source = merge_computer_use_tools_into(loop_tools_source)
         loop_tools: list = _filter_tools_by_policy(
             loop_tools_source,
             avatar_tools_enabled=loop_avatar_tools_enabled,
@@ -1983,19 +2017,36 @@ def create_studio_app() -> FastAPI:
             if isinstance(sess.connected_servers, set)
             else set(sess.connected_servers or [])
         )
+        tool_counts = _mcp_tool_counts_for_session(sess)
         servers = []
         for name, cfg in sorted(configs.items()):
+            in_connected = name in connected
+            n_tools = int(tool_counts.get(name, 0))
+            if in_connected and n_tools > 0:
+                conn_state = "healthy"
+                err_detail = ""
+            elif in_connected:
+                conn_state = "error"
+                err_detail = _ERR_STALE_MCP
+            else:
+                conn_state = "disconnected"
+                err_detail = ""
             servers.append(
                 {
                     "name": name,
-                    "connected": name in connected,
+                    "connected": in_connected,
                     "command": str(getattr(cfg, "command", "") or ""),
+                    "connection_state": conn_state,
+                    "tool_count": n_tools,
+                    "error_detail": err_detail,
                 }
             )
+        healthy_n = sum(1 for item in servers if item.get("connection_state") == "healthy")
         return {
             "ok": True,
             "count": len(servers),
             "connected_count": sum(1 for item in servers if item.get("connected")),
+            "healthy_count": healthy_n,
             "servers": servers,
         }
 
@@ -2184,6 +2235,9 @@ def create_studio_app() -> FastAPI:
 
         _TOOL_CATEGORIES: dict[str, str] = {
             "bash_exec": "system",
+            "desktop_screenshot": "system",
+            "desktop_mouse_click": "system",
+            "desktop_keyboard_type": "system",
             "file_read": "filesystem", "file_write": "filesystem", "file_edit": "filesystem", "list_files": "filesystem",
             "codegen": "code",
             "lsp_goto_definition": "code", "lsp_find_references": "code", "lsp_hover": "code", "lsp_diagnostics": "code",
@@ -2213,6 +2267,7 @@ def create_studio_app() -> FastAPI:
                 "category": _TOOL_CATEGORIES.get(name, "other"),
                 "is_meta": name in META_TOOL_NAMES,
             })
+        from agenticx.cli.agent_tools import COMPUTER_USE_TOOLS, computer_use_config_enabled
         from agenticx.runtime.meta_tools import META_AGENT_TOOLS
         for tool in META_AGENT_TOOLS:
             fn = tool.get("function", {})
@@ -2226,6 +2281,19 @@ def create_studio_app() -> FastAPI:
                 "category": _TOOL_CATEGORIES.get(name, "meta"),
                 "is_meta": True,
             })
+        if computer_use_config_enabled():
+            for tool in COMPUTER_USE_TOOLS:
+                fn = tool.get("function", {})
+                name = fn.get("name", "")
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                items.append({
+                    "name": name,
+                    "description": fn.get("description", ""),
+                    "category": _TOOL_CATEGORIES.get(name, "system"),
+                    "is_meta": False,
+                })
         return {"ok": True, "tools": items}
 
     @app.get("/api/tools/policy")

@@ -1199,6 +1199,18 @@ class AgentRuntime:
                     waiting_hint_emitted = False
                     last_pulse_at = wait_started_at
                     while True:
+                        if await _check_should_stop():
+                            invoke_task.cancel()
+                            try:
+                                await invoke_task
+                            except (asyncio.CancelledError, Exception):
+                                pass
+                            yield RuntimeEvent(
+                                type=EventType.ERROR.value,
+                                data={"text": STOP_MESSAGE},
+                                agent_id=agent_id,
+                            )
+                            return
                         if invoke_task.done():
                             response = await invoke_task
                             break
