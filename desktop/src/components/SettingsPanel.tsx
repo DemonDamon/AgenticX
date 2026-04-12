@@ -1103,21 +1103,53 @@ function HooksTab() {
 
 type PathRule = { pattern: string; allow: boolean };
 
-function PermissionsAdvancedPanel() {
+type RegistryToolRow = { name: string; description?: string; category?: string; is_meta?: boolean };
+
+export type PermissionsAdvancedPanelHandle = {
+  /** 将路径/命令/工具拒绝列表写入后端；与输入框失焦保存等效，供窗口底部「保存」统一触发。 */
+  flushPermissions: () => Promise<{ ok: boolean; error?: string }>;
+};
+
+const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandle>(function PermissionsAdvancedPanel(_props, ref) {
   const [pathRules, setPathRules] = useState<PathRule[]>([]);
   const [deniedCommands, setDeniedCommands] = useState<string[]>([]);
+  const [deniedTools, setDeniedTools] = useState<string[]>([]);
+  const [registryTools, setRegistryTools] = useState<RegistryToolRow[]>([]);
+  const [toolInsertFilter, setToolInsertFilter] = useState("");
   const [permMode, setPermMode] = useState("default");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const apiToken = useAppStore((s) => s.apiToken);
   const backendUrl = useAppStore((s) => s.backendUrl);
 
+  /** 与 CC Bridge / Hooks 等面板一致：未配置远程 URL 时用本机内置 Studio 的 API 根地址，避免请求落到 `/api/...` 相对路径导致 HTTP 404。 */
+  const resolveApiBase = useCallback(async () => {
+    const u = (backendUrl ?? "").trim();
+    if (u) return u.replace(/\/+$/, "");
+    const raw = String((await window.agenticxDesktop.getApiBase()) || "").trim();
+    return raw.replace(/\/+$/, "");
+  }, [backendUrl]);
+
+  const filteredRegistryTools = useMemo(() => {
+    const q = toolInsertFilter.trim().toLowerCase();
+    const rows = registryTools.filter((t) => t.name);
+    if (!q) return rows;
+    return rows.filter((t) => {
+      const d = (t.description ?? "").toLowerCase();
+      return t.name.toLowerCase().includes(q) || d.includes(q) || (t.category ?? "").toLowerCase().includes(q);
+    });
+  }, [registryTools, toolInsertFilter]);
+
   const fetchPerms = useCallback(async () => {
     try {
       const headers: Record<string, string> = {};
       if (apiToken) headers["x-agx-desktop-token"] = apiToken;
-      const res = await fetch(`${backendUrl}/api/permissions`, { headers });
-      const data = await res.json();
+      const base = await resolveApiBase();
+      const [permRes, regRes] = await Promise.all([
+        fetch(`${base}/api/permissions`, { headers }),
+        fetch(`${base}/api/tools/registry`, { headers }),
+      ]);
+      const data = await permRes.json();
       if (data.ok) {
         setPermMode(data.mode ?? "default");
         setPathRules(
@@ -1127,13 +1159,31 @@ function PermissionsAdvancedPanel() {
           })),
         );
         setDeniedCommands(data.denied_commands ?? []);
+        setDeniedTools(data.denied_tools ?? []);
+      }
+      try {
+        const reg = await regRes.json();
+        if (reg.ok && Array.isArray(reg.tools)) {
+          setRegistryTools(
+            reg.tools.map((t: any) => ({
+              name: String(t.name ?? "").trim(),
+              description: typeof t.description === "string" ? t.description : "",
+              category: typeof t.category === "string" ? t.category : "",
+              is_meta: Boolean(t.is_meta),
+            })),
+          );
+        } else {
+          setRegistryTools([]);
+        }
+      } catch {
+        setRegistryTools([]);
       }
     } catch {
       // silent
     } finally {
       setLoading(false);
     }
-  }, [apiToken, backendUrl]);
+  }, [apiToken, resolveApiBase]);
 
   useEffect(() => { void fetchPerms(); }, [fetchPerms]);
 
@@ -1143,7 +1193,8 @@ function PermissionsAdvancedPanel() {
       try {
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (apiToken) headers["x-agx-desktop-token"] = apiToken;
-        await fetch(`${backendUrl}/api/permissions`, {
+        const base = await resolveApiBase();
+        await fetch(`${base}/api/permissions`, {
           method: "PUT",
           headers,
           body: JSON.stringify(patch),
@@ -1153,7 +1204,68 @@ function PermissionsAdvancedPanel() {
         setBusy(false);
       }
     },
-    [apiToken, backendUrl, fetchPerms],
+    [apiToken, resolveApiBase, fetchPerms],
+  );
+
+  const appendDeniedTool = useCallback(
+    (rawName: string) => {
+      const trimmed = rawName.trim();
+      if (!trimmed) return;
+      setDeniedTools((prev) => {
+        if (prev.some((p) => p.trim() === trimmed)) return prev;
+        const next = [...prev, trimmed];
+        queueMicrotask(() => {
+          void persist({ denied_tools: next });
+        });
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      flushPermissions: async () => {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (apiToken) headers["x-agx-desktop-token"] = apiToken;
+        const pathRulesPayload = pathRules.filter((r) => String(r.pattern ?? "").trim());
+        const deniedCommandsPayload = deniedCommands.map((s) => String(s).trim()).filter(Boolean);
+        const deniedToolsPayload = deniedTools.map((s) => String(s).trim()).filter(Boolean);
+        try {
+          const base = await resolveApiBase();
+          const res = await fetch(`${base}/api/permissions`, {
+            method: "PUT",
+            headers,
+            body: JSON.stringify({
+              path_rules: pathRulesPayload,
+              denied_commands: deniedCommandsPayload,
+              denied_tools: deniedToolsPayload,
+            }),
+          });
+          let detail = "";
+          try {
+            const j = (await res.json()) as { detail?: string; error?: string };
+            if (!res.ok) {
+              detail =
+                (typeof j?.detail === "string" && j.detail) ||
+                (typeof j?.error === "string" && j.error) ||
+                "";
+            }
+          } catch {
+            /* ignore */
+          }
+          if (!res.ok) {
+            return { ok: false, error: detail || `HTTP ${res.status}` };
+          }
+          await fetchPerms();
+          return { ok: true };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      },
+    }),
+    [apiToken, resolveApiBase, pathRules, deniedCommands, deniedTools, fetchPerms],
   );
 
   if (loading) return null;
@@ -1262,9 +1374,109 @@ function PermissionsAdvancedPanel() {
           </button>
         </div>
       </Panel>
+
+      <Panel title="工具拒绝列表">
+        <div className="text-xs text-text-faint mb-2">
+          按 Studio 工具名做 fnmatch（例如 <code className="text-text-subtle">bash_exec</code>、
+          <code className="text-text-subtle">mcp_call</code>、<code className="text-text-subtle">file_*</code>
+          ）。命中后<strong className="text-text-primary">直接拒绝</strong>该工具调用，且<strong className="text-text-primary">不会</strong>再弹出执行确认（策略优先于询问）。
+          工具名与<strong className="text-text-primary">设置 → 工具</strong>页预授权列表一致；亦可到该页查看说明。
+        </div>
+        {registryTools.length > 0 ? (
+          <details className="mb-3 rounded-md border border-border bg-surface-panel px-2 py-1.5">
+            <summary className="cursor-pointer text-xs font-medium text-text-primary">
+              从已注册工具插入（共 {registryTools.length} 个）
+            </summary>
+            <div className="mt-2 space-y-2">
+              <input
+                type="search"
+                className="w-full rounded-md border border-border bg-surface-card px-2 py-1 text-xs text-text-primary placeholder:text-text-faint"
+                placeholder="筛选工具名或描述…"
+                value={toolInsertFilter}
+                disabled={busy}
+                onChange={(e) => setToolInsertFilter(e.target.value)}
+                aria-label="筛选工具列表"
+              />
+              <div className="max-h-40 overflow-y-auto rounded border border-border/60 bg-surface-card p-1.5">
+                <div className="flex flex-wrap gap-1">
+                  {filteredRegistryTools.map((t) => (
+                    <button
+                      key={t.name}
+                      type="button"
+                      disabled={busy}
+                      title={t.description ? `${t.description.slice(0, 400)}` : t.name}
+                      className="rounded border border-border bg-surface-panel px-1.5 py-0.5 font-mono text-[11px] text-text-primary transition hover:bg-surface-hover hover:border-text-subtle disabled:opacity-40"
+                      onClick={() => appendDeniedTool(t.name)}
+                    >
+                      {t.name}
+                      {t.is_meta ? (
+                        <span className="ml-0.5 text-[9px] text-amber-400/90">meta</span>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+                {filteredRegistryTools.length === 0 ? (
+                  <div className="py-2 text-center text-[11px] text-text-faint">无匹配项，清空筛选试试</div>
+                ) : null}
+              </div>
+            </div>
+          </details>
+        ) : (
+          <div className="mb-2 text-[11px] text-amber-400/90">
+            未能加载工具注册表（需后端在线）。仍可手动输入工具名；完整列表见设置 → 工具页。
+          </div>
+        )}
+        <datalist id="agx-studio-tool-names-datalist">
+          {registryTools.map((t) => (
+            <option key={t.name} value={t.name}>
+              {(t.description ?? "").slice(0, 80)}
+            </option>
+          ))}
+        </datalist>
+        <div className="space-y-1.5">
+          {deniedTools.map((toolPat, idx) => (
+            <div key={`dt-${idx}`} className="flex gap-2">
+              <input
+                className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1 text-sm font-mono"
+                value={toolPat}
+                placeholder="bash_exec"
+                list="agx-studio-tool-names-datalist"
+                autoComplete="off"
+                disabled={busy}
+                onChange={(e) => {
+                  const next = deniedTools.map((t, i) => (i === idx ? e.target.value : t));
+                  setDeniedTools(next);
+                }}
+                onBlur={() => void persist({ denied_tools: deniedTools })}
+              />
+              <button
+                type="button"
+                className="shrink-0 rounded-md border border-border p-1.5 text-text-subtle transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
+                disabled={busy}
+                onClick={() => {
+                  const next = deniedTools.filter((_, i) => i !== idx);
+                  setDeniedTools(next);
+                  void persist({ denied_tools: next });
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+            disabled={busy}
+            onClick={() => setDeniedTools((prev) => [...prev, ""])}
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden />
+            添加工具模式
+          </button>
+        </div>
+      </Panel>
     </>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // Tools Tab
@@ -4328,6 +4540,7 @@ export function SettingsPanel({
   const setMetaAvatarUrl = useAppStore((s) => s.setMetaAvatarUrl);
   const initializedForOpenRef = useRef(false);
   const toolsTabRef = useRef<ToolsTabHandle>(null);
+  const permissionsPanelRef = useRef<PermissionsAdvancedPanelHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
   const [draft, setDraft] = useState<Record<string, ProviderEntry>>({});
@@ -4673,6 +4886,16 @@ export function SettingsPanel({
   };
 
   const handleSave = async () => {
+    const permRes = await permissionsPanelRef.current?.flushPermissions?.();
+    if (permRes && !permRes.ok) {
+      const msg =
+        permRes.error ||
+        "请确认「设置 → 服务器连接」中 Studio 后端已连接且 token 正确。";
+      const still = window.confirm(
+        `权限（路径/命令/工具拒绝）未能写入 Studio：\n${msg}\n\n是否仍继续保存 Provider、远程连接等其他设置？`,
+      );
+      if (!still) return;
+    }
     if (tab === "tools") {
       const toolsRes = await toolsTabRef.current?.saveAll();
       if (toolsRes && !toolsRes.ok) {
@@ -4803,9 +5026,8 @@ export function SettingsPanel({
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-            {/* === GENERAL TAB === */}
-            {tab === "general" && (
-              <div className="space-y-4">
+            {/* === GENERAL TAB ===（保持挂载以便底部「保存」能刷入权限 API，避免仅失焦写入） */}
+            <div className={tab === "general" ? "space-y-4" : "hidden"}>
                 <Panel title="显示">
                   <label className="block text-sm text-text-muted">
                     主题
@@ -5009,15 +5231,17 @@ export function SettingsPanel({
                         ? "命中同类操作白名单自动放行，未命中时询问（推荐）。"
                         : "默认全部自动执行，不再询问（高风险）。"}
                   </div>
+                  <p className="mt-2 text-[11px] text-text-faint">
+                    下方「路径 / 命令 / 工具拒绝」修改后，请点击窗口底部「保存」写入 Studio（与失焦保存等效）。未配置远程 URL 时使用本机内置 API；若仍出现 HTTP 404，请升级远端 agenticx 版本或核对服务器地址是否指向当前 Machi 使用的同一 Studio。
+                  </p>
                 </Panel>
-                <PermissionsAdvancedPanel />
+                <PermissionsAdvancedPanel ref={permissionsPanelRef} />
                 <ComputerUseGeneralPanel />
                 <SessionMemoryPanel />
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
                   当前版本：AgenticX Desktop v0.2.0
                 </div>
-              </div>
-            )}
+            </div>
 
             {/* === PROVIDER TAB === */}
             {tab === "provider" && (

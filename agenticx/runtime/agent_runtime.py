@@ -19,7 +19,7 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Sequence
 
-from agenticx.cli.agent_tools import STUDIO_TOOLS, dispatch_tool_async
+from agenticx.cli.agent_tools import STUDIO_TOOLS, dispatch_tool_async, tool_denied_by_session_permissions
 from agenticx.cli.studio_mcp import build_mcp_tools_context
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.compactor import ContextCompactor
@@ -31,6 +31,7 @@ from agenticx.runtime.loop_detector import LoopDetector
 from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
 from agenticx.runtime.usage_metadata import usage_metadata_from_llm_response
+from agenticx.llms.provider_fault import classify_provider_fault, record_session_provider_hard_failure
 
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
@@ -1130,10 +1131,15 @@ class AgentRuntime:
                             {"content": response_text, "tool_calls": tool_calls, "usage": stream_usage},
                         )()
                         used_stream_path = True
-                    except Exception:
+                    except Exception as stream_exc:
                         logger.warning(
                             "stream_with_tools failed, fallback to invoke path",
                             exc_info=True,
+                        )
+                        record_session_provider_hard_failure(
+                            session,
+                            provider_name,
+                            fault=classify_provider_fault(stream_exc),
                         )
                         used_stream_path = False
                     finally:
@@ -1299,6 +1305,11 @@ class AgentRuntime:
                 )
                 return
             except Exception as exc:
+                record_session_provider_hard_failure(
+                    session,
+                    provider_name,
+                    fault=classify_provider_fault(exc),
+                )
                 yield RuntimeEvent(
                     type=EventType.ERROR.value,
                     data={"text": f"模型调用失败: {exc}"},
@@ -1461,15 +1472,16 @@ class AgentRuntime:
                         agent_id=agent_id,
                     )
                     continue
-                hook_outcome = await self.hooks.run_before_tool_call(tool_name, arguments, session)
-                if hook_outcome.blocked:
-                    blocked_message = hook_outcome.reason or f"工具 {tool_name} 被策略阻止。"
+                # Policy deny + allowlist before hooks / confirm (align CC deny > hook ask).
+                perm_deny = tool_denied_by_session_permissions(tool_name)
+                if perm_deny:
+                    denied_message = perm_deny
                     messages.append(
                         {
                             "role": "tool",
                             "tool_call_id": tool_call_id,
                             "name": tool_name,
-                            "content": blocked_message,
+                            "content": denied_message,
                         }
                     )
                     session.agent_messages.append(
@@ -1477,13 +1489,22 @@ class AgentRuntime:
                             "role": "tool",
                             "tool_call_id": tool_call_id,
                             "name": tool_name,
-                            "content": blocked_message,
+                            "content": denied_message,
                         }
                     )
                     synced_session_message_count = len(session.agent_messages)
+                    if not _is_system_trigger:
+                        session.chat_history.append(
+                            {"role": "assistant", "content": f"工具结果({tool_name}):\n{denied_message}"}
+                        )
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
-                        data={"text": blocked_message, "tool_call_id": tool_call_id},
+                        data={"text": denied_message, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_RESULT.value,
+                        data={"name": tool_name, "result": denied_message, "tool_call_id": tool_call_id},
                         agent_id=agent_id,
                     )
                     continue
@@ -1518,6 +1539,32 @@ class AgentRuntime:
                     yield RuntimeEvent(
                         type=EventType.TOOL_RESULT.value,
                         data={"name": tool_name, "result": denied_message, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
+                    continue
+                hook_outcome = await self.hooks.run_before_tool_call(tool_name, arguments, session)
+                if hook_outcome.blocked:
+                    blocked_message = hook_outcome.reason or f"工具 {tool_name} 被策略阻止。"
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": blocked_message,
+                        }
+                    )
+                    session.agent_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": blocked_message,
+                        }
+                    )
+                    synced_session_message_count = len(session.agent_messages)
+                    yield RuntimeEvent(
+                        type=EventType.ERROR.value,
+                        data={"text": blocked_message, "tool_call_id": tool_call_id},
                         agent_id=agent_id,
                     )
                     continue

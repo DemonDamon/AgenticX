@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import difflib
+import fnmatch
 import json
 import logging
 import os
@@ -83,6 +84,27 @@ MAX_BASH_EXEC_COMMAND_CHARS = 65536
 PATH_GUARDED_READ_COMMANDS = {"cat", "head", "tail", "grep", "find", "wc", "ls", "tree"}
 
 # Tools safe to run concurrently when appearing in the same assistant tool_calls batch.
+def tool_denied_by_session_permissions(tool_name: str) -> Optional[str]:
+    """Return a denial message if ``permissions.denied_tools`` matches the tool.
+
+    Policy deny must short-circuit before confirm gates (see ADR 0001).
+    Patterns use :func:`fnmatch.fnmatch` (e.g. ``bash_*``).
+    """
+    raw = ConfigManager.get_value("permissions.denied_tools")
+    if not isinstance(raw, list):
+        return None
+    name = str(tool_name or "").strip()
+    if not name:
+        return None
+    for entry in raw:
+        pat = str(entry or "").strip()
+        if not pat:
+            continue
+        if fnmatch.fnmatch(name, pat) or fnmatch.fnmatch(name.lower(), pat.lower()):
+            return f"工具「{name}」已被会话权限策略拒绝（匹配规则: {pat}）。"
+    return None
+
+
 _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
     {
         "file_read",
@@ -1616,6 +1638,10 @@ async def _tool_bash_exec(
         return "ERROR: missing command"
     if len(command) > MAX_BASH_EXEC_COMMAND_CHARS:
         return f"ERROR: command exceeds maximum length ({MAX_BASH_EXEC_COMMAND_CHARS} characters)"
+
+    perm_deny = tool_denied_by_session_permissions("bash_exec")
+    if perm_deny:
+        return f"ERROR: {perm_deny}"
 
     raw_timeout = arguments.get("timeout_sec")
     if raw_timeout is None:

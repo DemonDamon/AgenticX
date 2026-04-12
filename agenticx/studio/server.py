@@ -3423,7 +3423,16 @@ def create_studio_app() -> FastAPI:
             mode = ConfigManager.get_value("permissions.mode") or "default"
             path_rules = ConfigManager.get_value("permissions.path_rules") or []
             denied_commands = ConfigManager.get_value("permissions.denied_commands") or []
-            return {"ok": True, "mode": mode, "path_rules": path_rules, "denied_commands": denied_commands}
+            denied_tools = ConfigManager.get_value("permissions.denied_tools") or []
+            allowed_tools = ConfigManager.get_value("permissions.allowed_tools") or []
+            return {
+                "ok": True,
+                "mode": mode,
+                "path_rules": path_rules if isinstance(path_rules, list) else [],
+                "denied_commands": denied_commands if isinstance(denied_commands, list) else [],
+                "denied_tools": denied_tools if isinstance(denied_tools, list) else [],
+                "allowed_tools": allowed_tools if isinstance(allowed_tools, list) else [],
+            }
         except Exception as exc:
             logger.warning("put_permissions error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
