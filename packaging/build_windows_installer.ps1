@@ -1,6 +1,6 @@
 # End-to-end: PyInstaller agx-server.exe + wechat sidecar -> desktop/bundled-backend/win-amd64 -> NSIS.
 # Usage: packaging/build_windows_installer.ps1
-# Env: SKIP_BACKEND=1 — skip PyInstaller if packaging/dist/win-amd64/agx-server.exe already exists (still smoke).
+# Env: SKIP_BACKEND=1 - skip PyInstaller if packaging/dist/win-amd64/agx-server.exe already exists (still smoke).
 # Author: Damon Li
 
 $ErrorActionPreference = 'Stop'
@@ -88,17 +88,14 @@ else {
 }
 
 Write-Host '--- Smoke test (agx-server.exe) ---'
+Write-Host '[build_windows_installer] smoke: free TCP port via TcpListener (no python -c)'
 # Avoid fragile python -c quoting in PowerShell; pick ephemeral TCP port in .NET.
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
 $listener.Start()
 $FreePort = $listener.LocalEndpoint.Port
 $listener.Stop()
 
-$proc = Start-Process -FilePath $ExePath `
-    -ArgumentList @('--host', '127.0.0.1', '--port', "$FreePort") `
-    -PassThru `
-    -WindowStyle Hidden `
-    -WorkingDirectory $env:USERPROFILE
+$proc = Start-Process -FilePath $ExePath -ArgumentList @('--host', '127.0.0.1', '--port', "$FreePort") -PassThru -WindowStyle Hidden -WorkingDirectory $env:USERPROFILE
 
 $code = '000'
 for ($i = 0; $i -lt 60; $i++) {
