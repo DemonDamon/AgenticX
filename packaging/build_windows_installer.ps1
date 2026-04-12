@@ -88,8 +88,12 @@ else {
 }
 
 Write-Host '--- Smoke test (agx-server.exe) ---'
-$FreePort =
-  (& $VenvPython -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")).Trim()
+# Avoid fragile python -c quoting in PowerShell; pick ephemeral TCP port in .NET.
+$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+$listener.Start()
+$FreePort = $listener.LocalEndpoint.Port
+$listener.Stop()
+
 $proc = Start-Process -FilePath $ExePath `
     -ArgumentList @('--host', '127.0.0.1', '--port', "$FreePort") `
     -PassThru `
