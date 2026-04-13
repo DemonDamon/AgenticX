@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.llms.litellm_provider import LiteLLMProvider
 from agenticx.llms.minimax_provider import MiniMaxProvider
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.llms.qianfan_provider import QianfanProvider
@@ -62,4 +63,74 @@ def test_resolver_uses_minimax_default_base_url(tmp_path: Path, monkeypatch):
 
     provider = ProviderResolver.resolve()
     assert isinstance(provider, MiniMaxProvider)
-    assert provider.base_url == "https://api.minimaxi.com/v1"
+    assert provider.base_url == "https://api.minimax.chat/v1"
+
+
+def test_resolver_openai_custom_base_prefixes_model_for_litellm(tmp_path: Path, monkeypatch):
+    """Bare model IDs on custom OpenAI-compatible bases need openai/ for LiteLLM routing."""
+    _setup_paths(tmp_path, monkeypatch)
+    ConfigManager.set_value("default_provider", "openai", scope="global")
+    ConfigManager.set_value("providers.openai.api_key", "k", scope="global")
+    ConfigManager.set_value("providers.openai.model", "deepseek-r1", scope="global")
+    ConfigManager.set_value(
+        "providers.openai.base_url",
+        "https://zhenze-huhehaote.cmecloud.cn/v1",
+        scope="global",
+    )
+
+    provider = ProviderResolver.resolve()
+    assert isinstance(provider, LiteLLMProvider)
+    assert provider.model == "openai/deepseek-r1"
+    assert provider.base_url == "https://zhenze-huhehaote.cmecloud.cn/v1"
+
+
+def test_resolver_openai_no_custom_base_leaves_model_unprefixed(tmp_path: Path, monkeypatch):
+    _setup_paths(tmp_path, monkeypatch)
+    ConfigManager.set_value("default_provider", "openai", scope="global")
+    ConfigManager.set_value("providers.openai.api_key", "k", scope="global")
+    ConfigManager.set_value("providers.openai.model", "gpt-4o-mini", scope="global")
+
+    provider = ProviderResolver.resolve()
+    assert isinstance(provider, LiteLLMProvider)
+    assert provider.model == "gpt-4o-mini"
+
+
+def test_resolver_openai_custom_base_idempotent_when_model_already_prefixed(tmp_path: Path, monkeypatch):
+    _setup_paths(tmp_path, monkeypatch)
+    ConfigManager.set_value("default_provider", "openai", scope="global")
+    ConfigManager.set_value("providers.openai.api_key", "k", scope="global")
+    ConfigManager.set_value("providers.openai.model", "openai/deepseek-r1", scope="global")
+    ConfigManager.set_value("providers.openai.base_url", "https://example.com/v1", scope="global")
+
+    provider = ProviderResolver.resolve()
+    assert provider.model == "openai/deepseek-r1"
+
+
+def test_resolver_custom_provider_with_interface_openai_uses_litellm(tmp_path: Path, monkeypatch):
+    """YAML providers not in PROVIDER_MAP but with extra.interface=openai resolve to LiteLLM (OpenAI范式)."""
+    _setup_paths(tmp_path, monkeypatch)
+    ConfigManager.set_value("default_provider", "custom_openai_acme", scope="global")
+    ConfigManager.set_value("providers.custom_openai_acme.api_key", "k", scope="global")
+    ConfigManager.set_value("providers.custom_openai_acme.model", "gpt-4o-mini", scope="global")
+    ConfigManager.set_value("providers.custom_openai_acme.interface", "openai", scope="global")
+
+    provider = ProviderResolver.resolve()
+    assert isinstance(provider, LiteLLMProvider)
+    assert provider.model == "gpt-4o-mini"
+
+
+def test_resolver_legacy_custom_openai_provider_without_interface_uses_litellm(tmp_path: Path, monkeypatch):
+    """兼容旧配置：custom_openai_* 可能缺失 interface=openai，也应按 OpenAI 兼容网关处理。"""
+    _setup_paths(tmp_path, monkeypatch)
+    ConfigManager.set_value("default_provider", "custom_openai_legacy", scope="global")
+    ConfigManager.set_value("providers.custom_openai_legacy.api_key", "k", scope="global")
+    ConfigManager.set_value("providers.custom_openai_legacy.model", "deepseek-r1", scope="global")
+    ConfigManager.set_value(
+        "providers.custom_openai_legacy.base_url",
+        "https://zhenze-huhehaote.cmecloud.cn/v1",
+        scope="global",
+    )
+
+    provider = ProviderResolver.resolve()
+    assert isinstance(provider, LiteLLMProvider)
+    assert provider.model == "openai/deepseek-r1"
