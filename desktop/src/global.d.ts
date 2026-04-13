@@ -520,6 +520,8 @@ declare global {
         models?: string[];
         enabled?: boolean;
         dropParams?: boolean;
+        displayName?: string;
+        interface?: "openai";
       }) => Promise<{ ok: boolean }>;
       setDefaultProvider: (name: string) => Promise<{ ok: boolean }>;
       deleteProvider: (name: string) => Promise<{ ok: boolean }>;

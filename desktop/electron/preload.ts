@@ -349,6 +349,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     models?: string[];
     enabled?: boolean;
     dropParams?: boolean;
+    displayName?: string;
+    interface?: "openai";
   }) => ipcRenderer.invoke("save-provider", payload),
   setDefaultProvider: async (name: string) => ipcRenderer.invoke("set-default-provider", name),
   deleteProvider: async (name: string) => ipcRenderer.invoke("delete-provider", name),

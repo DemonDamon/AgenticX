@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useAppStore } from "../store";
+import { getProviderDisplayName } from "../utils/provider-display";
 
 type ModelOption = { provider: string; model: string; label: string };
 
@@ -18,12 +19,13 @@ export function ModelPicker({ open, onSelect, onClose }: Props) {
     for (const [provName, entry] of Object.entries(settings.providers)) {
       if (entry.enabled === false) continue;
       if (!entry.apiKey) continue;
+      const provLabel = getProviderDisplayName(provName, entry);
       if (entry.models.length > 0) {
         for (const m of entry.models) {
-          result.push({ provider: provName, model: m, label: `${provName} | ${m}` });
+          result.push({ provider: provName, model: m, label: `${provLabel} | ${m}` });
         }
       } else if (entry.model) {
-        result.push({ provider: provName, model: entry.model, label: `${provName} | ${entry.model}` });
+        result.push({ provider: provName, model: entry.model, label: `${provLabel} | ${entry.model}` });
       }
     }
     return result;
