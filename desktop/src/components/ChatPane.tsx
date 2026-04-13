@@ -31,6 +31,7 @@ import {
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
+import { getProviderDisplayName } from "../utils/provider-display";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import {
   ccBridgeSendToolProgressLabel,
@@ -183,10 +184,11 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     for (const [provName, entry] of Object.entries(settings.providers)) {
       if (entry.enabled === false) continue;
       if (!entry.apiKey) continue;
+      const provLabel = getProviderDisplayName(provName, entry);
       if (entry.models.length > 0) {
-        for (const m of entry.models) result.push({ provider: provName, model: m, label: `${provName}/${m}` });
+        for (const m of entry.models) result.push({ provider: provName, model: m, label: `${provLabel}/${m}` });
       } else if (entry.model) {
-        result.push({ provider: provName, model: entry.model, label: `${provName}/${entry.model}` });
+        result.push({ provider: provName, model: entry.model, label: `${provLabel}/${entry.model}` });
       }
     }
     return result;
@@ -194,7 +196,13 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
 
   const currentProvider = (paneModel?.modelProvider || "").trim();
   const currentModel = (paneModel?.modelName || "").trim();
-  const currentLabel = currentModel ? `${currentProvider}/${currentModel}` : "未选模型";
+  const currentLabel = useMemo(() => {
+    if (!currentModel) return "未选模型";
+    if (!currentProvider) return currentModel;
+    const entry = settings.providers[currentProvider];
+    const provLabel = getProviderDisplayName(currentProvider, entry);
+    return `${provLabel}/${currentModel}`;
+  }, [currentModel, currentProvider, settings.providers]);
 
   return (
     <div className="relative">
@@ -399,8 +407,11 @@ type Props = {
 };
 
 function ModelBadge({ provider, model }: { provider?: string; model?: string }) {
+  const providers = useAppStore((s) => s.settings.providers);
   if (!model) return null;
-  const label = provider ? `${provider}/${model}` : model;
+  const entry = provider ? providers[provider] : undefined;
+  const provLabel = provider ? getProviderDisplayName(provider, entry) : "";
+  const label = provLabel ? `${provLabel}/${model}` : model;
   return (
     <span className="mb-1 inline-block rounded bg-surface-card-strong px-1.5 py-0.5 text-[10px] text-text-faint">
       {label}
@@ -1165,6 +1176,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (pp && pm) return { chatProvider: pp, chatModel: pm };
     return { chatProvider: storeActiveProvider, chatModel: storeActiveModel };
   }, [pane?.modelProvider, pane?.modelName, storeActiveProvider, storeActiveModel]);
+  const providerEntryForModelChip = useAppStore((s) =>
+    chatProvider ? s.settings.providers[chatProvider] : undefined,
+  );
+  const chatProviderDisplay = useMemo(
+    () => getProviderDisplayName(chatProvider, providerEntryForModelChip),
+    [chatProvider, providerEntryForModelChip],
+  );
   const selectedSubAgent = useAppStore((s) => s.selectedSubAgent);
   const setSelectedSubAgent = useAppStore((s) => s.setSelectedSubAgent);
   const addSubAgent = useAppStore((s) => s.addSubAgent);
@@ -4087,8 +4105,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   : "-"}
             </span>
             {chatProvider && chatModel ? (
-              <span className="min-w-0 truncate rounded border border-border bg-surface-card px-2 py-0.5" style={{ maxWidth: "55%" }} title={`${chatProvider}/${chatModel}`}>
-                {chatProvider}/{chatModel}
+              <span
+                className="min-w-0 truncate rounded border border-border bg-surface-card px-2 py-0.5"
+                style={{ maxWidth: "55%" }}
+                title={`${chatProvider}/${chatModel}`}
+              >
+                {chatProviderDisplay}/{chatModel}
               </span>
             ) : null}
           </div>

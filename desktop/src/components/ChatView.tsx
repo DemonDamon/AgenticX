@@ -1,5 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
 import { useAppStore, type Message } from "../store";
+import { getProviderDisplayName } from "../utils/provider-display";
 import { SubAgentPanel } from "./SubAgentPanel";
 import { interruptOnInterimResult, interruptTtsOnUserSpeech } from "../voice/interrupt";
 import { speak } from "../voice/tts";
@@ -194,8 +195,11 @@ function buildToolCallLivePreview(toolNameRaw: unknown, argsRaw: unknown): strin
 }
 
 function ModelBadge({ provider, model }: { provider?: string; model?: string }) {
+  const providers = useAppStore((s) => s.settings.providers);
   if (!model) return null;
-  const label = provider ? `${provider}/${model}` : model;
+  const entry = provider ? providers[provider] : undefined;
+  const provLabel = provider ? getProviderDisplayName(provider, entry) : "";
+  const label = provLabel ? `${provLabel}/${model}` : model;
   return (
     <span className="mb-1 inline-block rounded bg-surface-card px-1.5 py-0.5 text-[10px] text-text-subtle">
       {label}
@@ -1501,10 +1505,11 @@ function ModelPickerDropdown({ onSelect, onClose }: { onSelect: (p: string, m: s
     for (const [provName, entry] of Object.entries(settings.providers)) {
       if (entry.enabled === false) continue;
       if (!entry.apiKey) continue;
+      const provLabel = getProviderDisplayName(provName, entry);
       if (entry.models.length > 0) {
-        for (const m of entry.models) result.push({ provider: provName, model: m, label: `${provName} | ${m}` });
+        for (const m of entry.models) result.push({ provider: provName, model: m, label: `${provLabel} | ${m}` });
       } else if (entry.model) {
-        result.push({ provider: provName, model: entry.model, label: `${provName} | ${entry.model}` });
+        result.push({ provider: provName, model: entry.model, label: `${provLabel} | ${entry.model}` });
       }
     }
     return result;

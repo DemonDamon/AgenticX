@@ -10,7 +10,7 @@ import { Topbar } from "./components/Topbar";
 import type { ForwardConfirmPayload } from "./components/ForwardPicker";
 import { rememberSessionForAvatar } from "./utils/avatar-last-session";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/session-message-map";
-import type { Message } from "./store";
+import type { Message, ProviderEntry } from "./store";
 import { useAppStore } from "./store";
 import { stopSpeak } from "./voice/tts";
 import { matchKeybinding } from "./core/keybinding-manager";
@@ -42,10 +42,25 @@ type PersistedWorkspaceState = {
   panes: PersistedPaneState[];
 };
 
-function toProviderEntries(raw: Record<string, { api_key?: string; base_url?: string; model?: string; models?: string[]; enabled?: boolean; drop_params?: boolean }>) {
-  const result: Record<string, { apiKey: string; baseUrl: string; model: string; models: string[]; enabled: boolean; dropParams: boolean }> = {};
+function toProviderEntries(
+  raw: Record<
+    string,
+    {
+      api_key?: string;
+      base_url?: string;
+      model?: string;
+      models?: string[];
+      enabled?: boolean;
+      drop_params?: boolean;
+      display_name?: string;
+      interface?: "openai";
+    }
+  >
+): Record<string, ProviderEntry> {
+  const result: Record<string, ProviderEntry> = {};
   for (const [name, cfg] of Object.entries(raw)) {
-    result[name] = {
+    const displayName = (cfg.display_name ?? "").trim();
+    const row: ProviderEntry = {
       apiKey: cfg.api_key ?? "",
       baseUrl: cfg.base_url ?? "",
       model: cfg.model ?? "",
@@ -53,6 +68,9 @@ function toProviderEntries(raw: Record<string, { api_key?: string; base_url?: st
       enabled: cfg.enabled !== false,
       dropParams: cfg.drop_params === true,
     };
+    if (displayName) row.displayName = displayName;
+    if (cfg.interface === "openai") row.interface = "openai";
+    result[name] = row;
   }
   return result;
 }
@@ -1199,7 +1217,7 @@ export function App() {
 
   const handleSettingsSave = async (result: {
     defaultProvider: string;
-    providers: Record<string, { apiKey: string; baseUrl: string; model: string; models: string[]; enabled: boolean; dropParams: boolean }>;
+    providers: Record<string, ProviderEntry>;
   }) => {
     const resolveFallbackModel = (): { provider: string; model: string } | null => {
       const candidates = Object.entries(result.providers)
@@ -1215,7 +1233,17 @@ export function App() {
     };
 
     for (const [name, entry] of Object.entries(result.providers)) {
-      if (!entry.apiKey && !entry.model && !entry.baseUrl && entry.models.length === 0 && entry.enabled !== false) continue;
+      const hasCustomVendorMeta = Boolean(entry.displayName?.trim()) || entry.interface === "openai";
+      if (
+        !hasCustomVendorMeta &&
+        !entry.apiKey &&
+        !entry.model &&
+        !entry.baseUrl &&
+        entry.models.length === 0 &&
+        entry.enabled !== false
+      ) {
+        continue;
+      }
       await window.agenticxDesktop.saveProvider({
         name,
         apiKey: entry.apiKey || undefined,
@@ -1224,6 +1252,9 @@ export function App() {
         models: entry.models.length > 0 ? entry.models : undefined,
         enabled: entry.enabled,
         dropParams: entry.dropParams,
+        // displayName 未出现在对象上时不传，避免误删 YAML；显式传空串表示用户清空展示名
+        ...(entry.displayName !== undefined ? { displayName: entry.displayName.trim() } : {}),
+        ...(entry.interface === "openai" ? { interface: "openai" as const } : {}),
       });
     }
     await window.agenticxDesktop.setDefaultProvider(result.defaultProvider);

@@ -42,6 +42,7 @@ import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-promp
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
 import { AutomationTab } from "./automation/AutomationTab";
+import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
 
 export type FavoriteForwardContext = {
   sourceSessionId: string;
@@ -54,23 +55,6 @@ const ALL_PROVIDERS = [
   "zhipu", "qianfan", "minimax", "kimi", "ollama",
 ] as const;
 
-/** UI 展示用标准名称（与 Cherry 等侧栏一致；配置 key 仍为英文 id） */
-const PROVIDER_DISPLAY_NAME: Record<string, string> = {
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  volcengine: "火山引擎",
-  bailian: "阿里云百炼",
-  zhipu: "智谱开放平台",
-  qianfan: "百度千帆",
-  minimax: "MiniMax",
-  kimi: "月之暗面",
-  ollama: "Ollama",
-};
-
-function getProviderDisplayName(providerId: string): string {
-  return PROVIDER_DISPLAY_NAME[providerId] ?? providerId;
-}
-
 /** LiteLLM routes: show optional drop_params toggle for strict OpenAI-compatible gateways. */
 const DROP_PARAMS_CAPABLE_PROVIDERS = new Set<string>(["openai", "anthropic", "ollama"]);
 
@@ -81,6 +65,10 @@ type ProviderEntry = {
   models: string[];
   enabled: boolean;
   dropParams: boolean;
+  /** 自定义服务厂商展示名（写入 config display_name） */
+  displayName?: string;
+  /** 接口范式：当前仅支持 OpenAI 兼容 */
+  interface?: "openai";
 };
 
 /** 至少填写了密钥或自定义 API 地址之一，才视为已配置（与「留空使用默认」的隐式地址区分）。 */
@@ -95,10 +83,13 @@ function providerEffectiveOn(e: ProviderEntry | undefined): boolean {
 }
 
 function providerEntryFromSaved(saved: Partial<ProviderEntry> | undefined): ProviderEntry {
+  const raw = saved as Partial<ProviderEntry> & { display_name?: string };
   const apiKey = String(saved?.apiKey ?? "");
   const baseUrl = String(saved?.baseUrl ?? "");
   const cred = providerCredentialed({ apiKey, baseUrl });
   const models = saved?.models;
+  const dn = raw.displayName?.trim() || raw.display_name?.trim();
+  const iface = saved?.interface === "openai" ? "openai" : undefined;
   return {
     apiKey,
     baseUrl,
@@ -106,6 +97,8 @@ function providerEntryFromSaved(saved: Partial<ProviderEntry> | undefined): Prov
     models: Array.isArray(models) ? models : [],
     enabled: cred && saved?.enabled !== false,
     dropParams: saved?.dropParams === true,
+    displayName: dn || undefined,
+    interface: iface,
   };
 }
 
@@ -4587,6 +4580,8 @@ export function SettingsPanel({
   const [addModelModalOpen, setAddModelModalOpen] = useState(false);
   const [addModelFormId, setAddModelFormId] = useState("");
   const [addModelFormName, setAddModelFormName] = useState("");
+  const [addServiceVendorModalOpen, setAddServiceVendorModalOpen] = useState(false);
+  const [addVendorFormName, setAddVendorFormName] = useState("");
   const [editModelModalOpen, setEditModelModalOpen] = useState(false);
   const [editModelOriginalId, setEditModelOriginalId] = useState("");
   const [editModelFormId, setEditModelFormId] = useState("");
@@ -4692,6 +4687,8 @@ export function SettingsPanel({
       setEditModelOriginalId("");
       setEditModelFormId("");
       setEditModelError(null);
+      setAddServiceVendorModalOpen(false);
+      setAddVendorFormName("");
       return;
     }
     // IMPORTANT: only initialize once per open cycle.
@@ -4964,6 +4961,35 @@ export function SettingsPanel({
     if (!id || current.models.includes(id)) return;
     updateField("models", [...current.models, id]);
     closeAddModelModal();
+  };
+
+  const closeAddServiceVendorModal = () => {
+    setAddServiceVendorModalOpen(false);
+    setAddVendorFormName("");
+  };
+
+  const submitAddServiceVendorFromModal = () => {
+    const name = addVendorFormName.trim();
+    if (!name) return;
+    const id = makeCustomOpenAIProviderId(name, Object.keys(draft));
+    setDraft((prev) => ({
+      ...prev,
+      [id]: {
+        apiKey: "",
+        baseUrl: "",
+        model: "",
+        models: [],
+        enabled: false,
+        dropParams: false,
+        displayName: name,
+        interface: "openai",
+      },
+    }));
+    setActive(id);
+    setAddServiceVendorModalOpen(false);
+    setAddVendorFormName("");
+    setProviderEnableHint(null);
+    setDefaultProvHint(null);
   };
 
   const closeEditModelModal = () => {
@@ -5382,41 +5408,56 @@ export function SettingsPanel({
             {tab === "provider" && (
               <div className="flex gap-3">
                 {/* Provider sub-list */}
-                <div className="w-[140px] shrink-0 space-y-0.5 overflow-y-auto rounded-md border border-border bg-surface-card py-1">
-                  {providerNames.map((name) => {
-                    const entry = draft[name];
-                    const dotClass = providerEffectiveOn(entry) ? "bg-emerald-400" : "bg-rose-400";
-                    return (
-                      <button
-                        key={name}
-                        className={`flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs transition ${
-                          active === name ? "bg-[var(--settings-accent-row-bg)] text-[var(--settings-accent-fg)]" : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
-                        }`}
-                        onClick={() => {
-                          setActive(name);
-                          setProviderEnableHint(null);
-                          setDefaultProvHint(null);
-                          setAddModelModalOpen(false);
-                          setAddModelFormId("");
-                          setAddModelFormName("");
-                          setEditModelModalOpen(false);
-                          setEditModelOriginalId("");
-                          setEditModelFormId("");
-                          setEditModelError(null);
-                        }}
-                      >
-                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} />
-                        <span className="truncate">{getProviderDisplayName(name)}</span>
-                        {name === defProv && <span className="ml-auto shrink-0 rounded bg-[var(--settings-accent-badge-bg)] px-1 text-[9px] text-[var(--settings-accent-fg)]">默认</span>}
-                      </button>
-                    );
-                  })}
+                <div className="flex w-[140px] shrink-0 flex-col rounded-md border border-border bg-surface-card">
+                  <div className="max-h-[min(60vh,420px)] space-y-0.5 overflow-y-auto py-1">
+                    {providerNames.map((name) => {
+                      const entry = draft[name];
+                      const dotClass = providerEffectiveOn(entry) ? "bg-emerald-400" : "bg-rose-400";
+                      return (
+                        <button
+                          key={name}
+                          className={`flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs transition ${
+                            active === name ? "bg-[var(--settings-accent-row-bg)] text-[var(--settings-accent-fg)]" : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
+                          }`}
+                          onClick={() => {
+                            setActive(name);
+                            setProviderEnableHint(null);
+                            setDefaultProvHint(null);
+                            setAddModelModalOpen(false);
+                            setAddModelFormId("");
+                            setAddModelFormName("");
+                            setAddServiceVendorModalOpen(false);
+                            setAddVendorFormName("");
+                            setEditModelModalOpen(false);
+                            setEditModelOriginalId("");
+                            setEditModelFormId("");
+                            setEditModelError(null);
+                          }}
+                        >
+                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} />
+                          <span className="truncate">{getProviderDisplayName(name, entry)}</span>
+                          {name === defProv && <span className="ml-auto shrink-0 rounded bg-[var(--settings-accent-badge-bg)] px-1 text-[9px] text-[var(--settings-accent-fg)]">默认</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    className="mx-1.5 mb-1.5 mt-0.5 flex shrink-0 items-center justify-center gap-1 rounded-lg border border-[var(--settings-accent-badge-bg)] py-1.5 text-xs font-medium text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-row-bg)]"
+                    onClick={() => {
+                      setAddVendorFormName("");
+                      setAddServiceVendorModalOpen(true);
+                    }}
+                  >
+                    <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    添加
+                  </button>
                 </div>
 
                 {/* Provider detail */}
                 <div className="flex-1 space-y-3">
                       <h2 className="text-sm font-semibold leading-snug text-text-primary">
-                        {getProviderDisplayName(active)}
+                        {getProviderDisplayName(active, current)}
                       </h2>
                       <div className="space-y-1 rounded-md border border-border bg-surface-panel px-3 py-2">
                         <div className="flex items-center justify-between">
@@ -5427,8 +5468,8 @@ export function SettingsPanel({
                             type="button"
                             aria-label={
                               currentEffectiveOn
-                                ? `关闭 ${getProviderDisplayName(active)}`
-                                : `启用 ${getProviderDisplayName(active)}`
+                                ? `关闭 ${getProviderDisplayName(active, current)}`
+                                : `启用 ${getProviderDisplayName(active, current)}`
                             }
                             className={`inline-flex min-w-[58px] items-center justify-center rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
                               currentEffectiveOn
@@ -5458,8 +5499,8 @@ export function SettingsPanel({
                             type="button"
                             aria-label={
                               defProv === active
-                                ? `取消将 ${getProviderDisplayName(active)} 设为默认 Provider`
-                                : `将 ${getProviderDisplayName(active)} 设为默认 Provider`
+                                ? `取消将 ${getProviderDisplayName(active, current)} 设为默认 Provider`
+                                : `将 ${getProviderDisplayName(active, current)} 设为默认 Provider`
                             }
                             className={`inline-flex min-w-[58px] items-center justify-center rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
                               defProv === active
@@ -5496,6 +5537,21 @@ export function SettingsPanel({
                           <div className="text-[11px] text-rose-400">{defaultProvHint}</div>
                         ) : null}
                       </div>
+                      {!(ALL_PROVIDERS as readonly string[]).includes(active) &&
+                      (current.interface === "openai" || active.startsWith("custom_openai_")) ? (
+                        <label className="mb-3 block text-sm text-text-muted">
+                          服务厂商显示名
+                          <input
+                            className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
+                            value={current.displayName ?? ""}
+                            onChange={(e) => updateField("displayName", e.target.value)}
+                            placeholder="例如 移动云"
+                          />
+                          <p className="mt-1 text-[11px] leading-relaxed text-text-faint">
+                            仅用于界面与侧栏展示；配置中的厂商 id 仍为左侧英文标识。
+                          </p>
+                        </label>
+                      ) : null}
                       <label className="block text-sm text-text-muted">
                         API 密钥
                         <div className="mt-1 flex gap-2">
@@ -5553,7 +5609,7 @@ export function SettingsPanel({
                           </div>
                         )}
                       </label>
-                      {DROP_PARAMS_CAPABLE_PROVIDERS.has(active) && (
+                      {(DROP_PARAMS_CAPABLE_PROVIDERS.has(active) || current.interface === "openai") && (
                         <label className="flex cursor-pointer items-start gap-2 text-sm text-text-muted">
                           <input
                             type="checkbox"
@@ -5679,6 +5735,66 @@ export function SettingsPanel({
                           );
                         })}
                       </div>
+                      <Modal
+                        open={addServiceVendorModalOpen}
+                        title="添加服务厂商"
+                        onClose={closeAddServiceVendorModal}
+                        backdropClassName="bg-black/75"
+                        panelClassName="w-full max-w-[min(92vw,400px)] bg-[var(--surface-base-fallback)]"
+                        footer={(
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                              onClick={closeAddServiceVendorModal}
+                            >
+                              取消
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-md bg-[var(--settings-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--settings-accent-solid-text)] transition hover:bg-[var(--settings-accent-solid-hover)] disabled:opacity-40"
+                              disabled={!addVendorFormName.trim()}
+                              onClick={submitAddServiceVendorFromModal}
+                            >
+                              确定
+                            </button>
+                          </div>
+                        )}
+                      >
+                        <div className="space-y-4">
+                          <div className="flex justify-center">
+                            <div className="flex h-14 w-14 items-center justify-center rounded-full border border-border bg-surface-card-strong text-lg font-semibold text-text-muted">
+                              {(addVendorFormName.trim().charAt(0) || "P").toUpperCase()}
+                            </div>
+                          </div>
+                          <label className="block text-sm text-text-muted">
+                            服务厂商名称
+                            <input
+                              className="mt-1 w-full rounded-md border border-border bg-surface-card-strong px-2 py-1.5 text-sm"
+                              value={addVendorFormName}
+                              onChange={(e) => setAddVendorFormName(e.target.value)}
+                              placeholder="例如 OpenAI"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && addVendorFormName.trim()) submitAddServiceVendorFromModal();
+                              }}
+                            />
+                          </label>
+                          <label className="block text-sm text-text-muted">
+                            服务厂商类型
+                            <select
+                              className="mt-1 w-full rounded-md border border-border bg-surface-card-strong px-2 py-1.5 text-sm"
+                              value="openai"
+                              disabled
+                              aria-label="服务厂商类型"
+                            >
+                              <option value="openai">OpenAI</option>
+                            </select>
+                            <p className="mt-1 text-[11px] leading-relaxed text-text-faint">
+                              当前仅支持 OpenAI 兼容接口（含多数中转 / 网关）；保存设置后写入配置。
+                            </p>
+                          </label>
+                        </div>
+                      </Modal>
                       <Modal
                         open={addModelModalOpen}
                         title="添加模型"

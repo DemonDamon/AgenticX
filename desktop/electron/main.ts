@@ -7,6 +7,7 @@ import {
   MenuItemConstructorOptions,
   nativeImage,
   powerSaveBlocker,
+  session,
   shell,
   Tray
 } from "electron";
@@ -19,6 +20,10 @@ if (process.platform === "win32" || process.env.AGX_DISABLE_GPU === "1") {
   app.commandLine.appendSwitch("disable-gpu");
   app.disableHardwareAcceleration();
 }
+
+// 渲染进程 fetch → 本机 agx（127.0.0.1）若走系统 HTTP/SOCKS 代理，常表现为 TypeError: network error；
+// 主进程直连公网的健康检测仍可能成功。Chromium：对环回地址绕过代理。
+app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>");
 import path from "node:path";
 import net from "node:net";
 import os from "node:os";
@@ -163,6 +168,8 @@ type ProviderConfig = {
   models?: string[];
   enabled?: boolean;
   drop_params?: boolean;
+  display_name?: string;
+  interface?: "openai";
 };
 
 type RemoteServerConfig = {
@@ -3405,6 +3412,8 @@ function registerIpc(): void {
     models?: string[];
     enabled?: boolean;
     dropParams?: boolean;
+    displayName?: string;
+    interface?: "openai";
   }) => {
     const cfg = loadAgxConfig();
     if (!cfg.providers) cfg.providers = {};
@@ -3425,6 +3434,14 @@ function registerIpc(): void {
       next.drop_params = true;
     } else if (payload.dropParams === false) {
       delete next.drop_params;
+    }
+    if (payload.displayName !== undefined) {
+      if (payload.displayName) next.display_name = payload.displayName;
+      else delete next.display_name;
+    }
+    if (payload.interface !== undefined) {
+      if (payload.interface === "openai") next.interface = "openai";
+      else delete next.interface;
     }
     cfg.providers[payload.name] = next;
     saveAgxConfig(cfg);
@@ -4143,6 +4160,11 @@ if (!gotTheLock) {
       registerIpc();
       applyPreventSleepFromConfig(loadAgxConfig());
       automationScheduler.start();
+      // 与 commandLine proxy-bypass-list 互补：部分 Chromium/Electron 版本下仅 appendSwitch 仍会让
+      // 渲染进程 fetch(127.0.0.1) 走系统代理 → TypeError: network error；显式声明环回绕过。
+      await session.defaultSession.setProxy({
+        proxyBypassRules: "<-loopback>,127.0.0.1,localhost,[::1]",
+      });
       createWindow();
       startSkillsDirWatcher();
       createTray();

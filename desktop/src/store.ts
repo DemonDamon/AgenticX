@@ -187,7 +187,7 @@ type ConfirmState = {
   context?: Record<string, unknown>;
 };
 
-type ProviderEntry = {
+export type ProviderEntry = {
   apiKey: string;
   baseUrl: string;
   model: string;
@@ -196,6 +196,10 @@ type ProviderEntry = {
   enabled: boolean;
   /** When true, persist `drop_params` for LiteLLM (strip unsupported params like tool_choice on some gateways). */
   dropParams: boolean;
+  /** 自定义服务厂商展示名 */
+  displayName?: string;
+  /** OpenAI 范式接口 */
+  interface?: "openai";
 };
 
 type SettingsState = {
