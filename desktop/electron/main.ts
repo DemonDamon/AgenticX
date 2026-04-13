@@ -3528,6 +3528,7 @@ function registerIpc(): void {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
+      const t0 = performance.now();
       const resp = await fetch(url, {
         method: "POST",
         headers: {
@@ -3542,7 +3543,8 @@ function registerIpc(): void {
         signal: controller.signal,
       });
       clearTimeout(timer);
-      if (resp.ok) return { ok: true, latencyHint: "healthy" };
+      const latencyMs = Math.round(performance.now() - t0);
+      if (resp.ok) return { ok: true, latencyMs };
       const body = await resp.text().catch(() => "");
       return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 200)}` };
     } catch (err) {

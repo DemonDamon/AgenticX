@@ -23,8 +23,17 @@ import {
   ChevronRight,
   Anchor,
   Clock,
+  Activity,
+  RefreshCw,
+  SquarePen,
+  CircleMinus,
+  CheckCircle2,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
+import { Modal } from "./ds/Modal";
+import { HoverTip } from "./ds/HoverTip";
 import type { Avatar, ChatPane, ChatStyle, GroupChat, McpServer } from "../store";
 import { useAppStore } from "../store";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
@@ -44,6 +53,23 @@ const ALL_PROVIDERS = [
   "openai", "anthropic", "volcengine", "bailian",
   "zhipu", "qianfan", "minimax", "kimi", "ollama",
 ] as const;
+
+/** UI 展示用标准名称（与 Cherry 等侧栏一致；配置 key 仍为英文 id） */
+const PROVIDER_DISPLAY_NAME: Record<string, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  volcengine: "火山引擎",
+  bailian: "阿里云百炼",
+  zhipu: "智谱开放平台",
+  qianfan: "百度千帆",
+  minimax: "MiniMax",
+  kimi: "月之暗面",
+  ollama: "Ollama",
+};
+
+function getProviderDisplayName(providerId: string): string {
+  return PROVIDER_DISPLAY_NAME[providerId] ?? providerId;
+}
 
 /** LiteLLM routes: show optional drop_params toggle for strict OpenAI-compatible gateways. */
 const DROP_PARAMS_CAPABLE_PROVIDERS = new Set<string>(["openai", "anthropic", "ollama"]);
@@ -569,11 +595,20 @@ type Props = {
   ) => Promise<void>;
 };
 
-type ModelHealth = "idle" | "checking" | "healthy" | "error";
+/** 模型行健康检测：无记录视为 idle */
+type ModelHealthEntry =
+  | { phase: "checking" }
+  | { phase: "ok"; ms: number }
+  | { phase: "error" };
+
+function formatHealthLatencyMs(ms: number): string {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
+  return `${ms}ms`;
+}
 
 const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "general", label: "通用", icon: Settings2 },
-  { id: "provider", label: "模型与 API", icon: Cpu },
+  { id: "provider", label: "模型服务", icon: Cpu },
   { id: "mcp", label: "MCP 服务", icon: Plug },
   { id: "tools", label: "工具", icon: Wrench },
   { id: "skills", label: "技能", icon: Sparkles },
@@ -4547,11 +4582,19 @@ export function SettingsPanel({
   const [defProv, setDefProv] = useState(defaultProvider);
   const [keyStatus, setKeyStatus] = useState<Record<string, "idle" | "checking" | "ok" | "fail">>({});
   const [keyError, setKeyError] = useState<Record<string, string>>({});
-  const [modelHealthMap, setModelHealthMap] = useState<Record<string, ModelHealth>>({});
+  const [modelHealthMap, setModelHealthMap] = useState<Record<string, ModelHealthEntry>>({});
   const [fetchingModels, setFetchingModels] = useState(false);
-  const [showModelPanel, setShowModelPanel] = useState(false);
-  const [newModelInput, setNewModelInput] = useState("");
+  const [addModelModalOpen, setAddModelModalOpen] = useState(false);
+  const [addModelFormId, setAddModelFormId] = useState("");
+  const [addModelFormName, setAddModelFormName] = useState("");
+  const [editModelModalOpen, setEditModelModalOpen] = useState(false);
+  const [editModelOriginalId, setEditModelOriginalId] = useState("");
+  const [editModelFormId, setEditModelFormId] = useState("");
+  const [editModelError, setEditModelError] = useState<string | null>(null);
   const [providerEnableHint, setProviderEnableHint] = useState<string | null>(null);
+  const [defaultProvHint, setDefaultProvHint] = useState<string | null>(null);
+  /** API 密钥显隐（切换左侧厂商时恢复为隐藏） */
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [mcpExtraPaths, setMcpExtraPaths] = useState<string[]>([]);
   const [mcpAutoConnectHint, setMcpAutoConnectHint] = useState<string[]>([]);
   const [mcpBusy, setMcpBusy] = useState(false);
@@ -4645,6 +4688,10 @@ export function SettingsPanel({
     // Reset the guard when dialog is closed.
     if (!open) {
       initializedForOpenRef.current = false;
+      setEditModelModalOpen(false);
+      setEditModelOriginalId("");
+      setEditModelFormId("");
+      setEditModelError(null);
       return;
     }
     // IMPORTANT: only initialize once per open cycle.
@@ -4664,12 +4711,12 @@ export function SettingsPanel({
     }
     setDraft(merged);
     setProviderEnableHint(null);
+    setDefaultProvHint(null);
     setDefProv(defaultProvider || ALL_PROVIDERS[0]);
     setActive(defaultProvider || ALL_PROVIDERS[0]);
     setKeyStatus({});
     setKeyError({});
     setModelHealthMap({});
-    setShowModelPanel(false);
     setMcpMessage("");
     setMetaSoulMessage("");
     setServerTestStatus("idle");
@@ -4812,6 +4859,10 @@ export function SettingsPanel({
     [draft, active]
   );
 
+  useEffect(() => {
+    setApiKeyVisible(false);
+  }, [active]);
+
   const currentEffectiveOn = useMemo(() => providerEffectiveOn(draft[active]), [draft, active]);
 
   const updateField = useCallback(
@@ -4835,6 +4886,7 @@ export function SettingsPanel({
       });
       if (field === "apiKey" || field === "baseUrl") {
         setProviderEnableHint(null);
+        setDefaultProvHint(null);
       }
     },
     [active]
@@ -4864,18 +4916,101 @@ export function SettingsPanel({
 
   const onHealthCheck = async (model: string) => {
     const key = `${active}:${model}`;
-    setModelHealthMap((p) => ({ ...p, [key]: "checking" }));
-    const res = await window.agenticxDesktop.healthCheckModel({ provider: active, apiKey: current.apiKey, baseUrl: current.baseUrl || undefined, model });
-    setModelHealthMap((p) => ({ ...p, [key]: res.ok ? "healthy" : "error" }));
+    setModelHealthMap((p) => ({ ...p, [key]: { phase: "checking" } }));
+    const res = await window.agenticxDesktop.healthCheckModel({
+      provider: active,
+      apiKey: current.apiKey,
+      baseUrl: current.baseUrl || undefined,
+      model,
+    });
+    const ms = typeof res.latencyMs === "number" ? res.latencyMs : 0;
+    setModelHealthMap((p) => ({
+      ...p,
+      [key]: res.ok ? { phase: "ok", ms } : { phase: "error" },
+    }));
+  };
+
+  const onBatchHealthCheck = async () => {
+    if (!current.apiKey?.trim() || current.models.length === 0) return;
+    for (const m of current.models) {
+      const key = `${active}:${m}`;
+      setModelHealthMap((p) => ({ ...p, [key]: { phase: "checking" } }));
+      // Sequential avoids hammering the same endpoint in parallel.
+      // eslint-disable-next-line no-await-in-loop
+      const res = await window.agenticxDesktop.healthCheckModel({
+        provider: active,
+        apiKey: current.apiKey,
+        baseUrl: current.baseUrl || undefined,
+        model: m,
+      });
+      const ms = typeof res.latencyMs === "number" ? res.latencyMs : 0;
+      setModelHealthMap((p) => ({
+        ...p,
+        [key]: res.ok ? { phase: "ok", ms } : { phase: "error" },
+      }));
+    }
   };
 
   const onRemoveModel = (model: string) => updateField("models", current.models.filter((m) => m !== model));
 
-  const onAddModel = () => {
-    const name = newModelInput.trim();
-    if (!name || current.models.includes(name)) return;
-    updateField("models", [...current.models, name]);
-    setNewModelInput("");
+  const closeAddModelModal = () => {
+    setAddModelModalOpen(false);
+    setAddModelFormId("");
+    setAddModelFormName("");
+  };
+
+  const submitAddModelFromModal = () => {
+    const id = addModelFormId.trim();
+    if (!id || current.models.includes(id)) return;
+    updateField("models", [...current.models, id]);
+    closeAddModelModal();
+  };
+
+  const closeEditModelModal = () => {
+    setEditModelModalOpen(false);
+    setEditModelOriginalId("");
+    setEditModelFormId("");
+    setEditModelError(null);
+  };
+
+  const openEditModelModal = (modelId: string) => {
+    setEditModelOriginalId(modelId);
+    setEditModelFormId(modelId);
+    setEditModelError(null);
+    setEditModelModalOpen(true);
+  };
+
+  const submitEditModelFromModal = () => {
+    const newId = editModelFormId.trim();
+    const oldId = editModelOriginalId;
+    if (!newId || !oldId) return;
+    if (newId !== oldId && current.models.includes(newId)) {
+      setEditModelError("列表中已有相同的模型 ID");
+      return;
+    }
+    if (newId === oldId) {
+      closeEditModelModal();
+      return;
+    }
+    setEditModelError(null);
+    setDraft((prev) => {
+      const prevEntry = prev[active];
+      if (!prevEntry) return prev;
+      const nextModels = prevEntry.models.map((m) => (m === oldId ? newId : m));
+      const next: ProviderEntry = {
+        ...prevEntry,
+        models: nextModels,
+        model: prevEntry.model === oldId ? newId : prevEntry.model,
+      };
+      return { ...prev, [active]: next };
+    });
+    setModelHealthMap((p) => {
+      const next = { ...p };
+      delete next[`${active}:${oldId}`];
+      delete next[`${active}:${newId}`];
+      return next;
+    });
+    closeEditModelModal();
   };
 
   /** Normalize base_url: strip trailing slash; if no version segment (/v1, /v2…), append /v1. */
@@ -5259,12 +5394,19 @@ export function SettingsPanel({
                         }`}
                         onClick={() => {
                           setActive(name);
-                          setShowModelPanel(false);
                           setProviderEnableHint(null);
+                          setDefaultProvHint(null);
+                          setAddModelModalOpen(false);
+                          setAddModelFormId("");
+                          setAddModelFormName("");
+                          setEditModelModalOpen(false);
+                          setEditModelOriginalId("");
+                          setEditModelFormId("");
+                          setEditModelError(null);
                         }}
                       >
                         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} />
-                        <span className="truncate">{name}</span>
+                        <span className="truncate">{getProviderDisplayName(name)}</span>
                         {name === defProv && <span className="ml-auto shrink-0 rounded bg-[var(--settings-accent-badge-bg)] px-1 text-[9px] text-[var(--settings-accent-fg)]">默认</span>}
                       </button>
                     );
@@ -5273,17 +5415,21 @@ export function SettingsPanel({
 
                 {/* Provider detail */}
                 <div className="flex-1 space-y-3">
-                  {!showModelPanel ? (
-                    <>
+                      <h2 className="text-sm font-semibold leading-snug text-text-primary">
+                        {getProviderDisplayName(active)}
+                      </h2>
                       <div className="space-y-1 rounded-md border border-border bg-surface-panel px-3 py-2">
                         <div className="flex items-center justify-between">
                           <div className="text-xs text-text-subtle">
-                            <span className="text-text-primary">{active}</span>
-                            <span className="ml-2">{currentEffectiveOn ? "已启用" : "已禁用"}</span>
+                            {currentEffectiveOn ? "已启用" : "已禁用"}
                           </div>
                           <button
                             type="button"
-                            aria-label={currentEffectiveOn ? `关闭 ${active}` : `启用 ${active}`}
+                            aria-label={
+                              currentEffectiveOn
+                                ? `关闭 ${getProviderDisplayName(active)}`
+                                : `启用 ${getProviderDisplayName(active)}`
+                            }
                             className={`inline-flex min-w-[58px] items-center justify-center rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
                               currentEffectiveOn
                                 ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
@@ -5304,20 +5450,78 @@ export function SettingsPanel({
                             {currentEffectiveOn ? "ON" : "OFF"}
                           </button>
                         </div>
+                        <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
+                          <div className="text-xs text-text-subtle">
+                            {defProv === active ? "已设为默认" : "未设为默认"}
+                          </div>
+                          <button
+                            type="button"
+                            aria-label={
+                              defProv === active
+                                ? `取消将 ${getProviderDisplayName(active)} 设为默认 Provider`
+                                : `将 ${getProviderDisplayName(active)} 设为默认 Provider`
+                            }
+                            className={`inline-flex min-w-[58px] items-center justify-center rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
+                              defProv === active
+                                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
+                                : "border-border bg-surface-card text-text-faint hover:text-text-subtle"
+                            }`}
+                            onClick={() => {
+                              if (defProv === active) {
+                                const fallback =
+                                  providerNames.find((n) => n !== active && providerCredentialed(draft[n])) ??
+                                  providerNames.find((n) => n !== active) ??
+                                  ALL_PROVIDERS.find((n) => n !== active);
+                                if (fallback && fallback !== active) {
+                                  setDefaultProvHint(null);
+                                  setDefProv(fallback);
+                                } else {
+                                  setDefaultProvHint("至少要保留一个默认 Provider；请先在左侧选择其它厂商后再取消默认。");
+                                }
+                              } else if (!providerCredentialed(current)) {
+                                setDefaultProvHint("请先填写 API 密钥或 API 地址后再设为默认 Provider");
+                              } else {
+                                setDefaultProvHint(null);
+                                setDefProv(active);
+                              }
+                            }}
+                          >
+                            {defProv === active ? "ON" : "OFF"}
+                          </button>
+                        </div>
                         {providerEnableHint ? (
                           <div className="text-[11px] text-rose-400">{providerEnableHint}</div>
+                        ) : null}
+                        {defaultProvHint ? (
+                          <div className="text-[11px] text-rose-400">{defaultProvHint}</div>
                         ) : null}
                       </div>
                       <label className="block text-sm text-text-muted">
                         API 密钥
                         <div className="mt-1 flex gap-2">
-                          <input
-                            type="password"
-                            className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
-                            value={current.apiKey}
-                            onChange={(e) => updateField("apiKey", e.target.value)}
-                            placeholder="sk-..."
-                          />
+                          <div className="relative min-w-0 flex-1">
+                            <input
+                              type={apiKeyVisible ? "text" : "password"}
+                              autoComplete="off"
+                              className="w-full rounded-md border border-border bg-surface-panel py-1.5 pl-2 pr-11 text-sm"
+                              value={current.apiKey}
+                              onChange={(e) => updateField("apiKey", e.target.value)}
+                              placeholder="sk-..."
+                            />
+                            <button
+                              type="button"
+                              tabIndex={-1}
+                              aria-label={apiKeyVisible ? "隐藏密钥" : "显示密钥"}
+                              className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-text-faint transition hover:bg-surface-hover hover:text-text-subtle"
+                              onClick={() => setApiKeyVisible((v) => !v)}
+                            >
+                              {apiKeyVisible ? (
+                                <EyeOff className="h-4 w-4 shrink-0" aria-hidden />
+                              ) : (
+                                <Eye className="h-4 w-4 shrink-0" aria-hidden />
+                              )}
+                            </button>
+                          </div>
                           <button
                             className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium transition ${
                               ks === "checking" ? "border-amber-500/50 text-amber-400"
@@ -5365,73 +5569,213 @@ export function SettingsPanel({
                           </span>
                         </label>
                       )}
-                      <label className="block text-sm text-text-muted">
-                        默认模型
-                        {current.models.length > 0 ? (
-                          <select className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm" value={current.model} onChange={(e) => updateField("model", e.target.value)}>
-                            <option value="">请选择</option>
-                            {current.models.map((m) => <option key={m} value={m}>{m}</option>)}
-                          </select>
-                        ) : (
-                          <input className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm" value={current.model} onChange={(e) => updateField("model", e.target.value)} placeholder="gpt-4o / glm-5 / doubao-seed-..." />
-                        )}
-                      </label>
-                      <div className="flex items-center gap-3">
-                        {defProv !== active && (
-                          <button
-                            type="button"
-                            className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-                            onClick={() => setDefProv(active)}
-                          >
-                            设为默认 Provider
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-                          onClick={() => setShowModelPanel(true)}
-                        >
-                          管理模型
-                        </button>
+                      <div className="grid grid-cols-[minmax(0,1fr)_minmax(6.5rem,auto)_auto] items-center gap-2">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium text-text-muted">模型列表</span>
+                          <span className="rounded-full bg-surface-hover px-1.5 py-px text-[10px] font-medium tabular-nums text-text-subtle">
+                            {current.models.length}
+                          </span>
+                        </div>
+                        <div className="min-w-[6.5rem]" aria-hidden />
+                        <div className="flex shrink-0 items-center justify-end gap-1">
+                          <HoverTip label="批量健康检查">
+                            <button
+                              type="button"
+                              aria-label="批量健康检查"
+                              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:pointer-events-none disabled:opacity-40"
+                              disabled={!current.apiKey?.trim() || current.models.length === 0}
+                              onClick={() => void onBatchHealthCheck()}
+                            >
+                              <Activity className="h-4 w-4" aria-hidden />
+                            </button>
+                          </HoverTip>
+                          <HoverTip label="从 API 获取模型">
+                            <button
+                              type="button"
+                              aria-label="从 API 获取模型"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:pointer-events-none disabled:opacity-40"
+                              disabled={fetchingModels || !current.apiKey?.trim()}
+                              onClick={() => void onFetchModels()}
+                            >
+                              {fetchingModels ? (
+                                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                              ) : (
+                                <RefreshCw className="h-4 w-4" aria-hidden />
+                              )}
+                            </button>
+                          </HoverTip>
+                          <HoverTip label="添加模型">
+                            <button
+                              type="button"
+                              aria-label="添加模型"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                              onClick={() => {
+                                setAddModelFormId("");
+                                setAddModelFormName("");
+                                setAddModelModalOpen(true);
+                              }}
+                            >
+                              <Plus className="h-4 w-4" aria-hidden />
+                            </button>
+                          </HoverTip>
+                        </div>
                       </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="mb-3 flex gap-2">
-                        <button className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-40" disabled={fetchingModels || !current.apiKey} onClick={onFetchModels}>
-                          {fetchingModels ? "获取中..." : "从 API 获取模型"}
-                        </button>
-                        <button className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong" onClick={() => setShowModelPanel(false)}>
-                          ← 返回
-                        </button>
-                      </div>
-                      <div className="mb-3 flex gap-2">
-                        <input className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm" value={newModelInput} onChange={(e) => setNewModelInput(e.target.value)} placeholder="手动添加模型名..." onKeyDown={(e) => { if (e.key === "Enter") onAddModel(); }} />
-                        <button className="shrink-0 rounded-md bg-[var(--settings-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--settings-accent-solid-text)] transition hover:bg-[var(--settings-accent-solid-hover)] disabled:opacity-40" disabled={!newModelInput.trim()} onClick={onAddModel}>
-                          添加
-                        </button>
-                      </div>
-                      {current.models.length === 0 && <div className="py-6 text-center text-sm text-text-faint">暂无模型</div>}
                       <div className="space-y-1">
+                        {current.models.length === 0 ? (
+                          <div className="py-4 text-center text-sm text-text-faint">暂无模型，可从 API 拉取或点击 + 手动添加</div>
+                        ) : null}
                         {current.models.map((model) => {
                           const hk = `${active}:${model}`;
-                          const health = modelHealthMap[hk] ?? "idle";
+                          const entry = modelHealthMap[hk];
+                          const checking = entry?.phase === "checking";
                           return (
-                            <div key={model} className="flex items-center gap-2 rounded-md border border-border bg-surface-panel/50 px-3 py-2">
-                              <span className={`h-2 w-2 shrink-0 rounded-full ${health === "healthy" ? "bg-emerald-400" : health === "error" ? "bg-rose-400" : health === "checking" ? "bg-amber-400 animate-pulse" : "bg-surface-hover"}`} />
-                              <span className="flex-1 truncate text-sm text-text-muted">{model}</span>
-                              {model === current.model && <span className="shrink-0 rounded bg-[var(--settings-accent-badge-bg)] px-1.5 text-[10px] text-[var(--settings-accent-fg)]">默认</span>}
-                              <button className="shrink-0 text-xs text-text-faint transition hover:text-[var(--settings-accent-fg)] disabled:opacity-40" disabled={health === "checking" || !current.apiKey} onClick={() => onHealthCheck(model)}>
-                                {health === "checking" ? "..." : "检测"}
-                              </button>
-                              <button className="shrink-0 text-xs text-text-faint transition hover:text-[var(--settings-accent-fg)]" onClick={() => updateField("model", model)}>⚙</button>
-                              <button className="shrink-0 text-xs text-text-faint transition hover:text-rose-400" onClick={() => onRemoveModel(model)}>—</button>
+                            <div
+                              key={model}
+                              className="grid grid-cols-[minmax(0,1fr)_minmax(6.5rem,auto)_2rem_2rem] items-center gap-2 rounded-md border border-border bg-surface-panel/50 px-3 py-2"
+                            >
+                              <span className="min-w-0 truncate text-sm text-text-muted">{model}</span>
+                              <div className="flex min-w-0 items-center justify-end gap-1.5">
+                                {entry?.phase === "ok" ? (
+                                  <>
+                                    <span className="tabular-nums text-xs text-text-subtle">{formatHealthLatencyMs(entry.ms)}</span>
+                                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" aria-hidden />
+                                  </>
+                                ) : entry?.phase === "error" ? (
+                                  <span className="text-xs text-rose-400/90">失败</span>
+                                ) : checking ? (
+                                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-text-faint" aria-hidden />
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="shrink-0 text-xs text-text-faint transition hover:text-[var(--settings-accent-fg)] disabled:opacity-40"
+                                    disabled={checking || !current.apiKey}
+                                    onClick={() => void onHealthCheck(model)}
+                                  >
+                                    检测
+                                  </button>
+                                )}
+                              </div>
+                              <HoverTip label="编辑模型">
+                                <button
+                                  type="button"
+                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-text-faint transition hover:bg-surface-hover hover:text-text-primary"
+                                  aria-label="编辑模型"
+                                  onClick={() => openEditModelModal(model)}
+                                >
+                                  <SquarePen className="h-4 w-4" aria-hidden />
+                                </button>
+                              </HoverTip>
+                              <HoverTip label="移除模型">
+                                <button
+                                  type="button"
+                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-rose-400/80 transition hover:bg-surface-hover hover:text-rose-400"
+                                  aria-label="移除模型"
+                                  onClick={() => onRemoveModel(model)}
+                                >
+                                  <CircleMinus className="h-4 w-4" aria-hidden />
+                                </button>
+                              </HoverTip>
                             </div>
                           );
                         })}
                       </div>
-                    </>
-                  )}
+                      <Modal
+                        open={addModelModalOpen}
+                        title="添加模型"
+                        onClose={closeAddModelModal}
+                        footer={(
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                              onClick={closeAddModelModal}
+                            >
+                              取消
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-md bg-[var(--settings-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--settings-accent-solid-text)] transition hover:bg-[var(--settings-accent-solid-hover)] disabled:opacity-40"
+                              disabled={!addModelFormId.trim()}
+                              onClick={submitAddModelFromModal}
+                            >
+                              添加模型
+                            </button>
+                          </div>
+                        )}
+                      >
+                        <div className="space-y-3">
+                          <label className="block text-sm text-text-muted">
+                            <span className="text-rose-400">*</span> 模型 ID
+                            <input
+                              className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
+                              value={addModelFormId}
+                              onChange={(e) => setAddModelFormId(e.target.value)}
+                              placeholder="必填，例如 gpt-4o-mini"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && addModelFormId.trim()) submitAddModelFromModal();
+                              }}
+                            />
+                          </label>
+                          <label className="block text-sm text-text-muted">
+                            模型名称
+                            <input
+                              className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
+                              value={addModelFormName}
+                              onChange={(e) => setAddModelFormName(e.target.value)}
+                              placeholder="可选，例如 GPT-4"
+                            />
+                          </label>
+                          <p className="text-[11px] leading-relaxed text-text-faint">
+                            保存到列表时仅使用「模型 ID」；模型名称便于你对照 Cherry Studio 习惯填写，当前版本不参与路由。
+                          </p>
+                        </div>
+                      </Modal>
+                      <Modal
+                        open={editModelModalOpen}
+                        title="编辑模型"
+                        onClose={closeEditModelModal}
+                        footer={(
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                              onClick={closeEditModelModal}
+                            >
+                              取消
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-md bg-[var(--settings-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--settings-accent-solid-text)] transition hover:bg-[var(--settings-accent-solid-hover)] disabled:opacity-40"
+                              disabled={!editModelFormId.trim()}
+                              onClick={submitEditModelFromModal}
+                            >
+                              保存
+                            </button>
+                          </div>
+                        )}
+                      >
+                        <div className="space-y-3">
+                          <label className="block text-sm text-text-muted">
+                            <span className="text-rose-400">*</span> 模型 ID
+                            <input
+                              className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
+                              value={editModelFormId}
+                              onChange={(e) => {
+                                setEditModelFormId(e.target.value);
+                                setEditModelError(null);
+                              }}
+                              placeholder="例如 gpt-4o-mini"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && editModelFormId.trim()) submitEditModelFromModal();
+                              }}
+                            />
+                          </label>
+                          {editModelError ? <div className="text-[11px] text-rose-400">{editModelError}</div> : null}
+                          <p className="text-[11px] leading-relaxed text-text-faint">
+                            列表项即请求时使用的模型 ID；保存设置后才会写入配置。
+                          </p>
+                        </div>
+                      </Modal>
                 </div>
               </div>
             )}
