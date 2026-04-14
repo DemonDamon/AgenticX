@@ -16,6 +16,11 @@ type LoadConfigResult = {
   confirmStrategy?: "manual" | "semi-auto" | "auto";
   activeProvider?: string;
   activeModel?: string;
+  agxAccount?: {
+    loggedIn: boolean;
+    email: string;
+    displayName: string;
+  };
 };
 
 type ValidateKeyResult = { ok: boolean; error?: string; status?: number };
@@ -446,6 +451,22 @@ declare global {
       deleteGroup: (id: string) => Promise<{ ok: boolean; error?: string }>;
 
       loadConfig: () => Promise<LoadConfigResult>;
+      agxAccountLoginStart: () => Promise<{
+        ok: boolean;
+        device_id?: string;
+        open_url?: string;
+        error?: string;
+      }>;
+      agxAccountLoginCancel: () => Promise<{ ok: boolean }>;
+      agxAccountLogout: () => Promise<{ ok: boolean }>;
+      loadAgxAccount: () => Promise<{
+        ok: boolean;
+        loggedIn?: boolean;
+        email?: string;
+        displayName?: string;
+      }>;
+      onAgxAccountChanged: (cb: (payload: { email: string; displayName: string }) => void) => () => void;
+      onAgxAccountLoginTimeout: (cb: () => void) => () => void;
       loadMetaSoul: () => Promise<{ ok: boolean; content: string; error?: string }>;
       saveMetaSoul: (payload: { content: string }) => Promise<{ ok: boolean; error?: string }>;
       loadAvatarSoul: (payload: { avatarId: string }) => Promise<{ ok: boolean; content: string; error?: string }>;
