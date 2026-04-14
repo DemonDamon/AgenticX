@@ -95,7 +95,7 @@ function providerEntryFromSaved(saved: Partial<ProviderEntry> | undefined): Prov
       dropParams: false,
     };
   }
-  const raw = saved as Partial<ProviderEntry> & { display_name?: string };
+  const raw = (saved ?? {}) as Partial<ProviderEntry> & { display_name?: string };
   const apiKey = String(saved?.apiKey ?? "");
   const baseUrl = String(saved?.baseUrl ?? "");
   const cred = providerCredentialed({ apiKey, baseUrl });
@@ -5200,7 +5200,7 @@ export function SettingsPanel({
                   }`}
                   onClick={() => setTab(t.id)}
                 >
-                  {typeof Icon === "function" ? (
+                  {Icon ? (
                     <Icon className="h-4 w-4 shrink-0" aria-hidden />
                   ) : (
                     <span className="h-4 w-4 shrink-0 rounded-sm bg-surface-hover" aria-hidden />
