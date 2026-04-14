@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
-import { LogIn, LogOut, Loader2, User } from "lucide-react";
+import { useCallback, useEffect, useState, type ComponentType, type SVGAttributes } from "react";
+import { LogIn as _LogIn, LogOut as _LogOut, Loader2 as _Loader2, User as _User } from "lucide-react";
 
 import { Button } from "./ds/Button";
+
+type IconProps = SVGAttributes<SVGSVGElement> & { className?: string };
+function safeLucide(icon: ComponentType<IconProps> | undefined, fallbackLabel: string): ComponentType<IconProps> {
+  if (typeof icon === "function" || (typeof icon === "object" && icon !== null)) return icon;
+  return (props: IconProps) => <span {...props} aria-label={fallbackLabel} />;
+}
+const User = safeLucide(_User, "user");
+const LogIn = safeLucide(_LogIn, "log-in");
+const LogOut = safeLucide(_LogOut, "log-out");
+const Loader2 = safeLucide(_Loader2, "loader");
 
 type AgxAccountState = {
   loggedIn: boolean;
