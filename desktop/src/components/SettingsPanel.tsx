@@ -85,6 +85,16 @@ function providerEffectiveOn(e: ProviderEntry | undefined): boolean {
 }
 
 function providerEntryFromSaved(saved: Partial<ProviderEntry> | undefined): ProviderEntry {
+  if (saved != null && typeof saved !== "object") {
+    return {
+      apiKey: "",
+      baseUrl: "",
+      model: "",
+      models: [],
+      enabled: false,
+      dropParams: false,
+    };
+  }
   const raw = saved as Partial<ProviderEntry> & { display_name?: string };
   const apiKey = String(saved?.apiKey ?? "");
   const baseUrl = String(saved?.baseUrl ?? "");
@@ -4855,10 +4865,32 @@ export function SettingsPanel({
     [sessionId, onRefreshMcp]
   );
 
-  const current = useMemo(
-    () => draft[active] ?? { apiKey: "", baseUrl: "", model: "", models: [], enabled: false, dropParams: false },
-    [draft, active]
-  );
+  const current = useMemo((): ProviderEntry => {
+    const empty: ProviderEntry = {
+      apiKey: "",
+      baseUrl: "",
+      model: "",
+      models: [],
+      enabled: false,
+      dropParams: false,
+    };
+    const raw = draft[active];
+    if (!raw || typeof raw !== "object") {
+      return empty;
+    }
+    return {
+      ...empty,
+      ...raw,
+      apiKey: String(raw.apiKey ?? ""),
+      baseUrl: String(raw.baseUrl ?? ""),
+      model: String(raw.model ?? ""),
+      models: Array.isArray(raw.models) ? raw.models.map((m) => String(m)) : [],
+      enabled: raw.enabled !== false,
+      dropParams: raw.dropParams === true,
+      displayName: raw.displayName != null && String(raw.displayName).trim() ? String(raw.displayName).trim() : undefined,
+      interface: raw.interface === "openai" ? "openai" : undefined,
+    };
+  }, [draft, active]);
 
   useEffect(() => {
     setApiKeyVisible(false);
@@ -5168,7 +5200,11 @@ export function SettingsPanel({
                   }`}
                   onClick={() => setTab(t.id)}
                 >
-                  <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                  {typeof Icon === "function" ? (
+                    <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                  ) : (
+                    <span className="h-4 w-4 shrink-0 rounded-sm bg-surface-hover" aria-hidden />
+                  )}
                   {t.label}
                 </button>
               );

@@ -59,6 +59,9 @@ function toProviderEntries(
 ): Record<string, ProviderEntry> {
   const result: Record<string, ProviderEntry> = {};
   for (const [name, cfg] of Object.entries(raw)) {
+    if (cfg == null || typeof cfg !== "object" || Array.isArray(cfg)) {
+      continue;
+    }
     const displayName = (cfg.display_name ?? "").trim();
     const row: ProviderEntry = {
       apiKey: cfg.api_key ?? "",
