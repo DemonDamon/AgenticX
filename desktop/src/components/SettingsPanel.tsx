@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Anchor,
   Clock,
+  User,
   Activity,
   RefreshCw,
   SquarePen,
@@ -42,6 +43,7 @@ import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-promp
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
 import { AutomationTab } from "./automation/AutomationTab";
+import { AccountTab } from "./AccountTab";
 import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
 
 export type FavoriteForwardContext = {
@@ -133,6 +135,7 @@ function resolveMcpRowPresentation(server: McpServer): {
 }
 
 type SettingsTab =
+  | "account"
   | "general"
   | "provider"
   | "mcp"
@@ -600,6 +603,7 @@ function formatHealthLatencyMs(ms: number): string {
 }
 
 const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
+  { id: "account", label: "账号", icon: User },
   { id: "general", label: "通用", icon: Settings2 },
   { id: "provider", label: "模型服务", icon: Cpu },
   { id: "mcp", label: "MCP 服务", icon: Plug },
@@ -5187,6 +5191,8 @@ export function SettingsPanel({
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            {tab === "account" && <AccountTab />}
+
             {/* === GENERAL TAB ===（保持挂载以便底部「保存」能刷入权限 API，避免仅失焦写入） */}
             <div className={tab === "general" ? "space-y-4" : "hidden"}>
                 <Panel title="显示">

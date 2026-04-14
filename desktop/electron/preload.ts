@@ -438,4 +438,32 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.on("terminal-exit", handler);
     return () => ipcRenderer.removeListener("terminal-exit", handler);
   },
+
+  agxAccountLoginStart: async () =>
+    ipcRenderer.invoke("agx-account-login-start") as Promise<{
+      ok: boolean;
+      device_id?: string;
+      open_url?: string;
+      error?: string;
+    }>,
+  agxAccountLoginCancel: async () =>
+    ipcRenderer.invoke("agx-account-login-cancel") as Promise<{ ok: boolean }>,
+  agxAccountLogout: async () => ipcRenderer.invoke("agx-account-logout") as Promise<{ ok: boolean }>,
+  loadAgxAccount: async () =>
+    ipcRenderer.invoke("load-agx-account") as Promise<{
+      ok: boolean;
+      loggedIn?: boolean;
+      email?: string;
+      displayName?: string;
+    }>,
+  onAgxAccountChanged: (cb: (payload: { email: string; displayName: string }) => void): (() => void) => {
+    const handler = (_e: unknown, payload: { email: string; displayName: string }) => cb(payload);
+    ipcRenderer.on("agx-account-changed", handler);
+    return () => ipcRenderer.removeListener("agx-account-changed", handler);
+  },
+  onAgxAccountLoginTimeout: (cb: () => void): (() => void) => {
+    const handler = () => cb();
+    ipcRenderer.on("agx-account-login-timeout", handler);
+    return () => ipcRenderer.removeListener("agx-account-login-timeout", handler);
+  },
 });

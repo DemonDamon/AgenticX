@@ -225,6 +225,15 @@ type AgxConfig = {
   };
   automation?: { prevent_sleep?: boolean };
   skills?: { non_high_risk_auto_install?: boolean };
+  /** Machi 官网 / Supabase 账号（桌面端轮询写入，勿在日志中打印 token） */
+  agx_account?: {
+    user_email?: string;
+    user_display_name?: string;
+    access_token?: string;
+    refresh_token?: string;
+    supabase_url?: string;
+    updated_at?: string;
+  };
 };
 
 type EmailConfig = {
@@ -1080,6 +1089,26 @@ let serveStderrBuffer = "";
 let remoteConfig: ResolvedRemoteConfig | null = null;
 let skillsDirWatchers: fs.FSWatcher[] = [];
 let skillsChangedDebounceTimer: NodeJS.Timeout | null = null;
+let agxAccountLoginPollTimer: NodeJS.Timeout | null = null;
+let agxAccountLoginDeviceId: string | null = null;
+let agxAccountLoginPollTicks = 0;
+
+const AGX_ACCOUNT_WEB_BASE_DEFAULT = "https://www.agxbuilder.com";
+
+function getAgxAccountWebBase(): string {
+  const raw = process.env.AGX_ACCOUNT_WEB_BASE?.trim();
+  if (raw) return raw.replace(/\/+$/, "");
+  return AGX_ACCOUNT_WEB_BASE_DEFAULT;
+}
+
+function clearAgxAccountLoginPoll(): void {
+  if (agxAccountLoginPollTimer) {
+    clearInterval(agxAccountLoginPollTimer);
+    agxAccountLoginPollTimer = null;
+  }
+  agxAccountLoginDeviceId = null;
+  agxAccountLoginPollTicks = 0;
+}
 
 function loadRemoteConfig(): ResolvedRemoteConfig | null {
   const cfg = loadAgxConfig();
@@ -1950,6 +1979,7 @@ function registerEarlyIpc(): void {
 
   ipcMain.handle("load-config", async () => {
     const cfg = loadAgxConfig();
+    const acct = cfg.agx_account;
     return {
       defaultProvider: cfg.default_provider ?? "",
       providers: cfg.providers ?? {},
@@ -1958,6 +1988,11 @@ function registerEarlyIpc(): void {
       confirmStrategy: cfg.confirm_strategy ?? "semi-auto",
       activeProvider: cfg.active_provider ?? "",
       activeModel: cfg.active_model ?? "",
+      agxAccount: {
+        loggedIn: Boolean(acct?.access_token),
+        email: acct?.user_email ?? "",
+        displayName: acct?.user_display_name ?? "",
+      },
     };
   });
 
@@ -2023,6 +2058,110 @@ function registerIpc(): void {
     } catch (err) {
       return { ok: false, error: String(err) };
     }
+  });
+
+  ipcMain.handle("agx-account-login-start", async () => {
+    clearAgxAccountLoginPoll();
+    const base = getAgxAccountWebBase();
+    const deviceId = crypto.randomUUID();
+    try {
+      const initRes = await fetch(`${base}/api/auth/device/init`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_id: deviceId }),
+      });
+      const initJson = (await initRes.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!initRes.ok || !initJson.ok) {
+        return {
+          ok: false,
+          error:
+            typeof initJson.error === "string" && initJson.error
+              ? initJson.error
+              : `init_http_${initRes.status}`,
+        };
+      }
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+
+    const openUrl = `${base}/auth?desktop=1&device_id=${encodeURIComponent(deviceId)}`;
+    void shell.openExternal(openUrl);
+    agxAccountLoginDeviceId = deviceId;
+    agxAccountLoginPollTicks = 0;
+
+    agxAccountLoginPollTimer = setInterval(() => {
+      void (async () => {
+        const id = agxAccountLoginDeviceId;
+        if (!id) return;
+        agxAccountLoginPollTicks += 1;
+        if (agxAccountLoginPollTicks > 144) {
+          clearAgxAccountLoginPoll();
+          mainWindow?.webContents.send("agx-account-login-timeout", {});
+          return;
+        }
+        try {
+          const pollRes = await fetch(
+            `${getAgxAccountWebBase()}/api/auth/device/poll?device_id=${encodeURIComponent(id)}`
+          );
+          const data = (await pollRes.json().catch(() => ({}))) as {
+            ok?: boolean;
+            status?: string;
+            access_token?: string;
+            refresh_token?: string;
+            supabase_url?: string;
+            user?: { email?: string; display_name?: string };
+          };
+          if (!pollRes.ok || data.ok === false) return;
+          if (data.status === "completed" && data.access_token) {
+            clearAgxAccountLoginPoll();
+            const cfg = loadAgxConfig();
+            cfg.agx_account = {
+              user_email: String(data.user?.email ?? ""),
+              user_display_name: String(
+                data.user?.display_name ?? data.user?.email ?? ""
+              ),
+              access_token: String(data.access_token),
+              refresh_token: String(data.refresh_token ?? ""),
+              supabase_url: String(data.supabase_url ?? ""),
+              updated_at: new Date().toISOString(),
+            };
+            saveAgxConfig(cfg);
+            mainWindow?.webContents.send("agx-account-changed", {
+              email: cfg.agx_account.user_email ?? "",
+              displayName: cfg.agx_account.user_display_name ?? "",
+            });
+          }
+        } catch {
+          // ignore transient network errors
+        }
+      })();
+    }, 2500);
+
+    return { ok: true, device_id: deviceId, open_url: openUrl };
+  });
+
+  ipcMain.handle("agx-account-login-cancel", async () => {
+    clearAgxAccountLoginPoll();
+    return { ok: true };
+  });
+
+  ipcMain.handle("agx-account-logout", async () => {
+    const cfg = loadAgxConfig();
+    delete cfg.agx_account;
+    saveAgxConfig(cfg);
+    mainWindow?.webContents.send("agx-account-changed", { email: "", displayName: "" });
+    return { ok: true };
+  });
+
+  ipcMain.handle("load-agx-account", async () => {
+    const cfg = loadAgxConfig();
+    const a = cfg.agx_account;
+    return {
+      ok: true,
+      loggedIn: Boolean(a?.access_token),
+      email: a?.user_email ?? "",
+      displayName: a?.user_display_name ?? "",
+    };
   });
 
   ipcMain.handle("load-gateway-im", async () => {
