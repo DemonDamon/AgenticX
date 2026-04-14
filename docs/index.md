@@ -91,3 +91,7 @@ result = executor.run(task)
 
 [Get Started →](getting-started/installation.md){ .md-button .md-button--primary }
 [View on GitHub →](https://github.com/DemonDamon/AgenticX){ .md-button }
+
+## Reference
+
+- [错误码体系：Machi 官网账号与设备登录（`AGX-AUTH-*`）](error-codes.md)
