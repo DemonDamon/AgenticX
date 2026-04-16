@@ -14,7 +14,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 DEFAULT_SESSION_DB_PATH = Path.home() / ".agenticx" / "memory" / "sessions.sqlite"
 
@@ -593,7 +593,38 @@ class SessionStore:
                 payload = json.loads(str(row["metadata"] or "{}"))
             except Exception:
                 return {}
-            return payload if isinstance(payload, dict) else {}
+            if not isinstance(payload, dict):
+                return {}
+            # Recover session_name from older rows if the latest one was
+            # corrupted (written as null by the old cleanup_expired bug).
+            if not str(payload.get("session_name") or "").strip():
+                recovered = self._recover_session_name_sync(conn, session_id)
+                if recovered:
+                    payload["session_name"] = recovered
+            return payload
+
+    @staticmethod
+    def _recover_session_name_sync(conn: Any, session_id: str) -> Optional[str]:
+        """Find the most recent non-null session_name from historical summary rows."""
+        rows = conn.execute(
+            """
+            SELECT metadata FROM session_summaries
+            WHERE session_id = ?
+            ORDER BY created_at DESC
+            """,
+            (session_id,),
+        ).fetchall()
+        for row in rows:
+            try:
+                meta = json.loads(str(row[0] or "{}"))
+            except Exception:
+                continue
+            if not isinstance(meta, dict):
+                continue
+            candidate = str(meta.get("session_name") or "").strip()
+            if candidate and candidate != "None":
+                return candidate
+        return None
 
     def _list_latest_sessions_sync(self, limit: int = 500) -> List[Dict[str, Any]]:
         safe_limit = int(limit)
@@ -632,19 +663,36 @@ class SessionStore:
                     """
                 ).fetchall()
             result: List[Dict[str, Any]] = []
+            needs_name_repair: List[int] = []  # indices in result that need fallback lookup
             for row in rows:
                 metadata: Dict[str, Any] = {}
                 try:
                     metadata = json.loads(str(row["metadata"] or "{}"))
                 except Exception:
                     metadata = {}
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                if not str(metadata.get("session_name") or "").strip():
+                    needs_name_repair.append(len(result))
                 result.append(
                     {
                         "session_id": str(row["session_id"]),
                         "created_at": str(row["created_at"]),
-                        "metadata": metadata if isinstance(metadata, dict) else {},
+                        "metadata": metadata,
                     }
                 )
+            # Repair sessions whose latest row has a null/empty session_name by
+            # finding the most recent historical row that stored a real name.
+            # This recovers from the cleanup_expired bug that persisted name=null.
+            if needs_name_repair:
+                for idx in needs_name_repair:
+                    sid = result[idx]["session_id"]
+                    try:
+                        recovered = self._recover_session_name_sync(conn, sid)
+                        if recovered:
+                            result[idx]["metadata"]["session_name"] = recovered
+                    except Exception:
+                        pass
             return result
 
     def _purge_session_sync(self, session_id: str) -> bool:

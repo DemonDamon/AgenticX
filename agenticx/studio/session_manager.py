@@ -725,10 +725,15 @@ class SessionManager:
             if (now - session.updated_at) > self.ttl_seconds
         ]
         for sid in expired:
-            managed = self._sessions.pop(sid, None)
+            managed = self._sessions.get(sid)
             if managed is None:
+                self._sessions.pop(sid, None)
                 continue
+            # Persist BEFORE removing from _sessions so _persist_session_state
+            # can still look up the managed ref via self._sessions.get(sid) and
+            # write all metadata fields (session_name, avatar_id, etc.) correctly.
             self._persist_session_state(sid, managed.studio_session)
+            self._sessions.pop(sid, None)
             if managed.team_manager is not None:
                 managed.team_manager.shutdown_now()
             self._close_mcp_hub_sync(managed)
@@ -772,6 +777,14 @@ class SessionManager:
             session_name = str(raw_name).strip()
             if session_name and session_name != "None":
                 managed.session_name = session_name
+        # Last resort: if DB history also had no valid name, derive from chat_history
+        # which was already loaded by _restore_persisted_state before this method.
+        if self.session_title_needs_auto_fill(managed.session_name):
+            first = self._first_user_text_from_chat_history(
+                getattr(managed.studio_session, "chat_history", None) or []
+            )
+            if first:
+                managed.session_name = self._build_auto_title(first)
         managed.created_at = self._to_float(metadata.get("created_at"), managed.created_at)
         managed.pinned = bool(metadata.get("pinned", False))
         managed.archived = bool(metadata.get("archived", False))
