@@ -176,6 +176,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   },
 
   listSessions: async (avatarId?: string) => ipcRenderer.invoke("list-sessions", avatarId),
+  interruptSession: async (sessionId: string) => ipcRenderer.invoke("interrupt-session", sessionId),
   searchSessions: async (payload: { q: string; avatarId?: string }) => {
     const params = new URLSearchParams();
     params.set("q", (payload.q || "").trim());

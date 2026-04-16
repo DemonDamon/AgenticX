@@ -958,6 +958,22 @@ def _model_capability_score(provider: str, model: str) -> int:
     return max(10, min(100, score))
 
 
+def _provider_enabled(provider_cfg: Dict[str, Any]) -> bool:
+    """Return True when provider config is enabled (default True)."""
+    raw = provider_cfg.get("enabled", True)
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        v = raw.strip().lower()
+        if v in {"false", "0", "no", "off"}:
+            return False
+        if v in {"true", "1", "yes", "on"}:
+            return True
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    return True
+
+
 def _resolve_model_for_category(
     *,
     category: str,
@@ -969,12 +985,16 @@ def _resolve_model_for_category(
     if not hints:
         return {"provider": "", "model": ""}
     candidates: List[Dict[str, str]] = []
+    enabled_provider_names: set[str] = set()
     try:
         cfg = ConfigManager.load()
         providers = cfg.providers if isinstance(cfg.providers, dict) else {}
         for provider_name, provider_cfg in providers.items():
             if not isinstance(provider_cfg, dict):
                 continue
+            if not _provider_enabled(provider_cfg):
+                continue
+            enabled_provider_names.add(str(provider_name).strip())
             model_name = str(provider_cfg.get("model", "")).strip()
             if not model_name:
                 continue
@@ -984,7 +1004,9 @@ def _resolve_model_for_category(
 
     current_provider = str(getattr(session, "provider_name", "") or "").strip()
     current_model = str(getattr(session, "model_name", "") or "").strip()
-    if current_provider and current_model:
+    if current_provider and current_model and (
+        not enabled_provider_names or current_provider in enabled_provider_names
+    ):
         exists = any(
             item["provider"] == current_provider and item["model"] == current_model
             for item in candidates
@@ -1265,11 +1287,15 @@ def _recommend_subagent_model_payload(
         reasons.append("任务信息有限，按中等复杂度保守评估")
 
     configured_candidates: List[Dict[str, Any]] = []
+    enabled_provider_names: set[str] = set()
     try:
         cfg = ConfigManager.load()
         for provider, provider_cfg in (cfg.providers or {}).items():
             if not isinstance(provider_cfg, dict):
                 continue
+            if not _provider_enabled(provider_cfg):
+                continue
+            enabled_provider_names.add(str(provider).strip())
             model_name = str(provider_cfg.get("model", "")).strip()
             if not model_name:
                 continue
@@ -1301,7 +1327,9 @@ def _recommend_subagent_model_payload(
     )
 
     all_candidates = list(configured_candidates)
-    if current_provider and current_model:
+    if current_provider and current_model and (
+        not enabled_provider_names or current_provider in enabled_provider_names
+    ):
         exists = any(
             item["provider"] == current_provider and item["model"] == current_model
             for item in all_candidates

@@ -8,6 +8,7 @@ import {
   type Message,
   type MessageAttachment,
   type PendingConfirm,
+  type QueuedMessage,
 } from "../store";
 import { startRecording, stopRecording } from "../voice/stt";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
@@ -18,6 +19,8 @@ import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
+import { QueuedMessageBubble } from "./messages/QueuedMessageBubble";
+import { ToolOutputStream } from "./messages/ToolOutputStream";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { HoverTip } from "./ds/HoverTip";
 import { Toast } from "./ds/Toast";
@@ -71,6 +74,8 @@ function resolveForwardSender(message: Message, userLabel = "我"): string {
 function shellSingleQuote(input: string): string {
   return `'${input.replace(/'/g, `'\"'\"'`)}'`;
 }
+
+const EMPTY_QUEUE: QueuedMessage[] = [];
 
 const FALLBACK_PANE: ChatPaneState = {
   id: "fallback-pane",
@@ -294,7 +299,12 @@ function ActionCircleButton({ hasInput, streaming, recording, onSend, onMic, onS
   let icon: ReactNode;
   let filled: boolean;
 
-  if (streaming) {
+  if (streaming && hasInput) {
+    onClick = onSend;
+    title = "排队发送";
+    icon = <SendIcon />;
+    filled = true;
+  } else if (streaming) {
     onClick = onStop;
     title = "中断生成";
     icon = <StopIcon />;
@@ -1163,6 +1173,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneContextInherited = useAppStore((s) => s.setPaneContextInherited);
+  const queuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
+  const removePendingMessage = useAppStore((s) => s.removePendingMessage);
+  const editPendingMessage = useAppStore((s) => s.editPendingMessage);
   const setSpawnsColumnOpen = useAppStore((s) => s.setSpawnsColumnOpen);
   const dismissSpawnsColumn = useAppStore((s) => s.dismissSpawnsColumn);
   const clearSpawnsColumnSuppress = useAppStore((s) => s.clearSpawnsColumnSuppress);
@@ -1243,6 +1256,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const streamCommittedRef = useRef(false);
   /** Text last committed at a tool_call boundary; avoids duplicating the same assistant bubble at stream end. */
   const lastMidStreamAssistantCommitRef = useRef<string | null>(null);
+  const [toolOutputLines, setToolOutputLines] = useState<string[]>([]);
+  const deferredSessionMessagesRef = useRef<Record<string, Array<Parameters<typeof addPaneMessage>>>>({});
   const streamRafRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const autoScrollPinnedRef = useRef(true);
@@ -2571,11 +2586,45 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       active && st ? { provider: st.provider || "", model: st.model || "" } : null
     );
     abortRef.current = active ? sessionAbortControllersRef.current[sid] ?? null : null;
-  }, [pane.sessionId]);
+    if (sid) {
+      const deferred = deferredSessionMessagesRef.current[sid] ?? [];
+      if (deferred.length > 0) {
+        const existing = new Set(
+          (pane.messages ?? []).map((m) => `${m.role}::${String(m.agentId ?? "")}::${String(m.content ?? "")}`)
+        );
+        for (const args of deferred) {
+          const role = String(args[1] ?? "");
+          const content = String(args[2] ?? "");
+          const agentId = String(args[3] ?? "");
+          const sig = `${role}::${agentId}::${content}`;
+          if (existing.has(sig)) continue;
+          addPaneMessage(...args);
+          existing.add(sig);
+        }
+        deferredSessionMessagesRef.current[sid] = [];
+      }
+    }
+  }, [addPaneMessage, pane.messages, pane.sessionId]);
 
   useEffect(() => {
     syncStreamingUiForCurrentSession();
   }, [syncStreamingUiForCurrentSession]);
+
+  const stopCurrentRun = useCallback(() => {
+    const sid = (streamingSessionId || pane.sessionId || "").trim();
+    if (!sid) return;
+    void window.agenticxDesktop.interruptSession?.(sid);
+    const st = sessionStreamStateRef.current[sid];
+    if (st) {
+      st.text = "⏹ 正在中断...";
+      sessionStreamStateRef.current[sid] = st;
+    }
+    abortRef.current?.abort();
+    if ((pane.sessionId || "").trim() === sid) {
+      setStreamedAssistantText("⏹ 正在中断...");
+    }
+    addPaneMessage(pane.id, "tool", "已发送中断请求", "meta");
+  }, [addPaneMessage, pane.id, pane.sessionId, streamingSessionId]);
 
   const renderedMessages = useMemo(() => (
     <>
@@ -2647,8 +2696,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           />
         )
       ) : null}
+      {isStreamingCurrentSession && toolOutputLines.length > 0 && (
+        <div className="ml-10">
+          <ToolOutputStream lines={toolOutputLines} />
+        </div>
+      )}
+      {queuedMessages.length > 0 && queuedMessages.map((qm, qi) => (
+        <QueuedMessageBubble
+          key={qm.id}
+          msg={qm}
+          index={qi}
+          total={queuedMessages.length}
+          onEdit={(id, newText) => editPendingMessage(paneId, id, newText)}
+          onRemove={(id) => removePendingMessage(paneId, id)}
+        />
+      ))}
     </>
-  ), [chatStyle, copyMessage, favoriteMessage, forwardOneMessage, groupTyping, hideStreamOverlayAsDuplicate, isGroupPane, isStreamingCurrentSession, pane.historySearchTerms, paneAvatarMeta, resolveGroupInlineConfirm, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, streamTextForCurrentSession, streamingModel, toggleSelectMessage, userAvatarUrl, userBubbleLabel, visibleMessages]);
+  ), [chatStyle, copyMessage, editPendingMessage, favoriteMessage, forwardOneMessage, groupTyping, hideStreamOverlayAsDuplicate, isGroupPane, isStreamingCurrentSession, pane.historySearchTerms, paneAvatarMeta, paneId, queuedMessages, removePendingMessage, resolveGroupInlineConfirm, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, streamTextForCurrentSession, streamingModel, toggleSelectMessage, toolOutputLines, userAvatarUrl, userBubbleLabel, visibleMessages]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -2856,7 +2920,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         return;
       }
     }
-    if (sessionStreamStateRef.current[requestSessionId]?.active) return;
+    if (sessionStreamStateRef.current[requestSessionId]?.active) {
+      const { enqueuePaneMessage } = useAppStore.getState();
+      enqueuePaneMessage(pane.id, {
+        id: crypto.randomUUID(),
+        text: messageText,
+        attachments: [...userAttachments],
+        contextFiles: userAttachments.filter((a) => !!a.referenceToken || !!a.sourcePath),
+        timestamp: Date.now(),
+      });
+      setComposerText("");
+      setContextFiles({});
+      return;
+    }
 
     const otherPanesWithSameSession = panes.filter(
       (p) => p.id !== pane.id && (p.sessionId || "").trim() === requestSessionId && requestSessionId.length > 0
@@ -2948,7 +3024,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       return (currentPane?.sessionId || "").trim() === requestSessionId;
     };
     const addPaneMessageIfSessionActive = (...args: Parameters<typeof addPaneMessage>) => {
-      if (!isTargetSessionStillActive()) return;
+      if (!isTargetSessionStillActive()) {
+        const bucket = deferredSessionMessagesRef.current[requestSessionId] ?? [];
+        bucket.push(args);
+        deferredSessionMessagesRef.current[requestSessionId] = bucket.slice(-80);
+        return;
+      }
       addPaneMessage(...args);
     };
     const commitCurrentStreamIfNeeded = () => {
@@ -3249,6 +3330,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             if (payload.type === "tool_progress") {
               const name = String(payload.data?.name ?? "tool");
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
+              const outputLine = payload.data?.line as string | undefined;
+              if (outputLine !== undefined && eventAgentId === "meta") {
+                setToolOutputLines((prev) => [...prev.slice(-200), outputLine]);
+                const streamLabel = payload.data?.stream === "stderr" ? "stderr" : "stdout";
+                const waitLabel = `⏳ ${name} 执行中…（${streamLabel}）`;
+                scheduleStreamTextUpdate(waitLabel);
+                continue;
+              }
               const waitLabel = (() => {
                 if (name === "cc_bridge_send") {
                   return ccBridgeSendToolProgressLabel(sec, ccBridgeLastSessionModeRef.current);
@@ -3287,6 +3376,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               }
             }
             if (payload.type === "tool_call") {
+              setToolOutputLines([]);
               const toolName = payload.data?.name ?? "tool";
               const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
               if (eventAgentId === "meta" && toolName === "cc_bridge_start") {
@@ -3624,9 +3714,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       streamTextRef.current = "";
       streamCommittedRef.current = false;
       setGroupTyping({});
+      setToolOutputLines([]);
       setContextFiles({});
       useAppStore.getState().bumpSessionCatalogRevision();
       window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 500);
+
+      const nextQueued = useAppStore.getState().dequeuePaneMessage(pane.id);
+      if (nextQueued) {
+        requestAnimationFrame(() => {
+          void sendChatRef.current(nextQueued.text, {
+            retryAttachments: nextQueued.attachments,
+          });
+        });
+      }
     }
   };
 
@@ -4353,7 +4453,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 recording={recording}
                 onSend={() => void sendChat(extractComposerText())}
                 onMic={onMicClick}
-                onStop={() => abortRef.current?.abort()}
+                onStop={stopCurrentRun}
               />
             </div>
           </div>

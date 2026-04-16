@@ -397,7 +397,8 @@ declare global {
       installTool: (payload: { requestId: string; toolId: string }) => Promise<{ ok: boolean; error?: string }>;
       onToolInstallProgress: (cb: (payload: ToolInstallProgress) => void) => () => void;
 
-      listSessions: (avatarId?: string) => Promise<{ ok: boolean; sessions: Array<{ session_id: string; avatar_id: string | null; avatar_name?: string | null; session_name: string | null; updated_at: number; created_at?: number; pinned?: boolean; archived?: boolean }> }>;
+      listSessions: (avatarId?: string) => Promise<{ ok: boolean; sessions: Array<{ session_id: string; avatar_id: string | null; avatar_name?: string | null; session_name: string | null; updated_at: number; created_at?: number; pinned?: boolean; archived?: boolean; execution_state?: "idle" | "running" | "interrupted" }> }>;
+      interruptSession: (sessionId: string) => Promise<{ ok: boolean; session_id?: string; error?: string }>;
       searchSessions: (payload: { q: string; avatarId?: string }) => Promise<{
         ok: boolean;
         hits?: Array<{ session_id: string; snippet: string }>;

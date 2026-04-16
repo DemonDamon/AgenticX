@@ -2045,6 +2045,25 @@ function registerEarlyIpc(): void {
       return { ok: false, sessions: [] };
     }
   });
+
+  ipcMain.handle("interrupt-session", async (_event, sessionId: string) => {
+    try {
+      const sid = String(sessionId ?? "").trim();
+      if (!sid) return { ok: false, error: "sessionId is required" };
+      const resp = await fetch(`${getStudioUrl()}/api/session/interrupt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+        body: JSON.stringify({ session_id: sid }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
 }
 
 function registerIpc(): void {

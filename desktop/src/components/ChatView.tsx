@@ -1,5 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEventHandler } from "react";
-import { useAppStore, type Message } from "../store";
+import { useAppStore, type Message, type QueuedMessage } from "../store";
 import { getProviderDisplayName } from "../utils/provider-display";
 import { SubAgentPanel } from "./SubAgentPanel";
 import { interruptOnInterimResult, interruptTtsOnUserSpeech } from "../voice/interrupt";
@@ -20,6 +20,10 @@ import { MessageRenderer } from "./messages/MessageRenderer";
 import { ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
+import { QueuedMessageBubble } from "./messages/QueuedMessageBubble";
+import { ToolOutputStream } from "./messages/ToolOutputStream";
+
+const EMPTY_QUEUE: QueuedMessage[] = [];
 
 type Props = {
   onOpenConfirm: (
@@ -286,6 +290,11 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const avatars = useAppStore((s) => s.avatars);
   const chatStyle = useAppStore((s) => s.chatStyle);
+  const liteQueueKey = "lite-pane";
+  const queuedMessages = useAppStore((s) => s.pendingMessages[liteQueueKey] ?? EMPTY_QUEUE);
+  const enqueuePaneMessage = useAppStore((s) => s.enqueuePaneMessage);
+  const removePendingMessage = useAppStore((s) => s.removePendingMessage);
+  const editPendingMessage = useAppStore((s) => s.editPendingMessage);
   const addSubAgent = useAppStore((s) => s.addSubAgent);
   const updateSubAgent = useAppStore((s) => s.updateSubAgent);
   const addSubAgentEvent = useAppStore((s) => s.addSubAgentEvent);
@@ -294,6 +303,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const [streaming, setStreaming] = useState(false);
   const [streamedAssistantText, setStreamedAssistantText] = useState("");
   const [streamingModel, setStreamingModel] = useState<{ provider: string; model: string } | null>(null);
+  const [toolOutputLines, setToolOutputLines] = useState<string[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [headerModelPickerOpen, setHeaderModelPickerOpen] = useState(false);
@@ -814,6 +824,13 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               if (!isCurrentRequest()) continue;
               const name = String(payload.data?.name ?? "tool");
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
+              const outputLine = payload.data?.line as string | undefined;
+              if (outputLine !== undefined && eventAgentId === "meta") {
+                setToolOutputLines((prev) => [...prev.slice(-200), outputLine]);
+                const streamLabel = payload.data?.stream === "stderr" ? "stderr" : "stdout";
+                setStreamedAssistantText(`⏳ ${name} 执行中…（${streamLabel}）`);
+                continue;
+              }
               const waitLabel = (() => {
                 if (name === "cc_bridge_send") {
                   return ccBridgeSendToolProgressLabel(sec, ccBridgeLastSessionModeRef.current);
@@ -839,6 +856,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               scheduleStreamTextUpdate(full);
             }
             if (payload.type === "tool_call") {
+              setToolOutputLines([]);
               const toolName = payload.data?.name ?? "tool";
               const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
               if (eventAgentId === "meta" && toolName === "cc_bridge_start") {
@@ -1083,10 +1101,16 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       streamTextRef.current = "";
       setStreamedAssistantText("");
       setStreamingModel(null);
+      setToolOutputLines([]);
       setStatus("idle");
       setStreaming(false);
       scrollToBottom();
       void syncSubAgents();
+
+      const nextQueued = useAppStore.getState().dequeuePaneMessage(liteQueueKey);
+      if (nextQueued) {
+        requestAnimationFrame(() => void sendChat(nextQueued.text));
+      }
     }
   };
 
@@ -1111,14 +1135,18 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
 
   const stopStreaming = () => {
     if (!streaming) return;
+    const sid = String(sessionId || "").trim();
+    if (sid) {
+      void window.agenticxDesktop.interruptSession?.(sid);
+    }
     abortedByUserRef.current = true;
     abortRef.current?.abort();
     const partial = streamTextRef.current.trim();
     if (partial && !isThinkingPlaceholderText(partial) && !streamCommittedRef.current) { addMessage("assistant", streamTextRef.current, "meta", activeProvider, activeModel); streamCommittedRef.current = true; }
-    addMessage("tool", "已中断当前生成", "meta");
+    addMessage("tool", "已发送中断请求", "meta");
     streamTextRef.current = "";
     cancelStreamRenderFrame();
-    setStreamedAssistantText("");
+    setStreamedAssistantText("⏹ 正在中断...");
     setStreamingModel(null);
     setStatus("idle");
     setStreaming(false);
@@ -1382,6 +1410,21 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               )}
             </div>
           )}
+          {streaming && toolOutputLines.length > 0 && (
+            <div className="ml-4">
+              <ToolOutputStream lines={toolOutputLines} />
+            </div>
+          )}
+          {queuedMessages.length > 0 && queuedMessages.map((qm, qi) => (
+            <QueuedMessageBubble
+              key={qm.id}
+              msg={qm}
+              index={qi}
+              total={queuedMessages.length}
+              onEdit={(id, newText) => editPendingMessage(liteQueueKey, id, newText)}
+              onRemove={(id) => removePendingMessage(liteQueueKey, id)}
+            />
+          ))}
         </div>
       </div>
 
@@ -1454,6 +1497,23 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             <div className="flex items-center gap-2">
               <button className="flex h-10 shrink-0 items-center rounded-xl bg-rose-500 px-4 text-sm font-medium text-white transition hover:bg-rose-400" onClick={stopStreaming}>中断</button>
               <button className="flex h-10 shrink-0 items-center rounded-xl bg-cyan-500 px-4 text-sm font-medium text-black transition hover:bg-cyan-400 disabled:opacity-40 disabled:hover:bg-cyan-500" disabled={!canSend || !input.trim()} onClick={() => void send()}>追问</button>
+              <button
+                className="flex h-10 shrink-0 items-center rounded-xl border border-border px-4 text-sm font-medium text-text-subtle transition hover:bg-surface-hover disabled:opacity-40"
+                disabled={!canSend || !input.trim()}
+                onClick={() => {
+                  const text = input.trim();
+                  if (!text) return;
+                  enqueuePaneMessage(liteQueueKey, {
+                    id: crypto.randomUUID(),
+                    text,
+                    attachments: [],
+                    contextFiles: [],
+                    timestamp: Date.now(),
+                  });
+                  setInput("");
+                }}
+                title="不中断当前生成，排队等待发送"
+              >排队</button>
             </div>
           ) : (
             <button className="flex h-10 shrink-0 items-center rounded-xl bg-cyan-500 px-4 text-sm font-medium text-black transition hover:bg-cyan-400 disabled:opacity-40 disabled:hover:bg-cyan-500" disabled={!canSend || !input.trim()} onClick={() => void send()}>发送</button>
