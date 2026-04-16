@@ -760,6 +760,11 @@ class AgentRuntime:
             self.hooks.register(ObservationHook(), priority=-30)
         except Exception:
             pass
+        try:
+            from agenticx.learning.session_review_hook import SessionReviewHook
+            self.hooks.register(SessionReviewHook(), priority=-50)
+        except Exception:
+            pass
 
     def _maybe_mid_turn_persist(self) -> None:
         """Fire incremental persist if interval or tool-count thresholds are met."""
@@ -932,6 +937,8 @@ class AgentRuntime:
                     }
                 )
             try:
+                # Increment per-turn counter for SessionReviewHook nudge threshold
+                session._turns_since_skill_manage = getattr(session, "_turns_since_skill_manage", 0) + 1
                 messages = await self.hooks.run_before_model(messages, session)
                 messages = _sanitize_context_messages(messages)
                 if provider_name.strip().lower() == "minimax":
@@ -1847,6 +1854,10 @@ class AgentRuntime:
                 result = await self.hooks.run_after_tool_call(tool_name, result, session)
                 result = _maybe_persist_large_tool_result(session, tool_call_id, tool_name, str(result))
                 result = self.compactor.micro_compact_tool_result(tool_name, str(result))
+                # Learning counters for SessionReviewHook threshold checks
+                session._total_tool_calls = getattr(session, "_total_tool_calls", 0) + 1
+                if tool_name == "skill_manage":
+                    session._turns_since_skill_manage = 0
                 if tool_name == "todo_write":
                     rounds_without_todo = 0
                 else:

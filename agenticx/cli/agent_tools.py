@@ -2890,8 +2890,15 @@ def _tool_skill_use(arguments: Dict[str, Any], session: StudioSession) -> str:
         return "ERROR: skill activation failed"
 
     meta = SkillBundleLoader().get_skill(name)
+    try:
+        from agenticx.learning.skill_usage_tracker import record_use
+        skill_dir = meta.base_dir if meta else None
+        if skill_dir:
+            sid = str(getattr(session, "session_id", "") or getattr(session, "id", "") or "")
+            record_use(skill_dir, session_id=sid)
+    except Exception:
+        pass
     if meta is None:
-        # Activation succeeded; metadata may be unavailable only in edge cases.
         return f"OK: activated skill '{name}' into context_files key 'skill:{name}'"
     return (
         f"OK: activated skill '{name}' into context_files key 'skill:{name}'. "
@@ -3161,11 +3168,17 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
         except OSError as exc:
             shutil.rmtree(skill_dir, ignore_errors=True)
             return f"ERROR: {exc}"
+        try:
+            from agenticx.skills.versioning import append_changelog
+            append_changelog(skill_dir, action="create", summary="agent-created skill")
+        except Exception:
+            pass
         return json.dumps({"ok": True, "action": "create", "path": str(skill_md)}, ensure_ascii=False)
 
     if action == "patch":
         old_s = str(arguments.get("old_string", ""))
         new_s = str(arguments.get("new_string", ""))
+        replace_all = bool(arguments.get("replace_all", False))
         skill_md = skill_dir / "SKILL.md"
         if not skill_md.is_file():
             return "ERROR: SKILL.md not found"
@@ -3173,11 +3186,12 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
             original = skill_md.read_text(encoding="utf-8")
         except OSError as exc:
             return f"ERROR: read failed: {exc}"
-        if old_s not in original:
-            return "ERROR: old_string not found in SKILL.md"
-        if original.count(old_s) != 1:
-            return "ERROR: old_string must match exactly once"
-        updated = original.replace(old_s, new_s, 1)
+        from agenticx.skills.fuzzy_patch import fuzzy_find_and_replace
+        updated, match_count, strategy, match_err = fuzzy_find_and_replace(
+            original, old_s, new_s, replace_all=replace_all,
+        )
+        if match_err:
+            return f"ERROR: {match_err}"
         backup = original
         try:
             skill_md.write_text(updated, encoding="utf-8")
@@ -3189,11 +3203,21 @@ def _tool_skill_manage(arguments: Dict[str, Any], session: Optional[StudioSessio
         except OSError as exc:
             skill_md.write_text(backup, encoding="utf-8")
             return f"ERROR: {exc}"
-        return json.dumps({"ok": True, "action": "patch", "path": str(skill_md)}, ensure_ascii=False)
+        try:
+            from agenticx.skills.versioning import append_changelog
+            append_changelog(skill_dir, action="patch", summary=f"fuzzy:{strategy}, {match_count} replacement(s)")
+        except Exception:
+            pass
+        return json.dumps({"ok": True, "action": "patch", "path": str(skill_md), "strategy": strategy, "matches": match_count}, ensure_ascii=False)
 
     if action == "delete":
         if not skill_dir.exists():
             return json.dumps({"ok": True, "action": "delete", "removed": False}, ensure_ascii=False)
+        try:
+            from agenticx.skills.versioning import append_changelog
+            append_changelog(skill_dir, action="delete", summary="skill deleted by agent")
+        except Exception:
+            pass
         try:
             shutil.rmtree(skill_dir)
         except OSError as exc:
