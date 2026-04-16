@@ -1,4 +1,6 @@
-# AgenticX / Machi 隐私政策 (Privacy Policy)
+# 隐私协议（隐私政策）
+
+> 英文标题：**AgenticX / Machi Privacy Policy**
 
 **更新日期：2026年04月**
 **生效日期：2026年04月**
