@@ -1811,9 +1811,15 @@ class AgentRuntime:
                         break
                     try:
                         emitted = await asyncio.wait_for(pending_events.get(), timeout=0.05)
+                        evt_type = str(emitted.get("type", ""))
+                        evt_data = dict(emitted.get("data", {}))
+                        if evt_type == "tool_output":
+                            evt_data.setdefault("name", tool_name)
+                            evt_data.setdefault("tool_call_id", tool_call_id)
+                            evt_type = EventType.TOOL_PROGRESS.value
                         yield RuntimeEvent(
-                            type=str(emitted.get("type", "")),
-                            data=dict(emitted.get("data", {})),
+                            type=evt_type,
+                            data=evt_data,
                             agent_id=agent_id,
                         )
                     except asyncio.TimeoutError:

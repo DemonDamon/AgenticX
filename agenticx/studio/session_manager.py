@@ -121,6 +121,7 @@ class SessionManager:
     def __init__(self, *, ttl_seconds: int = 3600) -> None:
         self.ttl_seconds = ttl_seconds
         self._sessions: Dict[str, ManagedSession] = {}
+        self._interrupt_requests: set[str] = set()
         self._session_store = SessionStore()
         self._sessions_root = os.path.join(os.path.expanduser("~"), ".agenticx", "sessions")
         self._taskspaces_root = os.path.join(os.path.expanduser("~"), ".agenticx", "taskspaces")
@@ -197,6 +198,22 @@ class SessionManager:
             managed.execution_state = state
             managed.updated_at = time.time()
 
+    def request_interrupt(self, session_id: str) -> bool:
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False
+        self._interrupt_requests.add(sid)
+        return True
+
+    def clear_interrupt(self, session_id: str) -> None:
+        sid = str(session_id or "").strip()
+        if sid:
+            self._interrupt_requests.discard(sid)
+
+    def should_interrupt(self, session_id: str) -> bool:
+        sid = str(session_id or "").strip()
+        return bool(sid and sid in self._interrupt_requests)
+
     def scan_interrupted_sessions(self) -> list[str]:
         """Scan persisted sessions for those left in 'running' state.
 
@@ -271,6 +288,7 @@ class SessionManager:
 
     def delete(self, session_id: str) -> bool:
         sid = str(session_id or "").strip()
+        self._interrupt_requests.discard(sid)
         existed_in_persistence = self._session_exists_in_persistence(sid)
         managed = self._sessions.pop(sid, None)
         if managed is not None:
@@ -304,6 +322,7 @@ class SessionManager:
                 "created_at": getattr(managed, "created_at", managed.updated_at),
                 "pinned": bool(getattr(managed, "pinned", False)),
                 "archived": bool(getattr(managed, "archived", False)),
+                "execution_state": str(getattr(managed, "execution_state", "idle") or "idle"),
             })
         for row in self._list_persisted_sessions():
             sid = str(row.get("session_id", "")).strip()
@@ -1075,6 +1094,7 @@ class SessionManager:
                     "created_at": created_at,
                     "pinned": bool(metadata.get("pinned", False)),
                     "archived": bool(metadata.get("archived", False)),
+                    "execution_state": str(metadata.get("execution_state", "idle") or "idle"),
                 }
             )
         known = {str(row.get("session_id", "")) for row in rows}
@@ -1122,6 +1142,7 @@ class SessionManager:
                         "created_at": mtime,
                         "pinned": False,
                         "archived": False,
+                        "execution_state": str(fs_meta.get("execution_state", "idle") or "idle"),
                     }
                 )
         return rows

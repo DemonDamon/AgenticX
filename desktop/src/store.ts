@@ -145,6 +145,14 @@ export type MessageAttachment = {
   referenceToken?: boolean;
 };
 
+export type QueuedMessage = {
+  id: string;
+  text: string;
+  attachments: MessageAttachment[];
+  contextFiles: MessageAttachment[];
+  timestamp: number;
+};
+
 export type SubAgentEvent = {
   id: string;
   type: string;
@@ -254,6 +262,13 @@ type AppState = {
   /** After merge-forward, target pane runs one normal /api/chat with this text (cleared when consumed). */
   forwardAutoReply: { paneId: string; sessionId: string; text: string } | null;
   setForwardAutoReply: (job: { paneId: string; sessionId: string; text: string } | null) => void;
+  /** Per-pane queued user messages (sent automatically after current stream ends). */
+  pendingMessages: Record<string, QueuedMessage[]>;
+  enqueuePaneMessage: (paneId: string, msg: QueuedMessage) => void;
+  dequeuePaneMessage: (paneId: string) => QueuedMessage | undefined;
+  removePendingMessage: (paneId: string, msgId: string) => void;
+  editPendingMessage: (paneId: string, msgId: string, newText: string) => void;
+  clearPendingMessages: (paneId: string) => void;
   setApiBase: (base: string) => void;
   setApiToken: (token: string) => void;
   setSessionId: (id: string) => void;
@@ -675,6 +690,49 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }),
   setForwardAutoReply: (forwardAutoReply) => set({ forwardAutoReply }),
+  pendingMessages: {},
+  enqueuePaneMessage: (paneId, msg) =>
+    set((state) => ({
+      pendingMessages: {
+        ...state.pendingMessages,
+        [paneId]: [...(state.pendingMessages[paneId] ?? []), msg],
+      },
+    })),
+  dequeuePaneMessage: (paneId) => {
+    const queue = get().pendingMessages[paneId];
+    if (!queue?.length) return undefined;
+    const first = queue[0];
+    set((state) => ({
+      pendingMessages: {
+        ...state.pendingMessages,
+        [paneId]: (state.pendingMessages[paneId] ?? []).slice(1),
+      },
+    }));
+    return first;
+  },
+  removePendingMessage: (paneId, msgId) =>
+    set((state) => ({
+      pendingMessages: {
+        ...state.pendingMessages,
+        [paneId]: (state.pendingMessages[paneId] ?? []).filter((m) => m.id !== msgId),
+      },
+    })),
+  editPendingMessage: (paneId, msgId, newText) =>
+    set((state) => ({
+      pendingMessages: {
+        ...state.pendingMessages,
+        [paneId]: (state.pendingMessages[paneId] ?? []).map((m) =>
+          m.id === msgId ? { ...m, text: newText } : m
+        ),
+      },
+    })),
+  clearPendingMessages: (paneId) =>
+    set((state) => ({
+      pendingMessages: {
+        ...state.pendingMessages,
+        [paneId]: [],
+      },
+    })),
   addPane: (avatarId, avatarName, sessionId) => {
     const paneId = uid();
     set((state) => ({

@@ -1174,6 +1174,21 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="session not found")
         return {"ok": True}
 
+    @app.post("/api/session/interrupt")
+    async def interrupt_session(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        session_id = str(payload.get("session_id", "") or "").strip()
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        if not manager.request_interrupt(session_id):
+            raise HTTPException(status_code=400, detail="invalid session_id")
+        manager.set_execution_state(session_id, "interrupted")
+        manager.persist(session_id)
+        return {"ok": True, "session_id": session_id}
+
     @app.post("/api/confirm")
     async def post_confirm(
         payload: ConfirmResponse,
@@ -1486,6 +1501,7 @@ def create_studio_app() -> FastAPI:
         meta_confirm_gate = (
             AutoApproveConfirmGate() if is_automation_session else _resolve_confirm_gate(managed, "meta")
         )
+        manager.clear_interrupt(payload.session_id)
         manager.set_execution_state(payload.session_id, "running")
 
         def _mid_turn_persist_cb() -> None:
@@ -1670,6 +1686,8 @@ def create_studio_app() -> FastAPI:
                     user_message_content: Any | None = None
                     history_user_attachments: list[dict[str, Any]] | None = None
                     async def _runtime_should_stop() -> bool:
+                        if manager.should_interrupt(payload.session_id):
+                            return True
                         if keep_runtime_after_disconnect:
                             return False
                         return await request.is_disconnected()
@@ -1753,6 +1771,7 @@ def create_studio_app() -> FastAPI:
                             payload.session_id,
                         )
                 _flush_taskspace_hint(payload.session_id, session)
+                manager.clear_interrupt(payload.session_id)
                 manager.set_execution_state(payload.session_id, "idle")
                 manager.persist(payload.session_id)
             if not client_disconnected:

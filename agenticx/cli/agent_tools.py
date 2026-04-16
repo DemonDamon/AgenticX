@@ -1807,34 +1807,65 @@ async def _tool_bash_exec(
         resolved0 = shutil.which(parts[0])
         if resolved0:
             parts = [resolved0] + list(parts[1:])
+    argv = _bash_exec_shell_argv(command) if use_shell else parts
     try:
-        if use_shell:
-            proc = await asyncio.to_thread(
-                subprocess.run,
-                _bash_exec_shell_argv(command),
-                shell=False,
-                cwd=str(cwd) if cwd else None,
-                capture_output=True,
-                text=True,
-                timeout=max(1, timeout_sec),
-            )
-        else:
-            proc = await asyncio.to_thread(
-                subprocess.run,
-                parts,
-                shell=False,
-                cwd=str(cwd) if cwd else None,
-                capture_output=True,
-                text=True,
-                timeout=max(1, timeout_sec),
-            )
-    except subprocess.TimeoutExpired:
-        return f"ERROR: command timeout after {timeout_sec}s"
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(cwd) if cwd else None,
+        )
     except Exception as exc:
         return f"ERROR: command failed to start: {exc}"
 
-    stdout = proc.stdout.strip()
-    stderr = proc.stderr.strip()
+    stdout_lines: List[str] = []
+    stderr_lines: List[str] = []
+    _STREAM_THROTTLE_SEC = 0.2
+    _last_emit_time = 0.0
+
+    async def _read_pipe(
+        stream: asyncio.StreamReader,
+        target: List[str],
+        label: str,
+    ) -> None:
+        nonlocal _last_emit_time
+        async for raw in stream:
+            line = raw.decode("utf-8", errors="replace").rstrip("\n")
+            target.append(line)
+            if emit_event is not None:
+                now = asyncio.get_event_loop().time()
+                if now - _last_emit_time >= _STREAM_THROTTLE_SEC:
+                    _last_emit_time = now
+                    try:
+                        await emit_event({
+                            "type": "tool_output",
+                            "data": {
+                                "stream": label,
+                                "line": line,
+                            },
+                        })
+                    except Exception:
+                        pass
+
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(
+                _read_pipe(proc.stdout, stdout_lines, "stdout"),
+                _read_pipe(proc.stderr, stderr_lines, "stderr"),
+            ),
+            timeout=max(1, timeout_sec),
+        )
+        await proc.wait()
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
+        return f"ERROR: command timeout after {timeout_sec}s"
+
+    stdout = "\n".join(stdout_lines).strip()
+    stderr = "\n".join(stderr_lines).strip()
     return (
         f"exit_code={proc.returncode}\n"
         f"stdout:\n{stdout or '(empty)'}\n"

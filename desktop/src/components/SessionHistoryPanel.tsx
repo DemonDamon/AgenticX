@@ -28,6 +28,7 @@ type SessionRow = {
   created_at?: number;
   pinned?: boolean;
   archived?: boolean;
+  execution_state?: "idle" | "running" | "interrupted";
 };
 
 type SessionContextMenu = {
@@ -185,6 +186,10 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
       created_at: Number.isFinite(createdAtRaw) && createdAtRaw > 0 ? createdAtRaw : undefined,
       pinned: Boolean(row.pinned),
       archived: Boolean(row.archived),
+      execution_state:
+        row.execution_state === "running" || row.execution_state === "interrupted"
+          ? row.execution_state
+          : "idle",
     });
   }
   return sortSessionRows(rows);
@@ -306,6 +311,14 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   useEffect(() => {
     if (!pane.historyOpen) return;
     void loadSessions();
+  }, [pane.historyOpen, pane.avatarId, pane.sessionId, sessionCatalogRevision]);
+
+  useEffect(() => {
+    if (!pane.historyOpen) return;
+    const timer = window.setInterval(() => {
+      void loadSessions();
+    }, 1500);
+    return () => window.clearInterval(timer);
   }, [pane.historyOpen, pane.avatarId, pane.sessionId, sessionCatalogRevision]);
 
   useEffect(() => {
@@ -452,9 +465,20 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       });
       return;
     }
+
+    const targetPane = useAppStore.getState().panes.find((p) => p.id === targetPaneId);
+    const previousSessionId = (targetPane?.sessionId ?? "").trim();
+    const isSameSession = previousSessionId === sessionId.trim();
+    const existingMessages = targetPane?.messages ?? [];
+
     setPaneSessionId(targetPaneId, sessionId);
     setPaneHistorySearchTerms(targetPaneId, highlightTerms);
     setUnreadSessionIds((prev) => prev.filter((id) => id !== sessionId));
+
+    if (isSameSession && existingMessages.length > 0) {
+      return;
+    }
+
     try {
       const result = await window.agenticxDesktop.loadSessionMessages(sessionId);
       if (result.ok && Array.isArray(result.messages)) {
@@ -618,6 +642,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     const label = (labelOverride || sessionHistoryLabel(item)).trim() || sessionHistoryLabel(item);
     const unread = unreadSessionIds.includes(item.session_id);
     const createdAt = getSessionCreatedTimestamp(item) || Date.now() / 1000;
+    const isRunning = item.execution_state === "running";
+    const isInterrupted = item.execution_state === "interrupted";
     const feishuMarked = feishuMarkedSessionId === item.session_id;
     const wechatMarked = wechatMarkedSessionId === item.session_id;
     const showFeishuChip =
@@ -674,6 +700,23 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 />
               ) : null}
               {item.pinned ? <span className="text-[10px] text-amber-300">pin</span> : null}
+              {isRunning ? (
+                <span
+                  className="inline-flex items-center gap-1 rounded-sm px-1 py-px text-[9px] font-medium leading-tight text-cyan-300"
+                  title="该会话正在运行"
+                >
+                  <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border border-current border-t-transparent" />
+                  运行中
+                </span>
+              ) : null}
+              {isInterrupted ? (
+                <span
+                  className="inline-flex items-center rounded-sm px-1 py-px text-[9px] font-medium leading-tight text-amber-300"
+                  title="该会话已收到中断请求"
+                >
+                  已中断
+                </span>
+              ) : null}
               <span className="truncate">{label}</span>
               {showFeishuChip ? (
                 <FeishuBadge />
