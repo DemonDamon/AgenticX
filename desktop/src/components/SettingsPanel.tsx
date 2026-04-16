@@ -43,6 +43,11 @@ import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-promp
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
 import { AutomationTab } from "./automation/AutomationTab";
+import {
+  RuntimeConfigSection,
+  RUNTIME_MAX_TOOL_ROUNDS,
+  RUNTIME_MIN_TOOL_ROUNDS,
+} from "./automation/RuntimeConfigSection";
 import { AccountTab } from "./AccountTab";
 import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
 
@@ -1541,7 +1546,7 @@ type CcBridgePanelHandle = {
 };
 
 type ToolsTabHandle = {
-  /** 持久化工具页内待提交的项（bash 默认超时 + CC Bridge 配置）。 */
+  /** 持久化工具页内待提交的项（bash 默认超时 + 最大工具轮数 + CC Bridge 配置）。 */
   saveAll: () => Promise<{ ok: boolean; error?: string }>;
 };
 
@@ -1858,15 +1863,19 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
   const [error, setError] = useState("");
   const [installing, setInstalling] = useState<Record<string, ToolInstallState>>({});
   const [search, setSearch] = useState("");
+  const [maxToolRounds, setMaxToolRounds] = useState(60);
+  const [runtimeLoadError, setRuntimeLoadError] = useState("");
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError("");
+    setRuntimeLoadError("");
     try {
-      const [regResult, policyResult, statusResult] = await Promise.all([
+      const [regResult, policyResult, statusResult, runtimeResult] = await Promise.all([
         window.agenticxDesktop.getToolsRegistry(),
         window.agenticxDesktop.getToolsPolicy(),
         window.agenticxDesktop.getToolsStatus(),
+        window.agenticxDesktop.loadRuntimeConfig().catch(() => ({ ok: false as const })),
       ]);
       if (regResult?.ok) setRegistry(Array.isArray(regResult.tools) ? regResult.tools : []);
       else setError(regResult?.error ?? "加载工具注册表失败");
@@ -1882,6 +1891,15 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         setBashTimeoutInput(String(n));
       }
       if (statusResult?.ok) setEnvTools(Array.isArray(statusResult.tools) ? statusResult.tools : []);
+      if (runtimeResult?.ok) {
+        const raw = Number(runtimeResult.max_tool_rounds);
+        const n = Number.isFinite(raw) ? raw : 60;
+        setMaxToolRounds(
+          Math.max(RUNTIME_MIN_TOOL_ROUNDS, Math.min(RUNTIME_MAX_TOOL_ROUNDS, n)),
+        );
+      } else {
+        setRuntimeLoadError("读取运行时参数失败，仍可按当前滑块值保存。");
+      }
     } catch (err) {
       setError(String(err));
     } finally {
@@ -1951,6 +1969,15 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
           return { ok: false, error: "工具列表仍在加载，请稍后再点窗口底部「保存」。" };
         }
         await saveBashDefaultTimeout();
+        const rtRes = await window.agenticxDesktop.saveRuntimeConfig({
+          max_tool_rounds: maxToolRounds,
+        });
+        if (!rtRes?.ok) {
+          return {
+            ok: false,
+            error: rtRes?.error ? String(rtRes.error) : "运行时参数保存失败",
+          };
+        }
         const bridge = ccBridgePanelRef.current;
         if (!bridge) {
           return { ok: false, error: "Claude Code Bridge 区块未就绪，请稍后再试。" };
@@ -1958,7 +1985,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         return bridge.save();
       },
     }),
-    [loading, saveBashDefaultTimeout],
+    [loading, maxToolRounds, saveBashDefaultTimeout],
   );
 
   const startInstall = async (tool: ToolStatusItem) => {
@@ -2018,8 +2045,18 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         管理 Agent 可调用工具的全局启停状态。关闭后 Agent 将无法调用该工具。
       </div>
       <div className="text-xs text-text-faint">
-        仅部分工具提供可折叠的「高级设置」；其余工具仅支持启用/停用。页面底部的「保存」会一并提交本页 bash 默认超时与 Claude Code Bridge 配置。
+        仅部分工具提供可折叠的「高级设置」；其余工具仅支持启用/停用。窗口底部「保存」会一并提交本页 bash 默认超时、最大工具轮数与 Claude Code Bridge 配置。
       </div>
+      <RuntimeConfigSection
+        value={maxToolRounds}
+        onChange={setMaxToolRounds}
+        disabled={loading}
+      />
+      {runtimeLoadError ? (
+        <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
+          {runtimeLoadError}
+        </div>
+      ) : null}
       {error ? (
         <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">{error}</div>
       ) : null}
