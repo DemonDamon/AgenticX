@@ -45,6 +45,8 @@ type TrinityConfig = {
   session_summary: boolean;
   learning_enabled: boolean;
   skill_manage_enabled: boolean;
+  learning_nudge_interval: number;
+  learning_min_tool_calls: number;
 };
 
 type AutomationConfig = {

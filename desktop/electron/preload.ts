@@ -257,6 +257,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     session_summary: boolean;
     learning_enabled: boolean;
     skill_manage_enabled: boolean;
+    learning_nudge_interval: number;
+    learning_min_tool_calls: number;
   }) => ipcRenderer.invoke("save-trinity-config", payload),
   loadAutomationConfig: async () => ipcRenderer.invoke("load-automation-config"),
   saveAutomationConfig: async (payload: { prevent_sleep: boolean }) =>
