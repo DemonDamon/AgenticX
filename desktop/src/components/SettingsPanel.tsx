@@ -194,6 +194,8 @@ type TrinityConfigForm = {
   session_summary: boolean;
   learning_enabled: boolean;
   skill_manage_enabled: boolean;
+  learning_nudge_interval: number;
+  learning_min_tool_calls: number;
 };
 
 type SkillItem = {
@@ -4218,6 +4220,8 @@ const TRINITY_DEFAULTS: TrinityConfigForm = {
   session_summary: false,
   learning_enabled: false,
   skill_manage_enabled: false,
+  learning_nudge_interval: 10,
+  learning_min_tool_calls: 5,
 };
 
 function useTrinityConfig() {
@@ -4240,6 +4244,14 @@ function useTrinityConfig() {
             session_summary: Boolean(result.config.session_summary),
             learning_enabled: Boolean(result.config.learning_enabled),
             skill_manage_enabled: Boolean(result.config.skill_manage_enabled),
+            learning_nudge_interval:
+              Number(result.config.learning_nudge_interval) > 0
+                ? Number(result.config.learning_nudge_interval)
+                : TRINITY_DEFAULTS.learning_nudge_interval,
+            learning_min_tool_calls:
+              Number(result.config.learning_min_tool_calls) > 0
+                ? Number(result.config.learning_min_tool_calls)
+                : TRINITY_DEFAULTS.learning_min_tool_calls,
           };
           setForm(loaded);
           setLastSaved(loaded);
@@ -4353,6 +4365,30 @@ function SkillAdvancedPanel() {
 
   const loading = trinityLoading || policyLoading;
   const busy = trinitySaving || policySaving;
+  const [nudgeDraft, setNudgeDraft] = useState(String(form.learning_nudge_interval));
+  const [minCallsDraft, setMinCallsDraft] = useState(String(form.learning_min_tool_calls));
+  const [reviewAdvancedOpen, setReviewAdvancedOpen] = useState(false);
+
+  useEffect(() => {
+    setNudgeDraft(String(form.learning_nudge_interval));
+    setMinCallsDraft(String(form.learning_min_tool_calls));
+  }, [form.learning_min_tool_calls, form.learning_nudge_interval]);
+
+  const commitLearningNumber = useCallback(
+    (field: "learning_nudge_interval" | "learning_min_tool_calls", raw: string) => {
+      const parsed = Number.parseInt(raw, 10);
+      const next = Number.isFinite(parsed) ? Math.max(1, parsed) : 1;
+      if (form[field] !== next) {
+        void update({ [field]: next });
+      }
+      if (field === "learning_nudge_interval") {
+        setNudgeDraft(String(next));
+      } else {
+        setMinCallsDraft(String(next));
+      }
+    },
+    [form, update]
+  );
 
   if (loading) {
     return (
@@ -4382,6 +4418,79 @@ function SkillAdvancedPanel() {
           disabled={busy}
           onChange={(next) => void update({ skill_manage_enabled: next })}
         />
+        <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-text-strong">启用技能自进化</div>
+              <p className="mt-1 text-xs leading-relaxed text-text-muted">
+                自动记录工具调用过程，会话结束后评估是否值得提炼为新技能。
+              </p>
+            </div>
+            <SettingsSwitch
+              checked={form.learning_enabled}
+              disabled={busy}
+              onChange={(next) => void update({ learning_enabled: next })}
+              aria-label="启用技能自进化"
+            />
+          </div>
+          <div className="mt-2.5 rounded-md bg-surface-panel px-3 py-2 text-[11px] text-text-faint">
+            观测数据存储于 <code className="text-text-subtle">~/.agenticx/sessions/&lt;session_id&gt;/tool_call_observations.json</code>
+          </div>
+          <div className="mt-3 border-t border-border pt-3">
+            <button
+              type="button"
+              className="flex items-center gap-1 text-xs text-text-subtle transition hover:text-text-primary"
+              onClick={() => setReviewAdvancedOpen((v) => !v)}
+              aria-expanded={reviewAdvancedOpen}
+            >
+              <ChevronRight
+                className={`h-3.5 w-3.5 shrink-0 transition-transform ${reviewAdvancedOpen ? "rotate-90" : ""}`}
+                aria-hidden
+              />
+              高级设置
+            </button>
+            {reviewAdvancedOpen ? (
+              <div className="mt-2 space-y-3">
+                <label className="block text-sm text-text-muted">
+                  复盘触发间隔
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
+                    value={nudgeDraft}
+                    disabled={busy || !form.learning_enabled}
+                    onChange={(e) => setNudgeDraft(e.target.value)}
+                    onBlur={() => commitLearningNumber("learning_nudge_interval", nudgeDraft)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }}
+                  />
+                </label>
+                <label className="block text-sm text-text-muted">
+                  最小工具调用数
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
+                    value={minCallsDraft}
+                    disabled={busy || !form.learning_enabled}
+                    onChange={(e) => setMinCallsDraft(e.target.value)}
+                    onBlur={() => commitLearningNumber("learning_min_tool_calls", minCallsDraft)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+            ) : null}
+          </div>
+        </div>
         <SettingsToggleCard
           title="未见高危则自动装完"
           description="安装前仍会跑一遍静态规则扫描并展示摘要；只有未命中高危规则时才可能一路装完，一旦命中高危必须你点确认。"
@@ -4435,18 +4544,6 @@ function SessionMemoryPanel() {
             disabled={saving}
             onChange={(next) => void update({ session_summary: next })}
             aria-label="启用会话摘要延续"
-          />
-        </div>
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div>启用观察式学习</div>
-            <div className="mt-0.5 text-[11px] text-text-faint">agent 自动沉淀高频操作为可复用知识</div>
-          </div>
-          <SettingsSwitch
-            checked={form.learning_enabled}
-            disabled={saving}
-            onChange={(next) => void update({ learning_enabled: next })}
-            aria-label="启用观察式学习"
           />
         </div>
       </div>

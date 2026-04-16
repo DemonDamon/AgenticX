@@ -222,6 +222,9 @@ type AgxConfig = {
     skill_protocol?: boolean;
     session_summary?: boolean;
     learning_enabled?: boolean;
+    skill_manage_enabled?: boolean;
+    learning_nudge_interval?: number;
+    learning_min_tool_calls?: number;
   };
   automation?: { prevent_sleep?: boolean };
   skills?: { non_high_risk_auto_install?: boolean };
@@ -252,6 +255,8 @@ type TrinityConfig = {
   session_summary: boolean;
   learning_enabled: boolean;
   skill_manage_enabled: boolean;
+  learning_nudge_interval: number;
+  learning_min_tool_calls: number;
 };
 
 type AutomationConfig = {
@@ -319,12 +324,21 @@ const DEFAULT_EMAIL_CONFIG: EmailConfig = {
   from_email: "",
   default_to_email: "bingzhenli@hotmail.com",
 };
-const TRINITY_CONFIG_KEYS = new Set(["skill_protocol", "session_summary", "learning_enabled", "skill_manage_enabled"]);
+const TRINITY_CONFIG_KEYS = new Set([
+  "skill_protocol",
+  "session_summary",
+  "learning_enabled",
+  "skill_manage_enabled",
+  "learning_nudge_interval",
+  "learning_min_tool_calls",
+]);
 const DEFAULT_TRINITY_CONFIG: TrinityConfig = {
   skill_protocol: true,
   session_summary: false,
   learning_enabled: false,
   skill_manage_enabled: false,
+  learning_nudge_interval: 10,
+  learning_min_tool_calls: 5,
 };
 
 const DEFAULT_AUTOMATION_CONFIG: AutomationConfig = {
@@ -990,11 +1004,19 @@ function loadTrinityConfig(cfg: AgxConfig): TrinityConfig {
   const raw = (cfg as Record<string, unknown>).agent_harness_trinity;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...DEFAULT_TRINITY_CONFIG };
   const row = raw as Record<string, unknown>;
+  const rawNudge = Number(row.learning_nudge_interval);
+  const rawMinCalls = Number(row.learning_min_tool_calls);
+  const learningNudgeInterval =
+    Number.isInteger(rawNudge) && rawNudge > 0 ? rawNudge : DEFAULT_TRINITY_CONFIG.learning_nudge_interval;
+  const learningMinToolCalls =
+    Number.isInteger(rawMinCalls) && rawMinCalls > 0 ? rawMinCalls : DEFAULT_TRINITY_CONFIG.learning_min_tool_calls;
   return {
     skill_protocol: parseBooleanLoose(row.skill_protocol, DEFAULT_TRINITY_CONFIG.skill_protocol),
     session_summary: parseBooleanLoose(row.session_summary, DEFAULT_TRINITY_CONFIG.session_summary),
     learning_enabled: parseBooleanLoose(row.learning_enabled, DEFAULT_TRINITY_CONFIG.learning_enabled),
     skill_manage_enabled: parseBooleanLoose(row.skill_manage_enabled, DEFAULT_TRINITY_CONFIG.skill_manage_enabled),
+    learning_nudge_interval: learningNudgeInterval,
+    learning_min_tool_calls: learningMinToolCalls,
   };
 }
 
@@ -1056,13 +1078,23 @@ function validateTrinityConfigPayload(input: unknown): { ok: true; config: Trini
   let sessionSummary: boolean;
   let learningEnabled: boolean;
   let skillManageEnabled: boolean;
+  let learningNudgeInterval: number;
+  let learningMinToolCalls: number;
   try {
     skillProtocol = parseBooleanStrict(payload.skill_protocol, "skill_protocol");
     sessionSummary = parseBooleanStrict(payload.session_summary, "session_summary");
     learningEnabled = parseBooleanStrict(payload.learning_enabled, "learning_enabled");
     skillManageEnabled = parseBooleanStrict(payload.skill_manage_enabled, "skill_manage_enabled");
+    learningNudgeInterval = intValue(payload.learning_nudge_interval, "learning_nudge_interval");
+    learningMinToolCalls = intValue(payload.learning_min_tool_calls, "learning_min_tool_calls");
   } catch (err) {
     return { ok: false, error: String(err) };
+  }
+  if (learningNudgeInterval < 1) {
+    return { ok: false, error: "learning_nudge_interval must be >= 1" };
+  }
+  if (learningMinToolCalls < 1) {
+    return { ok: false, error: "learning_min_tool_calls must be >= 1" };
   }
   return {
     ok: true,
@@ -1071,6 +1103,8 @@ function validateTrinityConfigPayload(input: unknown): { ok: true; config: Trini
       session_summary: sessionSummary,
       learning_enabled: learningEnabled,
       skill_manage_enabled: skillManageEnabled,
+      learning_nudge_interval: learningNudgeInterval,
+      learning_min_tool_calls: learningMinToolCalls,
     },
   };
 }
@@ -1476,6 +1510,8 @@ async function startStudioServe(): Promise<void> {
     AGX_SESSION_SUMMARY: trinity.session_summary ? "true" : "false",
     AGX_LEARNING_ENABLED: trinity.learning_enabled ? "true" : "false",
     AGX_SKILL_MANAGE: trinity.skill_manage_enabled ? "1" : "0",
+    AGX_LEARNING_NUDGE_INTERVAL: String(trinity.learning_nudge_interval),
+    AGX_LEARNING_MIN_TOOL_CALLS: String(trinity.learning_min_tool_calls),
   };
 
   const agxResolved = findAgxBinaryOnPath(augmentedPath);
