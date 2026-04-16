@@ -70,14 +70,15 @@ function PreventSleepToggle() {
         type="button"
         role="switch"
         aria-checked={enabled}
+        aria-label={enabled ? "已开启抑制系统睡眠" : "已关闭抑制系统睡眠"}
         disabled={saving || loading}
         onClick={() => { if (!saving && !loading) void persist(!enabled); }}
-        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${
-          enabled ? "bg-text-strong" : "bg-surface-card-strong"
-        } ${saving || loading ? "opacity-50" : ""}`}
+        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/55 ${
+          enabled ? "bg-emerald-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]" : "bg-text-muted/35"
+        } ${saving || loading ? "cursor-not-allowed opacity-50" : ""}`}
       >
         <span
-          className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+          className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform duration-200 ease-out ${
             enabled ? "translate-x-4" : ""
           }`}
         />
