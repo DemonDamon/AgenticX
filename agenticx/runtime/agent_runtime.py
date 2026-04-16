@@ -1975,7 +1975,15 @@ class AgentRuntime:
         )
         if agent_id == "meta":
             await self.hooks.run_on_agent_end(message, session)
-            yield RuntimeEvent(type=EventType.ERROR.value, data={"text": message}, agent_id=agent_id)
+            yield RuntimeEvent(
+                type=EventType.ERROR.value,
+                data={
+                    "text": message,
+                    "round": self.max_tool_rounds,
+                    "max_rounds": self.max_tool_rounds,
+                },
+                agent_id=agent_id,
+            )
             return
         await self.hooks.run_on_agent_end(message, session)
         yield RuntimeEvent(

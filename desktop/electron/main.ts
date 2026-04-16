@@ -3099,6 +3099,55 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("load-runtime-config", async () => {
+    try {
+      const cfg = loadAgxConfig();
+      const rt = cfg.runtime;
+      const raw = rt && typeof rt === "object" && !Array.isArray(rt)
+        ? (rt as Record<string, unknown>)
+        : {};
+      const val = Number(raw.max_tool_rounds ?? 30);
+      return {
+        ok: true,
+        max_tool_rounds: Number.isFinite(val) ? Math.max(10, Math.min(120, val)) : 30,
+        auto_resume_on_exhaustion: Boolean(raw.auto_resume_on_exhaustion ?? false),
+        max_auto_resumes: Math.max(0, Math.min(10, Number(raw.max_auto_resumes ?? 3))),
+      };
+    } catch (err) {
+      return { ok: false, error: String(err), max_tool_rounds: 30, auto_resume_on_exhaustion: false, max_auto_resumes: 3 };
+    }
+  });
+
+  ipcMain.handle("save-runtime-config", async (_event, payload: unknown) => {
+    if (!payload || typeof payload !== "object") return { ok: false, error: "invalid payload" };
+    const p = payload as Record<string, unknown>;
+    try {
+      const cfg = loadAgxConfig();
+      const root = cfg as Record<string, unknown>;
+      const prev = root.runtime;
+      const merged = prev && typeof prev === "object" && !Array.isArray(prev)
+        ? { ...(prev as Record<string, unknown>) }
+        : {};
+      if (p.max_tool_rounds !== undefined) {
+        const v = Number(p.max_tool_rounds);
+        if (!Number.isFinite(v)) return { ok: false, error: "max_tool_rounds must be a number" };
+        merged.max_tool_rounds = Math.max(10, Math.min(120, Math.round(v)));
+      }
+      if (p.auto_resume_on_exhaustion !== undefined) {
+        merged.auto_resume_on_exhaustion = Boolean(p.auto_resume_on_exhaustion);
+      }
+      if (p.max_auto_resumes !== undefined) {
+        const v = Number(p.max_auto_resumes);
+        if (Number.isFinite(v)) merged.max_auto_resumes = Math.max(0, Math.min(10, Math.round(v)));
+      }
+      root.runtime = merged;
+      saveAgxConfig(cfg);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   // ── Automation Tasks CRUD ──
 
   ipcMain.handle("confirm-dialog", async (_event, payload: unknown) => {
