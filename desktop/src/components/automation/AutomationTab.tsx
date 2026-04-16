@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 import { Panel } from "../ds/Panel";
+import { RuntimeConfigSection } from "./RuntimeConfigSection";
 import { TemplateGrid } from "./TemplateGrid";
 import { TaskFormPanel } from "./TaskFormPanel";
 import { deleteAutomationTaskWithConfirm } from "../../utils/automation-delete";
@@ -183,6 +184,9 @@ export function AutomationTab() {
         <h3 className="text-base font-semibold text-text-strong">自动化</h3>
         <p className="mt-1 text-xs text-text-muted">管理自动化任务，让 Machi 按计划为你工作。</p>
       </div>
+
+      {/* Runtime config */}
+      <RuntimeConfigSection />
 
       {/* System section */}
       <Panel title="系统" collapsible defaultCollapsed>

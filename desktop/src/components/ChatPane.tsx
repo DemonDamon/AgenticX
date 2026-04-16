@@ -21,6 +21,7 @@ import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
 import { QueuedMessageBubble } from "./messages/QueuedMessageBubble";
 import { ToolOutputStream } from "./messages/ToolOutputStream";
+import { StallRecoveryCard } from "./messages/StallRecoveryCard";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { HoverTip } from "./ds/HoverTip";
 import { Toast } from "./ds/Toast";
@@ -1257,6 +1258,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   /** Text last committed at a tool_call boundary; avoids duplicating the same assistant bubble at stream end. */
   const lastMidStreamAssistantCommitRef = useRef<string | null>(null);
   const [toolOutputLines, setToolOutputLines] = useState<string[]>([]);
+  const [stallState, setStallState] = useState<"none" | "stall" | "exhausted">("none");
+  const [exhaustedRounds, setExhaustedRounds] = useState<{ rounds: number; maxRounds: number } | null>(null);
+  const lastSseEventAtRef = useRef(0);
   const deferredSessionMessagesRef = useRef<Record<string, Array<Parameters<typeof addPaneMessage>>>>({});
   const streamRafRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -2624,7 +2628,57 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       setStreamedAssistantText("⏹ 正在中断...");
     }
     addPaneMessage(pane.id, "tool", "已发送中断请求", "meta");
+    setStallState("none");
   }, [addPaneMessage, pane.id, pane.sessionId, streamingSessionId]);
+
+  useEffect(() => {
+    if (!isStreamingCurrentSession) {
+      setStallState((prev) => prev === "stall" ? "stall" : "none");
+      return;
+    }
+    const STALL_THRESHOLD_MS = 20_000;
+    const timer = window.setInterval(() => {
+      const lastAt = lastSseEventAtRef.current;
+      if (lastAt > 0 && Date.now() - lastAt > STALL_THRESHOLD_MS) {
+        setStallState("stall");
+      }
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [isStreamingCurrentSession]);
+
+  useEffect(() => {
+    if (isStreamingCurrentSession || !pane.sessionId) return;
+    if (stallState !== "stall" && stallState !== "exhausted") return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await window.agenticxDesktop.listSessions(pane.avatarId ?? undefined);
+        if (cancelled || !r.ok) return;
+        const row = (r.sessions ?? []).find((s) => s.session_id === pane.sessionId);
+        if (row && row.execution_state === "idle") {
+          setStallState("none");
+          addPaneMessage(pane.id, "tool", "后台任务已完成", "meta");
+          try {
+            const msgs = await window.agenticxDesktop.loadSessionMessages(pane.sessionId);
+            if (!cancelled && msgs.ok && Array.isArray(msgs.messages)) {
+              // Do not overwrite - messages already in memory are richer than disk
+            }
+          } catch { /* best effort */ }
+        }
+      } catch { /* ignore */ }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 3000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [isStreamingCurrentSession, stallState, pane.sessionId, pane.avatarId, pane.id, addPaneMessage]);
+
+  const resumeCurrentTask = useCallback(() => {
+    setStallState("none");
+    const prompt = stallState === "exhausted"
+      ? "继续执行，从上次停止的地方接续。"
+      : "请汇报之前任务的执行结果，如果任务未完成请继续执行。";
+    void sendChatRef.current(prompt);
+  }, [stallState]);
 
   const renderedMessages = useMemo(() => (
     <>
@@ -2711,8 +2765,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           onRemove={(id) => removePendingMessage(paneId, id)}
         />
       ))}
+      {stallState === "stall" && (
+        <StallRecoveryCard
+          kind="stall"
+          onResume={resumeCurrentTask}
+          onStop={stopCurrentRun}
+        />
+      )}
+      {stallState === "exhausted" && (
+        <StallRecoveryCard
+          kind="exhausted"
+          rounds={exhaustedRounds?.rounds}
+          maxRounds={exhaustedRounds?.maxRounds}
+          onResume={resumeCurrentTask}
+          onStop={stopCurrentRun}
+          onOpenSettings={() => useAppStore.getState().openSettings()}
+        />
+      )}
     </>
-  ), [chatStyle, copyMessage, editPendingMessage, favoriteMessage, forwardOneMessage, groupTyping, hideStreamOverlayAsDuplicate, isGroupPane, isStreamingCurrentSession, pane.historySearchTerms, paneAvatarMeta, paneId, queuedMessages, removePendingMessage, resolveGroupInlineConfirm, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, streamTextForCurrentSession, streamingModel, toggleSelectMessage, toolOutputLines, userAvatarUrl, userBubbleLabel, visibleMessages]);
+  ), [chatStyle, copyMessage, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, hideStreamOverlayAsDuplicate, isGroupPane, isStreamingCurrentSession, pane.historySearchTerms, paneAvatarMeta, paneId, queuedMessages, removePendingMessage, resolveGroupInlineConfirm, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectMessage, toolOutputLines, userAvatarUrl, userBubbleLabel, visibleMessages]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -3006,6 +3077,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       provider: chatProvider,
       model: chatModel,
     };
+    lastSseEventAtRef.current = Date.now();
+    setStallState("none");
+    setExhaustedRounds(null);
     if ((pane.sessionId || "").trim() === requestSessionId) {
       syncStreamingUiForCurrentSession();
     }
@@ -3178,6 +3252,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           if (!line) continue;
           try {
             const payload = JSON.parse(line.slice(6));
+            lastSseEventAtRef.current = Date.now();
             const eventAgentId = payload.data?.agent_id ?? "meta";
             if (payload.type === "group_typing") {
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
@@ -3676,7 +3751,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               }
             }
             if (payload.type === "error") {
-              addPaneMessageIfSessionActive(pane.id, "tool", `❌ ${payload.data?.text ?? "未知错误"}`, "meta");
+              const errText = String(payload.data?.text ?? "未知错误");
+              if (errText.includes("已达到最大工具调用轮数")) {
+                const maxRounds = Number(payload.data?.max_rounds ?? 0) || 30;
+                const rounds = Number(payload.data?.round ?? maxRounds);
+                setExhaustedRounds({ rounds, maxRounds });
+                setStallState("exhausted");
+                addPaneMessageIfSessionActive(pane.id, "tool", errText, "meta");
+              } else {
+                addPaneMessageIfSessionActive(pane.id, "tool", `❌ ${errText}`, "meta");
+              }
             }
           } catch {
             // Ignore malformed frame.
