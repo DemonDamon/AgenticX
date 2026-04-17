@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState, type ComponentType, type SVGAttributes } from "react";
+import { useEffect, useState, type ComponentType, type SVGAttributes } from "react";
 import { LogIn as _LogIn, LogOut as _LogOut, Loader2 as _Loader2, User as _User } from "lucide-react";
 
 import { Button } from "./ds/Button";
+import { useAppStore } from "../store";
 
 type IconProps = SVGAttributes<SVGSVGElement> & { className?: string };
 function safeLucide(icon: ComponentType<IconProps> | undefined, fallbackLabel: string): ComponentType<IconProps> {
@@ -12,12 +13,6 @@ const User = safeLucide(_User, "user");
 const LogIn = safeLucide(_LogIn, "log-in");
 const LogOut = safeLucide(_LogOut, "log-out");
 const Loader2 = safeLucide(_Loader2, "loader");
-
-type AgxAccountState = {
-  loggedIn: boolean;
-  email: string;
-  displayName: string;
-};
 
 /**
  * 将官网 /init 错误转为「对用户的官方口径」：简短、不暴露部署细节；仅附错误码便于反馈支持。
@@ -81,54 +76,27 @@ function formatAgxLoginInitError(raw: string): { message: string; detail?: strin
 }
 
 export function AccountTab() {
-  const [acct, setAcct] = useState<AgxAccountState>({
-    loggedIn: false,
-    email: "",
-    displayName: "",
-  });
+  // Global account state is hydrated in App.tsx; read here so Topbar and Settings stay in sync.
+  const acct = useAppStore((s) => s.agxAccount);
+  const setAgxAccount = useAppStore((s) => s.setAgxAccount);
   const [loginBusy, setLoginBusy] = useState(false);
   const [waitingBrowser, setWaitingBrowser] = useState(false);
 
-  const refresh = useCallback(async () => {
-    try {
-      const r = await window.agenticxDesktop.loadAgxAccount();
-      if (!r.ok) return;
-      setAcct({
-        loggedIn: Boolean(r.loggedIn),
-        email: String(r.email ?? ""),
-        displayName: String(r.displayName ?? ""),
-      });
-    } catch {
-      // ignore
-    }
-  }, []);
-
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    const off = window.agenticxDesktop.onAgxAccountChanged((payload) => {
-      setAcct({
-        loggedIn: Boolean(payload.email?.trim()),
-        email: payload.email ?? "",
-        displayName: payload.displayName ?? "",
-      });
+    // Clear local waiting state when account becomes logged-in (event fired from App.tsx listener).
+    if (acct.loggedIn) {
       setWaitingBrowser(false);
       setLoginBusy(false);
-    });
+    }
+  }, [acct.loggedIn]);
+
+  useEffect(() => {
+    // Also clear waiting state on timeout; the user-facing dialog is shown in App.tsx.
     const offTimeout = window.agenticxDesktop.onAgxAccountLoginTimeout(() => {
       setWaitingBrowser(false);
       setLoginBusy(false);
-      void window.agenticxDesktop.confirmDialog({
-        title: "登录等待超时",
-        message: "未在有效时间内完成官网登录确认。请关闭等待后重试。",
-        detail: "错误代码 AGX-AUTH-201（向支持反馈时请一并提供）",
-        confirmText: "确定",
-      });
     });
     return () => {
-      off();
       offTimeout();
     };
   }, []);
@@ -175,7 +143,7 @@ export function AccountTab() {
     });
     if (!r.confirmed) return;
     await window.agenticxDesktop.agxAccountLogout();
-    await refresh();
+    setAgxAccount({ loggedIn: false, email: "", displayName: "" });
   };
 
   return (

@@ -239,6 +239,8 @@ type AppState = {
   keybindingsPanelOpen: boolean;
   planMode: boolean;
   theme: ThemeMode;
+  /** Machi 官网账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
+  agxAccount: { loggedIn: boolean; email: string; displayName: string };
   chatStyle: ChatStyle;
   /** Global user nickname shown on all bubbles and sent as context label (empty → 「我」). */
   userNickname: string;
@@ -281,6 +283,7 @@ type AppState = {
   setKeybindingsPanelOpen: (v: boolean) => void;
   setPlanMode: (v: boolean) => void;
   setTheme: (theme: ThemeMode) => void;
+  setAgxAccount: (acct: { loggedIn: boolean; email: string; displayName: string }) => void;
   setChatStyle: (style: ChatStyle) => void;
   setUserNickname: (name: string) => void;
   setUserAvatarUrl: (url: string) => void;
@@ -546,6 +549,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   keybindingsPanelOpen: false,
   planMode: false,
   theme: "dark",
+  agxAccount: { loggedIn: false, email: "", displayName: "" },
   chatStyle: loadChatStyle(),
   userNickname: loadUserNickname(),
   userAvatarUrl: loadUserAvatarUrl(),
@@ -599,6 +603,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setKeybindingsPanelOpen: (keybindingsPanelOpen) => set({ keybindingsPanelOpen }),
   setPlanMode: (planMode) => set({ planMode }),
   setTheme: (theme) => set({ theme }),
+  setAgxAccount: (agxAccount) => set({ agxAccount }),
   setChatStyle: (chatStyle) =>
     set(() => {
       try {

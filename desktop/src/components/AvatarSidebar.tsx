@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Ban, ChevronDown, ChevronRight, Clock3, Loader2, Settings } from "lucide-react";
+import { Ban, ChevronDown, ChevronRight, Clock3, Loader2 } from "lucide-react";
 import { useAppStore, type Avatar, type GroupChat } from "../store";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
@@ -818,17 +818,6 @@ export function AvatarSidebar() {
           </div>
         </div>
 
-        {/* Settings entry */}
-        <div className="shrink-0 px-2 py-2">
-          <button
-            className="flex w-full items-center gap-2.5 rounded-[10px] border border-transparent px-2.5 py-2 text-left text-[13px] font-semibold text-text-subtle transition-all hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
-            onClick={() => openSettings()}
-          >
-            <Settings className="h-4 w-4 shrink-0" aria-hidden />
-            <span>设置</span>
-            <span className="ml-auto text-[10px] font-normal text-text-faint">模型 · MCP · 偏好</span>
-          </button>
-        </div>
       </aside>
 
       {/* Context menu */}

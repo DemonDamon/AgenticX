@@ -241,6 +241,7 @@ export function App() {
   const setPlanMode = useAppStore((s) => s.setPlanMode);
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
+  const setAgxAccount = useAppStore((s) => s.setAgxAccount);
   const chatStyle = useAppStore((s) => s.chatStyle);
   const setChatStyle = useAppStore((s) => s.setChatStyle);
   const subAgents = useAppStore((s) => s.subAgents);
@@ -1119,6 +1120,44 @@ export function App() {
       // ignore storage failures
     }
   }, [theme]);
+
+  useEffect(() => {
+    // Initial account hydration and subscription to device-flow OAuth events.
+    // Both Topbar and Settings → AccountTab consume agxAccount via store; keep them in sync.
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await window.agenticxDesktop.loadAgxAccount();
+        if (cancelled || !r.ok) return;
+        setAgxAccount({
+          loggedIn: Boolean(r.loggedIn),
+          email: String(r.email ?? ""),
+          displayName: String(r.displayName ?? ""),
+        });
+      } catch {
+        // ignore; account is optional for most local workflows
+      }
+    })();
+
+    const offChanged = window.agenticxDesktop.onAgxAccountChanged((payload) => {
+      const email = String(payload.email ?? "");
+      const displayName = String(payload.displayName ?? "");
+      setAgxAccount({ loggedIn: Boolean(email.trim()), email, displayName });
+    });
+    const offTimeout = window.agenticxDesktop.onAgxAccountLoginTimeout(() => {
+      void window.agenticxDesktop.confirmDialog({
+        title: "登录等待超时",
+        message: "未在有效时间内完成官网登录确认。请重新点击「登录」再试。",
+        detail: "错误代码 AGX-AUTH-201（向支持反馈时请一并提供）",
+        confirmText: "确定",
+      });
+    });
+    return () => {
+      cancelled = true;
+      offChanged();
+      offTimeout();
+    };
+  }, [setAgxAccount]);
 
   useEffect(() => {
     const onWindowResize = () => {
