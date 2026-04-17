@@ -1565,7 +1565,10 @@ export function App() {
       const state = useAppStore.getState();
       const existingByAvatar = state.panes.find((pane) => pane.avatarId === avatarId);
       if (existingByAvatar) {
-        if ((existingByAvatar.sessionId || "").trim() !== sid) {
+        const prevSid = (existingByAvatar.sessionId || "").trim();
+        if (prevSid !== sid) {
+          // 新一轮触发切换到新 session：先清掉旧消息，避免视觉上「还在看旧聊天」。
+          setPaneMessages(existingByAvatar.id, []);
           setPaneSessionId(existingByAvatar.id, sid);
         }
         return existingByAvatar.id;

@@ -749,7 +749,12 @@ async function checkAutomationSessionBinding(
 
 async function runAutomationTaskHttp(
   task: AutomationTaskData,
-  options?: { sessionIdOverride?: string; reusePersistedSession?: boolean },
+  options?: {
+    sessionIdOverride?: string;
+    reusePersistedSession?: boolean;
+    /** Fires once the session id that will actually be used has been determined. */
+    onSessionReady?: (sessionId: string) => void;
+  },
 ): Promise<{ ok: boolean; error?: string; sessionId?: string }> {
   const portFile = path.join(CONFIG_DIR, "serve.port");
   const tokenFile = path.join(CONFIG_DIR, "serve.token");
@@ -797,6 +802,13 @@ async function runAutomationTaskHttp(
       tidEarly || "unknown",
       `[run.session_reused] existing=${sessionId.slice(0, 8)}…`,
     );
+  }
+  if (options?.onSessionReady) {
+    try {
+      options.onSessionReady(sessionId);
+    } catch {
+      /* best-effort notifier */
+    }
   }
   const bind = await checkAutomationSessionBinding(base, token, task.id, sessionId);
   if (bind.kind === "mismatch") {
@@ -913,12 +925,15 @@ class AutomationScheduler {
 
       task.lastRunAt = now.toISOString();
       dirty = true;
+      // queued phase intentionally emits without sessionId:
+      // a new automation session is created inside executeTask (每次触发新开 session)，
+      // 若此处就用 task.sessionId 打开窗格，会先显示上一轮的旧会话历史。
       emitAutomationTaskProgress({
         taskId: task.id,
         taskName: task.name,
         trigger: "schedule",
         phase: "queued",
-        sessionId: resolveAutomationSessionId(task) || undefined,
+        sessionId: undefined,
         ts: Date.now(),
       });
       void this.executeTask(task);
@@ -953,15 +968,19 @@ class AutomationScheduler {
 
   private async executeTask(task: AutomationTaskData): Promise<void> {
     try {
-      emitAutomationTaskProgress({
-        taskId: task.id,
-        taskName: task.name,
-        trigger: "schedule",
-        phase: "running",
-        sessionId: resolveAutomationSessionId(task) || undefined,
-        ts: Date.now(),
+      const result = await runAutomationTaskHttp(task, {
+        reusePersistedSession: false,
+        onSessionReady: (newSid) => {
+          emitAutomationTaskProgress({
+            taskId: task.id,
+            taskName: task.name,
+            trigger: "schedule",
+            phase: "running",
+            sessionId: newSid,
+            ts: Date.now(),
+          });
+        },
       });
-      const result = await runAutomationTaskHttp(task, { reusePersistedSession: false });
       const tasks = loadAutomationTasks();
       const found = tasks.find((t) => t.id === task.id);
       if (found) {
@@ -3462,13 +3481,23 @@ function registerIpc(): void {
         taskId: task.id,
         taskName: task.name,
         trigger: "manual",
-        phase: "running",
-        sessionId: resolveAutomationSessionId(task, sessionOverride) || undefined,
+        phase: "queued",
+        sessionId: undefined,
         ts: Date.now(),
       });
       const result = await runAutomationTaskHttp(task, {
         sessionIdOverride: sessionOverride || undefined,
         reusePersistedSession: Boolean(sessionOverride),
+        onSessionReady: (newSid) => {
+          emitAutomationTaskProgress({
+            taskId: task.id,
+            taskName: task.name,
+            trigger: "manual",
+            phase: "running",
+            sessionId: newSid,
+            ts: Date.now(),
+          });
+        },
       });
 
       task.lastRunAt = new Date().toISOString();
