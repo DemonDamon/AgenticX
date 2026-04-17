@@ -508,6 +508,16 @@ declare global {
         taskId: string,
       ) => Promise<{ ok: boolean; path: string; exists: boolean }>;
       cancelAutomationTaskRun: (taskId: string) => Promise<{ ok: boolean; error?: string }>;
+      readAutomationTaskLog: (
+        payload: string | { taskId: string; tail?: number },
+      ) => Promise<{
+        ok: boolean;
+        error?: string;
+        path: string;
+        lines: string[];
+        truncated?: boolean;
+        empty?: boolean;
+      }>;
       runAutomationTaskNow: (
         payload: string | { taskId: string; sessionId?: string },
       ) => Promise<{ ok: boolean; error?: string }>;

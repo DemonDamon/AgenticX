@@ -2578,6 +2578,38 @@ async def dispatch_meta_tool_async(
         )
         return json.dumps(payload, ensure_ascii=False)
 
+    if name == "get_automation_task_logs":
+        task_id = str(arguments.get("task_id", "")).strip()
+        if not task_id:
+            return json.dumps({"ok": False, "error": "task_id is required"}, ensure_ascii=False)
+        try:
+            tail_raw = int(arguments.get("tail", 200) or 200)
+        except (TypeError, ValueError):
+            tail_raw = 200
+        tail = max(1, min(2000, tail_raw))
+        log_path = Path.home() / ".agenticx" / "logs" / "automation" / f"{task_id}.log"
+        if not log_path.exists():
+            return json.dumps(
+                {"ok": True, "empty": True, "path": str(log_path), "lines": []},
+                ensure_ascii=False,
+            )
+        try:
+            text = log_path.read_text("utf-8", errors="replace")
+        except Exception as exc:
+            return json.dumps({"ok": False, "error": str(exc), "path": str(log_path)}, ensure_ascii=False)
+        all_lines = [ln for ln in text.splitlines() if ln.strip()]
+        slice_lines = all_lines[-tail:]
+        return json.dumps(
+            {
+                "ok": True,
+                "path": str(log_path),
+                "lines": slice_lines,
+                "truncated": len(all_lines) > len(slice_lines),
+                "total_lines": len(all_lines),
+            },
+            ensure_ascii=False,
+        )
+
     # --- Persistent automation task tools (bridged to Desktop AutomationScheduler) ---
     if name in ("schedule_task", "list_scheduled_tasks", "cancel_scheduled_task", "update_scheduled_task"):
         from agenticx.runtime._automation_tasks_io import (

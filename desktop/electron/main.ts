@@ -205,6 +205,7 @@ type AgxConfig = {
     app_id?: string;
     app_secret?: string;
   };
+  runtime?: Record<string, unknown>;
   notifications?: {
     email?: {
       enabled?: boolean;
@@ -270,6 +271,28 @@ type SkillInstallPolicyConfig = {
 const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.yaml");
 const AUTOMATION_TASKS_PATH = path.join(CONFIG_DIR, "automation_tasks.json");
+const AUTOMATION_LOGS_DIR = path.join(CONFIG_DIR, "logs", "automation");
+
+function automationLogPath(taskId: string): string {
+  const id = String(taskId ?? "").trim() || "unknown";
+  return path.join(AUTOMATION_LOGS_DIR, `${id}.log`);
+}
+
+/** Append a line to the task's persistent log file. Rotates when >2 MB. */
+function appendAutomationLog(taskId: string, line: string): void {
+  try {
+    fs.mkdirSync(AUTOMATION_LOGS_DIR, { recursive: true });
+    const file = automationLogPath(taskId);
+    try {
+      const st = fs.statSync(file);
+      if (st.size > 2 * 1024 * 1024) {
+        fs.renameSync(file, `${file}.1`);
+      }
+    } catch { /* first write */ }
+    const ts = new Date().toISOString();
+    fs.appendFileSync(file, `[${ts}] ${line.replace(/\s+$/,"")}\n`, "utf-8");
+  } catch { /* best-effort */ }
+}
 /** 默认定时任务根目录：~/.agenticx/crontask/<taskId>/，与用户指定 workspace 二选一；venv/脚本均应落在任务根下 */
 const AUTOMATION_CRONTASK_DIR = path.join(CONFIG_DIR, "crontask");
 
@@ -466,15 +489,24 @@ function resolveAutomationSessionId(task: AutomationTaskData, override?: string)
   return String(task.sessionId ?? "").trim();
 }
 
-async function drainSseChatResponse(resp: Response): Promise<{ ok: boolean; error?: string }> {
+async function drainSseChatResponse(
+  resp: Response,
+  taskId?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const tid = String(taskId ?? "").trim();
   if (!resp.ok) {
     const t = await resp.text().catch(() => "");
-    return { ok: false, error: `HTTP ${resp.status}: ${t.slice(0, 400)}` };
+    const msg = `HTTP ${resp.status}: ${t.slice(0, 400)}`;
+    if (tid) appendAutomationLog(tid, `[chat.http_error] ${msg}`);
+    return { ok: false, error: msg };
   }
   const reader = resp.body?.getReader();
   if (!reader) return { ok: true };
   const dec = new TextDecoder();
   let buffer = "";
+  let sseEvents = 0;
+  let toolCalls = 0;
+  let assistantChars = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -488,13 +520,37 @@ async function drainSseChatResponse(resp: Response): Promise<{ ok: boolean; erro
         for (const line of chunk.split("\n")) {
           const m = line.match(/^data:\s*(.+)$/);
           if (!m) continue;
+          sseEvents += 1;
           try {
-            const obj = JSON.parse(m[1]) as { type?: string; data?: { text?: string } };
+            const obj = JSON.parse(m[1]) as {
+              type?: string;
+              data?: { text?: string; name?: string };
+            };
+            if (tid) {
+              const t = String(obj.type ?? "");
+              if (t === "tool_call" || t === "tool_result") {
+                toolCalls += 1;
+                const nm = String(obj.data?.name ?? "");
+                if (nm) appendAutomationLog(tid, `[chat.sse] ${t} name=${nm}`);
+              } else if (t === "assistant_delta" || t === "assistant_text") {
+                assistantChars += String(obj.data?.text ?? "").length;
+              } else if (t && t !== "done") {
+                // Keep a compact record for other event types.
+                appendAutomationLog(tid, `[chat.sse] ${t}`);
+              }
+            }
             if (obj.type === "error") {
               const msg = String(obj.data?.text ?? "Agent 流式错误");
+              if (tid) appendAutomationLog(tid, `[chat.sse.error] ${msg.slice(0, 1200)}`);
               return { ok: false, error: msg.slice(0, 800) };
             }
             if (obj.type === "done") {
+              if (tid) {
+                appendAutomationLog(
+                  tid,
+                  `[chat.done] events=${sseEvents} tool_calls=${toolCalls} assistant_chars=${assistantChars}`,
+                );
+              }
               return { ok: true };
             }
           } catch {
@@ -506,6 +562,12 @@ async function drainSseChatResponse(resp: Response): Promise<{ ok: boolean; erro
     }
   } finally {
     reader.releaseLock();
+  }
+  if (tid) {
+    appendAutomationLog(
+      tid,
+      `[chat.stream_ended_without_done] events=${sseEvents} tool_calls=${toolCalls}`,
+    );
   }
   return { ok: true };
 }
@@ -553,16 +615,28 @@ async function invokeAutomationUserTurnWithSignal(
     chatBody.model = mod;
   }
   try {
+    appendAutomationLog(
+      tid,
+      `[chat.request] session=${sessionId.slice(0, 8)}… provider=${prov || "default"} model=${mod || "default"} prompt_chars=${userInput.length} workspace=${pathTrim || "(default)"}`,
+    );
     const resp = await fetch(`${base}/api/chat`, {
       method: "POST",
       headers,
       body: JSON.stringify(chatBody),
       signal,
     });
-    return await drainSseChatResponse(resp);
+    return await drainSseChatResponse(resp, tid);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     const name = e instanceof Error ? e.name : "";
+    const cause =
+      e && typeof e === "object" && "cause" in (e as Record<string, unknown>)
+        ? String((e as { cause?: unknown }).cause ?? "")
+        : "";
+    appendAutomationLog(
+      tid,
+      `[chat.exception] name=${name} msg=${msg.slice(0, 400)}${cause ? ` cause=${cause.slice(0, 400)}` : ""}`,
+    );
     const aborted =
       name === "AbortError" || /aborted|AbortError/i.test(msg);
     if (aborted) {
@@ -693,9 +767,18 @@ async function runAutomationTaskHttp(
   } else if (reusePersisted) {
     sessionId = String(task.sessionId ?? "").trim();
   }
+  const tidEarly = String(task.id ?? "").trim();
+  appendAutomationLog(
+    tidEarly || "unknown",
+    `[run.begin] task=${task.name} reuse_persisted=${reusePersisted} override_provided=${Boolean(override)}`,
+  );
   if (!sessionId) {
     const newSid = await createAutomationTaskSession(base, token, task);
     if (!newSid) {
+      appendAutomationLog(
+        tidEarly || "unknown",
+        "[run.session_create_failed] agx serve 可能未运行或 /api/sessions 拒绝请求",
+      );
       return {
         ok: false,
         error:
@@ -705,6 +788,15 @@ async function runAutomationTaskHttp(
     task.sessionId = newSid;
     persistAutomationTaskSession(task.id, newSid);
     sessionId = newSid;
+    appendAutomationLog(
+      tidEarly || "unknown",
+      `[run.session_created] new=${newSid}`,
+    );
+  } else {
+    appendAutomationLog(
+      tidEarly || "unknown",
+      `[run.session_reused] existing=${sessionId.slice(0, 8)}…`,
+    );
   }
   const bind = await checkAutomationSessionBinding(base, token, task.id, sessionId);
   if (bind.kind === "mismatch") {
@@ -776,6 +868,7 @@ async function runAutomationTaskHttp(
     clearTimeout(timer);
     automationRunControllers.delete(tid);
     automationRunUserCancelled.delete(tid);
+    appendAutomationLog(tid, "[run.end]");
   }
 }
 
@@ -3305,6 +3398,32 @@ function registerIpc(): void {
       return { ok: true, path: p, exists: fs.existsSync(p) };
     } catch {
       return { ok: true, path: p, exists: false };
+    }
+  });
+
+  ipcMain.handle("read-automation-task-log", async (_event, payload: unknown) => {
+    let id = "";
+    let tail = 200;
+    if (typeof payload === "string") {
+      id = payload.trim();
+    } else if (payload && typeof payload === "object") {
+      const p = payload as { taskId?: unknown; tail?: unknown };
+      id = String(p.taskId ?? "").trim();
+      const t = Number(p.tail ?? 200);
+      if (Number.isFinite(t) && t > 0) tail = Math.min(2000, Math.floor(t));
+    }
+    if (!id) return { ok: false, error: "taskId required", path: "", lines: [] };
+    const file = automationLogPath(id);
+    try {
+      if (!fs.existsSync(file)) {
+        return { ok: true, path: file, lines: [], empty: true };
+      }
+      const raw = fs.readFileSync(file, "utf-8");
+      const all = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      const slice = all.slice(Math.max(0, all.length - tail));
+      return { ok: true, path: file, lines: slice, truncated: all.length > slice.length };
+    } catch (err) {
+      return { ok: false, error: String(err), path: file, lines: [] };
     }
   });
 

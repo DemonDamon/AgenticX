@@ -124,6 +124,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "lsp_hover",
         "lsp_diagnostics",
         "list_scheduled_tasks",
+        "get_automation_task_logs",
         "cc_bridge_list",
     }
 )
@@ -1001,6 +1002,31 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_automation_task_logs",
+            "description": (
+                "Read the tail of a scheduled/automated task's execution log file "
+                "(~/.agenticx/logs/automation/<task_id>.log). "
+                "Each run writes [run.begin], [run.session_created|session_reused], [chat.request], "
+                "[chat.sse ...], [chat.done|stream_ended|http_error|sse.error|exception], and [run.end] lines. "
+                "Use this to diagnose why a task failed (e.g. terminated/timeout, http error, tool error) before proposing a fix."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "Task id (obtain via list_scheduled_tasks)."},
+                    "tail": {
+                        "type": "integer",
+                        "description": "Last N lines to return (default 200, max 2000).",
+                    },
+                },
+                "required": ["task_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 # Desktop Computer Use tools (injected at runtime when ``computer_use.enabled`` in config).
@@ -1359,6 +1385,7 @@ META_TOOL_NAMES = {
     "list_scheduled_tasks",
     "cancel_scheduled_task",
     "update_scheduled_task",
+    "get_automation_task_logs",
 }
 
 
