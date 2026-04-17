@@ -50,6 +50,8 @@ import {
 } from "./automation/RuntimeConfigSection";
 import { AccountTab } from "./AccountTab";
 import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
+import type { SettingsTab } from "../settings-tab";
+export type { SettingsTab } from "../settings-tab";
 
 export type FavoriteForwardContext = {
   sourceSessionId: string;
@@ -149,19 +151,6 @@ function resolveMcpRowPresentation(server: McpServer): {
   };
 }
 
-type SettingsTab =
-  | "account"
-  | "general"
-  | "provider"
-  | "mcp"
-  | "tools"
-  | "skills"
-  | "hooks"
-  | "automation"
-  | "email"
-  | "workspace"
-  | "favorites"
-  | "server";
 type ConfirmMode = "manual" | "semi-auto" | "auto";
 type EmailPresetId = "qq" | "163" | "gmail" | "outlook" | "custom";
 
@@ -4714,10 +4703,17 @@ export function SettingsPanel({
   const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
   const effectiveMetaAvatarUrl = metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL;
   const setMetaAvatarUrl = useAppStore((s) => s.setMetaAvatarUrl);
+  const settingsOpenToTab = useAppStore((s) => s.settings.openToTab);
+  const updateSettingsSlice = useAppStore((s) => s.updateSettings);
   const initializedForOpenRef = useRef(false);
   const toolsTabRef = useRef<ToolsTabHandle>(null);
   const permissionsPanelRef = useRef<PermissionsAdvancedPanelHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
+  useEffect(() => {
+    if (!open || !settingsOpenToTab) return;
+    setTab(settingsOpenToTab);
+    updateSettingsSlice({ openToTab: undefined });
+  }, [open, settingsOpenToTab, updateSettingsSlice]);
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
   const [draft, setDraft] = useState<Record<string, ProviderEntry>>({});
   const [defProv, setDefProv] = useState(defaultProvider);
