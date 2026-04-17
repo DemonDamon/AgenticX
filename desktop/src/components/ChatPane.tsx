@@ -26,6 +26,7 @@ import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { HoverTip } from "./ds/HoverTip";
 import { Toast } from "./ds/Toast";
 import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
+import { clipboardPlainTextForPaste } from "../utils/clipboard-plain-text";
 import { isKnownNonVisionChatModel } from "../utils/model-vision";
 import {
   attachmentsFromSessionRow,
@@ -4405,25 +4406,36 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onPaste={(e) => {
                 const dt = e.clipboardData;
                 const raw = extractClipboardImageFiles(dt);
-                const plain = dt?.getData("text/plain") ?? "";
-                if (raw.length === 0) return;
-                if (isKnownNonVisionChatModel(chatProvider, chatModel)) {
+                const plainText = clipboardPlainTextForPaste(dt);
+
+                if (raw.length > 0) {
+                  if (isKnownNonVisionChatModel(chatProvider, chatModel)) {
+                    e.preventDefault();
+                    setAttachToastOpen(true);
+                    return;
+                  }
                   e.preventDefault();
-                  setAttachToastOpen(true);
+                  const files = withClipboardImageNames(raw);
+                  if (plainText) {
+                    document.execCommand("insertText", false, plainText);
+                    const value = extractComposerText();
+                    setInput(value);
+                    updateAtStateFromText(value);
+                  }
+                  for (const file of files) {
+                    const key = `${file.name}:${file.size}:${file.lastModified}`;
+                    parseLocalFile(file, key);
+                  }
                   return;
                 }
+
+                // 无图片：禁止默认 HTML 粘贴，只插入纯文本，避免黑底/字体等富文本样式。
+                if (!plainText.trim()) return;
                 e.preventDefault();
-                const files = withClipboardImageNames(raw);
-                if (plain) {
-                  document.execCommand("insertText", false, plain.replace(/\r\n/g, "\n"));
-                  const value = extractComposerText();
-                  setInput(value);
-                  updateAtStateFromText(value);
-                }
-                for (const file of files) {
-                  const key = `${file.name}:${file.size}:${file.lastModified}`;
-                  parseLocalFile(file, key);
-                }
+                document.execCommand("insertText", false, plainText);
+                const value = extractComposerText();
+                setInput(value);
+                updateAtStateFromText(value);
               }}
               onKeyDown={(e) => {
                 const isImeComposing =
