@@ -937,6 +937,54 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_scheduled_task",
+            "description": (
+                "Partially update an existing scheduled/automated task by task_id. "
+                "Only fields explicitly provided will be changed; omitted fields keep their current value. "
+                "Use this to tweak an existing task's name, prompt, frequency, workspace, enabled flag or effective date range "
+                "via natural-language dialog — no need to delete and recreate."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "ID of the task to update (obtain via list_scheduled_tasks)."},
+                    "name": {"type": "string", "description": "New human-readable task name."},
+                    "instruction": {
+                        "type": "string",
+                        "description": (
+                            "New prompt for the automation runner. When provided, the tool re-runs MCP preflight and re-injects "
+                            "the Execution Contract, replacing any previously auto-injected contract block."
+                        ),
+                    },
+                    "frequency_type": {
+                        "type": "string",
+                        "enum": ["daily", "interval", "once"],
+                        "description": "If provided, rebuilds the frequency. Omitted frequency fields fall back to the task's current values.",
+                    },
+                    "time": {"type": "string", "description": "HH:MM 24h time for daily/once."},
+                    "days": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Days of week (1=Mon … 7=Sun) for daily/interval.",
+                    },
+                    "interval_hours": {"type": "integer", "description": "Run every N hours when frequency_type='interval'."},
+                    "date": {"type": "string", "description": "YYYY-MM-DD date when frequency_type='once'."},
+                    "workspace": {
+                        "type": "string",
+                        "description": "New task root directory. Pass empty string to reset to default (~/.agenticx/crontask/<task_id>/).",
+                    },
+                    "enabled": {"type": "boolean", "description": "Enable/disable the task."},
+                    "effective_date_range_start": {"type": "string", "description": "Optional effective start date (YYYY-MM-DD). Empty string clears it."},
+                    "effective_date_range_end": {"type": "string", "description": "Optional effective end date (YYYY-MM-DD). Empty string clears it."},
+                },
+                "required": ["task_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 # Desktop Computer Use tools (injected at runtime when ``computer_use.enabled`` in config).
@@ -1294,6 +1342,7 @@ META_TOOL_NAMES = {
     "schedule_task",
     "list_scheduled_tasks",
     "cancel_scheduled_task",
+    "update_scheduled_task",
 }
 
 
