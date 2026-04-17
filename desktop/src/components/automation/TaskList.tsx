@@ -151,6 +151,12 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
                 {task.workspace && (
                   <div><span className="text-text-faint">工作区：</span>{task.workspace}</div>
                 )}
+                {task.provider && task.model ? (
+                  <div>
+                    <span className="text-text-faint">执行模型：</span>
+                    {task.provider}/{task.model}
+                  </div>
+                ) : null}
                 {task.lastRunAt && (
                   <div>
                     <span className="text-text-faint">上次执行：</span>

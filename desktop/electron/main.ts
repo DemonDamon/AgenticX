@@ -401,6 +401,9 @@ interface AutomationTaskData {
   prompt: string;
   workspace?: string;
   sessionId?: string;
+  /** 与 ChatRequest 对齐；两者都非空时用于创建会话与每次 /api/chat */
+  provider?: string;
+  model?: string;
   frequency: AutomationFrequency;
   effectiveDateRange?: { start?: string; end?: string };
   enabled: boolean;
@@ -511,15 +514,14 @@ async function invokeAutomationUserTurnWithSignal(
   base: string,
   token: string,
   sessionId: string,
+  task: AutomationTaskData,
   userInput: string,
-  workspacePath: string | undefined,
   signal: AbortSignal,
-  taskId: string,
   timeoutMs: number,
 ): Promise<{ ok: boolean; error?: string }> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["x-agx-desktop-token"] = token;
-  const pathTrim = String(workspacePath ?? "").trim();
+  const pathTrim = String(task.workspace ?? "").trim();
   if (pathTrim) {
     try {
       const wsResp = await fetch(`${base}/api/taskspace/workspaces`, {
@@ -537,16 +539,24 @@ async function invokeAutomationUserTurnWithSignal(
       console.warn("[automation] taskspace attach error:", e);
     }
   }
+  const tid = String(task.id ?? "").trim();
+  const prov = String(task.provider ?? "").trim();
+  const mod = String(task.model ?? "").trim();
+  const chatBody: Record<string, unknown> = {
+    session_id: sessionId,
+    user_input: userInput,
+    // interactive：不把任务提示词包进 AutoSolve 长模板写入历史；避免与飞书/Machi 会话混淆且便于删除持久化
+    mode: "interactive",
+  };
+  if (prov && mod) {
+    chatBody.provider = prov;
+    chatBody.model = mod;
+  }
   try {
     const resp = await fetch(`${base}/api/chat`, {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        session_id: sessionId,
-        user_input: userInput,
-        // interactive：不把任务提示词包进 AutoSolve 长模板写入历史；避免与飞书/Machi 会话混淆且便于删除持久化
-        mode: "interactive",
-      }),
+      body: JSON.stringify(chatBody),
       signal,
     });
     return await drainSseChatResponse(resp);
@@ -556,7 +566,7 @@ async function invokeAutomationUserTurnWithSignal(
     const aborted =
       name === "AbortError" || /aborted|AbortError/i.test(msg);
     if (aborted) {
-      if (automationRunUserCancelled.has(taskId)) {
+      if (automationRunUserCancelled.has(tid)) {
         return { ok: false, error: "已手动终止本次自动化执行。" };
       }
       const mins = Math.max(1, Math.round(timeoutMs / 60_000));
@@ -576,13 +586,20 @@ async function createAutomationTaskSession(
 ): Promise<string | undefined> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["x-agx-desktop-token"] = token;
+  const prov = String(task.provider ?? "").trim();
+  const mod = String(task.model ?? "").trim();
+  const body: Record<string, unknown> = {
+    avatar_id: `automation:${task.id}`,
+    name: task.name,
+  };
+  if (prov && mod) {
+    body.provider = prov;
+    body.model = mod;
+  }
   const resp = await fetch(`${base}/api/sessions`, {
     method: "POST",
     headers,
-    body: JSON.stringify({
-      avatar_id: `automation:${task.id}`,
-      name: task.name,
-    }),
+    body: JSON.stringify(body),
   });
   if (!resp.ok) return undefined;
   const data = (await resp.json()) as { session_id?: unknown };
@@ -658,7 +675,7 @@ async function checkAutomationSessionBinding(
 
 async function runAutomationTaskHttp(
   task: AutomationTaskData,
-  options?: { sessionIdOverride?: string },
+  options?: { sessionIdOverride?: string; reusePersistedSession?: boolean },
 ): Promise<{ ok: boolean; error?: string; sessionId?: string }> {
   const portFile = path.join(CONFIG_DIR, "serve.port");
   const tokenFile = path.join(CONFIG_DIR, "serve.token");
@@ -668,7 +685,14 @@ async function runAutomationTaskHttp(
   const port = fs.readFileSync(portFile, "utf-8").trim();
   const token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, "utf-8").trim() : "";
   const base = `http://127.0.0.1:${port}`;
-  let sessionId = resolveAutomationSessionId(task, options?.sessionIdOverride);
+  const override = String(options?.sessionIdOverride ?? "").trim();
+  const reusePersisted = Boolean(options?.reusePersistedSession);
+  let sessionId = "";
+  if (override) {
+    sessionId = override;
+  } else if (reusePersisted) {
+    sessionId = String(task.sessionId ?? "").trim();
+  }
   if (!sessionId) {
     const newSid = await createAutomationTaskSession(base, token, task);
     if (!newSid) {
@@ -710,10 +734,9 @@ async function runAutomationTaskHttp(
       base,
       token,
       sessionId,
+      task,
       prompt,
-      task.workspace,
       ac.signal,
-      tid,
       timeoutMs,
     );
     if (first.ok) return { ...first, sessionId };
@@ -738,10 +761,9 @@ async function runAutomationTaskHttp(
       base,
       token,
       repairedSid,
+      task,
       prompt,
-      task.workspace,
       ac.signal,
-      tid,
       timeoutMs,
     );
     if (second.ok) return { ...second, sessionId: repairedSid };
@@ -846,7 +868,7 @@ class AutomationScheduler {
         sessionId: resolveAutomationSessionId(task) || undefined,
         ts: Date.now(),
       });
-      const result = await runAutomationTaskHttp(task);
+      const result = await runAutomationTaskHttp(task, { reusePersistedSession: false });
       const tasks = loadAutomationTasks();
       const found = tasks.find((t) => t.id === task.id);
       if (found) {
@@ -3327,6 +3349,7 @@ function registerIpc(): void {
       });
       const result = await runAutomationTaskHttp(task, {
         sessionIdOverride: sessionOverride || undefined,
+        reusePersistedSession: Boolean(sessionOverride),
       });
 
       task.lastRunAt = new Date().toISOString();

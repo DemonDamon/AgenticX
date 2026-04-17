@@ -910,6 +910,14 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                         "type": "boolean",
                         "description": "Whether the task is enabled immediately. Default: true",
                     },
+                    "provider": {
+                        "type": "string",
+                        "description": "Studio LLM provider id (must be set together with model). Optional.",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Model name for this task (must be set together with provider). Optional.",
+                    },
                 },
                 "required": ["name", "instruction"],
             },
@@ -979,6 +987,14 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "enabled": {"type": "boolean", "description": "Enable/disable the task."},
                     "effective_date_range_start": {"type": "string", "description": "Optional effective start date (YYYY-MM-DD). Empty string clears it."},
                     "effective_date_range_end": {"type": "string", "description": "Optional effective end date (YYYY-MM-DD). Empty string clears it."},
+                    "provider": {
+                        "type": "string",
+                        "description": "LLM provider for scheduled runs (set together with model; empty clears both).",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "LLM model id for scheduled runs (set together with provider; empty clears both).",
+                    },
                 },
                 "required": ["task_id"],
                 "additionalProperties": False,

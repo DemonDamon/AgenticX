@@ -141,14 +141,13 @@ export function AutomationTab() {
   }, [tasks, loadTasks]);
 
   const handleRunNow = useCallback(async (task: AutomationTask) => {
-    const sessionId = (task.sessionId ?? "").trim();
-    const r = await window.agenticxDesktop.runAutomationTaskNow({
-      taskId: task.id,
-      sessionId: sessionId || undefined,
-    });
+    const r = await window.agenticxDesktop.runAutomationTaskNow({ taskId: task.id });
     setRunHint(
       r.ok
-        ? { kind: "ok", text: "已触发执行，请在该会话的对话窗口查看进度。" }
+        ? {
+            kind: "ok",
+            text: "已在新会话中触发执行。展开该任务可查看上次结果；侧栏打开该任务窗格可查看最新一轮对话。",
+          }
         : { kind: "err", text: r.error ?? "执行失败" },
     );
     setTimeout(() => void loadTasks(), 1500);
@@ -180,9 +179,8 @@ export function AutomationTab() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div>
-        <h3 className="text-base font-semibold text-text-strong">自动化</h3>
-        <p className="mt-1 text-xs text-text-muted">管理自动化任务，让 Machi 按计划为你工作。</p>
+      <div className="text-sm text-text-subtle">
+      管理自动化任务，让 Machi 按计划为你工作。
       </div>
 
       {/* System section */}

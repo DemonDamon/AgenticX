@@ -1,8 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X, FolderOpen, ChevronDown } from "lucide-react";
 import { FrequencyPicker } from "./FrequencyPicker";
 import type { AutomationTask, AutomationFrequency } from "./types";
 import { deleteAutomationTaskWithConfirm } from "../../utils/automation-delete";
+import { useAppStore } from "../../store";
+import { getProviderDisplayName } from "../../utils/provider-display";
+
+function encodeLlm(provider: string, model: string): string {
+  return `${provider}:${model}`;
+}
+
+function decodeLlm(value: string): { provider: string; model: string } | null {
+  const i = value.indexOf(":");
+  if (i <= 0) return null;
+  const provider = value.slice(0, i).trim();
+  const model = value.slice(i + 1).trim();
+  if (!provider || !model) return null;
+  return { provider, model };
+}
 
 interface Props {
   initial?: AutomationTask | null;
@@ -36,6 +51,29 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
   const [wsFilter, setWsFilter] = useState("");
   const [wsHint, setWsHint] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const settings = useAppStore((s) => s.settings);
+  const [llmValue, setLlmValue] = useState(() => {
+    const p = (initial?.provider ?? "").trim();
+    const m = (initial?.model ?? "").trim();
+    return p && m ? encodeLlm(p, m) : "";
+  });
+
+  const llmOptions = useMemo(() => {
+    const result: { value: string; label: string }[] = [];
+    for (const [provName, entry] of Object.entries(settings.providers)) {
+      if (entry.enabled === false) continue;
+      if (!entry.apiKey) continue;
+      const provLabel = getProviderDisplayName(provName, entry);
+      if (entry.models.length > 0) {
+        for (const m of entry.models) {
+          result.push({ value: encodeLlm(provName, m), label: `${provLabel}/${m}` });
+        }
+      } else if (entry.model) {
+        result.push({ value: encodeLlm(provName, entry.model), label: `${provLabel}/${entry.model}` });
+      }
+    }
+    return result;
+  }, [settings.providers]);
 
   const pickWorkspaceFolder = useCallback(async () => {
     setWsHint("");
@@ -91,6 +129,7 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
       const id = initial?.id?.trim() ? initial.id.trim() : generateId();
       const createdAt = initial?.createdAt?.trim() ? initial.createdAt.trim() : new Date().toISOString();
       const sid = (initial?.sessionId ?? "").trim() || undefined;
+      const llm = decodeLlm(llmValue.trim());
       const task: AutomationTask = {
         id,
         name: name.trim(),
@@ -105,7 +144,12 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
         lastRunStatus: initial?.lastRunStatus,
         lastRunError: initial?.lastRunError,
         fromTemplate: initial?.fromTemplate,
+        ...(llm ? { provider: llm.provider, model: llm.model } : {}),
       };
+      if (!llm) {
+        delete (task as { provider?: string }).provider;
+        delete (task as { model?: string }).model;
+      }
       const res = await onSave(task);
       if (!res.ok) setSaveError(res.error?.trim() || "保存失败，请重试。");
     } catch (e) {
@@ -113,7 +157,7 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
     } finally {
       setSaving(false);
     }
-  }, [name, prompt, workspace, frequency, dateRangeEnabled, dateStart, dateEnd, initial, onSave]);
+  }, [name, prompt, workspace, frequency, dateRangeEnabled, dateStart, dateEnd, llmValue, initial, onSave]);
 
   const handleDeleteClick = useCallback(async () => {
     if (!canDelete || !editingId) return;
@@ -241,6 +285,29 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
               </div>
             )}
           </div>
+
+          {/* Per-task LLM */}
+          <label className="block">
+            <span className="text-sm font-medium text-text-strong">执行模型</span>
+            <span className="ml-1 text-xs text-text-faint">
+              （可选；不选则用 Studio 默认模型。每次触发会在新会话中执行。）
+            </span>
+            <select
+              value={llmValue}
+              onChange={(e) => setLlmValue(e.target.value)}
+              className="mt-1 w-full rounded-md border border-border bg-surface-card px-3 py-2 text-sm text-text-primary focus:border-text-subtle focus:outline-none"
+            >
+              <option value="">默认（与主界面当前模型策略一致）</option>
+              {llmOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            {llmOptions.length === 0 ? (
+              <p className="mt-1 text-xs text-amber-400/90">请先在设置中配置 API Key 并启用模型，此处才会出现可选列表。</p>
+            ) : null}
+          </label>
 
           {/* Prompt */}
           <label className="block">
