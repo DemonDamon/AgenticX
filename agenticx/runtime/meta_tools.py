@@ -2650,6 +2650,11 @@ async def dispatch_meta_tool_async(
                 default_ws = str(Path.home() / ".agenticx" / "crontask" / task_id)
                 task_obj["workspace"] = default_ws
                 Path(default_ws).mkdir(parents=True, exist_ok=True)
+            prov = str(arguments.get("provider", "") or "").strip()
+            mod = str(arguments.get("model", "") or "").strip()
+            if prov and mod:
+                task_obj["provider"] = prov
+                task_obj["model"] = mod
             # 不写入 sessionId：若绑定 Machi/当前对话的会话 ID，侧栏打开「定时」窗格会错误加载该会话历史。
             # 专属会话应在 Desktop 侧栏点击该任务时由 automation:<task_id> 创建并回写。
 
@@ -2685,6 +2690,8 @@ async def dispatch_meta_tool_async(
                     "lastRunAt": t.get("lastRunAt"),
                     "lastRunStatus": t.get("lastRunStatus"),
                     "lastRunError": t.get("lastRunError"),
+                    "provider": t.get("provider"),
+                    "model": t.get("model"),
                 })
             return json.dumps({"ok": True, "tasks": items}, ensure_ascii=False)
 
@@ -2833,6 +2840,27 @@ async def dispatch_meta_tool_async(
                     target["enabled"] = new_enabled
                     changed.append("enabled")
 
+            # --- LLM (provider + model together; clearing either removes both) ---
+            if "provider" in arguments or "model" in arguments:
+                old_p = str(target.get("provider", "") or "").strip()
+                old_m = str(target.get("model", "") or "").strip()
+                new_p = old_p
+                new_m = old_m
+                if "provider" in arguments:
+                    new_p = str(arguments.get("provider", "") or "").strip()
+                if "model" in arguments:
+                    new_m = str(arguments.get("model", "") or "").strip()
+                if new_p and new_m:
+                    target["provider"] = new_p
+                    target["model"] = new_m
+                    if (new_p, new_m) != (old_p, old_m):
+                        changed.append("llm")
+                else:
+                    target.pop("provider", None)
+                    target.pop("model", None)
+                    if old_p or old_m:
+                        changed.append("llm")
+
             # --- effective date range ---
             if "effective_date_range_start" in arguments or "effective_date_range_end" in arguments:
                 existing_range = target.get("effectiveDateRange") if isinstance(target.get("effectiveDateRange"), dict) else {}
@@ -2870,6 +2898,8 @@ async def dispatch_meta_tool_async(
                 "frequency": target.get("frequency"),
                 "workspace": target.get("workspace"),
                 "effectiveDateRange": target.get("effectiveDateRange"),
+                "provider": target.get("provider"),
+                "model": target.get("model"),
             }
             payload: Dict[str, Any] = {
                 "ok": True,

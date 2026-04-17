@@ -10,6 +10,9 @@ export interface AutomationTask {
   workspace?: string;
   /** 执行 /api/chat 时使用的专属会话；由侧栏「定时」打开该任务窗格时创建并回写，勿与 Machi/飞书主会话混用 */
   sessionId?: string;
+  /** 定时触发使用的 LLM；需 provider+model 同时设置；未设置则用 Studio 默认 */
+  provider?: string;
+  model?: string;
   frequency: AutomationFrequency;
   effectiveDateRange?: { start?: string; end?: string };
   enabled: boolean;

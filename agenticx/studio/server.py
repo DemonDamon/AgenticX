@@ -2639,8 +2639,18 @@ def create_studio_app() -> FastAPI:
         session_name = str(payload.get("name", "")).strip() or None
         inherit_from = str(payload.get("inherit_from_session_id", "")).strip() or None
         avatar_cfg = avatar_registry.get_avatar(avatar_id) if avatar_id else None
-        provider = avatar_cfg.default_provider if avatar_cfg and avatar_cfg.default_provider else None
-        model = avatar_cfg.default_model if avatar_cfg and avatar_cfg.default_model else None
+        provider_override = str(payload.get("provider", "") or "").strip() or None
+        model_override = str(payload.get("model", "") or "").strip() or None
+        provider = (
+            provider_override
+            if provider_override
+            else (avatar_cfg.default_provider if avatar_cfg and avatar_cfg.default_provider else None)
+        )
+        model = (
+            model_override
+            if model_override
+            else (avatar_cfg.default_model if avatar_cfg and avatar_cfg.default_model else None)
+        )
 
         inherited_summary = ""
         inherited_context_files: dict = {}
