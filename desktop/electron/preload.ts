@@ -303,6 +303,15 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     }>,
   cancelAutomationTaskRun: async (taskId: string) =>
     ipcRenderer.invoke("cancel-automation-task-run", taskId) as Promise<{ ok: boolean; error?: string }>,
+  readAutomationTaskLog: async (payload: string | { taskId: string; tail?: number }) =>
+    ipcRenderer.invoke("read-automation-task-log", payload) as Promise<{
+      ok: boolean;
+      error?: string;
+      path: string;
+      lines: string[];
+      truncated?: boolean;
+      empty?: boolean;
+    }>,
   runAutomationTaskNow: async (payload: string | { taskId: string; sessionId?: string }) =>
     ipcRenderer.invoke("run-automation-task-now", payload) as Promise<{ ok: boolean; error?: string }>,
   loadSkillInstallPolicy: async () => ipcRenderer.invoke("load-skill-install-policy"),

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Pencil, Trash2, Play, ChevronDown } from "lucide-react";
+import { useCallback, useState } from "react";
+import { Pencil, Trash2, Play, ChevronDown, FileText } from "lucide-react";
 import type { AutomationTask } from "./types";
 
 interface Props {
@@ -68,6 +68,33 @@ function relativeTime(iso: string): string {
 export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
+  const [logByTask, setLogByTask] = useState<
+    Record<string, { path: string; lines: string[]; empty?: boolean; error?: string }>
+  >({});
+
+  const loadLog = useCallback(async (taskId: string) => {
+    try {
+      const r = await window.agenticxDesktop.readAutomationTaskLog({ taskId, tail: 120 });
+      setLogByTask((prev) => ({
+        ...prev,
+        [taskId]: {
+          path: r.path,
+          lines: r.lines ?? [],
+          empty: r.empty,
+          error: r.error,
+        },
+      }));
+    } catch (err) {
+      setLogByTask((prev) => ({
+        ...prev,
+        [taskId]: {
+          path: "",
+          lines: [],
+          error: err instanceof Error ? err.message : String(err),
+        },
+      }));
+    }
+  }, []);
 
   const handleRunNow = (task: AutomationTask) => {
     setRunningId(task.id);
@@ -176,6 +203,36 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
                     ) : null}
                   </div>
                 )}
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-panel px-2 py-1 text-[11px] text-text-muted transition hover:border-text-faint hover:text-text-primary"
+                    onClick={() => void loadLog(task.id)}
+                  >
+                    <FileText className="h-3 w-3" />
+                    查看执行日志
+                  </button>
+                  {logByTask[task.id]?.path ? (
+                    <span className="truncate text-[10px] text-text-faint" title={logByTask[task.id].path}>
+                      {logByTask[task.id].path}
+                    </span>
+                  ) : null}
+                </div>
+                {logByTask[task.id] ? (
+                  <div className="mt-1 max-h-52 overflow-y-auto rounded-md border border-border bg-surface-panel/60 p-2 font-mono text-[11px] leading-snug text-text-muted">
+                    {logByTask[task.id].error ? (
+                      <div className="text-rose-400">读取日志失败：{logByTask[task.id].error}</div>
+                    ) : logByTask[task.id].empty || logByTask[task.id].lines.length === 0 ? (
+                      <div className="text-text-faint">暂无日志（任务尚未执行过，或刚刚重建）。</div>
+                    ) : (
+                      logByTask[task.id].lines.map((ln, i) => (
+                        <div key={i} className="whitespace-pre-wrap break-all">
+                          {ln}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
