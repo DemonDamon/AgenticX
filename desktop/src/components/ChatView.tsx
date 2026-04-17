@@ -270,6 +270,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const insertMessageAfter = useAppStore((s) => s.insertMessageAfter);
   const setStatus = useAppStore((s) => s.setStatus);
   const openSettings = useAppStore((s) => s.openSettings);
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
+  const agxAccount = useAppStore((s) => s.agxAccount);
+  const setAgxAccount = useAppStore((s) => s.setAgxAccount);
   const activeProvider = useAppStore((s) => s.activeProvider);
   const activeModel = useAppStore((s) => s.activeModel);
   const setActiveModel = useAppStore((s) => s.setActiveModel);
@@ -311,6 +315,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [keybindingsOpen, setKeybindingsOpen] = useState(false);
+  const [loginBusy, setLoginBusy] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const listRef = useRef<HTMLDivElement>(null);
@@ -1357,7 +1362,84 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               团队{subAgents.length > 0 ? `(${subAgents.length})` : ""}
             </button>
           ) : null}
-          <button className="no-drag rounded-md px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong" onClick={() => openSettings()} title="设置">⚙</button>
+          <button
+            className="no-drag rounded-md px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+            onClick={() => {
+              const next = theme === "dark" || theme === "dim" ? "light" : "dark";
+              setTheme(next);
+              try {
+                window.localStorage.setItem("agx-theme", next);
+              } catch {
+                // ignore storage errors
+              }
+            }}
+            title={theme === "light" ? "切换到暗色" : "切换到亮色"}
+            aria-label="切换主题"
+          >
+            {theme === "light" ? "🌙" : "☀"}
+          </button>
+          <button
+            className="no-drag rounded-md px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+            onClick={() => openSettings()}
+            title="设置"
+          >
+            ⚙
+          </button>
+          {agxAccount.loggedIn ? (
+            <button
+              className="no-drag inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+              onClick={async () => {
+                const r = await window.agenticxDesktop.confirmDialog({
+                  title: "退出官网账号",
+                  message: "确定要清除本机已保存的 Machi 官网登录状态吗？",
+                  confirmText: "退出",
+                  destructive: true,
+                });
+                if (!r.confirmed) return;
+                await window.agenticxDesktop.agxAccountLogout();
+                setAgxAccount({ loggedIn: false, email: "", displayName: "" });
+              }}
+              title={agxAccount.displayName || agxAccount.email || "已登录"}
+            >
+              <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-400/90 text-[9px] font-semibold text-black">
+                {(agxAccount.displayName || agxAccount.email || "?").trim().charAt(0).toUpperCase()}
+              </span>
+              <span className="max-w-[80px] truncate">
+                {agxAccount.displayName || agxAccount.email}
+              </span>
+            </button>
+          ) : (
+            <button
+              className="no-drag rounded-md px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+              disabled={loginBusy}
+              onClick={async () => {
+                if (loginBusy) return;
+                setLoginBusy(true);
+                try {
+                  const r = await window.agenticxDesktop.agxAccountLoginStart();
+                  if (!r.ok) {
+                    await window.agenticxDesktop.confirmDialog({
+                      title: "无法开始登录",
+                      message: "未能开始官网账号登录，请稍后再试。",
+                      detail: typeof r.error === "string" && r.error ? `错误：${r.error}` : undefined,
+                      confirmText: "确定",
+                    });
+                  }
+                } catch (e) {
+                  await window.agenticxDesktop.confirmDialog({
+                    title: "无法开始登录",
+                    message: String(e),
+                    confirmText: "确定",
+                  });
+                } finally {
+                  setLoginBusy(false);
+                }
+              }}
+              title="登录 Machi 官网账号"
+            >
+              {loginBusy ? "登录中..." : "登录"}
+            </button>
+          )}
         </div>
       </div>
 
