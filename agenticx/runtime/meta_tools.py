@@ -2579,7 +2579,7 @@ async def dispatch_meta_tool_async(
         return json.dumps(payload, ensure_ascii=False)
 
     # --- Persistent automation task tools (bridged to Desktop AutomationScheduler) ---
-    if name in ("schedule_task", "list_scheduled_tasks", "cancel_scheduled_task"):
+    if name in ("schedule_task", "list_scheduled_tasks", "cancel_scheduled_task", "update_scheduled_task"):
         from agenticx.runtime._automation_tasks_io import (
             load_automation_tasks,
             save_automation_tasks,
@@ -2678,6 +2678,10 @@ async def dispatch_meta_tool_async(
                     "name": t.get("name", ""),
                     "enabled": t.get("enabled", False),
                     "frequency": t.get("frequency"),
+                    "workspace": t.get("workspace"),
+                    "prompt": t.get("prompt"),
+                    "effectiveDateRange": t.get("effectiveDateRange"),
+                    "createdAt": t.get("createdAt"),
                     "lastRunAt": t.get("lastRunAt"),
                     "lastRunStatus": t.get("lastRunStatus"),
                     "lastRunError": t.get("lastRunError"),
@@ -2701,5 +2705,180 @@ async def dispatch_meta_tool_async(
                 {"ok": found, "task_id": task_id, "message": "已禁用该定时任务。" if found else "未找到该任务。"},
                 ensure_ascii=False,
             )
+
+        if name == "update_scheduled_task":
+            task_id = str(arguments.get("task_id", "")).strip()
+            if not task_id:
+                return json.dumps({"ok": False, "error": "task_id is required"}, ensure_ascii=False)
+
+            tasks = load_automation_tasks()
+            target: Optional[Dict[str, Any]] = None
+            for t in tasks:
+                if t.get("id") == task_id:
+                    target = t
+                    break
+            if target is None:
+                return json.dumps({"ok": False, "error": f"task not found: {task_id}"}, ensure_ascii=False)
+
+            changed: List[str] = []
+
+            # --- name ---
+            if "name" in arguments:
+                new_name = str(arguments.get("name", "")).strip()
+                if new_name and new_name != target.get("name"):
+                    target["name"] = new_name
+                    changed.append("name")
+
+            # --- instruction / prompt (re-run preflight + re-inject contract) ---
+            preflight_payload: Optional[Dict[str, Any]] = None
+            if "instruction" in arguments:
+                new_instruction = str(arguments.get("instruction", "")).strip()
+                if not new_instruction:
+                    return json.dumps(
+                        {"ok": False, "error": "instruction must be non-empty when provided"},
+                        ensure_ascii=False,
+                    )
+                preflight_payload = _automation_task_mcp_preflight(
+                    session=session,
+                    instruction=new_instruction,
+                )
+                if not bool(preflight_payload.get("ok")):
+                    return json.dumps(
+                        {
+                            "ok": False,
+                            "error": "automation preflight failed: no suitable connected crawler MCP tools",
+                            "preflight": preflight_payload,
+                        },
+                        ensure_ascii=False,
+                    )
+                augmented = _augment_automation_instruction_with_contract(
+                    new_instruction,
+                    preflight=preflight_payload,
+                )
+                if augmented != target.get("prompt"):
+                    target["prompt"] = augmented
+                    changed.append("prompt")
+
+            # --- frequency (rebuild when frequency_type provided; else allow in-place edits) ---
+            existing_freq = target.get("frequency") if isinstance(target.get("frequency"), dict) else {}
+            if "frequency_type" in arguments:
+                freq_type = str(arguments.get("frequency_type", "daily")).strip() or "daily"
+                # Fallbacks preserve current time/days when caller omits them.
+                prev_time = str(existing_freq.get("time", "09:00")) if existing_freq.get("type") in ("daily", "once") else "09:00"
+                prev_days_raw = existing_freq.get("days") if existing_freq.get("type") in ("daily", "interval") else None
+                prev_days = (
+                    [int(d) for d in prev_days_raw if isinstance(d, (int, float))]
+                    if isinstance(prev_days_raw, list) and prev_days_raw
+                    else [1, 2, 3, 4, 5, 6, 7]
+                )
+                time_str = str(arguments.get("time", prev_time)).strip() or prev_time
+                days_arg = arguments.get("days")
+                if isinstance(days_arg, list) and days_arg:
+                    days = [int(d) for d in days_arg if isinstance(d, (int, float))]
+                else:
+                    days = prev_days
+
+                if freq_type == "interval":
+                    prev_hours = int(existing_freq.get("hours", 4) or 4) if existing_freq.get("type") == "interval" else 4
+                    interval_hours = int(arguments.get("interval_hours", prev_hours) or prev_hours)
+                    new_frequency: Dict[str, Any] = {"type": "interval", "hours": interval_hours, "days": days}
+                elif freq_type == "once":
+                    prev_date = str(existing_freq.get("date", "")) if existing_freq.get("type") == "once" else ""
+                    date_str = str(arguments.get("date", prev_date)).strip()
+                    if not date_str:
+                        from datetime import date as _date_cls
+                        date_str = _date_cls.today().isoformat()
+                    new_frequency = {"type": "once", "time": time_str, "date": date_str}
+                else:
+                    new_frequency = {"type": "daily", "time": time_str, "days": days}
+                target["frequency"] = new_frequency
+                changed.append("frequency")
+            else:
+                # In-place tweaks on existing frequency (time/days/interval_hours/date)
+                freq_dirty = False
+                freq = dict(existing_freq) if existing_freq else None
+                if freq and "time" in arguments and freq.get("type") in ("daily", "once"):
+                    freq["time"] = str(arguments.get("time", "")).strip() or freq.get("time", "09:00")
+                    freq_dirty = True
+                if freq and "days" in arguments and freq.get("type") in ("daily", "interval"):
+                    days_arg = arguments.get("days")
+                    if isinstance(days_arg, list) and days_arg:
+                        freq["days"] = [int(d) for d in days_arg if isinstance(d, (int, float))]
+                        freq_dirty = True
+                if freq and "interval_hours" in arguments and freq.get("type") == "interval":
+                    freq["hours"] = int(arguments.get("interval_hours", 4) or 4)
+                    freq_dirty = True
+                if freq and "date" in arguments and freq.get("type") == "once":
+                    freq["date"] = str(arguments.get("date", "")).strip() or freq.get("date", "")
+                    freq_dirty = True
+                if freq_dirty:
+                    target["frequency"] = freq
+                    changed.append("frequency")
+
+            # --- workspace ---
+            if "workspace" in arguments:
+                ws_raw = str(arguments.get("workspace", "") or "").strip()
+                if ws_raw:
+                    target["workspace"] = ws_raw
+                else:
+                    default_ws = str(Path.home() / ".agenticx" / "crontask" / task_id)
+                    target["workspace"] = default_ws
+                    Path(default_ws).mkdir(parents=True, exist_ok=True)
+                changed.append("workspace")
+
+            # --- enabled ---
+            if "enabled" in arguments and isinstance(arguments.get("enabled"), bool):
+                new_enabled = bool(arguments.get("enabled"))
+                if new_enabled != target.get("enabled"):
+                    target["enabled"] = new_enabled
+                    changed.append("enabled")
+
+            # --- effective date range ---
+            if "effective_date_range_start" in arguments or "effective_date_range_end" in arguments:
+                existing_range = target.get("effectiveDateRange") if isinstance(target.get("effectiveDateRange"), dict) else {}
+                new_range: Dict[str, str] = dict(existing_range) if existing_range else {}
+                if "effective_date_range_start" in arguments:
+                    raw = str(arguments.get("effective_date_range_start", "") or "").strip()
+                    if raw:
+                        new_range["start"] = raw
+                    else:
+                        new_range.pop("start", None)
+                if "effective_date_range_end" in arguments:
+                    raw = str(arguments.get("effective_date_range_end", "") or "").strip()
+                    if raw:
+                        new_range["end"] = raw
+                    else:
+                        new_range.pop("end", None)
+                if new_range:
+                    target["effectiveDateRange"] = new_range
+                elif "effectiveDateRange" in target:
+                    target.pop("effectiveDateRange", None)
+                changed.append("effectiveDateRange")
+
+            if not changed:
+                return json.dumps(
+                    {"ok": True, "task_id": task_id, "changed": [], "message": "未提供任何要修改的字段。"},
+                    ensure_ascii=False,
+                )
+
+            save_automation_tasks(tasks)
+
+            summary = {
+                "task_id": task_id,
+                "name": target.get("name"),
+                "enabled": target.get("enabled"),
+                "frequency": target.get("frequency"),
+                "workspace": target.get("workspace"),
+                "effectiveDateRange": target.get("effectiveDateRange"),
+            }
+            payload: Dict[str, Any] = {
+                "ok": True,
+                "changed": changed,
+                "task": summary,
+                "message": f"已更新定时任务字段：{', '.join(changed)}。",
+            }
+            if preflight_payload is not None:
+                payload["preflight"] = preflight_payload
+            return json.dumps(payload, ensure_ascii=False)
 
     return json.dumps({"ok": False, "error": f"unknown meta tool: {name}"}, ensure_ascii=False)
