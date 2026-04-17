@@ -1,5 +1,7 @@
 import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
+import { isSettingsTab } from "./settings-tab";
+import type { SettingsTab } from "./settings-tab";
 
 export type UiStatus = "idle" | "listening" | "processing";
 export type MsgRole = "user" | "assistant" | "tool";
@@ -212,6 +214,8 @@ export type ProviderEntry = {
 
 type SettingsState = {
   open: boolean;
+  /** 打开设置时若指定，则 SettingsPanel 会切换到对应分区并随后清空。 */
+  openToTab?: SettingsTab;
   defaultProvider: string;
   providers: Record<string, ProviderEntry>;
   /** legacy compat */
@@ -383,9 +387,16 @@ type AppState = {
     context?: Record<string, unknown>
   ) => void;
   closeConfirm: () => void;
-  openSettings: () => void;
+  openSettings: (tab?: SettingsTab) => void;
   closeSettings: () => void;
-  updateSettings: (patch: Partial<Pick<SettingsState, "provider" | "model" | "apiKey" | "defaultProvider" | "providers">>) => void;
+  updateSettings: (
+    patch: Partial<
+      Pick<
+        SettingsState,
+        "provider" | "model" | "apiKey" | "defaultProvider" | "providers" | "openToTab"
+      >
+    >
+  ) => void;
 };
 
 function uid(): string {
@@ -1138,10 +1149,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ confirm: { open: true, requestId, question, diff, agentId: agentId ?? "meta", context } }),
   closeConfirm: () =>
     set((state) => ({ confirm: { ...state.confirm, open: false, requestId: "" } })),
-  openSettings: () =>
-    set((state) => ({ settings: { ...state.settings, open: true } })),
+  openSettings: (tab) =>
+    set((state) => {
+      const openToTab =
+        tab !== undefined && isSettingsTab(tab) ? tab : undefined;
+      return {
+        settings: {
+          ...state.settings,
+          open: true,
+          openToTab,
+        },
+      };
+    }),
   closeSettings: () =>
-    set((state) => ({ settings: { ...state.settings, open: false } })),
+    set((state) => ({
+      settings: { ...state.settings, open: false, openToTab: undefined },
+    })),
   updateSettings: (patch) =>
     set((state) => ({ settings: { ...state.settings, ...patch } }))
 }));

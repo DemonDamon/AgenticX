@@ -413,10 +413,57 @@ export function App() {
     if (sessionInitDoneRef.current) return;
     sessionInitDoneRef.current = true;
     (async () => {
+      try {
       const base = await window.agenticxDesktop.getApiBase();
       const token = await window.agenticxDesktop.getApiAuthToken();
       setApiBase(base);
       setApiToken(token);
+
+      // Load basic user-config first so the UI can render ASAP (userMode / onboarding).
+      // 会话恢复/MCP 状态属于次要副作用，单独放后面；哪怕下面串行 /api/session 稍慢，也不会把 UI 卡在 loading。
+      try {
+        const cfgEarly = await window.agenticxDesktop.loadConfig();
+        const loadedMode = cfgEarly.userMode === "lite" ? "lite" : "pro";
+        setUserMode(loadedMode);
+        setOnboardingCompleted(Boolean(cfgEarly.onboardingCompleted));
+        const loadedConfirmStrategy =
+          loadedMode === "lite" ? "manual" : (cfgEarly.confirmStrategy ?? "semi-auto");
+        setConfirmStrategy(loadedConfirmStrategy);
+        const entries = toProviderEntries(cfgEarly.providers ?? {});
+        const defP = cfgEarly.defaultProvider ?? "";
+        const defEntry = entries[defP];
+        updateSettings({
+          defaultProvider: defP,
+          providers: entries,
+          provider: defP,
+          model: defEntry?.model ?? "",
+          apiKey: defEntry?.apiKey ?? "",
+        });
+        const savedActiveProvider = cfgEarly.activeProvider ?? "";
+        const savedActiveModel = cfgEarly.activeModel ?? "";
+        if (savedActiveProvider && savedActiveModel) {
+          setActiveModel(savedActiveProvider, savedActiveModel);
+          const currentPaneId = useAppStore.getState().activePaneId;
+          const currentPane = useAppStore.getState().panes.find((pane) => pane.id === currentPaneId);
+          const hasPaneModel = Boolean(currentPane?.modelProvider?.trim() && currentPane?.modelName?.trim());
+          if (!hasPaneModel) {
+            setPaneModel(currentPaneId, savedActiveProvider, savedActiveModel);
+          }
+        } else if (defP && defEntry?.model) {
+          setActiveModel(defP, defEntry.model);
+          const currentPaneId = useAppStore.getState().activePaneId;
+          const currentPane = useAppStore.getState().panes.find((pane) => pane.id === currentPaneId);
+          const hasPaneModel = Boolean(currentPane?.modelProvider?.trim() && currentPane?.modelName?.trim());
+          if (!hasPaneModel) {
+            setPaneModel(currentPaneId, defP, defEntry.model);
+          }
+        }
+      } catch (err) {
+        console.error("[App init] loadConfig failed:", err);
+      } finally {
+        // 配置已经载入（或出错），让 UI 立刻渲染，避免被后续会话恢复挡住。
+        setConfigLoaded(true);
+      }
 
       let recovered = false;
       try {
@@ -608,45 +655,14 @@ export function App() {
         }
       }
 
-      const cfg = await window.agenticxDesktop.loadConfig();
-      const loadedMode = cfg.userMode === "lite" ? "lite" : "pro";
-      setUserMode(loadedMode);
-      setOnboardingCompleted(Boolean(cfg.onboardingCompleted));
-      setConfigLoaded(true);
-      const loadedConfirmStrategy =
-        loadedMode === "lite" ? "manual" : (cfg.confirmStrategy ?? "semi-auto");
-      setConfirmStrategy(loadedConfirmStrategy);
-      const entries = toProviderEntries(cfg.providers ?? {});
-      const defP = cfg.defaultProvider ?? "";
-      const defEntry = entries[defP];
-      updateSettings({
-        defaultProvider: defP,
-        providers: entries,
-        provider: defP,
-        model: defEntry?.model ?? "",
-        apiKey: defEntry?.apiKey ?? "",
-      });
-      const savedActiveProvider = cfg.activeProvider ?? "";
-      const savedActiveModel = cfg.activeModel ?? "";
-      if (savedActiveProvider && savedActiveModel) {
-        setActiveModel(savedActiveProvider, savedActiveModel);
-        const currentPaneId = useAppStore.getState().activePaneId;
-        const currentPane = useAppStore.getState().panes.find((pane) => pane.id === currentPaneId);
-        const hasPaneModel = Boolean(currentPane?.modelProvider?.trim() && currentPane?.modelName?.trim());
-        if (!hasPaneModel) {
-          setPaneModel(currentPaneId, savedActiveProvider, savedActiveModel);
-        }
-      } else if (defP && defEntry?.model) {
-        setActiveModel(defP, defEntry.model);
-        const currentPaneId = useAppStore.getState().activePaneId;
-        const currentPane = useAppStore.getState().panes.find((pane) => pane.id === currentPaneId);
-        const hasPaneModel = Boolean(currentPane?.modelProvider?.trim() && currentPane?.modelName?.trim());
-        if (!hasPaneModel) {
-          setPaneModel(currentPaneId, defP, defEntry.model);
-        }
-      }
       window.agenticxDesktop.onOpenSettings(() => openSettings());
       workspaceHydratedRef.current = true;
+      } catch (err) {
+        console.error("[App init] fatal", err);
+      } finally {
+        // 兜底：任何异常也要放行 UI。
+        setConfigLoaded(true);
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ensureMcpAutoConnectOnStartup, refreshMcpStatus]);
@@ -1734,7 +1750,11 @@ export function App() {
         sidebarCollapsed || userMode !== "pro" || !onboardingCompleted || !apiBase ? "sidebar-collapsed" : ""
       } ${windowResizing ? "window-resizing" : ""} ${startupOptimizing ? "startup-optimizing" : ""}`}
     >
-      {!configLoaded ? null : !onboardingCompleted ? (
+      {!configLoaded ? (
+        <div className="flex h-full min-h-0 w-full items-center justify-center text-sm text-text-faint">
+          正在加载配置…
+        </div>
+      ) : !onboardingCompleted ? (
         <OnboardingView onSelectMode={(mode) => void handleSelectMode(mode)} />
       ) : apiBase ? (
         <>

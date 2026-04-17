@@ -69,7 +69,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
 
   const onViewAccount = () => {
     setUserMenuOpen(false);
-    openSettings();
+    openSettings("account");
   };
 
   // 点击外部关闭用户菜单
