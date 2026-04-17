@@ -45,6 +45,7 @@ import {
 } from "../utils/cc-bridge-ui";
 import type { AutomationTask } from "./automation/types";
 import { parseReasoningContent } from "./messages/reasoning-parser";
+import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
 import machiEmptyState from "../assets/machi-logo-transparent.png";
@@ -2216,7 +2217,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, [pane.id, pane.sessionId, pane.taskspacePanelOpen, setActiveTaskspace, openSidePanel]);
 
   const copyMessage = useCallback(async (message: Message) => {
-    const textToCopy = message.content || "";
+    const textToCopy = messagePlainTextForClipboard(message);
     try {
       const firstImage = (message.attachments ?? []).find(
         (attachment) => !!attachment.dataUrl && attachment.mimeType.startsWith("image/")
@@ -4335,7 +4336,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                             minute: "2-digit",
                           })
                         : "";
-                      return `[${name}]${time ? ` ${time}` : ""}\n${message.content}`;
+                      return `[${name}]${time ? ` ${time}` : ""}\n${messagePlainTextForClipboard(message)}`;
                     })
                     .join("\n\n");
                   try {

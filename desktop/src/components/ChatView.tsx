@@ -17,6 +17,7 @@ import {
 import { KeybindingsPanel } from "./KeybindingsPanel";
 import { attachmentsFromSessionRow } from "../utils/session-message-map";
 import { MessageRenderer } from "./messages/MessageRenderer";
+import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
@@ -1167,7 +1168,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   };
 
   const onCopyMessage = (msg: Message) => {
-    void navigator.clipboard.writeText(msg.content);
+    void navigator.clipboard.writeText(messagePlainTextForClipboard(msg));
   };
 
   const onRetryMessage = (msg: Message) => {
