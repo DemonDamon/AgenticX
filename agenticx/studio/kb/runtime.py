@@ -1,0 +1,744 @@
+"""KBRuntime — single-instance knowledge base backing Machi Stage-1 MVP.
+
+Plan-Id: machi-kb-stage1-local-mvp
+Plan-File: .cursor/plans/2026-04-14-machi-kb-stage1-local-mvp.plan.md
+
+Design rationale (per plan §2.1):
+- Reuses ``agenticx.knowledge.readers`` and ``agenticx.knowledge.chunkers``.
+- Uses ``chromadb.PersistentClient`` **directly**. Rationale: the existing
+  ``agenticx.storage.vectordb_storages.chroma.ChromaStorage`` is a stub
+  (pure print statements, plan v2.1 §7 already flags this layer as optional),
+  and fixing the full BaseVectorStorage surface is out of scope for Stage 1.
+- Embedding is resolved through a provider factory here instead of
+  ``agenticx.embeddings.router`` because MVP only needs a single primary
+  provider, not a multi-provider fail-over chain.
+
+Everything exposed here is synchronous and thread-friendly so the FastAPI
+route handlers can ``await asyncio.to_thread(...)`` and so the background
+ingest queue (``kb_jobs.py``) can call these methods from worker threads.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import threading
+from dataclasses import replace
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+from .contracts import (
+    ChunkingSpec,
+    EmbeddingSpec,
+    IngestReport,
+    KBConfig,
+    KBDocument,
+    KBDocumentStatus,
+    KBError,
+    RetrievalHit,
+    RetrievalHitSource,
+    SUPPORTED_EXTENSIONS,
+    VectorStoreSpec,
+)
+
+logger = logging.getLogger(__name__)
+
+
+# --------------------------------------------------------------------------- #
+# Embedding provider factory                                                  #
+# --------------------------------------------------------------------------- #
+
+
+def _build_embedding_provider(spec: EmbeddingSpec):
+    """Resolve an ``agenticx.embeddings`` provider from an ``EmbeddingSpec``.
+
+    The default path is ``ollama`` routed through LiteLLM (``ollama/<model>``).
+    Online providers (OpenAI / SiliconFlow / Bailian) go through their native
+    classes so that ``api_base`` and dimension hints land in the right kwargs.
+    """
+
+    api_key = os.environ.get(spec.api_key_env) if spec.api_key_env else None
+    provider = (spec.provider or "").lower().strip()
+
+    if provider in {"ollama", "litellm"}:
+        from agenticx.embeddings.litellm import LiteLLMEmbeddingProvider
+
+        model = spec.model if spec.model.startswith("ollama/") or provider == "litellm" else f"ollama/{spec.model}"
+        base_url = spec.base_url or os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+        return LiteLLMEmbeddingProvider(model=model, api_key=api_key, api_base=base_url)
+
+    if provider == "openai":
+        from agenticx.embeddings.openai import OpenAIEmbeddingProvider
+
+        return OpenAIEmbeddingProvider(
+            api_key=api_key or os.environ.get("OPENAI_API_KEY", ""),
+            model=spec.model,
+            api_base=spec.base_url,
+            dimensions=spec.dim if spec.dim else None,
+        )
+
+    if provider == "siliconflow":
+        from agenticx.embeddings.siliconflow import SiliconFlowEmbeddingProvider
+
+        return SiliconFlowEmbeddingProvider(
+            api_key=api_key or os.environ.get("SILICONFLOW_API_KEY", ""),
+            model=spec.model,
+        )
+
+    if provider == "bailian":
+        from agenticx.embeddings.bailian import BailianEmbeddingProvider
+
+        return BailianEmbeddingProvider(
+            api_key=api_key or os.environ.get("DASHSCOPE_API_KEY", ""),
+            model=spec.model,
+        )
+
+    raise KBError(f"Unsupported embedding provider: {spec.provider!r}")
+
+
+# --------------------------------------------------------------------------- #
+# Chroma adapter                                                              #
+# --------------------------------------------------------------------------- #
+
+
+class _ChromaBackend:
+    """Minimal PersistentClient wrapper sized to MVP needs.
+
+    A full ``agenticx.storage.vectordb_storages`` integration is deferred: the
+    existing ChromaStorage is a stub (plan §7) and Stage-1 only needs add/
+    delete/query over a single collection.
+    """
+
+    def __init__(self, spec: VectorStoreSpec, *, expected_dim: int) -> None:
+        self._spec = spec
+        self._expected_dim = int(expected_dim)
+        self._lock = threading.RLock()
+        self._client = None
+        self._collection = None
+        self._path = Path(os.path.expanduser(spec.path))
+        self._path.mkdir(parents=True, exist_ok=True)
+
+    def _ensure(self) -> None:
+        if self._collection is not None:
+            return
+        try:
+            import chromadb
+        except ImportError as exc:  # pragma: no cover - exercised via install docs
+            raise KBError(
+                "chromadb is required for the knowledge base. Install with `pip install chromadb`."
+            ) from exc
+
+        with self._lock:
+            if self._collection is not None:
+                return
+            self._client = chromadb.PersistentClient(path=str(self._path))
+            self._collection = self._client.get_or_create_collection(
+                name=self._spec.collection,
+                metadata={"expected_dim": self._expected_dim},
+            )
+
+    # ------------------------------- writes -------------------------------- #
+
+    def upsert(
+        self,
+        *,
+        ids: List[str],
+        texts: List[str],
+        embeddings: List[List[float]],
+        metadatas: List[Dict[str, Any]],
+    ) -> None:
+        if not ids:
+            return
+        self._ensure()
+        with self._lock:
+            self._collection.upsert(
+                ids=ids,
+                documents=texts,
+                embeddings=embeddings,
+                metadatas=metadatas,
+            )
+
+    def delete_by_document(self, document_id: str) -> int:
+        self._ensure()
+        with self._lock:
+            try:
+                result = self._collection.get(where={"document_id": document_id})
+                ids = result.get("ids") or []
+                if not ids:
+                    return 0
+                self._collection.delete(ids=ids)
+                return len(ids)
+            except Exception as exc:  # pragma: no cover - chromadb-specific errors
+                logger.warning("Chroma delete_by_document failed for %s: %s", document_id, exc)
+                return 0
+
+    def clear(self) -> None:
+        self._ensure()
+        with self._lock:
+            try:
+                self._client.delete_collection(self._spec.collection)
+            except Exception:
+                pass
+            self._collection = self._client.get_or_create_collection(
+                name=self._spec.collection,
+                metadata={"expected_dim": self._expected_dim},
+            )
+
+    # ------------------------------- reads --------------------------------- #
+
+    def query(
+        self,
+        *,
+        query_embedding: List[float],
+        top_k: int,
+    ) -> List[Tuple[str, float, str, Dict[str, Any]]]:
+        self._ensure()
+        with self._lock:
+            result = self._collection.query(
+                query_embeddings=[query_embedding],
+                n_results=max(1, int(top_k)),
+            )
+        ids = (result.get("ids") or [[]])[0]
+        docs = (result.get("documents") or [[]])[0]
+        metas = (result.get("metadatas") or [[]])[0]
+        dists = (result.get("distances") or [[]])[0]
+        hits: List[Tuple[str, float, str, Dict[str, Any]]] = []
+        for idx, cid in enumerate(ids):
+            distance = float(dists[idx]) if idx < len(dists) else 0.0
+            # chroma returns squared-L2 by default; convert to a similarity-ish score
+            score = 1.0 / (1.0 + distance) if distance >= 0 else 0.0
+            hits.append((
+                str(cid),
+                score,
+                str(docs[idx]) if idx < len(docs) else "",
+                dict(metas[idx]) if idx < len(metas) else {},
+            ))
+        return hits
+
+    def count(self) -> int:
+        self._ensure()
+        with self._lock:
+            try:
+                return int(self._collection.count())
+            except Exception:
+                return 0
+
+
+# --------------------------------------------------------------------------- #
+# Document registry (persisted metadata outside chromadb)                     #
+# --------------------------------------------------------------------------- #
+
+
+class _DocumentRegistry:
+    """Tiny JSON-backed map: document_id -> KBDocument metadata."""
+
+    def __init__(self, store_path: Path) -> None:
+        self._path = store_path
+        self._lock = threading.RLock()
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._cache: Dict[str, KBDocument] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not self._path.exists():
+            return
+        try:
+            raw = json.loads(self._path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("KB registry %s unreadable, starting fresh: %s", self._path, exc)
+            return
+        if not isinstance(raw, dict):
+            return
+        for doc_id, data in raw.items():
+            if not isinstance(data, dict):
+                continue
+            try:
+                self._cache[str(doc_id)] = KBDocument(
+                    id=str(data.get("id") or doc_id),
+                    source_path=str(data.get("source_path", "")),
+                    source_name=str(data.get("source_name", "")),
+                    size_bytes=int(data.get("size_bytes", 0)),
+                    mtime_iso=str(data.get("mtime_iso", "")),
+                    status=KBDocumentStatus(str(data.get("status", "queued"))),
+                    chunks=int(data.get("chunks", 0)),
+                    error=data.get("error"),
+                    added_at=str(data.get("added_at", "")),
+                    embedding_fingerprint=data.get("embedding_fingerprint"),
+                )
+            except Exception as exc:
+                logger.warning("KB registry row %s invalid: %s", doc_id, exc)
+
+    def _flush_locked(self) -> None:
+        payload = {doc_id: doc.to_dict() for doc_id, doc in self._cache.items()}
+        tmp = self._path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(self._path)
+
+    # API --------------------------------------------------------------------
+
+    def upsert(self, doc: KBDocument) -> None:
+        with self._lock:
+            self._cache[doc.id] = doc
+            self._flush_locked()
+
+    def get(self, doc_id: str) -> Optional[KBDocument]:
+        with self._lock:
+            return self._cache.get(doc_id)
+
+    def remove(self, doc_id: str) -> Optional[KBDocument]:
+        with self._lock:
+            doc = self._cache.pop(doc_id, None)
+            if doc is not None:
+                self._flush_locked()
+            return doc
+
+    def list(self) -> List[KBDocument]:
+        with self._lock:
+            return sorted(self._cache.values(), key=lambda d: d.added_at, reverse=True)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._cache.clear()
+            self._flush_locked()
+
+
+# --------------------------------------------------------------------------- #
+# KBRuntime                                                                   #
+# --------------------------------------------------------------------------- #
+
+
+class KBRuntime:
+    """Singleton-friendly runtime wiring config → embedding → vector store → registry.
+
+    Usage::
+
+        runtime = KBRuntime(config=KBConfig.from_dict(yaml_node))
+        doc = runtime.register_document("/abs/path/to/file.md")
+        runtime.ingest_document(doc.id)             # sync, called from worker thread
+        hits = runtime.search("how do I build?", top_k=5)
+    """
+
+    def __init__(self, config: KBConfig, *, registry_dir: Optional[Path] = None) -> None:
+        self._config = config
+        base = registry_dir or Path(os.path.expanduser("~/.agenticx/storage/kb"))
+        base.mkdir(parents=True, exist_ok=True)
+        self._registry = _DocumentRegistry(base / "documents.json")
+        self._state_path = base / "state.json"
+        self._lock = threading.RLock()
+        self._embedding_provider = None
+        self._backend: Optional[_ChromaBackend] = None
+        self._indexed_fingerprint: Optional[str] = None
+        self._load_state()
+
+    # ---------------------------- config -------------------------------- #
+
+    @property
+    def config(self) -> KBConfig:
+        return self._config
+
+    def update_config(self, new_config: KBConfig) -> Dict[str, Any]:
+        """Persist in-memory config. Returns ``{rebuild_required, previous_fingerprint}``."""
+
+        with self._lock:
+            previous = self._config.embedding_fingerprint()
+            self._config = new_config
+            # Reset lazy-initialised components; they will be recreated on next use.
+            self._embedding_provider = None
+            self._backend = None
+            current = new_config.embedding_fingerprint()
+            rebuild_required = bool(self._indexed_fingerprint and self._indexed_fingerprint != current)
+            return {
+                "rebuild_required": rebuild_required,
+                "previous_fingerprint": previous,
+                "current_fingerprint": current,
+                "indexed_fingerprint": self._indexed_fingerprint,
+            }
+
+    def rebuild_required(self) -> bool:
+        if not self._indexed_fingerprint:
+            return False
+        return self._indexed_fingerprint != self._config.embedding_fingerprint()
+
+    # --------------------- lazy component accessors --------------------- #
+
+    def _embedding(self):
+        with self._lock:
+            if self._embedding_provider is None:
+                self._embedding_provider = _build_embedding_provider(self._config.embedding)
+            return self._embedding_provider
+
+    def _store(self) -> _ChromaBackend:
+        with self._lock:
+            if self._backend is None:
+                self._backend = _ChromaBackend(
+                    self._config.vector_store,
+                    expected_dim=self._config.embedding.dim,
+                )
+            return self._backend
+
+    # ------------------------------ state ------------------------------- #
+
+    def _load_state(self) -> None:
+        if not self._state_path.exists():
+            return
+        try:
+            raw = json.loads(self._state_path.read_text(encoding="utf-8"))
+            fp = raw.get("indexed_fingerprint")
+            if isinstance(fp, str) and fp:
+                self._indexed_fingerprint = fp
+        except Exception as exc:
+            logger.warning("KB state %s unreadable: %s", self._state_path, exc)
+
+    def _save_state(self) -> None:
+        payload = {"indexed_fingerprint": self._indexed_fingerprint}
+        self._state_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # --------------------------- documents ------------------------------ #
+
+    def list_documents(self) -> List[KBDocument]:
+        return self._registry.list()
+
+    def get_document(self, doc_id: str) -> Optional[KBDocument]:
+        return self._registry.get(doc_id)
+
+    def register_document(self, source_path: str) -> KBDocument:
+        """Create a fresh ``KBDocument`` entry in the registry (status=QUEUED)."""
+
+        path = Path(source_path).expanduser().resolve()
+        if not path.exists() or not path.is_file():
+            raise KBError(f"Not a file: {path}")
+        ext = path.suffix.lower()
+        allowed = {e.lower() for e in (self._config.file_filters.extensions or SUPPORTED_EXTENSIONS)}
+        if ext not in allowed:
+            raise KBError(f"Unsupported file extension {ext!r}. Allowed: {sorted(allowed)}")
+        size = path.stat().st_size
+        max_bytes = max(1, self._config.file_filters.max_file_size_mb) * 1024 * 1024
+        if size > max_bytes:
+            raise KBError(
+                f"File too large: {size} bytes (limit {self._config.file_filters.max_file_size_mb}MB)"
+            )
+        mtime_iso = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+        doc = KBDocument(
+            id=f"doc_{abs(hash((str(path), size, mtime_iso))) :x}",
+            source_path=str(path),
+            source_name=path.name,
+            size_bytes=size,
+            mtime_iso=mtime_iso,
+            status=KBDocumentStatus.QUEUED,
+            chunks=0,
+            embedding_fingerprint=self._config.embedding_fingerprint(),
+        )
+        self._registry.upsert(doc)
+        return doc
+
+    def delete_document(self, doc_id: str) -> bool:
+        doc = self._registry.remove(doc_id)
+        if doc is None:
+            return False
+        try:
+            self._store().delete_by_document(doc_id)
+        except KBError as exc:
+            logger.warning("Failed to purge vectors for %s: %s", doc_id, exc)
+        return True
+
+    def clear_all(self) -> None:
+        self._registry.clear()
+        with self._lock:
+            try:
+                self._store().clear()
+            except KBError as exc:
+                logger.warning("Failed to clear vector store: %s", exc)
+            self._indexed_fingerprint = None
+            self._save_state()
+
+    # ---------------------------- ingest -------------------------------- #
+
+    def ingest_document(
+        self,
+        doc_id: str,
+        *,
+        progress_cb=None,
+    ) -> IngestReport:
+        """Full synchronous ingest pipeline for one registered document.
+
+        ``progress_cb`` receives ``(status: KBDocumentStatus, message: str)``
+        tuples at each stage transition so a worker thread can relay to the
+        job registry without reaching back into runtime internals.
+        """
+
+        doc = self._registry.get(doc_id)
+        if doc is None:
+            raise KBError(f"Unknown document: {doc_id}")
+
+        report = IngestReport()
+
+        def _report(status: KBDocumentStatus, message: str = "") -> None:
+            if progress_cb:
+                try:
+                    progress_cb(status, message)
+                except Exception as exc:  # pragma: no cover - purely informational
+                    logger.debug("progress callback failed: %s", exc)
+
+        try:
+            _report(KBDocumentStatus.PARSING, "reading document")
+            text = _read_document_text(doc.source_path)
+            if not text.strip():
+                raise KBError("Document produced empty text after parsing")
+
+            _report(KBDocumentStatus.CHUNKING, "splitting into chunks")
+            chunks = _chunk_text(
+                text=text,
+                spec=self._config.chunking,
+                source_path=doc.source_path,
+                document_id=doc.id,
+            )
+            if not chunks:
+                raise KBError("No chunks produced")
+
+            _report(KBDocumentStatus.EMBEDDING, f"embedding {len(chunks)} chunks")
+            embeddings = _embed_texts(self._embedding(), [c["text"] for c in chunks])
+            if any(len(v) != self._config.embedding.dim for v in embeddings):
+                actual = {len(v) for v in embeddings}
+                raise KBError(
+                    f"Embedding dim mismatch: expected {self._config.embedding.dim}, got {sorted(actual)}"
+                )
+
+            _report(KBDocumentStatus.WRITING, "writing to vector store")
+            self._store().delete_by_document(doc.id)  # rebuild-safe replace
+            ids = [f"{doc.id}::{c['chunk_index']:06d}" for c in chunks]
+            metadatas = [
+                {
+                    "document_id": doc.id,
+                    "source_path": doc.source_path,
+                    "source_name": doc.source_name,
+                    "chunk_index": c["chunk_index"],
+                    "start_index": c.get("start_index"),
+                    "end_index": c.get("end_index"),
+                }
+                for c in chunks
+            ]
+            self._store().upsert(
+                ids=ids,
+                texts=[c["text"] for c in chunks],
+                embeddings=embeddings,
+                metadatas=metadatas,
+            )
+
+            updated = replace(
+                doc,
+                status=KBDocumentStatus.DONE,
+                chunks=len(chunks),
+                error=None,
+                embedding_fingerprint=self._config.embedding_fingerprint(),
+            )
+            self._registry.upsert(updated)
+            with self._lock:
+                self._indexed_fingerprint = self._config.embedding_fingerprint()
+                self._save_state()
+            report.success = 1
+            _report(KBDocumentStatus.DONE, f"indexed {len(chunks)} chunks")
+            return report
+
+        except Exception as exc:
+            logger.exception("ingest failed for %s", doc_id)
+            failed = replace(
+                doc,
+                status=KBDocumentStatus.FAILED,
+                error=str(exc),
+            )
+            self._registry.upsert(failed)
+            report.failed = 1
+            report.reasons.append(str(exc))
+            _report(KBDocumentStatus.FAILED, str(exc))
+            return report
+
+    # ---------------------------- search -------------------------------- #
+
+    def search(self, query: str, *, top_k: Optional[int] = None) -> List[RetrievalHit]:
+        q = (query or "").strip()
+        if not q:
+            return []
+        k = max(1, min(20, int(top_k or self._config.retrieval.top_k)))
+        query_vec = _embed_texts(self._embedding(), [q])[0]
+        raw = self._store().query(query_embedding=query_vec, top_k=k)
+        hits: List[RetrievalHit] = []
+        for cid, score, text, meta in raw:
+            if score < float(self._config.retrieval.score_floor or 0.0):
+                continue
+            src = RetrievalHitSource(
+                kind="local",
+                uri=str(meta.get("source_path", "")),
+                title=meta.get("source_name"),
+                chunk_index=int(meta["chunk_index"]) if meta.get("chunk_index") is not None else None,
+            )
+            hits.append(
+                RetrievalHit(
+                    id=cid,
+                    score=float(score),
+                    text=text,
+                    source=src,
+                    metadata=meta,
+                )
+            )
+        return hits
+
+    # ------------------------- chunking preview ------------------------- #
+
+    def preview_chunks(
+        self,
+        source_path: str,
+        *,
+        chunking: Optional[ChunkingSpec] = None,
+    ) -> List[Dict[str, Any]]:
+        """Reader + chunker, without embedding/writing — powers the debug panel."""
+
+        text = _read_document_text(source_path)
+        spec = chunking or self._config.chunking
+        chunks = _chunk_text(
+            text=text,
+            spec=spec,
+            source_path=source_path,
+            document_id="__preview__",
+        )
+        return chunks
+
+    # ------------------------------ stats ------------------------------- #
+
+    def stats(self) -> Dict[str, Any]:
+        docs = self._registry.list()
+        return {
+            "enabled": self._config.enabled,
+            "doc_count": len(docs),
+            "indexed_doc_count": sum(1 for d in docs if d.status == KBDocumentStatus.DONE),
+            "failed_doc_count": sum(1 for d in docs if d.status == KBDocumentStatus.FAILED),
+            "embedding_fingerprint": self._config.embedding_fingerprint(),
+            "indexed_fingerprint": self._indexed_fingerprint,
+            "rebuild_required": self.rebuild_required(),
+        }
+
+
+# --------------------------------------------------------------------------- #
+# helpers (reader / chunker / embed)                                          #
+# --------------------------------------------------------------------------- #
+
+
+def _read_document_text(source_path: str) -> str:
+    """Read a file into plain text, preferring agenticx readers for PDFs/Word.
+
+    Plain text / markdown files short-circuit to ``Path.read_text`` for speed
+    and predictability (no third-party parsing layer).
+    """
+
+    path = Path(source_path).expanduser()
+    ext = path.suffix.lower()
+
+    if ext in {".md", ".txt", ".markdown"}:
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    try:
+        from agenticx.knowledge.readers import get_reader
+    except Exception as exc:  # pragma: no cover
+        raise KBError(f"agenticx.knowledge.readers unavailable: {exc}") from exc
+
+    try:
+        reader = get_reader(path)
+        docs = reader.read(path)
+    except Exception as exc:
+        raise KBError(f"Reader failed for {path}: {exc}") from exc
+
+    texts: List[str] = []
+    for d in docs:
+        content = getattr(d, "content", None) or (d.get("content") if isinstance(d, dict) else None)
+        if isinstance(content, str) and content.strip():
+            texts.append(content)
+    if not texts:
+        raise KBError(f"No textual content extracted from {path}")
+    return "\n\n".join(texts)
+
+
+def _chunk_text(
+    *,
+    text: str,
+    spec: ChunkingSpec,
+    source_path: str,
+    document_id: str,
+) -> List[Dict[str, Any]]:
+    """Run an agenticx chunker, falling back to a naive splitter.
+
+    The fallback exists because some chunker implementations in the repo need
+    an LLM handle to operate (e.g. ``SemanticChunker``), but Stage-1 promises
+    ``recursive`` which is LLM-free.
+    """
+
+    try:
+        from agenticx.knowledge.base import ChunkingConfig
+        from agenticx.knowledge.chunkers import get_chunker
+
+        config = ChunkingConfig(
+            chunk_size=int(spec.chunk_size),
+            chunk_overlap=int(spec.chunk_overlap),
+        )
+        chunker = get_chunker(spec.strategy or "recursive", config=config)
+        raw_chunks = chunker.chunk_text(text, metadata={"source_path": source_path})
+    except Exception as exc:
+        logger.warning("agenticx chunker failed (%s) — falling back to naive splitter", exc)
+        raw_chunks = _naive_split(text, spec)
+
+    out: List[Dict[str, Any]] = []
+    for idx, ch in enumerate(raw_chunks):
+        content = ""
+        if isinstance(ch, dict):
+            content = str(ch.get("content") or ch.get("text") or "")
+            start = ch.get("start_index") or ch.get("start")
+            end = ch.get("end_index") or ch.get("end")
+        elif hasattr(ch, "content"):
+            content = str(getattr(ch, "content"))
+            start = getattr(ch, "start_index", None)
+            end = getattr(ch, "end_index", None)
+        else:
+            content = str(ch)
+            start = None
+            end = None
+        content = content.strip()
+        if not content:
+            continue
+        out.append(
+            {
+                "text": content,
+                "chunk_index": idx,
+                "start_index": int(start) if isinstance(start, int) else None,
+                "end_index": int(end) if isinstance(end, int) else None,
+            }
+        )
+    return out
+
+
+def _naive_split(text: str, spec: ChunkingSpec) -> List[Dict[str, Any]]:
+    size = max(64, int(spec.chunk_size))
+    overlap = max(0, min(size - 1, int(spec.chunk_overlap)))
+    step = max(1, size - overlap)
+    chunks: List[Dict[str, Any]] = []
+    i = 0
+    while i < len(text):
+        piece = text[i : i + size]
+        chunks.append({"content": piece, "start_index": i, "end_index": min(len(text), i + size)})
+        if i + size >= len(text):
+            break
+        i += step
+    return chunks
+
+
+def _embed_texts(provider, texts: List[str]) -> List[List[float]]:
+    """Call an embedding provider safely and guarantee a list-of-lists shape."""
+
+    if not texts:
+        return []
+    if hasattr(provider, "embed_documents"):
+        result = provider.embed_documents(texts)
+    elif hasattr(provider, "embed"):
+        result = provider.embed(texts)
+    else:
+        raise KBError(f"Embedding provider {type(provider).__name__} lacks an embed method")
+    return [list(map(float, v)) for v in result]
