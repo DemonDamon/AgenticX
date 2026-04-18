@@ -80,10 +80,9 @@ function shellSingleQuote(input: string): string {
 }
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
-const KB_RETRIEVAL_MODE_OPTIONS: { value: "auto" | "always" | "manual"; label: string }[] = [
-  { value: "auto", label: "检索: 智能" },
-  { value: "always", label: "检索: 始终" },
-  { value: "manual", label: "检索: 手动" },
+const KB_RETRIEVAL_MODE_OPTIONS: { value: "auto" | "always"; label: string }[] = [
+  { value: "auto", label: "智能检索" },
+  { value: "always", label: "始终检索" },
 ];
 const CHAT_PICKER_BUTTON_CLASS =
   "flex h-7 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong";
@@ -285,7 +284,7 @@ function PaneKnowledgeRetrievalModeSwitch({
     return raw.replace(/\/+$/, "");
   }, [apiBase]);
   const api = useMemo(() => createKbApi(apiToken, resolveApiBase), [apiToken, resolveApiBase]);
-  const [mode, setMode] = useState<"auto" | "always" | "manual">("auto");
+  const [mode, setMode] = useState<"auto" | "always">("auto");
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -293,11 +292,9 @@ function PaneKnowledgeRetrievalModeSwitch({
     try {
       const body = await api.readConfig();
       const modeRaw = body.config.retrieval?.mode;
-      if (modeRaw === "always" || modeRaw === "manual" || modeRaw === "auto") {
-        setMode(modeRaw);
-      } else {
-        setMode("auto");
-      }
+      // Legacy configs may still carry "manual" — fold it into auto so the
+      // switch stays in sync with the simplified two-state model.
+      setMode(modeRaw === "always" ? "always" : "auto");
     } catch {
       // Keep last known mode; Chat should still be usable if KB API is unavailable.
     }
@@ -308,7 +305,7 @@ function PaneKnowledgeRetrievalModeSwitch({
   }, [refresh]);
 
   const saveMode = useCallback(
-    async (nextMode: "auto" | "always" | "manual") => {
+    async (nextMode: "auto" | "always") => {
       if (saving) return;
       const previous = mode;
       setMode(nextMode);
@@ -342,7 +339,7 @@ function PaneKnowledgeRetrievalModeSwitch({
         onClick={() => setOpen((v) => !v)}
         title="知识库检索模式"
       >
-        <span>{KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "检索: 智能"}</span>
+        <span>{KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "智能检索"}</span>
         <span className="text-[9px]">{open ? "▴" : "▾"}</span>
       </button>
       {open && (

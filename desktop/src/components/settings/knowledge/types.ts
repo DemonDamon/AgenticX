@@ -44,7 +44,7 @@ export type FileFilterSpec = {
 export type RetrievalSpec = {
   top_k: number;
   score_floor: number;
-  mode: "auto" | "always" | "manual";
+  mode: "auto" | "always";
 };
 
 export type KBConfig = {
