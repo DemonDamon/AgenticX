@@ -20,8 +20,57 @@ class KBError(Exception):
     """Base exception for KB subsystem errors."""
 
 
-SUPPORTED_EXTENSIONS: List[str] = [".md", ".txt", ".pdf", ".docx"]
-"""Stage-1 MVP file filter (plan §0)."""
+_LEGACY_DEFAULT_EXTENSIONS: frozenset = frozenset({".md", ".txt", ".pdf", ".docx"})
+"""The pre-LiteParse default allowlist.
+
+Kept here (and only here) so ``KBConfig.from_dict`` can auto-upgrade configs
+written by earlier builds without asking the user to edit YAML by hand.
+"""
+
+
+SUPPORTED_EXTENSIONS: List[str] = [
+    # 纯文本与标记
+    ".md",
+    ".markdown",
+    ".txt",
+    ".rst",
+    ".log",
+    # 富文档（原生 reader：PDF/DOCX/PPTX 直读；旧版 Office 走 LiteParse）
+    ".pdf",
+    ".docx",
+    ".pptx",
+    ".doc",
+    ".ppt",
+    # Excel / 表格（走 LiteParse）
+    ".xls",
+    ".xlsx",
+    # 图片（LiteParse OCR）
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    # Web / 标记文本
+    ".html",
+    ".htm",
+    ".xml",
+    # 结构化数据
+    ".json",
+    ".csv",
+    ".tsv",
+    ".yaml",
+    ".yml",
+]
+"""Default allowlist for KB ingestion.
+
+Two parsing paths:
+
+* 原生 reader（``agenticx/knowledge/readers/``）：文本 / PDF / DOCX / PPTX /
+  HTML / JSON / CSV / YAML 等开箱即用，不依赖外部 CLI。
+* LiteParse fallback（``agenticx.tools.adapters.LiteParseAdapter``）：旧版
+  Office（.doc/.ppt）、表格（.xls/.xlsx）、图片（PNG/JPG/… 带 OCR）。需本机
+  安装 ``@llamaindex/liteparse``；未安装时对这些扩展名 ingest 会给出明确提示。
+"""
 
 
 @dataclass
@@ -122,8 +171,19 @@ class KBConfig:
         if isinstance(data.get("file_filters"), dict):
             f = data["file_filters"]
             exts = f.get("extensions")
+            if isinstance(exts, list):
+                extensions = list(exts)
+                # Auto-migrate the pre-0.2 default (MD/TXT/PDF/DOCX) to the
+                # new full allowlist so existing users immediately gain
+                # LiteParse-backed formats (.doc/.ppt/.xls*/.png/…) without
+                # editing YAML. Users who intentionally customized are left
+                # untouched because their set won't match exactly.
+                if {e.lower() for e in extensions} == _LEGACY_DEFAULT_EXTENSIONS:
+                    extensions = list(SUPPORTED_EXTENSIONS)
+            else:
+                extensions = list(SUPPORTED_EXTENSIONS)
             merged.file_filters = FileFilterSpec(
-                extensions=list(exts) if isinstance(exts, list) else list(SUPPORTED_EXTENSIONS),
+                extensions=extensions,
                 max_file_size_mb=int(f.get("max_file_size_mb", 100)),
             )
         if isinstance(data.get("retrieval"), dict):

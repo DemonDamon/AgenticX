@@ -641,18 +641,104 @@ class KBRuntime:
 # --------------------------------------------------------------------------- #
 
 
-def _read_document_text(source_path: str) -> str:
-    """Read a file into plain text, preferring agenticx readers for PDFs/Word.
+# Formats that agenticx's native readers can't handle (old-format Office,
+# Excel, images) but LiteParse can. When the user registers one of these, we
+# route directly to LiteParse; if it's not installed we raise a clear KBError
+# with the install hint so the UI can surface a copy-pastable command.
+_LITEPARSE_ONLY_EXTS: set[str] = {
+    ".doc",
+    ".ppt",
+    ".xls",
+    ".xlsx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+}
 
-    Plain text / markdown files short-circuit to ``Path.read_text`` for speed
-    and predictability (no third-party parsing layer).
+
+_LIBREOFFICE_REQUIRED_EXTS: set[str] = {".doc", ".ppt", ".xls", ".xlsx"}
+
+
+def _libreoffice_available() -> bool:
+    """LibreOffice (``soffice``) is what LiteParse shells out to for legacy
+    Office and Excel formats. We probe before invoking so the error is
+    immediate and actionable, not a 100-line JS stack trace from the CLI."""
+
+    import shutil
+
+    return bool(shutil.which("soffice") or shutil.which("libreoffice"))
+
+
+def _read_with_liteparse(path: Path) -> str:
+    """Run LiteParse CLI adapter synchronously and return merged text."""
+
+    try:
+        from agenticx.tools.adapters.liteparse import LiteParseAdapter
+    except Exception as exc:  # pragma: no cover - packaging issue
+        raise KBError(
+            f"LiteParse adapter unavailable: {exc}. "
+            "Install with `npm i -g @llamaindex/liteparse`."
+        ) from exc
+
+    if not LiteParseAdapter.is_available():
+        raise KBError(
+            f"LiteParse CLI not found; required to ingest {path.suffix!r}. "
+            "Install with `npm i -g @llamaindex/liteparse` (or `npx liteparse`)."
+        )
+
+    ext = path.suffix.lower()
+    if ext in _LIBREOFFICE_REQUIRED_EXTS and not _libreoffice_available():
+        raise KBError(
+            f"解析 {ext} 需要 LibreOffice（LiteParse 内部用 soffice 做格式转换）。"
+            f" 未检测到本机已安装。\n"
+            f"macOS：brew install --cask libreoffice\n"
+            f"Ubuntu：apt-get install libreoffice\n"
+            f"Windows：choco install libreoffice-fresh\n"
+            f"安装完成后在资料列表重建该条索引即可，无需重启 Machi。"
+        )
+
+    adapter = LiteParseAdapter(config={"debug": False})
+    try:
+        text = asyncio.run(adapter.parse_to_text(path))
+    except Exception as exc:
+        msg = str(exc)
+        # LiteParse bubbles up underlying tool errors verbatim; detect the
+        # two most common ones and surface a clean, copy-pastable remedy.
+        if "LibreOffice is not installed" in msg or "soffice" in msg.lower():
+            raise KBError(
+                f"解析 {ext} 需要 LibreOffice 做格式转换。\n"
+                f"macOS：brew install --cask libreoffice\n"
+                f"Ubuntu：apt-get install libreoffice\n"
+                f"Windows：choco install libreoffice-fresh\n"
+                f"安装完成后在资料列表重建该条索引即可。"
+            ) from exc
+        raise KBError(f"LiteParse failed for {path}: {exc}") from exc
+    if not isinstance(text, str) or not text.strip():
+        raise KBError(f"LiteParse returned empty text for {path}")
+    return text
+
+
+def _read_document_text(source_path: str) -> str:
+    """Read a file into plain text.
+
+    Routing order:
+      1. Plain text / markdown → ``Path.read_text`` (no parser overhead).
+      2. Legacy Office / Excel / images → LiteParse CLI (covers OCR & old
+         binary formats; needs ``@llamaindex/liteparse`` installed).
+      3. Everything else → ``agenticx/knowledge/readers`` (PDF, DOCX, PPTX,
+         HTML, CSV, JSON, YAML, …).
     """
 
     path = Path(source_path).expanduser()
     ext = path.suffix.lower()
 
-    if ext in {".md", ".txt", ".markdown"}:
+    if ext in {".md", ".txt", ".markdown", ".rst", ".log"}:
         return path.read_text(encoding="utf-8", errors="replace")
+
+    if ext in _LITEPARSE_ONLY_EXTS:
+        return _read_with_liteparse(path)
 
     try:
         from agenticx.knowledge.readers import get_reader

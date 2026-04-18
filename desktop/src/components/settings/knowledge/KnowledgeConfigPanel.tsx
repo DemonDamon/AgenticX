@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Eye, EyeOff, Loader2, RotateCcw, Save } from "lucide-react";
 import { Panel } from "../../ds/Panel";
-import type { KBApi } from "./api";
+import type { KBApi, ParserStatus } from "./api";
 import {
   CHUNKING_STRATEGIES,
   EMBEDDING_PROVIDERS,
@@ -45,6 +45,22 @@ export function KnowledgeConfigPanel({
   const [ollamaStatus, setOllamaStatus] = useState<"unknown" | "ok" | "missing">("unknown");
   const [testStatus, setTestStatus] = useState<"idle" | "checking" | "ok" | "fail">("idle");
   const [testMessage, setTestMessage] = useState<string>("");
+  const [parserStatus, setParserStatus] = useState<ParserStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await api.getParserStatus();
+        if (!cancelled) setParserStatus(status);
+      } catch {
+        if (!cancelled) setParserStatus(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   // Reset the inline test badge whenever embedding-relevant fields change,
   // so users don't read a stale "有效 ✓" next to a key they just edited.
@@ -399,20 +415,90 @@ export function KnowledgeConfigPanel({
 
       <Panel title="文件过滤">
         <Field label="扩展名（逗号分隔）">
-          <input
-            className={`w-full ${KB_FIELD_BASE}`}
-            value={config.file_filters.extensions.join(",")}
-            onChange={(e) =>
-              patch("file_filters", {
-                ...config.file_filters,
-                extensions: e.target.value
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean),
-              })
-            }
-          />
+          <div className="flex items-start gap-2">
+            <input
+              className={`min-w-0 flex-1 ${KB_FIELD_BASE}`}
+              value={config.file_filters.extensions.join(",")}
+              onChange={(e) =>
+                patch("file_filters", {
+                  ...config.file_filters,
+                  extensions: e.target.value
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                })
+              }
+            />
+            <button
+              type="button"
+              className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+              onClick={() =>
+                patch("file_filters", {
+                  ...config.file_filters,
+                  extensions: [...defaultKBConfig().file_filters.extensions],
+                })
+              }
+              title="恢复 Machi 内置的全量支持列表（含 LiteParse 覆盖的旧版 Office、表格、图片）"
+            >
+              恢复默认
+            </button>
+          </div>
         </Field>
+        <div className="md:col-span-2 -mt-1 flex flex-col gap-y-1 text-[11px] leading-snug text-text-faint">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+            内置解析器 已就绪（纯文本 / PDF / DOCX / PPTX / HTML / JSON / CSV / YAML）
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span
+              className={`inline-block h-2 w-2 rounded-full ${
+                parserStatus?.liteparse?.available ? "bg-emerald-500" : "bg-amber-500"
+              }`}
+            />
+            {parserStatus == null ? (
+              "LiteParse 检测中…"
+            ) : parserStatus.liteparse.available ? (
+              <>
+                LiteParse 已安装
+                {parserStatus.liteparse.version ? ` v${parserStatus.liteparse.version}` : ""}
+                <span className="ml-1 text-text-subtle">
+                  （覆盖 .doc / .ppt / .xls / .xlsx / 图片 OCR）
+                </span>
+              </>
+            ) : (
+              <>
+                未检测到 LiteParse — 旧版 Office、表格与图片暂不可解析。安装命令：
+                <code className="ml-1 rounded bg-surface-hover px-1">
+                  {parserStatus.install_hint || "npm i -g @llamaindex/liteparse"}
+                </code>
+              </>
+            )}
+          </span>
+          {parserStatus?.libreoffice ? (
+            <span className="flex flex-wrap items-center gap-1.5">
+              <span
+                className={`inline-block h-2 w-2 rounded-full ${
+                  parserStatus.libreoffice.available ? "bg-emerald-500" : "bg-amber-500"
+                }`}
+              />
+              {parserStatus.libreoffice.available ? (
+                <>
+                  LibreOffice 已安装
+                  <span className="ml-1 text-text-subtle">
+                    （LiteParse 用于解析 .doc / .ppt / .xls / .xlsx）
+                  </span>
+                </>
+              ) : (
+                <>
+                  未检测到 LibreOffice — 解析 .doc / .ppt / .xls / .xlsx 需要它做格式转换。安装命令：
+                  <code className="ml-1 rounded bg-surface-hover px-1">
+                    brew install --cask libreoffice
+                  </code>
+                </>
+              )}
+            </span>
+          ) : null}
+        </div>
         <Field label="单文件上限 (MB)">
           <input
             type="number"
