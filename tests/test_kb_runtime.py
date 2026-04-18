@@ -146,6 +146,11 @@ def test_kbconfig_retrieval_mode_validation():
     fallback = KBConfig.from_dict({"retrieval": {"mode": "invalid"}})
     assert fallback.retrieval.mode == "auto"
 
+    # Legacy "manual" mode (pre-simplification) must silently migrate to "auto"
+    # so existing config.yaml files continue to round-trip without user edits.
+    migrated = KBConfig.from_dict({"retrieval": {"mode": "manual"}})
+    assert migrated.retrieval.mode == "auto"
+
 
 # --------------------------------------------------------------------------- #
 # runtime end-to-end                                                          #

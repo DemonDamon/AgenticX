@@ -489,17 +489,16 @@ export function KnowledgeConfigPanel({
         <Field label="触发模式">
           <select
             className={`w-full ${KB_FIELD_BASE}`}
-            value={config.retrieval.mode ?? "auto"}
+            value={config.retrieval.mode === "always" ? "always" : "auto"}
             onChange={(e) =>
               patch("retrieval", {
                 ...config.retrieval,
-                mode: (e.target.value as "auto" | "always" | "manual") || "auto",
+                mode: (e.target.value as "auto" | "always") || "auto",
               })
             }
           >
-            <option value="auto">智能判断（推荐）</option>
+            <option value="auto">智能检索（推荐）</option>
             <option value="always">始终检索</option>
-            <option value="manual">仅手动触发</option>
           </select>
         </Field>
         <Field label="默认 Top-K">
@@ -518,7 +517,7 @@ export function KnowledgeConfigPanel({
           />
         </Field>
         <p className="mt-2 text-[11px] leading-snug text-text-faint">
-          智能判断：仅在明显依赖用户文档时触发；始终检索：每轮优先检索后再回答；仅手动：只在你明确要求“查知识库”时触发。
+          智能检索：由模型判断何时检索，包含你主动要求“查知识库”的场景；始终检索：每轮都先检索后再回答。
         </p>
       </Panel>
 

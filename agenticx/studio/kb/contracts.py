@@ -112,10 +112,13 @@ class RetrievalSpec:
     top_k: int = 5
     score_floor: float = 0.0
     # Retrieval trigger policy for model-side knowledge_search usage.
-    # auto: trigger when user intent implies document grounding;
-    # always: proactively search before most factual answers;
-    # manual: only search when user explicitly asks.
-    mode: Literal["auto", "always", "manual"] = "auto"
+    # auto:   let the LLM judge when to call knowledge_search (covers both
+    #         "only when the user intent implies document grounding" and
+    #         "only when the user explicitly asks" — the latter used to be a
+    #         separate ``manual`` mode but was merged into ``auto`` because
+    #         the decision is ultimately LLM-driven either way.
+    # always: proactively search before most factual answers.
+    mode: Literal["auto", "always"] = "auto"
 
 
 @dataclass
@@ -194,7 +197,10 @@ class KBConfig:
         if isinstance(data.get("retrieval"), dict):
             r = data["retrieval"]
             mode_raw = str(r.get("mode", "auto")).strip().lower()
-            mode = mode_raw if mode_raw in {"auto", "always", "manual"} else "auto"
+            # ``manual`` was an earlier third mode that has since been folded
+            # into ``auto`` (LLM decides when to search in both cases), so
+            # legacy configs are silently migrated instead of erroring.
+            mode = mode_raw if mode_raw in {"auto", "always"} else "auto"
             merged.retrieval = RetrievalSpec(
                 top_k=int(r.get("top_k", 5)),
                 score_floor=float(r.get("score_floor", 0.0)),

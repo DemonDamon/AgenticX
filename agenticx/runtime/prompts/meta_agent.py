@@ -445,7 +445,9 @@ def _build_kb_retrieval_policy_block() -> str:
         enabled = bool(getattr(cfg, "enabled", True))
         top_k = int(getattr(getattr(cfg, "retrieval", None), "top_k", 5) or 5)
         mode_raw = str(getattr(getattr(cfg, "retrieval", None), "mode", "auto") or "auto").strip().lower()
-        if mode_raw in {"auto", "always", "manual"}:
+        # Legacy ``manual`` has been folded into ``auto`` — treat any unknown
+        # value (including that legacy token) as ``auto``.
+        if mode_raw in {"auto", "always"}:
             mode = mode_raw
     except Exception:
         # Keep conservative defaults if KB subsystem is unavailable at prompt-build time.
@@ -460,11 +462,11 @@ def _build_kb_retrieval_policy_block() -> str:
         )
 
     mode_hint = (
-        "智能判断（auto）：仅在问题明显依赖用户文档时触发。"
+        "智能检索（auto）：由你自行判断何时调用 knowledge_search——"
+        "当问题明显依赖用户文档，或用户明确要求“查/检索知识库”时才触发；"
+        "日常闲聊与通用事实问答不要盲目检索。"
         if mode == "auto"
-        else "始终检索（always）：回答前优先调用 knowledge_search。"
-        if mode == "always"
-        else "仅手动（manual）：只有用户明确要求“查知识库/按知识库回答”时才调用。"
+        else "始终检索（always）：回答前优先调用 knowledge_search，再结合结果作答。"
     )
     return (
         "## 知识库检索（Stage-1 MVP）\n"
