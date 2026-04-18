@@ -20,6 +20,7 @@ ingest queue (``kb_jobs.py``) can call these methods from worker threads.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -59,7 +60,11 @@ def _build_embedding_provider(spec: EmbeddingSpec):
     classes so that ``api_base`` and dimension hints land in the right kwargs.
     """
 
-    api_key = os.environ.get(spec.api_key_env) if spec.api_key_env else None
+    # Prefer the literal api_key in config; fall back to env-var name; finally
+    # the well-known vendor default env vars (OPENAI_API_KEY / DASHSCOPE_API_KEY /…).
+    literal_key = (spec.api_key or "").strip() or None
+    env_key = os.environ.get(spec.api_key_env) if spec.api_key_env else None
+    api_key = literal_key or env_key
     provider = (spec.provider or "").lower().strip()
 
     if provider in {"ollama", "litellm"}:
@@ -85,6 +90,8 @@ def _build_embedding_provider(spec: EmbeddingSpec):
         return SiliconFlowEmbeddingProvider(
             api_key=api_key or os.environ.get("SILICONFLOW_API_KEY", ""),
             model=spec.model,
+            dimensions=spec.dim if spec.dim else None,
+            **({"api_url": spec.base_url} if spec.base_url else {}),
         )
 
     if provider == "bailian":
@@ -93,6 +100,16 @@ def _build_embedding_provider(spec: EmbeddingSpec):
         return BailianEmbeddingProvider(
             api_key=api_key or os.environ.get("DASHSCOPE_API_KEY", ""),
             model=spec.model,
+            # Bailian v4 supports 2048/1536/1024(默认)/768/512/256/128/64 —
+            # forward the user-chosen dim so the HTTP request carries
+            # `dimensions=<dim>` and the returned vectors match KBConfig.dim.
+            dimensions=spec.dim if spec.dim else None,
+            # Bailian's text-embedding API caps each request at 10 inputs
+            # ("batch size is invalid, it should not be larger than 10").
+            # The provider default (100) silently fails on the first call
+            # with any KB above ~10 chunks.
+            batch_size=10,
+            **({"api_url": spec.base_url} if spec.base_url else {}),
         )
 
     raise KBError(f"Unsupported embedding provider: {spec.provider!r}")
@@ -644,7 +661,15 @@ def _read_document_text(source_path: str) -> str:
 
     try:
         reader = get_reader(path)
-        docs = reader.read(path)
+        raw = reader.read(path)
+        # agenticx readers for PDF / Word / PPT expose async `read()`; ingest
+        # runs in a sync worker thread, so resolve the coroutine here instead
+        # of iterating over it (prior behavior raised "'coroutine' object is
+        # not iterable" for every PDF upload).
+        if asyncio.iscoroutine(raw):
+            docs = asyncio.run(raw)
+        else:
+            docs = raw
     except Exception as exc:
         raise KBError(f"Reader failed for {path}: {exc}") from exc
 
@@ -735,6 +760,22 @@ def _embed_texts(provider, texts: List[str]) -> List[List[float]]:
 
     if not texts:
         return []
+
+    # aiohttp-based online providers (Bailian / SiliconFlow) cache a
+    # ``ClientSession`` on ``self._session`` bound to the asyncio loop that
+    # created it. Their sync ``embed()`` does ``asyncio.run(...)``, which
+    # destroys that loop after each call. A second ingest reuses the same
+    # provider instance, finds ``_session`` still set (not yet garbage
+    # collected), and hits "Event loop is closed" inside aiohttp. Reset the
+    # attribute so ``_get_session()`` rebuilds a fresh session bound to the
+    # new loop. No-op for providers without this attribute (e.g. LiteLLM /
+    # OpenAIEmbeddingProvider).
+    if getattr(provider, "_session", None) is not None:
+        try:
+            provider._session = None  # type: ignore[attr-defined]
+        except Exception:  # pragma: no cover - defensive
+            pass
+
     if hasattr(provider, "embed_documents"):
         result = provider.embed_documents(texts)
     elif hasattr(provider, "embed"):

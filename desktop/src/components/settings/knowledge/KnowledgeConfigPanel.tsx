@@ -1,6 +1,6 @@
 // Plan-Id: machi-kb-stage1-local-mvp
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, RotateCcw, Save } from "lucide-react";
+import { Check, Eye, EyeOff, Loader2, RotateCcw, Save } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import type { KBApi } from "./api";
 import {
@@ -10,26 +10,80 @@ import {
   type KBConfig,
   type KBStats,
 } from "./types";
+import { KB_FIELD_BASE } from "./kb-field-classes";
 
 type Props = {
   api: KBApi;
-  initialConfig: KBConfig;
+  /** Config currently persisted on the backend (used for diffing / rebuild detection). */
+  persistedConfig: KBConfig;
+  /** Working copy owned by the parent so the outer SettingsPanel can flush it. */
+  draft: KBConfig;
+  onDraftChange: (next: KBConfig) => void;
   initialStats: KBStats | null;
   onSaved: (nextConfig: KBConfig, rebuildRequired: boolean, stats: KBStats | null) => void;
 };
 
-export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved }: Props) {
-  const [config, setConfig] = useState<KBConfig>(initialConfig);
+export function KnowledgeConfigPanel({
+  api,
+  persistedConfig,
+  draft,
+  onDraftChange,
+  initialStats,
+  onSaved,
+}: Props) {
+  const config = draft;
+  const setConfig = (updater: KBConfig | ((prev: KBConfig) => KBConfig)) => {
+    const next = typeof updater === "function" ? (updater as (p: KBConfig) => KBConfig)(draft) : updater;
+    onDraftChange(next);
+  };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
   const [rebuildRequired, setRebuildRequired] = useState<boolean>(
     Boolean(initialStats?.rebuild_required),
   );
   const [ollamaStatus, setOllamaStatus] = useState<"unknown" | "ok" | "missing">("unknown");
+  const [testStatus, setTestStatus] = useState<"idle" | "checking" | "ok" | "fail">("idle");
+  const [testMessage, setTestMessage] = useState<string>("");
+
+  // Reset the inline test badge whenever embedding-relevant fields change,
+  // so users don't read a stale "有效 ✓" next to a key they just edited.
+  useEffect(() => {
+    setTestStatus("idle");
+    setTestMessage("");
+  }, [
+    config.embedding.provider,
+    config.embedding.model,
+    config.embedding.dim,
+    config.embedding.base_url,
+    config.embedding.api_key,
+  ]);
+
+  async function testConnectivity() {
+    setTestStatus("checking");
+    setTestMessage("");
+    try {
+      const result = await api.testEmbedding(config.embedding);
+      if (result.ok) {
+        setTestStatus("ok");
+        setTestMessage(
+          `维度 ${result.actual_dim} · 用时 ${result.latency_ms ?? "?"}ms`,
+        );
+      } else {
+        setTestStatus("fail");
+        setTestMessage(result.error || `${result.stage ?? "unknown"} 阶段失败`);
+      }
+    } catch (exc) {
+      setTestStatus("fail");
+      setTestMessage(String((exc as Error).message ?? exc));
+    }
+  }
 
   useEffect(() => {
-    setConfig(initialConfig);
-  }, [initialConfig]);
+    if (!justSaved) return;
+    const t = setTimeout(() => setJustSaved(false), 1600);
+    return () => clearTimeout(t);
+  }, [justSaved]);
 
   // Plan-Id: machi-kb-stage1-local-mvp (t13) — best-effort Ollama probe.
   useEffect(() => {
@@ -66,10 +120,15 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
 
   const embeddingChanged = useMemo(
     () =>
-      initialConfig.embedding.provider !== config.embedding.provider ||
-      initialConfig.embedding.model !== config.embedding.model ||
-      initialConfig.embedding.dim !== config.embedding.dim,
-    [initialConfig, config],
+      persistedConfig.embedding.provider !== config.embedding.provider ||
+      persistedConfig.embedding.model !== config.embedding.model ||
+      persistedConfig.embedding.dim !== config.embedding.dim,
+    [persistedConfig, config],
+  );
+
+  const dirty = useMemo(
+    () => JSON.stringify(persistedConfig) !== JSON.stringify(config),
+    [persistedConfig, config],
   );
 
   async function save() {
@@ -86,6 +145,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
         stats = null;
       }
       onSaved(result.config, Boolean(result.rebuild_required), stats);
+      setJustSaved(true);
     } catch (exc) {
       setError(String((exc as Error).message ?? exc));
     } finally {
@@ -145,7 +205,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="后端">
             <input
-              className="kb-input"
+              className={`w-full cursor-default opacity-90 ${KB_FIELD_BASE}`}
               value={config.vector_store.backend}
               readOnly
               title="Stage-1 MVP 仅支持 Chroma"
@@ -153,7 +213,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
           </Field>
           <Field label="存储路径">
             <input
-              className="kb-input"
+              className={`w-full ${KB_FIELD_BASE}`}
               value={config.vector_store.path}
               onChange={(e) =>
                 patch("vector_store", { ...config.vector_store, path: e.target.value })
@@ -162,7 +222,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
           </Field>
           <Field label="集合名">
             <input
-              className="kb-input"
+              className={`w-full ${KB_FIELD_BASE}`}
               value={config.vector_store.collection}
               onChange={(e) =>
                 patch("vector_store", { ...config.vector_store, collection: e.target.value })
@@ -176,7 +236,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="Provider">
             <select
-              className="kb-input"
+              className={`w-full ${KB_FIELD_BASE}`}
               value={config.embedding.provider}
               onChange={(e) => patchEmbeddingProvider(e.target.value)}
             >
@@ -189,7 +249,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
           </Field>
           <Field label="模型">
             <input
-              className="kb-input"
+              className={`w-full ${KB_FIELD_BASE}`}
               value={config.embedding.model}
               onChange={(e) =>
                 patch("embedding", { ...config.embedding, model: e.target.value })
@@ -199,7 +259,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
           <Field label="维度 (dim)">
             <input
               type="number"
-              className="kb-input"
+              className={`w-full ${KB_FIELD_BASE}`}
               value={config.embedding.dim}
               min={16}
               max={4096}
@@ -210,7 +270,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
           </Field>
           <Field label="Base URL">
             <input
-              className="kb-input"
+              className={`w-full ${KB_FIELD_BASE}`}
               value={config.embedding.base_url ?? ""}
               placeholder={
                 config.embedding.provider === "ollama" ? "http://localhost:11434" : "可选"
@@ -223,19 +283,64 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
               }
             />
           </Field>
-          <Field label="API Key 环境变量名（可选）">
-            <input
-              className="kb-input"
-              value={config.embedding.api_key_env ?? ""}
-              placeholder="如 OPENAI_API_KEY"
-              onChange={(e) =>
-                patch("embedding", {
-                  ...config.embedding,
-                  api_key_env: e.target.value || null,
-                })
-              }
-            />
-          </Field>
+          <div className="md:col-span-2">
+            <Field label="API Key">
+              <div className="flex gap-2">
+                <div className="min-w-0 flex-1">
+                  <ApiKeyInput
+                    value={config.embedding.api_key ?? ""}
+                    onChange={(v) =>
+                      patch("embedding", {
+                        ...config.embedding,
+                        api_key: v || null,
+                      })
+                    }
+                    placeholder={
+                      config.embedding.provider === "ollama"
+                        ? "本地 Ollama 可留空"
+                        : "请粘贴百炼 / OpenAI / SiliconFlow 等在线服务的 API Key"
+                    }
+                  />
+                </div>
+                <button
+                  type="button"
+                  className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium transition ${
+                    testStatus === "checking"
+                      ? "border-amber-500/50 text-amber-400"
+                      : testStatus === "ok"
+                      ? "border-emerald-500/50 text-emerald-400"
+                      : testStatus === "fail"
+                      ? "border-rose-500/50 text-rose-400"
+                      : "border-border text-text-subtle hover:bg-surface-hover hover:text-text-primary"
+                  }`}
+                  disabled={testStatus === "checking"}
+                  onClick={testConnectivity}
+                  title="发一条测试 embedding 请求，验证密钥、模型、维度是否可用"
+                >
+                  {testStatus === "checking"
+                    ? "检测中…"
+                    : testStatus === "ok"
+                    ? "有效 ✓"
+                    : testStatus === "fail"
+                    ? "失败 ✗"
+                    : "检 测"}
+                </button>
+              </div>
+              {testMessage ? (
+                <div
+                  className={`mt-1 text-xs ${
+                    testStatus === "ok"
+                      ? "text-emerald-500"
+                      : testStatus === "fail"
+                      ? "text-rose-500"
+                      : "text-text-subtle"
+                  }`}
+                >
+                  {testMessage}
+                </div>
+              ) : null}
+            </Field>
+          </div>
         </div>
         {embeddingChanged ? (
           <p className="mt-3 text-xs text-text-subtle">
@@ -248,7 +353,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <Field label="Strategy">
             <select
-              className="kb-input"
+              className={`w-full ${KB_FIELD_BASE}`}
               value={config.chunking.strategy}
               onChange={(e) =>
                 patch("chunking", { ...config.chunking, strategy: e.target.value })
@@ -264,7 +369,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
           <Field label="chunk_size">
             <input
               type="number"
-              className="kb-input"
+              className={`w-full ${KB_FIELD_BASE}`}
               value={config.chunking.chunk_size}
               min={64}
               onChange={(e) =>
@@ -278,7 +383,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
           <Field label="chunk_overlap">
             <input
               type="number"
-              className="kb-input"
+              className={`w-full ${KB_FIELD_BASE}`}
               value={config.chunking.chunk_overlap}
               min={0}
               onChange={(e) =>
@@ -295,7 +400,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
       <Panel title="文件过滤">
         <Field label="扩展名（逗号分隔）">
           <input
-            className="kb-input"
+            className={`w-full ${KB_FIELD_BASE}`}
             value={config.file_filters.extensions.join(",")}
             onChange={(e) =>
               patch("file_filters", {
@@ -311,7 +416,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
         <Field label="单文件上限 (MB)">
           <input
             type="number"
-            className="kb-input"
+            className={`w-full ${KB_FIELD_BASE}`}
             value={config.file_filters.max_file_size_mb}
             min={1}
             onChange={(e) =>
@@ -328,7 +433,7 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
         <Field label="默认 Top-K">
           <input
             type="number"
-            className="kb-input"
+            className={`w-full ${KB_FIELD_BASE}`}
             min={1}
             max={20}
             value={config.retrieval.top_k}
@@ -349,9 +454,16 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
       ) : null}
 
       <div className="flex items-center justify-end gap-2">
+        {justSaved ? (
+          <span className="inline-flex items-center gap-1 text-xs text-emerald-500">
+            <Check className="h-3.5 w-3.5" /> 已保存
+          </span>
+        ) : dirty ? (
+          <span className="text-xs text-amber-500">· 有未保存的改动</span>
+        ) : null}
         <button
           type="button"
-          className="kb-button-ghost"
+          className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
           onClick={reset}
           disabled={saving}
         >
@@ -359,9 +471,10 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
         </button>
         <button
           type="button"
-          className="kb-button-primary"
+          className="inline-flex items-center gap-1 rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:cursor-progress disabled:opacity-50"
           onClick={save}
-          disabled={saving}
+          disabled={saving || !dirty}
+          title={dirty ? "保存知识库配置" : "暂无需保存的改动"}
         >
           {saving ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -371,40 +484,6 @@ export function KnowledgeConfigPanel({ api, initialConfig, initialStats, onSaved
           保存
         </button>
       </div>
-
-      <style>{`
-        .kb-input {
-          width: 100%;
-          border: 1px solid var(--color-border, #e5e7eb);
-          background: var(--color-surface-card, #fff);
-          border-radius: 0.375rem;
-          padding: 0.4rem 0.6rem;
-          font-size: 0.875rem;
-        }
-        .kb-input:focus {
-          outline: 2px solid var(--color-accent, #6366f1);
-          outline-offset: -1px;
-        }
-        .kb-button-primary, .kb-button-ghost {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.35rem;
-          padding: 0.4rem 0.8rem;
-          border-radius: 0.375rem;
-          font-size: 0.8rem;
-          cursor: pointer;
-          border: 1px solid transparent;
-        }
-        .kb-button-primary {
-          background: var(--color-accent, #6366f1);
-          color: white;
-        }
-        .kb-button-primary:disabled { opacity: 0.55; cursor: progress; }
-        .kb-button-ghost {
-          border-color: var(--color-border, #e5e7eb);
-          background: transparent;
-        }
-      `}</style>
     </div>
   );
 }
@@ -415,5 +494,38 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="mb-1 inline-block">{label}</span>
       {children}
     </label>
+  );
+}
+
+function ApiKeyInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        type={visible ? "text" : "password"}
+        autoComplete="off"
+        className={`w-full pr-10 ${KB_FIELD_BASE}`}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={visible ? "隐藏密钥" : "显示密钥"}
+        className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-text-faint transition hover:bg-surface-hover hover:text-text-subtle"
+        onClick={() => setVisible((v) => !v)}
+      >
+        {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
+    </div>
   );
 }

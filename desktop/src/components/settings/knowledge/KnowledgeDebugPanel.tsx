@@ -4,6 +4,7 @@ import { FileSearch, Loader2, Search } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import type { KBApi } from "./api";
 import type { KBConfig, PreviewChunk, RetrievalHit } from "./types";
+import { KB_FIELD_BASE } from "./kb-field-classes";
 
 type Props = {
   api: KBApi;
@@ -64,7 +65,7 @@ export function KnowledgeDebugPanel({ api, config }: Props) {
         <div className="flex gap-2">
           <input
             type="text"
-            className="kb-debug-input flex-1"
+            className={`min-w-0 flex-1 ${KB_FIELD_BASE}`}
             placeholder="输入问题，例如：知识库默认使用哪个向量库？"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -74,7 +75,7 @@ export function KnowledgeDebugPanel({ api, config }: Props) {
           />
           <input
             type="number"
-            className="kb-debug-input w-20"
+            className={`w-20 min-w-0 shrink-0 ${KB_FIELD_BASE}`}
             min={1}
             max={20}
             value={topK}
@@ -82,7 +83,7 @@ export function KnowledgeDebugPanel({ api, config }: Props) {
           />
           <button
             type="button"
-            className="inline-flex items-center gap-1 rounded bg-accent px-3 py-1 text-xs text-white disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-md bg-[var(--settings-accent-solid)] px-3 py-1 text-xs font-medium text-[var(--settings-accent-solid-text)] transition hover:bg-[var(--settings-accent-solid-hover)] disabled:opacity-50"
             onClick={runSearch}
             disabled={!query.trim() || searching}
           >
@@ -111,7 +112,7 @@ export function KnowledgeDebugPanel({ api, config }: Props) {
               className="rounded border border-border bg-surface-card/50 p-2 text-xs"
             >
               <div className="mb-1 flex items-center gap-2 text-[11px] text-text-subtle">
-                <span className="rounded bg-accent/15 px-1.5 py-0.5 text-accent">
+                <span className="rounded bg-[var(--settings-accent-badge-bg)] px-1.5 py-0.5 text-[var(--settings-accent-fg)]">
                   #{idx + 1}
                 </span>
                 <span>score={h.score.toFixed(4)}</span>
@@ -134,28 +135,28 @@ export function KnowledgeDebugPanel({ api, config }: Props) {
         <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
           <input
             type="text"
-            className="kb-debug-input md:col-span-3"
+            className={`w-full md:col-span-3 ${KB_FIELD_BASE}`}
             placeholder="文件绝对路径，如 /Users/me/doc.md"
             value={previewPath}
             onChange={(e) => setPreviewPath(e.target.value)}
           />
           <input
             type="number"
-            className="kb-debug-input"
+            className={`w-full min-w-0 ${KB_FIELD_BASE}`}
             placeholder="chunk_size"
             value={chunkSize}
             onChange={(e) => setChunkSize(Number(e.target.value) || 800)}
           />
           <input
             type="number"
-            className="kb-debug-input"
+            className={`w-full min-w-0 ${KB_FIELD_BASE}`}
             placeholder="chunk_overlap"
             value={chunkOverlap}
             onChange={(e) => setChunkOverlap(Number(e.target.value) || 0)}
           />
           <button
             type="button"
-            className="inline-flex items-center justify-center gap-1 rounded bg-accent px-3 py-1 text-xs text-white disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-1 rounded-md bg-[var(--settings-accent-solid)] px-3 py-1 text-xs font-medium text-[var(--settings-accent-solid-text)] transition hover:bg-[var(--settings-accent-solid-hover)] disabled:opacity-50"
             onClick={runPreview}
             disabled={!previewPath.trim() || previewing}
           >
@@ -189,20 +190,6 @@ export function KnowledgeDebugPanel({ api, config }: Props) {
           ) : null}
         </div>
       </Panel>
-
-      <style>{`
-        .kb-debug-input {
-          border: 1px solid var(--color-border, #e5e7eb);
-          background: var(--color-surface-card, #fff);
-          border-radius: 0.375rem;
-          padding: 0.4rem 0.6rem;
-          font-size: 0.8rem;
-        }
-        .kb-debug-input:focus {
-          outline: 2px solid var(--color-accent, #6366f1);
-          outline-offset: -1px;
-        }
-      `}</style>
     </div>
   );
 }

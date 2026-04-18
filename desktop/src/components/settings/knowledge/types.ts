@@ -24,6 +24,9 @@ export type EmbeddingSpec = {
   model: string;
   dim: number;
   base_url?: string | null;
+  /** Literal API key (preferred). Persisted to ~/.agenticx/config.yaml. */
+  api_key?: string | null;
+  /** Optional env var NAME (e.g. DASHSCOPE_API_KEY) used as fallback when api_key is empty. */
   api_key_env?: string | null;
 };
 
@@ -142,7 +145,9 @@ export const EMBEDDING_PROVIDERS: { id: string; label: string; defaultModel: str
   { id: "ollama", label: "Ollama (local)", defaultModel: "bge-m3", defaultDim: 1024 },
   { id: "openai", label: "OpenAI", defaultModel: "text-embedding-3-small", defaultDim: 1536 },
   { id: "siliconflow", label: "SiliconFlow", defaultModel: "BAAI/bge-m3", defaultDim: 1024 },
-  { id: "bailian", label: "Bailian (DashScope)", defaultModel: "text-embedding-v2", defaultDim: 1536 },
+  // 百炼 text-embedding-v4（Qwen3-Embedding）支持 2048 / 1536 / 1024(默认) / 768 / 512 / 256 / 128 / 64；
+  // 与官方默认对齐到 1024，需要更大维度（如 2048）时由用户在表单中手动调整。
+  { id: "bailian", label: "Bailian (DashScope)", defaultModel: "text-embedding-v4", defaultDim: 1024 },
 ];
 
 export const CHUNKING_STRATEGIES = [

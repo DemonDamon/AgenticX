@@ -183,7 +183,9 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
         <div
           ref={dropRef}
           className={`flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed p-6 text-sm transition ${
-            enabled ? "border-border hover:border-accent" : "border-border/50 opacity-60"
+            enabled
+              ? "border-border hover:border-[var(--settings-accent-border-strong)]"
+              : "border-border/50 opacity-60"
           }`}
           onDragOver={(e) => {
             if (!enabled) return;
@@ -243,7 +245,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
                     {job && status !== "done" && status !== "failed" ? (
                       <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-border/40">
                         <div
-                          className="h-full bg-accent transition-all"
+                          className="h-full bg-[var(--settings-accent-progress)] transition-all"
                           style={{ width: `${progressPercent}%` }}
                         />
                       </div>

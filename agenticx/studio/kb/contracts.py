@@ -37,6 +37,11 @@ class EmbeddingSpec:
     model: str = "bge-m3"
     dim: int = 1024
     base_url: Optional[str] = None
+    # Literal API key — written to config.yaml; preferred over api_key_env.
+    api_key: Optional[str] = None
+    # Optional environment variable NAME (e.g. "DASHSCOPE_API_KEY") used as fallback
+    # when api_key is empty. Keeps plaintext secret out of config.yaml for users
+    # who prefer env-var storage.
     api_key_env: Optional[str] = None
 
 
@@ -88,12 +93,24 @@ class KBConfig:
             )
         if isinstance(data.get("embedding"), dict):
             e = data["embedding"]
+            api_key = e.get("api_key")
+            api_key_env = e.get("api_key_env")
+            # Back-compat: a previous UI mislabeled the only input as
+            # "API Key 环境变量名" so users pasted real secrets (sk-…) into it.
+            # Detect that shape and migrate to the literal api_key field.
+            if api_key_env and not api_key:
+                ev = str(api_key_env)
+                import re as _re
+                if not _re.fullmatch(r"[A-Z][A-Z0-9_]*", ev):
+                    api_key = ev
+                    api_key_env = None
             merged.embedding = EmbeddingSpec(
                 provider=str(e.get("provider", "ollama")),
                 model=str(e.get("model", "bge-m3")),
                 dim=int(e.get("dim", 1024)),
                 base_url=e.get("base_url"),
-                api_key_env=e.get("api_key_env"),
+                api_key=(str(api_key).strip() or None) if api_key else None,
+                api_key_env=(str(api_key_env).strip() or None) if api_key_env else None,
             )
         if isinstance(data.get("chunking"), dict):
             c = data["chunking"]

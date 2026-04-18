@@ -50,7 +50,7 @@ import {
   RUNTIME_MIN_TOOL_ROUNDS,
 } from "./automation/RuntimeConfigSection";
 import { AccountTab } from "./AccountTab";
-import { KnowledgeSettings } from "./settings/knowledge/KnowledgeSettings";
+import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
 import type { SettingsTab } from "../settings-tab";
 export type { SettingsTab } from "../settings-tab";
@@ -4711,6 +4711,7 @@ export function SettingsPanel({
   const updateSettingsSlice = useAppStore((s) => s.updateSettings);
   const initializedForOpenRef = useRef(false);
   const toolsTabRef = useRef<ToolsTabHandle>(null);
+  const knowledgeRef = useRef<KnowledgeSettingsHandle>(null);
   const permissionsPanelRef = useRef<PermissionsAdvancedPanelHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
   useEffect(() => {
@@ -5233,6 +5234,13 @@ export function SettingsPanel({
         window.alert(toolsRes.error || "工具页保存失败");
         return;
       }
+    }
+    const kbRes = await knowledgeRef.current?.flushIfDirty();
+    if (kbRes && !kbRes.ok) {
+      const cont = window.confirm(
+        `知识库配置保存失败：\n${kbRes.error ?? "未知错误"}\n\n是否仍继续保存其它设置？`,
+      );
+      if (!cont) return;
     }
     const normalized: Record<string, ProviderEntry> = {};
     for (const [name, entry] of Object.entries(draft)) {
@@ -6216,7 +6224,7 @@ export function SettingsPanel({
             )}
 
             {/* === KNOWLEDGE TAB === Plan-Id: machi-kb-stage1-local-mvp */}
-            {tab === "knowledge" && <KnowledgeSettings />}
+            {tab === "knowledge" && <KnowledgeSettings ref={knowledgeRef} />}
 
             {/* === HOOKS TAB === */}
             {tab === "hooks" && <HooksTab />}
