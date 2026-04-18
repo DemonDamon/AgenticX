@@ -111,6 +111,11 @@ class FileFilterSpec:
 class RetrievalSpec:
     top_k: int = 5
     score_floor: float = 0.0
+    # Retrieval trigger policy for model-side knowledge_search usage.
+    # auto: trigger when user intent implies document grounding;
+    # always: proactively search before most factual answers;
+    # manual: only search when user explicitly asks.
+    mode: Literal["auto", "always", "manual"] = "auto"
 
 
 @dataclass
@@ -188,9 +193,12 @@ class KBConfig:
             )
         if isinstance(data.get("retrieval"), dict):
             r = data["retrieval"]
+            mode_raw = str(r.get("mode", "auto")).strip().lower()
+            mode = mode_raw if mode_raw in {"auto", "always", "manual"} else "auto"
             merged.retrieval = RetrievalSpec(
                 top_k=int(r.get("top_k", 5)),
                 score_floor=float(r.get("score_floor", 0.0)),
+                mode=mode,
             )
         return merged
 

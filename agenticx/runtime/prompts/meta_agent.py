@@ -433,6 +433,50 @@ def _build_provider_hard_failure_block(session: StudioSession) -> str:
     )
 
 
+def _build_kb_retrieval_policy_block() -> str:
+    """Build dynamic KB retrieval policy from persisted KB config."""
+    mode = "auto"
+    top_k = 5
+    enabled = True
+    try:
+        from agenticx.studio.kb import KBManager
+
+        cfg = KBManager.instance().read_config()
+        enabled = bool(getattr(cfg, "enabled", True))
+        top_k = int(getattr(getattr(cfg, "retrieval", None), "top_k", 5) or 5)
+        mode_raw = str(getattr(getattr(cfg, "retrieval", None), "mode", "auto") or "auto").strip().lower()
+        if mode_raw in {"auto", "always", "manual"}:
+            mode = mode_raw
+    except Exception:
+        # Keep conservative defaults if KB subsystem is unavailable at prompt-build time.
+        pass
+
+    if not enabled:
+        return (
+            "## 知识库检索（Stage-1 MVP）\n"
+            "- 本地知识库当前处于禁用状态：不要主动调用 `knowledge_search`，除非用户先要求启用知识库。\n"
+            "- 若用户明确要求“按知识库回答/检索知识库”，先告知当前为禁用状态，并引导其在设置中启用后再检索。\n"
+            "- 与记忆的边界：长期文档资料走 `knowledge_search`；个人偏好/动作项走 `memory_search`/`memory_append`，不要混用。\n\n"
+        )
+
+    mode_hint = (
+        "智能判断（auto）：仅在问题明显依赖用户文档时触发。"
+        if mode == "auto"
+        else "始终检索（always）：回答前优先调用 knowledge_search。"
+        if mode == "always"
+        else "仅手动（manual）：只有用户明确要求“查知识库/按知识库回答”时才调用。"
+    )
+    return (
+        "## 知识库检索（Stage-1 MVP）\n"
+        f"- 当前检索模式：`{mode}`；默认 Top-K：`{top_k}`。{mode_hint}\n"
+        f"- 除非用户显式指定，优先省略 `top_k` 参数，让系统自动采用默认 Top-K={top_k}。\n"
+        "- 返回 JSON 形如 `{ok, hits:[{id,score,text,source:{uri,title,chunk_index}}], used_top_k, source:'local'}`。\n"
+        "- 回答必须基于 `hits[].text` 给出，并在结尾用行内引用格式标注来源（例如：“根据 `notes.md` 第 3 段…”）。若 `hits` 为空，明确告知用户未在知识库命中，并询问是否需要兜底到一般知识。\n"
+        "- 不要把 `hits` 原始 JSON 复读给用户；只呈现有用片段与来源。\n"
+        "- 与记忆的边界：长期文档资料走 `knowledge_search`；个人偏好/动作项走 `memory_search`/`memory_append`，不要混用。\n\n"
+    )
+
+
 def build_meta_agent_system_prompt(
     session: StudioSession,
     *,
@@ -507,6 +551,7 @@ def build_meta_agent_system_prompt(
     )
     computer_use_block = _build_computer_use_capabilities_block()
     provider_fault_block = _build_provider_hard_failure_block(session)
+    kb_retrieval_block = _build_kb_retrieval_policy_block()
     base_prompt = (
         f"{workspace_context}\n"
         f"{provider_fault_block}"
@@ -602,12 +647,7 @@ def build_meta_agent_system_prompt(
         "- content 应是精炼的、自包含的事实（含关键 URL/路径/名称），而非原始对话文本。\n"
         "- 会话结束前，若本轮产生了重要结论或用户偏好变更，主动调用 `memory_append(target='daily', content='...')` 记录。\n"
         "- 需要回忆历史信息时，调用 `memory_search(query='...')` 查询。\n\n"
-        "## 知识库检索（Stage-1 MVP）\n"
-        "- 本地 Machi 知识库已启用时，遇到需要参考**用户文档**的问题（例如「文档里怎么说的」「我上传的那份 PDF 里提到过…」「按知识库回答」），**必须先调用** `knowledge_search(query='...', top_k=5)` 再作答。\n"
-        "- 返回 JSON 形如 `{ok, hits:[{id,score,text,source:{uri,title,chunk_index}}], used_top_k, source:'local'}`。\n"
-        "- 回答必须基于 `hits[].text` 给出，并在结尾用行内引用格式标注来源（例如：“根据 `notes.md` 第 3 段…”）。若 `hits` 为空，明确告知用户未在知识库命中，并询问是否需要兜底到一般知识。\n"
-        "- 不要把 `hits` 原始 JSON 复读给用户；只呈现有用片段与来源。\n"
-        "- 与记忆的边界：长期文档资料走 `knowledge_search`；个人偏好/动作项走 `memory_search`/`memory_append`，不要混用。\n\n"
+        f"{kb_retrieval_block}"
         "## 子智能体完成后的主动汇报（关键）\n"
         "- 当「当前子智能体状态」或「历史子智能体结果」中出现 completed 或 failed 的子智能体，你 **必须在本轮回复中主动汇报**，包括：\n"
         "  1) 子智能体名称和任务概述。\n"

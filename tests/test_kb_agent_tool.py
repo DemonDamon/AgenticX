@@ -112,6 +112,22 @@ def test_tool_clamps_top_k(seeded_manager: KBManager):
     assert payload["used_top_k"] <= 20
 
 
+def test_tool_uses_config_default_top_k_when_omitted(
+    seeded_manager: KBManager,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, int] = {}
+
+    def _fake_search(_query: str, top_k: int = 0):
+        captured["top_k"] = int(top_k)
+        return []
+
+    monkeypatch.setattr(seeded_manager.runtime, "search", _fake_search)
+    payload = json.loads(_tool_knowledge_search({"query": "agenticx"}))
+    assert payload["ok"] is True
+    assert captured["top_k"] == seeded_manager.read_config().retrieval.top_k
+
+
 def test_tool_when_kb_disabled(tmp_path: Path):
     KBManager.reset_for_tests()
     cfg_path = tmp_path / "config.yaml"

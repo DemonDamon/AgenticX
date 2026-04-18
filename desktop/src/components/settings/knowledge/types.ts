@@ -44,6 +44,7 @@ export type FileFilterSpec = {
 export type RetrievalSpec = {
   top_k: number;
   score_floor: number;
+  mode: "auto" | "always" | "manual";
 };
 
 export type KBConfig = {
@@ -163,6 +164,7 @@ export function defaultKBConfig(): KBConfig {
     retrieval: {
       top_k: 5,
       score_floor: 0,
+      mode: "auto",
     },
   };
 }

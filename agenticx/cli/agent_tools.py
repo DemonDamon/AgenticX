@@ -1046,7 +1046,7 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "query": {"type": "string", "description": "Natural-language search query."},
                     "top_k": {
                         "type": "integer",
-                        "description": "Maximum number of chunks to return (1-20, default 5).",
+                        "description": "Maximum number of chunks to return (1-20). Omit to use KB setting default Top-K.",
                     },
                 },
                 "required": ["query"],
@@ -3170,13 +3170,6 @@ def _tool_knowledge_search(arguments: Dict[str, Any]) -> str:
             {"ok": False, "error": "query is required", "hits": []},
             ensure_ascii=False,
         )
-    raw_top_k = arguments.get("top_k")
-    try:
-        top_k = int(raw_top_k) if raw_top_k is not None else 5
-    except (TypeError, ValueError):
-        top_k = 5
-    top_k = max(1, min(20, top_k))
-
     try:
         from agenticx.studio.kb import KBManager
     except Exception as exc:  # pragma: no cover - packaging issue
@@ -3194,6 +3187,14 @@ def _tool_knowledge_search(arguments: Dict[str, Any]) -> str:
         )
 
     cfg = manager.read_config()
+    default_top_k = int(getattr(getattr(cfg, "retrieval", None), "top_k", 5) or 5)
+    raw_top_k = arguments.get("top_k")
+    try:
+        top_k = int(raw_top_k) if raw_top_k is not None else default_top_k
+    except (TypeError, ValueError):
+        top_k = default_top_k
+    top_k = max(1, min(20, top_k))
+
     if not cfg.enabled:
         return json.dumps(
             {

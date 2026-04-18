@@ -103,6 +103,7 @@ def test_kbconfig_roundtrip_defaults():
     assert ".pptx" in cfg.file_filters.extensions
     assert ".html" in cfg.file_filters.extensions
     assert ".json" in cfg.file_filters.extensions
+    assert cfg.retrieval.mode == "auto"
 
     as_dict = cfg.to_dict()
     cfg2 = KBConfig.from_dict(as_dict)
@@ -135,6 +136,15 @@ def test_kbconfig_embedding_fingerprint_detects_change():
     a = KBConfig.from_dict({"embedding": {"provider": "openai", "model": "m", "dim": 768}})
     b = KBConfig.from_dict({"embedding": {"provider": "openai", "model": "m2", "dim": 768}})
     assert a.embedding_fingerprint() != b.embedding_fingerprint()
+
+
+def test_kbconfig_retrieval_mode_validation():
+    cfg = KBConfig.from_dict({"retrieval": {"mode": "always", "top_k": 7}})
+    assert cfg.retrieval.mode == "always"
+    assert cfg.retrieval.top_k == 7
+
+    fallback = KBConfig.from_dict({"retrieval": {"mode": "invalid"}})
+    assert fallback.retrieval.mode == "auto"
 
 
 # --------------------------------------------------------------------------- #

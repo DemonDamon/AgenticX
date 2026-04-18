@@ -164,12 +164,6 @@ export const KnowledgeSettings = forwardRef<KnowledgeSettingsHandle>(function Kn
               draft={draft}
               onDraftChange={setDraft}
               initialStats={stats}
-              onSaved={(next, rebuild, newStats) => {
-                setConfig(next);
-                setDraft(next);
-                if (newStats) setStats(newStats);
-                else setStats((prev) => (prev ? { ...prev, rebuild_required: rebuild } : prev));
-              }}
             />
           ) : null}
           {inner === "materials" ? (
