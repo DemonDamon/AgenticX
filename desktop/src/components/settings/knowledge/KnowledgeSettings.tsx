@@ -1,7 +1,15 @@
 // Plan-Id: machi-kb-stage1-local-mvp
 // Plan-File: .cursor/plans/2026-04-14-machi-kb-stage1-local-mvp.plan.md
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Library, Loader2 } from "lucide-react";
 import { useAppStore } from "../../../store";
 import { createKbApi } from "./api";
@@ -13,7 +21,17 @@ import { defaultKBConfig } from "./types";
 
 type InnerTab = "config" | "materials" | "debug";
 
-export function KnowledgeSettings() {
+export type KnowledgeSettingsHandle = {
+  /** Persist pending edits in the config sub-panel to /api/kb/config.
+   *  Called by the outer SettingsPanel footer "保存" so the user does not
+   *  have to click two save buttons. */
+  flushIfDirty: () => Promise<{ ok: boolean; error?: string }>;
+};
+
+export const KnowledgeSettings = forwardRef<KnowledgeSettingsHandle>(function KnowledgeSettings(
+  _props,
+  ref,
+) {
   const apiToken = useAppStore((s) => s.apiToken);
   const backendUrl = useAppStore((s) => s.backendUrl);
 
@@ -32,11 +50,20 @@ export function KnowledgeSettings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Working copy of the config panel. Lives here (not inside KnowledgeConfigPanel)
+  // so the outer footer can flush it on save.
+  const [draft, setDraft] = useState<KBConfig>(defaultKBConfig());
+  const draftRef = useRef<KBConfig>(draft);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
   const reload = useCallback(async () => {
     setLoading(true);
     try {
       const body = await api.readConfig();
       setConfig(body.config);
+      setDraft(body.config);
       setStats(body.stats);
       setError(null);
     } catch (exc) {
@@ -50,6 +77,36 @@ export function KnowledgeSettings() {
     void reload();
   }, [reload]);
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      async flushIfDirty() {
+        const persisted = config;
+        const next = draftRef.current;
+        if (JSON.stringify(persisted) === JSON.stringify(next)) {
+          return { ok: true };
+        }
+        try {
+          const result = await api.writeConfig(next);
+          setConfig(result.config);
+          setDraft(result.config);
+          try {
+            const s = await api.getStats();
+            setStats(s);
+          } catch {
+            /* non-fatal */
+          }
+          return { ok: true };
+        } catch (exc) {
+          const msg = String((exc as Error).message ?? exc);
+          setError(`保存知识库配置失败：${msg}`);
+          return { ok: false, error: msg };
+        }
+      },
+    }),
+    [api, config],
+  );
+
   const innerTabs: { id: InnerTab; label: string }[] = [
     { id: "config", label: "配置" },
     { id: "materials", label: "资料" },
@@ -60,7 +117,7 @@ export function KnowledgeSettings() {
     <div className="space-y-3">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
-          <Library className="h-4 w-4 text-accent" />
+          <Library className="h-4 w-4 text-[var(--settings-accent-fg)]" />
           知识库
           {stats ? (
             <span className="ml-2 text-xs text-text-subtle">
@@ -77,8 +134,8 @@ export function KnowledgeSettings() {
               type="button"
               className={`px-3 py-1 transition ${
                 inner === t.id
-                  ? "bg-accent text-white"
-                  : "bg-transparent text-text-subtle hover:text-text-primary"
+                  ? "bg-[var(--settings-accent-solid)] font-medium text-[var(--settings-accent-solid-text)]"
+                  : "bg-transparent text-text-subtle hover:bg-surface-hover hover:text-text-primary"
               }`}
               onClick={() => setInner(t.id)}
             >
@@ -103,10 +160,13 @@ export function KnowledgeSettings() {
           {inner === "config" ? (
             <KnowledgeConfigPanel
               api={api}
-              initialConfig={config}
+              persistedConfig={config}
+              draft={draft}
+              onDraftChange={setDraft}
               initialStats={stats}
               onSaved={(next, rebuild, newStats) => {
                 setConfig(next);
+                setDraft(next);
                 if (newStats) setStats(newStats);
                 else setStats((prev) => (prev ? { ...prev, rebuild_required: rebuild } : prev));
               }}
@@ -124,4 +184,4 @@ export function KnowledgeSettings() {
       )}
     </div>
   );
-}
+});

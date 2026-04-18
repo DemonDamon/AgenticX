@@ -2,6 +2,7 @@
 // Thin fetch helpers that reuse the studio API base + desktop token.
 
 import type {
+  EmbeddingSpec,
   IngestJob,
   KBConfig,
   KBDocument,
@@ -9,6 +10,17 @@ import type {
   PreviewChunk,
   RetrievalHit,
 } from "./types";
+
+export type EmbeddingTestResult = {
+  ok: boolean;
+  stage: "build" | "embed" | "dim_mismatch" | "done";
+  provider?: string;
+  model?: string;
+  expected_dim?: number;
+  actual_dim?: number;
+  latency_ms?: number;
+  error?: string | null;
+};
 
 export type KBApi = {
   readConfig: () => Promise<{ config: KBConfig; stats: KBStats }>;
@@ -27,6 +39,7 @@ export type KBApi = {
     chunking: { strategy: string; chunk_size: number; chunk_overlap: number },
   ) => Promise<PreviewChunk[]>;
   getStats: () => Promise<KBStats>;
+  testEmbedding: (embedding: EmbeddingSpec) => Promise<EmbeddingTestResult>;
 };
 
 type ResolveBase = () => Promise<string>;
@@ -116,6 +129,12 @@ export function createKbApi(apiToken: string, resolveApiBase: ResolveBase): KBAp
     async getStats() {
       const body = await doJson<{ stats: KBStats }>(`/api/kb/stats`);
       return body.stats;
+    },
+    async testEmbedding(embedding: EmbeddingSpec) {
+      return doJson<EmbeddingTestResult>(`/api/kb/test_embedding`, {
+        method: "POST",
+        body: JSON.stringify({ embedding }),
+      });
     },
   };
 }

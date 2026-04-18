@@ -20,11 +20,13 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
 from .contracts import (
     ChunkingSpec,
+    EmbeddingSpec,
     KBConfig,
     KBError,
     RetrievalHit,
 )
 from .manager import KBManager
+from .runtime import _build_embedding_provider, _embed_texts
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,64 @@ def register_kb_routes(app: FastAPI) -> None:
             "previous_fingerprint": result.get("previous_fingerprint"),
             "current_fingerprint": result.get("current_fingerprint"),
         }
+
+    # ------------------------------ embedding connectivity test --------- #
+
+    @app.post("/api/kb/test_embedding")
+    async def test_embedding(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Ping the configured embedding provider to verify API key / model / dim.
+
+        Accepts an ``embedding`` sub-object (same shape as ``KBConfig.embedding``)
+        so the user can test credentials *before* committing the config.
+        Falls back to the currently persisted embedding config when omitted.
+        """
+
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="expected JSON object")
+        manager = KBManager.instance()
+        embedding_raw = payload.get("embedding")
+        if isinstance(embedding_raw, dict):
+            wrapper = KBConfig.from_dict({"embedding": embedding_raw})
+            spec: EmbeddingSpec = wrapper.embedding
+        else:
+            spec = manager.read_config().embedding
+
+        import time
+
+        started = time.time()
+
+        def _do_test() -> Dict[str, Any]:
+            try:
+                provider_obj = _build_embedding_provider(spec)
+            except Exception as exc:
+                return {"ok": False, "stage": "build", "error": str(exc)}
+            try:
+                vectors = _embed_texts(provider_obj, ["ping"])
+            except Exception as exc:
+                return {"ok": False, "stage": "embed", "error": str(exc)}
+            if not vectors or not vectors[0]:
+                return {"ok": False, "stage": "embed", "error": "provider returned empty vectors"}
+            actual_dim = len(vectors[0])
+            dim_match = actual_dim == int(spec.dim)
+            return {
+                "ok": dim_match,
+                "stage": "done" if dim_match else "dim_mismatch",
+                "actual_dim": actual_dim,
+                "expected_dim": int(spec.dim),
+                "error": None
+                if dim_match
+                else (
+                    f"模型实际返回 {actual_dim} 维，与「维度 (dim)={spec.dim}」不一致；"
+                    f"请把 dim 改成 {actual_dim} 或让模型按 {spec.dim} 维输出。"
+                ),
+            }
+
+        # Run in a worker thread so aiohttp-based providers don't block the event loop.
+        result = await asyncio.to_thread(_do_test)
+        result["provider"] = spec.provider
+        result["model"] = spec.model
+        result["latency_ms"] = int((time.time() - started) * 1000)
+        return result
 
     # ------------------------------ stats -------------------------------- #
 
