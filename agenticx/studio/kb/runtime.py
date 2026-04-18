@@ -480,9 +480,17 @@ class KBRuntime:
     ) -> IngestReport:
         """Full synchronous ingest pipeline for one registered document.
 
-        ``progress_cb`` receives ``(status: KBDocumentStatus, message: str)``
-        tuples at each stage transition so a worker thread can relay to the
-        job registry without reaching back into runtime internals.
+        ``progress_cb`` receives stage updates so worker threads can relay
+        progress to the job registry without reaching back into runtime
+        internals.
+
+        Preferred callback signature is::
+
+            progress_cb(status: KBDocumentStatus, message: str, stage_progress: float | None)
+
+        ``stage_progress`` is a 0~1 value within the current stage (currently
+        used by EMBEDDING). For backward compatibility, two-arg callbacks are
+        also supported.
         """
 
         doc = self._registry.get(doc_id)
@@ -491,9 +499,17 @@ class KBRuntime:
 
         report = IngestReport()
 
-        def _report(status: KBDocumentStatus, message: str = "") -> None:
+        def _report(
+            status: KBDocumentStatus,
+            message: str = "",
+            *,
+            stage_progress: Optional[float] = None,
+        ) -> None:
             if progress_cb:
                 try:
+                    progress_cb(status, message, stage_progress)
+                except TypeError:
+                    # Backward compatibility for legacy two-arg callbacks.
                     progress_cb(status, message)
                 except Exception as exc:  # pragma: no cover - purely informational
                     logger.debug("progress callback failed: %s", exc)
@@ -514,8 +530,21 @@ class KBRuntime:
             if not chunks:
                 raise KBError("No chunks produced")
 
-            _report(KBDocumentStatus.EMBEDDING, f"embedding {len(chunks)} chunks")
-            embeddings = _embed_texts(self._embedding(), [c["text"] for c in chunks])
+            chunk_texts = [c["text"] for c in chunks]
+            _report(
+                KBDocumentStatus.EMBEDDING,
+                f"embedding 0/{len(chunk_texts)} chunks",
+                stage_progress=0.0,
+            )
+            embeddings = _embed_texts_with_progress(
+                self._embedding(),
+                chunk_texts,
+                progress_cb=lambda done, total: _report(
+                    KBDocumentStatus.EMBEDDING,
+                    f"embedding {done}/{total} chunks",
+                    stage_progress=(done / total) if total > 0 else 1.0,
+                ),
+            )
             if any(len(v) != self._config.embedding.dim for v in embeddings):
                 actual = {len(v) for v in embeddings}
                 raise KBError(
@@ -869,3 +898,40 @@ def _embed_texts(provider, texts: List[str]) -> List[List[float]]:
     else:
         raise KBError(f"Embedding provider {type(provider).__name__} lacks an embed method")
     return [list(map(float, v)) for v in result]
+
+
+def _embed_texts_with_progress(
+    provider,
+    texts: List[str],
+    *,
+    progress_cb=None,
+) -> List[List[float]]:
+    """Embed texts in batches and report incremental progress.
+
+    Large documents may spend a long time in EMBEDDING. Batching allows the UI
+    to display concrete progress (e.g. 37%) instead of a static stage label.
+    """
+
+    if not texts:
+        if progress_cb:
+            try:
+                progress_cb(0, 0)
+            except Exception:  # pragma: no cover - progress only
+                pass
+        return []
+
+    configured = int(getattr(provider, "batch_size", 0) or 0)
+    batch_size = max(1, min(32, configured if configured > 0 else 16))
+    total = len(texts)
+    done = 0
+    vectors: List[List[float]] = []
+    for i in range(0, total, batch_size):
+        batch = texts[i : i + batch_size]
+        vectors.extend(_embed_texts(provider, batch))
+        done += len(batch)
+        if progress_cb:
+            try:
+                progress_cb(done, total)
+            except Exception:  # pragma: no cover - progress only
+                pass
+    return vectors

@@ -309,6 +309,35 @@ def test_job_registry_runs_ingest(tmp_path: Path):
     assert final.progress == 1.0
 
 
+def test_ingest_progress_callback_reports_embedding_percentage(tmp_path: Path):
+    runtime = _build_runtime(tmp_path)
+    runtime._config.chunking = ChunkingSpec(  # type: ignore[attr-defined]
+        strategy="recursive",
+        chunk_size=32,
+        chunk_overlap=0,
+    )
+    doc_path = tmp_path / "progress.md"
+    doc_path.write_text(" ".join(f"token{i}" for i in range(600)))
+    doc = runtime.register_document(str(doc_path))
+
+    events: list[tuple[str, str, float | None]] = []
+
+    def _progress(status, message, stage_progress=None):
+        status_value = str(getattr(status, "value", status))
+        events.append((status_value, message, stage_progress))
+
+    report = runtime.ingest_document(doc.id, progress_cb=_progress)
+    assert report.failed == 0, report.reasons
+
+    embedding_events = [e for e in events if e[0] == KBDocumentStatus.EMBEDDING.value]
+    assert embedding_events, "expected embedding stage progress events"
+    # First event starts at 0%, and later ones move forward.
+    assert embedding_events[0][2] == 0.0
+    assert any((e[2] or 0.0) > 0.0 for e in embedding_events[1:])
+    assert embedding_events[-1][2] == 1.0
+    assert "/" in embedding_events[-1][1]
+
+
 # --------------------------------------------------------------------------- #
 # LiteParse fallback routing                                                  #
 # --------------------------------------------------------------------------- #
