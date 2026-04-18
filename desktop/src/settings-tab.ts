@@ -6,6 +6,7 @@ export const SETTINGS_TAB_IDS = [
   "mcp",
   "tools",
   "skills",
+  "knowledge",
   "hooks",
   "automation",
   "email",

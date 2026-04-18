@@ -558,6 +558,49 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
       // Fall through to generic formatter.
     }
   }
+  // Plan-Id: machi-kb-stage1-local-mvp — citation card summary for knowledge_search.
+  if (toolName === "knowledge_search") {
+    try {
+      const parsed = JSON.parse(resultText) as Record<string, unknown>;
+      const ok = parsed.ok !== false;
+      const disabled = Boolean(parsed.disabled);
+      const rawHits = Array.isArray(parsed.hits) ? (parsed.hits as Array<Record<string, unknown>>) : [];
+      if (disabled) {
+        return {
+          content: "📚 知识库未启用（`knowledge_search` 未产生结果）。",
+          silent: false,
+        };
+      }
+      if (!ok) {
+        const err = String(parsed.error ?? "未知错误");
+        return { content: `⚠️ knowledge_search 失败：${err}`, silent: false };
+      }
+      if (rawHits.length === 0) {
+        return {
+          content: "📚 知识库未命中相关片段。建议向用户确认是否需要兜底到一般知识。",
+          silent: false,
+        };
+      }
+      const lines: string[] = [`📚 知识库命中 ${rawHits.length} 条引用：`];
+      rawHits.slice(0, 5).forEach((hit, idx) => {
+        const score = typeof hit.score === "number" ? hit.score.toFixed(3) : "?";
+        const source = (hit.source as Record<string, unknown>) ?? {};
+        const title = String(source.title ?? source.uri ?? "");
+        const chunkIdx = source.chunk_index;
+        const chunkLabel = chunkIdx !== null && chunkIdx !== undefined ? ` · #${chunkIdx}` : "";
+        const textRaw = String(hit.text ?? "").replace(/\s+/g, " ").trim();
+        const preview = textRaw.length > 160 ? `${textRaw.slice(0, 160)}…` : textRaw;
+        lines.push(`  ${idx + 1}. ${title}${chunkLabel} · score=${score}\n     ${preview}`);
+      });
+      if (rawHits.length > 5) {
+        lines.push(`  …以及 ${rawHits.length - 5} 条更多`);
+      }
+      return { content: lines.join("\n"), silent: false };
+    } catch {
+      // Fall through — JSON parse failure is unexpected but shouldn't block output.
+    }
+  }
+
   const compact = resultText.slice(0, 500);
   const isError = /^\s*ERROR:/i.test(resultText);
   const isBenignTodoConflict =

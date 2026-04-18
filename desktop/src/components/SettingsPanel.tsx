@@ -31,6 +31,7 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  Library,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import { Modal } from "./ds/Modal";
@@ -49,6 +50,7 @@ import {
   RUNTIME_MIN_TOOL_ROUNDS,
 } from "./automation/RuntimeConfigSection";
 import { AccountTab } from "./AccountTab";
+import { KnowledgeSettings } from "./settings/knowledge/KnowledgeSettings";
 import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
 import type { SettingsTab } from "../settings-tab";
 export type { SettingsTab } from "../settings-tab";
@@ -615,6 +617,8 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "mcp", label: "MCP 服务", icon: Plug },
   { id: "tools", label: "工具", icon: Wrench },
   { id: "skills", label: "技能", icon: Sparkles },
+  // Plan-Id: machi-kb-stage1-local-mvp
+  { id: "knowledge", label: "知识库", icon: Library },
   { id: "hooks", label: "钩子", icon: Anchor },
   { id: "automation", label: "自动化", icon: Clock },
   { id: "email", label: "邮件通知", icon: Mail },
@@ -6210,6 +6214,9 @@ export function SettingsPanel({
                 <SkillAdvancedPanel />
               </div>
             )}
+
+            {/* === KNOWLEDGE TAB === Plan-Id: machi-kb-stage1-local-mvp */}
+            {tab === "knowledge" && <KnowledgeSettings />}
 
             {/* === HOOKS TAB === */}
             {tab === "hooks" && <HooksTab />}

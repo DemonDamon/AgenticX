@@ -126,6 +126,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "list_scheduled_tasks",
         "get_automation_task_logs",
         "cc_bridge_list",
+        "knowledge_search",  # Plan-Id: machi-kb-stage1-local-mvp — read-only vector search.
     }
 )
 
@@ -1023,6 +1024,32 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["task_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        # Plan-Id: machi-kb-stage1-local-mvp (plan §2.3).
+        "type": "function",
+        "function": {
+            "name": "knowledge_search",
+            "description": (
+                "Search the local knowledge base (Machi Stage-1 MVP). "
+                "Returns the top-k most relevant chunks with source path, chunk index, "
+                "similarity score, and the chunk text. Use this before making claims that "
+                "depend on user-provided documents. Returns {hits: [...], used_top_k, source: 'local'}. "
+                "If the KB is disabled or empty, `hits` will be an empty list."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Natural-language search query."},
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Maximum number of chunks to return (1-20, default 5).",
+                    },
+                },
+                "required": ["query"],
                 "additionalProperties": False,
             },
         },
@@ -3129,6 +3156,76 @@ async def _tool_memory_append(
     return f"OK: appended to {target}"
 
 
+def _tool_knowledge_search(arguments: Dict[str, Any]) -> str:
+    """Search the Stage-1 local knowledge base.
+
+    Plan-Id: machi-kb-stage1-local-mvp (plan §2.3). Returns a JSON payload
+    matching ``KBSearchResponse.to_dict()`` so the UI and the model share the
+    same ``hits[]`` shape.
+    """
+
+    query = str(arguments.get("query", "")).strip()
+    if not query:
+        return json.dumps(
+            {"ok": False, "error": "query is required", "hits": []},
+            ensure_ascii=False,
+        )
+    raw_top_k = arguments.get("top_k")
+    try:
+        top_k = int(raw_top_k) if raw_top_k is not None else 5
+    except (TypeError, ValueError):
+        top_k = 5
+    top_k = max(1, min(20, top_k))
+
+    try:
+        from agenticx.studio.kb import KBManager
+    except Exception as exc:  # pragma: no cover - packaging issue
+        return json.dumps(
+            {"ok": False, "error": f"KB subsystem unavailable: {exc}", "hits": []},
+            ensure_ascii=False,
+        )
+
+    try:
+        manager = KBManager.instance()
+    except Exception as exc:  # pragma: no cover - first-boot errors
+        return json.dumps(
+            {"ok": False, "error": f"KB not initialised: {exc}", "hits": []},
+            ensure_ascii=False,
+        )
+
+    cfg = manager.read_config()
+    if not cfg.enabled:
+        return json.dumps(
+            {
+                "ok": True,
+                "hits": [],
+                "used_top_k": 0,
+                "source": "local",
+                "disabled": True,
+                "hint": "Knowledge base is disabled in settings.",
+            },
+            ensure_ascii=False,
+        )
+
+    try:
+        hits = manager.runtime.search(query, top_k=top_k)
+    except Exception as exc:
+        return json.dumps(
+            {"ok": False, "error": f"search failed: {exc}", "hits": []},
+            ensure_ascii=False,
+        )
+
+    return json.dumps(
+        {
+            "ok": True,
+            "hits": [h.to_dict() for h in hits],
+            "used_top_k": len(hits),
+            "source": "local",
+        },
+        ensure_ascii=False,
+    )
+
+
 def _tool_memory_search(arguments: Dict[str, Any]) -> str:
     query = str(arguments.get("query", "")).strip()
     if not query:
@@ -3671,6 +3768,10 @@ async def dispatch_tool_async(
             return await _tool_memory_append(arguments, confirm_gate=gate, emit_event=event_callback)
         if name == "memory_search":
             return _tool_memory_search(arguments)
+        if name == "knowledge_search":
+            # Plan-Id: machi-kb-stage1-local-mvp — offloaded to a thread so the
+            # underlying chromadb + litellm calls don't block the event loop.
+            return await asyncio.to_thread(_tool_knowledge_search, arguments)
         if name == "session_search":
             return _tool_session_search(arguments, session)
         if name == "ask_user":

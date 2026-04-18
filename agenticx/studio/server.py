@@ -64,6 +64,7 @@ from agenticx.studio.session_manager import (
     managed_session_binding_matches_avatar_query,
 )
 from agenticx.tools.mcp_hub import MCPHub
+from agenticx.studio.kb.routes import register_kb_routes
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.workspace.loader import (
     append_long_term_memory,
@@ -4024,5 +4025,8 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.warning("registry_install error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # Machi knowledge base — Stage-1 MVP (Plan-Id: machi-kb-stage1-local-mvp)
+    register_kb_routes(app)
 
     return app
