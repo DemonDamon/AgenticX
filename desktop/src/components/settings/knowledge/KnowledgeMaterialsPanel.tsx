@@ -203,7 +203,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
             <FilePlus className="h-5 w-5 text-text-subtle" />
           )}
           <div className="mt-2 text-text-subtle">
-            拖拽文件到此处，或点击选择（支持 {extensions.join(", ") || "MD/TXT/PDF/DOCX"}）
+            拖拽文件到此处，或点击选择（支持 {extensions.join(", ") || "MD/TXT/PDF/DOC/DOCX/PPT/PPTX/XLS/XLSX/图片/HTML/JSON/CSV/YAML"}）
           </div>
         </div>
       </Panel>

@@ -133,6 +133,68 @@ def register_kb_routes(app: FastAPI) -> None:
         manager = KBManager.instance()
         return {"ok": True, "stats": manager.runtime.stats()}
 
+    # --------------------------- parser status --------------------------- #
+
+    @app.get("/api/kb/parser_status")
+    async def read_parser_status() -> Dict[str, Any]:
+        """Report parser availability so the UI can render live status chips.
+
+        Two downstream tools matter for KB ingest:
+
+        * ``liteparse`` — the Node CLI that reads legacy Office / Excel /
+          images; we translate its stderr into actionable KBErrors upstream.
+        * ``soffice`` (LibreOffice) — what LiteParse in turn shells out to
+          for ``.doc/.ppt/.xls/.xlsx``. When missing, users hit the "Office
+          cannot be converted" error only at ingest time; exposing the
+          status here lets the settings panel warn up-front.
+        """
+
+        from agenticx.tools.adapters.liteparse import LiteParseAdapter
+
+        available = LiteParseAdapter.is_available()
+        version: Optional[str] = None
+        path: Optional[str] = None
+        if available:
+            try:
+                cli_path = shutil.which("liteparse")
+                if cli_path:
+                    path = cli_path
+                proc = await asyncio.create_subprocess_exec(
+                    *(["liteparse", "--version"] if cli_path else ["npx", "--no-install", "liteparse", "--version"]),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+                if proc.returncode == 0:
+                    text = stdout.decode("utf-8", errors="ignore").strip().splitlines()
+                    if text:
+                        version = text[-1].strip()
+            except Exception:  # pragma: no cover - defensive
+                version = None
+
+        soffice_path = shutil.which("soffice") or shutil.which("libreoffice")
+
+        return {
+            "ok": True,
+            "liteparse": {
+                "available": available,
+                "version": version,
+                "path": path,
+            },
+            "libreoffice": {
+                "available": bool(soffice_path),
+                "path": soffice_path,
+                "required_for": [".doc", ".ppt", ".xls", ".xlsx"],
+                "install_hint": (
+                    "macOS: brew install --cask libreoffice | "
+                    "Ubuntu: apt-get install libreoffice | "
+                    "Windows: choco install libreoffice-fresh"
+                ),
+            },
+            "native_ready": True,
+            "install_hint": "npm i -g @llamaindex/liteparse",
+        }
+
     # ---------------------------- documents ------------------------------ #
 
     @app.get("/api/kb/documents")

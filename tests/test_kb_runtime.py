@@ -97,11 +97,38 @@ def test_kbconfig_roundtrip_defaults():
     assert cfg.embedding.provider == "ollama"
     assert cfg.embedding.model == "bge-m3"
     assert cfg.chunking.strategy == "recursive"
-    assert cfg.file_filters.extensions == [".md", ".txt", ".pdf", ".docx"]
+    assert ".md" in cfg.file_filters.extensions
+    assert ".pdf" in cfg.file_filters.extensions
+    assert ".docx" in cfg.file_filters.extensions
+    assert ".pptx" in cfg.file_filters.extensions
+    assert ".html" in cfg.file_filters.extensions
+    assert ".json" in cfg.file_filters.extensions
 
     as_dict = cfg.to_dict()
     cfg2 = KBConfig.from_dict(as_dict)
     assert cfg2.to_dict() == as_dict
+
+
+def test_kbconfig_autoupgrades_legacy_extension_allowlist():
+    """Configs persisted by the pre-LiteParse build must auto-widen on load.
+
+    Users who left the old default (.md/.txt/.pdf/.docx) should not have to
+    edit YAML to get .doc/.ppt/.xls*/image OCR support. Any list that differs
+    from that exact legacy set is treated as intentional and left untouched.
+    """
+
+    upgraded = KBConfig.from_dict({
+        "file_filters": {"extensions": [".md", ".txt", ".pdf", ".docx"], "max_file_size_mb": 100}
+    })
+    assert ".doc" in upgraded.file_filters.extensions
+    assert ".png" in upgraded.file_filters.extensions
+    assert ".xlsx" in upgraded.file_filters.extensions
+    assert len(upgraded.file_filters.extensions) > 4
+
+    preserved = KBConfig.from_dict({
+        "file_filters": {"extensions": [".md", ".txt"], "max_file_size_mb": 10}
+    })
+    assert preserved.file_filters.extensions == [".md", ".txt"]
 
 
 def test_kbconfig_embedding_fingerprint_detects_change():
@@ -265,3 +292,102 @@ def test_job_registry_runs_ingest(tmp_path: Path):
     assert final is not None
     assert final.status == IngestJobStatus.DONE
     assert final.progress == 1.0
+
+
+# --------------------------------------------------------------------------- #
+# LiteParse fallback routing                                                  #
+# --------------------------------------------------------------------------- #
+
+
+def test_read_document_text_routes_liteparse_only_exts(tmp_path: Path, monkeypatch):
+    """Images and legacy Office formats must be handed to LiteParse."""
+
+    from agenticx.studio.kb import runtime as kb_runtime
+
+    img_path = tmp_path / "scan.png"
+    img_path.write_bytes(b"\x89PNG\r\n\x1a\n")  # not a real PNG, but that's fine — we stub
+    called: list[Path] = []
+
+    def _fake_liteparse(path):
+        called.append(path)
+        return "hello from liteparse"
+
+    monkeypatch.setattr(kb_runtime, "_read_with_liteparse", _fake_liteparse)
+    text = kb_runtime._read_document_text(str(img_path))
+    assert text == "hello from liteparse"
+    assert called == [Path(str(img_path)).expanduser()]
+
+
+def test_read_with_liteparse_raises_when_libreoffice_missing(tmp_path: Path, monkeypatch):
+    """Excel/legacy-Office ingest must fail fast with the install hint when
+    LibreOffice is absent, rather than bubbling up LiteParse's multi-line JS
+    stack trace to the UI."""
+
+    from agenticx.studio.kb import runtime as kb_runtime
+    from agenticx.tools.adapters import liteparse as liteparse_mod
+
+    monkeypatch.setattr(
+        liteparse_mod.LiteParseAdapter, "is_available", staticmethod(lambda: True)
+    )
+    monkeypatch.setattr(kb_runtime, "_libreoffice_available", lambda: False)
+
+    xlsx_path = tmp_path / "sheet.xlsx"
+    xlsx_path.write_bytes(b"PK\x03\x04")
+    with pytest.raises(KBError) as excinfo:
+        kb_runtime._read_with_liteparse(xlsx_path)
+    message = str(excinfo.value)
+    assert "LibreOffice" in message
+    assert "brew install --cask libreoffice" in message
+    assert ".xlsx" in message
+
+
+def test_read_with_liteparse_translates_libreoffice_runtime_error(
+    tmp_path: Path, monkeypatch
+):
+    """If upstream check passes but LiteParse still reports missing LO, the
+    friendly KBError must replace the raw CLI stack trace."""
+
+    from agenticx.studio.kb import runtime as kb_runtime
+    from agenticx.tools.adapters import liteparse as liteparse_mod
+
+    monkeypatch.setattr(
+        liteparse_mod.LiteParseAdapter, "is_available", staticmethod(lambda: True)
+    )
+    monkeypatch.setattr(kb_runtime, "_libreoffice_available", lambda: True)
+
+    async def _fake_parse_to_text(self, path):
+        raise RuntimeError(
+            "liteparse parse failed: Error: Conversion failed: "
+            "LibreOffice is not installed."
+        )
+
+    monkeypatch.setattr(
+        liteparse_mod.LiteParseAdapter, "parse_to_text", _fake_parse_to_text
+    )
+
+    xlsx_path = tmp_path / "sheet.xlsx"
+    xlsx_path.write_bytes(b"PK\x03\x04")
+    with pytest.raises(KBError) as excinfo:
+        kb_runtime._read_with_liteparse(xlsx_path)
+    message = str(excinfo.value)
+    assert "LibreOffice" in message
+    assert "brew install --cask libreoffice" in message
+
+
+def test_read_with_liteparse_raises_when_cli_missing(tmp_path: Path, monkeypatch):
+    """Without the LiteParse CLI, the KBError must name the install command."""
+
+    from agenticx.studio.kb import runtime as kb_runtime
+    from agenticx.tools.adapters import liteparse as liteparse_mod
+
+    monkeypatch.setattr(
+        liteparse_mod.LiteParseAdapter, "is_available", staticmethod(lambda: False)
+    )
+
+    img_path = tmp_path / "scan.jpg"
+    img_path.write_bytes(b"\xff\xd8\xff")
+    with pytest.raises(KBError) as excinfo:
+        kb_runtime._read_with_liteparse(img_path)
+    message = str(excinfo.value)
+    assert "@llamaindex/liteparse" in message
+    assert ".jpg" in message

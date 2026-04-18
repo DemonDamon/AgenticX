@@ -22,6 +22,23 @@ export type EmbeddingTestResult = {
   error?: string | null;
 };
 
+export type ParserStatus = {
+  ok: boolean;
+  liteparse: {
+    available: boolean;
+    version: string | null;
+    path: string | null;
+  };
+  libreoffice?: {
+    available: boolean;
+    path: string | null;
+    required_for: string[];
+    install_hint: string;
+  };
+  native_ready: boolean;
+  install_hint: string;
+};
+
 export type KBApi = {
   readConfig: () => Promise<{ config: KBConfig; stats: KBStats }>;
   writeConfig: (
@@ -40,6 +57,7 @@ export type KBApi = {
   ) => Promise<PreviewChunk[]>;
   getStats: () => Promise<KBStats>;
   testEmbedding: (embedding: EmbeddingSpec) => Promise<EmbeddingTestResult>;
+  getParserStatus: () => Promise<ParserStatus>;
 };
 
 type ResolveBase = () => Promise<string>;
@@ -135,6 +153,9 @@ export function createKbApi(apiToken: string, resolveApiBase: ResolveBase): KBAp
         method: "POST",
         body: JSON.stringify({ embedding }),
       });
+    },
+    async getParserStatus() {
+      return doJson<ParserStatus>(`/api/kb/parser_status`);
     },
   };
 }
