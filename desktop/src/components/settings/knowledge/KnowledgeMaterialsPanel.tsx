@@ -224,21 +224,24 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
               const status = job?.status ?? doc.status;
               const progressPercent = Math.round((job?.progress ?? 0) * 100);
               return (
-                <li key={doc.id} className="flex items-start gap-3 py-2 text-sm">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium" title={doc.source_path}>
+                <li key={doc.id} className="flex min-w-0 items-start gap-3 py-2 text-sm">
+                  <div className="min-w-0 flex-1 overflow-hidden">
+                    <div className="truncate font-medium" title={doc.source_name}>
                       {doc.source_name}
                     </div>
-                    <div className="mt-0.5 text-xs text-text-subtle">
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-subtle">
                       <span className={statusTagClass(status)}>{statusLabel(status)}</span>
-                      <span className="ml-2">{formatSize(doc.size_bytes)}</span>
-                      <span className="ml-2">片段: {doc.chunks}</span>
-                      <span className="ml-2 truncate" title={doc.source_path}>
-                        {doc.source_path}
-                      </span>
+                      <span>{formatSize(doc.size_bytes)}</span>
+                      <span>片段: {doc.chunks}</span>
+                    </div>
+                    <div
+                      className="mt-1 min-w-0 truncate font-mono text-[11px] leading-snug text-text-faint"
+                      title={doc.source_path}
+                    >
+                      {doc.source_path}
                     </div>
                     {doc.error ? (
-                      <div className="mt-1 text-xs text-rose-600 dark:text-rose-400">
+                      <div className="mt-1 break-words text-xs text-rose-600 dark:text-rose-400">
                         {doc.error}
                       </div>
                     ) : null}
