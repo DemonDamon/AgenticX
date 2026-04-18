@@ -1,6 +1,6 @@
 // Plan-Id: machi-kb-stage1-local-mvp
 import { useEffect, useMemo, useState } from "react";
-import { Check, Eye, EyeOff, Loader2, RotateCcw, Save } from "lucide-react";
+import { Eye, EyeOff, RotateCcw } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import type { KBApi, ParserStatus } from "./api";
 import {
@@ -20,7 +20,6 @@ type Props = {
   draft: KBConfig;
   onDraftChange: (next: KBConfig) => void;
   initialStats: KBStats | null;
-  onSaved: (nextConfig: KBConfig, rebuildRequired: boolean, stats: KBStats | null) => void;
 };
 
 export function KnowledgeConfigPanel({
@@ -29,19 +28,18 @@ export function KnowledgeConfigPanel({
   draft,
   onDraftChange,
   initialStats,
-  onSaved,
 }: Props) {
   const config = draft;
   const setConfig = (updater: KBConfig | ((prev: KBConfig) => KBConfig)) => {
     const next = typeof updater === "function" ? (updater as (p: KBConfig) => KBConfig)(draft) : updater;
     onDraftChange(next);
   };
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [justSaved, setJustSaved] = useState(false);
   const [rebuildRequired, setRebuildRequired] = useState<boolean>(
     Boolean(initialStats?.rebuild_required),
   );
+  useEffect(() => {
+    setRebuildRequired(Boolean(initialStats?.rebuild_required));
+  }, [initialStats?.rebuild_required]);
   const [ollamaStatus, setOllamaStatus] = useState<"unknown" | "ok" | "missing">("unknown");
   const [testStatus, setTestStatus] = useState<"idle" | "checking" | "ok" | "fail">("idle");
   const [testMessage, setTestMessage] = useState<string>("");
@@ -95,12 +93,6 @@ export function KnowledgeConfigPanel({
     }
   }
 
-  useEffect(() => {
-    if (!justSaved) return;
-    const t = setTimeout(() => setJustSaved(false), 1600);
-    return () => clearTimeout(t);
-  }, [justSaved]);
-
   // Plan-Id: machi-kb-stage1-local-mvp (t13) — best-effort Ollama probe.
   useEffect(() => {
     let cancelled = false;
@@ -146,28 +138,6 @@ export function KnowledgeConfigPanel({
     () => JSON.stringify(persistedConfig) !== JSON.stringify(config),
     [persistedConfig, config],
   );
-
-  async function save() {
-    setSaving(true);
-    setError(null);
-    try {
-      const result = await api.writeConfig(config);
-      setRebuildRequired(Boolean(result.rebuild_required));
-      // fetch fresh stats so the "rebuild required" badge stays accurate
-      let stats: KBStats | null = null;
-      try {
-        stats = await api.getStats();
-      } catch {
-        stats = null;
-      }
-      onSaved(result.config, Boolean(result.rebuild_required), stats);
-      setJustSaved(true);
-    } catch (exc) {
-      setError(String((exc as Error).message ?? exc));
-    } finally {
-      setSaving(false);
-    }
-  }
 
   function reset() {
     setConfig(defaultKBConfig());
@@ -516,6 +486,22 @@ export function KnowledgeConfigPanel({
       </Panel>
 
       <Panel title="检索">
+        <Field label="触发模式">
+          <select
+            className={`w-full ${KB_FIELD_BASE}`}
+            value={config.retrieval.mode ?? "auto"}
+            onChange={(e) =>
+              patch("retrieval", {
+                ...config.retrieval,
+                mode: (e.target.value as "auto" | "always" | "manual") || "auto",
+              })
+            }
+          >
+            <option value="auto">智能判断（推荐）</option>
+            <option value="always">始终检索</option>
+            <option value="manual">仅手动触发</option>
+          </select>
+        </Field>
         <Field label="默认 Top-K">
           <input
             type="number"
@@ -531,43 +517,21 @@ export function KnowledgeConfigPanel({
             }
           />
         </Field>
+        <p className="mt-2 text-[11px] leading-snug text-text-faint">
+          智能判断：仅在明显依赖用户文档时触发；始终检索：每轮优先检索后再回答；仅手动：只在你明确要求“查知识库”时触发。
+        </p>
       </Panel>
 
-      {error ? (
-        <div className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">
-          保存失败：{error}
-        </div>
-      ) : null}
-
-      <div className="flex items-center justify-end gap-2">
-        {justSaved ? (
-          <span className="inline-flex items-center gap-1 text-xs text-emerald-500">
-            <Check className="h-3.5 w-3.5" /> 已保存
-          </span>
-        ) : dirty ? (
-          <span className="text-xs text-amber-500">· 有未保存的改动</span>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {dirty ? (
+          <span className="text-xs text-amber-500">· 有未保存的改动（请使用页面底部「保存」）</span>
         ) : null}
         <button
           type="button"
-          className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
           onClick={reset}
-          disabled={saving}
         >
           <RotateCcw className="h-3.5 w-3.5" /> 重置为默认
-        </button>
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:cursor-progress disabled:opacity-50"
-          onClick={save}
-          disabled={saving || !dirty}
-          title={dirty ? "保存知识库配置" : "暂无需保存的改动"}
-        >
-          {saving ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Save className="h-3.5 w-3.5" />
-          )}
-          保存
         </button>
       </div>
     </div>

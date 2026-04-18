@@ -50,6 +50,7 @@ import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
 import machiEmptyState from "../assets/machi-logo-transparent.png";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
+import { createKbApi } from "./settings/knowledge/api";
 
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
 const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
@@ -79,6 +80,15 @@ function shellSingleQuote(input: string): string {
 }
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
+const KB_RETRIEVAL_MODE_OPTIONS: { value: "auto" | "always" | "manual"; label: string }[] = [
+  { value: "auto", label: "检索: 智能" },
+  { value: "always", label: "检索: 始终" },
+  { value: "manual", label: "检索: 手动" },
+];
+const CHAT_PICKER_BUTTON_CLASS =
+  "flex h-7 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong";
+const CHAT_PICKER_PANEL_CLASS =
+  "absolute bottom-full left-0 z-40 mb-1 max-h-[220px] min-w-[170px] overflow-y-auto rounded-lg border border-border bg-surface-panel shadow-2xl backdrop-blur-xl";
 
 const FALLBACK_PANE: ChatPaneState = {
   id: "fallback-pane",
@@ -215,7 +225,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   return (
     <div className="relative">
       <button
-        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+        className={CHAT_PICKER_BUTTON_CLASS}
         onClick={() => setOpen((v) => !v)}
         title="切换模型"
       >
@@ -225,7 +235,9 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 z-40 mb-1 max-h-[220px] w-[240px] overflow-y-auto rounded-lg border border-border bg-surface-panel shadow-xl backdrop-blur-xl">
+          <div
+            className={`${CHAT_PICKER_PANEL_CLASS} w-[240px]`}
+          >
             {options.length === 0 ? (
               <div className="px-3 py-3 text-center text-xs text-text-faint">
                 请先在设置中配置模型
@@ -252,6 +264,117 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                 );
               })
             )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function PaneKnowledgeRetrievalModeSwitch({
+  apiToken,
+  apiBase,
+}: {
+  apiToken: string;
+  apiBase: string;
+}) {
+  const resolveApiBase = useCallback(async () => {
+    const base = String(apiBase ?? "").trim();
+    if (base) return base.replace(/\/+$/, "");
+    const raw = String((await window.agenticxDesktop.getApiBase()) || "").trim();
+    return raw.replace(/\/+$/, "");
+  }, [apiBase]);
+  const api = useMemo(() => createKbApi(apiToken, resolveApiBase), [apiToken, resolveApiBase]);
+  const [mode, setMode] = useState<"auto" | "always" | "manual">("auto");
+  const [saving, setSaving] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const body = await api.readConfig();
+      const modeRaw = body.config.retrieval?.mode;
+      if (modeRaw === "always" || modeRaw === "manual" || modeRaw === "auto") {
+        setMode(modeRaw);
+      } else {
+        setMode("auto");
+      }
+    } catch {
+      // Keep last known mode; Chat should still be usable if KB API is unavailable.
+    }
+  }, [api]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const saveMode = useCallback(
+    async (nextMode: "auto" | "always" | "manual") => {
+      if (saving) return;
+      const previous = mode;
+      setMode(nextMode);
+      setSaving(true);
+      try {
+        // Always re-read before write to avoid clobbering concurrent KB edits from settings.
+        const current = (await api.readConfig()).config;
+        const nextConfig = {
+          ...current,
+          retrieval: {
+            ...current.retrieval,
+            mode: nextMode,
+          },
+        };
+        await api.writeConfig(nextConfig);
+      } catch {
+        setMode(previous);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [api, mode, saving],
+  );
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className={CHAT_PICKER_BUTTON_CLASS}
+        disabled={saving}
+        onClick={() => setOpen((v) => !v)}
+        title="知识库检索模式"
+      >
+        <span>{KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "检索: 智能"}</span>
+        <span className="text-[9px]">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div
+            className={CHAT_PICKER_PANEL_CLASS}
+          >
+            {KB_RETRIEVAL_MODE_OPTIONS.map((opt) => {
+              const isActive = mode === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  disabled={saving}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:font-bold ${
+                    isActive ? "text-text-strong" : "text-text-muted"
+                  }`}
+                  onClick={() => {
+                    setOpen(false);
+                    void saveMode(opt.value);
+                  }}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                      isActive ? "bg-emerald-500" : "bg-surface-hover"
+                    }`}
+                  />
+                  <span className="truncate">{opt.label}</span>
+                </button>
+              );
+            })}
           </div>
         </>
       )}
@@ -4647,8 +4770,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               )}
             </div>
           ) : null}
-          <div className="mt-1.5 flex items-center">
+          <div className="mt-1.5 flex items-center gap-2">
             <PaneModelPicker paneId={pane.id} />
+            <PaneKnowledgeRetrievalModeSwitch apiToken={apiToken} apiBase={apiBase} />
           </div>
         </div>
       </div>
