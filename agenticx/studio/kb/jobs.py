@@ -44,6 +44,28 @@ _PROGRESS_WEIGHTS = {
 }
 
 
+def _weighted_progress(status: IngestJobStatus, stage_progress: Optional[float] = None) -> float:
+    """Map coarse status + optional stage progress to a global 0~1 percentage."""
+
+    start = float(_PROGRESS_WEIGHTS.get(status, 0.0))
+    if stage_progress is None or status in {IngestJobStatus.DONE, IngestJobStatus.FAILED}:
+        return start
+    stage_ratio = max(0.0, min(1.0, float(stage_progress)))
+    next_weight = 1.0
+    for candidate in (
+        IngestJobStatus.PARSING,
+        IngestJobStatus.CHUNKING,
+        IngestJobStatus.EMBEDDING,
+        IngestJobStatus.WRITING,
+        IngestJobStatus.DONE,
+    ):
+        value = float(_PROGRESS_WEIGHTS.get(candidate, 1.0))
+        if value > start:
+            next_weight = value
+            break
+    return start + (next_weight - start) * stage_ratio
+
+
 class JobRegistry:
     """In-memory job registry with bounded worker pool.
 
@@ -108,12 +130,12 @@ class JobRegistry:
         job: IngestJob,
         on_done: Optional[Callable[[IngestJob], None]],
     ) -> None:
-        def _progress(status, message: str) -> None:
+        def _progress(status, message: str, stage_progress: Optional[float] = None) -> None:
             mapped = _STATUS_MAP.get(status, IngestJobStatus.PARSING)
             self._update(
                 job.id,
                 status=mapped,
-                progress=_PROGRESS_WEIGHTS.get(mapped, 0.0),
+                progress=_weighted_progress(mapped, stage_progress),
                 message=message,
             )
 

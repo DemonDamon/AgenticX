@@ -222,7 +222,8 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
             {documents.map((doc) => {
               const job = activeJobs[doc.id];
               const status = job?.status ?? doc.status;
-              const progressPercent = Math.round((job?.progress ?? 0) * 100);
+              const progressPercent = Math.max(0, Math.min(100, Math.round((job?.progress ?? 0) * 100)));
+              const isRunning = Boolean(job && status !== "done" && status !== "failed");
               return (
                 <li key={doc.id} className="flex min-w-0 items-start gap-3 py-2 text-sm">
                   <div className="min-w-0 flex-1 overflow-hidden">
@@ -231,6 +232,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
                     </div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-subtle">
                       <span className={statusTagClass(status)}>{statusLabel(status)}</span>
+                      {isRunning ? <span>{progressPercent}%</span> : null}
                       <span>{formatSize(doc.size_bytes)}</span>
                       <span>片段: {doc.chunks}</span>
                     </div>
@@ -245,13 +247,20 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
                         {doc.error}
                       </div>
                     ) : null}
-                    {job && status !== "done" && status !== "failed" ? (
-                      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-border/40">
-                        <div
-                          className="h-full bg-[var(--settings-accent-progress)] transition-all"
-                          style={{ width: `${progressPercent}%` }}
-                        />
-                      </div>
+                    {isRunning ? (
+                      <>
+                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-border/40">
+                          <div
+                            className="h-full bg-[var(--settings-accent-progress)] transition-all"
+                            style={{ width: `${progressPercent}%` }}
+                          />
+                        </div>
+                        {job?.message ? (
+                          <div className="mt-1 truncate text-[11px] text-text-faint" title={job.message}>
+                            {job.message}
+                          </div>
+                        ) : null}
+                      </>
                     ) : null}
                   </div>
                   <div className="flex shrink-0 gap-1">
