@@ -272,6 +272,21 @@ def register_kb_routes(app: FastAPI) -> None:
 
     # ------------------------------ jobs --------------------------------- #
 
+    @app.get("/api/kb/jobs")
+    async def list_kb_jobs() -> Dict[str, Any]:
+        """Return all tracked ingest jobs with their latest state.
+
+        The front end uses this to re-hydrate in-flight progress after the
+        settings panel is closed and reopened: the desktop's `JobRegistry`
+        lives in-process and keeps running regardless of the UI lifecycle,
+        so the panel can rebuild its per-doc progress map by filtering for
+        non-terminal entries here instead of being stuck on whatever coarse
+        status was last persisted in the KBDocument registry.
+        """
+        manager = KBManager.instance()
+        jobs = manager.jobs.list()
+        return {"ok": True, "count": len(jobs), "jobs": [j.to_dict() for j in jobs]}
+
     @app.get("/api/kb/jobs/{job_id}")
     async def get_kb_job(job_id: str) -> Dict[str, Any]:
         manager = KBManager.instance()
