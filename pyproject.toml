@@ -49,6 +49,9 @@ dependencies = [
     # Web 框架
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
+    # FastAPI Form/File/UploadFile 解析 multipart/form-data 必需，
+    # 缺失会在 PyInstaller 打包后的干净 venv 中触发 RuntimeError。
+    "python-multipart>=0.0.9,<1",
     "typer>=0.9.0,<1",
     # LLM 核心（固定版本范围，加速依赖解析）
     "openai>=1.50.0,<3",
