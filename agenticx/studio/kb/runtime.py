@@ -554,14 +554,23 @@ class KBRuntime:
             _report(KBDocumentStatus.WRITING, "writing to vector store")
             self._store().delete_by_document(doc.id)  # rebuild-safe replace
             ids = [f"{doc.id}::{c['chunk_index']:06d}" for c in chunks]
+            # Chroma rejects `None` metadata values with
+            # "Expected metadata value to be a str, int, float or bool, got None".
+            # PDF / DOCX / PPTX chunks frequently lack `start_index` / `end_index`
+            # (non-text sources don't produce char offsets), so drop any None-valued
+            # keys rather than letting ingestion blow up at the final write step.
             metadatas = [
                 {
-                    "document_id": doc.id,
-                    "source_path": doc.source_path,
-                    "source_name": doc.source_name,
-                    "chunk_index": c["chunk_index"],
-                    "start_index": c.get("start_index"),
-                    "end_index": c.get("end_index"),
+                    key: value
+                    for key, value in {
+                        "document_id": doc.id,
+                        "source_path": doc.source_path,
+                        "source_name": doc.source_name,
+                        "chunk_index": c["chunk_index"],
+                        "start_index": c.get("start_index"),
+                        "end_index": c.get("end_index"),
+                    }.items()
+                    if value is not None
                 }
                 for c in chunks
             ]
