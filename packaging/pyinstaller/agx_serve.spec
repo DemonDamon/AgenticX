@@ -24,14 +24,48 @@ uvicorn_hiddenimports = [
     "uvicorn.logging",
 ]
 
+# `desktop-runtime` extras 里声明的第三方依赖在源码里几乎都是
+# **方法体内 + try/except 包裹**的延迟导入（典型例子：
+# `agenticx.studio.kb.runtime._ChromaBackend._ensure()` 里的
+# `import chromadb`，以及 `pdf_reader.py` 里轮询 `fitz` / `pypdf` /
+# `PyPDF2`）。PyInstaller 的 modulegraph 扫这种写法常常漏，必须显式
+# `collect_all` 才能把 **数据 / 二进制 / 全部子模块** 一锅端进去；
+# 否则即便 venv 里装好，运行时仍抛
+# "chromadb is required for the knowledge base. Install with `pip install chromadb`."
+_DESKTOP_RUNTIME_PACKAGES = (
+    "chromadb",
+    "fitz",         # PyMuPDF 顶层模块名
+    "pypdf",
+    "docx",         # python-docx
+    "pptx",         # python-pptx
+    "docx2txt",
+    "numpy",
+)
+
+desktop_runtime_datas: list = []
+desktop_runtime_binaries: list = []
+desktop_runtime_hiddenimports: list = []
+for _pkg in _DESKTOP_RUNTIME_PACKAGES:
+    try:
+        _d, _b, _h = collect_all(_pkg)
+    except Exception:
+        # 单个 extras 包缺失（例如本地 dev 环境没装 PyMuPDF）不应该让
+        # 整个打包流程失败；packaging/build_*.sh 已经强制安装
+        # `[desktop-runtime]`，CI 中这里不会落入 except。
+        continue
+    desktop_runtime_datas += _d
+    desktop_runtime_binaries += _b
+    desktop_runtime_hiddenimports += _h
+
 hiddenimports = (
     agenticx_hiddenimports
     + litellm_hiddenimports
     + uvicorn_hiddenimports
+    + desktop_runtime_hiddenimports
     + ["tiktoken_ext.openai_public", "tiktoken_ext"]
 )
 
-datas = list(agenticx_datas)
+datas = list(agenticx_datas) + desktop_runtime_datas
 datas += collect_data_files("litellm", include_py_files=False)
 try:
     datas += collect_data_files("tiktoken", include_py_files=False)
@@ -41,7 +75,7 @@ except Exception:
 a = Analysis(
     ["agx_serve_entry.py"],
     pathex=[],
-    binaries=list(agenticx_binaries),
+    binaries=list(agenticx_binaries) + desktop_runtime_binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
