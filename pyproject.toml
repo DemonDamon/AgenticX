@@ -72,6 +72,23 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# ── 桌面打包最小运行时 ──
+# PyInstaller 打出来的 agx-server 需要这些包在 venv 里，才能：
+#   - 解析 PDF（PyMuPDF 优先，pypdf 兜底；若都缺，PDFReader 会抛
+#     "No PDF library available"）
+#   - 解析 Word/PowerPoint（python-docx / python-pptx / docx2txt）
+#   - 满足 agenticx.knowledge 下游模块对 numpy 的隐式要求，避免
+#     "agenticx.knowledge.readers unavailable: No module named 'numpy'"
+# packaging/build_backend.sh 与 build_windows_installer.ps1 都必须用
+# `pip install "$PROJECT_ROOT[desktop-runtime]"` 安装本组。
+desktop-runtime = [
+    "PyMuPDF>=1.23.0,<2",
+    "pypdf>=3.15.0,<5",
+    "python-docx>=0.8.11,<2",
+    "python-pptx>=0.6.21,<1",
+    "docx2txt>=0.8,<1",
+    "numpy>=1.24.0,<2",
+]
 # ── 额外 LLM 提供者 ──
 llm = [
     "anthropic>=0.40.0,<1",
