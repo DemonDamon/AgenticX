@@ -46,8 +46,10 @@ VPIP="$VENV/bin/pip"
 "$VPIP" install -q -U pip
 "$VPIP" install -q pyinstaller
 # Non-editable install so PyInstaller sees a real site-packages tree (editable can miss subpackages).
+# Use the `desktop-runtime` extras so the bundled exe ships with PDF / Office
+# readers and numpy (issue #10: "Document ingestion fails for PDF files").
 "$VPIP" uninstall -y agenticx 2>/dev/null || true
-"$VPIP" install -q "$PROJECT_ROOT"
+"$VPIP" install -q "${PROJECT_ROOT}[desktop-runtime]"
 
 cd "$PY_DIR"
 

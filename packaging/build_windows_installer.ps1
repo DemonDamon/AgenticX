@@ -60,7 +60,10 @@ $HaveCachedBackend = Test-Path $ExePath
 if (-not $SkipPyInstaller) {
     Write-Host '--- Step 1: PyInstaller (agx-server.exe) ---'
     & $VenvPip uninstall -y agenticx 2>$null
-    & $VenvPip install -q $ProjectRoot
+    # Install with `desktop-runtime` extras so the bundled exe ships with PDF /
+    # Office readers and numpy (GitHub issue #10: "Document ingestion fails for
+    # PDF files (missing PDF reader libs / missing numpy)" on Windows).
+    & $VenvPip install -q "$ProjectRoot[desktop-runtime]"
 
     New-Item -ItemType Directory -Force -Path $DistArchDir | Out-Null
     New-Item -ItemType Directory -Force -Path $WorkArchDir | Out-Null
