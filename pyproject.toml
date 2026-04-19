@@ -92,6 +92,10 @@ desktop-runtime = [
     # `import chromadb`，缺失时 UI 上抛 "chromadb is required..." 而打包
     # 后的桌面端用户没法 pip install 进 bundle。
     "chromadb>=0.5.0,<1",
+    # chromadb 默认 embedding / 部分 segment 实现会动态 import onnxruntime；
+    # 未显式安装时运行时报 "The onnxruntime python package is not installed"。
+    # PyInstaller 同样需要 collect_all("onnxruntime") 才能打入 native 库。
+    "onnxruntime>=1.17.0,<2",
 ]
 # ── 额外 LLM 提供者 ──
 llm = [

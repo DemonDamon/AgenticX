@@ -34,6 +34,8 @@ uvicorn_hiddenimports = [
 # "chromadb is required for the knowledge base. Install with `pip install chromadb`."
 _DESKTOP_RUNTIME_PACKAGES = (
     "chromadb",
+    "onnxruntime",  # chromadb 默认 embedding 等路径动态依赖；否则运行时
+                    # "The onnxruntime python package is not installed"
     "fitz",         # PyMuPDF 顶层模块名
     "pypdf",
     "docx",         # python-docx
