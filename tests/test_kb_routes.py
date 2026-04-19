@@ -210,6 +210,34 @@ def test_delete_document_removes_row(client: TestClient, tmp_path: Path):
     assert resp2.status_code == 404
 
 
+def test_list_jobs_returns_all_tracked(client: TestClient, tmp_path: Path):
+    """GET /api/kb/jobs must expose every job so the UI can re-hydrate
+    live progress after the settings panel is closed and reopened."""
+    doc = tmp_path / "list-jobs.md"
+    doc.write_text("list-jobs source for polling rehydration")
+    add = client.post("/api/kb/documents", data={"path": str(doc)})
+    assert add.status_code == 200
+    job_id = add.json()["job_id"]
+    doc_id = add.json()["document"]["id"]
+
+    resp = client.get("/api/kb/jobs")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    matching = [j for j in body["jobs"] if j["id"] == job_id]
+    assert len(matching) == 1
+    assert matching[0]["document_id"] == doc_id
+
+    _wait_for_job(client, job_id)
+    # Terminal jobs remain queryable so the UI can collapse them in its
+    # post-reload pass without losing the reference.
+    resp = client.get("/api/kb/jobs")
+    assert resp.status_code == 200
+    matching = [j for j in resp.json()["jobs"] if j["id"] == job_id]
+    assert len(matching) == 1
+    assert matching[0]["status"] == "done"
+
+
 def test_rebuild_document_creates_new_job(client: TestClient, tmp_path: Path):
     doc = tmp_path / "rebuildable.md"
     doc.write_text("rebuild me please, over and over")

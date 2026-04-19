@@ -31,8 +31,51 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
 
   const reload = useCallback(async () => {
     try {
-      const docs = await api.listDocuments();
+      // Fetch docs + active jobs in parallel. Jobs live in the backend's
+      // in-process JobRegistry (ThreadPoolExecutor) and keep running when
+      // the settings panel is closed, but their ids are lost once this
+      // component unmounts. Re-hydrating `activeJobs` from the backend
+      // lets the polling effect resume and restores the live progress
+      // bar instead of getting stuck on the coarse persisted status
+      // (e.g. showing "排队中" while ingestion is actually at 70%).
+      const [docs, jobs] = await Promise.all([
+        api.listDocuments(),
+        api.listJobs().catch(() => [] as IngestJob[]),
+      ]);
       setDocuments(docs);
+      setActiveJobs((prev) => {
+        const next = { ...prev };
+        // Keep only the freshest non-terminal job per document.
+        const byDoc = new Map<string, IngestJob>();
+        for (const j of jobs) {
+          if (!j.document_id) continue;
+          if (j.status === "done" || j.status === "failed") continue;
+          const existing = byDoc.get(j.document_id);
+          if (!existing) {
+            byDoc.set(j.document_id, j);
+            continue;
+          }
+          // Prefer the most recently started job if multiple are tracked.
+          const a = existing.started_at ?? "";
+          const b = j.started_at ?? "";
+          if (b > a) byDoc.set(j.document_id, j);
+        }
+        for (const [docId, j] of byDoc) {
+          const cur = next[docId];
+          // Do not overwrite a locally-issued "queued" placeholder before
+          // the backend has registered the job (brief race); otherwise
+          // always reflect the backend's latest view.
+          if (cur && cur.jobId === j.id) continue;
+          next[docId] = {
+            docId,
+            jobId: j.id,
+            status: j.status,
+            progress: j.progress,
+            message: j.message,
+          };
+        }
+        return next;
+      });
       setError(null);
     } catch (exc) {
       setError(String((exc as Error).message ?? exc));
