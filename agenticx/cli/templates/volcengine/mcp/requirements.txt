@@ -1,1 +1,1 @@
-agenticx>=0.3.6
+agenticx>=0.3.7
