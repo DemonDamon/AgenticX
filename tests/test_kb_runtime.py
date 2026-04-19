@@ -202,6 +202,39 @@ def test_ingest_search_roundtrip(tmp_path: Path):
     assert hits[0].metadata.get("document_id") == doc.id
 
 
+def test_ingest_strips_none_valued_metadata(tmp_path: Path, monkeypatch):
+    """Chroma rejects metadata values that are None:
+        "Expected metadata value to be a str, int, float or bool, got None".
+    Many PDF/DOCX chunkers don't emit char offsets, so start_index/end_index
+    can be None. Regression test: ingestion must succeed by dropping those
+    keys, not fail the write with NoneType errors.
+    """
+    from agenticx.studio.kb import runtime as rt
+
+    def _chunks_with_none_offsets(**_kwargs):
+        return [
+            {"text": "one", "chunk_index": 0, "start_index": None, "end_index": None},
+            {"text": "two", "chunk_index": 1, "start_index": None, "end_index": None},
+        ]
+
+    monkeypatch.setattr(rt, "_chunk_text", _chunks_with_none_offsets)
+
+    runtime = _build_runtime(tmp_path)
+    doc_path = tmp_path / "has-none-offsets.md"
+    doc_path.write_text("body irrelevant — chunker stub replaces splitting")
+    doc = runtime.register_document(str(doc_path))
+
+    report = runtime.ingest_document(doc.id)
+
+    assert report.failed == 0, report.reasons
+    assert report.success == 1
+
+    stored = runtime.get_document(doc.id)
+    assert stored is not None
+    assert stored.status == KBDocumentStatus.DONE
+    assert stored.chunks == 2
+
+
 def test_preview_chunks_does_not_write_store(tmp_path: Path):
     runtime = _build_runtime(tmp_path)
     doc_path = tmp_path / "preview.md"
