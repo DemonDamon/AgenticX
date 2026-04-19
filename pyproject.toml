@@ -88,6 +88,10 @@ desktop-runtime = [
     "python-pptx>=0.6.21,<1",
     "docx2txt>=0.8,<1",
     "numpy>=1.24.0,<2",
+    # 知识库默认向量后端：agenticx.studio.kb.runtime._ChromaBackend 直接
+    # `import chromadb`，缺失时 UI 上抛 "chromadb is required..." 而打包
+    # 后的桌面端用户没法 pip install 进 bundle。
+    "chromadb>=0.5.0,<1",
 ]
 # ── 额外 LLM 提供者 ──
 llm = [

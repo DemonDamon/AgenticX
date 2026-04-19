@@ -48,6 +48,7 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
+        # 大体积 ML / 可视化栈：桌面端 KB 不依赖
         "torch",
         "tensorflow",
         "easyocr",
@@ -57,7 +58,9 @@ a = Analysis(
         "pandas",
         "plotly",
         "seaborn",
-        "chromadb",
+        # NOTE: chromadb **不**排除——它是知识库默认向量后端，被
+        # `agenticx.studio.kb.runtime._ChromaBackend` 直接 `import chromadb`，
+        # 排除后桌面端打开「资料」页就抛 "chromadb is required..."。
         "qdrant_client",
         "pymilvus",
         "neo4j",

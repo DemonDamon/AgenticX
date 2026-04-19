@@ -91,8 +91,14 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
             import sys
             sys.exit(1)
         
-        # HTTP会话管理
+        # HTTP会话管理：缓存 session + 创建它的事件循环。
+        # 同步入口 `embed()` 走 `asyncio.run()`，每次都会新建并销毁 loop；
+        # 若仅判断 `_session is None / closed`，下一次调用会拿到绑在已关闭
+        # loop 上的 session，aiohttp `Timer` 找不到 current task 就抛
+        # `RuntimeError("Timeout context manager should be used inside a task")`。
+        # 所以另存 `_session_loop`，loop 不一致时强制重建。
         self._session = None
+        self._session_loop = None
         
         # OpenAI客户端（用于兼容接口）
         self._openai_client = None
@@ -111,8 +117,17 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
         return self.dimensions
     
     async def _get_session(self) -> aiohttp.ClientSession:
-        """获取HTTP会话"""
-        if self._session is None or self._session.closed:
+        """获取HTTP会话（loop-aware）"""
+        loop = asyncio.get_running_loop()
+        needs_new = (
+            self._session is None
+            or self._session.closed
+            or self._session_loop is not loop
+        )
+        if needs_new:
+            # 旧 session 的 loop 通常已经关闭，无法跨 loop 调 await close()，
+            # 直接丢弃引用让 GC 回收即可（连接器本身没有 OS 级泄漏）。
+            self._session = None
             connector = aiohttp.TCPConnector(
                 limit=10,
                 limit_per_host=5,
@@ -123,6 +138,7 @@ class BailianEmbeddingProvider(BaseEmbeddingProvider):
                 connector=connector,
                 timeout=timeout
             )
+            self._session_loop = loop
         return self._session
     
 
