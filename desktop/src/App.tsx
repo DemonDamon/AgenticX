@@ -423,11 +423,29 @@ export function App() {
       // 会话恢复/MCP 状态属于次要副作用，单独放后面；哪怕下面串行 /api/session 稍慢，也不会把 UI 卡在 loading。
       try {
         const cfgEarly = await window.agenticxDesktop.loadConfig();
-        const loadedMode = cfgEarly.userMode === "lite" ? "lite" : "pro";
+        // Lite 模式已废弃：所有用户强制走 Pro，旧配置里若保存过 lite 则自动纠正并持久化。
+        const loadedMode: "pro" | "lite" = "pro";
         setUserMode(loadedMode);
-        setOnboardingCompleted(Boolean(cfgEarly.onboardingCompleted));
-        const loadedConfirmStrategy =
-          loadedMode === "lite" ? "manual" : (cfgEarly.confirmStrategy ?? "semi-auto");
+        if (cfgEarly.userMode === "lite") {
+          try {
+            await window.agenticxDesktop.saveUserMode("pro");
+          } catch {
+            // 写回失败不阻塞启动，下次运行仍会在这里再次纠正。
+          }
+        }
+        // 同步跳过首次启动的 Pro/Lite 选择弹窗：如果之前没完成 onboarding，
+        // 这里直接帮用户完成，后续 UI 与老用户保持一致。
+        if (!cfgEarly.onboardingCompleted) {
+          setOnboardingCompleted(true);
+          try {
+            await window.agenticxDesktop.saveOnboardingCompleted(true);
+          } catch {
+            // 同上，写回失败不影响当前会话。
+          }
+        } else {
+          setOnboardingCompleted(true);
+        }
+        const loadedConfirmStrategy = cfgEarly.confirmStrategy ?? "semi-auto";
         setConfirmStrategy(loadedConfirmStrategy);
         const entries = toProviderEntries(cfgEarly.providers ?? {});
         const defP = cfgEarly.defaultProvider ?? "";
@@ -1217,8 +1235,7 @@ export function App() {
       } else if (action === "clear-messages") {
         clearMessages();
       } else if (action === "toggle-mode") {
-        const nextMode = userMode === "pro" ? "lite" : "pro";
-        void applyUserMode(nextMode);
+        // Lite 模式已废弃，快捷键不再切换；保留 case 分支避免命中 default。
       } else if (action === "toggle-plan-mode") {
         setPlanMode(!planMode);
       } else if (action === "open-keybindings") {
