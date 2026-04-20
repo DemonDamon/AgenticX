@@ -4516,6 +4516,31 @@ if (!gotTheLock) {
 
       remoteConfig = loadRemoteConfig();
 
+      // Register the FULL IPC handler set BEFORE the long
+      // `await startStudioServe()` below. On macOS `app.on("activate")`
+      // fires during that await and — together with the idempotent
+      // `createWindow()` guard — opens the window early. The renderer
+      // then boots and a burst of invoke("load-agx-account"),
+      // invoke("list-avatars"), invoke("list-groups"),
+      // invoke("load-automation-tasks"), invoke("load-feishu-binding"),
+      // invoke("load-mcp-status") etc. fires on mount. If those handlers
+      // are still inside the deferred `registerIpc()` call, every one
+      // rejects with "No handler registered for 'X'" and each affected
+      // panel falls into its empty-state fallback — the user sees
+      // "account logged out / 0 agents / no history / settings reset"
+      // even though all of that data is safely on disk. A second launch
+      // "fixes" it only because the backend warms up faster and the
+      // timing lands differently.
+      //
+      // Moving registration up is safe: handlers either read local files
+      // (~/.agenticx, SQLite) that don't depend on the backend, or proxy
+      // to `getStudioUrl()` at invoke time — in the latter case early
+      // registration just means the renderer sees the same graceful
+      // "fetch failed while serve is still booting" response it would
+      // see a few seconds later. No handler references state that's
+      // only created inside startStudioServe / waitServeReady.
+      registerIpc();
+
       if (remoteConfig) {
         const ok = await pingRemoteServer(remoteConfig);
         if (!ok) {
@@ -4587,7 +4612,9 @@ if (!gotTheLock) {
         void startWechatSidecar();
       }
 
-      registerIpc();
+      // registerIpc() was moved above the backend-await block so the
+      // renderer can't hit "No handler registered" when `app.on("activate")`
+      // races with the studio-serve cold start.
       applyPreventSleepFromConfig(loadAgxConfig());
       automationScheduler.start();
       // 与 commandLine proxy-bypass-list 互补：部分 Chromium/Electron 版本下仅 appendSwitch 仍会让
