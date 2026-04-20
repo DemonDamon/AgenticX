@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import os
+import platform
 import threading
 import traceback
 from dataclasses import replace
@@ -775,6 +776,18 @@ _LITEPARSE_ONLY_EXTS: set[str] = {
 _LIBREOFFICE_REQUIRED_EXTS: set[str] = {".doc", ".ppt", ".xls", ".xlsx"}
 
 
+def _libreoffice_install_hint() -> str:
+    """Return platform-specific LibreOffice install command."""
+
+    system = platform.system().strip().lower()
+    if system == "darwin":
+        return "brew install --cask libreoffice"
+    if system == "windows":
+        return "choco install libreoffice-fresh"
+    # Linux and unknown fall back to apt-style guidance.
+    return "apt-get install libreoffice"
+
+
 def _libreoffice_available() -> bool:
     """LibreOffice (``soffice``) is what LiteParse shells out to for legacy
     Office and Excel formats. We probe before invoking so the error is
@@ -804,12 +817,11 @@ def _read_with_liteparse(path: Path) -> str:
 
     ext = path.suffix.lower()
     if ext in _LIBREOFFICE_REQUIRED_EXTS and not _libreoffice_available():
+        install_cmd = _libreoffice_install_hint()
         raise KBError(
             f"解析 {ext} 需要 LibreOffice（LiteParse 内部用 soffice 做格式转换）。"
             f" 未检测到本机已安装。\n"
-            f"macOS：brew install --cask libreoffice\n"
-            f"Ubuntu：apt-get install libreoffice\n"
-            f"Windows：choco install libreoffice-fresh\n"
+            f"建议安装命令：{install_cmd}\n"
             f"安装完成后在资料列表重建该条索引即可，无需重启 Machi。"
         )
 
@@ -821,11 +833,10 @@ def _read_with_liteparse(path: Path) -> str:
         # LiteParse bubbles up underlying tool errors verbatim; detect the
         # two most common ones and surface a clean, copy-pastable remedy.
         if "LibreOffice is not installed" in msg or "soffice" in msg.lower():
+            install_cmd = _libreoffice_install_hint()
             raise KBError(
                 f"解析 {ext} 需要 LibreOffice 做格式转换。\n"
-                f"macOS：brew install --cask libreoffice\n"
-                f"Ubuntu：apt-get install libreoffice\n"
-                f"Windows：choco install libreoffice-fresh\n"
+                f"建议安装命令：{install_cmd}\n"
                 f"安装完成后在资料列表重建该条索引即可。"
             ) from exc
         raise KBError(f"LiteParse failed for {path}: {exc}") from exc

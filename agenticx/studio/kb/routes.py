@@ -26,7 +26,7 @@ from .contracts import (
     RetrievalHit,
 )
 from .manager import KBManager
-from .runtime import _build_embedding_provider, _embed_texts
+from .runtime import _build_embedding_provider, _embed_texts, _libreoffice_install_hint
 
 logger = logging.getLogger(__name__)
 
@@ -185,11 +185,7 @@ def register_kb_routes(app: FastAPI) -> None:
                 "available": bool(soffice_path),
                 "path": soffice_path,
                 "required_for": [".doc", ".ppt", ".xls", ".xlsx"],
-                "install_hint": (
-                    "macOS: brew install --cask libreoffice | "
-                    "Ubuntu: apt-get install libreoffice | "
-                    "Windows: choco install libreoffice-fresh"
-                ),
+                "install_hint": _libreoffice_install_hint(),
             },
             "native_ready": True,
             "install_hint": "npm i -g @llamaindex/liteparse",
