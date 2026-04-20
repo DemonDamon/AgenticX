@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import threading
+import traceback
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +46,25 @@ from .contracts import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _format_traceback_tail(exc: BaseException, *, limit: int = 3) -> str:
+    """Return the last ``limit`` traceback frames as a short string.
+
+    The UI only has one line per job to show the reason, so this is rendered
+    after the exception class + message to give operators enough context
+    (file:line + calling function) to tell ``KeyError('_type')`` inside
+    chromadb apart from the same exception thrown by our own code.
+    """
+
+    tb = exc.__traceback__
+    if tb is None:
+        return ""
+    frames = traceback.extract_tb(tb)
+    if not frames:
+        return ""
+    tail = frames[-limit:]
+    return " -> ".join(f"{Path(fr.filename).name}:{fr.lineno} in {fr.name}" for fr in tail)
 
 
 # --------------------------------------------------------------------------- #
@@ -151,10 +171,50 @@ class _ChromaBackend:
             if self._collection is not None:
                 return
             self._client = chromadb.PersistentClient(path=str(self._path))
-            self._collection = self._client.get_or_create_collection(
+            # embedding_function=None is intentional:
+            #   * KB computes embeddings itself in `_embed_texts_with_progress`
+            #     and feeds them to `collection.upsert(embeddings=...)`, so the
+            #     default MiniLM / onnxruntime model is pure dead weight.
+            #   * Letting chromadb instantiate DefaultEmbeddingFunction serialises
+            #     a config dict. When we reopen a collection written by a slightly
+            #     different chromadb build, the stored config is missing the
+            #     `_type` key, and `ConfigurationInternal.from_json` then crashes
+            #     with `KeyError: '_type'` inside its own error-message f-string
+            #     (line 209 of chromadb/api/configuration.py). That's the
+            #     mysterious `'_type'` shown on every failed ingest in the UI.
+            self._collection = self._open_or_reset_collection()
+
+    def _open_or_reset_collection(self):
+        """Open the target collection; if chromadb's config deserialisation
+        chokes on a legacy on-disk layout (``KeyError('_type')``), rebuild the
+        collection from scratch.  Vectors are the only thing lost and they're
+        always reproducible from the source documents on the next ingest."""
+
+        assert self._client is not None
+
+        def _open():
+            return self._client.get_or_create_collection(
                 name=self._spec.collection,
                 metadata={"expected_dim": self._expected_dim},
+                embedding_function=None,
             )
+
+        try:
+            return _open()
+        except KeyError as exc:
+            if str(exc).strip("'\"") != "_type":
+                raise
+            logger.warning(
+                "Chroma collection %s has incompatible stored config (%s); "
+                "dropping and recreating — existing vectors will be rebuilt on next ingest.",
+                self._spec.collection,
+                exc,
+            )
+            try:
+                self._client.delete_collection(self._spec.collection)
+            except Exception as del_exc:  # pragma: no cover - best effort cleanup
+                logger.warning("delete_collection(%s) failed: %s", self._spec.collection, del_exc)
+            return _open()
 
     # ------------------------------- writes -------------------------------- #
 
@@ -598,15 +658,31 @@ class KBRuntime:
 
         except Exception as exc:
             logger.exception("ingest failed for %s", doc_id)
+            # `str(exc)` alone is frequently useless in the UI:
+            #   * KeyError('_type')       -> "'_type'"  (just the missing key)
+            #   * ModuleNotFoundError(...) -> "No module named 'x'"
+            #   * FileNotFoundError         -> "[Errno 2] ..."
+            # Prefix with the exception class so operators can distinguish a
+            # KBError (our own, already explanatory) from a bare KeyError
+            # bubbling up from a third-party library, and append a short tail
+            # of the traceback to make support tickets actionable.
+            if isinstance(exc, KBError):
+                friendly = str(exc)
+            else:
+                msg = str(exc) or repr(exc)
+                friendly = f"{type(exc).__name__}: {msg}"
+                tb_tail = _format_traceback_tail(exc, limit=3)
+                if tb_tail:
+                    friendly = f"{friendly}\n{tb_tail}"
             failed = replace(
                 doc,
                 status=KBDocumentStatus.FAILED,
-                error=str(exc),
+                error=friendly,
             )
             self._registry.upsert(failed)
             report.failed = 1
-            report.reasons.append(str(exc))
-            _report(KBDocumentStatus.FAILED, str(exc))
+            report.reasons.append(friendly)
+            _report(KBDocumentStatus.FAILED, friendly)
             return report
 
     # ---------------------------- search -------------------------------- #
