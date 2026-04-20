@@ -160,38 +160,86 @@ class _ChromaBackend:
 
     # ----------------------- legacy-sysdb recovery ------------------------- #
     #
-    # Problem recap (issue: "KeyError: '_type'" on every ingest, from user DMG):
+    # User-reported failure modes (all caused by on-disk chromadb state written
+    # by an older chromadb build that the DMG's newer chromadb can't read):
     #
-    #   sysdb.py:886 in _load_config_from_json_str_and_migrate
-    #     -> configuration.py:188 in from_json_str
-    #     -> configuration.py:209 in from_json              <-- `config["_type"]`
+    #   (A) "KeyError: '_type'"
+    #       sysdb.py:_load_config_from_json_str_and_migrate
+    #         -> configuration.py:from_json_str
+    #         -> configuration.py:from_json        <-- `config["_type"]`
+    #       Legacy collection / segment configs lack the discriminator key
+    #       that newer `ConfigurationInternal.from_json` unconditionally reads.
     #
-    # The chromadb persistent dir at `~/.agenticx/storage/vector_db/` was
-    # written by an older chromadb build whose collection/segment configs
-    # lack the `_type` discriminator key that newer `ConfigurationInternal.
-    # from_json` unconditionally reads. The dir **survives app reinstalls**
-    # (it lives in the user's home, not the app bundle), so a fresh DMG on
-    # a pre-existing vector_db/ trips every single operation.
+    #   (B) "ValueError: Could not connect to tenant default_tenant..."
+    #       chromadb/__init__.py:PersistentClient
+    #         -> api/client.py:Client.__init__
+    #         -> api/client.py:_validate_tenant_database
+    #       sqlite predates chromadb's multi-tenant rollout and has no
+    #       default_tenant / default_database row, so the client itself
+    #       refuses to initialise.
     #
-    # chromadb loads these configs lazily:
-    #   * collection-level config   -> during `get_or_create_collection`
-    #   * segment-level config      -> during `upsert` / `query` / `delete`
-    #                                  as each segment is first touched
-    #
-    # An earlier fix only wrapped `get_or_create_collection`, so upsert and
-    # query still bubbled up KeyError('_type') because the segment migration
-    # happens deeper inside chromadb. The only reliable recovery is nuking
-    # the persistent dir and rebuilding from scratch — vectors are always
-    # reproducible from the source documents that `_DocumentRegistry` holds
-    # separately in `documents.json` (different dir, unaffected by rmtree).
+    # The persistent dir at `~/.agenticx/storage/vector_db/` SURVIVES app
+    # reinstalls (lives in the user's home, not the app bundle), so a fresh
+    # DMG on top of a pre-existing vector_db/ trips every single operation.
+    # chromadb loads its state lazily:
+    #   * client init (tenant / database validation)   -> at PersistentClient()
+    #   * collection-level config                      -> get_or_create_collection
+    #   * segment-level config                         -> upsert / query / delete
+    # So the safest strategy is to wrap *every* public method with a recovery
+    # that nukes the on-disk dir and retries once. Vectors are reproducible
+    # from the source documents that `_DocumentRegistry` persists separately
+    # in `documents.json` (sibling directory, unaffected by the rmtree).
 
     @staticmethod
     def _is_type_key_error(exc: BaseException) -> bool:
-        """True iff `exc`, its ``__cause__`` or ``__context__`` chain, or its
-        ``ExceptionGroup`` siblings contain a ``KeyError('_type')`` raised by
-        chromadb's config migration.  We walk the full chain because chromadb
-        sometimes wraps the raw KeyError in its own RuntimeError before
-        re-raising."""
+        """True iff `exc` (or anything in its chain) is ``KeyError('_type')``.
+        Kept as a narrow, single-purpose helper so ``_open_or_reset_collection``
+        only engages its lightweight "drop+recreate collection" path for the
+        config-only failure mode, never for broader client-level corruption."""
+
+        return _ChromaBackend._walk_chain(
+            exc,
+            match=lambda e: isinstance(e, KeyError) and str(e).strip("'\"") == "_type",
+        )
+
+    @staticmethod
+    def _is_chromadb_incompat_error(exc: BaseException) -> bool:
+        """True iff `exc` (or anything in its chain) looks like chromadb
+        choking on on-disk state written by an incompatible build.
+
+        Covers both documented flavours:
+          * ``KeyError('_type')`` from config migration.
+          * ``ValueError("Could not connect to tenant ...")`` and the
+            database-level equivalent from ``_validate_tenant_database``.
+
+        Substring matching is intentionally loose so chromadb version drift
+        on the exact wording doesn't silently regress detection — the cost
+        of a false positive is a vector-store rebuild (cheap, always
+        reproducible from the document registry), the cost of a false
+        negative is the user sees every operation fail."""
+
+        def _match(e: BaseException) -> bool:
+            if isinstance(e, KeyError) and str(e).strip("'\"") == "_type":
+                return True
+            if isinstance(e, ValueError):
+                msg = str(e).lower()
+                if (
+                    "connect to tenant" in msg
+                    or "default_tenant" in msg
+                    or "connect to database" in msg
+                    or "default_database" in msg
+                ):
+                    return True
+            return False
+
+        return _ChromaBackend._walk_chain(exc, match=_match)
+
+    @staticmethod
+    def _walk_chain(exc: BaseException, *, match) -> bool:
+        """Shared exception-chain walker for the detectors above.  Follows
+        ``__cause__`` / ``__context__`` (chromadb sometimes wraps the raw
+        exception in its own RuntimeError via ``raise ... from ke``) and
+        ``ExceptionGroup.exceptions`` on 3.11+."""
 
         seen: set = set()
         stack: List[BaseException] = [exc]
@@ -200,13 +248,12 @@ class _ChromaBackend:
             if cur is None or id(cur) in seen:
                 continue
             seen.add(id(cur))
-            if isinstance(cur, KeyError) and str(cur).strip("'\"") == "_type":
+            if match(cur):
                 return True
             if cur.__cause__ is not None:
                 stack.append(cur.__cause__)
             if cur.__context__ is not None:
                 stack.append(cur.__context__)
-            # `ExceptionGroup` only exists on 3.11+. Guard with getattr.
             inner = getattr(cur, "exceptions", None)
             if isinstance(inner, (list, tuple)):
                 stack.extend(inner)
@@ -243,19 +290,20 @@ class _ChromaBackend:
         self._path.mkdir(parents=True, exist_ok=True)
 
     def _with_sysdb_recovery(self, op_label: str, op):
-        """Execute ``op()``; if it fails with ``KeyError('_type')`` anywhere
-        in chromadb's sysdb/configuration stack, nuke the persistent dir and
-        retry exactly once.
+        """Execute ``op()``; if it fails with a chromadb on-disk incompat
+        signal (``KeyError('_type')`` from config migration OR
+        ``ValueError("Could not connect to tenant ...")`` from tenant
+        validation), nuke the persistent dir and retry exactly once.
 
         One retry is enough: after ``_reset_persistent_dir`` the on-disk
-        state is empty, so the second attempt cannot trip the legacy config
-        migration path.  If it somehow still does, we re-raise rather than
-        loop forever."""
+        state is empty, so the second attempt cannot trip the legacy
+        migration path.  If it somehow still does, we re-raise rather
+        than loop forever."""
 
         try:
             return op()
         except Exception as exc:
-            if not self._is_type_key_error(exc):
+            if not self._is_chromadb_incompat_error(exc):
                 raise
             self._reset_persistent_dir(reason=f"{op_label}: {type(exc).__name__}: {exc}")
             # ``op`` implementations below all call ``_ensure()`` up front, so
@@ -363,10 +411,12 @@ class _ChromaBackend:
                     self._collection.delete(ids=ids)
                     return len(ids)
                 except Exception as exc:
-                    # Let KeyError('_type') escape so `_with_sysdb_recovery`
-                    # can trigger a reset; swallow everything else (delete
-                    # failures on a fresh install are usually benign).
-                    if self._is_type_key_error(exc):
+                    # Let chromadb on-disk incompat errors escape so
+                    # `_with_sysdb_recovery` can trigger a reset; swallow
+                    # everything else (per-delete failures are usually benign —
+                    # the surrounding `delete_document` already removed the
+                    # registry entry, which is the user-visible source of truth).
+                    if self._is_chromadb_incompat_error(exc):
                         raise
                     logger.warning("Chroma delete_by_document failed for %s: %s", document_id, exc)
                     return 0
@@ -430,7 +480,7 @@ class _ChromaBackend:
                 try:
                     return int(self._collection.count())
                 except Exception as exc:
-                    if self._is_type_key_error(exc):
+                    if self._is_chromadb_incompat_error(exc):
                         raise
                     return 0
 
@@ -648,10 +698,24 @@ class KBRuntime:
         doc = self._registry.remove(doc_id)
         if doc is None:
             return False
+        # Registry removal is the user-visible source of truth and already
+        # succeeded — never let a vector-store cleanup failure turn the whole
+        # HTTP DELETE into a 500 (the UI then sees "button does nothing",
+        # reloads the panel, and finds the row gone anyway because the
+        # registry write committed). Catch *any* exception from the vector
+        # store, log it, and return success. `_with_sysdb_recovery` inside
+        # `delete_by_document` still tries to self-heal the on-disk chromadb
+        # state the next time an op runs; if it can't, the user-visible
+        # outcome (document removed from the list) is still correct.
         try:
             self._store().delete_by_document(doc_id)
-        except KBError as exc:
-            logger.warning("Failed to purge vectors for %s: %s", doc_id, exc)
+        except Exception as exc:
+            logger.warning(
+                "Failed to purge vectors for %s after registry delete: %s: %s",
+                doc_id,
+                type(exc).__name__,
+                exc,
+            )
         return True
 
     def clear_all(self) -> None:

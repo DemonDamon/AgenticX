@@ -404,6 +404,107 @@ def test_with_sysdb_recovery_reraises_unrelated_errors(tmp_path: Path):
     assert sentinel.exists(), "persistent dir must NOT be wiped on unrelated errors"
 
 
+def test_with_sysdb_recovery_triggers_on_tenant_valueerror(
+    tmp_path: Path, monkeypatch
+):
+    """Regression for the second flavour of legacy-chromadb incompat:
+    ``ValueError("Could not connect to tenant default_tenant. Are you sure
+    it exists?")`` raised from ``PersistentClient._validate_tenant_database``
+    on old sqlites that predate chromadb's multi-tenant model. The first
+    reset-recovery pass only matched ``KeyError('_type')``, so the DMG
+    could not self-heal a vector_db/ written by an older build — every
+    ingest and every delete returned a 500 instead, which surfaced in the
+    UI as 'delete button does nothing'. This test locks in that tenant-
+    level ValueErrors are now recognised and drive the same rmtree+retry
+    recovery as the config-level KeyError."""
+    runtime = _build_runtime(tmp_path)
+    backend = runtime._store()
+    backend._ensure()
+
+    sentinel = backend._path / "stale-tenant-sqlite.txt"
+    sentinel.write_text("pretend this is a multi-tenant-incompatible chroma.sqlite3")
+
+    monkeypatch.setattr(backend, "_ensure", lambda: None)
+
+    attempts = {"n": 0}
+
+    def _op():
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise ValueError(
+                "Could not connect to tenant default_tenant. Are you sure it exists?"
+            )
+        return "healed"
+
+    result = backend._with_sysdb_recovery("upsert", _op)
+
+    assert result == "healed"
+    assert attempts["n"] == 2, "tenant ValueError must trigger exactly one retry"
+    assert not sentinel.exists(), (
+        "legacy multi-tenant-incompatible state should have been wiped"
+    )
+
+
+def test_is_chromadb_incompat_error_matches_known_shapes():
+    """Centralised detector must recognise every known incompat shape and
+    ignore unrelated errors that happen to be KeyError/ValueError."""
+    from agenticx.studio.kb.runtime import _ChromaBackend
+
+    # Positive matches — the three documented failure signatures.
+    assert _ChromaBackend._is_chromadb_incompat_error(KeyError("_type"))
+    assert _ChromaBackend._is_chromadb_incompat_error(
+        ValueError("Could not connect to tenant default_tenant. Are you sure it exists?")
+    )
+    assert _ChromaBackend._is_chromadb_incompat_error(
+        ValueError("Could not connect to database default_database.")
+    )
+
+    # Wrapped via __cause__ chain (chromadb sometimes re-raises from a helper).
+    try:
+        try:
+            raise ValueError("Could not connect to tenant default_tenant.")
+        except ValueError as ve:
+            raise RuntimeError("outer") from ve
+    except RuntimeError as outer:
+        wrapped = outer
+    assert _ChromaBackend._is_chromadb_incompat_error(wrapped)
+
+    # Negative matches — unrelated errors must NOT trigger a reset.
+    assert not _ChromaBackend._is_chromadb_incompat_error(KeyError("some-other-key"))
+    assert not _ChromaBackend._is_chromadb_incompat_error(ValueError("bad input"))
+    assert not _ChromaBackend._is_chromadb_incompat_error(RuntimeError("network down"))
+
+
+def test_delete_document_returns_true_even_when_vector_purge_raises(
+    tmp_path: Path, monkeypatch
+):
+    """User-reported bug: clicking the delete button in the knowledge-base
+    panel did nothing while the vector store was broken, because a raw
+    ValueError from chromadb's tenant validation bubbled out of
+    ``delete_by_document`` — past the ``except KBError`` in
+    ``delete_document`` — and the HTTP route returned 500. After the fix,
+    the registry entry (user-visible source of truth) is still removed and
+    ``delete_document`` returns True; the vector failure is logged, not
+    propagated."""
+    runtime = _build_runtime(tmp_path)
+    doc_path = tmp_path / "doomed.md"
+    doc_path.write_text("content that won't survive a deletion test")
+    doc = runtime.register_document(str(doc_path))
+    assert runtime.get_document(doc.id) is not None
+
+    def _explode(_doc_id):
+        raise ValueError(
+            "Could not connect to tenant default_tenant. Are you sure it exists?"
+        )
+
+    monkeypatch.setattr(runtime._store(), "delete_by_document", _explode)
+
+    assert runtime.delete_document(doc.id) is True
+    assert runtime.get_document(doc.id) is None, (
+        "registry entry must still be removed so the UI reflects the user's intent"
+    )
+
+
 def test_with_sysdb_recovery_catches_wrapped_type_keyerror(
     tmp_path: Path, monkeypatch
 ):
