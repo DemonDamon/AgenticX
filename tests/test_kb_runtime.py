@@ -297,6 +297,143 @@ def test_open_or_reset_collection_does_not_swallow_unrelated_keyerror(tmp_path: 
     assert "something-else" in str(ei.value)
 
 
+def test_is_type_key_error_walks_exception_chain():
+    """Chromadb sometimes wraps the raw `KeyError('_type')` inside its own
+    RuntimeError/ValueError before re-raising (e.g. from segment helpers
+    that do ``raise RuntimeError("...") from ke``). The detector must still
+    find it via ``__cause__`` / ``__context__``, otherwise the sysdb-reset
+    recovery won't trigger on the user-reported traceback where the outer
+    exception is something like ``RuntimeError`` wrapping the real cause."""
+    from agenticx.studio.kb.runtime import _ChromaBackend
+
+    raw = KeyError("_type")
+    wrapped: Exception
+    try:
+        try:
+            raise raw
+        except KeyError as inner:
+            raise RuntimeError("chromadb could not load config") from inner
+    except RuntimeError as outer:
+        wrapped = outer
+
+    assert _ChromaBackend._is_type_key_error(wrapped) is True
+    assert _ChromaBackend._is_type_key_error(raw) is True
+    assert _ChromaBackend._is_type_key_error(KeyError("some-other-key")) is False
+    assert _ChromaBackend._is_type_key_error(RuntimeError("unrelated")) is False
+
+
+def test_with_sysdb_recovery_nukes_dir_and_retries_on_type_keyerror(
+    tmp_path: Path, monkeypatch
+):
+    """Regression for the user-reported bug: on a legacy ``vector_db/`` dir
+    surviving from an older chromadb build, the collection itself opens
+    fine but ``collection.upsert`` / ``query`` / ``delete`` trip the sysdb
+    *segment* config migration with ``KeyError('_type')``.  Public entry
+    points must recognise that, nuke the whole persistent directory, and
+    retry so the caller sees a healed store instead of every ingest
+    failing with ``'_type'``.
+
+    We exercise the recovery wrapper directly (rather than reaching in at
+    the chromadb integration layer) because reproducing the legacy sqlite
+    state in-process would require chromadb's Rust bindings to release
+    cached handles after ``rmtree`` — which they don't do reliably in a
+    single test process.  Unit-testing ``_with_sysdb_recovery`` is enough
+    to lock in the behaviour all public methods share."""
+    runtime = _build_runtime(tmp_path)
+    backend = runtime._store()
+    backend._ensure()
+
+    # Sentinel that should be wiped when the persistent dir gets reset.
+    sentinel = backend._path / "legacy-sentinel.txt"
+    sentinel.write_text("pretend this is a chroma.sqlite3 from an older build")
+    assert sentinel.exists()
+
+    # After reset ``_ensure`` gets called again by ``op``; stub it so the
+    # retry doesn't need to re-open chromadb (which in Rust-bindings builds
+    # can race with the just-completed rmtree).
+    ensure_calls = {"n": 0}
+
+    def _fake_ensure():
+        ensure_calls["n"] += 1
+
+    monkeypatch.setattr(backend, "_ensure", _fake_ensure)
+
+    attempts = {"n": 0}
+
+    def _op():
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise KeyError("_type")
+        return "healed"
+
+    result = backend._with_sysdb_recovery("upsert", _op)
+
+    assert result == "healed"
+    assert attempts["n"] == 2, "op should be retried exactly once after reset"
+    assert not sentinel.exists(), (
+        "_reset_persistent_dir must wipe the legacy on-disk state before retry"
+    )
+    assert backend._path.exists(), "path must be recreated empty for retry"
+    assert backend._collection is None, (
+        "in-memory client/collection should be cleared so _ensure rebuilds"
+    )
+    assert backend._client is None
+
+
+def test_with_sysdb_recovery_reraises_unrelated_errors(tmp_path: Path):
+    """Non-``KeyError('_type')`` exceptions must bubble up unchanged. We
+    never want a generic error in chromadb (e.g. a dimension mismatch or
+    an IO error) to silently nuke the user's vector store."""
+    runtime = _build_runtime(tmp_path)
+    backend = runtime._store()
+    backend._ensure()
+
+    sentinel = backend._path / "do-not-wipe.txt"
+    sentinel.write_text("untouchable")
+
+    attempts = {"n": 0}
+
+    def _op():
+        attempts["n"] += 1
+        raise ValueError("unrelated problem")
+
+    with pytest.raises(ValueError, match="unrelated problem"):
+        backend._with_sysdb_recovery("upsert", _op)
+
+    assert attempts["n"] == 1, "no retry for unrelated errors"
+    assert sentinel.exists(), "persistent dir must NOT be wiped on unrelated errors"
+
+
+def test_with_sysdb_recovery_catches_wrapped_type_keyerror(
+    tmp_path: Path, monkeypatch
+):
+    """Some chromadb paths wrap the raw ``KeyError('_type')`` in another
+    exception type via ``raise ... from ke`` before it escapes. The
+    recovery wrapper must still unwrap and recognise it via the exception
+    chain, otherwise the sysdb-reset only triggers on the narrowest subset
+    of actual error shapes and the user keeps seeing ``'_type'`` failures."""
+    runtime = _build_runtime(tmp_path)
+    backend = runtime._store()
+    backend._ensure()
+
+    monkeypatch.setattr(backend, "_ensure", lambda: None)
+
+    attempts = {"n": 0}
+
+    def _op():
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            try:
+                raise KeyError("_type")
+            except KeyError as ke:
+                raise RuntimeError("chromadb could not load segment config") from ke
+        return "healed"
+
+    result = backend._with_sysdb_recovery("upsert", _op)
+    assert result == "healed"
+    assert attempts["n"] == 2
+
+
 def test_ingest_strips_none_valued_metadata(tmp_path: Path, monkeypatch):
     """Chroma rejects metadata values that are None:
         "Expected metadata value to be a str, int, float or bool, got None".
