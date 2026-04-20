@@ -509,7 +509,7 @@ def test_read_with_liteparse_raises_when_libreoffice_missing(tmp_path: Path, mon
         kb_runtime._read_with_liteparse(xlsx_path)
     message = str(excinfo.value)
     assert "LibreOffice" in message
-    assert "brew install --cask libreoffice" in message
+    assert "建议安装命令：" in message
     assert ".xlsx" in message
 
 
@@ -543,7 +543,22 @@ def test_read_with_liteparse_translates_libreoffice_runtime_error(
         kb_runtime._read_with_liteparse(xlsx_path)
     message = str(excinfo.value)
     assert "LibreOffice" in message
-    assert "brew install --cask libreoffice" in message
+    assert "建议安装命令：" in message
+
+
+@pytest.mark.parametrize(
+    ("system_name", "expected"),
+    [
+        ("Darwin", "brew install --cask libreoffice"),
+        ("Windows", "choco install libreoffice-fresh"),
+        ("Linux", "apt-get install libreoffice"),
+    ],
+)
+def test_libreoffice_install_hint_by_platform(monkeypatch, system_name: str, expected: str):
+    from agenticx.studio.kb import runtime as kb_runtime
+
+    monkeypatch.setattr(kb_runtime.platform, "system", lambda: system_name)
+    assert kb_runtime._libreoffice_install_hint() == expected
 
 
 def test_read_with_liteparse_raises_when_cli_missing(tmp_path: Path, monkeypatch):

@@ -275,6 +275,22 @@ def test_search_empty_query_400(client: TestClient):
     assert resp.status_code == 400
 
 
+def test_parser_status_uses_platform_specific_libreoffice_hint(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    import agenticx.studio.kb.routes as routes_mod
+
+    monkeypatch.setattr(
+        routes_mod,
+        "_libreoffice_install_hint",
+        lambda: "choco install libreoffice-fresh",
+    )
+    resp = client.get("/api/kb/parser_status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["libreoffice"]["install_hint"] == "choco install libreoffice-fresh"
+
+
 def test_add_document_rejects_unknown_extension(client: TestClient, tmp_path: Path):
     bad = tmp_path / "script.py"
     bad.write_text("print('hello')")
