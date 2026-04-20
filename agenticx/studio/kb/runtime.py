@@ -158,6 +158,110 @@ class _ChromaBackend:
         self._path = Path(os.path.expanduser(spec.path))
         self._path.mkdir(parents=True, exist_ok=True)
 
+    # ----------------------- legacy-sysdb recovery ------------------------- #
+    #
+    # Problem recap (issue: "KeyError: '_type'" on every ingest, from user DMG):
+    #
+    #   sysdb.py:886 in _load_config_from_json_str_and_migrate
+    #     -> configuration.py:188 in from_json_str
+    #     -> configuration.py:209 in from_json              <-- `config["_type"]`
+    #
+    # The chromadb persistent dir at `~/.agenticx/storage/vector_db/` was
+    # written by an older chromadb build whose collection/segment configs
+    # lack the `_type` discriminator key that newer `ConfigurationInternal.
+    # from_json` unconditionally reads. The dir **survives app reinstalls**
+    # (it lives in the user's home, not the app bundle), so a fresh DMG on
+    # a pre-existing vector_db/ trips every single operation.
+    #
+    # chromadb loads these configs lazily:
+    #   * collection-level config   -> during `get_or_create_collection`
+    #   * segment-level config      -> during `upsert` / `query` / `delete`
+    #                                  as each segment is first touched
+    #
+    # An earlier fix only wrapped `get_or_create_collection`, so upsert and
+    # query still bubbled up KeyError('_type') because the segment migration
+    # happens deeper inside chromadb. The only reliable recovery is nuking
+    # the persistent dir and rebuilding from scratch — vectors are always
+    # reproducible from the source documents that `_DocumentRegistry` holds
+    # separately in `documents.json` (different dir, unaffected by rmtree).
+
+    @staticmethod
+    def _is_type_key_error(exc: BaseException) -> bool:
+        """True iff `exc`, its ``__cause__`` or ``__context__`` chain, or its
+        ``ExceptionGroup`` siblings contain a ``KeyError('_type')`` raised by
+        chromadb's config migration.  We walk the full chain because chromadb
+        sometimes wraps the raw KeyError in its own RuntimeError before
+        re-raising."""
+
+        seen: set = set()
+        stack: List[BaseException] = [exc]
+        while stack:
+            cur = stack.pop()
+            if cur is None or id(cur) in seen:
+                continue
+            seen.add(id(cur))
+            if isinstance(cur, KeyError) and str(cur).strip("'\"") == "_type":
+                return True
+            if cur.__cause__ is not None:
+                stack.append(cur.__cause__)
+            if cur.__context__ is not None:
+                stack.append(cur.__context__)
+            # `ExceptionGroup` only exists on 3.11+. Guard with getattr.
+            inner = getattr(cur, "exceptions", None)
+            if isinstance(inner, (list, tuple)):
+                stack.extend(inner)
+        return False
+
+    def _reset_persistent_dir(self, *, reason: str) -> None:
+        """Drop all in-memory chromadb state and wipe the on-disk persistent
+        directory, then recreate the empty dir.  Caller is expected to call
+        ``_ensure()`` again to rebuild the client + collection.
+
+        Only the vector store is affected; ``~/.agenticx/storage/kb/documents
+        .json`` (the KB document registry) is in a sibling directory and
+        keeps the list of files the user added, so re-ingesting is just a
+        matter of embedding them again."""
+
+        import shutil
+
+        logger.warning(
+            "Resetting chromadb persistent directory %s due to: %s",
+            self._path,
+            reason,
+        )
+        with self._lock:
+            self._collection = None
+            # `chromadb.PersistentClient` has no public ``close()``; dropping
+            # the reference releases the sqlite file handle once GC runs.
+            # macOS WAL mode can leave `-wal` / `-shm` sidecars — rmtree
+            # below picks them up alongside the main .sqlite3 file.
+            self._client = None
+        try:
+            shutil.rmtree(self._path, ignore_errors=True)
+        except Exception as exc:  # pragma: no cover - best-effort cleanup
+            logger.warning("rmtree(%s) partial failure: %s", self._path, exc)
+        self._path.mkdir(parents=True, exist_ok=True)
+
+    def _with_sysdb_recovery(self, op_label: str, op):
+        """Execute ``op()``; if it fails with ``KeyError('_type')`` anywhere
+        in chromadb's sysdb/configuration stack, nuke the persistent dir and
+        retry exactly once.
+
+        One retry is enough: after ``_reset_persistent_dir`` the on-disk
+        state is empty, so the second attempt cannot trip the legacy config
+        migration path.  If it somehow still does, we re-raise rather than
+        loop forever."""
+
+        try:
+            return op()
+        except Exception as exc:
+            if not self._is_type_key_error(exc):
+                raise
+            self._reset_persistent_dir(reason=f"{op_label}: {type(exc).__name__}: {exc}")
+            # ``op`` implementations below all call ``_ensure()`` up front, so
+            # the retry rebuilds both client and collection from scratch.
+            return op()
+
     def _ensure(self) -> None:
         if self._collection is not None:
             return
@@ -189,7 +293,12 @@ class _ChromaBackend:
         """Open the target collection; if chromadb's config deserialisation
         chokes on a legacy on-disk layout (``KeyError('_type')``), rebuild the
         collection from scratch.  Vectors are the only thing lost and they're
-        always reproducible from the source documents on the next ingest."""
+        always reproducible from the source documents on the next ingest.
+
+        Note this only covers the *collection-level* config path. Segment-level
+        configs are loaded lazily from inside ``upsert`` / ``query`` / ``delete``
+        and cannot be healed here — those paths go through
+        ``_with_sysdb_recovery`` instead."""
 
         assert self._client is not None
 
@@ -202,8 +311,8 @@ class _ChromaBackend:
 
         try:
             return _open()
-        except KeyError as exc:
-            if str(exc).strip("'\"") != "_type":
+        except Exception as exc:
+            if not self._is_type_key_error(exc):
                 raise
             logger.warning(
                 "Chroma collection %s has incompatible stored config (%s); "
@@ -229,40 +338,56 @@ class _ChromaBackend:
     ) -> None:
         if not ids:
             return
-        self._ensure()
-        with self._lock:
-            self._collection.upsert(
-                ids=ids,
-                documents=texts,
-                embeddings=embeddings,
-                metadatas=metadatas,
-            )
+
+        def _do():
+            self._ensure()
+            with self._lock:
+                self._collection.upsert(
+                    ids=ids,
+                    documents=texts,
+                    embeddings=embeddings,
+                    metadatas=metadatas,
+                )
+
+        self._with_sysdb_recovery("upsert", _do)
 
     def delete_by_document(self, document_id: str) -> int:
-        self._ensure()
-        with self._lock:
-            try:
-                result = self._collection.get(where={"document_id": document_id})
-                ids = result.get("ids") or []
-                if not ids:
+        def _do() -> int:
+            self._ensure()
+            with self._lock:
+                try:
+                    result = self._collection.get(where={"document_id": document_id})
+                    ids = result.get("ids") or []
+                    if not ids:
+                        return 0
+                    self._collection.delete(ids=ids)
+                    return len(ids)
+                except Exception as exc:
+                    # Let KeyError('_type') escape so `_with_sysdb_recovery`
+                    # can trigger a reset; swallow everything else (delete
+                    # failures on a fresh install are usually benign).
+                    if self._is_type_key_error(exc):
+                        raise
+                    logger.warning("Chroma delete_by_document failed for %s: %s", document_id, exc)
                     return 0
-                self._collection.delete(ids=ids)
-                return len(ids)
-            except Exception as exc:  # pragma: no cover - chromadb-specific errors
-                logger.warning("Chroma delete_by_document failed for %s: %s", document_id, exc)
-                return 0
+
+        return self._with_sysdb_recovery("delete_by_document", _do)
 
     def clear(self) -> None:
-        self._ensure()
-        with self._lock:
-            try:
-                self._client.delete_collection(self._spec.collection)
-            except Exception:
-                pass
-            self._collection = self._client.get_or_create_collection(
-                name=self._spec.collection,
-                metadata={"expected_dim": self._expected_dim},
-            )
+        def _do():
+            self._ensure()
+            with self._lock:
+                try:
+                    self._client.delete_collection(self._spec.collection)
+                except Exception:
+                    pass
+                self._collection = self._client.get_or_create_collection(
+                    name=self._spec.collection,
+                    metadata={"expected_dim": self._expected_dim},
+                    embedding_function=None,
+                )
+
+        self._with_sysdb_recovery("clear", _do)
 
     # ------------------------------- reads --------------------------------- #
 
@@ -272,36 +397,44 @@ class _ChromaBackend:
         query_embedding: List[float],
         top_k: int,
     ) -> List[Tuple[str, float, str, Dict[str, Any]]]:
-        self._ensure()
-        with self._lock:
-            result = self._collection.query(
-                query_embeddings=[query_embedding],
-                n_results=max(1, int(top_k)),
-            )
-        ids = (result.get("ids") or [[]])[0]
-        docs = (result.get("documents") or [[]])[0]
-        metas = (result.get("metadatas") or [[]])[0]
-        dists = (result.get("distances") or [[]])[0]
-        hits: List[Tuple[str, float, str, Dict[str, Any]]] = []
-        for idx, cid in enumerate(ids):
-            distance = float(dists[idx]) if idx < len(dists) else 0.0
-            # chroma returns squared-L2 by default; convert to a similarity-ish score
-            score = 1.0 / (1.0 + distance) if distance >= 0 else 0.0
-            hits.append((
-                str(cid),
-                score,
-                str(docs[idx]) if idx < len(docs) else "",
-                dict(metas[idx]) if idx < len(metas) else {},
-            ))
-        return hits
+        def _do() -> List[Tuple[str, float, str, Dict[str, Any]]]:
+            self._ensure()
+            with self._lock:
+                result = self._collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=max(1, int(top_k)),
+                )
+            ids = (result.get("ids") or [[]])[0]
+            docs = (result.get("documents") or [[]])[0]
+            metas = (result.get("metadatas") or [[]])[0]
+            dists = (result.get("distances") or [[]])[0]
+            hits: List[Tuple[str, float, str, Dict[str, Any]]] = []
+            for idx, cid in enumerate(ids):
+                distance = float(dists[idx]) if idx < len(dists) else 0.0
+                # chroma returns squared-L2 by default; convert to a similarity-ish score
+                score = 1.0 / (1.0 + distance) if distance >= 0 else 0.0
+                hits.append((
+                    str(cid),
+                    score,
+                    str(docs[idx]) if idx < len(docs) else "",
+                    dict(metas[idx]) if idx < len(metas) else {},
+                ))
+            return hits
+
+        return self._with_sysdb_recovery("query", _do)
 
     def count(self) -> int:
-        self._ensure()
-        with self._lock:
-            try:
-                return int(self._collection.count())
-            except Exception:
-                return 0
+        def _do() -> int:
+            self._ensure()
+            with self._lock:
+                try:
+                    return int(self._collection.count())
+                except Exception as exc:
+                    if self._is_type_key_error(exc):
+                        raise
+                    return 0
+
+        return self._with_sysdb_recovery("count", _do)
 
 
 # --------------------------------------------------------------------------- #
