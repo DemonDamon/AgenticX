@@ -8,7 +8,6 @@ const PRO_ITEMS = [
   ["Ctrl/Cmd+K", "打开命令面板"],
   ["Ctrl+,", "打开设置"],
   ["Ctrl+L", "清空消息"],
-  ["Ctrl+Shift+M", "切换 Pro/Lite"],
   ["Ctrl+Shift+P", "切换计划模式"],
   ["Alt+↑ / Alt+↓", "历史输入导航"],
   ["Enter", "发送"],
@@ -18,7 +17,6 @@ const PRO_ITEMS = [
 
 const LITE_ITEMS = [
   ["Ctrl+,", "打开设置"],
-  ["Ctrl+Shift+M", "切换 Pro/Lite"],
   ["Enter", "发送"],
   ["Shift+Enter", "换行"],
   ["Escape", "中断生成"],

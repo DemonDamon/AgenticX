@@ -1330,30 +1330,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           )}
         </div>
         <div className="flex w-auto items-center justify-end gap-2">
-          <div className="no-drag inline-flex rounded-md border border-border bg-surface-card p-0.5">
-            <button
-              className={`rounded px-2 py-1 text-[11px] transition ${
-                userMode === "pro" ? "bg-cyan-500/20 text-cyan-200" : "text-text-subtle hover:text-text-primary"
-              }`}
-              onClick={() => {
-                if (userMode !== "pro") void applyUserMode("pro");
-              }}
-              title="切换到 Pro 模式"
-            >
-              Pro
-            </button>
-            <button
-              className={`rounded px-2 py-1 text-[11px] transition ${
-                userMode === "lite" ? "bg-cyan-500/20 text-cyan-200" : "text-text-subtle hover:text-text-primary"
-              }`}
-              onClick={() => {
-                if (userMode !== "lite") void applyUserMode("lite");
-              }}
-              title="切换到 Lite 模式"
-            >
-              Lite
-            </button>
-          </div>
+          {/* Lite 模式已废弃，不再展示 Pro/Lite 切换入口。 */}
           {(subAgents.length > 0 || isLite) ? (
             <button
               className="no-drag rounded-md px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"

@@ -106,16 +106,7 @@ export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry
     icon: "C",
     handler: () => ctx.clearMessages(),
   });
-  registry.register({
-    id: "mode",
-    name: "/mode",
-    description: "切换 Pro / Lite 模式",
-    category: "view",
-    shortcut: "Ctrl+Shift+M",
-    mode: "both",
-    icon: "U",
-    handler: async () => ctx.toggleUserMode(),
-  });
+  // Lite 模式已废弃，/mode 命令不再注册。`toggleUserMode` 保留在 ctx 上以兼容旧引用。
   registry.register({
     id: "help",
     name: "/help",
@@ -131,7 +122,6 @@ export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry
           "- /model：切换模型（Pro）",
           "- /settings：打开设置",
           "- /clear：清空对话",
-          "- /mode：切换 Pro/Lite",
           "- /plan：切换计划模式（Pro）",
           "- /confirm：切换确认策略",
           "- /keybindings：查看快捷键",
