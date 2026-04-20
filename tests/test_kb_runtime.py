@@ -202,6 +202,101 @@ def test_ingest_search_roundtrip(tmp_path: Path):
     assert hits[0].metadata.get("document_id") == doc.id
 
 
+def test_ingest_error_message_includes_exception_class(tmp_path: Path, monkeypatch):
+    """Regression test: when ingestion fails with a bare ``KeyError('_type')``
+    (the chromadb config-deserialisation bug), the UI must NOT receive the
+    useless string ``'_type'``. The reason surfaced on the failed ``KBDocument``
+    must include the exception class name so operators can distinguish a
+    ``KeyError`` from, say, a ``ValueError`` or our own ``KBError``."""
+
+    from agenticx.studio.kb import runtime as rt
+
+    def _boom(**_kwargs):
+        raise KeyError("_type")
+
+    monkeypatch.setattr(rt, "_chunk_text", _boom)
+
+    runtime = _build_runtime(tmp_path)
+    doc_path = tmp_path / "explode.md"
+    doc_path.write_text("doesn't matter, chunker stub always throws")
+    doc = runtime.register_document(str(doc_path))
+
+    report = runtime.ingest_document(doc.id)
+
+    assert report.failed == 1
+    reason = report.reasons[0]
+    assert reason.startswith("KeyError: "), reason
+    assert "_type" in reason
+    # Traceback tail should point back at our stub for the ingest to be
+    # debuggable from just the job record, without digging into stderr logs.
+    assert "in _boom" in reason or "_boom" in reason
+
+    stored = runtime.get_document(doc.id)
+    assert stored is not None
+    assert stored.status == KBDocumentStatus.FAILED
+    assert stored.error == reason
+
+
+def test_open_or_reset_collection_recovers_from_keyerror_type(tmp_path: Path, monkeypatch):
+    """Regression test for the `'_type'` bug: chromadb may raise
+    ``KeyError('_type')`` in its own error-message f-string when the stored
+    collection config is missing the ``_type`` key (legacy vector_db folder
+    or a different chromadb build).  `_ChromaBackend` must swallow *that
+    specific* KeyError, drop the broken collection, and recreate it.  Any
+    other KeyError must still propagate."""
+
+    from agenticx.studio.kb import runtime as rt
+
+    runtime = _build_runtime(tmp_path)
+    backend = runtime._store()
+    # Force the underlying chromadb client to materialise so we can patch it.
+    backend._ensure()
+    assert backend._client is not None
+    assert backend._collection is not None
+    client = backend._client
+    original_goc = client.get_or_create_collection
+    original_delete = client.delete_collection
+
+    calls = {"n": 0}
+
+    def _flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise KeyError("_type")
+        return original_goc(*args, **kwargs)
+
+    deleted: list = []
+
+    def _track_delete(name):
+        deleted.append(name)
+        return original_delete(name)
+
+    monkeypatch.setattr(client, "get_or_create_collection", _flaky)
+    monkeypatch.setattr(client, "delete_collection", _track_delete)
+
+    col = backend._open_or_reset_collection()
+    assert col is not None
+    assert deleted == [backend._spec.collection]
+    assert calls["n"] == 2  # first attempt failed, recreated after delete.
+
+
+def test_open_or_reset_collection_does_not_swallow_unrelated_keyerror(tmp_path: Path, monkeypatch):
+    from agenticx.studio.kb import runtime as rt
+
+    runtime = _build_runtime(tmp_path)
+    backend = runtime._store()
+    backend._ensure()
+
+    def _unrelated(*_a, **_kw):
+        raise KeyError("something-else")
+
+    monkeypatch.setattr(backend._client, "get_or_create_collection", _unrelated)
+
+    with pytest.raises(KeyError) as ei:
+        backend._open_or_reset_collection()
+    assert "something-else" in str(ei.value)
+
+
 def test_ingest_strips_none_valued_metadata(tmp_path: Path, monkeypatch):
     """Chroma rejects metadata values that are None:
         "Expected metadata value to be a str, int, float or bool, got None".
