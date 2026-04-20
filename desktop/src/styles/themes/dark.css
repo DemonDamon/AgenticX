@@ -7,7 +7,7 @@
   --text-subtle: rgba(255, 255, 255, 0.6);
   --text-faint: rgba(255, 255, 255, 0.45);
 
-  --surface-base: transparent;
+  --surface-base: #050505;
   --surface-base-fallback: #050505;
   --surface-panel: rgba(15, 15, 15, 0.72);
   --surface-sidebar: rgba(20, 20, 20, 0.65);
@@ -65,3 +65,4 @@
   --ui-accent-divider: rgba(255, 255, 255, 0.10);
   --ui-accent-divider-hover: rgba(255, 255, 255, 0.22);
 }
+
