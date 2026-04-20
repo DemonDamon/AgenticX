@@ -2012,6 +2012,22 @@ function shouldOpenInExternalBrowser(targetUrl: string, appUrl: string): boolean
 }
 
 function createWindow(): void {
+  // Idempotent guard: `whenReady.then` awaits `startStudioServe()` /
+  // `waitServeReady()` for ~5s on cold start. During that await the macOS
+  // `activate` event can fire first (initial Dock/Finder activation) and
+  // hit our `app.on("activate")` handler, which sees `mainWindow === null`
+  // and calls `createWindow()` — spawning window A. When the whenReady
+  // awaits later resolve, the whenReady callback calls `createWindow()`
+  // again, which used to unconditionally `new BrowserWindow(...)` and
+  // overwrite the `mainWindow` pointer, leaving window A orphaned but
+  // still visible. That's the "two Machi windows on DMG launch" bug.
+  // Bail out early when a live main window already exists.
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
   const vibrancyEnabled = process.env.AGX_ENABLE_VIBRANCY === "1";
   const devUrl = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
   const appEntryUrl = app.isPackaged
