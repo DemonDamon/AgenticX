@@ -1311,6 +1311,60 @@ function getStudioToken(): string {
   return remoteConfig ? remoteConfig.token : apiToken;
 }
 
+// ── Studio readiness barrier ─────────────────────────────────────
+// Background:
+// On macOS `app.on("activate")` may fire while we are still inside
+// `await startStudioServe()` / `await waitServeReady()`. The window
+// then opens early, the renderer mounts, and the AvatarSidebar /
+// SessionHistoryPanel immediately invoke list-avatars / list-groups /
+// list-sessions / load-automation-tasks. Without a barrier those
+// fetches hit a not-yet-listening 127.0.0.1 port, get caught and
+// returned as `{ ok: false, ... empty list }`, and the renderer
+// silently treats them as "no data" — the user sees "暂无分身" until
+// some unrelated re-render triggers another fetch (issue #11).
+//
+// `studioReady` flips to true once the local serve has answered a
+// real request (or once a remote ping succeeded). Any IPC handler
+// that hits the studio API can `await waitForStudio(timeoutMs)`
+// before its first attempt so the cold-start window is hidden from
+// the renderer instead of producing a misleading empty list.
+let studioReady = false;
+const studioReadyWaiters: Array<() => void> = [];
+
+function markStudioReady(): void {
+  if (studioReady) return;
+  studioReady = true;
+  const queued = studioReadyWaiters.splice(0);
+  for (const cb of queued) {
+    try { cb(); } catch { /* noop */ }
+  }
+}
+
+function resetStudioReady(): void {
+  studioReady = false;
+}
+
+function waitForStudio(timeoutMs = 30000): Promise<boolean> {
+  if (studioReady) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const onReady = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const idx = studioReadyWaiters.indexOf(onReady);
+      if (idx >= 0) studioReadyWaiters.splice(idx, 1);
+      resolve(false);
+    }, timeoutMs);
+    studioReadyWaiters.push(onReady);
+  });
+}
+
 function emitSkillsChanged(): void {
   if (skillsChangedDebounceTimer) {
     clearTimeout(skillsChangedDebounceTimer);
@@ -1776,6 +1830,7 @@ function stopStudioServe(): void {
     serveProcess = null;
     serveStdoutBuffer = "";
     serveStderrBuffer = "";
+    resetStudioReady();
   }
 }
 
@@ -2183,8 +2238,11 @@ function registerEarlyIpc(): void {
   });
 
   // Session list: renderer may call this as soon as the window loads; register before agx serve / registerIpc().
+  // Wait for the studio backend to finish booting so the renderer doesn't get
+  // a misleading empty list during the cold-start window (issue #11).
   ipcMain.handle("list-sessions", async (_event, avatarId?: string) => {
     try {
+      await waitForStudio();
       const params = avatarId ? `?avatar_id=${encodeURIComponent(avatarId)}` : "";
       const resp = await fetch(`${getStudioUrl()}/api/sessions${params}`, {
         headers: { "x-agx-desktop-token": getStudioToken() },
@@ -2538,6 +2596,10 @@ function registerIpc(): void {
 
   ipcMain.handle("list-avatars", async () => {
     try {
+      // Wait for studio cold start before fetching, otherwise the renderer
+      // would receive `{ ok: false, avatars: [] }` and silently render
+      // "暂无分身" until something else triggers a refresh (issue #11).
+      await waitForStudio();
       const resp = await fetch(`${getStudioUrl()}/api/avatars`, {
         headers: { "x-agx-desktop-token": getStudioToken() },
       });
@@ -3103,6 +3165,7 @@ function registerIpc(): void {
 
   ipcMain.handle("list-groups", async () => {
     try {
+      await waitForStudio();
       const resp = await fetch(`${getStudioUrl()}/api/groups`, {
         headers: { "x-agx-desktop-token": getStudioToken() },
       });
@@ -4543,7 +4606,9 @@ if (!gotTheLock) {
 
       if (remoteConfig) {
         const ok = await pingRemoteServer(remoteConfig);
-        if (!ok) {
+        if (ok) {
+          markStudioReady();
+        } else {
           const { response } = await dialog.showMessageBox({
             type: "warning",
             title: "无法连接远程服务器",
@@ -4565,6 +4630,7 @@ if (!gotTheLock) {
               app.quit();
               return;
             }
+            markStudioReady();
           } else {
             app.quit();
             return;
@@ -4608,6 +4674,7 @@ if (!gotTheLock) {
 
         await startStudioServe();
         await waitServeReady();
+        markStudioReady();
         startFeishuProcess();
         void startWechatSidecar();
       }

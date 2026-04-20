@@ -91,6 +91,13 @@ export function AvatarSidebar() {
   const [avatarsCollapsed, setAvatarsCollapsed] = useState(false);
   const [groupsCollapsed, setGroupsCollapsed] = useState(false);
   const [automationCollapsed, setAutomationCollapsed] = useState(false);
+  // First-paint readiness for the avatars / groups lists. While these flags
+  // are still false (typical during the studio cold-start window after a
+  // restart), we render a loading hint instead of "暂无分身/群聊", which
+  // would otherwise be misleading because we simply haven't fetched yet
+  // (issue #11).
+  const [avatarsLoaded, setAvatarsLoaded] = useState(false);
+  const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [settingsPanel, setSettingsPanel] = useState<
     | { mode: "avatar"; avatarId: string }
     | { mode: "machi" }
@@ -101,36 +108,55 @@ export function AvatarSidebar() {
   const automationMenuRef = useRef<HTMLDivElement>(null);
   const openingRef = useRef(false);
 
-  const refreshAvatars = useCallback(async () => {
-    const result = await window.agenticxDesktop.listAvatars();
-    if (result.ok && Array.isArray(result.avatars)) {
-      setAvatars(
-        result.avatars.map((a) => ({
-          id: a.id,
-          name: a.name,
-          role: a.role ?? "",
-          avatarUrl: a.avatar_url ?? "",
-          pinned: Boolean(a.pinned),
-          createdBy: a.created_by ?? "manual",
-          systemPrompt: a.system_prompt ?? "",
-          toolsEnabled: a.tools_enabled ?? {},
-          skillsEnabled: a.skills_enabled && typeof a.skills_enabled === "object" ? { ...a.skills_enabled } : undefined,
-        }))
-      );
+  const refreshAvatars = useCallback(async (): Promise<boolean> => {
+    try {
+      const result = await window.agenticxDesktop.listAvatars();
+      if (result.ok && Array.isArray(result.avatars)) {
+        setAvatars(
+          result.avatars.map((a) => ({
+            id: a.id,
+            name: a.name,
+            role: a.role ?? "",
+            avatarUrl: a.avatar_url ?? "",
+            pinned: Boolean(a.pinned),
+            createdBy: a.created_by ?? "manual",
+            systemPrompt: a.system_prompt ?? "",
+            toolsEnabled: a.tools_enabled ?? {},
+            skillsEnabled:
+              a.skills_enabled && typeof a.skills_enabled === "object"
+                ? { ...a.skills_enabled }
+                : undefined,
+          }))
+        );
+        setAvatarsLoaded(true);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error("[AvatarSidebar] refreshAvatars error:", err);
+      return false;
     }
   }, [setAvatars]);
 
-  const refreshGroups = useCallback(async () => {
-    const result = await window.agenticxDesktop.listGroups();
-    if (result.ok && Array.isArray(result.groups)) {
-      setGroups(
-        result.groups.map((g) => ({
-          id: g.id,
-          name: g.name,
-          avatarIds: g.avatar_ids ?? [],
-          routing: g.routing ?? "intelligent",
-        }))
-      );
+  const refreshGroups = useCallback(async (): Promise<boolean> => {
+    try {
+      const result = await window.agenticxDesktop.listGroups();
+      if (result.ok && Array.isArray(result.groups)) {
+        setGroups(
+          result.groups.map((g) => ({
+            id: g.id,
+            name: g.name,
+            avatarIds: g.avatar_ids ?? [],
+            routing: g.routing ?? "intelligent",
+          }))
+        );
+        setGroupsLoaded(true);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error("[AvatarSidebar] refreshGroups error:", err);
+      return false;
     }
   }, [setGroups]);
 
@@ -150,9 +176,34 @@ export function AvatarSidebar() {
   }, []);
 
   useEffect(() => {
-    void refreshAvatars();
-    void refreshGroups();
+    let cancelled = false;
+    // The studio backend may still be cold-booting when the sidebar mounts.
+    // The IPC handlers in main.ts now wait up to 30s for the studio to be
+    // ready, but if that wait times out (or the user starts in a degraded
+    // state) we still want the UI to recover automatically rather than sit
+    // on the misleading "暂无分身/群聊" empty state. Retry with a small
+    // backoff for up to ~1 minute (issue #11).
+    const delays = [2000, 4000, 8000, 16000, 30000];
+    const runWithRetries = async (
+      label: "avatars" | "groups",
+      fn: () => Promise<boolean>
+    ) => {
+      for (let i = 0; i <= delays.length; i++) {
+        if (cancelled) return;
+        const ok = await fn();
+        if (ok || cancelled) return;
+        const delay = delays[i] ?? delays[delays.length - 1];
+        await new Promise((r) => setTimeout(r, delay));
+        if (cancelled) return;
+        console.warn(`[AvatarSidebar] ${label} refresh failed, retrying...`);
+      }
+    };
+    void runWithRetries("avatars", refreshAvatars);
+    void runWithRetries("groups", refreshGroups);
     void refreshAutomationTasks();
+    return () => {
+      cancelled = true;
+    };
   }, [refreshAvatars, refreshGroups, refreshAutomationTasks]);
 
   useEffect(() => {
@@ -586,7 +637,7 @@ export function AvatarSidebar() {
               onClick={() => setAvatarsCollapsed((v) => !v)}
             >
               {avatarsCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              <span>分身 ({avatars.length})</span>
+              <span>分身 ({avatarsLoaded ? avatars.length : "…"})</span>
             </button>
             <button
               className="rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
@@ -599,7 +650,14 @@ export function AvatarSidebar() {
             <div className="pb-1">
               {sortedAvatars.length === 0 && (
                 <div className="px-3 py-4 text-center text-xs text-text-faint">
-                  暂无分身，点击上方「新建」创建
+                  {avatarsLoaded ? (
+                    "暂无分身，点击上方「新建」创建"
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      正在加载分身…
+                    </span>
+                  )}
                 </div>
               )}
               {sortedAvatars.map((avatar) => {
@@ -664,7 +722,7 @@ export function AvatarSidebar() {
                 onClick={() => setGroupsCollapsed((v) => !v)}
               >
                 {groupsCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                <span>群聊 ({groups.length})</span>
+                <span>群聊 ({groupsLoaded ? groups.length : "…"})</span>
               </button>
               <button
                 className="rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
