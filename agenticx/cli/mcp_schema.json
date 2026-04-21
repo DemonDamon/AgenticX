@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticx.ai/schemas/mcp-config.json",
+  "title": "AgenticX MCP Config",
+  "description": "MCP server configuration in root-map or mcpServers wrapper format.",
+  "$defs": {
+    "serverConfig": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": [
+            "command"
+          ],
+          "not": {
+            "required": [
+              "url"
+            ]
+          }
+        },
+        {
+          "required": [
+            "url"
+          ],
+          "not": {
+            "required": [
+              "command"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "enabled_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "assign_to_agents": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "mcpServers"
+      ],
+      "properties": {
+        "mcpServers": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/serverConfig"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/serverConfig"
+      }
+    }
+  ]
+}
