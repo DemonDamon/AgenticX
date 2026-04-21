@@ -520,17 +520,36 @@ async def mcp_connect_async(
             return False, err
 
     client = MCPClientV2(cfg)
-    hub.clients.append(client)
 
     try:
-        tools = await hub.discover_all_tools()
+        own_tools = await client.discover_tools()
     except Exception as exc:
         console.print(f"[red]连接 {name} 失败:[/red] {exc}")
-        hub.clients.remove(client)
+        try:
+            await client.close()
+        except Exception:
+            pass
+        return False, str(exc)
+
+    hub.clients.append(client)
+    try:
+        await hub.discover_all_tools()
+    except Exception as exc:
+        console.print(f"[red]连接 {name} 失败:[/red] {exc}")
+        try:
+            hub.clients.remove(client)
+        except ValueError:
+            pass
+        try:
+            await client.close()
+        except Exception:
+            pass
         return False, str(exc)
 
     connected.add(name)
-    console.print(f"[green]已连接 {name}[/green]，发现 {len(hub._merged_tools)} 个工具：")
+    console.print(
+        f"[green]已连接 {name}[/green]，本服务提供 {len(own_tools)} 个工具，路由表共计 {len(hub._merged_tools)} 个："
+    )
     for tool_info in hub._merged_tools:
         route = hub._tool_routing.get(tool_info.name)
         if route and route.client is client:

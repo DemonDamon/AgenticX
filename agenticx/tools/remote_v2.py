@@ -179,6 +179,14 @@ class MCPClientV2:
         """
         if self._closed:
             raise RuntimeError("Client has been closed")
+
+        if stdio_client is None or ClientSession is None or StdioServerParameters is None:
+            raise RuntimeError(
+                "MCP SDK 未安装：当前 Python 环境下 `from mcp.client.stdio import stdio_client` 失败，"
+                "因此所有 MCP 子进程都无法启动。请在与 Studio 相同的解释器下执行 "
+                "`pip install 'mcp>=1.0.0,<2'`（或 `pip install -e \".[desktop-runtime]\"`），"
+                "然后重启 Studio。"
+            )
         
         logger.info(f"Creating persistent MCP session for server: {self.server_config.name}")
         
