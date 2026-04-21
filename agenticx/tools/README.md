@@ -90,6 +90,8 @@
 }
 ```
 
+> 桌面端 Machi（2026-04 起）支持自动扫描常见 AI 工具的 MCP 配置（Cursor、Trae、Claude、OpenClaw、Hermes、Codex 等），并可在设置页内置 Monaco 编辑器中直接修复 `mcp.json`，或从 ModelScope MCP 市场一键导入到 `~/.agenticx/mcp.json`。
+
 ### 2. 创建客户端并使用工具
 
 ```python
