@@ -702,11 +702,14 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               {item.pinned ? <span className="text-[10px] text-amber-300">pin</span> : null}
               {isRunning ? (
                 <span
-                  className="inline-flex items-center gap-1 rounded-sm px-1 py-px text-[9px] font-medium leading-tight text-cyan-300"
+                  className="inline-flex items-center justify-center rounded-sm px-0.5 py-px text-text-strong"
                   title="该会话正在运行"
+                  aria-label="运行中"
                 >
-                  <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border border-current border-t-transparent" />
-                  运行中
+                  <span
+                    className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border border-current border-t-transparent"
+                    aria-hidden
+                  />
                 </span>
               ) : null}
               {isInterrupted ? (
