@@ -116,6 +116,8 @@ pip install "agenticx[all]"         # 全部功能
 
 > **提示**: 核心包仅包含 ~27 个轻量依赖，安装速度极快。重量级依赖（如 torch、pandas 等）均已移至可选分组，按需安装即可。
 
+> **MCP 桌面升级（2026-04）**: Machi 设置页已支持 MCP 品牌自动扫描（Cursor / Trae / Claude / OpenClaw / Hermes / Codex）、内置 Monaco JSON 编辑器（含 schema 校验）以及 ModelScope MCP 市场一键安装。
+
 #### 方式二：从源码安装（开发）
 
 ```bash
