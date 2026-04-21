@@ -51,6 +51,10 @@ import { FeishuBadge } from "./FeishuBadge";
 import machiEmptyState from "../assets/machi-logo-transparent.png";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { createKbApi } from "./settings/knowledge/api";
+import {
+  clearPaneAwaitingFreshSession,
+  markPaneAwaitingFreshSession,
+} from "../utils/pane-fresh-session";
 
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
 const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
@@ -1666,6 +1670,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       try {
         const result = await window.agenticxDesktop.loadSessionMessages(currentSid);
         if (!active) return;
+        // Session may have changed while the load was in flight (e.g. user
+        // clicked "新对话" mid-poll). Never overwrite the new session's pane
+        // with messages from the previous session.
+        const latestSid = String(
+          useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? ""
+        ).trim();
+        if (latestSid !== currentSid) return;
         if (result.ok && Array.isArray(result.messages) && result.messages.length > 0) {
           if (result.messages.length <= lastPollCountRef.current) return;
           lastPollCountRef.current = result.messages.length;
@@ -1686,7 +1697,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             const key = `${role}::${content.slice(0, 300)}::${attSig}`;
             if (seen.has(key)) continue;
             seen.add(key);
-            deduped.push(mapLoadedSessionMessage(item as LoadedSessionMessage, `dlgpoll-${pane.sessionId}`, idx));
+            deduped.push(mapLoadedSessionMessage(item as LoadedSessionMessage, `dlgpoll-${currentSid}`, idx));
           }
           setPaneMessages(pane.id, deduped);
         }
@@ -3145,7 +3156,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           return;
         }
         requestSessionId = created.session_id;
+        // Defensive reset: a brand-new lazy session must never display any
+        // residual messages from the previously-running session (which may
+        // have been racily restored by poll/sync effects while sessionId
+        // was transitioning from "" to the new id).
+        useAppStore.getState().setPaneMessages(pane.id, []);
+        lastPollCountRef.current = 0;
+        pollSessionSidRef.current = requestSessionId;
         setPaneSessionId(pane.id, requestSessionId);
+        clearPaneAwaitingFreshSession(pane.id);
         if (created.inherited) {
           setPaneContextInherited(pane.id, true);
         }
@@ -3186,6 +3205,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         const created = await window.agenticxDesktop.createSession({ avatar_id: avatarId });
         if (created.ok && created.session_id) {
           requestSessionId = created.session_id;
+          // Fresh isolated session must start with a clean pane so we do not
+          // keep displaying the shared/stale messages from the colliding peer.
+          useAppStore.getState().setPaneMessages(pane.id, []);
+          lastPollCountRef.current = 0;
+          pollSessionSidRef.current = requestSessionId;
           setPaneSessionId(pane.id, requestSessionId);
           addPaneMessage(pane.id, "tool", "⚠️ 检测到会话冲突，已自动切换到独立会话。", "meta");
         }
@@ -4003,6 +4027,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       });
       if (result.ok && result.session_id) {
         setPaneSessionId(pane.id, result.session_id);
+        clearPaneAwaitingFreshSession(pane.id);
         if (result.inherited) {
           setPaneContextInherited(pane.id, true);
         }
@@ -4014,6 +4039,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     } catch (err) {
       console.error("[ChatPane] createSession threw:", err);
     }
+    clearPaneAwaitingFreshSession(pane.id);
     if (prevSessionId) {
       setPaneSessionId(pane.id, prevSessionId);
       setPaneContextInherited(pane.id, false);
@@ -4025,6 +4051,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     const prevSessionId = (pane.sessionId || "").trim();
     clearPaneMessages(pane.id);
     setPaneContextInherited(pane.id, false);
+    // Mark this pane as explicitly awaiting a brand-new session, so
+    // WorkspacePanel's auto-restore effect will not snap it back to the
+    // previously-running session (which would trap new messages in the
+    // running session's queue).
+    markPaneAwaitingFreshSession(pane.id);
     if (isGroupPane || isAutomationTaskPane) {
       setPaneSessionId(pane.id, "");
       void initSession(inherit, prevSessionId || undefined);

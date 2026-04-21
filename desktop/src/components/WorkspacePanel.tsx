@@ -13,6 +13,7 @@ import { createResizeRafScheduler } from "../utils/resize-raf";
 import { ContextMenu } from "./ContextMenu";
 import { TerminalEmbed } from "./TerminalEmbed";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
+import { isPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
 
 type TaskspaceFile = {
   name: string;
@@ -223,6 +224,11 @@ export function WorkspacePanel({
 
   useEffect(() => {
     if (sessionId) return;
+    // Respect explicit "new topic" intent: user just cleared the pane to get
+    // a fresh lazy session; do NOT auto-restore the previous (possibly
+    // still-running) session, otherwise the next send would be queued into
+    // the old task instead of starting a truly new conversation.
+    if (isPaneAwaitingFreshSession(paneId)) return;
     let cancelled = false;
     void (async () => {
       const listed = await window.agenticxDesktop
@@ -240,6 +246,7 @@ export function WorkspacePanel({
       const recentSid = pickMostRecentSessionId(listed.sessions, paneAvatarId);
       const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
       if (!preferredSid || cancelled) return;
+      if (isPaneAwaitingFreshSession(paneId)) return;
       const latestPane = useAppStore.getState().panes.find((item) => item.id === paneId);
       const latestSid = String(latestPane?.sessionId ?? "").trim();
       if (!latestSid) {
