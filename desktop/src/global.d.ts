@@ -116,6 +116,9 @@ type AvatarItem = {
   system_prompt?: string;
   tools_enabled?: Record<string, boolean>;
   skills_enabled?: Record<string, boolean> | null;
+  /** Default provider/model the avatar falls back to when a session has none. */
+  default_provider?: string;
+  default_model?: string;
 };
 
 type ToolStatusItem = {
@@ -186,6 +189,9 @@ type McpServerItem = {
   connection_state?: "healthy" | "error" | "disconnected";
   tool_count?: number;
   error_detail?: string;
+  op_phase?: string;
+  op_message?: string;
+  op_updated_at?: number;
 };
 type McpStatusResult = {
   ok: boolean;
@@ -372,6 +378,8 @@ declare global {
         created_by?: string;
         tools_enabled?: Record<string, boolean>;
         skills_enabled?: Record<string, boolean> | null;
+        default_provider?: string;
+        default_model?: string;
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       updateAvatar: (payload: {
         id: string;
@@ -382,6 +390,8 @@ declare global {
         system_prompt?: string;
         tools_enabled?: Record<string, boolean>;
         skills_enabled?: Record<string, boolean> | null;
+        default_provider?: string;
+        default_model?: string;
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       deleteAvatar: (id: string) => Promise<{ ok: boolean; error?: string }>;
       getToolsStatus: () => Promise<{ ok: boolean; tools: ToolStatusItem[]; error?: string }>;
@@ -401,7 +411,7 @@ declare global {
       installTool: (payload: { requestId: string; toolId: string }) => Promise<{ ok: boolean; error?: string }>;
       onToolInstallProgress: (cb: (payload: ToolInstallProgress) => void) => () => void;
 
-      listSessions: (avatarId?: string) => Promise<{ ok: boolean; sessions: Array<{ session_id: string; avatar_id: string | null; avatar_name?: string | null; session_name: string | null; updated_at: number; created_at?: number; pinned?: boolean; archived?: boolean; execution_state?: "idle" | "running" | "interrupted" }> }>;
+      listSessions: (avatarId?: string) => Promise<{ ok: boolean; sessions: Array<{ session_id: string; avatar_id: string | null; avatar_name?: string | null; session_name: string | null; updated_at: number; created_at?: number; pinned?: boolean; archived?: boolean; execution_state?: "idle" | "running" | "interrupted"; provider?: string; model?: string }> }>;
       interruptSession: (sessionId: string) => Promise<{ ok: boolean; session_id?: string; error?: string }>;
       loadRuntimeConfig: () => Promise<{ ok: boolean; max_tool_rounds: number; auto_resume_on_exhaustion: boolean; max_auto_resumes: number; error?: string }>;
       saveRuntimeConfig: (payload: { max_tool_rounds?: number; auto_resume_on_exhaustion?: boolean; max_auto_resumes?: number }) => Promise<{ ok: boolean; error?: string }>;
@@ -415,6 +425,28 @@ declare global {
       deleteSession: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
       deleteSessionsBatch: (sessionIds: string[]) => Promise<{ ok: boolean; deleted?: string[]; failed?: string[]; error?: string }>;
       pinSession: (payload: { sessionId: string; pinned: boolean }) => Promise<{ ok: boolean; pinned?: boolean; error?: string }>;
+      setSessionModel: (payload: { sessionId: string; provider: string; model: string }) => Promise<{ ok: boolean; provider?: string; model?: string; error?: string }>;
+      loadLayout: () => Promise<{
+        ok: boolean;
+        panes: Array<{
+          id: string;
+          avatarId: string | null;
+          sessionId: string;
+          modelProvider: string;
+          modelName: string;
+        }>;
+        activePaneId: string;
+      }>;
+      saveLayout: (payload: {
+        panes?: Array<{
+          id: string;
+          avatarId: string | null;
+          sessionId: string;
+          modelProvider: string;
+          modelName: string;
+        }>;
+        activePaneId?: string;
+      }) => Promise<{ ok: boolean; error?: string }>;
       forkSession: (payload: { sessionId: string }) => Promise<{ ok: boolean; session_id?: string; session_name?: string; error?: string }>;
       archiveSessions: (payload: { sessionId: string; avatarId?: string | null }) => Promise<{ ok: boolean; archived_count?: number; error?: string }>;
       listTaskspaces: (sessionId: string) => Promise<{ ok: boolean; workspaces: TaskspaceItem[]; error?: string }>;

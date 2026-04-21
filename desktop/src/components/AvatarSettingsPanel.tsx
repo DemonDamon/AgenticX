@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Save, RotateCcw, X } from "lucide-react";
 import type { Avatar } from "../store";
 import { avatarBgClass } from "../utils/avatar-color";
+import { DefaultModelSelect } from "./DefaultModelSelect";
 
 function avatarInitials(name: string): string {
   const t = name.trim();
@@ -83,6 +84,8 @@ export function AvatarSettingsPanel(props: Props) {
   const [systemPrompt, setSystemPrompt] = useState(avatar?.systemPrompt ?? "");
   const [avatarUrlDraft, setAvatarUrlDraft] = useState(avatar?.avatarUrl ?? "");
   const [avatarImageHint, setAvatarImageHint] = useState("");
+  const [defaultProvider, setDefaultProvider] = useState(avatar?.defaultProvider ?? "");
+  const [defaultModel, setDefaultModel] = useState(avatar?.defaultModel ?? "");
 
   // Tools
   const [tools, setTools] = useState<ToolItem[]>(DEFAULT_TOOLS);
@@ -138,6 +141,8 @@ export function AvatarSettingsPanel(props: Props) {
       setAvatarUrlDraft(avatar.avatarUrl ?? "");
       setAvatarImageHint("");
       setToolsEnabled({ ...(avatar.toolsEnabled ?? {}) });
+      setDefaultProvider(avatar.defaultProvider ?? "");
+      setDefaultModel(avatar.defaultModel ?? "");
       const raw = avatar.skillsEnabled;
       setSkillsEnabledDraft(
         raw && typeof raw === "object"
@@ -220,6 +225,8 @@ export function AvatarSettingsPanel(props: Props) {
         role: role.trim(),
         system_prompt: systemPrompt.trim(),
         avatar_url: avatarUrlDraft.trim(),
+        default_provider: defaultProvider.trim(),
+        default_model: defaultModel.trim(),
       });
       if (!res?.ok) {
         setMessage(`保存失败: ${res?.error ?? "未知错误"}`);
@@ -445,6 +452,18 @@ export function AvatarSettingsPanel(props: Props) {
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   placeholder="例如：你是资深前端工程师，先给结论，再给步骤；代码优先给可直接运行版本。"
+                />
+              </label>
+              <label className="block text-sm text-text-muted">
+                默认模型
+                <span className="ml-1 text-xs font-normal text-text-faint">（新建会话或未显式选择模型时使用）</span>
+                <DefaultModelSelect
+                  provider={defaultProvider}
+                  model={defaultModel}
+                  onChange={(p, m) => {
+                    setDefaultProvider(p);
+                    setDefaultModel(m);
+                  }}
                 />
               </label>
               <div className="border-t border-border pt-4">
