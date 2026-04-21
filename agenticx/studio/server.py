@@ -113,6 +113,54 @@ def _mcp_tool_counts_for_session(studio_session: Any) -> dict[str, int]:
     return counts
 
 
+def _get_mcp_server_ops(studio_session: Any) -> dict[str, dict[str, Any]]:
+    """Get mutable per-server operation states for one studio session."""
+    raw = getattr(studio_session, "mcp_server_ops", None)
+    if isinstance(raw, dict):
+        return raw
+    setattr(studio_session, "mcp_server_ops", {})
+    return getattr(studio_session, "mcp_server_ops")
+
+
+def _set_mcp_server_op(
+    studio_session: Any,
+    name: str,
+    *,
+    phase: str,
+    message: str,
+    error: str = "",
+) -> None:
+    """Set latest concise operation status for one MCP server card."""
+    key = str(name or "").strip()
+    if not key:
+        return
+    ops = _get_mcp_server_ops(studio_session)
+    ops[key] = {
+        "phase": str(phase or "idle"),
+        "message": str(message or "").strip(),
+        "error": str(error or "").strip(),
+        "updated_at": float(time.time()),
+    }
+
+
+def _get_mcp_connect_tasks(studio_session: Any) -> dict[str, asyncio.Task[Any]]:
+    """Get in-flight MCP connect tasks for one studio session."""
+    raw = getattr(studio_session, "mcp_connect_tasks", None)
+    if isinstance(raw, dict):
+        return raw
+    setattr(studio_session, "mcp_connect_tasks", {})
+    return getattr(studio_session, "mcp_connect_tasks")
+
+
+def _get_mcp_connect_cancelled(studio_session: Any) -> set[str]:
+    """Get server names whose in-flight connect has been cancelled by user."""
+    raw = getattr(studio_session, "mcp_connect_cancelled", None)
+    if isinstance(raw, set):
+        return raw
+    setattr(studio_session, "mcp_connect_cancelled", set())
+    return getattr(studio_session, "mcp_connect_cancelled")
+
+
 def _runtime_event_to_sse_lines(event: RuntimeEvent) -> list[str]:
     """Serialize RuntimeEvent to SSE data line(s); emit token_usage after final when usage present."""
     event_data = dict(event.data)
@@ -2183,6 +2231,7 @@ def create_studio_app() -> FastAPI:
             else set(sess.connected_servers or [])
         )
         tool_counts = _mcp_tool_counts_for_session(sess)
+        server_ops = _get_mcp_server_ops(sess)
         servers = []
         for name, cfg in sorted(configs.items()):
             in_connected = name in connected
@@ -2204,6 +2253,9 @@ def create_studio_app() -> FastAPI:
                     "connection_state": conn_state,
                     "tool_count": n_tools,
                     "error_detail": err_detail,
+                    "op_phase": str((server_ops.get(name, {}) or {}).get("phase", "idle") or "idle"),
+                    "op_message": str((server_ops.get(name, {}) or {}).get("message", "") or ""),
+                    "op_updated_at": (server_ops.get(name, {}) or {}).get("updated_at"),
                 }
             )
         healthy_n = sum(1 for item in servers if item.get("connection_state") == "healthy")
@@ -2251,18 +2303,69 @@ def create_studio_app() -> FastAPI:
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
         sess = managed.studio_session
+        cfg = (sess.mcp_configs or {}).get(name) if isinstance(sess.mcp_configs, dict) else None
+        cmd = str(getattr(cfg, "command", "") or "").strip().lower()
+        if cmd == "docker":
+            preflight_msg = "准备连接：检查 Docker 服务可用性…"
+        elif cmd in {"uvx", "npx"}:
+            preflight_msg = f"准备连接：拉起 {cmd} 运行时…"
+        elif cmd:
+            preflight_msg = f"准备连接：启动 {cmd}…"
+        else:
+            preflight_msg = "准备连接：初始化 MCP 客户端…"
+        _set_mcp_server_op(sess, name, phase="preparing", message=preflight_msg)
         if sess.mcp_hub is None:
             sess.mcp_hub = MCPHub(clients=[], auto_mode=False)
-        ok, detail = await mcp_connect_async(sess.mcp_hub, sess.mcp_configs, sess.connected_servers, name)
+        _set_mcp_server_op(sess, name, phase="connecting", message="连接中：握手并发现工具…")
+        cancelled_set = _get_mcp_connect_cancelled(sess)
+        cancelled_set.discard(name)
+        connect_tasks = _get_mcp_connect_tasks(sess)
+        task = connect_tasks.get(name)
+        if task is None or task.done():
+            task = asyncio.create_task(
+                mcp_connect_async(sess.mcp_hub, sess.mcp_configs, sess.connected_servers, name)
+            )
+            connect_tasks[name] = task
+        try:
+            ok, detail = await task
+        except asyncio.CancelledError:
+            ok, detail = False, "连接已取消"
+        finally:
+            if connect_tasks.get(name) is task:
+                connect_tasks.pop(name, None)
+        if name in cancelled_set:
+            cancelled_set.discard(name)
+            sess.connected_servers.discard(name)
+            _set_mcp_server_op(sess, name, phase="idle", message="未连接")
+            return {"ok": False, "error": "连接已取消", "name": name}
         if not ok:
+            detail_text = detail.strip() or f"failed to connect MCP server: {name}"
+            if "已取消" in detail_text:
+                sess.connected_servers.discard(name)
+                _set_mcp_server_op(sess, name, phase="idle", message="未连接")
+                return {"ok": False, "error": detail_text, "name": name}
+            _set_mcp_server_op(
+                sess,
+                name,
+                phase="failed",
+                message=f"连接失败：{detail_text}",
+                error=detail_text,
+            )
             raise HTTPException(
                 status_code=400,
-                detail=(detail.strip() or f"failed to connect MCP server: {name}"),
+                detail=detail_text,
             )
         try:
             append_mcp_auto_connect_name(name)
         except Exception as exc:
             logger.warning("MCP auto_connect persist failed: %s", exc)
+        n_tools = int(_mcp_tool_counts_for_session(sess).get(name, 0))
+        _set_mcp_server_op(
+            sess,
+            name,
+            phase="healthy",
+            message=(f"已连接：{n_tools} 个工具" if n_tools > 0 else "已连接：工具注册同步中…"),
+        )
         return {"ok": True, "name": name}
 
     @app.get("/api/mcp/settings")
@@ -2545,20 +2648,43 @@ def create_studio_app() -> FastAPI:
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
         sess = managed.studio_session
+        connect_tasks = _get_mcp_connect_tasks(sess)
+        in_flight_connect = connect_tasks.get(name)
+        if in_flight_connect is not None and not in_flight_connect.done():
+            _get_mcp_connect_cancelled(sess).add(name)
+            in_flight_connect.cancel()
+            sess.connected_servers.discard(name)
+            try:
+                remove_mcp_auto_connect_name(name)
+            except Exception as exc:
+                logger.warning("MCP auto_connect remove failed: %s", exc)
+            _set_mcp_server_op(sess, name, phase="idle", message="未连接")
+            return {"ok": True, "name": name}
+        _set_mcp_server_op(sess, name, phase="disconnecting", message="断开中：正在关闭 MCP 客户端…")
         if sess.mcp_hub is None:
             sess.connected_servers.discard(name)
             try:
                 remove_mcp_auto_connect_name(name)
             except Exception as exc:
                 logger.warning("MCP auto_connect remove failed: %s", exc)
+            _set_mcp_server_op(sess, name, phase="idle", message="未连接")
             return {"ok": True, "name": name}
         okd, err = await mcp_disconnect_async(sess.mcp_hub, sess.mcp_configs, sess.connected_servers, name)
         if not okd:
-            raise HTTPException(status_code=400, detail=err.strip() or f"disconnect failed: {name}")
+            err_text = err.strip() or f"disconnect failed: {name}"
+            _set_mcp_server_op(
+                sess,
+                name,
+                phase="failed",
+                message=f"断开失败：{err_text}",
+                error=err_text,
+            )
+            raise HTTPException(status_code=400, detail=err_text)
         try:
             remove_mcp_auto_connect_name(name)
         except Exception as exc:
             logger.warning("MCP auto_connect remove failed: %s", exc)
+        _set_mcp_server_op(sess, name, phase="idle", message="未连接")
         return {"ok": True, "name": name}
 
     @app.post("/api/test-email")
@@ -3055,6 +3181,25 @@ def create_studio_app() -> FastAPI:
         if not ok:
             raise HTTPException(status_code=404, detail="session not found")
         return {"ok": True}
+
+    @app.post("/api/sessions/{session_id}/model")
+    async def set_session_model(
+        session_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Persist the currently-selected provider/model for a session.
+
+        Desktop calls this when the user picks a new model in the chat pane,
+        so the selection survives cold restart (list_sessions() re-reads it).
+        """
+        _check_token(x_agx_desktop_token)
+        provider = str(payload.get("provider", "") or "").strip()
+        model = str(payload.get("model", "") or "").strip()
+        ok = manager.set_session_model(session_id, provider=provider, model=model)
+        if not ok:
+            raise HTTPException(status_code=404, detail="session not found")
+        return {"ok": True, "session_id": session_id, "provider": provider, "model": model}
 
     @app.post("/api/sessions/{session_id}/pin")
     async def pin_session(
