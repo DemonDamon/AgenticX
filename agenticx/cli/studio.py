@@ -69,6 +69,9 @@ class StudioSession:
     mcp_hub: Optional[object] = None  # MCPHub instance (lazy init)
     mcp_configs: Dict[str, object] = field(default_factory=dict)  # name -> MCPServerConfig
     connected_servers: set = field(default_factory=set)
+    # Per-server latest operation state for Desktop MCP cards.
+    # Example: {"github": {"phase": "connecting", "message": "连接中…", "updated_at": 1710000000.0}}
+    mcp_server_ops: Dict[str, Dict[str, object]] = field(default_factory=dict)
     todo_manager: TodoManager = field(default_factory=TodoManager)
     scratchpad: Dict[str, str] = field(default_factory=dict)
     file_state_tracker: FileStateTracker = field(default_factory=FileStateTracker)
