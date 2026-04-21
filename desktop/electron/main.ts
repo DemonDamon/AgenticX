@@ -3797,6 +3797,154 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("mcp-discover", async () => {
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/mcp/discover`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("mcp-get-raw", async (_event, payload?: { path?: string }) => {
+    const path = String(payload?.path || "").trim();
+    const q = path ? `?path=${encodeURIComponent(path)}` : "";
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/mcp/raw${q}`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("mcp-put-raw", async (_event, payload: { path: string; text: string }) => {
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/mcp/raw`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "x-agx-desktop-token": getStudioToken(),
+        },
+        body: JSON.stringify({
+          path: String(payload?.path || "").trim(),
+          text: String(payload?.text || ""),
+        }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle(
+    "mcp-marketplace-list",
+    async (
+      _event,
+      payload?: {
+        category?: string;
+        search?: string;
+        page?: number;
+        pageSize?: number;
+        isHosted?: boolean;
+        isVerified?: boolean;
+      },
+    ) => {
+      const qs = new URLSearchParams();
+      if (payload?.category) qs.set("category", String(payload.category));
+      if (payload?.search) qs.set("search", String(payload.search));
+      if (payload?.page != null) qs.set("page", String(payload.page));
+      if (payload?.pageSize != null) qs.set("page_size", String(payload.pageSize));
+      if (payload?.isHosted != null) qs.set("is_hosted", String(payload.isHosted));
+      if (payload?.isVerified != null) qs.set("is_verified", String(payload.isVerified));
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      try {
+        const resp = await fetch(`${getStudioUrl()}/api/mcp/marketplace${suffix}`, {
+          headers: { "x-agx-desktop-token": getStudioToken() },
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+        }
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle("mcp-marketplace-detail", async (_event, payload: { serverId: string }) => {
+    const sid = String(payload?.serverId || "").trim();
+    if (!sid) return { ok: false, error: "serverId is required" };
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/mcp/marketplace/${encodeURIComponent(sid)}`, {
+        headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle(
+    "mcp-marketplace-install",
+    async (_event, payload: { serverId: string; env?: Record<string, string> }) => {
+      const sid = String(payload?.serverId || "").trim();
+      if (!sid) return { ok: false, error: "serverId is required" };
+      try {
+        const resp = await fetch(`${getStudioUrl()}/api/mcp/marketplace/install`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-agx-desktop-token": getStudioToken(),
+          },
+          body: JSON.stringify({
+            server_id: sid,
+            env: payload?.env ?? {},
+          }),
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+        }
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle("shell-open-path", async (_event, path: string) => {
+    const target = String(path || "").trim();
+    if (!target) return { ok: false, error: "path is required" };
+    try {
+      const err = await shell.openPath(target);
+      if (err) return { ok: false, error: err };
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+
   ipcMain.handle("get-skill-settings", async () => {
     try {
       const resp = await fetch(`${getStudioUrl()}/api/skills/settings`, {
