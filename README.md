@@ -119,6 +119,8 @@ pip install "agenticx[all]"         # Everything
 
 > **Browser automation**: To run [browser-use](https://github.com/browser-use/browser-use) as an MCP server from AgenticX (`mcp_connect` / `mcp_call`), see [examples/browser-use-mcp.md](examples/browser-use-mcp.md).
 
+> **Desktop MCP upgrades (2026-04)**: Machi Settings now supports MCP brand auto-discovery (Cursor / Trae / Claude / OpenClaw / Hermes / Codex), built-in Monaco JSON editor with schema validation, and one-click install from ModelScope MCP marketplace.
+
 #### Option 2: Install from Source (Development)
 
 ```bash
