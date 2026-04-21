@@ -324,6 +324,22 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   getMcpSettings: async () => ipcRenderer.invoke("get-mcp-settings"),
   putMcpSettings: async (payload: { extraSearchPaths: string[] }) =>
     ipcRenderer.invoke("put-mcp-settings", payload),
+  mcpDiscover: async () => ipcRenderer.invoke("mcp-discover"),
+  mcpGetRaw: async (payload?: { path?: string }) => ipcRenderer.invoke("mcp-get-raw", payload),
+  mcpPutRaw: async (payload: { path: string; text: string }) => ipcRenderer.invoke("mcp-put-raw", payload),
+  mcpMarketplaceList: async (payload?: {
+    category?: string;
+    search?: string;
+    page?: number;
+    pageSize?: number;
+    isHosted?: boolean;
+    isVerified?: boolean;
+  }) => ipcRenderer.invoke("mcp-marketplace-list", payload),
+  mcpMarketplaceDetail: async (payload: { serverId: string }) =>
+    ipcRenderer.invoke("mcp-marketplace-detail", payload),
+  mcpMarketplaceInstall: async (payload: { serverId: string; env?: Record<string, string> }) =>
+    ipcRenderer.invoke("mcp-marketplace-install", payload),
+  shellOpenPath: async (path: string) => ipcRenderer.invoke("shell-open-path", path),
   connectMcp: async (payload: { sessionId: string; name: string }) =>
     ipcRenderer.invoke("connect-mcp", payload),
   disconnectMcp: async (payload: { sessionId: string; name: string }) =>

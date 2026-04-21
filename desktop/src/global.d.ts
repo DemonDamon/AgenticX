@@ -544,6 +544,56 @@ declare global {
         extra_search_paths?: string[];
         error?: string;
       }>;
+      mcpDiscover: () => Promise<{
+        ok: boolean;
+        count?: number;
+        hits?: Array<Record<string, unknown>>;
+        error?: string;
+      }>;
+      mcpGetRaw: (payload?: { path?: string }) => Promise<{
+        ok: boolean;
+        path?: string;
+        format?: string;
+        text?: string;
+        parse_ok?: boolean;
+        parse_error?: string;
+        line?: number | null;
+        column?: number | null;
+        error?: string;
+      }>;
+      mcpPutRaw: (payload: { path: string; text: string }) => Promise<{
+        ok: boolean;
+        path?: string;
+        format?: string;
+        error?: string;
+      }>;
+      mcpMarketplaceList: (payload?: {
+        category?: string;
+        search?: string;
+        page?: number;
+        pageSize?: number;
+        isHosted?: boolean;
+        isVerified?: boolean;
+      }) => Promise<{
+        ok: boolean;
+        page?: number;
+        page_size?: number;
+        total_count?: number;
+        items?: Array<Record<string, unknown>>;
+        error?: string;
+      }>;
+      mcpMarketplaceDetail: (payload: { serverId: string }) => Promise<{
+        ok: boolean;
+        item?: Record<string, unknown>;
+        error?: string;
+      }>;
+      mcpMarketplaceInstall: (payload: { serverId: string; env?: Record<string, string> }) => Promise<{
+        ok: boolean;
+        installed?: string[];
+        updated?: string[];
+        error?: string;
+      }>;
+      shellOpenPath: (path: string) => Promise<{ ok: boolean; error?: string }>;
       connectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       disconnectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       saveUserMode: (mode: "pro" | "lite") => Promise<{ ok: boolean }>;
