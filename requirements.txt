@@ -13,6 +13,8 @@ loguru>=0.7.0
 rich>=13.0.0
 click>=8.0.0
 PyYAML>=6.0
+json5>=0.9.25
+tomli>=2.0; python_version<'3.11'
 jinja2>=3.0.0
 python-dotenv>=1.0.0
 
@@ -35,6 +37,11 @@ litellm>=1.50.0
 tiktoken>=0.7.0
 tokenizers>=0.19.0
 huggingface-hub>=0.24.0
+
+# MCP 协议（Studio / CLI / Desktop 强依赖：缺失时 MCPClientV2 的 stdio_client
+# 会静默退化为 None，所有 MCP 连接都会在启动子进程时抛
+# "TypeError: 'NoneType' object is not callable"。）
+mcp>=1.0.0,<2
 
 # 核心工具库
 docstring-parser>=0.11,<0.16
