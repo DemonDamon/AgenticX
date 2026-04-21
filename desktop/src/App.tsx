@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AvatarSidebar } from "./components/AvatarSidebar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { OnboardingView } from "./components/OnboardingView";
 import { LiteChatView } from "./components/LiteChatView";
 import { PaneManager } from "./components/PaneManager";
 import { SidebarResizer } from "./components/SidebarResizer";
@@ -223,7 +222,6 @@ export function App() {
   const confirm = useAppStore((s) => s.confirm);
   const settings = useAppStore((s) => s.settings);
   const userMode = useAppStore((s) => s.userMode);
-  const onboardingCompleted = useAppStore((s) => s.onboardingCompleted);
   const setApiBase = useAppStore((s) => s.setApiBase);
   const setApiToken = useAppStore((s) => s.setApiToken);
   const setSessionId = useAppStore((s) => s.setSessionId);
@@ -398,17 +396,6 @@ export function App() {
     return `question:${question}`;
   };
 
-  const applyUserMode = async (mode: "pro" | "lite") => {
-    setUserMode(mode);
-    const nextStrategy = mode === "lite" ? "manual" : "semi-auto";
-    setConfirmStrategy(nextStrategy);
-    if (mode === "lite") setPlanMode(false);
-    setCommandPaletteOpen(false);
-    setKeybindingsPanelOpen(false);
-    await window.agenticxDesktop.saveUserMode(mode);
-    await window.agenticxDesktop.saveConfirmStrategy(nextStrategy);
-  };
-
   useEffect(() => {
     if (sessionInitDoneRef.current) return;
     sessionInitDoneRef.current = true;
@@ -433,18 +420,9 @@ export function App() {
             // 写回失败不阻塞启动，下次运行仍会在这里再次纠正。
           }
         }
-        // 同步跳过首次启动的 Pro/Lite 选择弹窗：如果之前没完成 onboarding，
-        // 这里直接帮用户完成，后续 UI 与老用户保持一致。
-        if (!cfgEarly.onboardingCompleted) {
-          setOnboardingCompleted(true);
-          try {
-            await window.agenticxDesktop.saveOnboardingCompleted(true);
-          } catch {
-            // 同上，写回失败不影响当前会话。
-          }
-        } else {
-          setOnboardingCompleted(true);
-        }
+        // Pro/Lite 欢迎页已移除；主进程 load-config 始终返回 onboardingCompleted: true，
+        // 并与旧配置中 onboarding_completed: false 做一次写回迁移。
+        setOnboardingCompleted(true);
         const loadedConfirmStrategy = cfgEarly.confirmStrategy ?? "semi-auto";
         setConfirmStrategy(loadedConfirmStrategy);
         const entries = toProviderEntries(cfgEarly.providers ?? {});
@@ -1257,13 +1235,6 @@ export function App() {
     setKeybindingsPanelOpen,
   ]);
 
-  const handleSelectMode = async (mode: "pro" | "lite") => {
-    await applyUserMode(mode);
-    setOnboardingCompleted(true);
-    await window.agenticxDesktop.saveOnboardingCompleted(true);
-    if (mode === "pro") openSettings();
-  };
-
   const onOpenConfirm = async (
     requestId: string,
     question: string,
@@ -1665,7 +1636,7 @@ export function App() {
   const feishuBindingSidRef = useRef<string>("");
   const feishuBindingHydratedRef = useRef(false);
   useEffect(() => {
-    if (!apiBase || !onboardingCompleted) return;
+    if (!apiBase) return;
     let cancelled = false;
 
     const check = async () => {
@@ -1762,20 +1733,18 @@ export function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [apiBase, onboardingCompleted, addPane, setActivePaneId, setActiveAvatarId, setPaneMessages, setPaneSessionId]);
+  }, [apiBase, addPane, setActivePaneId, setActiveAvatarId, setPaneMessages, setPaneSessionId]);
 
   return (
     <div
       className={`agx-app ${
-        sidebarCollapsed || userMode !== "pro" || !onboardingCompleted || !apiBase ? "sidebar-collapsed" : ""
+        sidebarCollapsed || userMode !== "pro" || !apiBase ? "sidebar-collapsed" : ""
       } ${windowResizing ? "window-resizing" : ""} ${startupOptimizing ? "startup-optimizing" : ""}`}
     >
       {!configLoaded ? (
         <div className="flex h-full min-h-0 w-full items-center justify-center text-sm text-text-faint">
           正在加载配置…
         </div>
-      ) : !onboardingCompleted ? (
-        <OnboardingView onSelectMode={(mode) => void handleSelectMode(mode)} />
       ) : apiBase ? (
         <>
           {userMode === "pro" && !sidebarCollapsed ? (
