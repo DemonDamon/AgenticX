@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import asyncio
 import hashlib
+from collections import deque
 import inspect
 import logging
 import os
@@ -716,8 +717,8 @@ class AgentRuntime:
         confirm_gate: ConfirmGate,
         *,
         max_tool_rounds: int = MAX_TOOL_ROUNDS,
-        loop_warning_threshold: int = 4,
-        loop_critical_threshold: int = 8,
+        loop_warning_threshold: int = 6,
+        loop_critical_threshold: int = 12,
         hooks: Optional[HookRegistry] = None,
         team_manager: Optional[Any] = None,
         mid_turn_persist: Optional[Callable[[], None]] = None,
@@ -731,6 +732,12 @@ class AgentRuntime:
             warning_threshold=loop_warning_threshold,
             critical_threshold=loop_critical_threshold,
         )
+        self._recent_exploratory_fps: deque[str] = deque(maxlen=10)
+        # Exploratory tools get a bounded "schema discovery" budget:
+        # the first N consecutive unique errors count as progress, after
+        # which the detector goes back to treating errors as no-progress.
+        self._exploratory_error_streak: int = 0
+        self._exploratory_error_budget: int = 3
         self.team_manager = team_manager
         self.token_budget = TokenBudgetGuard()
         self._mid_turn_persist = mid_turn_persist
@@ -814,6 +821,10 @@ class AgentRuntime:
         self.token_budget.reset_turn()
         self._last_persist_time = time.time()
         self._tools_since_persist = 0
+        # Reset per-turn exploratory tracking so each turn starts with a
+        # fresh "schema discovery" budget.
+        self._recent_exploratory_fps.clear()
+        self._exploratory_error_streak = 0
 
         current_system_prompt = system_prompt or _build_agent_system_prompt(session)
         active_tools: Sequence[Dict[str, Any]] = STUDIO_TOOLS if tools is None else tools
@@ -1907,13 +1918,44 @@ class AgentRuntime:
                 PROGRESS_TOOLS = {
                     "todo_write", "scratchpad_write", "bash_exec",
                     "file_read", "list_files", "file_search", "grep_search",
+                    # MCP / 外部信息发现类：返回新内容即视为进展
+                    "mcp_call", "list_mcps", "mcp_connect",
+                    "web_search", "web_fetch",
+                    "browser_navigate", "browser_snapshot", "browser_click",
                 }
+                # schema 探索：同一工具连续失败但 error 内容不同，认知上仍在推进
+                EXPLORATORY_TOOLS = {"mcp_call", "list_mcps", "mcp_connect"}
+                result_head = result.lstrip()[:80] if isinstance(result, str) else ""
+                is_error_result = isinstance(result, str) and (
+                    result_head.startswith("ERROR:")
+                    or result_head.startswith("❌")
+                    or result_head.startswith("⚠️")
+                )
                 logical_progress = (
                     tool_name in PROGRESS_TOOLS
                     and isinstance(result, str)
-                    and not result.lstrip().startswith("ERROR:")
+                    and not is_error_result
                     and len(result.strip()) > 10
                 )
+                if tool_name in EXPLORATORY_TOOLS and isinstance(result, str) and result.strip():
+                    if not is_error_result:
+                        # Successful exploratory call resets the discovery budget
+                        self._exploratory_error_streak = 0
+                    else:
+                        # Failed exploratory call: each unique error counts as
+                        # progress only within a bounded schema-discovery budget
+                        self._exploratory_error_streak += 1
+                        fp = hashlib.sha1(
+                            result[:512].encode("utf-8", errors="replace")
+                        ).hexdigest()[:12]
+                        new_fp = fp not in self._recent_exploratory_fps
+                        self._recent_exploratory_fps.append(fp)
+                        if (
+                            new_fp
+                            and self._exploratory_error_streak
+                            <= self._exploratory_error_budget
+                        ):
+                            logical_progress = True
                 self.loop_detector.record_call(
                     tool_name,
                     LoopDetector.args_signature(arguments),
@@ -1925,19 +1967,16 @@ class AgentRuntime:
                     ),
                 )
                 loop_issue = self.loop_detector.check()
+                loop_halt = loop_issue is not None and loop_issue.level == "critical"
                 if loop_issue is not None:
+                    _original_task_snippet = (user_input or "").strip().replace("\n", " ")[:300]
                     reminder = (
                         f"[loop-{loop_issue.level}] {loop_issue.message} "
-                        "请调整策略：改用不同工具、读取更多上下文，或先总结当前结论。"
+                        f"用户原始请求：{_original_task_snippet}\n"
+                        "请严格围绕该原始请求继续推进，不要引入无关话题；"
+                        "若确实无法继续，请直接向用户总结已尝试动作、失败原因与下一步建议。"
                     )
                     messages.append({"role": "user", "content": reminder})
-                    if loop_issue.level == "critical":
-                        yield RuntimeEvent(
-                            type=EventType.ERROR.value,
-                            data={"text": reminder, "detector": loop_issue.detector},
-                            agent_id=agent_id,
-                        )
-                        return
                 messages.append(
                     {
                         "role": "tool",
@@ -1968,6 +2007,104 @@ class AgentRuntime:
                     data={"name": tool_name, "result": result, "tool_call_id": tool_call_id},
                     agent_id=agent_id,
                 )
+
+                if loop_halt and loop_issue is not None:
+                    # Fill in filler tool results for any remaining unanswered
+                    # tool_calls from the same assistant batch so downstream
+                    # LLM sees well-formed messages.
+                    try:
+                        current_idx = tool_calls.index(call)
+                    except ValueError:
+                        current_idx = len(tool_calls) - 1
+                    for remaining in tool_calls[current_idx + 1:]:
+                        rem_fn = remaining.get("function") if isinstance(remaining, dict) else None
+                        rem_name = str((rem_fn or {}).get("name") or "unknown_tool")
+                        rem_id = str(remaining.get("id", "")) if isinstance(remaining, dict) else ""
+                        filler = "（工具未执行：会话已因连续无进展而自动停止）"
+                        messages.append(
+                            {"role": "tool", "tool_call_id": rem_id, "name": rem_name, "content": filler}
+                        )
+                        session.agent_messages.append(
+                            {"role": "tool", "tool_call_id": rem_id, "name": rem_name, "content": filler}
+                        )
+                    synced_session_message_count = len(session.agent_messages)
+
+                    _original_task_snippet = (user_input or "").strip().replace("\n", " ")[:500]
+                    halt_prompt = (
+                        "[system-halt] 运行时检测到连续工具调用无进展，已自动停止重试。\n"
+                        f"触发原因：{loop_issue.message}\n"
+                        f"【用户原始请求】{_original_task_snippet}\n"
+                        "⚠️ 严格要求：回答必须紧扣上面的【用户原始请求】，不得切换、发明或扩展到任何其它话题（例如不要自行转为配置教程、产品对比等与原始请求无关的主题）。\n"
+                        "请用中文 3-5 句直接对用户说明：\n"
+                        "1) 围绕【用户原始请求】你尝试过哪些工具/参数；\n"
+                        "2) 失败或无进展的主要原因（参数不对 / 站点不可达 / 工具能力不足 / 需鉴权 等）；\n"
+                        "3) 围绕同一个原始请求的下一步建议（换工具、补充信息、手动执行等）。\n"
+                        "请直接给出正文，不要再调用任何工具，也不要讨论与原始请求无关的内容。"
+                    )
+                    messages.append({"role": "user", "content": halt_prompt})
+
+                    summary_text = ""
+                    try:
+                        halt_queue: asyncio.Queue[str | None] = asyncio.Queue()
+                        halt_loop = asyncio.get_running_loop()
+
+                        def _run_halt_stream() -> None:
+                            try:
+                                for chunk in self.llm.stream(
+                                    messages,
+                                    temperature=0.2,
+                                    max_tokens=800,
+                                    timeout=request_timeout_seconds,
+                                ):
+                                    tok = chunk if isinstance(chunk, str) else str(chunk.get("content", ""))
+                                    if tok:
+                                        halt_loop.call_soon_threadsafe(halt_queue.put_nowait, tok)
+                            finally:
+                                halt_loop.call_soon_threadsafe(halt_queue.put_nowait, None)
+
+                        halt_task = asyncio.get_running_loop().run_in_executor(None, _run_halt_stream)
+                        while True:
+                            if await _check_should_stop():
+                                halt_task.cancel()
+                                break
+                            try:
+                                tok = await asyncio.wait_for(halt_queue.get(), timeout=0.05)
+                            except asyncio.TimeoutError:
+                                continue
+                            if tok is None:
+                                break
+                            summary_text += tok
+                            yield RuntimeEvent(
+                                type=EventType.TOKEN.value,
+                                data={"text": tok},
+                                agent_id=agent_id,
+                            )
+                        try:
+                            await halt_task
+                        except Exception:
+                            pass
+                    except Exception as exc:
+                        logger.warning("loop-halt summary stream failed: %s", exc)
+                    summary_text = summary_text.strip() or (
+                        f"我多次尝试后仍未取得进展（{loop_issue.message}）。"
+                        "建议你换用其它工具，或先手动确认目标可行性后再继续。"
+                    )
+                    assistant_summary = {"role": "assistant", "content": summary_text}
+                    session.agent_messages.append(assistant_summary)
+                    synced_session_message_count = len(session.agent_messages)
+                    if not _is_system_trigger:
+                        session.chat_history.append(assistant_summary)
+                    await self.hooks.run_on_agent_end(summary_text, session)
+                    yield RuntimeEvent(
+                        type=EventType.FINAL.value,
+                        data={
+                            "text": summary_text,
+                            "loop_halt": True,
+                            "detector": loop_issue.detector,
+                        },
+                        agent_id=agent_id,
+                    )
+                    return
 
         message = (
             "已达到最大工具调用轮数，已暂停自动执行。"
