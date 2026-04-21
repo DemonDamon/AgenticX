@@ -17,21 +17,27 @@ import re
 import shutil
 import smtplib
 import subprocess
+import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from typing import AsyncGenerator
 from email.message import EmailMessage
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from jsonschema import Draft202012Validator
 
 from agenticx.avatar.group_chat import GroupChatRegistry
 from agenticx.avatar.registry import AvatarRegistry
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.cli.mcp_discovery import detect_all
 from agenticx.hooks import load_discovered_hooks
 from agenticx.cli.studio_mcp import (
+    agenticx_home_mcp_path,
     append_mcp_auto_connect_name,
     auto_connect_servers,
     auto_connect_servers_async,
@@ -78,6 +84,11 @@ from agenticx.workspace.loader import (
 )
 
 logger = logging.getLogger(__name__)
+
+_MODELSCOPE_LIST_URL = "https://www.modelscope.cn/openapi/v1/mcp/servers"
+_MODELSCOPE_DETAIL_URL_TMPL = "https://www.modelscope.cn/openapi/v1/mcp/servers/{server_id}"
+_MCP_MARKETPLACE_CACHE_TTL_SECONDS = 1800.0
+_MCP_MARKETPLACE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 _ERR_STALE_MCP = (
     "会话标记为已连接，但当前未注册任何 MCP 工具；子进程可能已退出或握手不完整。"
@@ -644,6 +655,94 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=403, detail="desktop token required for MCP admin APIs")
         if x_agx_desktop_token != desktop_token:
             raise HTTPException(status_code=401, detail="invalid desktop token")
+
+    def _detect_mcp_file_format(path: Path) -> str:
+        suffix = path.suffix.lower()
+        if suffix in {".json"}:
+            return "json"
+        if suffix in {".json5"}:
+            return "json5"
+        if suffix in {".yaml", ".yml"}:
+            return "yaml"
+        if suffix in {".toml"}:
+            return "toml"
+        return "unknown"
+
+    def _allowed_mcp_edit_paths() -> set[str]:
+        allowed: set[str] = set()
+        home = agenticx_home_mcp_path().expanduser().resolve(strict=False)
+        allowed.add(str(home))
+        for raw in get_mcp_extra_search_paths_config():
+            try:
+                resolved = Path(raw).expanduser().resolve(strict=False)
+            except Exception:
+                continue
+            allowed.add(str(resolved))
+        return allowed
+
+    def _normalize_mcp_path_for_edit(path_text: str | None) -> Path:
+        candidate = str(path_text or "").strip()
+        path = agenticx_home_mcp_path() if not candidate else Path(candidate)
+        resolved = path.expanduser().resolve(strict=False)
+        if str(resolved) not in _allowed_mcp_edit_paths():
+            raise HTTPException(status_code=400, detail=f"path not allowed: {resolved}")
+        return resolved
+
+    def _parse_by_format(text: str, fmt: str) -> Any:
+        if fmt == "json":
+            return json.loads(text)
+        if fmt == "json5":
+            import json5
+
+            return json5.loads(text)
+        if fmt == "yaml":
+            import yaml
+
+            return yaml.safe_load(text) or {}
+        if fmt == "toml":
+            try:
+                import tomllib
+            except Exception:
+                import tomli as tomllib  # type: ignore
+            return tomllib.loads(text)
+        raise HTTPException(status_code=400, detail=f"unsupported mcp format: {fmt}")
+
+    def _mcp_schema_validator() -> Draft202012Validator:
+        schema_path = Path(__file__).resolve().parents[1] / "cli" / "mcp_schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        return Draft202012Validator(schema)
+
+    def _validate_json_mcp_payload(payload: Any) -> list[str]:
+        validator = _mcp_schema_validator()
+        errors = sorted(validator.iter_errors(payload), key=lambda e: list(e.path))
+        msgs: list[str] = []
+        for err in errors:
+            ptr = ".".join([str(x) for x in err.path]) or "$"
+            msgs.append(f"{ptr}: {err.message}")
+        return msgs
+
+    def _marketplace_cache_get(key: str) -> dict[str, Any] | None:
+        item = _MCP_MARKETPLACE_CACHE.get(key)
+        if not item:
+            return None
+        expires_at, payload = item
+        if time.time() > expires_at:
+            _MCP_MARKETPLACE_CACHE.pop(key, None)
+            return None
+        return payload
+
+    def _marketplace_cache_set(key: str, payload: dict[str, Any]) -> None:
+        _MCP_MARKETPLACE_CACHE[key] = (time.time() + _MCP_MARKETPLACE_CACHE_TTL_SECONDS, payload)
+
+    def _modelscope_headers() -> dict[str, str]:
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "AgenticX/0.3.7",
+        }
+        token = str(os.getenv("MODELSCOPE_API_TOKEN", "")).strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     def _load_non_high_risk_auto_install() -> bool:
         """Read skills.non_high_risk_auto_install from global config (default True)."""
@@ -2196,6 +2295,240 @@ def create_studio_app() -> FastAPI:
         return {
             "ok": True,
             "extra_search_paths": list(get_mcp_extra_search_paths_config()),
+        }
+
+    @app.get("/api/mcp/discover")
+    async def discover_mcp_configs(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        hits = [item.to_dict() for item in detect_all(Path.cwd())]
+        return {
+            "ok": True,
+            "count": len(hits),
+            "hits": hits,
+        }
+
+    @app.get("/api/mcp/raw")
+    async def get_mcp_raw(
+        path: str | None = Query(default=None),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        target = _normalize_mcp_path_for_edit(path)
+        if not target.exists():
+            raise HTTPException(status_code=404, detail=f"file not found: {target}")
+        text = target.read_text(encoding="utf-8")
+        fmt = _detect_mcp_file_format(target)
+        parse_ok = True
+        parse_error = ""
+        line = None
+        column = None
+        if fmt == "json":
+            try:
+                json.loads(text)
+            except json.JSONDecodeError as exc:
+                parse_ok = False
+                parse_error = exc.msg
+                line = exc.lineno
+                column = exc.colno
+        return {
+            "ok": True,
+            "path": str(target),
+            "format": fmt,
+            "text": text,
+            "parse_ok": parse_ok,
+            "parse_error": parse_error,
+            "line": line,
+            "column": column,
+        }
+
+    @app.put("/api/mcp/raw")
+    async def put_mcp_raw(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        target = _normalize_mcp_path_for_edit(str(payload.get("path", "")).strip() or None)
+        text = str(payload.get("text", ""))
+        fmt = _detect_mcp_file_format(target)
+        if fmt != "json":
+            raise HTTPException(status_code=400, detail="only .json mcp file is editable in this endpoint")
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": exc.msg,
+                    "line": exc.lineno,
+                    "column": exc.colno,
+                },
+            )
+
+        validation_errors = _validate_json_mcp_payload(parsed)
+        if validation_errors:
+            raise HTTPException(status_code=400, detail={"error": "schema validation failed", "items": validation_errors})
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(target.parent),
+            delete=False,
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+        ) as tmp:
+            tmp.write(text.rstrip() + "\n")
+            tmp_path = Path(tmp.name)
+        tmp_path.replace(target)
+        return {"ok": True, "path": str(target), "format": fmt}
+
+    @app.get("/api/mcp/marketplace")
+    async def list_marketplace_mcps(
+        category: str | None = Query(default=None),
+        search: str | None = Query(default=None),
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+        is_hosted: bool | None = Query(default=None),
+        is_verified: bool | None = Query(default=None),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        cache_key = json.dumps(
+            {
+                "category": category,
+                "search": search,
+                "page": page,
+                "page_size": page_size,
+                "is_hosted": is_hosted,
+                "is_verified": is_verified,
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        cached = _marketplace_cache_get(cache_key)
+        if cached is not None:
+            return cached
+
+        filter_obj: dict[str, Any] = {}
+        if category:
+            filter_obj["category"] = str(category).strip()
+        if is_hosted is not None:
+            filter_obj["is_hosted"] = bool(is_hosted)
+        body = {
+            "filter": filter_obj,
+            "page_number": page,
+            "page_size": page_size,
+            "search": str(search or "").strip(),
+        }
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.put(_MODELSCOPE_LIST_URL, json=body, headers=_modelscope_headers())
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=502, detail=f"marketplace upstream error: HTTP {resp.status_code}")
+        payload = resp.json()
+        data = payload.get("data") if isinstance(payload, dict) else {}
+        items = data.get("mcp_server_list") if isinstance(data, dict) else []
+        if not isinstance(items, list):
+            items = []
+        if is_verified is not None:
+            items = [it for it in items if bool((it or {}).get("is_verified")) is bool(is_verified)]
+        result = {
+            "ok": True,
+            "page": page,
+            "page_size": page_size,
+            "total_count": int((data or {}).get("total_count") or 0),
+            "items": items,
+        }
+        _marketplace_cache_set(cache_key, result)
+        return result
+
+    @app.get("/api/mcp/marketplace/{server_id:path}")
+    async def marketplace_mcp_detail(
+        server_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        sid = str(server_id).strip()
+        if not sid:
+            raise HTTPException(status_code=400, detail="server_id required")
+        cache_key = f"detail:{sid}"
+        cached = _marketplace_cache_get(cache_key)
+        if cached is not None:
+            return cached
+        url = _MODELSCOPE_DETAIL_URL_TMPL.format(server_id=sid)
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url, headers=_modelscope_headers())
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=502, detail=f"marketplace upstream error: HTTP {resp.status_code}")
+        payload = resp.json()
+        data = payload.get("data") if isinstance(payload, dict) else {}
+        result = {"ok": True, "item": data}
+        _marketplace_cache_set(cache_key, result)
+        return result
+
+    @app.post("/api/mcp/marketplace/install")
+    async def install_marketplace_mcp(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_mcp_admin_token(x_agx_desktop_token)
+        server_id = str(payload.get("server_id", "")).strip()
+        env_overrides = payload.get("env") or {}
+        if not isinstance(env_overrides, dict):
+            raise HTTPException(status_code=400, detail="env must be an object")
+        if not server_id:
+            raise HTTPException(status_code=400, detail="server_id required")
+        detail = await marketplace_mcp_detail(server_id=server_id, x_agx_desktop_token=x_agx_desktop_token)
+        item = detail.get("item") if isinstance(detail, dict) else {}
+        server_config_list = item.get("server_config") if isinstance(item, dict) else None
+        if not isinstance(server_config_list, list) or not server_config_list:
+            raise HTTPException(status_code=400, detail="invalid marketplace server_config")
+        first_cfg = server_config_list[0]
+        if not isinstance(first_cfg, dict):
+            raise HTTPException(status_code=400, detail="invalid server_config payload")
+        mcp_servers = first_cfg.get("mcpServers")
+        if not isinstance(mcp_servers, dict):
+            raise HTTPException(status_code=400, detail="server_config missing mcpServers")
+
+        merged_cfg = {"mcpServers": {}}
+        for name, cfg in mcp_servers.items():
+            if not isinstance(cfg, dict):
+                continue
+            env_block = cfg.get("env")
+            base_env = dict(env_block) if isinstance(env_block, dict) else {}
+            for k, v in env_overrides.items():
+                if str(v).strip():
+                    base_env[str(k)] = str(v)
+            next_cfg = dict(cfg)
+            if base_env:
+                next_cfg["env"] = base_env
+            merged_cfg["mcpServers"][str(name)] = next_cfg
+        if not merged_cfg["mcpServers"]:
+            raise HTTPException(status_code=400, detail="empty mcpServers after merge")
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".json", delete=False) as tmp:
+            tmp.write(json.dumps(merged_cfg, ensure_ascii=False, indent=2) + "\n")
+            source_path = tmp.name
+        try:
+            result = import_mcp_config(source_path)
+        finally:
+            with contextlib.suppress(Exception):
+                Path(source_path).unlink(missing_ok=True)
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=str(result.get("error", "install failed")))
+
+        imported_names = [str(x) for x in result.get("imported", [])]
+        updated_names = [str(x) for x in result.get("updated", [])]
+        for name in imported_names + updated_names:
+            with contextlib.suppress(Exception):
+                append_mcp_auto_connect_name(name)
+
+        return {
+            "ok": True,
+            "installed": imported_names,
+            "updated": updated_names,
+            "result": result,
         }
 
     @app.post("/api/mcp/disconnect")
