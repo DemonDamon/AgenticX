@@ -71,6 +71,9 @@ export function WorkspacePanel({
   const setActivePaneTerminalTab = useAppStore((s) => s.setActivePaneTerminalTab);
   const terminalTabs = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.terminalTabs ?? []);
   const activeTerminalTabId = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.activeTerminalTabId ?? null);
+  const paneAvatarId = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.avatarId ?? null);
+  const paneAvatarName = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.avatarName ?? "");
+  const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
 
   const [taskspaces, setTaskspaces] = useState<Taskspace[]>([]);
   const [loading, setLoading] = useState(false);
@@ -218,8 +221,35 @@ export function WorkspacePanel({
 
   const addTaskspace = async (pathValue: string, labelValue: string) => {
     setAdding(true);
+    let effectiveSessionId = sessionId;
+    if (!effectiveSessionId) {
+      const isGroupOrAutomationPane =
+        !!paneAvatarId && (paneAvatarId.startsWith("group:") || paneAvatarId.startsWith("automation:"));
+      if (isGroupOrAutomationPane) {
+        setAdding(false);
+        setErrorText("会话正在初始化，请稍候再试");
+        return;
+      }
+      try {
+        const createPayload: { avatar_id?: string; name?: string } = {};
+        if (paneAvatarId) createPayload.avatar_id = paneAvatarId;
+        if (paneAvatarName) createPayload.name = paneAvatarName;
+        const created = await window.agenticxDesktop.createSession(createPayload);
+        if (!created.ok || !created.session_id) {
+          setAdding(false);
+          setErrorText(created.error ?? "创建会话失败，无法添加工作区");
+          return;
+        }
+        effectiveSessionId = created.session_id;
+        setPaneSessionId(paneId, effectiveSessionId);
+      } catch (err) {
+        setAdding(false);
+        setErrorText(`创建会话失败：${String(err)}`);
+        return;
+      }
+    }
     const result = await window.agenticxDesktop.addTaskspace({
-      sessionId,
+      sessionId: effectiveSessionId,
       path: pathValue.trim() || undefined,
       label: labelValue.trim() || undefined,
     });
