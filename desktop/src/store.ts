@@ -556,7 +556,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeProvider: "",
   activeModel: "",
   userMode: "pro",
-  onboardingCompleted: false,
+  onboardingCompleted: true,
   commandPaletteOpen: false,
   keybindingsPanelOpen: false,
   planMode: false,

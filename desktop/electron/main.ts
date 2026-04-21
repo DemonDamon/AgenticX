@@ -1042,12 +1042,14 @@ const PROVIDER_FALLBACK_MODELS: Record<string, string[]> = {
 };
 
 function loadAgxConfig(): AgxConfig {
-  if (!fs.existsSync(CONFIG_PATH)) return { version: "1", providers: {} };
+  if (!fs.existsSync(CONFIG_PATH)) {
+    return { version: "1", providers: {}, onboarding_completed: true, user_mode: "pro" };
+  }
   try {
     const raw = yaml.load(fs.readFileSync(CONFIG_PATH, "utf-8")) as AgxConfig;
-    return raw ?? { version: "1", providers: {} };
+    return raw ?? { version: "1", providers: {}, onboarding_completed: true, user_mode: "pro" };
   } catch {
-    return { version: "1", providers: {} };
+    return { version: "1", providers: {}, onboarding_completed: true, user_mode: "pro" };
   }
 }
 
@@ -2220,12 +2222,18 @@ function registerEarlyIpc(): void {
 
   ipcMain.handle("load-config", async () => {
     const cfg = loadAgxConfig();
+    // Lite / 首次 Pro-Lite 选择已废弃：旧配置里若仍为「未完成 onboarding」，
+    // 一次性写回 true，避免偶发 loadConfig 失败或竞态时反复出现欢迎页。
+    if (cfg.onboarding_completed === false) {
+      cfg.onboarding_completed = true;
+      saveAgxConfig(cfg);
+    }
     const acct = cfg.agx_account;
     return {
       defaultProvider: cfg.default_provider ?? "",
       providers: cfg.providers ?? {},
       userMode: cfg.user_mode ?? "pro",
-      onboardingCompleted: cfg.onboarding_completed ?? false,
+      onboardingCompleted: true,
       confirmStrategy: cfg.confirm_strategy ?? "semi-auto",
       activeProvider: cfg.active_provider ?? "",
       activeModel: cfg.active_model ?? "",
