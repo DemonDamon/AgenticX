@@ -2,6 +2,7 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
 import { isSettingsTab } from "./settings-tab";
 import type { SettingsTab } from "./settings-tab";
+import { clearPaneAwaitingFreshSession } from "./utils/pane-fresh-session";
 
 export type UiStatus = "idle" | "listening" | "processing";
 export type MsgRole = "user" | "assistant" | "tool";
@@ -895,7 +896,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { panes: nextPanes };
     }),
-  setPaneSessionId: (paneId, sessionId) =>
+  setPaneSessionId: (paneId, sessionId) => {
+    // Any time the pane gets bound to a real session id, the "awaiting fresh
+    // session" intent is satisfied — clear the flag so subsequent auto-
+    // restore effects behave normally again.
+    if (String(sessionId ?? "").trim()) {
+      clearPaneAwaitingFreshSession(paneId);
+    }
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === paneId
@@ -909,7 +916,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             })()
           : pane
       ),
-    })),
+    }));
+  },
   setPaneMessages: (paneId, messages) =>
     set((state) => ({
       panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, messages } : pane)),
