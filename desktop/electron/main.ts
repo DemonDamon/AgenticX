@@ -303,6 +303,54 @@ const WORKSPACE_DIR = path.join(CONFIG_DIR, "workspace");
 const META_SOUL_PATH = path.join(WORKSPACE_DIR, "SOUL.md");
 const AVATARS_DIR = path.join(CONFIG_DIR, "avatars");
 const FEISHU_BINDING_PATH = path.join(CONFIG_DIR, "feishu_binding.json");
+const LAYOUT_PATH = path.join(CONFIG_DIR, "layout.json");
+
+type LayoutBounds = {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  isMaximized?: boolean;
+};
+
+type LayoutPaneSnapshot = {
+  id: string;
+  avatarId: string | null;
+  sessionId: string;
+  modelProvider: string;
+  modelName: string;
+};
+
+type LayoutFile = {
+  mainWindow?: LayoutBounds;
+  panes?: LayoutPaneSnapshot[];
+  activePaneId?: string;
+};
+
+/** Disk read for the pane/window layout. Returns an empty object on any error
+ *  so first-launch / corrupted-file paths fall back to defaults. */
+function loadLayoutData(): LayoutFile {
+  try {
+    const raw = fs.readFileSync(LAYOUT_PATH, "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed as LayoutFile;
+  } catch {
+    return {};
+  }
+}
+
+/** Partial save that preserves fields we don't manage in this call. */
+function saveLayoutData(patch: Partial<LayoutFile>): void {
+  try {
+    const prev = loadLayoutData();
+    const merged: LayoutFile = { ...prev, ...patch };
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(LAYOUT_PATH, JSON.stringify(merged, null, 2), "utf-8");
+  } catch {
+    // best effort; layout persistence is not critical enough to crash the app
+  }
+}
 const FEISHU_DESKTOP_BINDING_KEY = "_desktop";
 const WECHAT_BINDING_PATH = path.join(CONFIG_DIR, "wechat_binding.json");
 const WECHAT_DESKTOP_BINDING_KEY = "_desktop";
@@ -2090,9 +2138,41 @@ function createWindow(): void {
   const appEntryUrl = app.isPackaged
     ? `file://${path.join(__dirname, "..", "dist", "index.html")}`
     : devUrl;
+  const savedBounds = loadLayoutData().mainWindow ?? {};
+  // Reject bounds that fell outside all displays (e.g. the external monitor
+  // that held the window last time was unplugged). We can't use
+  // screen.getAllDisplays() before app.whenReady on some platforms, so we
+  // simply clamp obviously-bad coordinates; the OS otherwise handles clipping.
+  const boundsOverride: {
+    x?: number;
+    y?: number;
+    width: number;
+    height: number;
+  } = {
+    width:
+      typeof savedBounds.width === "number" && savedBounds.width >= 680
+        ? Math.floor(savedBounds.width)
+        : 900,
+    height:
+      typeof savedBounds.height === "number" && savedBounds.height >= 480
+        ? Math.floor(savedBounds.height)
+        : 700,
+  };
+  if (
+    typeof savedBounds.x === "number" &&
+    typeof savedBounds.y === "number" &&
+    Number.isFinite(savedBounds.x) &&
+    Number.isFinite(savedBounds.y) &&
+    savedBounds.x > -20000 &&
+    savedBounds.y > -20000 &&
+    savedBounds.x < 20000 &&
+    savedBounds.y < 20000
+  ) {
+    boundsOverride.x = Math.floor(savedBounds.x);
+    boundsOverride.y = Math.floor(savedBounds.y);
+  }
   mainWindow = new BrowserWindow({
-    width: 900,
-    height: 700,
+    ...boundsOverride,
     minWidth: 680,
     minHeight: 480,
     show: false,
@@ -2107,6 +2187,38 @@ function createWindow(): void {
       preload: path.join(__dirname, "preload.js")
     }
   });
+  if (savedBounds.isMaximized) {
+    mainWindow.maximize();
+  }
+
+  // Debounced bounds persistence. Resize/move fire at very high frequency
+  // on drag; collapsing to 400ms reduces JSON rewrites during a single drag.
+  let boundsSaveTimer: NodeJS.Timeout | null = null;
+  const scheduleBoundsSave = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (boundsSaveTimer) clearTimeout(boundsSaveTimer);
+    boundsSaveTimer = setTimeout(() => {
+      boundsSaveTimer = null;
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      const isMax = mainWindow.isMaximized();
+      // When maximized, getBounds() returns the maximized (screen-filling)
+      // size. Use getNormalBounds() so the "restored" size survives a cycle.
+      const normal = mainWindow.getNormalBounds();
+      saveLayoutData({
+        mainWindow: {
+          x: normal.x,
+          y: normal.y,
+          width: normal.width,
+          height: normal.height,
+          isMaximized: isMax,
+        },
+      });
+    }, 400);
+  };
+  mainWindow.on("move", scheduleBoundsSave);
+  mainWindow.on("resize", scheduleBoundsSave);
+  mainWindow.on("maximize", scheduleBoundsSave);
+  mainWindow.on("unmaximize", scheduleBoundsSave);
   const tryOpenExternalBrowser = (targetUrl: string): boolean => {
     if (!shouldOpenInExternalBrowser(targetUrl, appEntryUrl)) return false;
     void shell.openExternal(targetUrl);
@@ -2626,6 +2738,8 @@ function registerIpc(): void {
     created_by?: string;
     tools_enabled?: Record<string, boolean>;
     skills_enabled?: Record<string, boolean> | null;
+    default_provider?: string;
+    default_model?: string;
   }) => {
     try {
       const resp = await fetch(`${getStudioUrl()}/api/avatars`, {
@@ -2652,6 +2766,8 @@ function registerIpc(): void {
     system_prompt?: string;
     tools_enabled?: Record<string, boolean>;
     skills_enabled?: Record<string, boolean> | null;
+    default_provider?: string;
+    default_model?: string;
   }) => {
     const { id, ...body } = payload;
     try {
@@ -2947,6 +3063,61 @@ function registerIpc(): void {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
         body: JSON.stringify({ pinned: !!payload.pinned }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("layout-get", async () => {
+    const data = loadLayoutData();
+    return {
+      ok: true,
+      panes: Array.isArray(data.panes) ? data.panes : [],
+      activePaneId: typeof data.activePaneId === "string" ? data.activePaneId : "",
+    };
+  });
+
+  ipcMain.handle("layout-set", async (_event, payload: { panes?: LayoutPaneSnapshot[]; activePaneId?: string }) => {
+    try {
+      const panes = Array.isArray(payload?.panes)
+        ? payload.panes
+            .map((p) => ({
+              id: String(p?.id ?? "").trim(),
+              avatarId: typeof p?.avatarId === "string" ? p.avatarId : null,
+              sessionId: String(p?.sessionId ?? "").trim(),
+              modelProvider: String(p?.modelProvider ?? "").trim(),
+              modelName: String(p?.modelName ?? "").trim(),
+            }))
+            .filter((p) => p.id)
+        : undefined;
+      const activePaneId = String(payload?.activePaneId ?? "").trim();
+      const patch: Partial<LayoutFile> = {};
+      if (panes !== undefined) patch.panes = panes;
+      if (activePaneId) patch.activePaneId = activePaneId;
+      saveLayoutData(patch);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("set-session-model", async (_event, payload: { sessionId: string; provider: string; model: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/model`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+        body: JSON.stringify({
+          provider: String(payload?.provider || "").trim(),
+          model: String(payload?.model || "").trim(),
+        }),
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");

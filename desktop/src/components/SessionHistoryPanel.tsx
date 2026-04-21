@@ -29,6 +29,8 @@ type SessionRow = {
   pinned?: boolean;
   archived?: boolean;
   execution_state?: "idle" | "running" | "interrupted";
+  provider?: string;
+  model?: string;
 };
 
 type SessionContextMenu = {
@@ -190,6 +192,8 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
         row.execution_state === "running" || row.execution_state === "interrupted"
           ? row.execution_state
           : "idle",
+      provider: typeof row.provider === "string" ? row.provider : "",
+      model: typeof row.model === "string" ? row.model : "",
     });
   }
   return sortSessionRows(rows);
@@ -471,7 +475,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     const isSameSession = previousSessionId === sessionId.trim();
     const existingMessages = targetPane?.messages ?? [];
 
-    setPaneSessionId(targetPaneId, sessionId);
+    setPaneSessionId(targetPaneId, sessionId, {
+      provider: targetRow.provider,
+      model: targetRow.model,
+    });
     setPaneHistorySearchTerms(targetPaneId, highlightTerms);
     setUnreadSessionIds((prev) => prev.filter((id) => id !== sessionId));
 

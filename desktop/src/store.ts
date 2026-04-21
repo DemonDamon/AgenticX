@@ -25,6 +25,11 @@ export type McpServer = {
   connection_state?: "healthy" | "error" | "disconnected";
   tool_count?: number;
   error_detail?: string;
+  /** 最新运维状态：idle/preparing/connecting/healthy/failed/disconnecting */
+  op_phase?: string;
+  /** 每个 MCP 卡片底部展示的简短状态日志 */
+  op_message?: string;
+  op_updated_at?: number;
 };
 
 export type Avatar = {
@@ -38,6 +43,10 @@ export type Avatar = {
   toolsEnabled?: Record<string, boolean>;
   /** Per-skill overrides: false = disabled for this avatar; missing = inherit global. */
   skillsEnabled?: Record<string, boolean>;
+  /** Default LLM provider the avatar uses when a session has no explicit model yet. */
+  defaultProvider?: string;
+  /** Default LLM model the avatar uses when a session has no explicit model yet. */
+  defaultModel?: string;
 };
 
 export type SessionItem = {
@@ -48,6 +57,9 @@ export type SessionItem = {
   createdAt?: number;
   pinned?: boolean;
   archived?: boolean;
+  /** Last-used LLM provider/model for this session (empty = never picked). */
+  provider?: string;
+  model?: string;
 };
 
 export type Taskspace = {
@@ -301,6 +313,7 @@ type AppState = {
   setAvatarSessions: (sessions: SessionItem[]) => void;
   setGroups: (groups: GroupChat[]) => void;
   setActivePaneId: (id: string) => void;
+  hydratePanes: (panes: ChatPane[], activePaneId: string) => void;
   addPane: (avatarId: string | null, avatarName: string, sessionId: string) => string;
   removePane: (paneId: string) => void;
   /** 删除定时任务后移除所有绑定该任务的窗格（avatarId 为 automation:<taskId>）。 */
@@ -329,7 +342,7 @@ type AppState = {
   ) => void;
   updateLastPaneMessage: (paneId: string, content: string) => void;
   clearPaneMessages: (paneId: string) => void;
-  setPaneSessionId: (paneId: string, sessionId: string) => void;
+  setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
   setPaneHistorySearchTerms: (paneId: string, terms: string[]) => void;
   togglePaneHistory: (paneId: string) => void;
@@ -682,11 +695,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       let provider = (target.modelProvider || "").trim();
       let model = (target.modelName || "").trim();
       if (!provider || !model) {
+        const avatar = target.avatarId
+          ? state.avatars.find((a) => a.id === target.avatarId)
+          : null;
+        const avatarProvider = (avatar?.defaultProvider || "").trim();
+        const avatarModel = (avatar?.defaultModel || "").trim();
         const defaultProvider = (state.settings.defaultProvider || "").trim();
         const defaultModel = (state.settings.providers[defaultProvider]?.model || "").trim();
-        if (defaultProvider && defaultModel) {
+        if (avatarProvider && avatarModel) {
+          provider = avatarProvider;
+          model = avatarModel;
+        } else if (defaultProvider && defaultModel) {
           provider = defaultProvider;
           model = defaultModel;
+        }
+        if (provider && model) {
           return {
             activePaneId,
             activeProvider: provider,
@@ -704,6 +727,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         activePaneId,
         activeProvider: provider,
         activeModel: model,
+      };
+    }),
+  hydratePanes: (panes, activePaneId) =>
+    set((state) => {
+      if (!Array.isArray(panes) || panes.length === 0) return state;
+      const nextPanes = panes.map((p) => ({ ...makeDefaultPane(), ...p }));
+      const hasActive = nextPanes.some((p) => p.id === activePaneId);
+      const nextActiveId = hasActive ? activePaneId : nextPanes[0]?.id ?? state.activePaneId;
+      const active = nextPanes.find((p) => p.id === nextActiveId) ?? nextPanes[0];
+      return {
+        panes: nextPanes,
+        activePaneId: nextActiveId,
+        activeProvider: (active?.modelProvider || "").trim(),
+        activeModel: (active?.modelName || "").trim(),
       };
     }),
   setForwardAutoReply: (forwardAutoReply) => set({ forwardAutoReply }),
@@ -753,6 +790,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   addPane: (avatarId, avatarName, sessionId) => {
     const paneId = uid();
     set((state) => ({
+      // New pane should prefer avatar defaults so "click avatar" does not
+      // inherit a random model from the currently active pane.
       panes: [
         ...state.panes,
         {
@@ -760,8 +799,14 @@ export const useAppStore = create<AppState>((set, get) => ({
           avatarId,
           avatarName,
           sessionId,
-          modelProvider: state.activeProvider,
-          modelName: state.activeModel,
+          modelProvider: (() => {
+            const av = avatarId ? state.avatars.find((a) => a.id === avatarId) : null;
+            return (av?.defaultProvider || "").trim() || state.activeProvider;
+          })(),
+          modelName: (() => {
+            const av = avatarId ? state.avatars.find((a) => a.id === avatarId) : null;
+            return (av?.defaultModel || "").trim() || state.activeModel;
+          })(),
           messages: [],
           historyOpen: false,
           contextInherited: false,
@@ -896,27 +941,69 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { panes: nextPanes };
     }),
-  setPaneSessionId: (paneId, sessionId) => {
+  setPaneSessionId: (paneId, sessionId, modelHint) => {
     // Any time the pane gets bound to a real session id, the "awaiting fresh
     // session" intent is satisfied — clear the flag so subsequent auto-
     // restore effects behave normally again.
     if (String(sessionId ?? "").trim()) {
       clearPaneAwaitingFreshSession(paneId);
     }
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId
-          ? (() => {
-              const cached = getSessionTokensFromCache(sessionId);
-              if (cached) return { ...pane, sessionId, sessionTokens: cached };
-              if (String(pane.sessionId ?? "").trim() === String(sessionId ?? "").trim()) {
-                return { ...pane, sessionId, sessionTokens: pane.sessionTokens ?? { input: 0, output: 0 } };
-              }
-              return { ...pane, sessionId, sessionTokens: { input: 0, output: 0 } };
-            })()
-          : pane
-      ),
-    }));
+    const hintProvider = String(modelHint?.provider ?? "").trim();
+    const hintModel = String(modelHint?.model ?? "").trim();
+    set((state) => {
+      // Priority chain when binding a session to a pane:
+      //   modelHint (usually = session.provider/model from backend)
+      //   > avatar.defaultProvider/defaultModel
+      //   > settings.defaultProvider + providers[default].model
+      // Leave empty strings alone so UI can still show "未选模型" if nothing
+      // is configured anywhere — but only for explicit empty hint cases.
+      const pane = state.panes.find((p) => p.id === paneId);
+      let resolvedProvider = hintProvider;
+      let resolvedModel = hintModel;
+      if (!resolvedProvider || !resolvedModel) {
+        const avatar = pane?.avatarId
+          ? state.avatars.find((a) => a.id === pane.avatarId)
+          : null;
+        const avatarProvider = (avatar?.defaultProvider || "").trim();
+        const avatarModel = (avatar?.defaultModel || "").trim();
+        if (avatarProvider && avatarModel) {
+          resolvedProvider = avatarProvider;
+          resolvedModel = avatarModel;
+        } else {
+          const dp = (state.settings.defaultProvider || "").trim();
+          const dm = (state.settings.providers[dp]?.model || "").trim();
+          if (dp && dm) {
+            resolvedProvider = dp;
+            resolvedModel = dm;
+          }
+        }
+      }
+      const isActive = state.activePaneId === paneId;
+      const nextPanes = state.panes.map((p) => {
+        if (p.id !== paneId) return p;
+        const cached = getSessionTokensFromCache(sessionId);
+        const baseTokens =
+          cached
+            ? cached
+            : String(p.sessionId ?? "").trim() === String(sessionId ?? "").trim()
+              ? p.sessionTokens ?? { input: 0, output: 0 }
+              : { input: 0, output: 0 };
+        return {
+          ...p,
+          sessionId,
+          sessionTokens: baseTokens,
+          ...(resolvedProvider && resolvedModel
+            ? { modelProvider: resolvedProvider, modelName: resolvedModel }
+            : {}),
+        };
+      });
+      const next: Partial<AppState> = { panes: nextPanes };
+      if (isActive && resolvedProvider && resolvedModel) {
+        next.activeProvider = resolvedProvider;
+        next.activeModel = resolvedModel;
+      }
+      return next as AppState;
+    });
   },
   setPaneMessages: (paneId, messages) =>
     set((state) => ({

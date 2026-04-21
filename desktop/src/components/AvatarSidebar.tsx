@@ -25,6 +25,8 @@ type SessionListItem = {
   updated_at: number;
   created_at?: number;
   archived?: boolean;
+  provider?: string;
+  model?: string;
 };
 
 function isSessionAvatarMatch(item: SessionListItem, avatarId?: string | null): boolean {
@@ -126,6 +128,8 @@ export function AvatarSidebar() {
               a.skills_enabled && typeof a.skills_enabled === "object"
                 ? { ...a.skills_enabled }
                 : undefined,
+            defaultProvider: a.default_provider ?? "",
+            defaultModel: a.default_model ?? "",
           }))
         );
         setAvatarsLoaded(true);
@@ -308,6 +312,8 @@ export function AvatarSidebar() {
     systemPrompt: string;
     toolsEnabled: Record<string, boolean>;
     skillsEnabled?: Record<string, boolean>;
+    defaultProvider?: string;
+    defaultModel?: string;
   }) => {
     const se = data.skillsEnabled;
     const falses =
@@ -315,12 +321,16 @@ export function AvatarSidebar() {
         ? Object.fromEntries(Object.entries(se).filter(([, v]) => v === false))
         : {};
     const skillsPayload = Object.keys(falses).length > 0 ? falses : undefined;
+    const dp = (data.defaultProvider || "").trim();
+    const dm = (data.defaultModel || "").trim();
     await window.agenticxDesktop.createAvatar({
       name: data.name,
       role: data.role,
       system_prompt: data.systemPrompt,
       tools_enabled: data.toolsEnabled,
       ...(skillsPayload !== undefined ? { skills_enabled: skillsPayload } : {}),
+      ...(dp ? { default_provider: dp } : {}),
+      ...(dm ? { default_model: dm } : {}),
     });
     await refreshAvatars();
   };
@@ -330,11 +340,26 @@ export function AvatarSidebar() {
     if (existing) {
       setActivePaneId(existing.id);
       setActiveAvatarId(avatarId);
-      if (!String(existing.sessionId ?? "").trim()) {
-        void (async () => {
-          const listed = await window.agenticxDesktop
-            .listSessions(avatarId ?? undefined)
-            .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
+      void (async () => {
+        const listed = await window.agenticxDesktop
+          .listSessions(avatarId ?? undefined)
+          .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
+        const currentSid = String(existing.sessionId ?? "").trim();
+        if (
+          currentSid &&
+          listed.ok &&
+          Array.isArray(listed.sessions)
+        ) {
+          const currentRow = listed.sessions.find((item) => String(item.session_id ?? "").trim() === currentSid);
+          if (currentRow) {
+            setPaneSessionId(existing.id, currentSid, {
+              provider: currentRow.provider,
+              model: currentRow.model,
+            });
+            return;
+          }
+        }
+        if (!currentSid) {
           const rememberedSid = getRememberedSessionForAvatar(avatarId);
           const rememberedValid =
             !!rememberedSid &&
@@ -350,13 +375,22 @@ export function AvatarSidebar() {
               ? pickMostRecentSessionId(listed.sessions, avatarId)
               : undefined;
           const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
+          const preferredRow =
+            preferredSid && listed.ok && Array.isArray(listed.sessions)
+              ? listed.sessions.find((item) => String(item.session_id ?? "").trim() === preferredSid)
+              : undefined;
           if (preferredSid) {
             const latestPane = useAppStore.getState().panes.find((item) => item.id === existing.id);
             const latestSid = String(latestPane?.sessionId ?? "").trim();
-            if (!latestSid) setPaneSessionId(existing.id, preferredSid);
+            if (!latestSid) {
+              setPaneSessionId(existing.id, preferredSid, {
+                provider: preferredRow?.provider,
+                model: preferredRow?.model,
+              });
+            }
           }
-        })();
-      }
+        }
+      })();
       return;
     }
 
@@ -388,8 +422,15 @@ export function AvatarSidebar() {
             ? pickMostRecentSessionId(listed.sessions, avatarId)
             : undefined;
         const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
+        const preferredRow =
+          preferredSid && listed.ok && Array.isArray(listed.sessions)
+            ? listed.sessions.find((item) => String(item.session_id ?? "").trim() === preferredSid)
+            : undefined;
         if (preferredSid) {
-          setPaneSessionId(paneId, preferredSid);
+          setPaneSessionId(paneId, preferredSid, {
+            provider: preferredRow?.provider,
+            model: preferredRow?.model,
+          });
           return;
         }
         // Lazy session: first real send in ChatPane will createSession (align Machi meta pane).

@@ -161,6 +161,8 @@ type SessionListItem = {
   updated_at: number;
   created_at?: number;
   archived?: boolean;
+  provider?: string;
+  model?: string;
 };
 
 function isSessionItemMatchingAvatar(item: SessionListItem, avatarId?: string | null): boolean {
@@ -327,6 +329,9 @@ export function App() {
           connection_state: item.connection_state,
           tool_count: typeof item.tool_count === "number" ? item.tool_count : undefined,
           error_detail: item.error_detail,
+          op_phase: typeof item.op_phase === "string" ? item.op_phase : undefined,
+          op_message: typeof item.op_message === "string" ? item.op_message : undefined,
+          op_updated_at: typeof item.op_updated_at === "number" ? item.op_updated_at : undefined,
         }))
       );
     }
@@ -461,6 +466,37 @@ export function App() {
         setConfigLoaded(true);
       }
 
+      // Preload avatar list into the store BEFORE pane hydration, so the
+      // setPaneSessionId() fallback chain (session > avatar.default > global)
+      // can actually resolve an avatar's default_provider/default_model on
+      // cold start. Without this, the first render falls through to "未选模型"
+      // until the AvatarSidebar component finishes its own lazy refresh.
+      try {
+        const avResp = await window.agenticxDesktop.listAvatars();
+        if (avResp?.ok && Array.isArray(avResp.avatars)) {
+          useAppStore.getState().setAvatars(
+            avResp.avatars.map((a) => ({
+              id: a.id,
+              name: a.name,
+              role: a.role ?? "",
+              avatarUrl: a.avatar_url ?? "",
+              pinned: Boolean(a.pinned),
+              createdBy: a.created_by ?? "manual",
+              systemPrompt: a.system_prompt ?? "",
+              toolsEnabled: a.tools_enabled ?? {},
+              skillsEnabled:
+                a.skills_enabled && typeof a.skills_enabled === "object"
+                  ? { ...a.skills_enabled }
+                  : undefined,
+              defaultProvider: a.default_provider ?? "",
+              defaultModel: a.default_model ?? "",
+            })),
+          );
+        }
+      } catch (err) {
+        console.error("[App init] preload avatars failed:", err);
+      }
+
       let recovered = false;
       try {
         const raw = window.localStorage.getItem(WORKSPACE_STATE_STORAGE_KEY);
@@ -586,9 +622,30 @@ export function App() {
               })),
               activePaneId: nextActivePaneId,
             });
-            // Re-apply sid bindings so store can restore per-session token cache.
+            // Re-apply sid bindings so store can restore per-session token cache
+            // and seed the model from the newly-returned session.provider/model
+            // field (S1). If the session has no remembered model, the store
+            // fallback chain (avatar.default > global.default) kicks in.
             for (const pane of hydratedPanes) {
-              setPaneSessionId(pane.id, pane.sessionId);
+              let hintProvider: string | undefined;
+              let hintModel: string | undefined;
+              const sid = String(pane.sessionId ?? "").trim();
+              if (sid) {
+                const rows = await getSessionsForAvatar(pane.avatarId ?? undefined).catch(() => []);
+                const row = rows.find((r) => String(r.session_id ?? "").trim() === sid);
+                hintProvider = row?.provider?.trim() || undefined;
+                hintModel = row?.model?.trim() || undefined;
+              }
+              setPaneSessionId(pane.id, pane.sessionId, {
+                provider: hintProvider,
+                model: hintModel,
+              });
+            }
+            // After binding, ensure activeProvider/activeModel follows the active pane.
+            const activeState = useAppStore.getState();
+            const activePane = activeState.panes.find((p) => p.id === activeState.activePaneId);
+            if (activePane?.modelProvider && activePane?.modelName) {
+              activeState.setActiveModel(activePane.modelProvider, activePane.modelName);
             }
             const metaPane = hydratedPanes.find((pane) => pane.id === "pane-meta");
             const nextSessionId =

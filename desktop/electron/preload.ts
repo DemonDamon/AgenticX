@@ -129,6 +129,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     system_prompt?: string;
     created_by?: string;
     tools_enabled?: Record<string, boolean>;
+    default_provider?: string;
+    default_model?: string;
   }) =>
     ipcRenderer.invoke("create-avatar", payload),
   updateAvatar: async (payload: {
@@ -139,6 +141,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     pinned?: boolean;
     system_prompt?: string;
     tools_enabled?: Record<string, boolean>;
+    default_provider?: string;
+    default_model?: string;
   }) =>
     ipcRenderer.invoke("update-avatar", payload),
   deleteAvatar: async (id: string) => ipcRenderer.invoke("delete-avatar", id),
@@ -198,6 +202,19 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("delete-sessions-batch", sessionIds),
   pinSession: async (payload: { sessionId: string; pinned: boolean }) =>
     ipcRenderer.invoke("pin-session", payload),
+  setSessionModel: async (payload: { sessionId: string; provider: string; model: string }) =>
+    ipcRenderer.invoke("set-session-model", payload),
+  loadLayout: async () => ipcRenderer.invoke("layout-get"),
+  saveLayout: async (payload: {
+    panes?: Array<{
+      id: string;
+      avatarId: string | null;
+      sessionId: string;
+      modelProvider: string;
+      modelName: string;
+    }>;
+    activePaneId?: string;
+  }) => ipcRenderer.invoke("layout-set", payload),
   forkSession: async (payload: { sessionId: string }) =>
     ipcRenderer.invoke("fork-session", payload),
   archiveSessions: async (payload: { sessionId: string; avatarId?: string | null }) =>

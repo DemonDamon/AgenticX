@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { AvatarToolPermissionDialog } from "./AvatarToolPermissionDialog";
+import { DefaultModelSelect } from "./DefaultModelSelect";
 
 type SkillRow = { name: string; description: string };
 
@@ -13,6 +14,8 @@ type Props = {
     systemPrompt: string;
     toolsEnabled: Record<string, boolean>;
     skillsEnabled?: Record<string, boolean>;
+    defaultProvider?: string;
+    defaultModel?: string;
   }) => Promise<void>;
 };
 
@@ -32,6 +35,8 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
   const [loadingSkills, setLoadingSkills] = useState(false);
   /** Per-skill `false` = disabled for this avatar (aligned with avatar.yaml skills_enabled). */
   const [skillsEnabledDraft, setSkillsEnabledDraft] = useState<Record<string, boolean>>({});
+  const [defaultProvider, setDefaultProvider] = useState("");
+  const [defaultModel, setDefaultModel] = useState("");
   const customizedCount = Object.keys(toolsEnabled).filter((key) => toolsEnabled[key] !== undefined).length;
   const skillsCustomizedCount = Object.keys(skillsEnabledDraft).filter((k) => skillsEnabledDraft[k] === false).length;
 
@@ -70,12 +75,16 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
         systemPrompt: systemPrompt.trim(),
         toolsEnabled: { ...toolsEnabled },
         ...(Object.keys(skillsOnlyFalse).length > 0 ? { skillsEnabled: skillsOnlyFalse } : {}),
+        defaultProvider: defaultProvider.trim(),
+        defaultModel: defaultModel.trim(),
       });
       setName("");
       setRole("");
       setSystemPrompt("");
       setToolsEnabled({});
       setSkillsEnabledDraft({});
+      setDefaultProvider("");
+      setDefaultModel("");
       setSkillsSectionOpen(false);
       setToolsDialogOpen(false);
       onClose();
@@ -113,6 +122,8 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
     setSkillsEnabledDraft({});
     setSkillsSectionOpen(false);
     setToolsDialogOpen(false);
+    setDefaultProvider("");
+    setDefaultModel("");
     onClose();
   };
 
@@ -169,6 +180,18 @@ export function AvatarCreateDialog({ open, onClose, onCreate }: Props) {
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   placeholder="自定义角色行为指令..."
+                />
+              </label>
+              <label className="block text-sm text-text-muted">
+                默认模型
+                <span className="ml-1 text-xs text-text-faint">(新建会话时使用)</span>
+                <DefaultModelSelect
+                  provider={defaultProvider}
+                  model={defaultModel}
+                  onChange={(p, m) => {
+                    setDefaultProvider(p);
+                    setDefaultModel(m);
+                  }}
                 />
               </label>
 

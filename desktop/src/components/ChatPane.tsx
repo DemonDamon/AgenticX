@@ -198,6 +198,12 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     setOpen(false);
     // Persist the current pane model as global fallback for restarts.
     void window.agenticxDesktop.saveConfig({ activeProvider: provider, activeModel: model });
+    // If this pane is bound to a real session, record the model against that
+    // session so a cold restart + jump-back restores the exact pick.
+    const sid = String(paneModel?.sessionId ?? "").trim();
+    if (sid) {
+      void window.agenticxDesktop.setSessionModel({ sessionId: sid, provider, model });
+    }
   };
 
   const options = useMemo(() => {

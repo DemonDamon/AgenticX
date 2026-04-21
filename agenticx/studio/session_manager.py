@@ -323,6 +323,8 @@ class SessionManager:
                 "pinned": bool(getattr(managed, "pinned", False)),
                 "archived": bool(getattr(managed, "archived", False)),
                 "execution_state": str(getattr(managed, "execution_state", "idle") or "idle"),
+                "provider": str(getattr(managed.studio_session, "provider_name", "") or ""),
+                "model": str(getattr(managed.studio_session, "model_name", "") or ""),
             })
         for row in self._list_persisted_sessions():
             sid = str(row.get("session_id", "")).strip()
@@ -433,6 +435,33 @@ class SessionManager:
         managed.session_name = name
         managed.updated_at = time.time()
         self._persist_session_state(session_id, managed.studio_session)
+        return True
+
+    def set_session_model(
+        self,
+        session_id: str,
+        *,
+        provider: Optional[str],
+        model: Optional[str],
+    ) -> bool:
+        """Update the session's active LLM provider/model and persist to disk.
+
+        Triggered by the desktop model-picker so a session's last-used model
+        survives app restarts (the UI re-applies it via list_sessions()).
+        Returns True if the session exists (either in memory or persistence).
+        """
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False
+        managed = self.get(sid)
+        if managed is None:
+            return False
+        prov_clean = str(provider or "").strip()
+        model_clean = str(model or "").strip()
+        managed.studio_session.provider_name = prov_clean
+        managed.studio_session.model_name = model_clean
+        managed.updated_at = time.time()
+        self._persist_session_state(sid, managed.studio_session)
         return True
 
     @staticmethod
@@ -1095,6 +1124,8 @@ class SessionManager:
                     "pinned": bool(metadata.get("pinned", False)),
                     "archived": bool(metadata.get("archived", False)),
                     "execution_state": str(metadata.get("execution_state", "idle") or "idle"),
+                    "provider": str(metadata.get("provider", "") or ""),
+                    "model": str(metadata.get("model", "") or ""),
                 }
             )
         known = {str(row.get("session_id", "")) for row in rows}
@@ -1143,6 +1174,8 @@ class SessionManager:
                         "pinned": False,
                         "archived": False,
                         "execution_state": str(fs_meta.get("execution_state", "idle") or "idle"),
+                        "provider": str(fs_meta.get("provider", "") or ""),
+                        "model": str(fs_meta.get("model", "") or ""),
                     }
                 )
         return rows
