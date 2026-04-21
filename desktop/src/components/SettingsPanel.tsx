@@ -41,6 +41,7 @@ import { useAppStore } from "../store";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { RECOMMENDED_SKILLS } from "../data/recommended-skills";
 import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
+import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
 import { AutomationTab } from "./automation/AutomationTab";
@@ -4743,7 +4744,12 @@ export function SettingsPanel({
   /** API 密钥显隐（切换左侧厂商时恢复为隐藏） */
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [mcpExtraPaths, setMcpExtraPaths] = useState<string[]>([]);
-  const [mcpBusy, setMcpBusy] = useState(false);
+  const [mcpPathSaving, setMcpPathSaving] = useState(false);
+  const [mcpServerBusy, setMcpServerBusy] = useState<Record<string, boolean>>({});
+  const mcpServerInFlightRef = useRef<Record<string, boolean>>({});
+  const mcpQueuedToggleRef = useRef<Record<string, boolean>>({});
+  const [mcpOptimisticChecked, setMcpOptimisticChecked] = useState<Record<string, boolean>>({});
+  const [mcpImportBusy, setMcpImportBusy] = useState(false);
   const [mcpMessage, setMcpMessage] = useState("");
   const [mcpErrorInspect, setMcpErrorInspect] = useState<{ title: string; body: string } | null>(null);
   const [mcpDiscoverLoading, setMcpDiscoverLoading] = useState(false);
@@ -4988,7 +4994,7 @@ export function SettingsPanel({
   const persistMcpExtraPaths = useCallback(
     async (next: string[]) => {
       const cleaned = next.map((x) => x.trim()).filter(Boolean);
-      setMcpBusy(true);
+      setMcpPathSaving(true);
       setMcpMessage("");
       try {
         const r = await window.agenticxDesktop.putMcpSettings({ extraSearchPaths: cleaned });
@@ -5002,7 +5008,7 @@ export function SettingsPanel({
       } catch (err) {
         setMcpMessage(`保存路径失败: ${String(err)}`);
       } finally {
-        setMcpBusy(false);
+        setMcpPathSaving(false);
       }
     },
     [sessionId, onRefreshMcp]
@@ -5275,43 +5281,86 @@ export function SettingsPanel({
     onClose();
   };
 
-  const handleConnectMcp = async (name: string) => {
+  const runMcpToggleRequest = useCallback(async (name: string, next: boolean) => {
     if (!sessionId) return;
-    setMcpBusy(true);
     setMcpMessage("");
+    const actionLabel = next ? "连接" : "断开";
     try {
-      const result = await window.agenticxDesktop.connectMcp({ sessionId, name });
+      const result = next
+        ? await window.agenticxDesktop.connectMcp({ sessionId, name })
+        : await window.agenticxDesktop.disconnectMcp({ sessionId, name });
       if (result.ok) {
         await onRefreshMcp(sessionId);
-        setMcpMessage(`已连接 ${name}；下次启动 Machi 将自动重连此项。`);
+        setMcpMessage(next ? `已连接 ${name}；下次启动 Machi 将自动重连此项。` : `已断开 ${name}，且不再自动连接。`);
       } else {
-        setMcpMessage(`连接失败: ${result.error ?? "未知错误"}`);
+        const detail = String(result.error ?? "未知错误");
+        if (detail.includes("连接已取消")) return;
+        try {
+          await onRefreshMcp(sessionId);
+        } catch {
+          // best-effort refresh
+        }
+        setMcpMessage(`${actionLabel}失败: ${detail}`);
       }
     } catch (err) {
-      setMcpMessage(`连接失败: ${String(err)}`);
-    } finally {
-      setMcpBusy(false);
+      const detail = String(err);
+      if (detail.includes("连接已取消")) return;
+      try {
+        await onRefreshMcp(sessionId);
+      } catch {
+        // best-effort refresh
+      }
+      setMcpMessage(`${actionLabel}失败: ${detail}`);
     }
-  };
+  }, [onRefreshMcp, sessionId]);
 
-  const handleDisconnectMcp = async (name: string) => {
+  const handleToggleMcp = useCallback((name: string, next: boolean) => {
     if (!sessionId) return;
-    setMcpBusy(true);
-    setMcpMessage("");
-    try {
-      const result = await window.agenticxDesktop.disconnectMcp({ sessionId, name });
-      if (result.ok) {
-        await onRefreshMcp(sessionId);
-        setMcpMessage(`已断开 ${name}，且不再自动连接。`);
-      } else {
-        setMcpMessage(`断开失败: ${result.error ?? "未知错误"}`);
+    setMcpOptimisticChecked((prev) => ({ ...prev, [name]: next }));
+    if (mcpServerInFlightRef.current[name]) {
+      mcpQueuedToggleRef.current[name] = next;
+      if (!next) {
+        // 连接中立即关闭：立刻发起断开，触发后端对 in-flight connect 的取消。
+        void window.agenticxDesktop
+          .disconnectMcp({ sessionId, name })
+          .then(async (result) => {
+            if (!result?.ok) return;
+            try {
+              await onRefreshMcp(sessionId);
+            } catch {
+              // best-effort refresh
+            }
+          })
+          .catch(() => {
+            // best-effort cancel
+          });
       }
-    } catch (err) {
-      setMcpMessage(`断开失败: ${String(err)}`);
-    } finally {
-      setMcpBusy(false);
+      return;
     }
-  };
+    mcpServerInFlightRef.current[name] = true;
+    setMcpServerBusy((prev) => ({ ...prev, [name]: true }));
+    const runLoop = async () => {
+      let desired = next;
+      while (true) {
+        delete mcpQueuedToggleRef.current[name];
+        await runMcpToggleRequest(name, desired);
+        const queued = mcpQueuedToggleRef.current[name];
+        if (typeof queued !== "boolean" || queued === desired) break;
+        desired = queued;
+        setMcpOptimisticChecked((prev) => ({ ...prev, [name]: desired }));
+      }
+    };
+    void runLoop().finally(() => {
+      mcpServerInFlightRef.current[name] = false;
+      delete mcpQueuedToggleRef.current[name];
+      setMcpServerBusy((prev) => ({ ...prev, [name]: false }));
+      setMcpOptimisticChecked((prev) => {
+        const nextState = { ...prev };
+        delete nextState[name];
+        return nextState;
+      });
+    });
+  }, [runMcpToggleRequest, sessionId]);
 
   const refreshMcpDiscover = useCallback(async () => {
     setMcpDiscoverLoading(true);
@@ -5367,7 +5416,7 @@ export function SettingsPanel({
         setMcpMessage("该路径不存在，无法导入。");
         return;
       }
-      setMcpBusy(true);
+      setMcpImportBusy(true);
       setMcpMessage("");
       try {
         const res = await window.agenticxDesktop.importMcpConfig({ sessionId, sourcePath: hit.path });
@@ -5380,7 +5429,7 @@ export function SettingsPanel({
       } catch (err) {
         setMcpMessage(`导入失败: ${String(err)}`);
       } finally {
-        setMcpBusy(false);
+        setMcpImportBusy(false);
       }
     },
     [onRefreshMcp, sessionId],
@@ -5439,6 +5488,15 @@ export function SettingsPanel({
       void refreshMcpMarketplace();
     }
   }, [open, tab, mcpDiscoverHits.length, mcpMarketplaceItems.length, refreshMcpDiscover, refreshMcpMarketplace]);
+
+  useEffect(() => {
+    if (!open || tab !== "mcp" || !sessionId) return;
+    void onRefreshMcp(sessionId);
+    const timer = window.setInterval(() => {
+      void onRefreshMcp(sessionId);
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [onRefreshMcp, open, sessionId, tab]);
 
   if (!open) return null;
 
@@ -6255,6 +6313,7 @@ export function SettingsPanel({
                         className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
                         value={row}
                         placeholder="例如 ~/.cursor/mcp.json"
+                        disabled={mcpPathSaving}
                         onChange={(e) => {
                           const v = e.target.value;
                           setMcpExtraPaths((prev) => prev.map((p, i) => (i === idx ? v : p)));
@@ -6264,13 +6323,12 @@ export function SettingsPanel({
                           const next = mcpExtraPaths.map((p, i) => (i === idx ? v : p));
                           void persistMcpExtraPaths(next);
                         }}
-                        disabled={mcpBusy}
                       />
                       <button
                         type="button"
                         className="shrink-0 rounded-md border border-border p-2 text-text-subtle transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
                         title="移除此路径"
-                        disabled={mcpBusy}
+                        disabled={mcpPathSaving}
                         onClick={() => {
                           const next = mcpExtraPaths.filter((_, i) => i !== idx);
                           setMcpExtraPaths(next);
@@ -6293,7 +6351,7 @@ export function SettingsPanel({
                   <button
                     type="button"
                     className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-                    disabled={mcpBusy}
+                    disabled={mcpPathSaving}
                     onClick={() => setMcpExtraPaths((prev) => [...prev, ""])}
                   >
                     <Plus className="h-3.5 w-3.5" aria-hidden />
@@ -6344,6 +6402,12 @@ export function SettingsPanel({
                     ) : null}
                     {mcpServers.map((server) => {
                       const pres = resolveMcpRowPresentation(server);
+                      const optimisticChecked = mcpOptimisticChecked[server.name];
+                      const switchChecked = typeof optimisticChecked === "boolean" ? optimisticChecked : server.connected;
+                      const forceDisconnectedMessage = Boolean(mcpServerBusy[server.name]) && !switchChecked;
+                      const latestOpMessage = forceDisconnectedMessage
+                        ? "未连接"
+                        : server.op_message?.trim() || `状态：${pres.statusLine}`;
                       return (
                         <div
                           key={server.name}
@@ -6382,18 +6446,30 @@ export function SettingsPanel({
                               {server.command ? (
                                 <div className="truncate text-[10px] text-text-faint">{server.command}</div>
                               ) : null}
+                              {latestOpMessage ? (
+                                <div
+                                  className={`truncate text-[11px] ${
+                                    server.op_phase === "failed" ? "text-rose-400" : "text-text-faint"
+                                  }`}
+                                  title={latestOpMessage}
+                                >
+                                  {latestOpMessage}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center justify-end sm:pl-2">
                             <SettingsSwitch
-                              checked={server.connected}
-                              disabled={mcpBusy || !sessionId}
+                              checked={switchChecked}
+                              disabled={shouldDisableMcpToggle({
+                                hasSession: Boolean(sessionId),
+                                isBusy: Boolean(mcpServerBusy[server.name]),
+                              })}
                               onChange={(next) => {
-                                if (next) void handleConnectMcp(server.name);
-                                else void handleDisconnectMcp(server.name);
+                                handleToggleMcp(server.name, next);
                               }}
                               aria-label={
-                                server.connected ? `已连接 ${server.name}，关闭以断开` : `连接 ${server.name}`
+                                switchChecked ? `已连接 ${server.name}，关闭以断开` : `连接 ${server.name}`
                               }
                             />
                           </div>
@@ -6431,7 +6507,7 @@ export function SettingsPanel({
                               <button
                                 type="button"
                                 className="shrink-0 rounded-md bg-[var(--settings-accent-solid)] px-2 py-1 text-xs text-[var(--settings-accent-solid-text)] disabled:opacity-40"
-                                disabled={mcpBusy || hit.format === "detect-only"}
+                                disabled={mcpImportBusy || hit.format === "detect-only"}
                                 onClick={() => void handleImportDiscoveredMcp(hit)}
                               >
                                 导入

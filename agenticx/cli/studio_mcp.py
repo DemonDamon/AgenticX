@@ -521,8 +521,43 @@ async def mcp_connect_async(
 
     client = MCPClientV2(cfg)
 
+    # Overall connection timeout. Honors cfg.timeout when larger than the
+    # safety floor so long-running bootstrap (e.g. browser-use with timeout=600)
+    # keeps working, while defaulting commands (docker run ..., uvx ..., ...)
+    # that hang forever fail fast with a human-readable reason.
+    cfg_timeout = float(getattr(cfg, "timeout", 60.0) or 60.0)
+    connect_timeout = max(cfg_timeout, 120.0)
+
+    cmd_lower = str(getattr(cfg, "command", "") or "").strip().lower()
+    if cmd_lower == "docker":
+        hint = (
+            "Docker 子进程未在时限内返回；请确认 Docker Desktop 已完全启动、"
+            "`docker info` 能秒回，且镜像能正常拉取（若配置了 HTTP(S)_PROXY，"
+            "请确认该代理实际可达）。"
+        )
+    elif cmd_lower == "uvx":
+        hint = "uvx 子进程未在时限内返回；请确认已安装 uv，且网络可访问目标包索引。"
+    elif cmd_lower == "npx":
+        hint = "npx 子进程未在时限内返回；请确认 Node/npm 可用，网络可访问 npm 源。"
+    else:
+        hint = f"{cmd_lower or '子进程'} 未在时限内返回；请确认该命令本身可执行。"
+
     try:
-        own_tools = await client.discover_tools()
+        own_tools = await asyncio.wait_for(client.discover_tools(), timeout=connect_timeout)
+    except asyncio.CancelledError:
+        try:
+            await client.close()
+        except Exception:
+            pass
+        return False, "连接已取消"
+    except asyncio.TimeoutError:
+        msg = f"连接握手超时（{int(connect_timeout)}s）：{hint}"
+        console.print(f"[red]连接 {name} 失败:[/red] {msg}")
+        try:
+            await client.close()
+        except Exception:
+            pass
+        return False, msg
     except Exception as exc:
         console.print(f"[red]连接 {name} 失败:[/red] {exc}")
         try:
@@ -533,7 +568,29 @@ async def mcp_connect_async(
 
     hub.clients.append(client)
     try:
-        await hub.discover_all_tools()
+        await asyncio.wait_for(hub.discover_all_tools(), timeout=connect_timeout)
+    except asyncio.CancelledError:
+        try:
+            hub.clients.remove(client)
+        except ValueError:
+            pass
+        try:
+            await client.close()
+        except Exception:
+            pass
+        return False, "连接已取消"
+    except asyncio.TimeoutError:
+        msg = f"合并工具路由超时（{int(connect_timeout)}s）；可能有其它 MCP 连接卡住，请逐个排查。"
+        console.print(f"[red]连接 {name} 失败:[/red] {msg}")
+        try:
+            hub.clients.remove(client)
+        except ValueError:
+            pass
+        try:
+            await client.close()
+        except Exception:
+            pass
+        return False, msg
     except Exception as exc:
         console.print(f"[red]连接 {name} 失败:[/red] {exc}")
         try:
