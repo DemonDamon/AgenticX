@@ -1582,6 +1582,36 @@ function repoAdjacentVenvBinDirs(): string[] {
   return out;
 }
 
+function nvmNodeBinDirs(home: string): string[] {
+  if (process.platform === "win32") return [];
+  const root = path.join(home, ".nvm", "versions", "node");
+  const out: string[] = [];
+  const currentBin = path.join(home, ".nvm", "current", "bin");
+  try {
+    if (fs.statSync(currentBin).isDirectory()) out.push(currentBin);
+  } catch {
+    /* noop */
+  }
+  try {
+    const entries = fs.readdirSync(root, { withFileTypes: true });
+    const dirs = entries
+      .filter((e) => e.isDirectory())
+      .map((e) => path.join(root, e.name, "bin"))
+      .filter((p) => {
+        try {
+          return fs.statSync(p).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+    // Prefer newer versions first while keeping deterministic order.
+    out.push(...dirs.sort().reverse());
+    return out;
+  } catch {
+    return out;
+  }
+}
+
 function buildAugmentedPath(): string {
   const home = os.homedir();
   const sep = pathListSeparator();
@@ -1590,6 +1620,7 @@ function buildAugmentedPath(): string {
 
   const venvDirs = repoAdjacentVenvBinDirs();
   let extraPaths: string[];
+  let trailingPaths: string[] = [];
   if (process.platform === "win32") {
     const localAppData = process.env.LOCALAPPDATA || "";
     const appDataRoaming = process.env.APPDATA || "";
@@ -1621,20 +1652,32 @@ function buildAugmentedPath(): string {
     extraPaths = [
       ...venvDirs,
       ...pyUserBins,
+      ...nvmNodeBinDirs(home),
       "/opt/miniconda3/bin",
       "/opt/miniconda3/condabin",
       `${home}/miniconda3/bin`,
       `${home}/opt/miniconda3/bin`,
+      `${home}/.volta/bin`,
       "/opt/homebrew/bin",
       "/usr/local/bin",
       `${home}/.local/bin`,
-      `${home}/.pyenv/shims`,
-      `${home}/.rye/shims`,
       `${home}/bin`,
     ];
+    // Keep shim-based managers as fallback (after base PATH) to avoid shadowing healthy system binaries.
+    trailingPaths = [
+      `${home}/.fnm`,
+      `${home}/.asdf/shims`,
+      `${home}/.nodenv/shims`,
+      `${home}/.pyenv/shims`,
+      `${home}/.rye/shims`,
+    ];
   }
-  const prefix = extraPaths.join(sep);
-  return prefix ? `${prefix}${sep}${basePath}` : basePath;
+  const prefix = extraPaths.filter(Boolean).join(sep);
+  const suffix = trailingPaths.filter(Boolean).join(sep);
+  if (prefix && suffix) return `${prefix}${sep}${basePath}${sep}${suffix}`;
+  if (prefix) return `${prefix}${sep}${basePath}`;
+  if (suffix) return `${basePath}${sep}${suffix}`;
+  return basePath;
 }
 
 /**
