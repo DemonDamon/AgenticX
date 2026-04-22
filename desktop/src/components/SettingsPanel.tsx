@@ -4749,7 +4749,6 @@ export function SettingsPanel({
   const mcpServerInFlightRef = useRef<Record<string, boolean>>({});
   const mcpQueuedToggleRef = useRef<Record<string, boolean>>({});
   const [mcpOptimisticChecked, setMcpOptimisticChecked] = useState<Record<string, boolean>>({});
-  const [mcpImportBusy, setMcpImportBusy] = useState(false);
   const [mcpMessage, setMcpMessage] = useState("");
   const [mcpErrorInspect, setMcpErrorInspect] = useState<{ title: string; body: string } | null>(null);
   const [mcpDiscoverLoading, setMcpDiscoverLoading] = useState(false);
@@ -5405,43 +5404,6 @@ export function SettingsPanel({
       setMcpMarketplaceLoading(false);
     }
   }, [mcpMarketplaceSearch]);
-
-  const handleImportDiscoveredMcp = useCallback(
-    async (hit: MCPDiscoveryHit) => {
-      if (!sessionId) {
-        setMcpMessage("请先进入一个会话，再导入 MCP。");
-        return;
-      }
-      if (!hit.exists) {
-        setMcpMessage("该路径不存在，无法导入。");
-        return;
-      }
-      setMcpImportBusy(true);
-      setMcpMessage("");
-      try {
-        const res = await window.agenticxDesktop.importMcpConfig({ sessionId, sourcePath: hit.path });
-        if (!res.ok) {
-          setMcpMessage(`导入失败: ${res.error ?? "未知错误"}`);
-          return;
-        }
-        await onRefreshMcp(sessionId);
-        setMcpMessage(`导入完成：新增 ${res.total_imported ?? 0} 个服务。`);
-      } catch (err) {
-        setMcpMessage(`导入失败: ${String(err)}`);
-      } finally {
-        setMcpImportBusy(false);
-      }
-    },
-    [onRefreshMcp, sessionId],
-  );
-
-  const handleLinkOnlyDiscoveredMcp = useCallback(
-    async (hit: MCPDiscoveryHit) => {
-      const next = Array.from(new Set([...mcpExtraPaths, hit.path])).filter(Boolean);
-      await persistMcpExtraPaths(next);
-    },
-    [mcpExtraPaths, persistMcpExtraPaths],
-  );
 
   const handleInstallMarketplaceMcp = useCallback(
     async (serverId: string, env: Record<string, string>) => {
@@ -6267,12 +6229,6 @@ export function SettingsPanel({
 
             {/* === MCP TAB === */}
             {tab === "mcp" && (() => {
-              const installedNames = new Set(mcpServers.map((s) => s.name));
-              const newHits = mcpDiscoverHits.filter((h) => {
-                if (h.path === MCP_PRIMARY_CONFIG_PATH || h.brand === "agenticx") return false;
-                if (!h.exists || !h.parse_ok || h.server_count === 0) return false;
-                return h.servers.some((s) => !installedNames.has(s.name));
-              });
               const openEditorFor = (path: string) => {
                 setMcpEditorPath(path);
                 setMcpEditorOpen(true);
@@ -6395,7 +6351,7 @@ export function SettingsPanel({
                   </div>
 
                   <div className="space-y-1.5">
-                    {mcpServers.length === 0 && newHits.length === 0 ? (
+                    {mcpServers.length === 0 ? (
                       <div className="py-6 text-center text-sm text-text-faint">
                         尚未发现 MCP 服务。点右上角「扫描发现」或下方「New MCP Server」添加。
                       </div>
@@ -6476,55 +6432,6 @@ export function SettingsPanel({
                         </div>
                       );
                     })}
-
-                    {/* 扫描发现但尚未安装的 */}
-                    {newHits.length > 0 ? (
-                      <>
-                        <div className="pt-2 text-[11px] text-text-faint">
-                          从本地其他 AI 工具扫描到（未安装）：
-                        </div>
-                        {newHits.map((hit) => {
-                          const newServers = hit.servers.filter((s) => !installedNames.has(s.name));
-                          return (
-                            <div
-                              key={`${hit.brand}-${hit.path}`}
-                              className="flex items-center gap-2 rounded-md border border-dashed border-border bg-surface-panel px-3 py-2"
-                            >
-                              <span className="mt-0 h-2 w-2 shrink-0 rounded-full bg-text-faint" aria-hidden />
-                              <div className="min-w-0 flex-1">
-                                <div className="truncate text-sm font-medium text-text-muted">
-                                  {hit.display_name}
-                                  <span className="ml-2 text-[11px] text-text-faint">
-                                    {newServers.length} 个新服务
-                                  </span>
-                                </div>
-                                <div className="truncate text-[11px] text-text-faint">
-                                  {newServers.slice(0, 4).map((s) => s.name).join("、")}
-                                  {newServers.length > 4 ? "…" : ""}
-                                </div>
-                                <div className="truncate text-[10px] text-text-faint">{hit.path}</div>
-                              </div>
-                              <button
-                                type="button"
-                                className="shrink-0 rounded-md bg-[var(--settings-accent-solid)] px-2 py-1 text-xs text-[var(--settings-accent-solid-text)] disabled:opacity-40"
-                                disabled={mcpImportBusy || hit.format === "detect-only"}
-                                onClick={() => void handleImportDiscoveredMcp(hit)}
-                              >
-                                导入
-                              </button>
-                              <button
-                                type="button"
-                                className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover"
-                                onClick={() => void handleLinkOnlyDiscoveredMcp(hit)}
-                                title="仅链接：不合并到主配置，追加到配置路径按顺序合并"
-                              >
-                                仅链接
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </>
-                    ) : null}
 
                     {/* New MCP Server */}
                     <button
