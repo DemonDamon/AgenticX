@@ -188,6 +188,8 @@ type McpServerItem = {
   command?: string;
   connection_state?: "healthy" | "error" | "disconnected";
   tool_count?: number;
+  /** Original tool names registered by this server (available when connected & healthy). */
+  tool_names?: string[];
   error_detail?: string;
   op_phase?: string;
   op_message?: string;
@@ -569,9 +571,10 @@ declare global {
         ok: boolean;
         extra_search_paths?: string[];
         auto_connect?: string[];
+        disabled_tools?: Record<string, string[]>;
         error?: string;
       }>;
-      putMcpSettings: (payload: { extraSearchPaths: string[] }) => Promise<{
+      putMcpSettings: (payload: { extraSearchPaths: string[]; disabledTools?: Record<string, string[]> }) => Promise<{
         ok: boolean;
         extra_search_paths?: string[];
         error?: string;

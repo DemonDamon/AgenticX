@@ -24,6 +24,8 @@ export type McpServer = {
   /** healthy=握手且已注册工具；error=仍标记已连但当前无工具（多为子进程失效）；disconnected=未连 */
   connection_state?: "healthy" | "error" | "disconnected";
   tool_count?: number;
+  /** Original tool names registered by this server (populated when connected & healthy). */
+  tool_names?: string[];
   error_detail?: string;
   /** 最新运维状态：idle/preparing/connecting/healthy/failed/disconnecting */
   op_phase?: string;

@@ -41,6 +41,7 @@ from agenticx.cli.studio_mcp import (
     append_mcp_auto_connect_name,
     auto_connect_servers,
     auto_connect_servers_async,
+    get_mcp_disabled_tools_config,
     get_mcp_extra_search_paths_config,
     import_mcp_config,
     load_available_servers,
@@ -48,6 +49,7 @@ from agenticx.cli.studio_mcp import (
     mcp_connect_async,
     mcp_disconnect_async,
     remove_mcp_auto_connect_name,
+    set_mcp_disabled_tools_config,
     set_mcp_extra_search_paths_config,
 )
 from agenticx.llms.provider_resolver import ProviderResolver
@@ -111,6 +113,25 @@ def _mcp_tool_counts_for_session(studio_session: Any) -> dict[str, int]:
         key = str(srv)
         counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+def _mcp_tool_names_for_session(studio_session: Any) -> dict[str, list[str]]:
+    """Return original tool names grouped by configured server name."""
+    hub = getattr(studio_session, "mcp_hub", None)
+    routing = getattr(hub, "_tool_routing", None) if hub is not None else None
+    if not routing:
+        return {}
+    result: dict[str, list[str]] = {}
+    for _routed_name, route in routing.items():
+        try:
+            srv = str(route.client.server_config.name)
+            original = str(route.original_name)
+        except Exception:
+            continue
+        result.setdefault(srv, [])
+        if original not in result[srv]:
+            result[srv].append(original)
+    return result
 
 
 def _get_mcp_server_ops(studio_session: Any) -> dict[str, dict[str, Any]]:
@@ -2231,6 +2252,7 @@ def create_studio_app() -> FastAPI:
             else set(sess.connected_servers or [])
         )
         tool_counts = _mcp_tool_counts_for_session(sess)
+        tool_names_map = _mcp_tool_names_for_session(sess)
         server_ops = _get_mcp_server_ops(sess)
         servers = []
         for name, cfg in sorted(configs.items()):
@@ -2252,6 +2274,7 @@ def create_studio_app() -> FastAPI:
                     "command": str(getattr(cfg, "command", "") or ""),
                     "connection_state": conn_state,
                     "tool_count": n_tools,
+                    "tool_names": sorted(tool_names_map.get(name, [])),
                     "error_detail": err_detail,
                     "op_phase": str((server_ops.get(name, {}) or {}).get("phase", "idle") or "idle"),
                     "op_message": str((server_ops.get(name, {}) or {}).get("message", "") or ""),
@@ -2378,10 +2401,12 @@ def create_studio_app() -> FastAPI:
             auto_list = [str(x).strip() for x in ac_raw if str(x).strip()]
         elif isinstance(ac_raw, str) and ac_raw.strip() and ac_raw.strip().lower() != "all":
             auto_list = [ac_raw.strip()]
+        disabled_tools = get_mcp_disabled_tools_config()
         return {
             "ok": True,
             "extra_search_paths": extra,
             "auto_connect": auto_list,
+            "disabled_tools": disabled_tools,
         }
 
     @app.put("/api/mcp/settings")
@@ -2395,6 +2420,13 @@ def create_studio_app() -> FastAPI:
             if not isinstance(extra, list):
                 raise HTTPException(status_code=400, detail="extra_search_paths must be a list")
             set_mcp_extra_search_paths_config([str(x) for x in extra])
+        disabled_tools = payload.get("disabled_tools")
+        if disabled_tools is not None:
+            if not isinstance(disabled_tools, dict):
+                raise HTTPException(status_code=400, detail="disabled_tools must be a dict")
+            set_mcp_disabled_tools_config(
+                {str(k): [str(t) for t in v] for k, v in disabled_tools.items() if isinstance(v, list)}
+            )
         return {
             "ok": True,
             "extra_search_paths": list(get_mcp_extra_search_paths_config()),

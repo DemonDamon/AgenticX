@@ -3955,8 +3955,12 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("put-mcp-settings", async (_event, payload: { extraSearchPaths: string[] }) => {
+  ipcMain.handle("put-mcp-settings", async (_event, payload: { extraSearchPaths: string[]; disabledTools?: Record<string, string[]> }) => {
     const paths = Array.isArray(payload?.extraSearchPaths) ? payload.extraSearchPaths : [];
+    const body: Record<string, unknown> = { extra_search_paths: paths };
+    if (payload?.disabledTools !== undefined) {
+      body.disabled_tools = payload.disabledTools;
+    }
     try {
       const resp = await fetch(`${getStudioUrl()}/api/mcp/settings`, {
         method: "PUT",
@@ -3964,7 +3968,7 @@ function registerIpc(): void {
           "Content-Type": "application/json",
           "x-agx-desktop-token": getStudioToken(),
         },
-        body: JSON.stringify({ extra_search_paths: paths }),
+        body: JSON.stringify(body),
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
