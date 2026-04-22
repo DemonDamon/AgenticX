@@ -328,6 +328,7 @@ export function App() {
           command: item.command,
           connection_state: item.connection_state,
           tool_count: typeof item.tool_count === "number" ? item.tool_count : undefined,
+          tool_names: Array.isArray(item.tool_names) ? (item.tool_names as string[]) : undefined,
           error_detail: item.error_detail,
           op_phase: typeof item.op_phase === "string" ? item.op_phase : undefined,
           op_message: typeof item.op_message === "string" ? item.op_message : undefined,
@@ -706,6 +707,19 @@ export function App() {
         if (!sessionCreated) {
           console.error("[App init] all session creation attempts failed");
         }
+      }
+
+      // Final safety net for old/bad workspace snapshots: if the active pane
+      // is still model-less after all restore branches, rehydrate from
+      // config-level activeProvider/activeModel.
+      const bootState = useAppStore.getState();
+      const bootActivePane = bootState.panes.find((p) => p.id === bootState.activePaneId);
+      const paneProvider = String(bootActivePane?.modelProvider ?? "").trim();
+      const paneModel = String(bootActivePane?.modelName ?? "").trim();
+      const cfgProvider = String(bootState.activeProvider ?? "").trim();
+      const cfgModel = String(bootState.activeModel ?? "").trim();
+      if ((!paneProvider || !paneModel) && cfgProvider && cfgModel) {
+        bootState.setPaneModel(bootState.activePaneId, cfgProvider, cfgModel);
       }
 
       window.agenticxDesktop.onOpenSettings(() => openSettings());
