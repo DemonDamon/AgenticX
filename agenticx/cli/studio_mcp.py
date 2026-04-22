@@ -859,10 +859,50 @@ def mcp_call_tool(hub: "MCPHub", tool_name: str, args_json: str) -> str:
     )
 
 
+def get_mcp_disabled_tools_config() -> Dict[str, List[str]]:
+    """Return per-server lists of tool names that have been disabled by the user.
+
+    Returns a dict keyed by server name, value is a list of disabled tool names
+    (original names as registered by the MCP server, NOT the routed names).
+    """
+    from agenticx.cli.config_manager import ConfigManager
+
+    raw = ConfigManager.get_value("mcp.disabled_tools")
+    if not isinstance(raw, dict):
+        return {}
+    result: Dict[str, List[str]] = {}
+    for k, v in raw.items():
+        if not isinstance(v, list):
+            continue
+        result[str(k)] = [str(t) for t in v if t]
+    return result
+
+
+def set_mcp_disabled_tools_config(data: Dict[str, List[str]]) -> None:
+    """Persist per-server disabled tool lists to config."""
+    from agenticx.cli.config_manager import ConfigManager
+
+    cleaned: Dict[str, List[str]] = {}
+    for server_name, tools in data.items():
+        if not isinstance(tools, list):
+            continue
+        t_list = [str(t).strip() for t in tools if str(t).strip()]
+        if t_list:
+            cleaned[str(server_name)] = t_list
+    ConfigManager.set_value("mcp.disabled_tools", cleaned)
+
+
 def build_mcp_tools_context(hub: "MCPHub") -> str:
-    """Serialize connected MCP tools as text context for code generation."""
+    """Serialize connected MCP tools as text context for code generation.
+
+    Tools that the user has individually disabled via the UI are excluded so
+    the agent is not aware of them and cannot attempt to call them.
+    """
     if not hub._merged_tools:
         return ""
+
+    disabled_cfg = get_mcp_disabled_tools_config()
+
     parts = ["=== 可用的 MCP 工具 ===\n"]
     parts.append(
         "以下是用户已连接的 MCP 工具；`mcp_call` 的 `tool_name` 必须与下列名称**完全一致**。"
@@ -871,6 +911,9 @@ def build_mcp_tools_context(hub: "MCPHub") -> str:
     for tool_info in hub._merged_tools:
         route = hub._tool_routing.get(tool_info.name)
         source = route.client.server_config.name if route else "unknown"
+        original = route.original_name if route else tool_info.name
+        if original in disabled_cfg.get(source, []):
+            continue
         parts.append(f"工具: {tool_info.name} (来源: {source})")
         parts.append(f"  描述: {tool_info.description}")
         schema_str = json.dumps(tool_info.inputSchema, ensure_ascii=False, indent=2)
