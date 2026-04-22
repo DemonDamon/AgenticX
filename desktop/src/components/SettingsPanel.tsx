@@ -4755,9 +4755,38 @@ export function SettingsPanel({
   const [mcpDiscoverHits, setMcpDiscoverHits] = useState<MCPDiscoveryHit[]>([]);
   const [mcpMarketplaceLoading, setMcpMarketplaceLoading] = useState(false);
   const [mcpMarketplaceItems, setMcpMarketplaceItems] = useState<Array<Record<string, unknown>>>([]);
+  const [mcpMarketplaceSummary, setMcpMarketplaceSummary] = useState("");
   const [mcpMarketplaceSearch, setMcpMarketplaceSearch] = useState("");
   const [mcpMarketplaceInstallBusy, setMcpMarketplaceInstallBusy] = useState(false);
   const [mcpMarketplaceEnvSchema, setMcpMarketplaceEnvSchema] = useState<{ required: string[] }>({ required: [] });
+  const [mcpMarketplaceInstalledIds, setMcpMarketplaceInstalledIds] = useState<Set<string>>(new Set());
+  const [mcpMarketplaceInstallingId, setMcpMarketplaceInstallingId] = useState<string | null>(null);
+  const [mcpMarketplaceStatus, setMcpMarketplaceStatus] = useState<{
+    message: string;
+    kind: "info" | "success" | "error";
+    serverId?: string;
+  } | null>(null);
+  const [mcpMarketplaceIdToNames, setMcpMarketplaceIdToNames] = useState<Record<string, string[]>>(() => {
+    try {
+      const raw = window.localStorage.getItem("agenticx:mcp:marketplaceIdToNames");
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        const out: Record<string, string[]> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          if (Array.isArray(v)) out[k] = v.filter((x): x is string => typeof x === "string");
+        }
+        return out;
+      }
+    } catch {
+      // ignore
+    }
+    return {};
+  });
+  const mcpMarketplaceDetailInFlightRef = useRef<Set<string>>(new Set());
+  const mcpMarketplaceRequestSeqRef = useRef(0);
+  const [mcpDisabledTools, setMcpDisabledTools] = useState<Record<string, string[]>>({});
+  const [mcpExpandedServers, setMcpExpandedServers] = useState<Set<string>>(new Set());
   const [mcpEditorOpen, setMcpEditorOpen] = useState(false);
   const [mcpEditorPath, setMcpEditorPath] = useState(MCP_PRIMARY_CONFIG_PATH);
 
@@ -4986,6 +5015,9 @@ export function SettingsPanel({
     void window.agenticxDesktop.getMcpSettings().then((r) => {
       if (r.ok && Array.isArray(r.extra_search_paths)) {
         setMcpExtraPaths([...r.extra_search_paths]);
+      }
+      if (r.ok && r.disabled_tools && typeof r.disabled_tools === "object") {
+        setMcpDisabledTools(r.disabled_tools as Record<string, string[]>);
       }
     });
   }, [open, tab]);
@@ -5313,6 +5345,32 @@ export function SettingsPanel({
     }
   }, [onRefreshMcp, sessionId]);
 
+  const handleToggleMcpTool = useCallback(
+    (serverName: string, toolName: string, currentlyDisabled: boolean) => {
+      setMcpDisabledTools((prev) => {
+        const current = new Set(prev[serverName] ?? []);
+        if (currentlyDisabled) {
+          current.delete(toolName);
+        } else {
+          current.add(toolName);
+        }
+        const nextMap = { ...prev };
+        if (current.size === 0) {
+          delete nextMap[serverName];
+        } else {
+          nextMap[serverName] = Array.from(current);
+        }
+        void window.agenticxDesktop
+          .putMcpSettings({ extraSearchPaths: mcpExtraPaths, disabledTools: nextMap })
+          .catch(() => {
+            // best-effort persist
+          });
+        return nextMap;
+      });
+    },
+    [mcpExtraPaths],
+  );
+
   const handleToggleMcp = useCallback((name: string, next: boolean) => {
     if (!sessionId) return;
     setMcpOptimisticChecked((prev) => ({ ...prev, [name]: next }));
@@ -5384,30 +5442,136 @@ export function SettingsPanel({
     }
   }, []);
 
+  const extractMarketplaceMcpServerNames = useCallback((item: Record<string, unknown> | undefined): string[] => {
+    const serverConfig = item?.server_config as unknown;
+    if (!Array.isArray(serverConfig) || serverConfig.length === 0) return [];
+    const names: string[] = [];
+    for (const cfg of serverConfig) {
+      if (!cfg || typeof cfg !== "object") continue;
+      const mcpServers = (cfg as { mcpServers?: unknown }).mcpServers;
+      if (!mcpServers || typeof mcpServers !== "object") continue;
+      for (const key of Object.keys(mcpServers as Record<string, unknown>)) {
+        if (key.trim()) names.push(key.trim());
+      }
+    }
+    return Array.from(new Set(names));
+  }, []);
+
+  const updateMarketplaceIdMapping = useCallback((serverId: string, names: string[]) => {
+    if (!serverId || names.length === 0) return;
+    setMcpMarketplaceIdToNames((prev) => {
+      const existing = prev[serverId] ?? [];
+      const merged = Array.from(new Set([...existing, ...names]));
+      if (
+        merged.length === existing.length &&
+        merged.every((n, i) => n === existing[i])
+      ) {
+        return prev;
+      }
+      return { ...prev, [serverId]: merged };
+    });
+  }, []);
+
   const refreshMcpMarketplace = useCallback(async () => {
+    const requestSeq = ++mcpMarketplaceRequestSeqRef.current;
+    const isStale = () => requestSeq !== mcpMarketplaceRequestSeqRef.current;
     setMcpMarketplaceLoading(true);
     setMcpMessage("");
+    setMcpMarketplaceSummary("");
     try {
+      const keyword = mcpMarketplaceSearch.trim();
+      const hasKeyword = keyword.length > 0;
+      const pageSize = hasKeyword ? 100 : 20;
       const res = await window.agenticxDesktop.mcpMarketplaceList({
-        search: mcpMarketplaceSearch.trim(),
+        search: keyword,
         page: 1,
-        pageSize: 20,
+        pageSize,
       });
+      if (isStale()) return;
       if (res?.ok && Array.isArray(res.items)) {
-        setMcpMarketplaceItems(res.items);
+        let rawItems = res.items as Array<Record<string, unknown>>;
+        const totalCount = Number(res.total_count ?? rawItems.length);
+        if (hasKeyword && totalCount > rawItems.length) {
+          const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+          const pagePromises: Array<Promise<{ ok: boolean; items?: Array<Record<string, unknown>> }>> = [];
+          for (let page = 2; page <= totalPages; page += 1) {
+            pagePromises.push(
+              window.agenticxDesktop.mcpMarketplaceList({
+                search: keyword,
+                page,
+                pageSize,
+              }),
+            );
+          }
+          const pageResults = await Promise.all(pagePromises);
+          if (isStale()) return;
+          for (const pageRes of pageResults) {
+            if (pageRes?.ok && Array.isArray(pageRes.items)) {
+              rawItems = rawItems.concat(pageRes.items as Array<Record<string, unknown>>);
+            }
+          }
+        }
+        const dedupedMap = new Map<string, Record<string, unknown>>();
+        for (const item of rawItems) {
+          const id = String((item as { id?: unknown }).id ?? "").trim();
+          if (!id) continue;
+          if (!dedupedMap.has(id)) dedupedMap.set(id, item);
+        }
+        const dedupedItems = Array.from(dedupedMap.values());
+        const enriched = await Promise.all(
+          dedupedItems.map(async (raw) => {
+            const id = String((raw as { id?: unknown }).id ?? "").trim();
+            if (!id) return raw;
+            try {
+              const detail = await window.agenticxDesktop.mcpMarketplaceDetail({ serverId: id });
+              const detailItem = (detail?.item as Record<string, unknown> | undefined) ?? undefined;
+              const names = extractMarketplaceMcpServerNames(detailItem);
+              if (names.length > 0) updateMarketplaceIdMapping(id, names);
+              return {
+                ...raw,
+                ...(detailItem ?? {}),
+              } as Record<string, unknown>;
+            } catch {
+              return raw;
+            }
+          }),
+        );
+        if (isStale()) return;
+        if (hasKeyword) {
+          setMcpMarketplaceItems(enriched);
+          setMcpMarketplaceSummary(`检索到 ${totalCount} 个，已全部展示`);
+          return;
+        }
+        const filtered = enriched.filter((item) => {
+          const isVerified = Boolean(item.is_verified);
+          const isHosted = Boolean(item.is_hosted);
+          const names = extractMarketplaceMcpServerNames(item);
+          return isVerified && isHosted && names.length > 0;
+        });
+        setMcpMarketplaceItems(filtered);
+        setMcpMarketplaceSummary(
+          `检索到 ${totalCount} 个，符合“官方认证 + 托管 + 可安装”条件 ${filtered.length} 个`,
+        );
+        if (totalCount > filtered.length) {
+          setMcpMessage(`已过滤 ${totalCount - filtered.length} 个非官方或不可安装条目`);
+        }
       } else {
         setMcpMessage(`市场加载失败: ${res?.error ?? "未知错误"}`);
       }
     } catch (err) {
       setMcpMessage(`市场加载失败: ${String(err)}`);
     } finally {
-      setMcpMarketplaceLoading(false);
+      if (!isStale()) {
+        setMcpMarketplaceLoading(false);
+      }
     }
-  }, [mcpMarketplaceSearch]);
+  }, [extractMarketplaceMcpServerNames, mcpMarketplaceSearch, updateMarketplaceIdMapping]);
 
   const handleInstallMarketplaceMcp = useCallback(
     async (serverId: string, env: Record<string, string>) => {
       setMcpMarketplaceInstallBusy(true);
+      setMcpMarketplaceInstallingId(serverId);
+      setMcpMarketplaceStatus({ message: `正在安装 ${serverId} ...`, kind: "info", serverId });
       setMcpMessage("");
       try {
         const detail = await window.agenticxDesktop.mcpMarketplaceDetail({ serverId });
@@ -5419,27 +5583,116 @@ export function SettingsPanel({
 
         const res = await window.agenticxDesktop.mcpMarketplaceInstall({ serverId, env });
         if (!res.ok) {
-          setMcpMessage(`安装失败: ${res.error ?? "未知错误"}`);
+          const errMsg = `安装失败：${res.error ?? "未知错误"}`;
+          setMcpMessage(errMsg);
+          setMcpMarketplaceStatus({ message: errMsg, kind: "error", serverId });
           return;
         }
-        setMcpMessage(
-          `安装成功：${[...(res.installed ?? []), ...(res.updated ?? [])].join("、") || serverId}`,
-        );
+        const installedNames = [...(res.installed ?? []), ...(res.updated ?? [])];
+        const installedLabel = installedNames.join("、") || serverId;
+        const okMsg = `安装成功：${installedLabel}`;
+        setMcpMessage(okMsg);
+        setMcpMarketplaceStatus({ message: okMsg, kind: "success", serverId });
+        setMcpMarketplaceInstalledIds((prev) => new Set([...prev, serverId]));
+        if (installedNames.length > 0) {
+          updateMarketplaceIdMapping(serverId, installedNames);
+        }
         if (sessionId) await onRefreshMcp(sessionId);
         await refreshMcpDiscover();
       } catch (err) {
-        setMcpMessage(`安装失败: ${String(err)}`);
+        const errMsg = `安装失败：${String(err)}`;
+        setMcpMessage(errMsg);
+        setMcpMarketplaceStatus({ message: errMsg, kind: "error", serverId });
       } finally {
         setMcpMarketplaceInstallBusy(false);
+        setMcpMarketplaceInstallingId(null);
       }
     },
-    [onRefreshMcp, refreshMcpDiscover, sessionId],
+    [onRefreshMcp, refreshMcpDiscover, sessionId, updateMarketplaceIdMapping],
   );
+
+  useEffect(() => {
+    if (!mcpMarketplaceStatus || mcpMarketplaceStatus.kind !== "success") return;
+    const timer = window.setTimeout(() => setMcpMarketplaceStatus(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [mcpMarketplaceStatus]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "agenticx:mcp:marketplaceIdToNames",
+        JSON.stringify(mcpMarketplaceIdToNames),
+      );
+    } catch {
+      // ignore quota errors
+    }
+  }, [mcpMarketplaceIdToNames]);
+
+  useEffect(() => {
+    if (!open || tab !== "mcp") return;
+    if (mcpMarketplaceItems.length === 0) return;
+    const installedServerNames = new Set(mcpServers.map((s) => s.name));
+    if (installedServerNames.size === 0) return;
+    const resolveDetail = async (serverId: string) => {
+      if (!serverId) return;
+      if (mcpMarketplaceIdToNames[serverId]) return;
+      if (mcpMarketplaceDetailInFlightRef.current.has(serverId)) return;
+      mcpMarketplaceDetailInFlightRef.current.add(serverId);
+      try {
+        const detail = await window.agenticxDesktop.mcpMarketplaceDetail({ serverId });
+        const names = extractMarketplaceMcpServerNames(detail?.item as Record<string, unknown> | undefined);
+        if (names.length === 0) return;
+        updateMarketplaceIdMapping(serverId, names);
+      } catch {
+        // best-effort; skip this item
+      } finally {
+        mcpMarketplaceDetailInFlightRef.current.delete(serverId);
+      }
+    };
+    for (const raw of mcpMarketplaceItems) {
+      const id = String((raw as { id?: unknown }).id ?? "").trim();
+      if (!id) continue;
+      if (mcpMarketplaceIdToNames[id]) continue;
+      void resolveDetail(id);
+    }
+  }, [open, tab, mcpMarketplaceItems, mcpServers, mcpMarketplaceIdToNames, extractMarketplaceMcpServerNames, updateMarketplaceIdMapping]);
 
   const mcpEditorFilePaths = useMemo(
     () => [MCP_PRIMARY_CONFIG_PATH, ...mcpExtraPaths.filter(Boolean)],
     [mcpExtraPaths],
   );
+
+  const mcpMarketplaceAllInstalledIds = useMemo(() => {
+    const serverNames = new Set(mcpServers.map((s) => s.name));
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const normalizedServerNames = new Set<string>();
+    for (const n of serverNames) {
+      const nn = normalize(n);
+      if (nn) normalizedServerNames.add(nn);
+    }
+    const installed = new Set<string>(mcpMarketplaceInstalledIds);
+    for (const raw of mcpMarketplaceItems) {
+      const id = String((raw as { id?: unknown }).id ?? "").trim();
+      if (!id || installed.has(id)) continue;
+      const mapped = mcpMarketplaceIdToNames[id];
+      if (mapped && mapped.some((n) => serverNames.has(n))) {
+        installed.add(id);
+        continue;
+      }
+      const candidates = [
+        id,
+        id.split("/").pop() ?? "",
+        String((raw as { name?: unknown }).name ?? ""),
+        String((raw as { chinese_name?: unknown }).chinese_name ?? ""),
+      ]
+        .map(normalize)
+        .filter(Boolean);
+      if (candidates.some((c) => normalizedServerNames.has(c))) {
+        installed.add(id);
+      }
+    }
+    return installed;
+  }, [mcpServers, mcpMarketplaceInstalledIds, mcpMarketplaceItems, mcpMarketplaceIdToNames]);
 
   useEffect(() => {
     if (!open || tab !== "mcp") return;
@@ -6364,71 +6617,131 @@ export function SettingsPanel({
                       const latestOpMessage = forceDisconnectedMessage
                         ? "未连接"
                         : server.op_message?.trim() || `状态：${pres.statusLine}`;
+                      const toolNames = server.tool_names ?? [];
+                      const disabledForServer = mcpDisabledTools[server.name] ?? [];
+                      const isExpanded = mcpExpandedServers.has(server.name);
+                      const canExpand = toolNames.length > 0;
                       return (
                         <div
                           key={server.name}
-                          className="flex flex-col gap-1 rounded-md border border-border bg-surface-card px-3 py-2 sm:flex-row sm:items-center sm:gap-2"
+                          className="rounded-md border border-border bg-surface-card"
                         >
-                          <div className="flex min-w-0 flex-1 items-start gap-2">
-                            <span
-                              className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${pres.dotClass}`}
-                              title={pres.statusLine}
-                            />
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-medium text-text-muted">{server.name}</div>
-                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                                <span className="text-[11px] text-text-subtle">{pres.statusLine}</span>
-                                {pres.detail ? (
-                                  <>
+                          {/* 主行 */}
+                          <div className="flex flex-col gap-1 px-3 py-2 sm:flex-row sm:items-center sm:gap-2">
+                            <div className="flex min-w-0 flex-1 items-start gap-2">
+                              <span
+                                className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${pres.dotClass}`}
+                                title={pres.statusLine}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1">
+                                  <span className="truncate text-sm font-medium text-text-muted">{server.name}</span>
+                                  {canExpand ? (
                                     <button
                                       type="button"
-                                      className="text-[11px] text-rose-400 underline decoration-dotted hover:text-rose-300"
+                                      className="shrink-0 rounded p-0.5 text-text-faint transition hover:bg-surface-hover hover:text-text-subtle"
+                                      title={isExpanded ? "收起工具列表" : `展开工具列表（${toolNames.length} 个）`}
                                       onClick={() =>
-                                        setMcpErrorInspect({ title: `${server.name} — 异常说明`, body: pres.detail! })
+                                        setMcpExpandedServers((prev) => {
+                                          const next = new Set(prev);
+                                          if (next.has(server.name)) next.delete(server.name);
+                                          else next.add(server.name);
+                                          return next;
+                                        })
                                       }
                                     >
-                                      查看详情
+                                      <ChevronRight
+                                        className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                                        aria-hidden
+                                      />
                                     </button>
-                                    <button
-                                      type="button"
-                                      className="text-[11px] text-[var(--settings-accent-text)] underline decoration-dotted"
-                                      onClick={() => openEditorFor(MCP_PRIMARY_CONFIG_PATH)}
-                                    >
-                                      用编辑器修复
-                                    </button>
-                                  </>
+                                  ) : null}
+                                  {canExpand ? (
+                                    <span className="shrink-0 text-[10px] text-text-faint">
+                                      {toolNames.length - disabledForServer.length}/{toolNames.length} 启用
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                  <span className="text-[11px] text-text-subtle">{pres.statusLine}</span>
+                                  {pres.detail ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="text-[11px] text-rose-400 underline decoration-dotted hover:text-rose-300"
+                                        onClick={() =>
+                                          setMcpErrorInspect({ title: `${server.name} — 异常说明`, body: pres.detail! })
+                                        }
+                                      >
+                                        查看详情
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="text-[11px] text-[var(--settings-accent-text)] underline decoration-dotted"
+                                        onClick={() => openEditorFor(MCP_PRIMARY_CONFIG_PATH)}
+                                      >
+                                        用编辑器修复
+                                      </button>
+                                    </>
+                                  ) : null}
+                                </div>
+                                {server.command ? (
+                                  <div className="truncate text-[10px] text-text-faint">{server.command}</div>
+                                ) : null}
+                                {latestOpMessage ? (
+                                  <div
+                                    className={`truncate text-[11px] ${
+                                      server.op_phase === "failed" ? "text-rose-400" : "text-text-faint"
+                                    }`}
+                                    title={latestOpMessage}
+                                  >
+                                    {latestOpMessage}
+                                  </div>
                                 ) : null}
                               </div>
-                              {server.command ? (
-                                <div className="truncate text-[10px] text-text-faint">{server.command}</div>
-                              ) : null}
-                              {latestOpMessage ? (
-                                <div
-                                  className={`truncate text-[11px] ${
-                                    server.op_phase === "failed" ? "text-rose-400" : "text-text-faint"
-                                  }`}
-                                  title={latestOpMessage}
-                                >
-                                  {latestOpMessage}
-                                </div>
-                              ) : null}
+                            </div>
+                            <div className="flex shrink-0 items-center justify-end sm:pl-2">
+                              <SettingsSwitch
+                                checked={switchChecked}
+                                disabled={shouldDisableMcpToggle({
+                                  hasSession: Boolean(sessionId),
+                                  isBusy: Boolean(mcpServerBusy[server.name]),
+                                })}
+                                onChange={(next) => {
+                                  handleToggleMcp(server.name, next);
+                                }}
+                                aria-label={
+                                  switchChecked ? `已连接 ${server.name}，关闭以断开` : `连接 ${server.name}`
+                                }
+                              />
                             </div>
                           </div>
-                          <div className="flex shrink-0 items-center justify-end sm:pl-2">
-                            <SettingsSwitch
-                              checked={switchChecked}
-                              disabled={shouldDisableMcpToggle({
-                                hasSession: Boolean(sessionId),
-                                isBusy: Boolean(mcpServerBusy[server.name]),
-                              })}
-                              onChange={(next) => {
-                                handleToggleMcp(server.name, next);
-                              }}
-                              aria-label={
-                                switchChecked ? `已连接 ${server.name}，关闭以断开` : `连接 ${server.name}`
-                              }
-                            />
-                          </div>
+
+                          {/* 展开的工具列表 */}
+                          {isExpanded && canExpand ? (
+                            <div className="border-t border-border px-3 pb-2.5 pt-2">
+                              <div className="flex flex-wrap gap-1.5">
+                                {toolNames.map((tool) => {
+                                  const isDisabled = disabledForServer.includes(tool);
+                                  return (
+                                    <button
+                                      key={tool}
+                                      type="button"
+                                      title={isDisabled ? `启用 ${tool}` : `禁用 ${tool}`}
+                                      onClick={() => handleToggleMcpTool(server.name, tool, isDisabled)}
+                                      className={`rounded-md border px-2 py-0.5 text-[11px] transition ${
+                                        isDisabled
+                                          ? "border-border bg-surface-panel text-text-faint line-through opacity-50"
+                                          : "border-border bg-surface-hover text-text-subtle hover:border-[var(--settings-accent-text)] hover:text-text-primary"
+                                      }`}
+                                    >
+                                      {tool}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })}
@@ -6453,18 +6766,24 @@ export function SettingsPanel({
                 {/* —— MCP 市场 —— */}
                 <div className="space-y-2 border-t border-border pt-4">
                   <div className="text-sm font-medium text-text-muted">MCP 市场</div>
-                  <div className="text-[11px] leading-relaxed text-text-faint">
-                    来自魔搭 ModelScope 的 MCP 服务仓库，点「添加」直接合并到主配置。
-                  </div>
+                  {/* <div className="text-[11px] leading-relaxed text-text-faint">
+                    仅展示官方认证且可安装的托管 MCP（已过滤第三方/不可安装条目），点「添加」直接合并到主配置。
+                  </div> */}
                   <MCPMarketplacePanel
                     loading={mcpMarketplaceLoading}
                     items={mcpMarketplaceItems as Array<Record<string, unknown> & { id: string }>}
+                    summary={mcpMarketplaceSummary}
                     search={mcpMarketplaceSearch}
                     onSearchChange={setMcpMarketplaceSearch}
                     onRefresh={refreshMcpMarketplace}
                     onInstall={handleInstallMarketplaceMcp}
                     resolving={mcpMarketplaceInstallBusy}
                     envSchema={mcpMarketplaceEnvSchema}
+                    installedIds={mcpMarketplaceAllInstalledIds}
+                    installingId={mcpMarketplaceInstallingId}
+                    statusMessage={mcpMarketplaceStatus?.message}
+                    statusKind={mcpMarketplaceStatus?.kind}
+                    statusTargetId={mcpMarketplaceStatus?.serverId}
                   />
                 </div>
               </div>
