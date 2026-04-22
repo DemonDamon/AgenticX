@@ -362,6 +362,71 @@ def _serialize_server_config(cfg: "MCPServerConfig") -> Dict[str, Any]:
     return data
 
 
+def _resolve_command_path(
+    command: str,
+    *,
+    cwd: Optional[str] = None,
+    env: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    """Best-effort resolve an executable from effective execution context."""
+    cmd = str(command or "").strip()
+    if not cmd:
+        return None
+    effective_env = env or dict(os.environ)
+    effective_path = str(effective_env.get("PATH") or "")
+    pathext = str(effective_env.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(";")
+    p = Path(cmd).expanduser()
+    if p.is_absolute() or "/" in cmd or "\\" in cmd:
+        if not p.is_absolute() and cwd:
+            p = Path(cwd).expanduser() / p
+        candidates = [p]
+        if os.name == "nt" and not p.suffix:
+            for ext in pathext:
+                ext_norm = ext.strip()
+                if not ext_norm:
+                    continue
+                if not ext_norm.startswith("."):
+                    ext_norm = f".{ext_norm}"
+                candidates.append(Path(f"{p}{ext_norm}"))
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+        return None
+    return shutil.which(cmd, path=effective_path)
+
+
+def _precheck_mcp_command(cfg: "MCPServerConfig") -> Tuple[bool, str]:
+    """Validate MCP command exists before attempting stdio handshake."""
+    cmd = str(getattr(cfg, "command", "") or "").strip()
+    if not cmd:
+        return False, "MCP 配置缺少 command 字段。"
+    effective_env: Dict[str, str] = dict(os.environ)
+    effective_env.update({str(k): str(v) for k, v in dict(getattr(cfg, "env", {}) or {}).items()})
+    effective_cwd_raw = str(getattr(cfg, "cwd", "") or "").strip()
+    effective_cwd = str(Path(effective_cwd_raw).expanduser()) if effective_cwd_raw else None
+    resolved = _resolve_command_path(cmd, cwd=effective_cwd, env=effective_env)
+    if resolved:
+        return True, ""
+
+    lower = cmd.lower()
+    sep = ";" if os.name == "nt" else ":"
+    path_entries = [p for p in str(effective_env.get("PATH") or "").split(sep) if p]
+    path_hint = ", ".join(path_entries[:6]) if path_entries else "(empty)"
+
+    if lower == "npx":
+        hint = (
+            "未找到 `npx`。请安装 Node.js（建议 LTS）并确保 npx 在 PATH 中；"
+            "若通过 nvm/fnm/asdf/volta 安装，请重启应用后重试。"
+        )
+    elif lower == "uvx":
+        hint = "未找到 `uvx`。请先安装 uv：https://docs.astral.sh/uv/getting-started/installation/"
+    elif lower == "docker":
+        hint = "未找到 `docker`。请安装并启动 Docker Desktop 后重试。"
+    else:
+        hint = f"未找到可执行命令 `{cmd}`。请确认该命令已安装并在 PATH 中。"
+    return False, f"{hint}（PATH 前缀：{path_hint}）"
+
+
 def load_available_servers() -> Dict[str, "MCPServerConfig"]:
     """Load MCP server configs from default paths.
 
@@ -510,6 +575,11 @@ async def mcp_connect_async(
     from agenticx.tools.remote_v2 import MCPClientV2
 
     cfg = configs[name]
+    ok_cmd, cmd_err = _precheck_mcp_command(cfg)
+    if not ok_cmd:
+        console.print(f"[red]连接 {name} 失败:[/red] {cmd_err}")
+        return False, cmd_err
+
     if name == "browser-use" and _is_stock_browser_use_mcp_config(cfg):
         ok_install, err = preflight_browser_use_install(echo=True)
         if not ok_install:
