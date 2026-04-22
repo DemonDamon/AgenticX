@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Check, Loader2 } from "lucide-react";
 import { Modal } from "../../ds/Modal";
 
 const MonacoEditor = lazy(async () => {
@@ -45,13 +46,25 @@ export function MCPJsonEditorModal({
   const [text, setText] = useState("");
   const [format, setFormat] = useState("json");
   const [message, setMessage] = useState("");
+  const [saveToast, setSaveToast] = useState("");
+  const saveToastTimerRef = useRef<number | null>(null);
+
+  // 父组件常把 onLoad/onSave 写成内联匿名函数，每次 rerender 引用都会变化。
+  // 这里用 ref 固化最新引用，effect 只依赖 open + selectedPath，避免定时刷新
+  // 导致编辑器不断重新读文件、覆盖用户正在编辑的文本、并让光标闪烁。
+  const onLoadRef = useRef(onLoad);
+  useEffect(() => {
+    onLoadRef.current = onLoad;
+  }, [onLoad]);
 
   useEffect(() => {
     if (!open || !selectedPath) return;
+    let cancelled = false;
     setLoading(true);
     setMessage("");
-    void onLoad(selectedPath)
+    void onLoadRef.current(selectedPath)
       .then((r) => {
+        if (cancelled) return;
         if (r.ok) {
           setText(String(r.text || ""));
           setFormat(String(r.format || "json"));
@@ -60,12 +73,78 @@ export function MCPJsonEditorModal({
           setMessage(r.error || "读取失败");
         }
       })
-      .finally(() => setLoading(false));
-  }, [open, selectedPath, onLoad]);
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, selectedPath]);
 
   const canSave = useMemo(() => format === "json" && !loading && !saving, [format, loading, saving]);
+  const showSaveToast = useCallback((msg: string) => {
+    setSaveToast(msg);
+    if (saveToastTimerRef.current !== null) {
+      window.clearTimeout(saveToastTimerRef.current);
+    }
+    saveToastTimerRef.current = window.setTimeout(() => {
+      setSaveToast("");
+      saveToastTimerRef.current = null;
+    }, 1800);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (saveToastTimerRef.current !== null) {
+        window.clearTimeout(saveToastTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const doSave = useCallback(async () => {
+    if (!canSave) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      const result = await onSave(selectedPath, text);
+      if (result.ok) {
+        setMessage("保存成功");
+        showSaveToast("已保存");
+      } else {
+        setMessage(result.error || "保存失败");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [canSave, onSave, selectedPath, showSaveToast, text]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && key === "s") {
+        event.preventDefault();
+        void doSave();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [doSave, open]);
 
   return (
+    <>
+      {saveToast
+        ? createPortal(
+            <div className="pointer-events-none fixed inset-0 z-[9999] flex items-center justify-center">
+              <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/40 bg-[#1a2a20]/90 px-6 py-3.5 shadow-2xl backdrop-blur-sm">
+                <Check className="h-4 w-4 shrink-0 text-emerald-400" strokeWidth={2.5} />
+                <span className="text-sm font-medium text-emerald-300">{saveToast}</span>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     <Modal
       open={open}
       title="编辑 MCP 配置"
@@ -87,12 +166,7 @@ export function MCPJsonEditorModal({
               className="rounded-md bg-[var(--settings-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--settings-accent-solid-text)] disabled:opacity-40"
               disabled={!canSave}
               onClick={() => {
-                if (!canSave) return;
-                setSaving(true);
-                setMessage("");
-                void onSave(selectedPath, text)
-                  .then((r) => setMessage(r.ok ? "保存成功" : (r.error || "保存失败")))
-                  .finally(() => setSaving(false));
+                void doSave();
               }}
             >
               {saving ? "保存中..." : "保存"}
@@ -160,5 +234,6 @@ export function MCPJsonEditorModal({
         </div>
       </div>
     </Modal>
+    </>
   );
 }
