@@ -27,6 +27,10 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   getApiAuthToken: async (): Promise<string> => ipcRenderer.invoke("get-api-auth-token"),
   platform: async (): Promise<string> => ipcRenderer.invoke("get-platform"),
   getConnectionMode: async (): Promise<"local" | "remote"> => ipcRenderer.invoke("get-connection-mode"),
+  focusModeEnter: async (): Promise<{ ok: boolean; alreadyActive?: boolean; error?: string }> =>
+    ipcRenderer.invoke("focus-mode-enter"),
+  focusModeExit: async (): Promise<{ ok: boolean; alreadyInactive?: boolean; error?: string }> =>
+    ipcRenderer.invoke("focus-mode-exit"),
   loadRemoteServer: async () =>
     ipcRenderer.invoke("load-remote-server") as Promise<{ enabled: boolean; url: string; token: string }>,
   saveRemoteServer: async (payload: { enabled: boolean; url: string; token: string }) =>

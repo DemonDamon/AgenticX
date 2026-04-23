@@ -4,6 +4,7 @@ export type KeybindingAction =
   | "clear-messages"
   | "toggle-mode"
   | "toggle-plan-mode"
+  | "toggle-focus-mode"
   | "open-keybindings";
 export type UserMode = "pro" | "lite";
 
@@ -21,6 +22,7 @@ const RULES: MatchRule[] = [
   { action: "clear-messages", key: "l", ctrlOrMeta: true, mode: "pro" },
   { action: "toggle-mode", key: "m", ctrlOrMeta: true, shift: true, mode: "both" },
   { action: "toggle-plan-mode", key: "p", ctrlOrMeta: true, shift: true, mode: "pro" },
+  { action: "toggle-focus-mode", key: "f", ctrlOrMeta: true, shift: true, mode: "pro" },
   { action: "open-keybindings", key: "/", ctrlOrMeta: true, mode: "pro" },
 ];
 

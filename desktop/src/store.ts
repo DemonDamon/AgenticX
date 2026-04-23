@@ -212,6 +212,21 @@ type ConfirmState = {
   context?: Record<string, unknown>;
 };
 
+type FocusSnapshot = {
+  sidebarCollapsed: boolean;
+  panePanels: Record<
+    string,
+    {
+      historyOpen: boolean;
+      taskspacePanelOpen: boolean;
+      membersPanelOpen: boolean;
+      spawnsColumnOpen: boolean;
+      spawnsColumnSuppressAuto: boolean;
+      spawnsColumnBaselineIds: string[];
+    }
+  >;
+};
+
 export type ProviderEntry = {
   apiKey: string;
   baseUrl: string;
@@ -257,6 +272,10 @@ type AppState = {
   commandPaletteOpen: boolean;
   keybindingsPanelOpen: boolean;
   planMode: boolean;
+  sidebarCollapsed: boolean;
+  focusMode: boolean;
+  focusModeTall: boolean;
+  focusSnapshot: FocusSnapshot | null;
   theme: ThemeMode;
   /** Machi 官网账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
   agxAccount: { loggedIn: boolean; email: string; displayName: string };
@@ -301,6 +320,11 @@ type AppState = {
   setCommandPaletteOpen: (v: boolean) => void;
   setKeybindingsPanelOpen: (v: boolean) => void;
   setPlanMode: (v: boolean) => void;
+  setSidebarCollapsed: (v: boolean | ((prev: boolean) => boolean)) => void;
+  enterFocusMode: () => void;
+  exitFocusMode: () => void;
+  toggleFocusMode: () => void;
+  setFocusModeTall: (v: boolean) => void;
   setTheme: (theme: ThemeMode) => void;
   setAgxAccount: (acct: { loggedIn: boolean; email: string; displayName: string }) => void;
   setChatStyle: (style: ChatStyle) => void;
@@ -575,6 +599,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   commandPaletteOpen: false,
   keybindingsPanelOpen: false,
   planMode: false,
+  sidebarCollapsed: false,
+  focusMode: false,
+  focusModeTall: false,
+  focusSnapshot: null,
   theme: "dark",
   agxAccount: { loggedIn: false, email: "", displayName: "" },
   chatStyle: loadChatStyle(),
@@ -629,6 +657,99 @@ export const useAppStore = create<AppState>((set, get) => ({
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
   setKeybindingsPanelOpen: (keybindingsPanelOpen) => set({ keybindingsPanelOpen }),
   setPlanMode: (planMode) => set({ planMode }),
+  setSidebarCollapsed: (next) =>
+    set((state) => ({
+      sidebarCollapsed:
+        typeof next === "function" ? next(state.sidebarCollapsed) : next,
+    })),
+  setFocusModeTall: (v) => set({ focusModeTall: v }),
+  enterFocusMode: () => {
+    const already = get().focusMode;
+    set((state) => {
+      if (state.focusMode) return state;
+      const panePanels: FocusSnapshot["panePanels"] = {};
+      for (const pane of state.panes) {
+        panePanels[pane.id] = {
+          historyOpen: pane.historyOpen,
+          taskspacePanelOpen: pane.taskspacePanelOpen,
+          membersPanelOpen: pane.membersPanelOpen,
+          spawnsColumnOpen: pane.spawnsColumnOpen,
+          spawnsColumnSuppressAuto: pane.spawnsColumnSuppressAuto,
+          spawnsColumnBaselineIds: [...(pane.spawnsColumnBaselineIds ?? [])],
+        };
+      }
+      return {
+        focusMode: true,
+        focusModeTall: false,
+        focusSnapshot: {
+          sidebarCollapsed: state.sidebarCollapsed,
+          panePanels,
+        },
+        sidebarCollapsed: true,
+        panes: state.panes.map((pane) => ({
+          ...pane,
+          historyOpen: false,
+          taskspacePanelOpen: false,
+          membersPanelOpen: false,
+          spawnsColumnOpen: false,
+        })),
+      };
+    });
+    if (!already) {
+      // Fire-and-forget: shrink the actual Electron window to a compact
+      // capsule. Older preload builds may not expose this IPC — in that case
+      // we silently fall back to in-renderer layout only.
+      try {
+        void window.agenticxDesktop?.focusModeEnter?.();
+      } catch {
+        // ignore IPC errors; UI-only focus mode still works
+      }
+    }
+  },
+  exitFocusMode: () => {
+    const wasActive = get().focusMode;
+    set((state) => {
+      if (!state.focusMode) return state;
+      const snapshot = state.focusSnapshot;
+      if (!snapshot) {
+        return { focusMode: false, focusModeTall: false, focusSnapshot: null };
+      }
+      return {
+        focusMode: false,
+        focusModeTall: false,
+        focusSnapshot: null,
+        sidebarCollapsed: snapshot.sidebarCollapsed,
+        panes: state.panes.map((pane) => {
+          const paneSnapshot = snapshot.panePanels[pane.id];
+          if (!paneSnapshot) return pane;
+          return {
+            ...pane,
+            historyOpen: paneSnapshot.historyOpen,
+            taskspacePanelOpen: paneSnapshot.taskspacePanelOpen,
+            membersPanelOpen: paneSnapshot.membersPanelOpen,
+            spawnsColumnOpen: paneSnapshot.spawnsColumnOpen,
+            spawnsColumnSuppressAuto: paneSnapshot.spawnsColumnSuppressAuto,
+            spawnsColumnBaselineIds: [...paneSnapshot.spawnsColumnBaselineIds],
+          };
+        }),
+      };
+    });
+    if (wasActive) {
+      try {
+        void window.agenticxDesktop?.focusModeExit?.();
+      } catch {
+        // ignore IPC errors; window will stay at current size
+      }
+    }
+  },
+  toggleFocusMode: () => {
+    const state = get();
+    if (state.focusMode) {
+      state.exitFocusMode();
+      return;
+    }
+    state.enterFocusMode();
+  },
   setTheme: (theme) => set({ theme }),
   setAgxAccount: (agxAccount) => set({ agxAccount }),
   setChatStyle: (chatStyle) =>
@@ -1029,31 +1150,40 @@ export const useAppStore = create<AppState>((set, get) => ({
       ),
     })),
   togglePaneHistory: (paneId) =>
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId ? { ...pane, historyOpen: !pane.historyOpen } : pane
-      ),
-    })),
+    set((state) => {
+      if (state.focusMode) return state;
+      return {
+        panes: state.panes.map((pane) =>
+          pane.id === paneId ? { ...pane, historyOpen: !pane.historyOpen } : pane
+        ),
+      };
+    }),
   cycleSidePanel: (paneId, tab) =>
-    set((state) => ({
-      panes: state.panes.map((pane) => {
-        if (pane.id !== paneId) return pane;
-        if (tab === "workspace") {
-          return { ...pane, taskspacePanelOpen: !pane.taskspacePanelOpen, sidePanelTab: "workspace" };
-        }
-        return { ...pane, membersPanelOpen: !pane.membersPanelOpen, sidePanelTab: "members" };
-      }),
-    })),
+    set((state) => {
+      if (state.focusMode) return state;
+      return {
+        panes: state.panes.map((pane) => {
+          if (pane.id !== paneId) return pane;
+          if (tab === "workspace") {
+            return { ...pane, taskspacePanelOpen: !pane.taskspacePanelOpen, sidePanelTab: "workspace" };
+          }
+          return { ...pane, membersPanelOpen: !pane.membersPanelOpen, sidePanelTab: "members" };
+        }),
+      };
+    }),
   openSidePanel: (paneId, tab) =>
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId
-          ? tab === "workspace"
-            ? { ...pane, taskspacePanelOpen: true, sidePanelTab: "workspace" }
-            : { ...pane, membersPanelOpen: true, sidePanelTab: "members" }
-          : pane
-      ),
-    })),
+    set((state) => {
+      if (state.focusMode) return state;
+      return {
+        panes: state.panes.map((pane) =>
+          pane.id === paneId
+            ? tab === "workspace"
+              ? { ...pane, taskspacePanelOpen: true, sidePanelTab: "workspace" }
+              : { ...pane, membersPanelOpen: true, sidePanelTab: "members" }
+            : pane
+        ),
+      };
+    }),
   toggleTaskspacePanel: (paneId) => {
     get().cycleSidePanel(paneId, "workspace");
   },
@@ -1071,38 +1201,47 @@ export const useAppStore = create<AppState>((set, get) => ({
       panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, contextInherited: inherited } : pane)),
     })),
   setSpawnsColumnOpen: (paneId, open) =>
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId
-          ? {
-              ...pane,
-              spawnsColumnOpen: open,
-              ...(open ? { spawnsColumnSuppressAuto: false, spawnsColumnBaselineIds: [] } : {}),
-            }
-          : pane
-      ),
-    })),
+    set((state) => {
+      if (state.focusMode) return state;
+      return {
+        panes: state.panes.map((pane) =>
+          pane.id === paneId
+            ? {
+                ...pane,
+                spawnsColumnOpen: open,
+                ...(open ? { spawnsColumnSuppressAuto: false, spawnsColumnBaselineIds: [] } : {}),
+              }
+            : pane
+        ),
+      };
+    }),
   dismissSpawnsColumn: (paneId, baselineSubAgentIds) =>
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId
-          ? {
-              ...pane,
-              spawnsColumnOpen: false,
-              spawnsColumnSuppressAuto: true,
-              spawnsColumnBaselineIds: [...baselineSubAgentIds],
-            }
-          : pane
-      ),
-    })),
+    set((state) => {
+      if (state.focusMode) return state;
+      return {
+        panes: state.panes.map((pane) =>
+          pane.id === paneId
+            ? {
+                ...pane,
+                spawnsColumnOpen: false,
+                spawnsColumnSuppressAuto: true,
+                spawnsColumnBaselineIds: [...baselineSubAgentIds],
+              }
+            : pane
+        ),
+      };
+    }),
   clearSpawnsColumnSuppress: (paneId) =>
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === paneId
-          ? { ...pane, spawnsColumnSuppressAuto: false, spawnsColumnBaselineIds: [] }
-          : pane
-      ),
-    })),
+    set((state) => {
+      if (state.focusMode) return state;
+      return {
+        panes: state.panes.map((pane) =>
+          pane.id === paneId
+            ? { ...pane, spawnsColumnSuppressAuto: false, spawnsColumnBaselineIds: [] }
+            : pane
+        ),
+      };
+    }),
   addPaneTerminalTab: (paneId, cwd, labelHint, ccBridgePty) =>
     set((state) => {
       const pane = state.panes.find((p) => p.id === paneId);

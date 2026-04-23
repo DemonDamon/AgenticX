@@ -2,6 +2,25 @@ import { useEffect, useRef, useState } from "react";
 import { LogIn, LogOut, Moon, PanelLeftOpen, Settings, Sun, User } from "lucide-react";
 import { useAppStore } from "../store";
 
+function FocusModeLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="2" y="4" width="20" height="13" rx="2" />
+      <path d="M12 17v4" />
+      <path d="M8 21h8" />
+      <path d="M12 10.5c-1-1.33-2-2-3-2a2 2 0 1 0 0 4c1 0 2-.67 3-2Zm0 0c1 1.33 2 2 3 2a2 2 0 1 0 0-4c-1 0-2 .67-3 2Z" />
+    </svg>
+  );
+}
+
 type Props = {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
@@ -11,6 +30,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
   const openSettings = useAppStore((s) => s.openSettings);
+  const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const agxAccount = useAppStore((s) => s.agxAccount);
   const setAgxAccount = useAppStore((s) => s.setAgxAccount);
 
@@ -102,6 +122,14 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
         </button>
       </div>
       <div className="agx-topbar-right">
+        <button
+          className="agx-topbar-btn"
+          onClick={toggleFocusMode}
+          title="灵巧模式 (⇧⌘F)"
+          aria-label="进入灵巧模式"
+        >
+          <FocusModeLogo className="h-[15px] w-[15px] opacity-80" />
+        </button>
         <button
           className="agx-topbar-btn"
           onClick={onThemeToggle}

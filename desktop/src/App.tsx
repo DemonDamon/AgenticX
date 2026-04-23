@@ -232,6 +232,8 @@ export function App() {
   const setOnboardingCompleted = useAppStore((s) => s.setOnboardingCompleted);
   const setCommandPaletteOpen = useAppStore((s) => s.setCommandPaletteOpen);
   const setKeybindingsPanelOpen = useAppStore((s) => s.setKeybindingsPanelOpen);
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const clearMessages = useAppStore((s) => s.clearMessages);
   const confirmStrategy = useAppStore((s) => s.confirmStrategy);
   const setConfirmStrategy = useAppStore((s) => s.setConfirmStrategy);
@@ -239,6 +241,9 @@ export function App() {
   const setMcpServers = useAppStore((s) => s.setMcpServers);
   const planMode = useAppStore((s) => s.planMode);
   const setPlanMode = useAppStore((s) => s.setPlanMode);
+  const focusMode = useAppStore((s) => s.focusMode);
+  const focusModeTall = useAppStore((s) => s.focusModeTall);
+  const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
   const setAgxAccount = useAppStore((s) => s.setAgxAccount);
@@ -263,7 +268,6 @@ export function App() {
   const denyScopesRef = useRef<Set<string>>(new Set());
   const sessionInitDoneRef = useRef(false);
   const workspaceHydratedRef = useRef(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [windowResizing, setWindowResizing] = useState(false);
   const [startupOptimizing, setStartupOptimizing] = useState(true);
   const [configLoaded, setConfigLoaded] = useState(false);
@@ -1287,6 +1291,8 @@ export function App() {
         // Lite 模式已废弃，快捷键不再切换；保留 case 分支避免命中 default。
       } else if (action === "toggle-plan-mode") {
         setPlanMode(!planMode);
+      } else if (action === "toggle-focus-mode") {
+        toggleFocusMode();
       } else if (action === "open-keybindings") {
         setKeybindingsPanelOpen(true);
       }
@@ -1303,7 +1309,7 @@ export function App() {
     setConfirmStrategy,
     planMode,
     setPlanMode,
-    setKeybindingsPanelOpen,
+    toggleFocusMode,
   ]);
 
   const onOpenConfirm = async (
@@ -1810,7 +1816,9 @@ export function App() {
     <div
       className={`agx-app ${
         sidebarCollapsed || userMode !== "pro" || !apiBase ? "sidebar-collapsed" : ""
-      } ${windowResizing ? "window-resizing" : ""} ${startupOptimizing ? "startup-optimizing" : ""}`}
+      } ${windowResizing ? "window-resizing" : ""} ${startupOptimizing ? "startup-optimizing" : ""} ${
+        focusMode ? "focus-mode" : ""
+      } ${focusModeTall ? "focus-mode-tall" : ""}`}
     >
       {!configLoaded ? (
         <div className="flex h-full min-h-0 w-full items-center justify-center text-sm text-text-faint">
@@ -1825,7 +1833,7 @@ export function App() {
             </div>
           ) : null}
           <div className="agx-main-shell">
-            {userMode === "pro" ? (
+            {userMode === "pro" && !focusMode ? (
               <Topbar
                 sidebarCollapsed={sidebarCollapsed}
                 onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
