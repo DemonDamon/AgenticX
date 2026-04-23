@@ -326,6 +326,8 @@ declare global {
       getApiAuthToken: () => Promise<string>;
       platform: () => Promise<string>;
       getConnectionMode: () => Promise<"local" | "remote">;
+      focusModeEnter: () => Promise<{ ok: boolean; alreadyActive?: boolean; error?: string }>;
+      focusModeExit: () => Promise<{ ok: boolean; alreadyInactive?: boolean; error?: string }>;
       loadRemoteServer: () => Promise<{ enabled: boolean; url: string; token: string }>;
       saveRemoteServer: (payload: { enabled: boolean; url: string; token: string }) => Promise<{ ok: boolean; restart_required?: boolean }>;
       testRemoteServer: (payload: { url: string; token: string }) => Promise<{ ok: boolean; status?: number; error?: string }>;

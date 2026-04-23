@@ -1295,6 +1295,12 @@ function validateTrinityConfigPayload(input: unknown): { ok: true; config: Trini
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+/** When true, the scheduled bounds save is skipped so focus-mode's tiny
+ *  capsule size is never persisted to layout.json. */
+let focusModeActive = false;
+/** Saved bounds captured right before entering focus mode; restored on exit. */
+let focusModePreviousBounds: { x: number; y: number; width: number; height: number } | null = null;
+let focusModeWasMaximized = false;
 let apiPort = 8000;
 const apiToken = crypto.randomBytes(16).toString("hex");
 let serveProcess: ChildProcess | null = null;
@@ -2221,6 +2227,7 @@ function createWindow(): void {
     show: false,
     alwaysOnTop: false,
     skipTaskbar: false,
+    transparent: true,
     titleBarStyle: "hiddenInset",
     ...(vibrancyEnabled ? { vibrancy: "under-window" as const, visualEffectState: "followWindow" as const } : {}),
     backgroundColor: "#00000000",
@@ -2239,6 +2246,9 @@ function createWindow(): void {
   let boundsSaveTimer: NodeJS.Timeout | null = null;
   const scheduleBoundsSave = () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
+    // Focus mode forces a tiny capsule size; never persist that to disk —
+    // otherwise the next cold start would launch as a tiny 560x120 window.
+    if (focusModeActive) return;
     if (boundsSaveTimer) clearTimeout(boundsSaveTimer);
     boundsSaveTimer = setTimeout(() => {
       boundsSaveTimer = null;
@@ -2374,6 +2384,195 @@ function registerEarlyIpc(): void {
   ipcMain.handle("get-api-auth-token", async () => getStudioToken());
   ipcMain.handle("get-platform", async () => process.platform);
   ipcMain.handle("get-connection-mode", async () => remoteConfig ? "remote" : "local");
+
+  /**
+   * Focus Mode window shrink/restore.
+   * Enter: snapshot current normal bounds, drop window minimums, resize to a
+   *   compact Perplexity-style capsule (560x132), center horizontally on the
+   *   same display the window currently lives on, keep vertical anchor near
+   *   the top third so it feels like a HUD bar. No on-disk persistence.
+   * Exit: restore the snapshot (or re-maximize if it was maximized), put the
+   *   minimum sizes back, re-enable resizing. After this returns the debounced
+   *   scheduleBoundsSave can resume persisting user-driven resizes.
+   */
+  ipcMain.handle("focus-mode-enter", async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
+    if (focusModeActive) return { ok: true, alreadyActive: true };
+    try {
+      focusModeWasMaximized = mainWindow.isMaximized();
+      const baseBounds = focusModeWasMaximized
+        ? mainWindow.getNormalBounds()
+        : mainWindow.getBounds();
+      focusModePreviousBounds = {
+        x: baseBounds.x,
+        y: baseBounds.y,
+        width: baseBounds.width,
+        height: baseBounds.height,
+      };
+      focusModeActive = true;
+      if (focusModeWasMaximized) {
+        // unmaximize() emits resize which we skip via focusModeActive guard
+        mainWindow.unmaximize();
+      }
+      mainWindow.setMinimumSize(240, 80);
+      mainWindow.setResizable(false);
+      // macOS 专属：隐藏红绿黄；关闭系统阴影，让 CSS 自己绘制圆角+阴影。
+      if (process.platform === "darwin") {
+        try {
+          mainWindow.setWindowButtonVisibility(false);
+        } catch {
+          // older Electron builds may not have it on non-standard titlebar
+        }
+        try {
+          // Focus mode: DO NOT use macOS vibrancy. Any vibrancy material
+          // (sidebar/under-window/hud/…) paints a translucent gray under the
+          // window which makes our CSS look "wrapped in a dark frame".
+          // We want the window truly transparent so our CSS frosted layer is
+          // the ONLY visible shell.
+          mainWindow.setVibrancy(null);
+        } catch {
+          // ignore
+        }
+      }
+      try {
+        mainWindow.setBackgroundColor("#00000000");
+      } catch {
+        // ignore
+      }
+      mainWindow.setHasShadow(false);
+      mainWindow.setMovable(true);
+      // Perplexity 式浮动胶囊：置顶在所有普通窗口之上。
+      mainWindow.setAlwaysOnTop(true, "floating");
+      const capsuleWidth = 300;
+      const capsuleHeight = 110;
+      const { screen } = await import("electron");
+      const display = screen.getDisplayMatching(baseBounds) ?? screen.getPrimaryDisplay();
+      const area = display.workArea;
+      // 锚定在屏幕右上角，右边距 / 上边距 各留 24px。
+      const nextX = Math.round(area.x + area.width - capsuleWidth - 24);
+      const nextY = Math.round(area.y + 24);
+      mainWindow.setBounds({
+        x: nextX,
+        y: nextY,
+        width: capsuleWidth,
+        height: capsuleHeight,
+      });
+      return { ok: true };
+    } catch (error) {
+      // Best-effort rollback to avoid leaving focus-mode state half-applied.
+      focusModeActive = false;
+      try {
+        mainWindow.setMinimumSize(680, 480);
+        mainWindow.setResizable(true);
+        mainWindow.setAlwaysOnTop(false);
+        mainWindow.setHasShadow(true);
+        if (process.platform === "darwin") {
+          try {
+            mainWindow.setWindowButtonVisibility(true);
+          } catch {
+            // ignore
+          }
+          try {
+            const defaultVibrancyEnabled = process.env.AGX_ENABLE_VIBRANCY === "1";
+            if (defaultVibrancyEnabled) {
+              mainWindow.setVibrancy("under-window");
+            } else {
+              mainWindow.setVibrancy(null);
+            }
+          } catch {
+            // ignore
+          }
+        }
+        if (focusModePreviousBounds) {
+          mainWindow.setBounds(focusModePreviousBounds);
+        }
+        if (focusModeWasMaximized) {
+          mainWindow.maximize();
+        }
+      } catch {
+        // ignore rollback failures
+      }
+      focusModePreviousBounds = null;
+      focusModeWasMaximized = false;
+      return { ok: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle("focus-mode-expand", async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
+    if (!focusModeActive) return { ok: true, alreadyInactive: true };
+    try {
+      const bounds = mainWindow.getBounds();
+      const expandedHeight = 600; // 高度撑开容纳消息流
+      // 如果当前高度已经达到或超过，就不做处理
+      if (bounds.height >= expandedHeight) return { ok: true };
+      
+      try {
+        // Keep transparent background so acrylic/vibrancy can show through.
+        mainWindow.setBackgroundColor("#00000000");
+      } catch {
+        // ignore
+      }
+
+      mainWindow.setBounds({
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: expandedHeight,
+      });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle("focus-mode-exit", async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
+    if (!focusModeActive) return { ok: true, alreadyInactive: true };
+    try {
+      mainWindow.setMinimumSize(680, 480);
+      mainWindow.setResizable(true);
+      if (process.platform === "darwin") {
+        try {
+          mainWindow.setWindowButtonVisibility(true);
+        } catch {
+          // ignore
+        }
+        try {
+          // Restore the app-level vibrancy behavior when leaving focus mode.
+          const defaultVibrancyEnabled = process.env.AGX_ENABLE_VIBRANCY === "1";
+          if (defaultVibrancyEnabled) {
+            mainWindow.setVibrancy("under-window");
+          } else {
+            mainWindow.setVibrancy(null);
+          }
+        } catch {
+          // ignore
+        }
+      }
+      try {
+        mainWindow.setBackgroundColor("#00000000");
+      } catch {
+        // ignore
+      }
+      mainWindow.setHasShadow(true);
+      mainWindow.setAlwaysOnTop(false);
+      if (focusModePreviousBounds) {
+        mainWindow.setBounds(focusModePreviousBounds);
+      }
+      if (focusModeWasMaximized) {
+        mainWindow.maximize();
+      }
+      focusModePreviousBounds = null;
+      focusModeWasMaximized = false;
+      // Flip the flag LAST so any resize events above are still suppressed.
+      focusModeActive = false;
+      return { ok: true };
+    } catch (error) {
+      focusModeActive = false;
+      return { ok: false, error: String(error) };
+    }
+  });
 
   ipcMain.handle("load-config", async () => {
     const cfg = loadAgxConfig();
