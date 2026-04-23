@@ -97,6 +97,16 @@ function providerEffectiveOn(e: ProviderEntry | undefined): boolean {
   return e.enabled !== false && providerCredentialed(e);
 }
 
+function isLikelyLocalImagePath(raw: string): boolean {
+  const value = String(raw || "").trim();
+  if (!value) return false;
+  // Vite build assets look like "/assets/xxx.svg"; those should be used directly in <img src>.
+  if (value.startsWith("/assets/")) return false;
+  if (value.startsWith("file://")) return true;
+  if (value.startsWith("/")) return true;
+  return /^[a-zA-Z]:[\\/]/.test(value);
+}
+
 function providerEntryFromSaved(saved: Partial<ProviderEntry> | undefined): ProviderEntry {
   if (saved != null && typeof saved !== "object") {
     return {
@@ -2295,7 +2305,10 @@ function SkillsTab() {
   const [skillhubLoading, setSkillhubLoading] = useState(false);
   const [skillhubMsg, setSkillhubMsg] = useState("");
   const [skillhubHint, setSkillhubHint] = useState("");
-  const [recommendedIconData, setRecommendedIconData] = useState<Record<string, string>>({});
+  const [recommendedIconData, setRecommendedIconData] = useState<Record<string, string>>(() =>
+    Object.fromEntries(RECOMMENDED_SKILLS.map((skill) => [skill.id, skill.icon_src]))
+  );
+  const [recommendedIconBroken, setRecommendedIconBroken] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setBundleNeedsConfirmNonHigh(false);
@@ -2308,18 +2321,30 @@ function SkillsTab() {
     void (async () => {
       const next: Record<string, string> = {};
       for (const skill of RECOMMENDED_SKILLS) {
+        const iconSrc = String(skill.icon_src ?? "").trim();
+        if (!iconSrc) {
+          next[skill.id] = "";
+          continue;
+        }
+        if (!isLikelyLocalImagePath(iconSrc)) {
+          next[skill.id] = iconSrc;
+          continue;
+        }
         try {
-          const res = await window.agenticxDesktop.loadLocalImageDataUrl(skill.icon_src);
+          const res = await window.agenticxDesktop.loadLocalImageDataUrl(iconSrc);
           if (res?.ok && res.dataUrl) {
             next[skill.id] = res.dataUrl;
           } else {
-            next[skill.id] = skill.icon_src;
+            next[skill.id] = iconSrc;
           }
         } catch {
-          next[skill.id] = skill.icon_src;
+          next[skill.id] = iconSrc;
         }
       }
-      if (!cancelled) setRecommendedIconData(next);
+      if (!cancelled) {
+        setRecommendedIconData(next);
+        setRecommendedIconBroken({});
+      }
     })();
     return () => {
       cancelled = true;
@@ -3184,12 +3209,23 @@ function SkillsTab() {
               className="flex flex-col rounded-md border border-border bg-surface-card px-3 py-2.5 transition hover:bg-surface-hover/40"
             >
               <div className="flex items-start gap-2">
-                <img
-                  src={recommendedIconData[skill.id] || ""}
-                  alt={`${skill.name} 图标`}
-                  className="h-9 w-9 shrink-0 rounded-md border border-border/70 bg-white object-cover"
-                  loading="lazy"
-                />
+                {recommendedIconBroken[skill.id] || !(recommendedIconData[skill.id] || skill.icon_src) ? (
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-surface-panel text-xs font-semibold text-text-subtle">
+                    {(skill.name || skill.id).slice(0, 1).toUpperCase()}
+                  </div>
+                ) : (
+                  <img
+                    src={recommendedIconData[skill.id] || skill.icon_src}
+                    alt={`${skill.name} 图标`}
+                    className="h-9 w-9 shrink-0 rounded-md border border-border/70 bg-white object-cover"
+                    loading="lazy"
+                    onError={() =>
+                      setRecommendedIconBroken((prev) =>
+                        prev[skill.id] ? prev : { ...prev, [skill.id]: true }
+                      )
+                    }
+                  />
+                )}
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-sm font-medium text-text-primary">{skill.name}</span>

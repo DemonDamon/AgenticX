@@ -1,0 +1,7 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="128" height="128" rx="28" fill="#ECF7FF" />
+  <rect x="24" y="30" width="58" height="48" rx="10" fill="white" stroke="#1A9CFF" stroke-width="5" />
+  <path d="M84 44L104 36V72L84 64V44Z" fill="#1A9CFF" />
+  <rect x="20" y="86" width="88" height="24" rx="12" fill="#1A9CFF" />
+  <text x="64" y="104" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="white">MEETING</text>
+</svg>

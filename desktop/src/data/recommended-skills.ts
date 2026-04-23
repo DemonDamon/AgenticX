@@ -3,6 +3,10 @@
  * Provider pages publish these instructions for OpenClaw-compatible agents.
  */
 
+import tencentDocsIcon from "../assets/recommended/tencent-docs.svg";
+import tencentImaIcon from "../assets/recommended/tencent-ima.svg";
+import tencentMeetingIcon from "../assets/recommended/tencent-meeting.svg";
+
 export type RecommendedSkill = {
   id: string;
   name: string;
@@ -19,8 +23,7 @@ export const RECOMMENDED_SKILLS: RecommendedSkill[] = [
     name: "腾讯文档",
     provider: "腾讯",
     description: "按官方页面指引在 Machi / Meta-Agent 中接入腾讯文档技能。",
-    icon_src:
-      "/Users/damon/.cursor/projects/Users-damon-myWork-AgenticX/assets/____-ab01ce3b-357e-4216-a6dd-f68051c66900.png",
+    icon_src: tencentDocsIcon,
     official_url: "https://docs.qq.com/scenario/open-claw.html?nlc=1",
     category: "文档协作",
   },
@@ -29,8 +32,7 @@ export const RECOMMENDED_SKILLS: RecommendedSkill[] = [
     name: "ima 知识库",
     provider: "腾讯",
     description: "ima 笔记与知识库（读取、写入、检索）；请按官网申请 API Key。",
-    icon_src:
-      "/Users/damon/.cursor/projects/Users-damon-myWork-AgenticX/assets/image-04683518-ae83-41ad-b75c-aaf395a3c805.png",
+    icon_src: tencentImaIcon,
     official_url: "https://ima.qq.com/agent-interface",
     category: "知识库",
   },
@@ -39,8 +41,7 @@ export const RECOMMENDED_SKILLS: RecommendedSkill[] = [
     name: "腾讯会议",
     provider: "腾讯",
     description: "会议与日程、参会统计、转写与纪要等能力；安装步骤以官网说明为准。",
-    icon_src:
-      "/Users/damon/.cursor/projects/Users-damon-myWork-AgenticX/assets/____-05557fa7-4809-4fcf-91d7-2edef051266c.png",
+    icon_src: tencentMeetingIcon,
     official_url: "https://meeting.tencent.com/ai-skill/",
     category: "会议",
   },
