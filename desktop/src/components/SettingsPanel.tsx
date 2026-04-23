@@ -128,6 +128,7 @@ function providerEntryFromSaved(saved: Partial<ProviderEntry> | undefined): Prov
 }
 
 const MCP_PRIMARY_CONFIG_PATH = "~/.agenticx/mcp.json";
+const BUNDLED_DEFAULT_MCP_NAMES_FALLBACK = ["browser-use", "firecrawl"] as const;
 
 /** 与后端 `connection_state` 对齐；缺省时按 connected 推断（兼容旧 Studio） */
 function resolveMcpRowPresentation(server: McpServer): {
@@ -4786,9 +4787,16 @@ export function SettingsPanel({
   const mcpMarketplaceDetailInFlightRef = useRef<Set<string>>(new Set());
   const mcpMarketplaceRequestSeqRef = useRef(0);
   const [mcpDisabledTools, setMcpDisabledTools] = useState<Record<string, string[]>>({});
+  const [mcpSkipDefaultNames, setMcpSkipDefaultNames] = useState<string[]>([]);
+  const [mcpDefaultEntryNames, setMcpDefaultEntryNames] = useState<string[]>([
+    ...BUNDLED_DEFAULT_MCP_NAMES_FALLBACK,
+  ]);
+  const [mcpDeleteConfirmServerName, setMcpDeleteConfirmServerName] = useState<string | null>(null);
   const [mcpExpandedServers, setMcpExpandedServers] = useState<Set<string>>(new Set());
   const [mcpEditorOpen, setMcpEditorOpen] = useState(false);
   const [mcpEditorPath, setMcpEditorPath] = useState(MCP_PRIMARY_CONFIG_PATH);
+  const [mcpEditorFocusServerName, setMcpEditorFocusServerName] = useState<string | undefined>(undefined);
+  const [mcpEditorFocusToken, setMcpEditorFocusToken] = useState(0);
 
   const [serverMode, setServerMode] = useState<"local" | "remote">("local");
   const [serverUrl, setServerUrl] = useState("");
@@ -5018,6 +5026,12 @@ export function SettingsPanel({
       }
       if (r.ok && r.disabled_tools && typeof r.disabled_tools === "object") {
         setMcpDisabledTools(r.disabled_tools as Record<string, string[]>);
+      }
+      if (r.ok && Array.isArray(r.skip_default_names)) {
+        setMcpSkipDefaultNames(r.skip_default_names.map((x) => String(x).trim()).filter(Boolean));
+      }
+      if (r.ok && Array.isArray(r.default_entry_names)) {
+        setMcpDefaultEntryNames(r.default_entry_names.map((x) => String(x).trim()).filter(Boolean));
       }
     });
   }, [open, tab]);
@@ -5661,6 +5675,157 @@ export function SettingsPanel({
     () => [MCP_PRIMARY_CONFIG_PATH, ...mcpExtraPaths.filter(Boolean)],
     [mcpExtraPaths],
   );
+
+  const locateMcpServerPath = useCallback(async (serverName: string): Promise<string> => {
+    for (const path of mcpEditorFilePaths) {
+      try {
+        const result = await window.agenticxDesktop.mcpGetRaw({ path });
+        if (!result?.ok || typeof result.text !== "string") continue;
+        const text = result.text;
+        try {
+          const parsed = JSON.parse(text) as Record<string, unknown>;
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+          const nested = parsed.mcpServers;
+          if (
+            nested &&
+            typeof nested === "object" &&
+            !Array.isArray(nested) &&
+            Object.prototype.hasOwnProperty.call(nested, serverName)
+          ) {
+            return path;
+          }
+          if (Object.prototype.hasOwnProperty.call(parsed, serverName)) {
+            return path;
+          }
+        } catch {
+          if (text.includes(`"${serverName}"`)) return path;
+        }
+      } catch {
+        // keep scanning
+      }
+    }
+    return MCP_PRIMARY_CONFIG_PATH;
+  }, [mcpEditorFilePaths]);
+
+  const openMcpEditor = useCallback((path: string, focusServerName?: string) => {
+    setMcpEditorPath(path);
+    setMcpEditorFocusServerName(focusServerName);
+    setMcpEditorFocusToken((prev) => prev + 1);
+    setMcpEditorOpen(true);
+  }, []);
+
+  const openMcpEditorForServer = useCallback(async (serverName: string) => {
+    const path = await locateMcpServerPath(serverName);
+    openMcpEditor(path, serverName);
+  }, [locateMcpServerPath, openMcpEditor]);
+
+  const handleDeleteMcpServer = useCallback(async (serverName: string) => {
+    const name = serverName.trim();
+    if (!name) return;
+    setMcpServerBusy((prev) => ({ ...prev, [name]: true }));
+    setMcpMessage("");
+    try {
+      const path = await locateMcpServerPath(name);
+      const raw = await window.agenticxDesktop.mcpGetRaw({ path });
+      if (!raw?.ok || typeof raw.text !== "string") {
+        setMcpMessage(`删除失败：无法读取配置文件 ${path}`);
+        return;
+      }
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(raw.text) as Record<string, unknown>;
+      } catch (err) {
+        setMcpMessage(`删除失败：配置文件不是有效 JSON（${String(err)}）`);
+        return;
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        setMcpMessage(`删除失败：配置文件结构无效（${path}）`);
+        return;
+      }
+      let changed = false;
+      const nested = parsed.mcpServers;
+      if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+        const mcpServersObj = nested as Record<string, unknown>;
+        if (Object.prototype.hasOwnProperty.call(mcpServersObj, name)) {
+          delete mcpServersObj[name];
+          changed = true;
+        }
+      }
+      if (
+        !changed &&
+        name !== "mcpServers" &&
+        Object.prototype.hasOwnProperty.call(parsed, name)
+      ) {
+        delete parsed[name];
+        changed = true;
+      }
+      if (!changed) {
+        setMcpMessage(`未在 ${path} 中找到服务「${name}」`);
+        return;
+      }
+      const isDefaultEntry = new Set(mcpDefaultEntryNames).has(name);
+      let skipAddedForThisDelete = false;
+      let rollbackSkipNames = [...mcpSkipDefaultNames];
+      if (isDefaultEntry) {
+        let baseSkipNames = [...mcpSkipDefaultNames];
+        const latestSettings = await window.agenticxDesktop.getMcpSettings().catch(() => null);
+        if (latestSettings?.ok && Array.isArray(latestSettings.skip_default_names)) {
+          baseSkipNames = latestSettings.skip_default_names.map((x) => String(x).trim()).filter(Boolean);
+          setMcpSkipDefaultNames(baseSkipNames);
+        }
+        const baseSkipSet = new Set(baseSkipNames);
+        const hadSkipAlready = baseSkipSet.has(name);
+        const nextSkipNames = hadSkipAlready ? [...baseSkipNames] : [...baseSkipNames, name];
+        rollbackSkipNames = [...baseSkipNames];
+        const skipPersist = await window.agenticxDesktop.putMcpSettings({
+          extraSearchPaths: mcpExtraPaths,
+          skipDefaultNames: nextSkipNames,
+        });
+        if (!skipPersist?.ok) {
+          setMcpMessage(`删除失败：无法更新默认服务跳过列表（${skipPersist?.error ?? "未知错误"}）`);
+          return;
+        }
+        setMcpSkipDefaultNames(nextSkipNames);
+        skipAddedForThisDelete = !hadSkipAlready;
+      }
+      const save = await window.agenticxDesktop.mcpPutRaw({
+        path,
+        text: `${JSON.stringify(parsed, null, 2)}\n`,
+      });
+      if (!save?.ok) {
+        if (skipAddedForThisDelete) {
+          const rollback = await window.agenticxDesktop.putMcpSettings({
+            extraSearchPaths: mcpExtraPaths,
+            skipDefaultNames: rollbackSkipNames,
+          });
+          if (rollback?.ok) {
+            setMcpSkipDefaultNames(rollbackSkipNames);
+          }
+        }
+        setMcpMessage(`删除失败：${save?.error ?? "保存失败"}`);
+        return;
+      }
+      setMcpMessage(`已删除 ${name}`);
+      setMcpExpandedServers((prev) => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
+      if (sessionId) await onRefreshMcp(sessionId);
+      await refreshMcpDiscover();
+    } catch (err) {
+      setMcpMessage(`删除失败：${String(err)}`);
+    } finally {
+      setMcpServerBusy((prev) => ({ ...prev, [name]: false }));
+    }
+  }, [locateMcpServerPath, mcpDefaultEntryNames, mcpExtraPaths, mcpSkipDefaultNames, onRefreshMcp, refreshMcpDiscover, sessionId]);
+
+  const confirmDeleteMcpServer = useCallback(() => {
+    const name = mcpDeleteConfirmServerName?.trim();
+    if (!name) return;
+    setMcpDeleteConfirmServerName(null);
+    void handleDeleteMcpServer(name);
+  }, [handleDeleteMcpServer, mcpDeleteConfirmServerName]);
 
   const mcpMarketplaceAllInstalledIds = useMemo(() => {
     const serverNames = new Set(mcpServers.map((s) => s.name));
@@ -6482,10 +6647,6 @@ export function SettingsPanel({
 
             {/* === MCP TAB === */}
             {tab === "mcp" && (() => {
-              const openEditorFor = (path: string) => {
-                setMcpEditorPath(path);
-                setMcpEditorOpen(true);
-              };
               return (
               <div className="space-y-5">
                 <div className="text-sm text-text-subtle">
@@ -6511,7 +6672,7 @@ export function SettingsPanel({
                       type="button"
                       className="shrink-0 rounded-md border border-border p-2 text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
                       title="编辑此配置文件"
-                      onClick={() => openEditorFor(MCP_PRIMARY_CONFIG_PATH)}
+                      onClick={() => openMcpEditor(MCP_PRIMARY_CONFIG_PATH)}
                     >
                       <SquarePen className="h-4 w-4" aria-hidden />
                     </button>
@@ -6551,7 +6712,7 @@ export function SettingsPanel({
                         className="shrink-0 rounded-md border border-border p-2 text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
                         title="编辑此配置文件"
                         disabled={!row.trim()}
-                        onClick={() => openEditorFor(row.trim())}
+                        onClick={() => openMcpEditor(row.trim())}
                       >
                         <SquarePen className="h-4 w-4" aria-hidden />
                       </button>
@@ -6678,7 +6839,7 @@ export function SettingsPanel({
                                       <button
                                         type="button"
                                         className="text-[11px] text-[var(--settings-accent-text)] underline decoration-dotted"
-                                        onClick={() => openEditorFor(MCP_PRIMARY_CONFIG_PATH)}
+                                        onClick={() => openMcpEditor(MCP_PRIMARY_CONFIG_PATH)}
                                       >
                                         用编辑器修复
                                       </button>
@@ -6700,7 +6861,29 @@ export function SettingsPanel({
                                 ) : null}
                               </div>
                             </div>
-                            <div className="flex shrink-0 items-center justify-end sm:pl-2">
+                            <div className="flex shrink-0 items-center justify-end gap-1 sm:pl-2">
+                              <button
+                                type="button"
+                                className="rounded-md border border-border p-1.5 text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+                                title={`编辑 ${server.name} 配置`}
+                                disabled={Boolean(mcpServerBusy[server.name])}
+                                onClick={() => {
+                                  void openMcpEditorForServer(server.name);
+                                }}
+                              >
+                                <SquarePen className="h-3.5 w-3.5" aria-hidden />
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-md border border-border p-1.5 text-text-subtle transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
+                                title={`删除 ${server.name}`}
+                                disabled={Boolean(mcpServerBusy[server.name])}
+                                onClick={() => {
+                                  setMcpDeleteConfirmServerName(server.name);
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                              </button>
                               <SettingsSwitch
                                 checked={switchChecked}
                                 disabled={shouldDisableMcpToggle({
@@ -6750,7 +6933,7 @@ export function SettingsPanel({
                     <button
                       type="button"
                       className="flex w-full items-center gap-2 rounded-md border border-dashed border-border bg-surface-panel px-3 py-2 text-left text-sm text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
-                      onClick={() => openEditorFor(MCP_PRIMARY_CONFIG_PATH)}
+                      onClick={() => openMcpEditor(MCP_PRIMARY_CONFIG_PATH)}
                     >
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border">
                         <Plus className="h-3.5 w-3.5" aria-hidden />
@@ -7391,11 +7574,67 @@ export function SettingsPanel({
         </div>
       </div>
     ) : null}
+    <Modal
+      open={Boolean(mcpDeleteConfirmServerName)}
+      onClose={() => setMcpDeleteConfirmServerName(null)}
+      panelClassName="w-full max-w-[min(92vw,560px)] bg-surface-panel"
+      footer={(
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            className="rounded-md border border-border px-4 py-1.5 text-sm text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+            onClick={() => setMcpDeleteConfirmServerName(null)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+            onClick={confirmDeleteMcpServer}
+          >
+            OK
+          </button>
+        </div>
+      )}
+    >
+      <div className="space-y-5 text-center">
+        <div className="relative mx-auto h-[120px] w-[120px]">
+          <svg
+            viewBox="0 0 120 120"
+            className="h-full w-full drop-shadow-[0_10px_24px_rgba(0,0,0,0.45)]"
+            aria-hidden
+          >
+            <path
+              d="M60 9 L110 100 H10 Z"
+              fill="#FACC15"
+              stroke="#F8FAFC"
+              strokeWidth="8"
+              strokeLinejoin="round"
+            />
+            <rect x="54" y="40" width="12" height="36" rx="6" fill="#F8FAFC" />
+            <circle cx="60" cy="88" r="6" fill="#F8FAFC" />
+          </svg>
+          <div className="absolute -bottom-1 -right-1 flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border-2 border-[#0f172a] bg-[#0f172a] shadow-lg">
+            <img src={effectiveMetaAvatarUrl} alt="" className="h-full w-full object-cover" />
+          </div>
+        </div>
+        <p className="text-[38px] font-semibold leading-tight text-text-strong">
+          确认删除 MCP 服务「{mcpDeleteConfirmServerName ?? ""}」
+          <br />
+          吗？此操作会直接修改 mcp.json。
+        </p>
+      </div>
+    </Modal>
     <MCPJsonEditorModal
       open={mcpEditorOpen}
       selectedPath={mcpEditorPath}
       filePaths={mcpEditorFilePaths}
-      onClose={() => setMcpEditorOpen(false)}
+      focusServerName={mcpEditorFocusServerName}
+      focusRequestToken={mcpEditorFocusToken}
+      onClose={() => {
+        setMcpEditorOpen(false);
+        setMcpEditorFocusServerName(undefined);
+      }}
       onPickPath={setMcpEditorPath}
       onLoad={async (path) => {
         const result = await window.agenticxDesktop.mcpGetRaw({ path });

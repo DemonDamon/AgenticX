@@ -4197,11 +4197,23 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("put-mcp-settings", async (_event, payload: { extraSearchPaths: string[]; disabledTools?: Record<string, string[]> }) => {
+  ipcMain.handle(
+    "put-mcp-settings",
+    async (
+      _event,
+      payload: {
+        extraSearchPaths: string[];
+        disabledTools?: Record<string, string[]>;
+        skipDefaultNames?: string[];
+      },
+    ) => {
     const paths = Array.isArray(payload?.extraSearchPaths) ? payload.extraSearchPaths : [];
     const body: Record<string, unknown> = { extra_search_paths: paths };
     if (payload?.disabledTools !== undefined) {
       body.disabled_tools = payload.disabledTools;
+    }
+    if (payload?.skipDefaultNames !== undefined) {
+      body.skip_default_names = payload.skipDefaultNames;
     }
     try {
       const resp = await fetch(`${getStudioUrl()}/api/mcp/settings`, {
@@ -4220,7 +4232,8 @@ function registerIpc(): void {
     } catch (err) {
       return { ok: false, error: String(err) };
     }
-  });
+  },
+  );
 
   ipcMain.handle("mcp-discover", async () => {
     try {

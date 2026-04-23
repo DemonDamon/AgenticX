@@ -574,11 +574,19 @@ declare global {
         extra_search_paths?: string[];
         auto_connect?: string[];
         disabled_tools?: Record<string, string[]>;
+        skip_default_names?: string[];
+        default_entry_names?: string[];
         error?: string;
       }>;
-      putMcpSettings: (payload: { extraSearchPaths: string[]; disabledTools?: Record<string, string[]> }) => Promise<{
+      putMcpSettings: (payload: {
+        extraSearchPaths: string[];
+        disabledTools?: Record<string, string[]>;
+        skipDefaultNames?: string[];
+      }) => Promise<{
         ok: boolean;
         extra_search_paths?: string[];
+        skip_default_names?: string[];
+        default_entry_names?: string[];
         error?: string;
       }>;
       mcpDiscover: () => Promise<{

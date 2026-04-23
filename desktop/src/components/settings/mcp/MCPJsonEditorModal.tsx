@@ -26,16 +26,33 @@ type Props = {
   open: boolean;
   selectedPath: string;
   filePaths: string[];
+  focusServerName?: string;
+  focusRequestToken?: number;
   onClose: () => void;
   onPickPath: (path: string) => void;
   onLoad: (path: string) => Promise<{ ok: boolean; text?: string; format?: string; parse_error?: string; error?: string }>;
   onSave: (path: string, text: string) => Promise<{ ok: boolean; error?: string }>;
 };
 
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function findServerLine(source: string, serverName: string): number | null {
+  const escaped = escapeRegExp(serverName);
+  const re = new RegExp(`^\\s*"${escaped}"\\s*:`, "m");
+  const match = re.exec(source);
+  if (!match) return null;
+  const line = source.slice(0, match.index).split("\n").length;
+  return line > 0 ? line : null;
+}
+
 export function MCPJsonEditorModal({
   open,
   selectedPath,
   filePaths,
+  focusServerName,
+  focusRequestToken,
   onClose,
   onPickPath,
   onLoad,
@@ -48,6 +65,8 @@ export function MCPJsonEditorModal({
   const [message, setMessage] = useState("");
   const [saveToast, setSaveToast] = useState("");
   const saveToastTimerRef = useRef<number | null>(null);
+  const editorRef = useRef<any>(null);
+  const appliedFocusTokenRef = useRef<number>(-1);
 
   // 父组件常把 onLoad/onSave 写成内联匿名函数，每次 rerender 引用都会变化。
   // 这里用 ref 固化最新引用，effect 只依赖 open + selectedPath，避免定时刷新
@@ -101,6 +120,20 @@ export function MCPJsonEditorModal({
     },
     [],
   );
+
+  useEffect(() => {
+    if (!open || loading || format !== "json") return;
+    if (!focusServerName || typeof focusRequestToken !== "number") return;
+    if (appliedFocusTokenRef.current === focusRequestToken) return;
+    if (!editorRef.current) return;
+    const line = findServerLine(text, focusServerName);
+    if (!line) return;
+    const editor = editorRef.current;
+    editor.revealLineInCenter(line);
+    editor.setPosition({ lineNumber: line, column: 1 });
+    editor.focus();
+    appliedFocusTokenRef.current = focusRequestToken;
+  }, [open, loading, format, text, focusServerName, focusRequestToken, selectedPath]);
 
   const doSave = useCallback(async () => {
     if (!canSave) return;
@@ -209,6 +242,7 @@ export function MCPJsonEditorModal({
                 language="json"
                 value={text}
                 onMount={(editor, monaco) => {
+                  editorRef.current = editor;
                   monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
                     validate: true,
                     schemas: [

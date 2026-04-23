@@ -343,7 +343,11 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   importMcpConfig: async (payload: { sessionId: string; sourcePath: string }) =>
     ipcRenderer.invoke("import-mcp-config", payload),
   getMcpSettings: async () => ipcRenderer.invoke("get-mcp-settings"),
-  putMcpSettings: async (payload: { extraSearchPaths: string[]; disabledTools?: Record<string, string[]> }) =>
+  putMcpSettings: async (payload: {
+    extraSearchPaths: string[];
+    disabledTools?: Record<string, string[]>;
+    skipDefaultNames?: string[];
+  }) =>
     ipcRenderer.invoke("put-mcp-settings", payload),
   mcpDiscover: async () => ipcRenderer.invoke("mcp-discover"),
   mcpGetRaw: async (payload?: { path?: string }) => ipcRenderer.invoke("mcp-get-raw", payload),
