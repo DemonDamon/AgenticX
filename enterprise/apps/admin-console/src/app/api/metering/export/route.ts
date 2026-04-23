@@ -1,0 +1,47 @@
+import { NextResponse } from "next/server";
+import { queryMetering } from "../../../../lib/metering-service";
+
+export async function POST(request: Request) {
+  const body = (await request.json()) as Record<string, unknown>;
+  const toArray = (value: unknown) =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
+
+  const result = await queryMetering({
+    dept_id: toArray(body.dept_id),
+    user_id: toArray(body.user_id),
+    provider: toArray(body.provider),
+    model: toArray(body.model),
+    start: typeof body.start === "string" ? body.start : new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(),
+    end: typeof body.end === "string" ? body.end : new Date().toISOString(),
+    group_by: toArray(body.group_by) as Array<"dept" | "user" | "provider" | "model" | "day">,
+  });
+  const rows = result.data?.rows ?? [];
+  const header = ["dept", "user", "provider", "model", "day", "input_tokens", "output_tokens", "total_tokens", "cost_usd"];
+  const csv = [
+    header.join(","),
+    ...rows.map((row) =>
+      [
+        row.dims.dept ?? "",
+        row.dims.user ?? "",
+        row.dims.provider ?? "",
+        row.dims.model ?? "",
+        row.dims.day ?? "",
+        row.input_tokens,
+        row.output_tokens,
+        row.total_tokens,
+        row.cost_usd,
+      ]
+        .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+        .join(",")
+    ),
+  ].join("\n");
+
+  return new NextResponse(csv, {
+    status: 200,
+    headers: {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": `attachment; filename="metering-export.xlsx"`,
+    },
+  });
+}
+

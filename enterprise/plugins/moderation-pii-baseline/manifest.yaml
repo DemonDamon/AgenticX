@@ -2,4 +2,34 @@ name: moderation-pii-baseline
 version: 0.1.0
 type: rule-pack
 description: 通用 PII 基线规则库
-# TODO: populate concrete rules / tools / theme tokens
+rules:
+  - id: pii-email
+    kind: pii
+    pii_type: email
+    action: redact
+    severity: high
+    message: 检测到邮箱，已脱敏处理
+  - id: pii-mobile
+    kind: pii
+    pii_type: mobile
+    action: redact
+    severity: high
+    message: 检测到手机号，已脱敏处理
+  - id: pii-id-card
+    kind: pii
+    pii_type: id-card
+    action: block
+    severity: critical
+    message: 检测到身份证号，已拦截
+  - id: pii-bank-card
+    kind: pii
+    pii_type: bank-card
+    action: block
+    severity: critical
+    message: 检测到银行卡号，已拦截
+  - id: pii-api-key
+    kind: pii
+    pii_type: api-key
+    action: block
+    severity: critical
+    message: 检测到 API Key，已拦截

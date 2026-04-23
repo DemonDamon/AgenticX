@@ -2,4 +2,15 @@ name: moderation-medical
 version: 0.1.0
 type: rule-pack
 description: 医疗行业敏感规则库
-# TODO: populate concrete rules / tools / theme tokens
+extends: moderation-pii-baseline
+rules:
+  - id: medical-keyword-phi
+    kind: keyword
+    action: warn
+    severity: high
+    message: 检测到医疗敏感术语，请确认最小必要披露原则
+    keywords:
+      - 病历全文
+      - 基因检测原始数据
+      - 住院号
+      - 处方原件

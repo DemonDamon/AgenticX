@@ -8,5 +8,11 @@
   "scripts": {
     "lint": "echo 'lint placeholder'",
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@agenticx/core-api": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0"
   }
 }
