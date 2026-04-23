@@ -1,0 +1,41 @@
+:root {
+  --machi-bg: #0a0a0a;
+  --machi-bg-elevated: #141414;
+  --machi-bg-soft: #1a1a1a;
+  --machi-fg: #f5f5f5;
+  --machi-muted: #a1a1aa;
+  --machi-border: #2a2a2a;
+  --machi-accent: #0ea5e9;
+
+  --ui-color-primary: #0ea5e9;
+  --ui-color-primary-foreground: #f8fafc;
+}
+
+:root.machi-light {
+  --machi-bg: #ffffff;
+  --machi-bg-elevated: #fafafa;
+  --machi-bg-soft: #f4f4f5;
+  --machi-fg: #0f172a;
+  --machi-muted: #52525b;
+  --machi-border: #e4e4e7;
+  --machi-accent: #0284c7;
+}
+
+.machi-theme {
+  background-color: var(--machi-bg);
+  color: var(--machi-fg);
+}
+
+.machi-surface {
+  background-color: var(--machi-bg-elevated);
+  border-color: var(--machi-border);
+}
+
+.machi-muted {
+  color: var(--machi-muted);
+}
+
+.machi-accent {
+  color: var(--machi-accent);
+}
+
