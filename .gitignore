@@ -67,6 +67,24 @@ packaging/wechat-sidecar/agx-wechat-sidecar-*.exe
 
 docs/.private/
 
+# ============================================================
+# 客户交付物（每客户独立私有仓，嵌套于此目录但物理隔离）
+# ============================================================
+/customers/
+
+# 密钥 / 凭据
+*.pem
+*.key
+*.p12
+*.pfx
+**/secrets/
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# 个人本地敏感目录请写入 .git/info/exclude（不入仓库）
+
 # Temporary planning files
 task_plan.md
 **/task_plan.md

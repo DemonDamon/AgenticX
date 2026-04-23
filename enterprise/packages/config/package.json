@@ -1,0 +1,12 @@
+{
+  "name": "@agenticx/config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "配置加载器（品牌 · feature flag · 插件）",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "echo 'lint placeholder'",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

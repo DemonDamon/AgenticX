@@ -1,0 +1,12 @@
+{
+  "name": "@agenticx/policy-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JS 端规则检查引擎",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "echo 'lint placeholder'",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

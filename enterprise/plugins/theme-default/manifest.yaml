@@ -1,0 +1,5 @@
+name: theme-default
+version: 0.1.0
+type: theme-pack
+description: 默认主题包
+# TODO: populate concrete rules / tools / theme tokens

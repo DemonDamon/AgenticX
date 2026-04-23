@@ -1,0 +1,26 @@
+{
+  "name": "@agenticx/app-web-portal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "员工前台 Web App（Next.js）",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agenticx/ui": "workspace:*",
+    "@agenticx/branding": "workspace:*",
+    "@agenticx/auth": "workspace:*",
+    "@agenticx/config": "workspace:*",
+    "@agenticx/feature-chat": "workspace:*",
+    "@agenticx/feature-model-service": "workspace:*",
+    "@agenticx/feature-knowledge-base": "workspace:*",
+    "@agenticx/feature-settings": "workspace:*",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}
