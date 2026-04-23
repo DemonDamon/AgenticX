@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { requireAdminPageSession } from "../../lib/admin-page-guard";
 
-export default async function IamLayout({ children }: { children: ReactNode }) {
+export default async function MeteringLayout({ children }: { children: ReactNode }) {
   await requireAdminPageSession();
   return <>{children}</>;
 }

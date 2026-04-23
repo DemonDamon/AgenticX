@@ -1,8 +1,18 @@
 import { NextResponse } from "next/server";
 import { queryMetering } from "../../../../lib/metering-service";
+import { requireAdminSession } from "../../../../lib/admin-auth";
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as Record<string, unknown>;
+  const guard = await requireAdminSession();
+  if (!guard.ok) {
+    return guard.response;
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return NextResponse.json({ code: "40001", message: "invalid json" }, { status: 400 });
+  }
   const toArray = (value: unknown) =>
     Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
 
