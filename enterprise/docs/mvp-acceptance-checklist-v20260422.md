@@ -32,10 +32,12 @@
 ## 本期验证产物
 
 - 截图：
-  - `enterprise/w4-e2e-01-portal-auth.png`
-  - `enterprise/w4-e2e-02-portal-workspace.png`
-  - `enterprise/w4-e2e-03-admin-audit.png`
-  - `enterprise/w4-e2e-04-admin-metering.png`
-- 录屏：
-  - `enterprise/page@76baafc407c9ac091b5fd8e24d81e532.webm`
+  - `enterprise/docs/visuals/w4-portal-auth.png`
+  - `enterprise/docs/visuals/w4-portal-signup-result.png`
+  - `enterprise/docs/visuals/w4-portal-workspace.png`
+  - `enterprise/docs/visuals/w4-portal-chat-normal.png`
+  - `enterprise/docs/visuals/w4-portal-chat-compliance.png`
+  - `enterprise/docs/visuals/w4-admin-login.png`
+  - `enterprise/docs/visuals/w4-admin-dashboard.png`
+  - `enterprise/docs/visuals/w4-admin-metering.png`
 
