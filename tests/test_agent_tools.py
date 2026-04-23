@@ -622,7 +622,7 @@ def test_session_workspace_roots_put_user_taskspaces_before_default(tmp_path: Pa
     session.workspace_dir = str(default_dir)
     session.taskspaces = [
         {"id": "default", "label": "默认工作区", "path": str(default_dir)},
-        {"id": "ts-abc12345", "label": "和创投资", "path": str(user_dir)},
+        {"id": "ts-abc12345", "label": "示例任务空间", "path": str(user_dir)},
     ]
 
     roots = agent_tools._session_workspace_roots(session)
