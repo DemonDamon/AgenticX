@@ -8,5 +8,17 @@
   "scripts": {
     "lint": "echo 'lint placeholder'",
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@agenticx/config": "workspace:^",
+    "@agenticx/core-api": "workspace:^",
+    "@agenticx/sdk-ts": "workspace:^",
+    "@agenticx/ui": "workspace:^",
+    "@tanstack/react-virtual": "^3.13.24",
+    "react": "^19.0.0",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14"
   }
 }
