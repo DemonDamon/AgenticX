@@ -1,0 +1,143 @@
+# 安全扫描 · CI 防线（与本地 .githooks/ 互补）
+#
+# 职责：
+# - gitleaks 扫凭据泄露（PR 必过）
+# - 自定义 pattern 扫客户识别字样（可通过 GitHub secret 配置个性化关键词）
+#
+# 设计原则：
+# - 扫描历史 commit 到 PR HEAD，不止 HEAD 本身
+# - 失败 = 阻止合并，强制开发者先修复再 push
+
+name: security-scan
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  # 每周一自检一次（防止历史 commit 被遗漏）
+  schedule:
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: read
+
+jobs:
+  gitleaks:
+    name: gitleaks (credentials)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 扫完整历史
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 使用仓内 .gitleaks.toml 或默认规则
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+
+  custom-keywords:
+    name: custom keywords (client identifiers)
+    runs-on: ubuntu-latest
+    # 只在需要时运行：设置了 CUSTOM_SECRETS_PATTERN 才开启
+    if: ${{ github.event_name != 'schedule' || vars.CUSTOM_SCAN_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan staged / HEAD for client identifiers
+        shell: bash
+        run: |
+          set -eu
+          # 从仓内 patterns.txt 加载通用模式
+          if [ ! -f .githooks/patterns.txt ]; then
+            echo "::warning::No .githooks/patterns.txt, skipping."
+            exit 0
+          fi
+
+          # 从 repository secret 里读取额外客户关键词（可选）
+          # 在 GitHub Repo Settings → Secrets → Actions 新增：
+          # CUSTOM_SECRET_KEYWORDS（多行，每行一个）
+          EXTRA_KW="${CUSTOM_SECRET_KEYWORDS:-}"
+          if [ -n "$EXTRA_KW" ]; then
+            printf '%s\n' "$EXTRA_KW" > /tmp/extra-kw.txt
+          else
+            echo "" > /tmp/extra-kw.txt
+          fi
+
+          HITS=0
+          scan() {
+            local target="$1"
+            # 通用模式
+            while IFS=$'\t' read -r raw label; do
+              [ -z "$raw" ] && continue
+              case "$raw" in
+                \#*) continue ;;
+                RE:*)
+                  pat="${raw#RE:}"
+                  if git grep -n -E "$pat" -- "*" ':!node_modules/**' ':!.git/**' 2>/dev/null | head -3; then
+                    echo "::error::Match for: ${label:-pattern}"
+                    HITS=$((HITS + 1))
+                  fi
+                  ;;
+                F:*)
+                  pat="${raw#F:}"
+                  if git grep -n -F "$pat" -- "*" ':!node_modules/**' ':!.git/**' 2>/dev/null | head -3; then
+                    echo "::error::Match for: ${label:-pattern}"
+                    HITS=$((HITS + 1))
+                  fi
+                  ;;
+              esac
+            done < .githooks/patterns.txt
+
+            # 额外关键词（每行字面量匹配）
+            while IFS= read -r kw; do
+              [ -z "$kw" ] && continue
+              if git grep -n -F "$kw" -- "*" ':!node_modules/**' ':!.git/**' 2>/dev/null | head -3; then
+                echo "::error::Custom keyword match: $kw"
+                HITS=$((HITS + 1))
+              fi
+            done < /tmp/extra-kw.txt
+          }
+
+          scan
+          if [ "$HITS" -gt 0 ]; then
+            echo "::error::发现 $HITS 处敏感字样，阻止合并"
+            exit 1
+          fi
+          echo "✓ No sensitive content detected"
+        env:
+          CUSTOM_SECRET_KEYWORDS: ${{ secrets.CUSTOM_SECRET_KEYWORDS }}
+
+  dependency-audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+
+      - name: Audit enterprise workspace
+        working-directory: enterprise
+        run: |
+          if [ -f pnpm-workspace.yaml ]; then
+            # 只装 enterprise 自己的 workspace（不含 customers/）
+            pnpm install --ignore-scripts --lockfile-only || true
+            pnpm audit --audit-level=high || echo "::warning::pnpm audit flagged high CVEs"
+          fi

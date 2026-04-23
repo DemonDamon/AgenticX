@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# AgenticX · commit-msg hook
+#
+# 扫 commit message 是否含敏感字样（凭据 / 客户识别字样）。
+# 绕过：git commit --no-verify
+
+set -eu
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+MSG_FILE="${1:-}"
+if [ -z "$MSG_FILE" ] || [ ! -f "$MSG_FILE" ]; then
+  exit 0
+fi
+
+MSG="$(cat "$MSG_FILE")"
+
+PATTERNS_GLOBAL=".githooks/patterns.txt"
+PATTERNS_LOCAL=".githooks/patterns.local.txt"
+
+[ -f "$PATTERNS_GLOBAL" ] || exit 0
+
+parse_patterns() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  grep -v '^\s*#' "$file" | grep -v '^\s*$' || true
+}
+
+PATTERN_LINES="$(parse_patterns "$PATTERNS_GLOBAL")"
+if [ -f "$PATTERNS_LOCAL" ]; then
+  PATTERN_LINES="$PATTERN_LINES"$'\n'"$(parse_patterns "$PATTERNS_LOCAL")"
+fi
+
+[ -z "$PATTERN_LINES" ] && exit 0
+
+HITS=0
+HIT_DETAILS=""
+
+while IFS=$'\t' read -r raw_pattern label; do
+  [ -z "$raw_pattern" ] && continue
+  label="${label:-match}"
+
+  case "$raw_pattern" in
+    RE:*) pat="${raw_pattern#RE:}"; flag="-E" ;;
+    F:*)  pat="${raw_pattern#F:}"; flag="-F" ;;
+    *)    pat="$raw_pattern"; flag="-F" ;;
+  esac
+
+  match="$(printf '%s' "$MSG" | grep $flag -e "$pat" 2>/dev/null || true)"
+  if [ -n "$match" ]; then
+    HITS=$((HITS + 1))
+    HIT_DETAILS="${HIT_DETAILS}
+  [MSG] ${label}:
+$(printf '%s' "$match" | head -3 | sed 's/^/    /')"
+  fi
+done <<< "$PATTERN_LINES"
+
+if [ "$HITS" -gt 0 ]; then
+  echo -e "${RED}╔════════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${RED}║  🚨 commit-msg: 检测到 $HITS 处敏感内容，提交已阻止                 ║${NC}"
+  echo -e "${RED}╚════════════════════════════════════════════════════════════════╝${NC}"
+  echo "$HIT_DETAILS"
+  echo ""
+  echo -e "${YELLOW}处理建议：${NC}"
+  echo "  1. 改 commit message：git commit --amend"
+  echo "  2. 紧急绕过：git commit --no-verify"
+  exit 1
+fi
+
+exit 0

@@ -1,0 +1,18 @@
+# AgenticX · 本地敏感关键词示例
+#
+# 复制此文件为 patterns.local.txt，填入你个人的敏感字样。
+# 该文件已在 .gitignore 中排除，不会随 commit 入仓。
+#
+# 规则格式同 patterns.txt：<pattern>\t<label>
+# - RE:... 为正则
+# - F:...  为字面量匹配
+
+# === 客户识别字样（按需填写）===
+# F:<YourClientShortName>	客户 A 简称
+# F:<your-client-slug>	客户 A slug
+
+# === 内部项目代号 ===
+# F:PRJ-2024-XXX	内部项目代号
+
+# === 本地敏感目录名（避免路径字符串意外入 commit）===
+# F:某本地业务目录名	本地工作目录
