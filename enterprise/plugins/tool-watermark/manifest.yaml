@@ -1,0 +1,5 @@
+name: tool-watermark
+version: 0.1.0
+type: tool-pack
+description: 水印工具通用封装模板
+# TODO: populate concrete rules / tools / theme tokens

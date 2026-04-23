@@ -1,0 +1,12 @@
+{
+  "name": "@agenticx/feature-tools-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "工具 · MCP 接入",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "echo 'lint placeholder'",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

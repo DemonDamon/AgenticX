@@ -1,0 +1,46 @@
+# AgenticX Enterprise · Code Owners
+#
+# 规则：
+# - 每条修改必须至少 1 位 owner approve
+# - 安全敏感路径必须有「安全审查标识」
+#
+# 语法：https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# 默认：整个仓库
+*                               @damonli
+
+# ============ 安全敏感区（必须加强审查） ============
+
+# 认证模块
+/packages/auth/                 @damonli
+/apps/*/cmd/                    @damonli
+
+# 安全文档 + ADR
+/SECURITY.md                    @damonli
+/docs/adr/                      @damonli
+
+# 端侧 Edge Agent（数据不出端的生命线）
+/apps/edge-agent/               @damonli
+
+# 网关策略引擎
+/apps/gateway/internal/policy/  @damonli
+/packages/policy-engine/        @damonli
+
+# 审计模块
+/features/audit/                @damonli
+
+# 多租户 DB schema（改动影响全局）
+/packages/db-schema/            @damonli
+
+# CI 工作流
+/.github/workflows/             @damonli
+
+# ============ 业务功能区 ============
+
+/features/chat/                 @damonli
+/features/iam/                  @damonli
+/features/metering/             @damonli
+
+# ============ 插件区 ============
+
+/plugins/moderation-*           @damonli

@@ -1,0 +1,12 @@
+{
+  "name": "@agenticx/feature-settings",
+  "version": "0.1.0",
+  "private": true,
+  "description": "设置面板",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "echo 'lint placeholder'",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

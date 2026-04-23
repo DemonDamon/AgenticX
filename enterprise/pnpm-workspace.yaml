@@ -1,0 +1,17 @@
+packages:
+  # 通用产品本身
+  - "apps/*"
+  - "features/*"
+  - "packages/*"
+  - "plugins/*"
+
+  # 客户仓（物理嵌套于 AgenticX 根目录 customers/*，git 独立）
+  # 如果客户仓被 clone 到本地，pnpm 会自动把它们纳入 workspace，
+  # customers/*/apps/* 就能直接用 workspace:* 引用 @agenticx/*。
+  # 未 clone 时 glob 匹配为空，不会报错，AgenticX 开源用户无感。
+  - "../customers/*/apps/*"
+  - "../customers/*/plugins/*"
+
+  # 不纳入的：
+  # - apps/gateway（Go 项目，go.mod 管理）
+  # - packages/sdk-py（Python 项目，pyproject.toml 管理）

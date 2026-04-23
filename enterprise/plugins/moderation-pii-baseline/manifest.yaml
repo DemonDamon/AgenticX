@@ -1,0 +1,5 @@
+name: moderation-pii-baseline
+version: 0.1.0
+type: rule-pack
+description: 通用 PII 基线规则库
+# TODO: populate concrete rules / tools / theme tokens

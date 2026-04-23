@@ -1,0 +1,5 @@
+name: moderation-medical
+version: 0.1.0
+type: rule-pack
+description: 医疗行业敏感规则库
+# TODO: populate concrete rules / tools / theme tokens

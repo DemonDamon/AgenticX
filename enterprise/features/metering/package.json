@@ -1,0 +1,12 @@
+{
+  "name": "@agenticx/feature-metering",
+  "version": "0.1.0",
+  "private": true,
+  "description": "计量 · 四维查询（部门-员工-厂商-时间）",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "echo 'lint placeholder'",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

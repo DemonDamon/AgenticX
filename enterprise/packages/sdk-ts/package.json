@@ -1,0 +1,12 @@
+{
+  "name": "@agenticx/sdk-ts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript 客户端 SDK（给 Machi 接）",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "echo 'lint placeholder'",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

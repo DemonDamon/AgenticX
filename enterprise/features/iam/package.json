@@ -1,0 +1,12 @@
+{
+  "name": "@agenticx/feature-iam",
+  "version": "0.1.0",
+  "private": true,
+  "description": "身份 · 租户 · 部门 · 角色 · 权限",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "echo 'lint placeholder'",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

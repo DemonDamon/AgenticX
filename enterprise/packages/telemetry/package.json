@@ -1,0 +1,12 @@
+{
+  "name": "@agenticx/telemetry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "埋点 · 审计上报",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "echo 'lint placeholder'",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

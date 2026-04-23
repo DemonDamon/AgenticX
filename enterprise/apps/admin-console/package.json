@@ -1,0 +1,28 @@
+{
+  "name": "@agenticx/app-admin-console",
+  "version": "0.1.0",
+  "private": true,
+  "description": "管理员后台 Next.js 应用",
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agenticx/ui": "workspace:*",
+    "@agenticx/branding": "workspace:*",
+    "@agenticx/auth": "workspace:*",
+    "@agenticx/config": "workspace:*",
+    "@agenticx/feature-iam": "workspace:*",
+    "@agenticx/feature-metering": "workspace:*",
+    "@agenticx/feature-audit": "workspace:*",
+    "@agenticx/feature-policy": "workspace:*",
+    "@agenticx/feature-model-service": "workspace:*",
+    "@agenticx/feature-tools-mcp": "workspace:*",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

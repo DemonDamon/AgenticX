@@ -1,0 +1,12 @@
+{
+  "name": "@agenticx/auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "认证抽象层（Supabase/LDAP/SSO/账密）",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "echo 'lint placeholder'",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}
