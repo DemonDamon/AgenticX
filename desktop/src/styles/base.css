@@ -204,3 +204,276 @@ body,
   opacity: 1;
 }
 
+/* ============================================================
+   Focus Mode — Perplexity-style floating capsule
+   Main process resizes the window to 520x100, anchors it to the
+   top-right of the active display, hides the macOS traffic
+   lights, and disables the system shadow.
+
+   The outer layer is completely transparent. The composer sits
+   as a capsule in the middle, rendered with a glass blur and shadow.
+   The entire transparent area outside the composer acts as a drag region, 
+   so users can grab any empty area to move the window freely.
+   ============================================================ */
+
+.agx-app.focus-mode,
+.agx-app.focus-mode .agx-main-shell,
+.agx-app.focus-mode .agx-content,
+.agx-app.focus-mode .agx-main-content,
+.agx-app.focus-mode .agx-chatpane,
+.agx-app.focus-mode .agx-chatpane-main-column {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* 关键：把整个窗口的渲染区裁剪成胶囊形状，让玻璃圆角外面那 4 个小三角
+   区域完全"不存在"，而不是透出背后的 IDE 暗色内容。 */
+.agx-app.focus-mode {
+  clip-path: inset(0 round 18px) !important;
+  -webkit-clip-path: inset(0 round 18px) !important;
+}
+
+.agx-app.focus-mode .agx-main-shell {
+  grid-template-rows: 1fr;
+}
+
+.agx-app.focus-mode .agx-content {
+  position: relative;
+}
+
+.agx-app.focus-mode .agx-main-content {
+  display: flex;
+  min-height: 0;
+}
+
+/* —— 底托即玻璃层：整个方形铺满窗口（无圆角），胶囊的圆角由上面 .agx-app.focus-mode
+     的 clip-path 负责。这样玻璃不会留角落三角区露出背后的 IDE 暗色。
+     blur 和 saturate 都加强，让磨砂感更明显。 —— */
+.agx-app.focus-mode .agx-chatpane {
+  padding: 4px 7px 2px;
+  margin: 0;
+  min-height: 0 !important;
+  background: var(--focus-glass-bg) !important;
+  backdrop-filter: blur(80px) saturate(180%);
+  -webkit-backdrop-filter: blur(80px) saturate(180%);
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  -webkit-app-region: drag;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.agx-app.focus-mode .agx-chatpane-main-column {
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
+  min-width: 0 !important;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  isolation: isolate;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 0 !important;
+  border-radius: 0;
+  box-shadow: none !important;
+  overflow: visible;
+}
+
+/* 展开态：玻璃已经铺在 .agx-chatpane 上填满窗口，main-column 只管布局。 */
+.agx-app.focus-mode.focus-mode-tall .agx-chatpane-main-column {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  overflow: hidden;
+}
+
+@supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
+  :root[data-theme="light"] .agx-app.focus-mode .agx-chatpane {
+    background: rgba(255, 255, 255, 0.92) !important;
+    border-color: rgba(0, 0, 0, 0.12);
+  }
+
+  :root[data-theme="dark"] .agx-app.focus-mode .agx-chatpane,
+  :root[data-theme="dim"] .agx-app.focus-mode .agx-chatpane {
+    background: rgba(28, 30, 36, 0.92) !important;
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .agx-app.focus-mode .agx-pane-composer-input {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* 聚焦模式下彻底隐藏 pane 的头部工具条、token/session/model chips、底部模型选择器等。
+   同时默认隐藏消息列表——即使会话里存在历史消息（否则它们会被 100px 小窗口硬切断）。
+   发送消息后 Electron 主进程会把窗口撑高到 600px，那时展开面板再显示消息流。 */
+.agx-app.focus-mode .agx-pane-toolbar,
+.agx-app.focus-mode .agx-pane-composer-meta,
+.agx-app.focus-mode .agx-pane-composer-tail,
+.agx-app.focus-mode .agx-pane-message-list {
+  display: none !important;
+}
+
+/* 窗口被 Electron 撑高到 600px 以上时（tall 版本），
+   消息列表才重新展示，让历史 + 回复可见 */
+.agx-app.focus-mode.focus-mode-tall .agx-pane-message-list {
+  display: block !important;
+  margin-top: 24px;
+  padding-top: 8px;
+  -webkit-app-region: no-drag;
+}
+
+/* —— 胶囊输入条：由外层 main-column 负责底色 + 圆角，自己只做布局 —— */
+.agx-app.focus-mode .agx-pane-composer-shell {
+  background: transparent !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+  padding: 8px 12px 6px;
+  width: 100%;
+}
+
+/* 非展开态：玻璃层已经铺在 .agx-chatpane 上（见上方规则）填满整个窗口，
+   composer-shell 只做布局，不再承担任何视觉。
+   关键：用 flex 列布局，让按钮行永远留在底部，input 只能在剩余空间里伸缩+滚动，
+   避免输入多行时把下面的按钮挤出视口。 */
+.agx-app.focus-mode:not(.focus-mode-tall) .agx-pane-composer-shell {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.agx-app.focus-mode .agx-pane-composer-body {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 非展开态硬切：主容器不再参与绘制，避免任何“最外层壳”残留。 */
+.agx-app.focus-mode:not(.focus-mode-tall) .agx-chatpane-main-column,
+.agx-app.focus-mode:not(.focus-mode-tall) .agx-chatpane-main-column--focus-empty {
+  display: contents;
+}
+
+/* 展开状态（有消息）下，与上方消息列表之间画一条细线 */
+.agx-app.focus-mode.focus-mode-tall .agx-pane-composer-shell {
+  border-top: 1px solid var(--border-muted);
+}
+
+.agx-app.focus-mode .agx-chatpane-main-column--focus-empty .agx-pane-message-list {
+  display: none !important;
+}
+
+/* 空态只保留胶囊本体，不再让玻璃板撑满整块高度，避免“三层叠”的观感。 */
+.agx-app.focus-mode .agx-chatpane-main-column--focus-empty {
+  flex: 0 0 auto;
+}
+
+/* Focus 模式下只保留两层：外层玻璃板 + 内层输入框 */
+.agx-app.focus-mode .agx-pane-composer-body {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.agx-app.focus-mode .agx-pane-composer-input {
+  border: 1px solid var(--focus-composer-border) !important;
+  background: var(--focus-composer-surface) !important;
+  border-radius: 14px !important;
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2) inset;
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+  padding-top: 6px !important;
+  padding-bottom: 4px !important;
+  color: var(--focus-composer-text, var(--text-primary)) !important;
+  /* flex 关键：吃掉按钮以上的剩余空间，多行时自己内部滚动，不挤按钮 */
+  flex: 1 1 auto !important;
+  min-height: 28px !important;
+  max-height: none !important;
+  overflow-y: auto !important;
+}
+
+.agx-app.focus-mode .agx-pane-composer-placeholder {
+  left: 12px;
+  top: 6px;
+  color: var(--focus-composer-text-muted, var(--text-faint)) !important;
+}
+
+.agx-app.focus-mode .agx-pane-composer-actions {
+  margin-top: 2px !important;
+  padding: 0 2px !important;
+  /* 永远留在底部可见，不被输入内容挤出视口 */
+  flex: 0 0 auto !important;
+}
+
+/* 底部工具栏图标：磨砂玻璃偏白底，所以所有主题下按钮都用深色，
+   这样不管什么主题都清晰可见、对比度高。 */
+.agx-app.focus-mode .agx-pane-composer-actions button,
+.agx-app.focus-mode .agx-pane-composer-actions .text-text-faint,
+.agx-app.focus-mode .agx-pane-composer-actions svg {
+  color: rgba(20, 24, 32, 0.82) !important;
+  stroke: rgba(20, 24, 32, 0.82);
+}
+
+/* hover 时再往上提一档对比度 */
+.agx-app.focus-mode .agx-pane-composer-actions button:hover {
+  color: #000000 !important;
+  background: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* 让整个胶囊本身以及底托支持拖拽 */
+.agx-app.focus-mode .agx-pane-composer-shell {
+  -webkit-app-region: drag;
+}
+
+/* 仅需要交互的具体子元素声明 no-drag，不要用通配符 * 否则整个胶囊不可拖 */
+.agx-app.focus-mode .agx-pane-composer-shell button,
+.agx-app.focus-mode .agx-pane-composer-shell input,
+.agx-app.focus-mode .agx-pane-composer-shell [contenteditable="true"],
+.agx-app.focus-mode .agx-pane-composer-shell .agx-pane-composer-tail {
+  -webkit-app-region: no-drag;
+}
+
+/* 输入区：由 flex:1 吃掉可用空间，多行时内部滚动，不再固定 max-height */
+.agx-app.focus-mode .agx-pane-composer-input {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.agx-app.focus-mode .agx-pane-composer-shell .text-text-faint {
+  font-size: 14px;
+}
+
+/* 隐藏 composer 右上的「展开输入区」按钮——小窗口没意义 */
+.agx-app.focus-mode .agx-pane-composer-shell .pointer-events-none.absolute.right-3.top-2 {
+  display: none;
+}
+
+/* 附件区域不在焦点模式下展示 */
+.agx-app.focus-mode .agx-pane-composer-shell .flex.flex-wrap.gap-1\.5.px-3.pt-3 {
+  display: none;
+}
+

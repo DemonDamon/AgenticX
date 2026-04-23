@@ -49,6 +49,14 @@
   --border-subtle: rgba(255, 255, 255, 0.045);
   --border-muted: rgba(255, 255, 255, 0.035);
   --border-strong: rgba(255, 255, 255, 0.09);
+  --focus-glass-bg: rgba(255, 255, 255, 0.58);
+  --focus-glass-border: rgba(255, 255, 255, 0);
+  --focus-glass-highlight: rgba(255, 255, 255, 0);
+  --focus-glass-shadow-outer: rgba(0, 0, 0, 0);
+  --focus-composer-surface: #1f1f1f;
+  --focus-composer-border: rgba(255, 255, 255, 0.12);
+  --focus-composer-text: #d9dce1;
+  --focus-composer-text-muted: rgba(225, 229, 236, 0.5);
 
   --status-success: rgba(130, 230, 195, 0.94);
   --status-warning: rgba(255, 184, 110, 0.94);

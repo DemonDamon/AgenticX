@@ -48,6 +48,7 @@ function PaneDragOverlayPreview({ pane }: { pane: ChatPaneState }) {
 export function PaneManager({ onOpenConfirm }: Props) {
   const panes = useAppStore((s) => s.panes);
   const activePaneId = useAppStore((s) => s.activePaneId);
+  const focusMode = useAppStore((s) => s.focusMode);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const reorderPanes = useAppStore((s) => s.reorderPanes);
 
@@ -156,7 +157,9 @@ export function PaneManager({ onOpenConfirm }: Props) {
         const inner = (
           <>
             <div
-              className={`flex h-full min-w-0 flex-1 overflow-hidden ${isFocused && isMulti ? "bg-[rgba(255,255,255,0.015)]" : ""}`}
+              className={`flex h-full min-w-0 flex-1 overflow-hidden ${
+                isFocused && isMulti && !focusMode ? "bg-[rgba(255,255,255,0.015)]" : ""
+              }`}
             >
               <ChatPane
                 paneId={pane.id}
@@ -230,7 +233,9 @@ export function PaneManager({ onOpenConfirm }: Props) {
                     style={outerStyle}
                   >
                     <div
-                      className={`flex h-full min-w-0 flex-1 overflow-hidden ${isFocused ? "bg-[rgba(255,255,255,0.015)]" : ""}`}
+                      className={`flex h-full min-w-0 flex-1 overflow-hidden ${
+                        isFocused && !focusMode ? "bg-[rgba(255,255,255,0.015)]" : ""
+                      }`}
                     >
                       <ChatPane
                         paneId={pane.id}

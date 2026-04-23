@@ -51,6 +51,18 @@
   --border-subtle: rgba(255, 255, 255, 0.04);
   --border-muted: rgba(255, 255, 255, 0.03);
   --border-strong: rgba(255, 255, 255, 0.08);
+  /* Focus mode glass layer: frosted whitish acrylic. Opacity must be high
+     enough to look like glass without vibrancy underneath; otherwise it
+     reads as a dark gray frame on top of whatever is behind the window. */
+  --focus-glass-bg: rgba(255, 255, 255, 0.58);
+  --focus-glass-border: rgba(255, 255, 255, 0);
+  --focus-glass-highlight: rgba(255, 255, 255, 0);
+  --focus-glass-shadow-outer: rgba(0, 0, 0, 0);
+  /* Inner input keeps the dark-theme original look (dark surface + light text). */
+  --focus-composer-surface: #1a1a1a;
+  --focus-composer-border: rgba(255, 255, 255, 0.12);
+  --focus-composer-text: #e6e7ea;
+  --focus-composer-text-muted: rgba(255, 255, 255, 0.5);
 
   --status-success: rgba(120, 235, 190, 0.95);
   --status-warning: rgba(255, 175, 85, 0.95);
