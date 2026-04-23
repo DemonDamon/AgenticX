@@ -625,6 +625,31 @@ function formatHealthLatencyMs(ms: number): string {
   return `${ms}ms`;
 }
 
+function ModelCapabilityBadges({ className = "" }: { className?: string }) {
+  return (
+    <div className={`flex items-center gap-1.5 ${className}`.trim()}>
+      <HoverTip label="推理">
+        <span
+          role="img"
+          aria-label="推理能力"
+          className="inline-flex h-5 min-w-8 items-center justify-center rounded-full border border-indigo-500/35 bg-indigo-500/12 px-1.5 text-indigo-400"
+        >
+          <Sparkles className="h-3 w-3" aria-hidden />
+        </span>
+      </HoverTip>
+      <HoverTip label="工具">
+        <span
+          role="img"
+          aria-label="工具能力"
+          className="inline-flex h-5 min-w-8 items-center justify-center rounded-full border border-amber-500/35 bg-amber-500/12 px-1.5 text-amber-400"
+        >
+          <Wrench className="h-3 w-3" aria-hidden />
+        </span>
+      </HoverTip>
+    </div>
+  );
+}
+
 const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "account", label: "账号", icon: User },
   { id: "general", label: "通用", icon: Settings2 },
@@ -4767,6 +4792,10 @@ export function SettingsPanel({
   const [keyError, setKeyError] = useState<Record<string, string>>({});
   const [modelHealthMap, setModelHealthMap] = useState<Record<string, ModelHealthEntry>>({});
   const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchModelsModalOpen, setFetchModelsModalOpen] = useState(false);
+  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+  const [fetchModelsSearch, setFetchModelsSearch] = useState("");
+  const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
   const [addModelModalOpen, setAddModelModalOpen] = useState(false);
   const [addModelFormId, setAddModelFormId] = useState("");
   const [addModelFormName, setAddModelFormName] = useState("");
@@ -4833,6 +4862,8 @@ export function SettingsPanel({
   const [mcpEditorPath, setMcpEditorPath] = useState(MCP_PRIMARY_CONFIG_PATH);
   const [mcpEditorFocusServerName, setMcpEditorFocusServerName] = useState<string | undefined>(undefined);
   const [mcpEditorFocusToken, setMcpEditorFocusToken] = useState(0);
+  const fetchModelsRequestSeqRef = useRef(0);
+  const activeProviderRef = useRef(active);
 
   const [serverMode, setServerMode] = useState<"local" | "remote">("local");
   const [serverUrl, setServerUrl] = useState("");
@@ -4921,6 +4952,12 @@ export function SettingsPanel({
     // Reset the guard when dialog is closed.
     if (!open) {
       initializedForOpenRef.current = false;
+      fetchModelsRequestSeqRef.current += 1;
+      setFetchingModels(false);
+      setFetchModelsModalOpen(false);
+      setFetchedModels([]);
+      setFetchModelsSearch("");
+      setFetchModelsError(null);
       setEditModelModalOpen(false);
       setEditModelOriginalId("");
       setEditModelFormId("");
@@ -5122,8 +5159,24 @@ export function SettingsPanel({
     };
   }, [draft, active]);
 
+  const filteredFetchedModels = useMemo(() => {
+    const keyword = fetchModelsSearch.trim().toLowerCase();
+    if (!keyword) return fetchedModels;
+    return fetchedModels.filter((model) => model.toLowerCase().includes(keyword));
+  }, [fetchedModels, fetchModelsSearch]);
+
   useEffect(() => {
     setApiKeyVisible(false);
+  }, [active]);
+
+  useEffect(() => {
+    setFetchModelsModalOpen(false);
+    setFetchedModels([]);
+    setFetchModelsSearch("");
+    setFetchModelsError(null);
+    setFetchingModels(false);
+    activeProviderRef.current = active;
+    fetchModelsRequestSeqRef.current += 1;
   }, [active]);
 
   const currentEffectiveOn = useMemo(() => providerEffectiveOn(draft[active]), [draft, active]);
@@ -5171,10 +5224,59 @@ export function SettingsPanel({
 
   const onFetchModels = async () => {
     if (!current.apiKey) return;
+    const requestProvider = active;
+    const requestId = fetchModelsRequestSeqRef.current + 1;
+    fetchModelsRequestSeqRef.current = requestId;
+    const requestApiKey = current.apiKey;
+    const requestBaseUrl = current.baseUrl || undefined;
+    setFetchModelsError(null);
     setFetchingModels(true);
-    const res = await window.agenticxDesktop.fetchModels({ provider: active, apiKey: current.apiKey, baseUrl: current.baseUrl || undefined });
-    setFetchingModels(false);
-    if (res.ok && res.models.length > 0) updateField("models", res.models);
+    try {
+      const res = await window.agenticxDesktop.fetchModels({
+        provider: requestProvider,
+        apiKey: requestApiKey,
+        baseUrl: requestBaseUrl,
+      });
+      const isLatestRequest = fetchModelsRequestSeqRef.current === requestId;
+      const providerUnchanged = activeProviderRef.current === requestProvider;
+      if (!isLatestRequest || !providerUnchanged) return;
+      if (!res.ok) {
+        setFetchModelsError(res.error ?? "拉取模型失败");
+        return;
+      }
+      const normalized = Array.from(
+        new Set(
+          [...current.models, ...res.models].map((m) => String(m).trim()).filter(Boolean),
+        ),
+      );
+      setFetchedModels(normalized);
+      setFetchModelsSearch("");
+      setFetchModelsModalOpen(true);
+    } catch (err) {
+      if (
+        fetchModelsRequestSeqRef.current === requestId &&
+        activeProviderRef.current === requestProvider
+      ) {
+        setFetchModelsError(`拉取模型失败: ${String(err)}`);
+      }
+    } finally {
+      if (
+        fetchModelsRequestSeqRef.current === requestId &&
+        activeProviderRef.current === requestProvider
+      ) {
+        setFetchingModels(false);
+      }
+    }
+  };
+
+  const closeFetchModelsModal = () => {
+    setFetchModelsModalOpen(false);
+    setFetchModelsSearch("");
+  };
+
+  const makeModelVisible = (model: string) => {
+    if (!model || current.models.includes(model)) return;
+    updateField("models", [...current.models, model]);
   };
 
   const onHealthCheck = async (model: string) => {
@@ -6461,6 +6563,9 @@ export function SettingsPanel({
                           </HoverTip>
                         </div>
                       </div>
+                      {fetchModelsError ? (
+                        <div className="text-xs text-rose-400">{fetchModelsError}</div>
+                      ) : null}
                       <div className="space-y-1">
                         {current.models.length === 0 ? (
                           <div className="py-4 text-center text-sm text-text-faint">暂无模型，可从 API 拉取或点击 + 手动添加</div>
@@ -6474,8 +6579,11 @@ export function SettingsPanel({
                               key={model}
                               className="grid grid-cols-[minmax(0,1fr)_minmax(6.5rem,auto)_2rem_2rem] items-center gap-2 rounded-md border border-border bg-surface-panel/50 px-3 py-2"
                             >
-                              <span className="min-w-0 truncate text-sm text-text-muted">{model}</span>
-                              <div className="flex min-w-0 items-center justify-end gap-1.5">
+                              <div className="min-w-0">
+                                <div className="truncate text-sm text-text-muted">{model}</div>
+                              </div>
+                              <div className="flex min-w-0 items-center justify-end gap-2">
+                                <ModelCapabilityBadges />
                                 {entry?.phase === "ok" ? (
                                   <>
                                     <span className="tabular-nums text-xs text-text-subtle">{formatHealthLatencyMs(entry.ms)}</span>
@@ -6520,6 +6628,89 @@ export function SettingsPanel({
                           );
                         })}
                       </div>
+                      <Modal
+                        open={fetchModelsModalOpen}
+                        title="获取模型列表"
+                        onClose={closeFetchModelsModal}
+                        backdropClassName="bg-black/78"
+                        panelClassName="w-full max-w-[min(90vw,720px)] bg-[var(--surface-base-fallback)]"
+                        footer={(
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-text-faint">
+                              共 {fetchedModels.length} 个，可见 {current.models.length} 个
+                            </span>
+                            <button
+                              type="button"
+                              className="rounded-md bg-[var(--settings-accent-solid)] px-3 py-1.5 text-xs font-medium text-[var(--settings-accent-solid-text)] transition hover:bg-[var(--settings-accent-solid-hover)]"
+                              onClick={closeFetchModelsModal}
+                            >
+                              完成
+                            </button>
+                          </div>
+                        )}
+                      >
+                        <div className="space-y-3">
+                          <input
+                            className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
+                            value={fetchModelsSearch}
+                            onChange={(e) => setFetchModelsSearch(e.target.value)}
+                            placeholder="搜索模型 ID 或名称"
+                          />
+                          <div className="max-h-[min(56vh,460px)] space-y-1 overflow-y-auto pr-1">
+                            {filteredFetchedModels.length === 0 ? (
+                              <div className="rounded-md border border-dashed border-border px-3 py-5 text-center text-sm text-text-faint">
+                                {fetchedModels.length === 0 ? "未从 API 返回可用模型" : "没有匹配的模型"}
+                              </div>
+                            ) : (
+                              filteredFetchedModels.map((model) => {
+                                const isVisible = current.models.includes(model);
+                                return (
+                                  <div
+                                    key={model}
+                                    className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-md border border-border bg-surface-panel/60 px-3 py-2"
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="truncate text-sm text-text-muted">{model}</div>
+                                      <div className="text-[11px] text-text-faint">
+                                        {isVisible ? "当前状态：可见" : "当前状态：不可见"}
+                                      </div>
+                                    </div>
+                                    <ModelCapabilityBadges className="justify-end" />
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        aria-label={`设为可见：${model}`}
+                                        className={`inline-flex h-8 w-8 items-center justify-center rounded-md border transition ${
+                                          isVisible
+                                            ? "border-emerald-500/40 text-emerald-400/80"
+                                            : "border-border text-text-subtle hover:bg-surface-hover hover:text-emerald-400"
+                                        }`}
+                                        disabled={isVisible}
+                                        onClick={() => makeModelVisible(model)}
+                                      >
+                                        <Plus className="h-4 w-4" aria-hidden />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        aria-label={`设为不可见：${model}`}
+                                        className={`inline-flex h-8 w-8 items-center justify-center rounded-md border transition ${
+                                          isVisible
+                                            ? "border-border text-text-subtle hover:bg-surface-hover hover:text-rose-400"
+                                            : "border-rose-500/40 text-rose-400/65"
+                                        }`}
+                                        disabled={!isVisible}
+                                        onClick={() => onRemoveModel(model)}
+                                      >
+                                        <CircleMinus className="h-4 w-4" aria-hidden />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                      </Modal>
                       <Modal
                         open={addServiceVendorModalOpen}
                         title="添加服务厂商"

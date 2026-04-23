@@ -1086,7 +1086,17 @@ const KNOWN_BASE_URLS: Record<string, string> = {
 };
 
 const PROVIDER_FALLBACK_MODELS: Record<string, string[]> = {
-  minimax: ["MiniMax-M2.5"],
+  minimax: [
+    "MiniMax-M2.7",
+    "MiniMax-M2.7-highspeed",
+    "MiniMax-M2.5",
+    "MiniMax-M2.5-highspeed",
+    "MiniMax-M2.5-lightning",
+    "MiniMax-M2.1",
+    "MiniMax-M2.1-highspeed",
+    "MiniMax-M2.1-lightning",
+    "MiniMax-M2",
+  ],
 };
 
 function loadAgxConfig(): AgxConfig {
