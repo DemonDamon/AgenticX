@@ -1,8 +1,18 @@
 import { NextResponse } from "next/server";
 import { exportAuditCsv } from "../../../../lib/audit-service";
+import { requireAdminSession } from "../../../../lib/admin-auth";
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as Record<string, unknown>;
+  const guard = await requireAdminSession();
+  if (!guard.ok) {
+    return guard.response;
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return NextResponse.json({ code: "40001", message: "invalid json" }, { status: 400 });
+  }
   const result = await exportAuditCsv({
     tenant_id: "tenant_default",
     user_id: typeof body.user_id === "string" ? body.user_id : undefined,
