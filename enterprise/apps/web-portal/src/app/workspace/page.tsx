@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { WorkspaceClient } from "../../components/WorkspaceClient";
+import { WorkspaceShell } from "../../components/WorkspaceShell";
 import { getSessionFromCookies } from "../../lib/session";
 
 export default async function WorkspacePage() {
@@ -8,6 +8,6 @@ export default async function WorkspacePage() {
     redirect("/auth");
   }
 
-  return <WorkspaceClient userEmail={session.email} />;
+  return <WorkspaceShell userEmail={session.email} />;
 }
 
