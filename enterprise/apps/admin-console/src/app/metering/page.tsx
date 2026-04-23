@@ -2,6 +2,7 @@
 
 import { Button, Card, CardContent, CardHeader, CardTitle, Input } from "@agenticx/ui";
 import { useEffect, useMemo, useState } from "react";
+import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 type MeteringRow = {
   dims: Record<string, string | null>;
@@ -97,13 +98,13 @@ export default function MeteringPage() {
   };
 
   return (
-    <main className="mx-auto max-w-[1400px] space-y-4 p-6">
+    <main className="mx-auto max-w-[1400px] space-y-4">
       <div>
         <h1 className="text-2xl font-semibold">四维消耗查询</h1>
-        <p className="text-sm text-zinc-500">部门 → 员工 → 厂商/模型 → 时间段 四级联动。</p>
+        <p className="text-sm text-zinc-400">部门 → 员工 → 厂商/模型 → 时间段 四级联动。</p>
       </div>
 
-      <Card>
+      <Card className="border-zinc-800 bg-[var(--machi-bg-elevated)]">
         <CardHeader>
           <CardTitle>筛选条件</CardTitle>
         </CardHeader>
@@ -173,7 +174,56 @@ export default function MeteringPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
+        <Card className="border-zinc-800 bg-[var(--machi-bg-elevated)]">
+          <CardHeader>
+            <CardTitle>Token 消耗趋势</CardTitle>
+          </CardHeader>
+          <CardContent className="h-[260px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={rows.map((row, index) => ({
+                  day: row.dims.day ?? `slot-${index + 1}`,
+                  tokens: row.total_tokens,
+                  cost: Number(row.cost_usd.toFixed(4)),
+                }))}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                <XAxis dataKey="day" stroke="#71717a" />
+                <YAxis stroke="#71717a" />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="tokens" stroke="#38bdf8" strokeWidth={2} />
+                <Line type="monotone" dataKey="cost" stroke="#34d399" strokeWidth={2} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        <Card className="border-zinc-800 bg-[var(--machi-bg-elevated)]">
+          <CardHeader>
+            <CardTitle>部门 x 模型分布</CardTitle>
+          </CardHeader>
+          <CardContent className="h-[260px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={rows.map((row, index) => ({
+                  name: row.dims.day ?? `slot-${index + 1}`,
+                  tokens: row.total_tokens,
+                }))}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                <XAxis dataKey="name" stroke="#71717a" />
+                <YAxis stroke="#71717a" />
+                <Tooltip />
+                <Bar dataKey="tokens" fill="#38bdf8" />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="border-zinc-800 bg-[var(--machi-bg-elevated)]">
           <CardHeader>
             <CardTitle>表格</CardTitle>
           </CardHeader>
@@ -199,9 +249,9 @@ export default function MeteringPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-zinc-800 bg-[var(--machi-bg-elevated)]">
           <CardHeader>
-            <CardTitle>柱图 + 折线（轻量版）</CardTitle>
+            <CardTitle>透视预览</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {rows.map((row, index) => {

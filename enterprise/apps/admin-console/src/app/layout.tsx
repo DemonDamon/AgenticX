@@ -1,10 +1,16 @@
 import type { ReactNode } from "react";
+import { RootShell } from "../components/RootShell";
+import { AppProviders } from "../providers/AppProviders";
 import "./globals.css";
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body className="bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">{children}</body>
+      <body className="bg-[var(--machi-bg)] text-zinc-100 antialiased">
+        <AppProviders>
+          <RootShell>{children}</RootShell>
+        </AppProviders>
+      </body>
     </html>
   );
 }

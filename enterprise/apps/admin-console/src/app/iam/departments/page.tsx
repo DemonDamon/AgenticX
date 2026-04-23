@@ -55,26 +55,38 @@ export default function DepartmentsPage() {
   }, [selectedId]);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[380px_1fr]">
-      <Card>
+    <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
+      <Card className="border-zinc-800 bg-[var(--machi-bg-elevated)]">
         <CardHeader>
           <CardTitle>部门树</CardTitle>
-          <CardDescription>接入 `@agenticx/feature-iam` 的 Tree 组件。</CardDescription>
+          <CardDescription>左树右详情布局</CardDescription>
         </CardHeader>
         <CardContent>
           <DepartmentTree nodes={mockDepartments} selectedDepartmentId={selectedId} onSelect={setSelectedId} />
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="border-zinc-800 bg-[var(--machi-bg-elevated)]">
         <CardHeader>
           <CardTitle>部门详情</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <div>部门 ID：{selected?.id ?? "-"}</div>
-          <div>名称：{selected?.name ?? "-"}</div>
-          <div>成员数：{selected?.memberCount ?? 0}</div>
-          <div>层级路径：{selected?.path ?? "-"}</div>
+        <CardContent className="space-y-4 text-sm">
+          <div className="rounded-lg border border-zinc-800 p-3">
+            <p className="text-zinc-400">部门 ID</p>
+            <p className="mt-1 font-medium">{selected?.id ?? "-"}</p>
+          </div>
+          <div className="rounded-lg border border-zinc-800 p-3">
+            <p className="text-zinc-400">名称</p>
+            <p className="mt-1 font-medium">{selected?.name ?? "-"}</p>
+          </div>
+          <div className="rounded-lg border border-zinc-800 p-3">
+            <p className="text-zinc-400">成员数</p>
+            <p className="mt-1 font-medium">{selected?.memberCount ?? 0}</p>
+          </div>
+          <div className="rounded-lg border border-zinc-800 p-3">
+            <p className="text-zinc-400">层级路径</p>
+            <p className="mt-1 font-medium">{selected?.path ?? "-"}</p>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -1,7 +1,20 @@
 "use client";
 
 import type { AuthContext } from "@agenticx/auth";
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Textarea } from "@agenticx/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  Textarea,
+} from "@agenticx/ui";
 import { BulkImportService, IamBulkImportApi, IamUserService, type ImportJob } from "@agenticx/feature-iam";
 import { useMemo, useState } from "react";
 
@@ -25,19 +38,23 @@ export default function BulkImportPage() {
   );
   const [precheckResult, setPrecheckResult] = useState<string>("尚未预检");
   const [job, setJob] = useState<ImportJob | null>(null);
+  const [activeStep, setActiveStep] = useState<"upload" | "precheck" | "submit">("upload");
 
   const handlePrecheck = () => {
     const result = api.precheck(auth, csv);
     if ((result.data?.failures.length ?? 0) === 0) {
       setPrecheckResult("预检通过");
+      setActiveStep("precheck");
       return;
     }
     setPrecheckResult(result.data?.failures.map((item) => `第 ${item.rowIndex} 行：${item.reason}`).join("；") ?? "预检失败");
+    setActiveStep("precheck");
   };
 
   const handleSubmit = async () => {
     const result = await api.submit(auth, csv);
     setJob(result.data ?? null);
+    setActiveStep("submit");
   };
 
   const handleRetry = async () => {
@@ -50,16 +67,48 @@ export default function BulkImportPage() {
     <div className="space-y-4">
       <div>
         <h2 className="text-xl font-semibold">批量开通子账号</h2>
-        <p className="text-sm text-zinc-500">已挂载 CSV 模板、预检、提交、重试与进度查看流程（W2-T08/W2-T09）。</p>
+        <p className="text-sm text-zinc-400">Upload → Precheck → Submit + Progress</p>
       </div>
 
-      <Card>
+      <Card className="border-zinc-800 bg-[var(--machi-bg-elevated)]">
         <CardHeader>
-          <CardTitle>CSV 上传内容</CardTitle>
+          <CardTitle>导入向导</CardTitle>
           <CardDescription>表头固定：email, display_name, dept_id, password_hash。</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <Textarea value={csv} onChange={(event) => setCsv(event.target.value)} rows={8} className="font-mono text-xs" />
+        <CardContent className="space-y-4">
+          <Tabs value={activeStep} onValueChange={(value) => setActiveStep(value as typeof activeStep)}>
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="upload">1. Upload</TabsTrigger>
+              <TabsTrigger value="precheck">2. Precheck</TabsTrigger>
+              <TabsTrigger value="submit">3. Submit</TabsTrigger>
+            </TabsList>
+            <TabsContent value="upload" className="space-y-3 pt-3">
+              <Textarea value={csv} onChange={(event) => setCsv(event.target.value)} rows={10} className="font-mono text-xs" />
+              <Button type="button" variant="outline" onClick={handlePrecheck}>
+                进入预检
+              </Button>
+            </TabsContent>
+            <TabsContent value="precheck" className="space-y-3 pt-3">
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3 text-sm">{precheckResult}</div>
+              <div className="flex gap-2">
+                <Button type="button" onClick={handleSubmit}>
+                  提交批处理
+                </Button>
+                <Button type="button" variant="secondary" onClick={() => setActiveStep("upload")}>
+                  返回修改
+                </Button>
+              </div>
+            </TabsContent>
+            <TabsContent value="submit" className="space-y-3 pt-3">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">任务 ID: {job?.id ?? "-"}</Badge>
+                <Badge variant={job?.status === "completed" ? "success" : "warning"}>状态: {job?.status ?? "-"}</Badge>
+              </div>
+              <Button type="button" variant="secondary" onClick={handleRetry} disabled={!job}>
+                重试失败行
+              </Button>
+            </TabsContent>
+          </Tabs>
           <div className="flex gap-2">
             <Button type="button" variant="outline" onClick={handlePrecheck}>
               预检
@@ -71,11 +120,11 @@ export default function BulkImportPage() {
               重试失败行
             </Button>
           </div>
-          <div className="text-sm text-zinc-500">预检结果：{precheckResult}</div>
+          <div className="text-sm text-zinc-400">预检结果：{precheckResult}</div>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="border-zinc-800 bg-[var(--machi-bg-elevated)]">
         <CardHeader>
           <CardTitle>批处理进度</CardTitle>
         </CardHeader>
