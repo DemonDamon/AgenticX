@@ -1,4 +1,10 @@
-// @agenticx/auth
-// 认证抽象层（Supabase/LDAP/SSO/账密）
-// TODO: implement
-export const packageName = "auth" as const;
+export * from "./types";
+export * from "./services/password";
+export * from "./services/jwt";
+export * from "./services/auth";
+export * from "./middleware/next";
+export * from "./providers/types";
+export * from "./providers/password-provider";
+export * from "./providers/oidc-provider";
+export * from "./providers/saml-provider";
+export * from "./providers/factory";

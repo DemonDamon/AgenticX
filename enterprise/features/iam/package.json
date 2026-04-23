@@ -8,5 +8,15 @@
   "scripts": {
     "lint": "echo 'lint placeholder'",
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@agenticx/auth": "workspace:^",
+    "@agenticx/core-api": "workspace:^",
+    "@agenticx/ui": "workspace:^",
+    "react": "^19.0.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14"
   }
 }
