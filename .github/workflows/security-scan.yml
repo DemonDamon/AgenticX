@@ -73,6 +73,36 @@ jobs:
             echo "" > /tmp/extra-kw.txt
           fi
 
+          BASE_SHA="${BASE_SHA:-}"
+          HEAD_SHA="${HEAD_SHA:-HEAD}"
+          ZERO_SHA="0000000000000000000000000000000000000000"
+          SCAN_FILES=()
+
+          collect_files() {
+            while IFS= read -r file; do
+              [ -z "$file" ] && continue
+              case "$file" in
+                node_modules/*|.git/*|.githooks/patterns.txt|.githooks/patterns.local.txt|.githooks/patterns.local.txt.example)
+                  continue
+                  ;;
+              esac
+              SCAN_FILES+=("$file")
+            done
+          }
+
+          # push / PR 仅扫描本次变更，避免被历史存量内容阻塞
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "$ZERO_SHA" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            collect_files < <(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA")
+          else
+            # schedule / workflow_dispatch 兜底全量扫描
+            collect_files < <(git ls-files)
+          fi
+
+          if [ "${#SCAN_FILES[@]}" -eq 0 ]; then
+            echo "No files to scan in this run."
+            exit 0
+          fi
+
           HITS=0
           scan() {
             # 通用模式
@@ -82,14 +112,18 @@ jobs:
                 \#*) continue ;;
                 RE:*)
                   pat="${raw#RE:}"
-                  if git grep -n -E "$pat" -- "*" ':!node_modules/**' ':!.git/**' 2>/dev/null | head -3; then
+                  match="$(git grep -n -E -e "$pat" -- "${SCAN_FILES[@]}" 2>/dev/null || true)"
+                  if [ -n "$match" ]; then
+                    printf '%s\n' "$match" | head -3
                     echo "::error::Match for: ${label:-pattern}"
                     HITS=$((HITS + 1))
                   fi
                   ;;
                 F:*)
                   pat="${raw#F:}"
-                  if git grep -n -F "$pat" -- "*" ':!node_modules/**' ':!.git/**' 2>/dev/null | head -3; then
+                  match="$(git grep -n -F -e "$pat" -- "${SCAN_FILES[@]}" 2>/dev/null || true)"
+                  if [ -n "$match" ]; then
+                    printf '%s\n' "$match" | head -3
                     echo "::error::Match for: ${label:-pattern}"
                     HITS=$((HITS + 1))
                   fi
@@ -100,7 +134,9 @@ jobs:
             # 额外关键词（每行字面量匹配）
             while IFS= read -r kw; do
               [ -z "$kw" ] && continue
-              if git grep -n -F "$kw" -- "*" ':!node_modules/**' ':!.git/**' 2>/dev/null | head -3; then
+              match="$(git grep -n -F -e "$kw" -- "${SCAN_FILES[@]}" 2>/dev/null || true)"
+              if [ -n "$match" ]; then
+                printf '%s\n' "$match" | head -3
                 echo "::error::Custom keyword match: $kw"
                 HITS=$((HITS + 1))
               fi
@@ -115,6 +151,8 @@ jobs:
           echo "✓ No sensitive content detected"
         env:
           CUSTOM_SECRET_KEYWORDS: ${{ secrets.CUSTOM_SECRET_KEYWORDS }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
 
   dependency-audit:
     name: dependency audit
