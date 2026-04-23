@@ -1,4 +1,4 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@agenticx/ui";
+import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@agenticx/ui";
 import { SYSTEM_ROLE_TEMPLATES } from "@agenticx/feature-iam";
 
 export default function RolesPage() {
@@ -8,31 +8,42 @@ export default function RolesPage() {
     <div className="space-y-4">
       <div>
         <h2 className="text-xl font-semibold">角色与权限</h2>
-        <p className="text-sm text-zinc-500">系统角色（owner/admin/member/auditor）与 `resource:action` scope 语法已挂载。</p>
+        <p className="text-sm text-zinc-400">角色列表 + 权限矩阵</p>
       </div>
-      <Card>
+      <Card className="border-zinc-800 bg-[var(--machi-bg-elevated)]">
         <CardHeader>
           <CardTitle>系统角色矩阵</CardTitle>
-          <CardDescription>后续会接入角色增删改与用户绑定 API。</CardDescription>
+          <CardDescription>后续会接入角色增删改与用户绑定 API</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          {entries.map(([code, role]) => (
-            <div key={code} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
-              <div className="mb-2 text-sm font-semibold">
-                {code} · {role.name}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {role.scopes.map((scope) => (
-                  <span
-                    key={scope}
-                    className="rounded bg-zinc-100 px-2 py-1 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-                  >
-                    {scope}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>角色</TableHead>
+                <TableHead>描述</TableHead>
+                <TableHead>Scopes</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {entries.map(([code, role]) => (
+                <TableRow key={code}>
+                  <TableCell className="font-medium">
+                    {code} · {role.name}
+                  </TableCell>
+                  <TableCell>{`${role.scopes.length} scopes`}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1.5">
+                      {role.scopes.map((scope) => (
+                        <Badge key={scope} variant="outline">
+                          {scope}
+                        </Badge>
+                      ))}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
     </div>
