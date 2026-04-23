@@ -66,3 +66,40 @@ def test_load_available_servers_triggers_seed(fake_home: Path) -> None:
     configs = load_available_servers()
     assert agenticx_home_mcp_path().exists()
     assert "browser-use" in configs
+
+
+def test_ensure_default_skips_entries_from_config(fake_home: Path) -> None:
+    from agenticx.cli.studio_mcp import (
+        agenticx_home_mcp_path,
+        ensure_default_agenticx_mcp_json,
+        set_mcp_skip_default_names_config,
+    )
+
+    set_mcp_skip_default_names_config(["browser-use"])
+    target = agenticx_home_mcp_path()
+    assert ensure_default_agenticx_mcp_json() is True
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert "browser-use" not in data
+    assert "firecrawl" in data
+
+
+def test_ensure_default_migrates_legacy_skip_key(fake_home: Path) -> None:
+    from agenticx.cli.studio_mcp import (
+        agenticx_home_mcp_path,
+        ensure_default_agenticx_mcp_json,
+        get_mcp_skip_default_names_config,
+    )
+
+    target = agenticx_home_mcp_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        '{"__agenticx_skip_default_mcp__": ["browser-use"], "other": {"command": "x", "args": []}}\n',
+        encoding="utf-8",
+    )
+    assert ensure_default_agenticx_mcp_json() is True
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert "__agenticx_skip_default_mcp__" not in data
+    assert "browser-use" not in data
+    assert "firecrawl" in data
+    assert "other" in data
+    assert "browser-use" in get_mcp_skip_default_names_config()

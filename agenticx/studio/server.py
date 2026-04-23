@@ -41,8 +41,10 @@ from agenticx.cli.studio_mcp import (
     append_mcp_auto_connect_name,
     auto_connect_servers,
     auto_connect_servers_async,
+    get_default_mcp_entry_names,
     get_mcp_disabled_tools_config,
     get_mcp_extra_search_paths_config,
+    get_mcp_skip_default_names_config,
     import_mcp_config,
     load_available_servers,
     mcp_connect,
@@ -51,6 +53,7 @@ from agenticx.cli.studio_mcp import (
     remove_mcp_auto_connect_name,
     set_mcp_disabled_tools_config,
     set_mcp_extra_search_paths_config,
+    set_mcp_skip_default_names_config,
 )
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate
@@ -2407,6 +2410,8 @@ def create_studio_app() -> FastAPI:
             "extra_search_paths": extra,
             "auto_connect": auto_list,
             "disabled_tools": disabled_tools,
+            "skip_default_names": get_mcp_skip_default_names_config(),
+            "default_entry_names": get_default_mcp_entry_names(),
         }
 
     @app.put("/api/mcp/settings")
@@ -2427,9 +2432,16 @@ def create_studio_app() -> FastAPI:
             set_mcp_disabled_tools_config(
                 {str(k): [str(t) for t in v] for k, v in disabled_tools.items() if isinstance(v, list)}
             )
+        skip_default_names = payload.get("skip_default_names")
+        if skip_default_names is not None:
+            if not isinstance(skip_default_names, list):
+                raise HTTPException(status_code=400, detail="skip_default_names must be a list")
+            set_mcp_skip_default_names_config([str(x) for x in skip_default_names])
         return {
             "ok": True,
             "extra_search_paths": list(get_mcp_extra_search_paths_config()),
+            "skip_default_names": get_mcp_skip_default_names_config(),
+            "default_entry_names": get_default_mcp_entry_names(),
         }
 
     @app.get("/api/mcp/discover")

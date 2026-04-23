@@ -103,6 +103,7 @@ _DEFAULT_MCP_ENTRIES: Dict[str, Dict[str, Any]] = {
         "timeout": 120.0,
     },
 }
+_DEFAULT_MCP_SKIP_KEY_LEGACY = "__agenticx_skip_default_mcp__"
 
 
 def agenticx_home_mcp_path() -> Path:
@@ -155,6 +156,46 @@ def set_mcp_extra_search_paths_config(paths: List[str]) -> None:
         seen.add(expanded)
         cleaned.append(s)
     ConfigManager.set_value("mcp.extra_search_paths", cleaned)
+
+
+def get_mcp_skip_default_names_config() -> List[str]:
+    """Return default bundled MCP names that should not be auto-reseeded."""
+    from agenticx.cli.config_manager import ConfigManager
+
+    raw = ConfigManager.get_value("mcp.skip_default_entries")
+    names: List[str] = []
+    seen: set[str] = set()
+    if isinstance(raw, list):
+        for item in raw:
+            name = str(item).strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+    elif isinstance(raw, str) and raw.strip():
+        name = raw.strip()
+        names = [name]
+    return names
+
+
+def set_mcp_skip_default_names_config(names: List[str]) -> None:
+    """Persist default bundled MCP names that should be skipped on auto-merge."""
+    from agenticx.cli.config_manager import ConfigManager
+
+    cleaned: List[str] = []
+    seen: set[str] = set()
+    for item in names:
+        name = str(item).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        cleaned.append(name)
+    ConfigManager.set_value("mcp.skip_default_entries", cleaned)
+
+
+def get_default_mcp_entry_names() -> List[str]:
+    """Return bundled default MCP server names shipped by AgenticX."""
+    return sorted(_DEFAULT_MCP_ENTRIES.keys())
 
 
 def append_mcp_auto_connect_name(name: str) -> None:
@@ -228,9 +269,8 @@ def ensure_default_agenticx_mcp_json() -> bool:
     """Ensure ~/.agenticx/mcp.json contains default bundled MCP servers.
 
     - If the file is missing: creates it with bundled defaults.
-    - If the file exists but has missing bundled entries (common: user only uses
-      ``~/.cursor/mcp.json``): **merges** the missing entries without removing others.
-    - Never replaces existing server blocks.
+    - If the file exists but has missing bundled entries: merges missing entries.
+    - Names in ``mcp.skip_default_entries`` are never auto-readded.
 
     Returns True if a new file was created or updated.
     """
@@ -241,11 +281,13 @@ def ensure_default_agenticx_mcp_json() -> bool:
         return False
 
     entries = {name: dict(payload) for name, payload in _DEFAULT_MCP_ENTRIES.items()}
+    skip_names = set(get_mcp_skip_default_names_config())
 
     if not target.exists():
+        seeded = {name: entry for name, entry in entries.items() if name not in skip_names}
         try:
             target.write_text(
-                json.dumps(entries, ensure_ascii=False, indent=2) + "\n",
+                json.dumps(seeded, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
         except OSError:
@@ -262,14 +304,51 @@ def ensure_default_agenticx_mcp_json() -> bool:
         return False
 
     changed = False
+
+    # Backward compatibility: migrate legacy skip field from mcp.json into config.
+    legacy_found = _DEFAULT_MCP_SKIP_KEY_LEGACY in raw
+    legacy_skip_raw = raw.get(_DEFAULT_MCP_SKIP_KEY_LEGACY)
+    legacy_skip_names: set[str] = set()
+    legacy_can_remove = False
+    if isinstance(legacy_skip_raw, list):
+        legacy_skip_names = {str(x).strip() for x in legacy_skip_raw if str(x).strip()}
+        legacy_can_remove = True
+    elif isinstance(legacy_skip_raw, str):
+        s = legacy_skip_raw.strip()
+        if s:
+            legacy_skip_names.add(s)
+        legacy_can_remove = True
+    elif legacy_skip_raw is None:
+        legacy_can_remove = True
+
+    if legacy_skip_names:
+        merged = set(skip_names)
+        merged.update(legacy_skip_names)
+        if merged != skip_names:
+            set_mcp_skip_default_names_config(sorted(merged))
+            skip_names = merged
+
+    if legacy_found and legacy_can_remove:
+        del raw[_DEFAULT_MCP_SKIP_KEY_LEGACY]
+        changed = True
+    elif legacy_found and not legacy_can_remove:
+        logger.warning(
+            "legacy MCP skip key has unsupported type (%s), keep as-is in %s",
+            type(legacy_skip_raw).__name__,
+            target,
+        )
     if "mcpServers" in raw and isinstance(raw["mcpServers"], dict):
         servers = raw["mcpServers"]
         for server_name, entry in entries.items():
+            if server_name in skip_names:
+                continue
             if server_name not in servers:
                 servers[server_name] = entry
                 changed = True
     else:
         for server_name, entry in entries.items():
+            if server_name in skip_names:
+                continue
             if server_name not in raw:
                 raw[server_name] = entry
                 changed = True
