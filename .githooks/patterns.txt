@@ -1,0 +1,41 @@
+# AgenticX · 通用敏感模式（随仓库公开）
+#
+# 本文件每行一条规则，格式：<pattern>\t<label>
+# - pattern: 可以是 POSIX 扩展正则（grep -E），也可以是字面量（grep -F）
+#   - 以 'RE:' 开头 → 正则
+#   - 以 'F:' 开头 → 字面量
+# - label: 命中时打印的说明
+#
+# 空行与 # 开头行忽略。
+#
+# 维护规则：
+# - 只放「公开披露 OK」的 pattern
+# - 客户名 / 公司简称 / 项目代号请放到 patterns.local.txt（gitignore）
+
+# === Secrets ===
+RE:ghp_[A-Za-z0-9]{36}	GitHub Personal Access Token
+RE:gho_[A-Za-z0-9]{36}	GitHub OAuth Token
+RE:ghs_[A-Za-z0-9]{36}	GitHub Server Token
+RE:ghu_[A-Za-z0-9]{36}	GitHub User Token
+RE:github_pat_[A-Za-z0-9_]{22,}	GitHub fine-grained PAT
+RE:AKIA[0-9A-Z]{16}	AWS Access Key ID
+RE:(?i)aws(.{0,20})?(secret|access).{0,20}?[=:]\s*['\"][A-Za-z0-9/+=]{40}['\"]	AWS Secret Access Key (likely)
+RE:sk-[A-Za-z0-9]{20,}	OpenAI-style API key
+RE:sk-ant-api03-[A-Za-z0-9_\-]{80,}	Anthropic API key
+RE:xoxb-[A-Za-z0-9-]{20,}	Slack Bot Token
+RE:xoxp-[A-Za-z0-9-]{20,}	Slack User Token
+RE:AIza[0-9A-Za-z_\-]{35}	Google API key
+RE:glpat-[A-Za-z0-9_\-]{20,}	GitLab PAT
+RE:-----BEGIN (RSA|EC|DSA|OPENSSH|PGP) PRIVATE KEY-----	Private key (PEM)
+RE:-----BEGIN PRIVATE KEY-----	Private key (PKCS8)
+
+# === Tokens in .env syntax ===
+RE:(?i)(password|passwd|pwd|secret|token|api[_\-]?key)\s*[:=]\s*['\"][^'\"]{8,}['\"]	inline secret assignment
+
+# === Credentials in URL ===
+RE:https?://[^/@\s]+:[^@\s]+@	HTTP URL with embedded credential
+
+# === 客户识别占位（在 patterns.local.txt 里填充具体关键词）===
+# 示例（不激活，参考用）：
+# F:CompanyShortName	客户简称
+# F:InternalProjectCode-2024	客户内部代号

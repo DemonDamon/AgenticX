@@ -85,6 +85,9 @@ docs/.private/
 
 # 个人本地敏感目录请写入 .git/info/exclude（不入仓库）
 
+# Git hooks 的本地敏感关键词（每个人的客户/项目简称不同，不可入仓）
+.githooks/patterns.local.txt
+
 # Temporary planning files
 task_plan.md
 **/task_plan.md
