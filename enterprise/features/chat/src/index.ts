@@ -1,4 +1,8 @@
-// @agenticx/feature-chat
-// 对话工作区（从 AgenticX-Website 剥离）
-// TODO: implement
-export const featureName = "chat" as const;
+export * from "./types";
+export * from "./store";
+export * from "./ChatWorkspace";
+export * from "./components/molecules/MessageList";
+export * from "./components/molecules/InputArea";
+export * from "./components/molecules/ModelSelector";
+export * from "./components/atoms/ReasoningBlock";
+export * from "./components/atoms/ToolCallCard";

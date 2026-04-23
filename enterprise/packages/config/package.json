@@ -5,8 +5,25 @@
   "description": "配置加载器（品牌 · feature flag · 插件）",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schemas": "./src/schemas.ts",
+    "./loaders": "./src/loaders.ts",
+    "./react": "./src/react.tsx"
+  },
   "scripts": {
     "lint": "echo 'lint placeholder'",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "19.2.14",
+    "vitest": "^4.1.5"
   }
 }
