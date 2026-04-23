@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { GitBranch, GripVertical, Sparkles } from "lucide-react";
+import { GitBranch, GripVertical, Expand, Sparkles } from "lucide-react";
 import {
   useAppStore,
   type Avatar,
@@ -1385,6 +1385,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   const userNickname = useAppStore((s) => s.userNickname);
   const userPreference = useAppStore((s) => s.userPreference);
+  const focusMode = useAppStore((s) => s.focusMode);
+  const exitFocusMode = useAppStore((s) => s.exitFocusMode);
   const userBubbleLabel = useMemo(() => userNickname.trim() || "我", [userNickname]);
   const isGroupPane = Boolean(pane?.avatarId?.startsWith("group:"));
   const isAutomationTaskPane = isAutomationPaneAvatarId(pane?.avatarId);
@@ -1510,6 +1512,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }),
     [isGroupPane, pane?.messages]
   );
+  const focusComposerOnly = focusMode && visibleMessages.length === 0;
 
   useEffect(() => {
     if (!isAutomationTaskPane || !pane?.avatarId?.startsWith("automation:")) {
@@ -1571,6 +1574,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     wechatDesktopBound && primaryPaneForSessionId === pane.id && !isAutomationTaskPane;
 
   useEffect(() => {
+    if (focusMode) return;
     if (paneSubAgents.length === 0) {
       if (pane.spawnsColumnOpen) setSpawnsColumnOpen(pane.id, false);
       return;
@@ -1594,6 +1598,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     pane.spawnsColumnBaselineIds,
     paneSubAgentIdsKey,
     paneSubAgents.length,
+    focusMode,
     clearSpawnsColumnSuppress,
     setSpawnsColumnOpen,
   ]);
@@ -2046,6 +2051,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const triggerCcBridgeVisibleTerminal = useCallback(
     async (toolCallKey: string) => {
+      if (focusMode) return;
       if (!pane.sessionId) return;
       const now = Date.now();
       const last = ccBridgeVisibleLaunchGuardRef.current.get(toolCallKey) ?? 0;
@@ -2123,11 +2129,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         await sleep(180);
       }
     },
-    [pane.id, pane.sessionId, pane.activeTaskspaceId, apiBase, apiToken, setActiveTaskspace, openSidePanel, addPaneTerminalTab]
+    [
+      pane.id,
+      pane.sessionId,
+      pane.activeTaskspaceId,
+      apiBase,
+      apiToken,
+      focusMode,
+      setActiveTaskspace,
+      openSidePanel,
+      addPaneTerminalTab,
+    ]
   );
 
   const triggerCcBridgeTailTerminal = useCallback(
     async (sessionId: string) => {
+      if (focusMode) return;
       const sid = sessionId.trim();
       if (!/^[0-9a-fA-F-]{36}$/.test(sid) || !pane.sessionId) return;
       const now = Date.now();
@@ -2191,7 +2208,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         await sleep(180);
       }
     },
-    [pane.id, pane.sessionId, pane.activeTaskspaceId, apiBase, apiToken, openSidePanel, addPaneTerminalTab]
+    [pane.id, pane.sessionId, pane.activeTaskspaceId, apiBase, apiToken, focusMode, openSidePanel, addPaneTerminalTab]
   );
 
   const updateAtStateFromText = useCallback(
@@ -3110,6 +3127,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       skipUserHistory?: boolean;
     }
   ) => {
+    if (focusMode) {
+      try {
+        const expandFn = window.agenticxDesktop?.focusModeExpand;
+        if (expandFn) {
+          const res = await expandFn();
+          if (res?.ok) {
+            useAppStore.getState().setFocusModeTall(true);
+          } else {
+            useAppStore.getState().exitFocusMode();
+          }
+        } else {
+          // Fallback if main process hasn't been restarted and IPC is missing
+          useAppStore.getState().exitFocusMode();
+        }
+      } catch {
+        useAppStore.getState().exitFocusMode();
+      }
+    }
     const text = userText.trim();
     const messageText = text || ATTACHMENT_ONLY_USER_PROMPT;
     const retryAttachments = options?.retryAttachments;
@@ -4264,12 +4299,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   return (
     <div
       ref={paneRef}
-      className="flex h-full min-w-0 flex-1"
-      style={paneTint ? { backgroundColor: paneTint } : undefined}
+      className={`agx-chatpane flex h-full min-w-0 flex-1 ${focusMode ? "agx-chatpane--focus" : ""}`}
+      style={!focusMode && paneTint ? { backgroundColor: paneTint } : undefined}
       onMouseDown={onFocus}
     >
-      <div className="flex h-full min-w-0 flex-1 flex-col" style={{ minWidth: 280 }}>
-        <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
+      <div
+        className={`agx-chatpane-main-column flex h-full min-w-0 flex-1 flex-col ${
+          focusComposerOnly ? "agx-chatpane-main-column--focus-empty" : ""
+        }`}
+        style={{ minWidth: 280 }}
+      >
+        <div className="agx-pane-toolbar flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
           <div
             className={`flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden ${
               paneSortableListeners ? "cursor-grab touch-none active:cursor-grabbing" : ""
@@ -4406,9 +4446,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
         <div
           ref={listRef}
-          className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-3"
+          className="agx-pane-message-list relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-3"
         >
-          {!pane.sessionId && (isGroupPane || isAutomationTaskPane) ? (
+          {focusComposerOnly ? null : !pane.sessionId && (isGroupPane || isAutomationTaskPane) ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-xs text-text-faint">
               <span className="animate-pulse">正在初始化会话...</span>
               <button
@@ -4466,8 +4506,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           </div>
         )}
 
-        <div className="shrink-0 border-t border-border px-4 py-2.5">
-          <div className="mb-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-text-faint">
+        <div className="agx-pane-composer-shell shrink-0 border-t border-border px-4 py-2.5">
+          <div className="agx-pane-composer-meta mb-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-text-faint">
             {(() => {
               const tkIn = pane.sessionTokens?.input ?? 0;
               const tkOut = pane.sessionTokens?.output ?? 0;
@@ -4554,7 +4594,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               <button className="rounded px-1 hover:bg-surface-hover" onClick={() => setSelectedMessageIds(new Set())}>取消</button>
             </div>
           ) : null}
-          <div className="relative rounded-2xl border border-border bg-surface-card transition-colors focus-within:border-border-strong">
+          <div className="agx-pane-composer-body relative rounded-2xl border border-border bg-surface-card transition-colors focus-within:border-border-strong">
             {visibleAttachmentEntries.length > 0 ? (
               <div className="flex flex-wrap gap-1.5 px-3 pt-3">
                 {visibleAttachmentEntries.map(([key, file]) => (
@@ -4689,15 +4729,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   void sendChat(extractComposerText());
                 }
               }}
-              className={`block w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-0 pt-3 text-sm text-text-primary outline-none ${
+              className={`agx-pane-composer-input block w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-0 pt-3 text-sm text-text-primary outline-none ${
                 composerExpanded ? "max-h-[62vh] min-h-[260px] pr-40" : "max-h-[220px] min-h-[40px] pr-4"
               }`}
             />
             {input.trim().length === 0 ? (
-              <div className="pointer-events-none absolute left-4 top-3 text-sm text-text-faint">发消息...</div>
+              <div className="agx-pane-composer-placeholder pointer-events-none absolute left-4 top-3 text-sm text-text-faint">
+                {focusMode ? "开始任务..." : "发消息..."}
+              </div>
             ) : null}
-            <div className="flex min-w-0 items-center justify-between gap-1 px-2 pb-2 pt-1">
+            <div className="agx-pane-composer-actions flex min-w-0 items-center justify-between gap-1 px-2 pb-2 pt-1">
               <div className="flex min-w-0 items-center gap-0.5">
+                {focusMode ? (
+                  <button
+                    type="button"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+                    onClick={exitFocusMode}
+                    title="展开回主界面 (⇧⌘F)"
+                    aria-label="展开回主界面"
+                  >
+                    <Expand className="h-[15px] w-[15px]" strokeWidth={1.8} />
+                  </button>
+                ) : null}
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -4748,7 +4801,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 hasInput={!!pane.sessionId && (!!input.trim() || readyAttachments.length > 0)}
                 streaming={isStreamingCurrentSession}
                 recording={recording}
-                onSend={() => void sendChat(extractComposerText())}
+                onSend={() => {
+                  void sendChat(extractComposerText());
+                }}
                 onMic={onMicClick}
                 onStop={stopCurrentRun}
               />
@@ -4804,7 +4859,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               )}
             </div>
           ) : null}
-          <div className="mt-1.5 flex items-center gap-2">
+          <div className="agx-pane-composer-tail mt-1.5 flex items-center gap-2">
             <PaneModelPicker paneId={pane.id} />
             <PaneKnowledgeRetrievalModeSwitch apiToken={apiToken} apiBase={apiBase} />
           </div>
