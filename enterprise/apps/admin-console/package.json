@@ -11,18 +11,22 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agenticx/ui": "workspace:*",
-    "@agenticx/branding": "workspace:*",
     "@agenticx/auth": "workspace:*",
+    "@agenticx/branding": "workspace:*",
     "@agenticx/config": "workspace:*",
+    "@agenticx/core-api": "workspace:*",
+    "@agenticx/feature-audit": "workspace:*",
     "@agenticx/feature-iam": "workspace:*",
     "@agenticx/feature-metering": "workspace:*",
-    "@agenticx/feature-audit": "workspace:*",
-    "@agenticx/feature-policy": "workspace:*",
     "@agenticx/feature-model-service": "workspace:*",
+    "@agenticx/feature-policy": "workspace:*",
     "@agenticx/feature-tools-mcp": "workspace:*",
+    "@agenticx/ui": "workspace:*",
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14"
   }
 }

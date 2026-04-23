@@ -1,4 +1,11 @@
-// @agenticx/feature-iam
-// 身份 · 租户 · 部门 · 角色 · 权限
-// TODO: implement
-export const featureName = "iam" as const;
+export * from "./types";
+export * from "./middleware/rbac";
+export * from "./services/user";
+export * from "./services/department";
+export * from "./services/role";
+export * from "./services/bulk-import";
+export * from "./api/users";
+export * from "./api/departments";
+export * from "./api/roles";
+export * from "./api/bulk-import";
+export * from "./components/DepartmentTree";

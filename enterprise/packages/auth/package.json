@@ -8,5 +8,12 @@
   "scripts": {
     "lint": "echo 'lint placeholder'",
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0"
   }
 }
