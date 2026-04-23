@@ -8,5 +8,12 @@
   "scripts": {
     "lint": "echo 'lint placeholder'",
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/pg": "^8.15.6"
   }
 }

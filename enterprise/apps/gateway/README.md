@@ -1,6 +1,6 @@
 # AgenticX AI Gateway
 
-企业级 AI 管控网关。基于 [APIPark](https://github.com/APIParkLab/APIPark) 二次开发。
+企业级 AI 管控网关（AgenticX 自研实现）。
 
 ## 职责
 
@@ -13,8 +13,9 @@
 ## 技术栈
 
 - Go 1.22+
-- Gin / Fiber
-- 基于 APIPark Apinto 插件链
+- Chi Router
+- OpenAI Compatible API
+- YAML 配置加载
 
 ## 构建
 
@@ -22,3 +23,16 @@
 cd apps/gateway
 go build -o bin/gateway ./cmd/gateway
 ```
+
+## 运行（开发）
+
+```bash
+cd apps/gateway
+go run ./cmd/gateway
+# default: http://localhost:8088
+```
+
+可选环境变量：
+
+- `GATEWAY_HTTP_ADDR`：监听地址，默认 `:8088`
+- `GATEWAY_CONFIG_PATH`：外部 YAML 配置文件路径

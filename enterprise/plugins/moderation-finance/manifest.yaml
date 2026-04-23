@@ -2,4 +2,22 @@ name: moderation-finance
 version: 0.1.0
 type: rule-pack
 description: 金融行业敏感规则库
-# TODO: populate concrete rules / tools / theme tokens
+extends: moderation-pii-baseline
+rules:
+  - id: finance-keyword-insider
+    kind: keyword
+    action: block
+    severity: critical
+    message: 检测到金融敏感关键词，已拦截
+    keywords:
+      - 内幕交易
+      - 非公开财报
+      - 未披露并购
+      - 资金挪用
+      - 反洗钱名单
+  - id: finance-regex-account
+    kind: regex
+    action: warn
+    severity: medium
+    message: 检测到疑似资金账号描述，请确认是否合规
+    pattern: "(?i)(账户余额|资金流水|券商席位|授信额度)"
