@@ -4,7 +4,7 @@ import * as React from "react";
 import { Command as CommandPrimitive } from "cmdk";
 import { Search } from "lucide-react";
 import { cn } from "../../lib/cn";
-import { Dialog, DialogContent } from "./dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./dialog";
 
 /**
  * Command · cmdk 包装，用于全局 Cmd+K 搜索面板或页面内的命令选择器
@@ -39,12 +39,23 @@ Command.displayName = CommandPrimitive.displayName;
 
 export interface CommandDialogProps extends React.ComponentPropsWithoutRef<typeof Dialog> {
   title?: string;
+  description?: string;
 }
 
-export function CommandDialog({ children, ...props }: CommandDialogProps) {
+export function CommandDialog({
+  children,
+  title = "Command palette",
+  description = "Search and run quick actions.",
+  ...props
+}: CommandDialogProps) {
   return (
     <Dialog {...props}>
       <DialogContent className="overflow-hidden p-0 shadow-2xl max-w-2xl" showClose={false}>
+        {/* Radix a11y: DialogContent must contain a DialogTitle (can be visually hidden). */}
+        <DialogHeader className="sr-only">
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
         <Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
           {children}
         </Command>
