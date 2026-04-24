@@ -363,7 +363,7 @@ a {
 }
 
 /* focus-visible 一致化 */
-:where(button, a, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+:where(button, a, input, select, textarea, [role="button"]):focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
