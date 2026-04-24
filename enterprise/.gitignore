@@ -15,6 +15,9 @@ pnpm-lock.yaml
 .env.*.local
 !.env.example
 
+# Bootstrap 生成的本地密钥（切勿提交）
+.local-secrets/
+
 # Go gateway build artifacts
 apps/gateway/bin/
 apps/gateway/tmp/

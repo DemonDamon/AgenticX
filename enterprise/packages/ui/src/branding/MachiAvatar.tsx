@@ -7,11 +7,11 @@ type MachiAvatarProps = {
   src?: string;
 };
 
-export function MachiAvatar({ className, size = 96, src = "/machi-lineart-mask.svg" }: MachiAvatarProps) {
+export function MachiAvatar({ className, size = 96, src = "/machi-logo-transparent.png" }: MachiAvatarProps) {
   return (
     <span
       className={cn(
-        "relative inline-flex items-center justify-center overflow-hidden rounded-md border border-zinc-700/70 bg-black text-white",
+        "relative inline-flex items-center justify-center overflow-hidden rounded-md",
         className
       )}
       style={{ width: size, height: size }}
@@ -22,20 +22,8 @@ export function MachiAvatar({ className, size = 96, src = "/machi-lineart-mask.s
         alt="Machi"
         width={size}
         height={size}
-        className="h-full w-full object-contain invert dark:invert-0"
-        onError={(event) => {
-          const target = event.currentTarget;
-          target.style.display = "none";
-          const fallback = target.nextElementSibling as HTMLElement | null;
-          if (fallback) fallback.style.display = "flex";
-        }}
+        className="h-full w-full object-cover"
       />
-      <span
-        className="absolute inset-0 hidden items-center justify-center text-xs font-semibold uppercase tracking-[0.2em]"
-        aria-hidden
-      >
-        Machi
-      </span>
     </span>
   );
 }

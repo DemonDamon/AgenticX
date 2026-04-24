@@ -52,12 +52,76 @@ enterprise/
 
 ## 快速开始
 
+### 日常启动（最常用，3 条命令就够）
+
 ```bash
-# 在 enterprise/ 根目录
+cd enterprise
+bash scripts/bootstrap.sh     # 只需首次 / 环境/密钥变更时跑
+bash scripts/start-dev.sh     # 每天开工跑这一条
+```
+
+起来后：
+
+- 前台：<http://localhost:3000>
+- 后台：<http://localhost:3001>
+- 网关健康检查：<http://localhost:8088/healthz>
+
+登录账号（`bootstrap.sh` 交互设置的密码，落在 `.env.local`）：
+
+- 后台：`owner@agenticx.local` + `ADMIN_CONSOLE_LOGIN_PASSWORD`
+- 前台：`owner@agenticx.local` + `AUTH_DEV_OWNER_PASSWORD`
+  - 如果输入 `staff@agenticx.local` 会报 `Invalid credentials` —— 默认种子里没有这个人，需要先在后台或注册页创建
+
+### `start-dev.sh` 的 3 个参数（只要记这些）
+
+| 命令 | 行为 |
+|---|---|
+| `bash scripts/start-dev.sh` | 默认，仅拉起 enterprise 的 web-portal + admin-console |
+| `bash scripts/start-dev.sh --all` | 同时拉起 `customers/*`（如 hechuang 的 `:3100/:3101`） |
+| `bash scripts/start-dev.sh --ui=stream` | 关闭 Turbo TUI，输出纯日志（Ctrl+C 一次就退） |
+| `bash scripts/start-dev.sh --help` | 随时查 |
+
+> Turbo TUI 的小提示：默认 `tui` 模式下，用 `↑/↓` 切任务、`/` 搜索、`q` 退出。如果感觉"卡住/Ctrl+C 没反应"，先按 `Esc` 再按 `q`，或直接改用 `--ui=stream`。
+
+### 企业服务器部署（不交互）
+
+```bash
+export DATABASE_URL='postgresql://...'
+export AUTH_JWT_PRIVATE_KEY="$(cat /secure/path/auth_private.pem)"
+export AUTH_JWT_PUBLIC_KEY="$(cat /secure/path/auth_public.pem)"
+export ADMIN_CONSOLE_LOGIN_PASSWORD='...'
+export ADMIN_CONSOLE_SESSION_SECRET='...'
+bash scripts/bootstrap.sh --mode=server
+```
+
+`bootstrap.sh` 要点：
+
+1. 预检 node/pnpm/go/docker/openssl
+2. 写入 `enterprise/.env.local`（chmod 600，已 `.gitignore`）
+3. 若缺少密码 → 交互提示（强度校验）；`--mode=server` 下直接失败
+4. `pnpm install`
+5. 启动 postgres + redis（local）；server 模式跳过
+6. 跑 `db:migrate` + `db:seed`
+7. 生成 RSA-2048 JWT 密钥对至 `enterprise/.local-secrets/`（local）
+
+常用选项：
+
+- `--reset-db`：`docker compose down -v` 后重建（仅开发）
+- `--skip-docker`：本机已有独立 postgres，不经 compose
+- `--mode=server`：非交互，全部密钥/密码必须来自外部环境变量
+
+### 不用脚本，直接 pnpm（知道自己在做什么时）
+
+```bash
+# 在 enterprise/ 根目录，环境变量需自行注入
+set -a; source .env.local; set +a
+# .env.local 里存的是 *_FILE，需要手动展开 PEM 内容
+export AUTH_JWT_PRIVATE_KEY="$(cat "$AUTH_JWT_PRIVATE_KEY_FILE")"
+export AUTH_JWT_PUBLIC_KEY="$(cat "$AUTH_JWT_PUBLIC_KEY_FILE")"
 pnpm install
-pnpm dev      # 并行启动所有 apps
-pnpm build    # 构建所有包
-pnpm typecheck
+pnpm exec turbo run dev \
+  --filter=@agenticx/app-web-portal \
+  --filter=@agenticx/app-admin-console
 ```
 
 ## 产品定位
