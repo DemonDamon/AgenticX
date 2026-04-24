@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Badge,
@@ -193,7 +193,7 @@ export default function RolesPage() {
               </thead>
               <tbody>
                 {matrix.map(({ resource, actions }) => (
-                  <>
+                  <Fragment key={resource}>
                     <tr key={`${resource}-head`} className="border-b border-border bg-surface-subtle">
                       <td
                         className="sticky left-0 z-10 bg-surface-subtle px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground"
@@ -234,7 +234,7 @@ export default function RolesPage() {
                         </tr>
                       );
                     })}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>
