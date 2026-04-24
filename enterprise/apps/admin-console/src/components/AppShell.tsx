@@ -28,6 +28,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  type UiLocale,
   useLocale,
   useUiTheme,
 } from "@agenticx/ui";
@@ -110,6 +111,84 @@ const NAV_GROUPS: NavGroup[] = [
 
 const FLAT_NAV: NavItem[] = NAV_GROUPS.flatMap((group) => group.items);
 
+const NAV_GROUP_LABELS: Record<string, { zh: string; en: string }> = {
+  overview: { zh: "概览", en: "Overview" },
+  iam: { zh: "身份与权限", en: "IAM" },
+  ops: { zh: "运维监控", en: "Operations" },
+  platform: { zh: "平台配置", en: "Platform" },
+};
+
+const NAV_ITEM_LABELS: Record<string, { zh: string; en: string }> = {
+  "overview:Dashboard": { zh: "仪表盘", en: "Dashboard" },
+  "iam:用户": { zh: "用户", en: "Users" },
+  "iam:部门": { zh: "部门", en: "Departments" },
+  "iam:角色": { zh: "角色", en: "Roles" },
+  "iam:批量导入": { zh: "批量导入", en: "Bulk Import" },
+  "ops:审计日志": { zh: "审计日志", en: "Audit Logs" },
+  "ops:四维消耗": { zh: "四维消耗", en: "Metering" },
+  "platform:策略规则": { zh: "策略规则", en: "Policy Rules" },
+  "platform:模型服务": { zh: "模型服务", en: "Model Services" },
+};
+
+const SHELL_COPY = {
+  zh: {
+    adminLabel: "管理后台",
+    commandSearch: "搜索页面 / 导航...",
+    commandInputPlaceholder: "输入页面名称、部门或用户...",
+    commandTitle: "命令面板",
+    commandDescription: "搜索页面并执行快捷操作",
+    commandEmpty: "未找到匹配项",
+    quickActions: "快捷操作",
+    openMenu: "打开菜单",
+    theme: "主题",
+    light: "亮色",
+    dark: "暗色",
+    system: "跟随系统",
+    language: "语言",
+    chinese: "中文",
+    english: "English",
+    switchTheme: "切换主题",
+    switchTo: "切换到",
+    signOut: "退出登录",
+    userMgmt: "人员管理",
+    rolePerm: "角色与权限",
+    notifyComingSoon: "通知中心（即将上线）",
+    gatewayTip: "Gateway /healthz · 每 5 秒轮询",
+  },
+  en: {
+    adminLabel: "Admin Console",
+    commandSearch: "Search pages / navigation...",
+    commandInputPlaceholder: "Type page, department, or user...",
+    commandTitle: "Command palette",
+    commandDescription: "Search pages and run quick actions",
+    commandEmpty: "No matching result",
+    quickActions: "Quick actions",
+    openMenu: "Open menu",
+    theme: "Theme",
+    light: "Light",
+    dark: "Dark",
+    system: "System",
+    language: "Language",
+    chinese: "Chinese",
+    english: "English",
+    switchTheme: "Toggle theme",
+    switchTo: "Switch to",
+    signOut: "Sign out",
+    userMgmt: "User management",
+    rolePerm: "Roles & permissions",
+    notifyComingSoon: "Notification center (coming soon)",
+    gatewayTip: "Gateway /healthz · polling every 5s",
+  },
+} as const;
+
+function localizeGroupLabel(groupId: string, locale: UiLocale): string {
+  return NAV_GROUP_LABELS[groupId]?.[locale] ?? groupId;
+}
+
+function localizeItemLabel(groupId: string, itemLabel: string, locale: UiLocale): string {
+  return NAV_ITEM_LABELS[`${groupId}:${itemLabel}`]?.[locale] ?? itemLabel;
+}
+
 type HealthStatus = "healthy" | "degraded" | "offline";
 
 function healthVariant(status: HealthStatus): "success" | "warning" | "destructive" {
@@ -118,7 +197,12 @@ function healthVariant(status: HealthStatus): "success" | "warning" | "destructi
   return "destructive";
 }
 
-function healthLabel(status: HealthStatus): string {
+function healthLabel(status: HealthStatus, locale: UiLocale): string {
+  if (locale === "en") {
+    if (status === "healthy") return "Gateway healthy";
+    if (status === "degraded") return "Gateway degraded";
+    return "Gateway offline";
+  }
   if (status === "healthy") return "网关正常";
   if (status === "degraded") return "网关降级";
   return "网关离线";
@@ -135,6 +219,7 @@ export function AppShell({ children }: AppShellProps) {
   const [health, setHealth] = useState<HealthStatus>("offline");
   const [commandOpen, setCommandOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const copy = SHELL_COPY[locale];
 
   useEffect(() => {
     try {
@@ -203,8 +288,8 @@ export function AppShell({ children }: AppShellProps) {
   const breadcrumbs = useMemo(() => {
     const group = NAV_GROUPS.find((g) => g.items.some((item) => item === activeItem));
     if (!group || !activeItem) return [] as string[];
-    return [group.label, activeItem.label];
-  }, [activeItem]);
+    return [localizeGroupLabel(group.id, locale), localizeItemLabel(group.id, activeItem.label, locale)];
+  }, [activeItem, locale]);
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -227,7 +312,7 @@ export function AppShell({ children }: AppShellProps) {
             {!collapsed && (
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold">AgenticX</div>
-                <div className="truncate text-[11px] text-muted-foreground">Admin Console</div>
+                <div className="truncate text-[11px] text-muted-foreground">{copy.adminLabel}</div>
               </div>
             )}
           </div>
@@ -240,12 +325,13 @@ export function AppShell({ children }: AppShellProps) {
               <div key={group.id} className="space-y-1">
                 {!collapsed && (
                   <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
-                    {group.label}
+                    {localizeGroupLabel(group.id, locale)}
                   </div>
                 )}
                 {group.items.map((item) => {
                   const Icon = item.icon;
                   const active = activeItem?.href === item.href;
+                  const itemLabel = localizeItemLabel(group.id, item.label, locale);
                   const link = (
                     <Link
                       key={`${group.id}-${item.href}-${item.label}`}
@@ -263,7 +349,7 @@ export function AppShell({ children }: AppShellProps) {
                         <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-primary" aria-hidden />
                       )}
                       <Icon className={["h-4 w-4 shrink-0", active ? "text-primary" : "text-muted-foreground"].join(" ")} />
-                      {!collapsed && <span className="truncate">{item.label}</span>}
+                      {!collapsed && <span className="truncate">{itemLabel}</span>}
                       {!collapsed && item.shortcut && (
                         <span className="ml-auto text-[10px] tracking-widest text-muted-foreground/70">{item.shortcut}</span>
                       )}
@@ -274,7 +360,7 @@ export function AppShell({ children }: AppShellProps) {
                     <Tooltip key={`${group.id}-${item.href}-${item.label}`}>
                       <TooltipTrigger asChild>{link}</TooltipTrigger>
                       <TooltipContent side="right" sideOffset={12}>
-                        {item.label}
+                        {itemLabel}
                       </TooltipContent>
                     </Tooltip>
                   );
@@ -319,14 +405,14 @@ export function AppShell({ children }: AppShellProps) {
               size="icon-sm"
               className="lg:hidden"
               onClick={() => setMobileOpen((prev) => !prev)}
-              aria-label="打开菜单"
+              aria-label={copy.openMenu}
             >
               <Menu />
             </Button>
 
             {/* breadcrumbs */}
             <nav aria-label="面包屑" className="hidden min-w-0 items-center gap-1.5 text-sm text-muted-foreground sm:flex">
-              <span className="shrink-0">Admin</span>
+              <span className="shrink-0">{copy.adminLabel}</span>
               {breadcrumbs.map((segment, index) => (
                 <span key={`${segment}-${index}`} className="flex shrink-0 items-center gap-1.5">
                   <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" />
@@ -344,7 +430,7 @@ export function AppShell({ children }: AppShellProps) {
               className="ml-auto flex h-8 w-full max-w-[320px] items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted"
             >
               <Search className="h-3.5 w-3.5" />
-              <span className="flex-1 text-left">搜索页面 / 导航...</span>
+              <span className="flex-1 text-left">{copy.commandSearch}</span>
               <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium">⌘K</kbd>
             </button>
 
@@ -354,10 +440,10 @@ export function AppShell({ children }: AppShellProps) {
                 <TooltipTrigger asChild>
                   <Badge variant={healthVariant(health)} className="gap-1 px-2 py-1">
                     <Activity className="h-3 w-3" />
-                    <span className="hidden sm:inline">{healthLabel(health)}</span>
+                    <span className="hidden sm:inline">{healthLabel(health, locale)}</span>
                   </Badge>
                 </TooltipTrigger>
-                <TooltipContent>Gateway /healthz · 每 5 秒轮询</TooltipContent>
+                <TooltipContent>{copy.gatewayTip}</TooltipContent>
               </Tooltip>
 
               <Tooltip>
@@ -366,49 +452,61 @@ export function AppShell({ children }: AppShellProps) {
                     <Bell />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>通知中心（即将上线）</TooltipContent>
+                <TooltipContent>{copy.notifyComingSoon}</TooltipContent>
               </Tooltip>
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" aria-label="主题">
+                  <Button variant="ghost" size="icon-sm" aria-label={copy.theme}>
                     {resolvedTheme === "dark" ? <Moon /> : <Sun />}
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-36">
-                  <DropdownMenuLabel>主题</DropdownMenuLabel>
+                <DropdownMenuContent
+                  align="end"
+                  className="w-40 border-border bg-popover text-popover-foreground shadow-xl [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0"
+                >
+                  <DropdownMenuLabel>{copy.theme}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => setTheme("light")}>
                     <Sun className="mr-2 h-4 w-4" />
-                    亮色
+                    {copy.light}
                     {theme === "light" ? <span className="ml-auto text-xs text-primary">✓</span> : null}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setTheme("dark")}>
                     <Moon className="mr-2 h-4 w-4" />
-                    暗色
+                    {copy.dark}
                     {theme === "dark" ? <span className="ml-auto text-xs text-primary">✓</span> : null}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setTheme("system")}>
                     <Monitor className="mr-2 h-4 w-4" />
-                    跟随系统
+                    {copy.system}
                     {theme === "system" ? <span className="ml-auto text-xs text-primary">✓</span> : null}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="语言"
-                    onClick={() => setLocale(locale === "zh" ? "en" : "zh")}
-                  >
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label={copy.language}>
                     <Languages />
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent>{locale === "zh" ? "切换到 English" : "切换到中文"}</TooltipContent>
-              </Tooltip>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="w-40 border-border bg-popover text-popover-foreground shadow-xl [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0"
+                >
+                  <DropdownMenuLabel>{copy.language}</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setLocale("zh")}>
+                    {copy.chinese}
+                    {locale === "zh" ? <span className="ml-auto text-xs text-primary">✓</span> : null}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLocale("en")}>
+                    {copy.english}
+                    {locale === "en" ? <span className="ml-auto text-xs text-primary">✓</span> : null}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
 
               <Separator orientation="vertical" className="mx-1 h-6" />
 
@@ -422,28 +520,31 @@ export function AppShell({ children }: AppShellProps) {
                     <span className="hidden text-sm font-medium sm:inline">admin</span>
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuContent
+                  align="end"
+                  className="w-56 border-border bg-popover text-popover-foreground shadow-xl [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0"
+                >
                   <DropdownMenuLabel>
-                    <div className="text-sm font-medium">管理员</div>
+                    <div className="text-sm font-medium">{copy.adminLabel}</div>
                     <div className="text-xs font-normal text-muted-foreground">owner@agenticx.local</div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => router.push("/iam/users")}>
                     <Users className="mr-2 h-4 w-4" />
-                    人员管理
+                    {copy.userMgmt}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => router.push("/iam/roles")}>
                     <KeyRound className="mr-2 h-4 w-4" />
-                    角色与权限
+                    {copy.rolePerm}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={toggleTheme}>
                     <Sliders className="mr-2 h-4 w-4" />
-                    切换主题
+                    {copy.switchTheme}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleSignOut}>
                     <LogOut className="mr-2 h-4 w-4" />
-                    退出登录
+                    {copy.signOut}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -456,14 +557,20 @@ export function AppShell({ children }: AppShellProps) {
         </section>
 
         {/* ===================== Command Palette ===================== */}
-        <CommandDialog open={commandOpen} onOpenChange={setCommandOpen}>
-          <CommandInput placeholder="输入页面名称、部门或用户..." />
+        <CommandDialog
+          open={commandOpen}
+          onOpenChange={setCommandOpen}
+          title={copy.commandTitle}
+          description={copy.commandDescription}
+        >
+          <CommandInput placeholder={copy.commandInputPlaceholder} />
           <CommandList>
-            <CommandEmpty>未找到匹配项</CommandEmpty>
+            <CommandEmpty>{copy.commandEmpty}</CommandEmpty>
             {NAV_GROUPS.map((group) => (
-              <CommandGroup key={group.id} heading={group.label}>
+              <CommandGroup key={group.id} heading={localizeGroupLabel(group.id, locale)}>
                 {group.items.map((item) => {
                   const Icon = item.icon;
+                  const itemLabel = localizeItemLabel(group.id, item.label, locale);
                   return (
                     <CommandItem
                       key={`${group.id}-${item.href}-${item.label}`}
@@ -471,10 +578,10 @@ export function AppShell({ children }: AppShellProps) {
                         setCommandOpen(false);
                         router.push(item.href);
                       }}
-                      value={`${group.label} ${item.label} ${item.href}`}
+                      value={`${localizeGroupLabel(group.id, locale)} ${itemLabel} ${item.href}`}
                     >
                       <Icon className="mr-2 h-4 w-4 text-muted-foreground" />
-                      {item.label}
+                      {itemLabel}
                       {item.shortcut ? <CommandShortcut>{item.shortcut}</CommandShortcut> : null}
                     </CommandItem>
                   );
@@ -482,7 +589,7 @@ export function AppShell({ children }: AppShellProps) {
               </CommandGroup>
             ))}
             <CommandSeparator />
-            <CommandGroup heading="快捷操作">
+            <CommandGroup heading={copy.quickActions}>
               <CommandItem
                 onSelect={() => {
                   setCommandOpen(false);
@@ -490,7 +597,7 @@ export function AppShell({ children }: AppShellProps) {
                 }}
               >
                 {resolvedTheme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                切换到 {resolvedTheme === "dark" ? "亮色" : "暗色"}主题
+                {copy.switchTo} {resolvedTheme === "dark" ? copy.light : copy.dark} {copy.theme}
               </CommandItem>
               <CommandItem
                 onSelect={() => {
@@ -499,7 +606,7 @@ export function AppShell({ children }: AppShellProps) {
                 }}
               >
                 <LogOut className="mr-2 h-4 w-4" />
-                退出登录
+                {copy.signOut}
               </CommandItem>
             </CommandGroup>
           </CommandList>

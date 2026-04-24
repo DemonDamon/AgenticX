@@ -50,7 +50,11 @@ export function CommandDialog({
 }: CommandDialogProps) {
   return (
     <Dialog {...props}>
-      <DialogContent className="overflow-hidden p-0 shadow-2xl max-w-2xl" showClose={false}>
+      <DialogContent
+        className="max-w-2xl overflow-hidden border-border bg-popover p-0 shadow-2xl"
+        overlayClassName="bg-black/18 backdrop-blur-0"
+        showClose={false}
+      >
         {/* Radix a11y: DialogContent must contain a DialogTitle (can be visually hidden). */}
         <DialogHeader className="sr-only">
           <DialogTitle>{title}</DialogTitle>
