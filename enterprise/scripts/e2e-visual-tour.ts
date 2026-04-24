@@ -12,10 +12,23 @@
  *   Admin:  /login, /dashboard, /iam/users, /iam/departments, /iam/roles,
  *           /iam/bulk-import, /audit, /metering
  *
- * 启动前提：
- *   bash scripts/start-dev.sh
- * 运行：
- *   pnpm exec tsx scripts/e2e-visual-tour.ts
+ * ===== 运行前提（缺一不可）=====
+ * 1. 首次运行需安装 Chromium 二进制（~150MB）：
+ *      pnpm -C enterprise visual-tour:install
+ * 2. 两个前端服务必须已经起来（默认端口 :3000 / :3001）：
+ *      bash enterprise/scripts/start-dev.sh
+ *    脚本不会帮你拉 server，只会访问 http://127.0.0.1:3000/3001
+ *
+ * ===== 运行 =====
+ *   pnpm -C enterprise visual-tour
+ *   # 或
+ *   cd enterprise && pnpm visual-tour
+ *
+ * 环境变量覆盖：
+ *   PORTAL_BASE_URL               web-portal 基址（默认 http://127.0.0.1:3000）
+ *   ADMIN_BASE_URL                admin-console 基址（默认 http://127.0.0.1:3001）
+ *   ADMIN_CONSOLE_LOGIN_PASSWORD  admin 登录密码
+ *   AUTH_DEV_OWNER_PASSWORD       portal 登录密码
  */
 
 import { mkdir } from "node:fs/promises";
@@ -159,10 +172,55 @@ async function tourPortal(page: Page, theme: Theme): Promise<void> {
   }
 }
 
+async function probe(url: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2_000);
+  try {
+    const res = await fetch(url, { method: "GET", signal: controller.signal, redirect: "manual" });
+    // 2xx / 3xx / 401 都视为 server 活着
+    return res.status < 500;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function main(): Promise<void> {
+  // 健康检查：不起 server 就直接给人话错误
+  const [portalUp, adminUp] = await Promise.all([
+    probe(`${PORTAL_BASE}/auth`),
+    probe(`${ADMIN_BASE}/login`),
+  ]);
+  if (!portalUp || !adminUp) {
+    console.error("");
+    console.error("✗ 前端服务未运行，无法进行视觉巡检：");
+    console.error(`  - portal  ${PORTAL_BASE}  ${portalUp ? "✓" : "✗"}`);
+    console.error(`  - admin   ${ADMIN_BASE}  ${adminUp ? "✓" : "✗"}`);
+    console.error("");
+    console.error("请先打开另一个终端执行：");
+    console.error("  bash enterprise/scripts/start-dev.sh");
+    console.error("看到 web-portal/admin-console 都 ready 后再运行本脚本。");
+    console.error("");
+    process.exit(2);
+  }
+
   await mkdir(OUTPUT_DIR, { recursive: true });
 
-  const browser = await chromium.launch();
+  let browser;
+  try {
+    browser = await chromium.launch();
+  } catch (error) {
+    const message = (error as Error).message ?? "";
+    if (message.includes("Executable doesn't exist")) {
+      console.error("");
+      console.error("✗ Chromium 浏览器未安装。首次运行请先执行：");
+      console.error("    pnpm -C enterprise visual-tour:install");
+      console.error("");
+      process.exit(3);
+    }
+    throw error;
+  }
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 
   try {
