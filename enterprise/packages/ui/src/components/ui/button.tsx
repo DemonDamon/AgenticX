@@ -3,22 +3,25 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/cn";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-[var(--ui-color-primary)] text-white hover:opacity-90",
-        secondary: "bg-zinc-100 text-zinc-900 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700",
-        outline:
-          "border border-zinc-200 bg-transparent text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800",
-        ghost: "bg-transparent text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800",
-        destructive: "bg-red-600 text-white hover:bg-red-500",
+        default: "bg-primary text-primary-foreground shadow-sm hover:bg-primary-hover",
+        secondary: "bg-secondary text-secondary-foreground hover:bg-muted",
+        outline: "border border-input bg-background text-foreground shadow-sm hover:bg-muted hover:text-foreground",
+        ghost: "bg-transparent text-foreground hover:bg-muted",
+        destructive: "bg-danger text-danger-foreground shadow-sm hover:opacity-90",
+        success: "bg-success text-success-foreground shadow-sm hover:opacity-90",
+        link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
-        sm: "h-8 px-3 text-xs",
-        default: "h-9 px-4 py-2",
-        lg: "h-10 px-5",
-        icon: "h-9 w-9",
+        xs: "h-7 px-2 text-xs [&_svg]:size-3",
+        sm: "h-8 px-3 text-xs [&_svg]:size-3.5",
+        default: "h-9 px-4 py-2 [&_svg]:size-4",
+        lg: "h-10 px-5 [&_svg]:size-4",
+        icon: "h-9 w-9 [&_svg]:size-4",
+        "icon-sm": "h-8 w-8 [&_svg]:size-3.5",
       },
     },
     defaultVariants: {
@@ -28,8 +31,7 @@ const buttonVariants = cva(
   }
 );
 
-export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
-  VariantProps<typeof buttonVariants>;
+export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof buttonVariants>;
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, type = "button", ...props }, ref) => {
@@ -40,4 +42,3 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 Button.displayName = "Button";
 
 export { buttonVariants };
-

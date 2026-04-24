@@ -2,19 +2,23 @@ import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/cn";
 
-const alertVariants = cva("relative w-full rounded-lg border p-4", {
-  variants: {
-    variant: {
-      default: "border-zinc-200 bg-white text-zinc-900 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100",
-      warning: "border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200",
-      destructive: "border-red-300 bg-red-50 text-red-950 dark:border-red-700 dark:bg-red-950/30 dark:text-red-200",
-      success: "border-emerald-300 bg-emerald-50 text-emerald-950 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200",
+const alertVariants = cva(
+  "relative w-full rounded-lg border p-4 [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:size-5 [&>svg+div]:pl-7",
+  {
+    variants: {
+      variant: {
+        default: "border-border bg-surface text-foreground",
+        info: "border-info/30 bg-info-soft text-info [&>svg]:text-info",
+        success: "border-success/30 bg-success-soft text-success [&>svg]:text-success",
+        warning: "border-warning/40 bg-warning-soft text-warning-foreground [&>svg]:text-warning",
+        destructive: "border-danger/40 bg-danger-soft text-danger [&>svg]:text-danger",
+      },
     },
-  },
-  defaultVariants: {
-    variant: "default",
-  },
-});
+    defaultVariants: {
+      variant: "default",
+    },
+  }
+);
 
 type AlertProps = React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants>;
 
@@ -32,4 +36,3 @@ export const AlertDescription = React.forwardRef<HTMLParagraphElement, React.HTM
   ({ className, ...props }, ref) => <div ref={ref} className={cn("text-sm opacity-90", className)} {...props} />
 );
 AlertDescription.displayName = "AlertDescription";
-

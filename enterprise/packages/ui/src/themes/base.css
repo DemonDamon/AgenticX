@@ -1,0 +1,381 @@
+/*
+ * @agenticx/ui · base tokens
+ *
+ * 唯一的设计 token 源，被 admin-console / web-portal / customers/* 共同引入。
+ *
+ * 结构：
+ *   :root        → 默认亮色（light theme）
+ *   .dark        → 暗色覆盖
+ *   @theme inline → 把 CSS vars 暴露为 Tailwind v4 utility（bg-background / text-foreground / border-border ...）
+ *
+ * 所有 token 使用 OKLCH 色空间，色相（hue）参考 vue-vben-admin v5 的 indigo/violet primary 风格。
+ * 中性色保留 Machi 基底。
+ *
+ * 命名规范：
+ *   --background / --foreground    → 语义底色
+ *   --surface / --surface-elevated → Card 三层 elevation（background < surface < surface-elevated）
+ *   --primary / --primary-foreground → 品牌色 + 其上的文字色
+ *   --muted / --muted-foreground    → 次级背景 + 次级文字
+ *   --success / --warning / --danger / --info → 状态语义色
+ *   --chart-1 .. --chart-7          → 图表色板
+ *
+ * 向后兼容：保留 --machi-* 变量作为 alias，指向新语义 token，
+ *          直到后续把所有引用迁移到语义 class（bg-surface 等）。
+ */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ============================================================
+ * 1. dark 变体定义（tailwind v4 方式）
+ *    让 `dark:xxx` 在 `<html class="dark">` 场景下命中
+ * ============================================================ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ============================================================
+ * 2. 亮色 token（默认）
+ * ============================================================ */
+:root {
+  /* base */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+
+  /* surfaces（Card 三层） */
+  --surface-subtle: oklch(0.99 0 0);
+  --surface: oklch(0.985 0 0);
+  --surface-elevated: oklch(0.97 0 0);
+
+  /* muted */
+  --muted: oklch(0.96 0 0);
+  --muted-foreground: oklch(0.45 0.01 270);
+
+  /* border & input */
+  --border: oklch(0.92 0.005 270);
+  --border-strong: oklch(0.85 0.01 270);
+  --input: oklch(0.92 0.005 270);
+  --ring: oklch(0.55 0.22 275);
+
+  /* brand primary · indigo/violet */
+  --primary: oklch(0.52 0.22 275);
+  --primary-foreground: oklch(0.99 0 0);
+  --primary-hover: oklch(0.47 0.23 275);
+  --primary-soft: oklch(0.95 0.04 275);
+
+  /* secondary · slate */
+  --secondary: oklch(0.94 0.01 270);
+  --secondary-foreground: oklch(0.20 0.01 270);
+
+  /* accent · violet 更偏紫 */
+  --accent: oklch(0.60 0.22 305);
+  --accent-foreground: oklch(0.99 0 0);
+
+  /* semantic · success/warning/danger/info */
+  --success: oklch(0.63 0.17 150);
+  --success-foreground: oklch(0.99 0 0);
+  --success-soft: oklch(0.95 0.05 150);
+
+  --warning: oklch(0.75 0.17 70);
+  --warning-foreground: oklch(0.20 0.05 70);
+  --warning-soft: oklch(0.97 0.05 70);
+
+  --danger: oklch(0.58 0.22 25);
+  --danger-foreground: oklch(0.99 0 0);
+  --danger-soft: oklch(0.96 0.04 25);
+
+  --info: oklch(0.62 0.16 230);
+  --info-foreground: oklch(0.99 0 0);
+  --info-soft: oklch(0.95 0.05 230);
+
+  /* destructive（shadcn 习惯命名，等同 danger） */
+  --destructive: var(--danger);
+  --destructive-foreground: var(--danger-foreground);
+
+  /* chart palette · 7 色柔和 */
+  --chart-1: oklch(0.55 0.21 275); /* indigo */
+  --chart-2: oklch(0.65 0.13 195); /* teal */
+  --chart-3: oklch(0.72 0.17 70);  /* amber */
+  --chart-4: oklch(0.62 0.20 15);  /* rose */
+  --chart-5: oklch(0.58 0.22 310); /* violet */
+  --chart-6: oklch(0.65 0.16 155); /* emerald */
+  --chart-7: oklch(0.62 0.15 225); /* sky */
+
+  /* card shorthand（等价 surface，shadcn 语义） */
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+
+  /* popover */
+  --popover: var(--surface-elevated);
+  --popover-foreground: var(--foreground);
+
+  /* radius */
+  --radius: 0.625rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* sidebar specific */
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-accent: oklch(0.96 0.01 275);
+  --sidebar-accent-foreground: var(--primary);
+
+  /* ================= legacy machi-* alias =================
+   * 现有代码大量用 bg-[var(--machi-bg)] 等，过渡期保留。
+   * 后续 commit 迁移完再删。
+   */
+  --machi-bg: var(--background);
+  --machi-bg-elevated: var(--surface);
+  --machi-bg-soft: var(--surface-elevated);
+  --machi-fg: var(--foreground);
+  --machi-muted: var(--muted-foreground);
+  --machi-border: var(--border);
+  --machi-accent: var(--primary);
+
+  /* legacy ui-color alias（runtime-brand.ts 引用） */
+  --ui-color-primary: var(--primary);
+  --ui-color-primary-foreground: var(--primary-foreground);
+  --ui-color-background: var(--background);
+  --ui-color-surface: var(--surface);
+  --ui-color-foreground: var(--foreground);
+  --ui-color-border: var(--border);
+}
+
+/* ============================================================
+ * 3. 暗色 token（覆盖）
+ * ============================================================ */
+.dark {
+  --background: oklch(0.14 0.005 270);
+  --foreground: oklch(0.985 0 0);
+
+  --surface-subtle: oklch(0.16 0.005 270);
+  --surface: oklch(0.185 0.005 270);
+  --surface-elevated: oklch(0.22 0.006 270);
+
+  --muted: oklch(0.24 0.005 270);
+  --muted-foreground: oklch(0.65 0.01 270);
+
+  --border: oklch(0.27 0.008 270);
+  --border-strong: oklch(0.35 0.01 270);
+  --input: oklch(0.27 0.008 270);
+  --ring: oklch(0.70 0.18 275);
+
+  --primary: oklch(0.72 0.18 275);
+  --primary-foreground: oklch(0.14 0.005 270);
+  --primary-hover: oklch(0.78 0.17 275);
+  --primary-soft: oklch(0.28 0.08 275);
+
+  --secondary: oklch(0.24 0.006 270);
+  --secondary-foreground: oklch(0.985 0 0);
+
+  --accent: oklch(0.70 0.20 305);
+  --accent-foreground: oklch(0.14 0.005 270);
+
+  --success: oklch(0.70 0.17 150);
+  --success-foreground: oklch(0.14 0.005 270);
+  --success-soft: oklch(0.28 0.08 150);
+
+  --warning: oklch(0.80 0.17 70);
+  --warning-foreground: oklch(0.14 0.005 270);
+  --warning-soft: oklch(0.30 0.08 70);
+
+  --danger: oklch(0.68 0.22 25);
+  --danger-foreground: oklch(0.14 0.005 270);
+  --danger-soft: oklch(0.30 0.10 25);
+
+  --info: oklch(0.72 0.16 230);
+  --info-foreground: oklch(0.14 0.005 270);
+  --info-soft: oklch(0.28 0.08 230);
+
+  --destructive: var(--danger);
+  --destructive-foreground: var(--danger-foreground);
+
+  --chart-1: oklch(0.70 0.20 275);
+  --chart-2: oklch(0.72 0.14 195);
+  --chart-3: oklch(0.80 0.17 70);
+  --chart-4: oklch(0.72 0.20 15);
+  --chart-5: oklch(0.70 0.22 310);
+  --chart-6: oklch(0.72 0.16 155);
+  --chart-7: oklch(0.72 0.15 225);
+
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+
+  --popover: var(--surface-elevated);
+  --popover-foreground: var(--foreground);
+
+  --sidebar: oklch(0.16 0.005 270);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-accent: oklch(0.22 0.02 275);
+  --sidebar-accent-foreground: var(--primary);
+}
+
+/* ============================================================
+ * 4. Tailwind v4 @theme inline
+ *    把 CSS vars 暴露为 utility（bg-background / text-foreground / border-border / bg-primary ...）
+ * ============================================================ */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-surface: var(--surface);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-surface-elevated: var(--surface-elevated);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
+
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-soft: var(--danger-soft);
+
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-soft: var(--info-soft);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+
+  --font-sans:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
+/* ============================================================
+ * 5. 全局基线
+ * ============================================================ */
+* {
+  box-sizing: border-box;
+  border-color: var(--border);
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  /* 关键修复：color-scheme 随 .dark class 切换，Light/Dark 下原生控件（滚动条/checkbox/select）都跟随 */
+  color-scheme: light;
+}
+
+.dark body {
+  color-scheme: dark;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* 装饰工具类 */
+.machi-grid-bg {
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 32px 32px;
+  opacity: 0.6;
+}
+
+.dark .machi-grid-bg {
+  opacity: 0.35;
+}
+
+/* 细腻滚动条（桌面端） */
+@media (min-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--muted-foreground) 25%, transparent);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+}
+
+/* focus-visible 一致化 */
+:where(button, a, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* 禁用动画（系统 prefers-reduced-motion） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
