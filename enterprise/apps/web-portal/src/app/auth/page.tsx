@@ -25,7 +25,7 @@ export default function AuthPage() {
   const router = useRouter();
   const t = usePortalCopy();
   const { locale, setLocale } = useLocale();
-  const [signInEmail, setSignInEmail] = useState("staff@agenticx.local");
+  const [signInEmail, setSignInEmail] = useState("owner@agenticx.local");
   const [signInPassword, setSignInPassword] = useState("");
   const [signUpEmail, setSignUpEmail] = useState("");
   const [signUpUsername, setSignUpUsername] = useState("");

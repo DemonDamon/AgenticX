@@ -9,7 +9,17 @@
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "env": [
+        "ADMIN_CONSOLE_LOGIN_EMAIL",
+        "ADMIN_CONSOLE_LOGIN_PASSWORD",
+        "AUTH_DEV_OWNER_PASSWORD",
+        "AUTH_JWT_PRIVATE_KEY",
+        "AUTH_JWT_PUBLIC_KEY",
+        "ENABLE_DEV_BOOTSTRAP",
+        "DEFAULT_TENANT_ID",
+        "DEFAULT_DEPT_ID"
+      ]
     },
     "lint": {
       "outputs": []
