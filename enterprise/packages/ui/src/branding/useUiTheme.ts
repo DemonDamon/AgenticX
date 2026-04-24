@@ -8,12 +8,14 @@ const STORAGE_KEY = "agenticx-ui-theme";
 const subscribers = new Set<() => void>();
 
 function isDarkMode(theme: UiTheme): boolean {
+  if (typeof window === "undefined") return false;
   if (theme === "dark") return true;
   if (theme === "light") return false;
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
 function applyTheme(theme: UiTheme): void {
+  if (typeof document === "undefined") return;
   const root = document.documentElement;
   if (isDarkMode(theme)) {
     root.classList.add("dark");
@@ -23,12 +25,12 @@ function applyTheme(theme: UiTheme): void {
 }
 
 function readTheme(): UiTheme {
-  if (typeof window === "undefined") return "dark";
+  if (typeof window === "undefined") return "system";
   const value = window.localStorage.getItem(STORAGE_KEY);
   if (value === "dark" || value === "light" || value === "system") {
     return value;
   }
-  return "dark";
+  return "system";
 }
 
 function setStoredTheme(theme: UiTheme): void {
@@ -43,20 +45,33 @@ function subscribe(handler: () => void): () => void {
 }
 
 export function useUiTheme() {
-  const [theme, setThemeState] = useState<UiTheme>("dark");
+  const [theme, setThemeState] = useState<UiTheme>("system");
+  const [resolved, setResolved] = useState<"light" | "dark">("light");
 
   useLayoutEffect(() => {
     const next = readTheme();
     setThemeState(next);
     applyTheme(next);
+    setResolved(isDarkMode(next) ? "dark" : "light");
   }, []);
 
-  useEffect(() => subscribe(() => setThemeState(readTheme())), []);
+  useEffect(
+    () =>
+      subscribe(() => {
+        const next = readTheme();
+        setThemeState(next);
+        setResolved(isDarkMode(next) ? "dark" : "light");
+      }),
+    []
+  );
 
   useEffect(() => {
     if (theme !== "system") return;
     const query = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = () => applyTheme("system");
+    const handler = () => {
+      applyTheme("system");
+      setResolved(query.matches ? "dark" : "light");
+    };
     query.addEventListener("change", handler);
     return () => query.removeEventListener("change", handler);
   }, [theme]);
@@ -64,8 +79,13 @@ export function useUiTheme() {
   const setTheme = useCallback((next: UiTheme) => {
     setThemeState(next);
     setStoredTheme(next);
+    setResolved(isDarkMode(next) ? "dark" : "light");
   }, []);
 
-  return { theme, setTheme };
-}
+  const toggle = useCallback(() => {
+    const next: UiTheme = resolved === "dark" ? "light" : "dark";
+    setTheme(next);
+  }, [resolved, setTheme]);
 
+  return { theme, resolved, setTheme, toggle };
+}

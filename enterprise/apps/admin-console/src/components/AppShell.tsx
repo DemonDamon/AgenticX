@@ -53,7 +53,7 @@ function healthVariant(status: HealthStatus): "success" | "warning" | "destructi
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
-  const { theme, setTheme } = useUiTheme();
+  const { resolved: resolvedTheme, toggle: toggleTheme } = useUiTheme();
   const { locale, setLocale } = useLocale();
   const [collapsed, setCollapsed] = useState(false);
   const [health, setHealth] = useState<HealthStatus>("offline");
@@ -143,9 +143,9 @@ export function AppShell({ children }: AppShellProps) {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-                {theme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                Theme: {theme}
+              <DropdownMenuItem onClick={toggleTheme}>
+                {resolvedTheme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
+                Theme: {resolvedTheme}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setLocale(locale === "zh" ? "en" : "zh")}>
                 Language: {locale === "zh" ? "中文" : "English"}

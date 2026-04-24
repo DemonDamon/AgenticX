@@ -4,8 +4,29 @@ import "./globals.css";
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="zh-CN">
-      <body className="bg-white text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
+    <html lang="zh-CN" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function () {
+                try {
+                  var stored = localStorage.getItem('agenticx-ui-theme');
+                  var resolved = stored === 'light' || stored === 'dark'
+                    ? stored
+                    : (stored === 'system' || !stored)
+                      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                      : 'dark';
+                  if (resolved === 'dark') {
+                    document.documentElement.classList.add('dark');
+                  }
+                } catch (e) {}
+              })();
+            `,
+          }}
+        />
+      </head>
+      <body className="min-h-screen bg-background text-foreground antialiased">
         <AppProviders>{children}</AppProviders>
       </body>
     </html>

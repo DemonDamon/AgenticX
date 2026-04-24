@@ -23,11 +23,10 @@ export const AvatarFallback = React.forwardRef<
   <AvatarPrimitive.Fallback
     ref={ref}
     className={cn(
-      "flex h-full w-full items-center justify-center rounded-full bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-200",
+      "flex h-full w-full items-center justify-center rounded-full bg-muted text-muted-foreground text-sm font-medium",
       className
     )}
     {...props}
   />
 ));
 AvatarFallback.displayName = AvatarPrimitive.Fallback.displayName;
-

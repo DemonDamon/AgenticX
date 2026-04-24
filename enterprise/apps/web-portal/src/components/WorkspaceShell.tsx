@@ -24,7 +24,7 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
   const router = useRouter();
   const t = usePortalCopy();
   const { locale, setLocale } = useLocale();
-  const { theme, setTheme } = useUiTheme();
+  const { resolved: resolvedTheme, toggle: toggleTheme } = useUiTheme();
   const { bootstrap } = useChatStore();
 
   const [collapsed, setCollapsed] = React.useState(false);
@@ -128,9 +128,9 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
                 {t.settings}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-                {theme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                Theme: {theme}
+              <DropdownMenuItem onClick={toggleTheme}>
+                {resolvedTheme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
+                Theme: {resolvedTheme}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setLocale(locale === "zh" ? "en" : "zh")}>
                 Language: {locale === "zh" ? "中文" : "English"}

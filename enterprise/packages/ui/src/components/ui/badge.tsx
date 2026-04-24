@@ -3,16 +3,18 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/cn";
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors",
+  "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors whitespace-nowrap",
   {
     variants: {
       variant: {
-        default: "border-transparent bg-zinc-900 text-zinc-100 dark:bg-zinc-100 dark:text-zinc-900",
-        secondary: "border-transparent bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100",
-        outline: "border-zinc-300 text-zinc-700 dark:border-zinc-600 dark:text-zinc-200",
-        success: "border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-200",
-        warning: "border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200",
-        destructive: "border-red-300 bg-red-100 text-red-800 dark:border-red-700 dark:bg-red-950 dark:text-red-200",
+        default: "border-transparent bg-primary text-primary-foreground",
+        secondary: "border-transparent bg-secondary text-secondary-foreground",
+        outline: "border-border text-foreground",
+        success: "border-transparent bg-success-soft text-success",
+        warning: "border-transparent bg-warning-soft text-warning-foreground",
+        destructive: "border-transparent bg-danger-soft text-danger",
+        info: "border-transparent bg-info-soft text-info",
+        soft: "border-transparent bg-muted text-muted-foreground",
       },
     },
     defaultVariants: {
@@ -28,4 +30,3 @@ export function Badge({ className, variant, ...props }: BadgeProps) {
 }
 
 export { badgeVariants };
-
