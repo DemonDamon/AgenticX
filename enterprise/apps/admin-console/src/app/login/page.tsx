@@ -63,7 +63,7 @@ export default function LoginPage() {
 
       <div className="relative mx-auto grid min-h-screen max-w-6xl grid-cols-1 gap-10 px-6 py-10 lg:grid-cols-[1.1fr_1fr] lg:items-center">
         {/* 左：品牌故事 */}
-        <div className="hidden flex-col justify-between lg:flex lg:min-h-[560px] xl:min-h-[580px]">
+        <div className="hidden flex-col justify-center gap-16 lg:flex">
           <div className="flex items-center gap-3">
             <MachiAvatar size={48} className="h-12 w-12 shadow-sm" />
             <div>
@@ -111,14 +111,6 @@ export default function LoginPage() {
                 </div>
               </li>
             </ul>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-5 text-sm font-medium text-muted-foreground/60">
-            <span>企业合规</span>
-            <Separator orientation="vertical" className="h-4 bg-border/50" />
-            <span>ISO27001 · SOC2</span>
-            <Separator orientation="vertical" className="h-4 bg-border/50" />
-            <span>Apache 2.0</span>
           </div>
         </div>
 
@@ -201,6 +193,15 @@ export default function LoginPage() {
             </CardContent>
           </Card>
         </div>
+      </div>
+
+      {/* 底部信息 */}
+      <div className="pointer-events-none absolute bottom-6 left-6 flex items-center gap-4 text-xs font-medium text-muted-foreground/40 md:bottom-8 md:left-10">
+        <span>企业合规</span>
+        <Separator orientation="vertical" className="h-3 bg-border/40" />
+        <span>ISO27001 · SOC2</span>
+        <Separator orientation="vertical" className="h-3 bg-border/40" />
+        <span>Apache 2.0</span>
       </div>
     </main>
   );

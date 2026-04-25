@@ -132,7 +132,7 @@ export default function AuthPage() {
 
       <div className="relative mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-8 px-6 py-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:gap-12 lg:px-8 lg:py-10 xl:grid-cols-[1.2fr_0.8fr] xl:gap-16 xl:px-10 xl:py-14">
         {/* 左：品牌故事区 */}
-        <section className="hidden flex-col justify-between lg:flex lg:min-h-[560px] xl:min-h-[580px]">
+        <section className="hidden flex-col justify-center gap-16 lg:flex">
           <div className="flex items-center gap-3">
             <MachiAvatar size={48} className="h-12 w-12 shadow-sm" />
             <div>
@@ -176,15 +176,6 @@ export default function AuthPage() {
                 );
               })}
             </ul>
-
-          </div>
-
-          <div className="flex flex-wrap items-center gap-5 text-sm font-medium text-muted-foreground/60">
-            <span>Apache 2.0</span>
-            <Separator orientation="vertical" className="h-4 bg-border/50" />
-            <span>ISO27001 · SOC2</span>
-            <Separator orientation="vertical" className="h-4 bg-border/50" />
-            <span>Made with ❤ in Beijing</span>
           </div>
         </section>
 
@@ -364,6 +355,15 @@ export default function AuthPage() {
             </CardContent>
           </Card>
         </section>
+      </div>
+
+      {/* 底部信息 */}
+      <div className="pointer-events-none absolute bottom-6 left-6 flex items-center gap-4 text-xs font-medium text-muted-foreground/40 md:bottom-8 md:left-10">
+        <span>Apache 2.0</span>
+        <Separator orientation="vertical" className="h-3 bg-border/40" />
+        <span>ISO27001 · SOC2</span>
+        <Separator orientation="vertical" className="h-3 bg-border/40" />
+        <span>Made with ❤ in Beijing</span>
       </div>
     </main>
   );
