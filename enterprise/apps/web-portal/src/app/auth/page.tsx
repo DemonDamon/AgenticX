@@ -119,6 +119,12 @@ export default function AuthPage() {
 
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-background">
+      {/* 顶部 Logo */}
+      <div className="absolute left-6 top-6 z-50 flex items-center gap-3 md:left-10 md:top-8">
+        <MachiAvatar size={40} className="h-10 w-10 shadow-sm" />
+        <span className="text-xl font-bold tracking-tight text-foreground">AgenticX Enterprise</span>
+      </div>
+
       {/* 装饰背景：grid + 双光晕 */}
       <GridBackdrop className="machi-grid-bg opacity-60" />
       <div
@@ -133,14 +139,6 @@ export default function AuthPage() {
       <div className="relative mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-8 px-6 py-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:gap-12 lg:px-8 lg:py-10 xl:grid-cols-[1.2fr_0.8fr] xl:gap-16 xl:px-10 xl:py-14">
         {/* 左：品牌故事区 */}
         <section className="hidden flex-col justify-center gap-16 lg:flex">
-          <div className="flex items-center gap-3">
-            <MachiAvatar size={48} className="h-12 w-12 shadow-sm" />
-            <div>
-              <div className="text-xl font-bold tracking-tight text-foreground">AgenticX Enterprise</div>
-              <div className="text-sm font-medium text-muted-foreground">Workspace</div>
-            </div>
-          </div>
-
           <div className="space-y-10">
             <div className="space-y-6">
               <Badge variant="soft" className="mb-4 gap-1.5 px-3 py-1">
@@ -182,14 +180,11 @@ export default function AuthPage() {
         {/* 右：登录/注册卡 */}
         <section className="flex items-center justify-center xl:justify-end">
           <Card className="w-full max-w-md backdrop-blur">
-            <CardHeader>
+            <CardHeader className="pb-6">
               <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <MachiAvatar size={36} className="h-9 w-9 lg:hidden" />
-                  <div>
-                    <CardTitle>{t.authTitle}</CardTitle>
-                    <CardDescription>{t.authSubtitle}</CardDescription>
-                  </div>
+                <div className="space-y-1.5">
+                  <CardTitle className="text-2xl">{t.authTitle}</CardTitle>
+                  <CardDescription>{t.authSubtitle}</CardDescription>
                 </div>
                 <Button
                   variant="ghost"
