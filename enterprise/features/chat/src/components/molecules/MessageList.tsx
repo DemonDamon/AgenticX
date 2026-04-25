@@ -64,7 +64,7 @@ export function MessageList({
                   isTerminal ? "w-full max-w-[min(95%,860px)]" : "max-w-[min(88%,840px)]",
                 ].join(" ")}
               >
-                {!isTerminal ? (
+                {!isTerminal && !(isIm && isUser) ? (
                   <div className="mt-0.5 shrink-0">
                     {isUser ? (
                       <span className="flex h-8 w-8 items-center justify-center rounded-full border border-border/70 bg-surface-subtle text-xs font-medium text-muted-foreground">
@@ -84,28 +84,30 @@ export function MessageList({
                       : isClean
                         ? "w-full rounded-2xl border border-border/70 bg-card/85 px-5 py-4 shadow-sm"
                         : isUser
-                          ? "rounded-2xl rounded-tr-md bg-primary px-5 py-3.5 text-primary-foreground shadow-sm"
-                          : "rounded-2xl rounded-tl-md border border-border/70 bg-card px-5 py-4 text-card-foreground shadow-sm",
+                          ? "rounded-[24px] bg-primary px-4 py-2.5 text-primary-foreground"
+                          : "rounded-[24px] border border-border/40 bg-card px-5 py-4 text-card-foreground shadow-sm",
                   ].join(" ")}
                 >
-                  <div className={`mb-2 flex items-center justify-between gap-3 ${isIm && isUser ? "sr-only" : ""}`}>
-                    {isTerminal ? (
-                      <span className="font-mono text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        {isUser ? "YOU>" : "MACHI>"}
+                  {!(isIm && isUser) && (
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      {isTerminal ? (
+                        <span className="font-mono text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          {isUser ? "YOU>" : "MACHI>"}
+                        </span>
+                      ) : (
+                        <Badge variant={isUser ? "secondary" : "soft"} className="px-2 py-0 text-[11px]">
+                          {isUser ? "你" : "Machi"}
+                        </Badge>
+                      )}
+                      <span
+                        className={`text-[11px] ${
+                          isUser && !isTerminal ? "text-primary-foreground/80" : "text-muted-foreground"
+                        }`}
+                      >
+                        {formatTime(message.created_at)}
                       </span>
-                    ) : (
-                      <Badge variant={isUser ? "secondary" : "soft"} className="px-2 py-0 text-[11px]">
-                        {isUser ? "你" : "Machi"}
-                      </Badge>
-                    )}
-                    <span
-                      className={`text-[11px] ${
-                        isUser && !isTerminal ? "text-primary-foreground/80" : "text-muted-foreground"
-                      }`}
-                    >
-                      {formatTime(message.created_at)}
-                    </span>
-                  </div>
+                    </div>
+                  )}
 
                   <p className={`whitespace-pre-wrap break-words text-sm leading-7 ${!message.content ? "opacity-70" : ""}`}>
                     {message.content || "..."}
