@@ -203,65 +203,50 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     <TooltipProvider delayDuration={200}>
       <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
         {/* 顶部 */}
-        <div className="flex shrink-0 items-center justify-between border-b border-border bg-card/60 px-4 py-3.5 sm:px-5">
+        <div className="flex shrink-0 items-center justify-between px-6 py-4">
           <div className="flex items-center gap-2">
-            <MachiAvatar size={30} className="h-[30px] w-[30px]" />
-            <span className="text-sm font-medium">Machi Workspace</span>
-          </div>
-          <div className="flex items-center gap-2.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Badge variant={route.variant} className="gap-1">
-                  <Cpu className="h-3 w-3" />
-                  {t.routeLabel}: {route.label}
-                </Badge>
-              </TooltipTrigger>
-              <TooltipContent>根据模型推断的网关路由</TooltipContent>
-            </Tooltip>
+            <span className="text-base font-semibold tracking-tight">Machi</span>
+            <Badge variant={route.variant} className="ml-2 bg-transparent border-transparent text-muted-foreground hover:bg-transparent shadow-none px-0 gap-1 text-[11px]">
+              <Cpu className="h-3 w-3" />
+              {route.label}
+            </Badge>
           </div>
         </div>
 
         {/* 主对话区 */}
         <div className="relative min-h-0 flex-1 overflow-hidden">
-          {/* 背景水印 */}
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <MachiAvatar size={280} className="h-[220px] w-[220px] opacity-[0.035] dark:opacity-[0.06]" />
-          </div>
-
           {isEmpty ? (
             /* 欢迎态 */
-            <div className="relative flex h-full flex-col items-center justify-center gap-6 px-4 py-8">
-              <div className="flex flex-col items-center gap-3 text-center">
+            <div className="relative flex h-full flex-col items-center justify-center gap-8 px-4 py-8">
+              <div className="flex flex-col items-center gap-4 text-center">
                 <div className="relative">
-                  <span
-                    aria-hidden
-                    className="absolute inset-0 -m-3 rounded-full bg-primary/10 blur-xl"
-                  />
-                  <MachiAvatar size={64} className="relative h-16 w-16" />
+                  <MachiAvatar size={72} className="relative h-20 w-20 shadow-md ring-4 ring-background" />
                 </div>
                 <div>
-                  <h2 className="text-2xl font-semibold tracking-tight">今天我可以帮你做什么？</h2>
-                  <p className="mt-1.5 text-sm text-muted-foreground">
-                    点击下方建议开始，或直接在输入框提问
+                  <h2 className="text-3xl font-semibold tracking-tight text-foreground">我是 Machi</h2>
+                  <p className="mt-2 text-base text-muted-foreground/80">
+                    很高兴见到你，有什么我可以帮忙的吗？
                   </p>
                 </div>
               </div>
 
-              <div className="grid w-full max-w-3xl gap-3 sm:grid-cols-3">
-                {SUGGESTIONS.map((item) => (
+              <div className="mt-4 grid w-full max-w-2xl gap-4 sm:grid-cols-2">
+                {SUGGESTIONS.slice(0, 2).map((item) => (
                   <button
                     key={item.title}
                     type="button"
                     onClick={() => {
                       setDraft(item.prompt);
                     }}
-                    className="group flex flex-col gap-1.5 rounded-2xl border border-border/70 bg-surface-subtle/70 p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:bg-primary-soft/65 hover:shadow-md"
+                    className="group flex items-start gap-3 rounded-[20px] border border-border/40 bg-surface-subtle/50 px-5 py-4 text-left transition-all hover:-translate-y-0.5 hover:border-primary/20 hover:bg-surface-subtle hover:shadow-sm"
                   >
-                    <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary-soft text-primary group-hover:bg-primary/20">
+                    <span className="mt-0.5 flex shrink-0 text-muted-foreground group-hover:text-primary">
                       {item.icon}
                     </span>
-                    <div className="text-sm font-medium">{item.title}</div>
-                    <div className="line-clamp-2 text-xs text-muted-foreground">{item.description}</div>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-sm font-medium text-foreground">{item.title}</span>
+                      <span className="line-clamp-2 text-xs text-muted-foreground/80">{item.description}</span>
+                    </div>
                   </button>
                 ))}
               </div>
@@ -274,173 +259,149 @@ export function MachiChatView({ client }: MachiChatViewProps) {
         </div>
 
         {/* 底部输入区 */}
-        <div className="shrink-0 border-t border-border bg-surface-subtle/40 p-3 sm:p-4">
-          {errorMessage && (
-            <Alert variant="warning" className="mb-3">
-              <ShieldAlert className="h-5 w-5" />
-              <AlertTitle>{t.complianceTitle}</AlertTitle>
-              <AlertDescription>{errorMessage}</AlertDescription>
-            </Alert>
-          )}
+        <div className="relative z-10 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-6 pt-4 sm:px-6 sm:pb-8">
+          <div className="mx-auto w-full max-w-3xl space-y-3">
+            {errorMessage && (
+              <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
+                <ShieldAlert className="h-5 w-5" />
+                <AlertTitle>{t.complianceTitle}</AlertTitle>
+                <AlertDescription>{errorMessage}</AlertDescription>
+              </Alert>
+            )}
 
-          <InputArea
-            value={draft}
-            status={status}
-            onChange={setDraft}
-            onSend={() => handleSend(draft)}
-            onCancel={() => void cancel(client)}
-          />
-
-          {/* 工具栏 toggle */}
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5 rounded-xl border border-border/70 bg-background/90 px-2 py-2 shadow-sm">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="xs" aria-label="附件" className="rounded-lg">
-                  <Paperclip />
-                  <span className="hidden sm:inline">附件</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>上传文件（即将上线）</TooltipContent>
-            </Tooltip>
-            <Button
-              variant={webSearch ? "default" : "ghost"}
-              size="xs"
-              onClick={() => setWebSearch((prev) => !prev)}
-              className="gap-1 rounded-lg"
-            >
-              <Globe />
-              <span className="hidden sm:inline">联网</span>
-            </Button>
-            <Button
-              variant={deepResearch ? "default" : "ghost"}
-              size="xs"
-              onClick={() => setDeepResearch((prev) => !prev)}
-              className="gap-1 rounded-lg"
-            >
-              <Microscope />
-              <span className="hidden sm:inline">Deep Research</span>
-            </Button>
-            <div ref={chatStyleMenuRef} className="relative">
-              {chatStyleMenuOpen ? (
-                <div className="absolute bottom-full left-0 z-[70] mb-2 w-[280px] overflow-hidden rounded-2xl border border-border/70 bg-popover/95 p-1 shadow-2xl backdrop-blur">
-                  {CHAT_STYLE_OPTIONS.map((style) => {
-                    const isActive = style.id === chatStyle;
-                    return (
-                      <button
-                        key={style.id}
-                        type="button"
-                        onClick={() => {
-                          setChatStyle(style.id);
-                          window.localStorage.setItem(CHAT_STYLE_STORAGE_KEY, style.id);
-                          window.dispatchEvent(
-                            new CustomEvent("agx-enterprise-chat-style-change", {
-                              detail: { style: style.id },
-                            }),
-                          );
-                          setChatStyleMenuOpen(false);
-                        }}
-                        className={`flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors ${
-                          isActive ? "bg-primary-soft/70" : "hover:bg-muted/70"
-                        }`}
-                      >
-                        <span className="mt-0.5 text-primary">
-                          <MessageSquare className="h-4 w-4" />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-semibold leading-5 text-foreground">{style.label}</span>
-                          <span className="block text-xs leading-5 text-muted-foreground">{style.desc}</span>
-                        </span>
-                        <span className={`pt-1 text-primary ${isActive ? "" : "opacity-0"}`}>
-                          <Check className="h-4 w-4" />
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => setChatStyleMenuOpen((prev) => !prev)}
-                className="gap-1 rounded-lg"
-              >
-                <MessageSquare />
-                <span className="hidden sm:inline">
-                  {CHAT_STYLE_OPTIONS.find((item) => item.id === chatStyle)?.label ?? "聊天风格"}
-                </span>
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${chatStyleMenuOpen ? "rotate-180" : ""}`} />
-              </Button>
-            </div>
-
-            <div ref={modelMenuRef} className="relative ml-auto flex items-center gap-2">
-              {modelMenuOpen ? (
-                <div
-                  className="fixed z-[80] overflow-hidden rounded-2xl border border-border/70 bg-popover/95 p-1 shadow-2xl backdrop-blur"
-                  style={{
-                    width: modelMenuPosition.width,
-                    left: modelMenuPosition.left,
-                    top: modelMenuPosition.top,
-                    transform: "translateY(-100%)",
-                  }}
-                >
-                  {MODELS.map((model) => {
-                    const isSelected = model === activeModel;
-                    const icon =
-                      model === "moonshot-v1-8k" ? (
-                        <Microscope className="h-4 w-4" />
-                      ) : model === "gpt-4o-mini" ? (
-                        <Cpu className="h-4 w-4" />
-                      ) : (
-                        <Sparkles className="h-4 w-4" />
-                      );
-                    return (
-                      <button
-                        key={model}
-                        type="button"
-                        onClick={() => {
-                          switchModel(model);
-                          setModelMenuOpen(false);
-                        }}
-                        className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${isSelected ? "bg-primary-soft/70" : "hover:bg-muted/70"}`}
-                      >
-                        <span className="flex h-5 w-5 shrink-0 items-center justify-center pt-0.5 text-primary">{icon}</span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-base font-semibold leading-6 text-foreground">
-                            {MODEL_LABELS[model] ?? model}
-                          </span>
-                          <span className="block truncate text-sm leading-5 text-muted-foreground">
-                            {MODEL_DESCRIPTIONS[model] ?? ""}
-                          </span>
-                        </span>
-                        <span className={`pt-1 text-base text-primary ${isSelected ? "" : "opacity-0"}`}>
-                          <Check className="h-4 w-4" />
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-              <button
-                ref={modelTriggerRef}
-                type="button"
-                onClick={() => setModelMenuOpen((prev) => !prev)}
-                className="flex h-10 w-[240px] max-w-full items-center gap-2 rounded-full border border-border/70 bg-card px-3 text-left shadow-sm transition-colors hover:border-border hover:bg-background"
-              >
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center text-primary">
-                  {activeModel === "moonshot-v1-8k" ? (
+            <InputArea
+              value={draft}
+              status={status}
+              onChange={setDraft}
+              onSend={() => handleSend(draft)}
+              onCancel={() => void cancel(client)}
+              leftToolbar={
+                <>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="icon" aria-label="附件" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
+                        <Paperclip className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>上传文件（即将上线）</TooltipContent>
+                  </Tooltip>
+                  <Button
+                    variant={webSearch ? "secondary" : "ghost"}
+                    size="icon"
+                    onClick={() => setWebSearch((prev) => !prev)}
+                    className={`h-8 w-8 rounded-full ${webSearch ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    <Globe className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant={deepResearch ? "secondary" : "ghost"}
+                    size="icon"
+                    onClick={() => setDeepResearch((prev) => !prev)}
+                    className={`h-8 w-8 rounded-full ${deepResearch ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+                  >
                     <Microscope className="h-4 w-4" />
-                  ) : activeModel === "gpt-4o-mini" ? (
-                    <Cpu className="h-4 w-4" />
-                  ) : (
-                    <Sparkles className="h-4 w-4" />
-                  )}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-base font-semibold text-foreground">
-                  {MODEL_LABELS[activeModel] ?? activeModel}
-                </span>
-                <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${modelMenuOpen ? "rotate-180" : ""}`} />
-              </button>
-            </div>
+                  </Button>
+                  <div ref={chatStyleMenuRef} className="relative">
+                    {chatStyleMenuOpen ? (
+                      <div className="absolute bottom-full left-0 z-[70] mb-2 w-[240px] overflow-hidden rounded-2xl border border-border/70 bg-popover/95 p-1 shadow-2xl backdrop-blur">
+                        {CHAT_STYLE_OPTIONS.map((style) => {
+                          const isActive = style.id === chatStyle;
+                          return (
+                            <button
+                              key={style.id}
+                              type="button"
+                              onClick={() => {
+                                setChatStyle(style.id);
+                                window.localStorage.setItem(CHAT_STYLE_STORAGE_KEY, style.id);
+                                window.dispatchEvent(
+                                  new CustomEvent("agx-enterprise-chat-style-change", {
+                                    detail: { style: style.id },
+                                  }),
+                                );
+                                setChatStyleMenuOpen(false);
+                              }}
+                              className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left transition-colors ${
+                                isActive ? "bg-primary-soft/70 text-primary" : "hover:bg-muted/70"
+                              }`}
+                            >
+                              <MessageSquare className="h-4 w-4 shrink-0" />
+                              <span className="flex-1 text-sm font-medium">{style.label}</span>
+                              {isActive && <Check className="h-4 w-4 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setChatStyleMenuOpen((prev) => !prev)}
+                      className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                    >
+                      <MessageSquare className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </>
+              }
+              rightToolbar={
+                <div ref={modelMenuRef} className="relative">
+                  {modelMenuOpen ? (
+                    <div
+                      className="fixed z-[80] overflow-hidden rounded-2xl border border-border/70 bg-popover/95 p-1 shadow-2xl backdrop-blur"
+                      style={{
+                        width: modelMenuPosition.width,
+                        left: modelMenuPosition.left,
+                        top: modelMenuPosition.top,
+                        transform: "translateY(-100%)",
+                      }}
+                    >
+                      {MODELS.map((model) => {
+                        const isSelected = model === activeModel;
+                        const icon =
+                          model === "moonshot-v1-8k" ? (
+                            <Microscope className="h-4 w-4" />
+                          ) : model === "gpt-4o-mini" ? (
+                            <Cpu className="h-4 w-4" />
+                          ) : (
+                            <Sparkles className="h-4 w-4" />
+                          );
+                        return (
+                          <button
+                            key={model}
+                            type="button"
+                            onClick={() => {
+                              switchModel(model);
+                              setModelMenuOpen(false);
+                            }}
+                            className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${isSelected ? "bg-primary-soft/70" : "hover:bg-muted/70"}`}
+                          >
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center pt-0.5 text-primary">{icon}</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-semibold leading-5 text-foreground">
+                                {MODEL_LABELS[model] ?? model}
+                              </span>
+                              <span className="block truncate text-[11px] leading-4 text-muted-foreground mt-0.5">
+                                {MODEL_DESCRIPTIONS[model] ?? ""}
+                              </span>
+                            </span>
+                            {isSelected && <Check className="h-4 w-4 shrink-0 text-primary mt-0.5" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  <button
+                    ref={modelTriggerRef}
+                    type="button"
+                    onClick={() => setModelMenuOpen((prev) => !prev)}
+                    className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
+                  >
+                    <span>{MODEL_LABELS[activeModel] ?? activeModel}</span>
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${modelMenuOpen ? "rotate-180" : ""}`} />
+                  </button>
+                </div>
+              }
+            />
           </div>
         </div>
       </div>
