@@ -118,7 +118,7 @@ export default function AuthPage() {
   };
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-background">
+    <main className="relative min-h-screen overflow-x-hidden bg-background">
       {/* 装饰背景：grid + 双光晕 */}
       <GridBackdrop className="machi-grid-bg opacity-60" />
       <div
@@ -130,76 +130,66 @@ export default function AuthPage() {
         className="pointer-events-none absolute -right-32 bottom-0 h-[520px] w-[520px] rounded-full bg-chart-5/12 blur-3xl"
       />
 
-      <div className="relative mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-8 px-6 py-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:gap-12">
+      <div className="relative mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-8 px-6 py-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:gap-12 lg:px-8 lg:py-10 xl:grid-cols-[1.2fr_0.8fr] xl:gap-16 xl:px-10 xl:py-14">
         {/* 左：品牌故事区 */}
-        <section className="hidden flex-col justify-between lg:flex">
-          <div className="flex items-center gap-2">
-            <MachiAvatar size={40} className="h-10 w-10" />
+        <section className="hidden flex-col justify-between lg:flex lg:min-h-[560px] xl:min-h-[580px]">
+          <div className="flex items-center gap-3">
+            <MachiAvatar size={48} className="h-12 w-12 shadow-sm" />
             <div>
-              <div className="text-lg font-semibold">AgenticX Enterprise</div>
-              <div className="text-xs text-muted-foreground">Workspace</div>
+              <div className="text-xl font-bold tracking-tight text-foreground">AgenticX Enterprise</div>
+              <div className="text-sm font-medium text-muted-foreground">Workspace</div>
             </div>
           </div>
 
-          <div className="space-y-6">
-            <div>
-              <Badge variant="soft" className="mb-3 gap-1">
+          <div className="space-y-10">
+            <div className="space-y-6">
+              <Badge variant="soft" className="mb-4 gap-1.5 px-3 py-1">
                 <Sparkles className="h-3 w-3" />
                 Enterprise AI Gateway
               </Badge>
-              <h1 className="text-4xl font-semibold leading-tight tracking-tight">
-                让大模型<span className="text-primary">安全可控</span>地走进企业
+              <h1 className="max-w-3xl text-4xl font-bold leading-[1.15] tracking-tighter xl:text-5xl">
+                让大模型<br /><span className="text-primary">安全可控</span>地走进企业
               </h1>
-              <p className="mt-3 max-w-xl text-sm text-muted-foreground">
+              <p className="max-w-xl text-base leading-relaxed text-muted-foreground">
                 {t.authSubtitle}
               </p>
             </div>
 
             {/* 特性列表 */}
-            <ul className="grid gap-2.5 text-sm">
+            <ul className="grid max-w-2xl gap-5 text-base">
               {[
-                { icon: ShieldCheck, text: "合规优先：审计链防篡改 · 策略拦截可视化" },
-                { icon: Zap, text: "三端联动：前台 + 后台 + AI 网关 · 一条链路" },
-                { icon: CheckCircle2, text: "可白标：5 分钟换肤 · 按客户独立部署" },
+                { icon: ShieldCheck, title: "合规优先", desc: "审计链防篡改 · 策略拦截可视化" },
+                { icon: Zap, title: "三端联动", desc: "前台 + 后台 + AI 网关 · 一条链路" },
+                { icon: CheckCircle2, title: "可白标交付", desc: "5 分钟换肤 · 按客户独立部署" },
               ].map((feature) => {
                 const Icon = feature.icon;
                 return (
-                  <li key={feature.text} className="flex items-start gap-2.5">
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary">
-                      <Icon className="h-3 w-3" />
-                    </span>
-                    <span className="text-foreground/90">{feature.text}</span>
+                  <li key={feature.title} className="flex items-start gap-3.5">
+                    <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary">
+                      <Icon className="h-4 w-4" />
+                    </div>
+                    <div className="flex flex-col pt-0.5">
+                      <span className="font-semibold text-foreground">{feature.title}</span>
+                      <span className="text-sm leading-6 text-muted-foreground">{feature.desc}</span>
+                    </div>
                   </li>
                 );
               })}
             </ul>
 
-            {/* 小客户 logo 条（占位） */}
-            <div className="rounded-xl border border-border bg-surface-subtle/60 p-4">
-              <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
-                已服务企业
-              </div>
-              <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-muted-foreground/80">
-                <span>· 和创集团</span>
-                <span>· 风控事业部</span>
-                <span>· 制造业 Top 10</span>
-                <span>· 金融科技公司</span>
-              </div>
-            </div>
           </div>
 
-          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-5 text-sm font-medium text-muted-foreground/60">
             <span>Apache 2.0</span>
-            <Separator orientation="vertical" className="h-3" />
+            <Separator orientation="vertical" className="h-4 bg-border/50" />
             <span>ISO27001 · SOC2</span>
-            <Separator orientation="vertical" className="h-3" />
+            <Separator orientation="vertical" className="h-4 bg-border/50" />
             <span>Made with ❤ in Beijing</span>
           </div>
         </section>
 
         {/* 右：登录/注册卡 */}
-        <section className="flex items-center justify-center">
+        <section className="flex items-center justify-center xl:justify-end">
           <Card className="w-full max-w-md backdrop-blur">
             <CardHeader>
               <div className="flex items-start justify-between">
