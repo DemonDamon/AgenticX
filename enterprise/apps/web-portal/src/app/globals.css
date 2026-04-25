@@ -1,1 +1,6 @@
 @import "../../../../packages/ui/src/themes/base.css";
+
+/* 显式声明其他 monorepo package 的 source 路径，以便 Tailwind v4 扫描并生成其中用到的类名 */
+@source "../../../../packages/ui/src";
+@source "../../../../features/chat/src";
+
