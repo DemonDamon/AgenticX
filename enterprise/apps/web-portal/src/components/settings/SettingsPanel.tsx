@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Badge,
   Button,
@@ -62,6 +62,14 @@ const PROVIDERS = [
   { id: "anthropic", name: "Anthropic", tagline: "Claude 系列", color: "bg-chart-3/80" },
 ];
 
+const CHAT_STYLE_STORAGE_KEY = "agx-enterprise-chat-style";
+const CHAT_STYLE_OPTIONS = [
+  { id: "im", label: "IM 风格（头像 + 气泡）" },
+  { id: "terminal", label: "Terminal 风格（终端前缀）" },
+  { id: "clean", label: "Clean 风格（极简留白）" },
+] as const;
+type ChatStyleVariant = (typeof CHAT_STYLE_OPTIONS)[number]["id"];
+
 export function SettingsPanel() {
   const t = usePortalCopy();
   const [active, setActive] = useState<TabId>("general");
@@ -69,6 +77,24 @@ export function SettingsPanel() {
   const [webSearchOn, setWebSearchOn] = useState(true);
   const [streamingOn, setStreamingOn] = useState(true);
   const [autoTitleOn, setAutoTitleOn] = useState(true);
+  const [chatStyle, setChatStyle] = useState<ChatStyleVariant>("im");
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem(CHAT_STYLE_STORAGE_KEY);
+    if (saved === "im" || saved === "terminal" || saved === "clean") {
+      setChatStyle(saved);
+    }
+  }, []);
+
+  const updateChatStyle = (next: ChatStyleVariant) => {
+    setChatStyle(next);
+    window.localStorage.setItem(CHAT_STYLE_STORAGE_KEY, next);
+    window.dispatchEvent(
+      new CustomEvent("agx-enterprise-chat-style-change", {
+        detail: { style: next },
+      }),
+    );
+  };
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -133,6 +159,24 @@ export function SettingsPanel() {
                   label="显示语言"
                   description="中文 / English 双语 · 右上角用户菜单内切换"
                   control={<Badge variant="soft">已同步</Badge>}
+                />
+                <SettingsRow
+                  label="聊天风格"
+                  description="可在 IM / Terminal / Clean 三种风格间切换"
+                  control={
+                    <Select value={chatStyle} onValueChange={(value) => updateChatStyle(value as ChatStyleVariant)}>
+                      <SelectTrigger className="w-[280px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CHAT_STYLE_OPTIONS.map((item) => (
+                          <SelectItem key={item.id} value={item.id}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  }
                 />
                 <SettingsRow
                   label="数据导入 / 导出"
