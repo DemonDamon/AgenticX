@@ -196,7 +196,7 @@ export default function LoginPage() {
       </div>
 
       {/* 底部信息 */}
-      <div className="pointer-events-none absolute bottom-6 left-6 flex items-center gap-4 text-xs font-medium text-muted-foreground/40 md:bottom-8 md:left-10">
+      <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-3 text-[11px] font-medium text-muted-foreground/40 md:bottom-6 md:gap-4">
         <span>企业合规</span>
         <Separator orientation="vertical" className="h-3 bg-border/40" />
         <span>ISO27001 · SOC2</span>
