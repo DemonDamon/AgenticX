@@ -63,53 +63,61 @@ export default function LoginPage() {
 
       <div className="relative mx-auto grid min-h-screen max-w-6xl grid-cols-1 gap-10 px-6 py-10 lg:grid-cols-[1.1fr_1fr] lg:items-center">
         {/* 左：品牌故事 */}
-        <div className="hidden flex-col justify-between lg:flex">
-          <div className="flex items-center gap-2">
-            <MachiAvatar size={40} className="h-10 w-10" />
+        <div className="hidden flex-col justify-between lg:flex lg:min-h-[560px] xl:min-h-[580px]">
+          <div className="flex items-center gap-3">
+            <MachiAvatar size={48} className="h-12 w-12 shadow-sm" />
             <div>
-              <div className="text-lg font-semibold text-foreground">AgenticX Enterprise</div>
-              <div className="text-xs text-muted-foreground">Admin Console</div>
+              <div className="text-xl font-bold tracking-tight text-foreground">AgenticX Enterprise</div>
+              <div className="text-sm font-medium text-muted-foreground">Admin Console</div>
             </div>
           </div>
 
-          <div className="space-y-5">
-            <div>
-              <h1 className="text-3xl font-semibold leading-tight tracking-tight">
-                企业级大模型<span className="text-primary">应用一体化平台</span>
+          <div className="space-y-10">
+            <div className="space-y-6">
+              <h1 className="text-4xl font-bold leading-[1.15] tracking-tighter xl:text-5xl">
+                企业级大模型<br /><span className="text-primary">应用一体化平台</span>
               </h1>
-              <p className="mt-3 max-w-md text-sm text-muted-foreground">
+              <p className="max-w-lg text-base leading-relaxed text-muted-foreground">
                 前台 + 后台 + AI 网关三端联动 · 云端统一管控 · 端侧安全闭环 · 四维计量与合规审计全覆盖。
               </p>
             </div>
 
-            <ul className="space-y-2.5 text-sm">
-              <li className="flex items-start gap-2">
-                <ShieldCheck className="mt-0.5 h-4 w-4 text-success" />
-                <span className="text-foreground/90">
-                  <span className="font-medium">合规优先：</span>
-                  审计链防篡改、策略拦截可视化、审计导出合规归档
-                </span>
+            <ul className="space-y-5 text-base">
+              <li className="flex items-start gap-3.5">
+                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-success-soft text-success">
+                  <ShieldCheck className="h-4 w-4" />
+                </div>
+                <div className="flex flex-col pt-0.5">
+                  <span className="font-semibold text-foreground">合规优先</span>
+                  <span className="text-sm leading-6 text-muted-foreground">审计链防篡改、策略拦截可视化、审计导出合规归档</span>
+                </div>
               </li>
-              <li className="flex items-start gap-2">
-                <ShieldCheck className="mt-0.5 h-4 w-4 text-success" />
-                <span className="text-foreground/90">
-                  <span className="font-medium">管控深度：</span>
-                  部门 × 员工 × 厂商 × 模型四维消耗穿透分析
-                </span>
+              <li className="flex items-start gap-3.5">
+                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-success-soft text-success">
+                  <ShieldCheck className="h-4 w-4" />
+                </div>
+                <div className="flex flex-col pt-0.5">
+                  <span className="font-semibold text-foreground">管控深度</span>
+                  <span className="text-sm leading-6 text-muted-foreground">部门 × 员工 × 厂商 × 模型四维消耗穿透分析</span>
+                </div>
               </li>
-              <li className="flex items-start gap-2">
-                <ShieldCheck className="mt-0.5 h-4 w-4 text-success" />
-                <span className="text-foreground/90">
-                  <span className="font-medium">白标交付：</span>
-                  Machi 基底 + 客户 brand token 覆盖 · 5 分钟换肤
-                </span>
+              <li className="flex items-start gap-3.5">
+                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-success-soft text-success">
+                  <ShieldCheck className="h-4 w-4" />
+                </div>
+                <div className="flex flex-col pt-0.5">
+                  <span className="font-semibold text-foreground">白标交付</span>
+                  <span className="text-sm leading-6 text-muted-foreground">Machi 基底 + 客户 brand token 覆盖 · 5 分钟换肤</span>
+                </div>
               </li>
             </ul>
           </div>
 
-          <div className="flex items-center gap-6 text-xs text-muted-foreground">
-            <span>企业合规 · ISO27001 · SOC2</span>
-            <Separator orientation="vertical" className="h-4" />
+          <div className="flex flex-wrap items-center gap-5 text-sm font-medium text-muted-foreground/60">
+            <span>企业合规</span>
+            <Separator orientation="vertical" className="h-4 bg-border/50" />
+            <span>ISO27001 · SOC2</span>
+            <Separator orientation="vertical" className="h-4 bg-border/50" />
             <span>Apache 2.0</span>
           </div>
         </div>
