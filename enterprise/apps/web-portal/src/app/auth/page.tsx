@@ -143,22 +143,22 @@ export default function AuthPage() {
             <div className="space-y-6">
               <Badge variant="soft" className="mb-4 gap-1.5 px-3 py-1">
                 <Sparkles className="h-3 w-3" />
-                Enterprise AI Gateway
+                AI Workspace
               </Badge>
               <h1 className="max-w-3xl text-4xl font-bold leading-[1.15] tracking-tighter xl:text-5xl">
-                让大模型<br /><span className="text-primary">安全可控</span>地走进企业
+                你的专属<br /><span className="text-primary">AI 智能工作台</span>
               </h1>
               <p className="max-w-xl text-base leading-relaxed text-muted-foreground">
-                {t.authSubtitle}
+                无缝连接顶级大模型与企业私有知识库，为每位员工提供极速、安全、全能的 AI 助手。
               </p>
             </div>
 
             {/* 特性列表 */}
             <ul className="grid max-w-2xl gap-5 text-base">
               {[
-                { icon: ShieldCheck, title: "合规优先", desc: "审计链防篡改 · 策略拦截可视化" },
-                { icon: Zap, title: "三端联动", desc: "前台 + 后台 + AI 网关 · 一条链路" },
-                { icon: CheckCircle2, title: "可白标交付", desc: "5 分钟换肤 · 按客户独立部署" },
+                { icon: Sparkles, title: "全能 AI 助手", desc: "极速响应日常问答、长文总结、数据分析与代码编写" },
+                { icon: Zap, title: "开箱即用的工作流", desc: "内置丰富场景模板，一键调用企业内部专业智能体" },
+                { icon: ShieldCheck, title: "企业级数据保护", desc: "所有对话不用于模型训练，企业数据绝对隔离" },
               ].map((feature) => {
                 const Icon = feature.icon;
                 return (
