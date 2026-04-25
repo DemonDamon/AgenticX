@@ -50,6 +50,12 @@ export default function LoginPage() {
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-background">
+      {/* 顶部 Logo */}
+      <div className="absolute left-6 top-6 z-50 flex items-center gap-3 md:left-10 md:top-8">
+        <MachiAvatar size={40} className="h-10 w-10 shadow-sm" />
+        <span className="text-xl font-bold tracking-tight text-foreground">AgenticX Enterprise</span>
+      </div>
+
       {/* 装饰背景 */}
       <GridBackdrop className="machi-grid-bg opacity-60" />
       <div
@@ -64,14 +70,6 @@ export default function LoginPage() {
       <div className="relative mx-auto grid min-h-screen max-w-6xl grid-cols-1 gap-10 px-6 py-10 lg:grid-cols-[1.1fr_1fr] lg:items-center">
         {/* 左：品牌故事 */}
         <div className="hidden flex-col justify-center gap-16 lg:flex">
-          <div className="flex items-center gap-3">
-            <MachiAvatar size={48} className="h-12 w-12 shadow-sm" />
-            <div>
-              <div className="text-xl font-bold tracking-tight text-foreground">AgenticX Enterprise</div>
-              <div className="text-sm font-medium text-muted-foreground">Admin Console</div>
-            </div>
-          </div>
-
           <div className="space-y-10">
             <div className="space-y-6">
               <h1 className="text-4xl font-bold leading-[1.15] tracking-tighter xl:text-5xl">
@@ -117,14 +115,9 @@ export default function LoginPage() {
         {/* 右：登录卡 */}
         <div className="flex items-center justify-center">
           <Card className="w-full max-w-md backdrop-blur">
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <MachiAvatar size={36} className="h-9 w-9 lg:hidden" />
-                <div>
-                  <CardTitle>管理员登录</CardTitle>
-                  <CardDescription>使用企业管理员账号进入控制台</CardDescription>
-                </div>
-              </div>
+            <CardHeader className="space-y-1.5">
+              <CardTitle className="text-2xl">管理员登录</CardTitle>
+              <CardDescription>使用企业管理员账号进入控制台</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <form className="space-y-3.5" onSubmit={signIn}>
