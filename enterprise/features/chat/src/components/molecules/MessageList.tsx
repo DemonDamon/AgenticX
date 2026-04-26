@@ -327,26 +327,8 @@ export function MessageList({
                           <TooltipContent>复制</TooltipContent>
                         </Tooltip>
 
-                        {/* 复制链接 */}
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onShare?.(message.id);
-                              }}
-                            >
-                              <IconLink className="h-3.5 w-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>复制链接</TooltipContent>
-                        </Tooltip>
-
-                        {/* 重试 - 仅对用户消息 */}
-                        {isUser && onRetry && (
+                        {/* 重试 */}
+                        {onRetry && (
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
@@ -361,7 +343,7 @@ export function MessageList({
                                 <IconRefresh className="h-3.5 w-3.5" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent>重新发送</TooltipContent>
+                            <TooltipContent>{isUser ? "重新发送" : "重新生成"}</TooltipContent>
                           </Tooltip>
                         )}
 
