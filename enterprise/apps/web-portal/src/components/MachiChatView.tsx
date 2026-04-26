@@ -6,14 +6,22 @@ import { type ChatClient } from "@agenticx/sdk-ts";
 import {
   Check,
   ChevronDown,
+  Copy,
   Cpu,
   FileText,
   Globe,
+  Link,
   MessageSquare,
   Microscope,
   Paperclip,
+  Pencil,
+  RefreshCw,
+  Share,
   ShieldAlert,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+  Trash2,
   Wand2,
 } from "lucide-react";
 import {
@@ -192,6 +200,9 @@ export function MachiChatView({ client }: MachiChatViewProps) {
 
   const route = inferRoute(activeModel);
   const isEmpty = messages.length === 0;
+  const [sessionTitle, setSessionTitle] = React.useState("新对话");
+  const [isEditingTitle, setIsEditingTitle] = React.useState(false);
+  const titleInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleSend = (text: string) => {
     if (!text.trim()) return;
@@ -202,14 +213,51 @@ export function MachiChatView({ client }: MachiChatViewProps) {
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-        {/* 顶部 */}
+        {/* 顶部 - 对话标题 */}
         <div className="flex shrink-0 items-center justify-between px-6 py-4">
           <div className="flex items-center gap-2">
-            <span className="text-base font-semibold tracking-tight">Machi</span>
-            <Badge variant={route.variant} className="ml-2 bg-transparent border-transparent text-muted-foreground hover:bg-transparent shadow-none px-0 gap-1 text-[11px]">
-              <Cpu className="h-3 w-3" />
-              {route.label}
-            </Badge>
+            {isEditingTitle ? (
+              <input
+                ref={titleInputRef}
+                type="text"
+                value={sessionTitle}
+                onChange={(e) => setSessionTitle(e.target.value)}
+                onBlur={() => setIsEditingTitle(false)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") setIsEditingTitle(false);
+                  if (e.key === "Escape") setIsEditingTitle(false);
+                }}
+                className="rounded-md border border-border bg-background px-2 py-1 text-sm font-medium outline-none focus:border-ring"
+                autoFocus
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsEditingTitle(true)}
+                className="group flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted"
+              >
+                <span className="text-base font-semibold tracking-tight">{sessionTitle}</span>
+                <Pencil className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100" />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
+                  <Share className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>分享对话</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>删除对话</TooltipContent>
+            </Tooltip>
           </div>
         </div>
 
@@ -253,7 +301,28 @@ export function MachiChatView({ client }: MachiChatViewProps) {
             </div>
           ) : (
             <div className="relative h-full min-h-0 px-4 py-3 sm:px-5">
-              <MessageList messages={messages} className="h-full" styleVariant={chatStyle} />
+              <MessageList
+                messages={messages}
+                className="h-full"
+                styleVariant={chatStyle}
+                onCopy={(content) => {
+                  console.log("Copied:", content);
+                }}
+                onRetry={(messageId) => {
+                  const msg = messages.find((m) => m.id === messageId);
+                  if (msg?.content) {
+                    void sendMessage(client, { content: msg.content });
+                  }
+                }}
+                onShare={(messageId) => {
+                  const url = `${window.location.origin}/workspace?share=${messageId}`;
+                  navigator.clipboard.writeText(url);
+                  console.log("Shared:", url);
+                }}
+                onFeedback={(messageId, type) => {
+                  console.log(`Feedback ${type} for message ${messageId}`);
+                }}
+              />
             </div>
           )}
         </div>
