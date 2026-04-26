@@ -368,6 +368,10 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
               >
                 <Menu />
               </Button>
+              <Badge variant="success" className="gap-1 bg-transparent border-transparent text-muted-foreground hover:bg-transparent shadow-none px-0">
+                <Activity className="h-3 w-3 text-success" />
+                <span className="hidden sm:inline text-[11px]">Gateway online</span>
+              </Badge>
             </div>
             {panelMode === "settings" ? (
               <Button variant="outline" size="sm" onClick={() => setPanelMode("chat")}>
