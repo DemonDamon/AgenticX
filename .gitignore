@@ -70,7 +70,7 @@ docs/.private/
 # ============================================================
 # 客户交付物（每客户独立私有仓，嵌套于此目录但物理隔离）
 # ============================================================
-/customers/
+customers/
 
 # 密钥 / 凭据
 *.pem
@@ -100,5 +100,4 @@ task_plan.md
 **/test-results/
 **/.playwright-state/
 **/out/
-
-AGENTS.md
+enterprise/apps/gateway/.runtime/
