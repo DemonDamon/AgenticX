@@ -4,6 +4,7 @@ import * as React from "react";
 import { InputArea, MessageList, useChatStore } from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
 import {
+  Activity,
   Check,
   ChevronDown,
   Copy,
@@ -214,7 +215,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     <TooltipProvider delayDuration={200}>
       <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
         {/* 顶部 - 对话标题 */}
-        <div className="flex shrink-0 items-center justify-between px-6 py-4">
+        <div className="flex shrink-0 items-center justify-between px-6 py-4 pl-14 lg:pl-6">
           <div className="flex items-center gap-2">
             {isEditingTitle ? (
               <input
@@ -242,6 +243,11 @@ export function MachiChatView({ client }: MachiChatViewProps) {
             )}
           </div>
           <div className="flex items-center gap-1">
+            <Badge variant="success" className="mr-2 gap-1 px-2.5 py-0.5 text-[11px] font-medium">
+              <Activity className="h-3 w-3" />
+              <span className="hidden sm:inline">Gateway online</span>
+              <span className="sm:hidden">on</span>
+            </Badge>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
@@ -268,7 +274,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
             <div className="relative flex h-full flex-col items-center justify-center gap-8 px-4 py-8">
               <div className="flex flex-col items-center gap-4 text-center">
                 <div className="relative">
-                  <MachiAvatar size={140} className="relative h-[140px] w-[140px] shadow-sm ring-4 ring-background" />
+                  <MachiAvatar size={210} className="relative h-[210px] w-[210px]" />
                 </div>
                 <div>
                   <h2 className="text-3xl font-semibold tracking-tight text-foreground">我是 Machi</h2>
