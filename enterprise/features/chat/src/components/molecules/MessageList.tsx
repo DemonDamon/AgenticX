@@ -187,9 +187,9 @@ export function MessageList({
       <div
         ref={parentRef}
         style={height ? { height } : undefined}
-        className={`min-h-0 overflow-y-auto px-4 py-4 sm:px-6 ${className ?? ""}`}
+        className={`min-h-0 overflow-y-auto ${className ?? ""}`}
       >
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 pb-4">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-4 sm:px-6">
           {messages.map((message) => {
             const isUser = message.role === "user";
             const isAssistant = message.role === "assistant";
@@ -237,9 +237,8 @@ export function MessageList({
 
                 <div
                   className={[
-                    "flex items-start gap-3",
+                    "flex w-full items-start gap-3",
                     isUser ? "flex-row-reverse" : "flex-row",
-                    isTerminal ? "w-full max-w-3xl" : "w-full max-w-3xl",
                     isSelectionMode && isSelected ? "opacity-60" : "",
                   ].join(" ")}
                 >
@@ -257,7 +256,7 @@ export function MessageList({
 
                   <div
                     className={[
-                      "relative min-w-0",
+                      "relative min-w-0 max-w-[calc(100%-2.5rem)]",
                       isTerminal
                         ? "flex-1 rounded-xl border border-border/70 bg-surface-subtle/45 px-4 py-3"
                         : isClean
