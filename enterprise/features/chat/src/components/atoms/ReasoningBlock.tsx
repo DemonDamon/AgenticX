@@ -7,18 +7,21 @@ type ReasoningBlockProps = {
 
 export function ReasoningBlock({ reasoning }: ReasoningBlockProps) {
   const [open, setOpen] = React.useState(false);
+  const content = reasoning?.trim();
+
+  if (!content) return null;
 
   return (
-    <div className="mt-2 rounded-md border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-700 dark:bg-zinc-900">
+    <div className="rounded-xl border border-border/70 bg-surface-subtle/60 p-3">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-zinc-600 dark:text-zinc-300">Reasoning</span>
-        <Button size="sm" variant="ghost" onClick={() => setOpen((value) => !value)}>
+        <span className="text-xs font-medium text-muted-foreground">Reasoning</span>
+        <Button size="xs" variant="ghost" onClick={() => setOpen((value) => !value)}>
           {open ? "Hide" : "Show"}
         </Button>
       </div>
       {open && (
-        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-          {reasoning ?? "Reasoning placeholder. W3 将接入真实推理内容。"}
+        <p className="mt-2 rounded-md bg-background/35 px-2.5 py-2 text-xs leading-6 text-muted-foreground">
+          {content}
         </p>
       )}
     </div>

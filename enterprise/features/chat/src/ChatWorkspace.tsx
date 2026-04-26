@@ -71,7 +71,7 @@ export function ChatWorkspace({ brand, features, rulePacks = [], client, slots }
                 <h2 className="text-lg font-semibold">{brand.brand.short_name} Workspace</h2>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400">{brand.brand.slogan}</p>
               </div>
-              <ModelSelector value={activeModel} options={modelOptions} onChange={switchModel} />
+              <ModelSelector value={activeModel} options={modelOptions} onChange={switchModel} placement="bottom" />
             </div>
           </header>
         )}
