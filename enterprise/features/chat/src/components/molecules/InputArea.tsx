@@ -41,7 +41,7 @@ export function InputArea({ value, status, onChange, onSend, onCancel, leftToolb
   }, [value]);
 
   return (
-    <div className="flex flex-col gap-1 rounded-3xl border border-border/80 bg-background p-2 shadow-sm transition-all focus-within:border-ring/50 focus-within:shadow-md">
+    <div className="flex flex-col gap-1 rounded-3xl border border-border/80 bg-background p-2 shadow-sm transition-all duration-300 focus-within:shadow-[0_16px_40px_-12px_rgba(0,0,0,0.15)]">
       <textarea
         ref={textareaRef}
         value={value}
