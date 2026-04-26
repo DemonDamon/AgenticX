@@ -187,9 +187,9 @@ export function MessageList({
       <div
         ref={parentRef}
         style={height ? { height } : undefined}
-        className={`min-h-0 overflow-y-auto ${className ?? ""}`}
+        className={`min-h-0 overflow-y-auto px-4 sm:px-6 ${className ?? ""}`}
       >
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-4 sm:px-6">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 py-4">
           {messages.map((message) => {
             const isUser = message.role === "user";
             const isAssistant = message.role === "assistant";
