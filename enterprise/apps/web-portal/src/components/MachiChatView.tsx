@@ -329,7 +329,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
 
         {/* 底部输入区 */}
         <div className="relative z-10 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-6 pt-4 sm:px-6 sm:pb-8">
-          <div className="mx-auto w-full max-w-3xl space-y-3">
+          <div className="mx-auto w-full max-w-4xl space-y-3">
             {errorMessage && (
               <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
                 <ShieldAlert className="h-5 w-5" />
