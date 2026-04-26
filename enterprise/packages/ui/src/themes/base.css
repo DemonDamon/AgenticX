@@ -362,8 +362,8 @@ a {
   }
 }
 
-/* focus-visible 一致化 */
-:where(button, a, input, select, textarea, [role="button"]):focus-visible {
+/* focus-visible 一致化（不含 textarea：多行输入常在卡片/胶囊内无框展示，由容器承担聚焦态；原语 Textarea 组件自带 ring） */
+:where(button, a, input, select, [role="button"]):focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
