@@ -220,7 +220,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
             <div className="relative flex h-full flex-col items-center justify-center gap-8 px-4 py-8">
               <div className="flex flex-col items-center gap-4 text-center">
                 <div className="relative">
-                  <MachiAvatar size={72} className="relative h-20 w-20 shadow-md ring-4 ring-background" />
+                  <MachiAvatar size={140} className="relative h-[140px] w-[140px] shadow-sm ring-4 ring-background" />
                 </div>
                 <div>
                   <h2 className="text-3xl font-semibold tracking-tight text-foreground">我是 Machi</h2>

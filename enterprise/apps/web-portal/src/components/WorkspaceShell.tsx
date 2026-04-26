@@ -171,7 +171,7 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <main className="flex min-h-screen bg-background text-foreground">
+      <main className="flex h-[100dvh] overflow-hidden bg-background text-foreground">
         {/* 侧栏 */}
         <aside
           data-collapsed={collapsed ? "1" : undefined}
@@ -356,7 +356,7 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
         )}
 
         {/* 主区 */}
-        <section className="flex min-w-0 flex-1 flex-col">
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur">
             <div className="flex items-center gap-2">
               <Button
@@ -368,15 +368,6 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
               >
                 <Menu />
               </Button>
-              <Badge variant={deepResearch ? "default" : "soft"} className="gap-1">
-                <Microscope className="h-3 w-3" />
-                {deepResearch ? "Deep Research" : "Standard"}
-              </Badge>
-              <Badge variant="success" className="gap-1">
-                <Activity className="h-3 w-3" />
-                <span className="hidden sm:inline">Gateway online</span>
-                <span className="sm:hidden">on</span>
-              </Badge>
             </div>
             {panelMode === "settings" ? (
               <Button variant="outline" size="sm" onClick={() => setPanelMode("chat")}>
@@ -386,8 +377,14 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
           </header>
 
           <div className="flex min-h-0 flex-1 p-3 sm:p-4">
-            <div className="min-h-0 w-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-              {panelMode === "chat" ? <MachiChatView client={client} /> : <SettingsPanel />}
+            <div className="flex h-full min-h-0 w-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+              {panelMode === "chat" ? (
+                <MachiChatView client={client} />
+              ) : (
+                <div className="h-full w-full overflow-auto">
+                  <SettingsPanel />
+                </div>
+              )}
             </div>
           </div>
         </section>
