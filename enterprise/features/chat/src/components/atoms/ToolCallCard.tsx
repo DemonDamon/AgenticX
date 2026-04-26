@@ -1,6 +1,6 @@
 import * as React from "react";
 import type { ToolCallSummary } from "@agenticx/core-api";
-import { Button, Card, CardContent, CardHeader, CardTitle } from "@agenticx/ui";
+import { Button } from "@agenticx/ui";
 
 type ToolCallCardProps = {
   toolCall?: ToolCallSummary;
@@ -9,22 +9,24 @@ type ToolCallCardProps = {
 export function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const [open, setOpen] = React.useState(false);
 
+  if (!toolCall) return null;
+
   return (
-    <Card className="mt-2 border-dashed">
-      <CardHeader className="flex flex-row items-center justify-between p-3">
-        <CardTitle className="text-xs uppercase tracking-wide">Tool Call</CardTitle>
-        <Button size="sm" variant="ghost" onClick={() => setOpen((value) => !value)}>
+    <div className="rounded-xl border border-dashed border-border/70 bg-surface-subtle/45 p-3">
+      <div className="flex flex-row items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tool Call</span>
+        <Button size="xs" variant="ghost" onClick={() => setOpen((value) => !value)}>
           {open ? "Collapse" : "Expand"}
         </Button>
-      </CardHeader>
+      </div>
       {open && (
-        <CardContent className="p-3 pt-0 text-xs text-zinc-500 dark:text-zinc-400">
-          <p>name: {toolCall?.tool_name ?? "placeholder_tool"}</p>
-          <p>status: {toolCall?.status ?? "queued"}</p>
-          <p>preview: {toolCall?.result_preview ?? "W3 接入真实工具调用摘要"}</p>
-        </CardContent>
+        <div className="space-y-1.5 rounded-md bg-background/35 px-2.5 py-2 text-xs leading-6 text-muted-foreground">
+          <p>name: {toolCall.tool_name}</p>
+          <p>status: {toolCall.status}</p>
+          <p>preview: {toolCall.result_preview}</p>
+        </div>
       )}
-    </Card>
+    </div>
   );
 }
 
