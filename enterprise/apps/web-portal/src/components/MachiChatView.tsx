@@ -248,14 +248,16 @@ export function MachiChatView({ client }: MachiChatViewProps) {
               <span className="hidden sm:inline">Gateway online</span>
               <span className="sm:hidden">on</span>
             </Badge>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
-                  <Share className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>分享对话</TooltipContent>
-            </Tooltip>
+            {!isEmpty && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
+                    <Share className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>分享对话</TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
