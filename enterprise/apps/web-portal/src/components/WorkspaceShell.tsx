@@ -224,15 +224,15 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
           </div>
 
           {/* 主操作 */}
-          <div className="space-y-1.5 p-3">
-            <Button onClick={onNewChat} className="w-full justify-start" size={collapsed ? "icon" : "default"}>
+          <div className={["flex flex-col gap-1.5 p-3", collapsed ? "items-center" : ""].join(" ")}>
+            <Button onClick={onNewChat} className={collapsed ? "" : "w-full justify-start"} size={collapsed ? "icon" : "default"}>
               <MessageSquarePlus />
               {!collapsed && t.newChat}
             </Button>
             <Button
               variant={deepResearch ? "default" : "outline"}
               onClick={() => setDeepResearch((prev) => !prev)}
-              className="w-full justify-start"
+              className={collapsed ? "" : "w-full justify-start"}
               size={collapsed ? "icon" : "default"}
             >
               <Microscope />
@@ -306,7 +306,10 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-muted"
+                  className={[
+                    "flex w-full items-center gap-2.5 rounded-md py-2 transition-colors hover:bg-muted",
+                    collapsed ? "justify-center px-0" : "px-2 text-left",
+                  ].join(" ")}
                 >
                   <div className="relative shrink-0">
                     <MachiAvatar size={32} className="h-8 w-8" />
