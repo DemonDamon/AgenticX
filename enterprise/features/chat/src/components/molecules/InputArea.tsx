@@ -47,7 +47,7 @@ export function InputArea({ value, status, onChange, onSend, onCancel, leftToolb
         value={value}
         onChange={(event) => onChange(event.target.value)}
         rows={1}
-        className="min-h-[40px] w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pb-2 pt-2.5 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground/70"
+        className="min-h-[40px] w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pb-2 pt-2.5 text-sm leading-6 text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
         placeholder="发送消息给 Machi..."
         onKeyDown={(event) => {
           if (event.key !== "Enter") return;
