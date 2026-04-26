@@ -88,12 +88,28 @@ export function MessageList({
   const [selectedMessages, setSelectedMessages] = React.useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = React.useState(false);
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
+  const longPressTimerRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const prevMessageCountRef = React.useRef(messages.length);
 
+  // 只在消息数量增加时滚动到底部（用户发送新消息或收到新回复）
   React.useEffect(() => {
     const container = parentRef.current;
     if (!container) return;
-    container.scrollTop = container.scrollHeight;
+    
+    // 只有当消息数量增加时才滚动（避免浏览历史时被打断）
+    if (messages.length > prevMessageCountRef.current) {
+      container.scrollTop = container.scrollHeight;
+    }
+    prevMessageCountRef.current = messages.length;
   }, [messages]);
+
+  // 清理所有长按计时器
+  React.useEffect(() => {
+    return () => {
+      longPressTimerRef.current.forEach((timer) => clearTimeout(timer));
+      longPressTimerRef.current.clear();
+    };
+  }, []);
 
   const toggleSelection = (messageId: string) => {
     setSelectedMessages((prev) => {
@@ -182,13 +198,17 @@ export function MessageList({
             const isIm = styleVariant === "im";
             const isSelected = selectedMessages.has(message.id);
 
-            // 长按计时器
-            let longPressTimer: NodeJS.Timeout;
+            // 使用 ref 存储每个消息的长按计时器
             const onPointerDown = () => {
-              longPressTimer = setTimeout(() => handleLongPress(message.id), 500);
+              const timer = setTimeout(() => handleLongPress(message.id), 500);
+              longPressTimerRef.current.set(message.id, timer);
             };
             const onPointerUp = () => {
-              clearTimeout(longPressTimer);
+              const timer = longPressTimerRef.current.get(message.id);
+              if (timer) {
+                clearTimeout(timer);
+                longPressTimerRef.current.delete(message.id);
+              }
             };
 
             return (
