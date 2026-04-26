@@ -182,20 +182,46 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
             "-translate-x-full data-[mobile-open=1]:translate-x-0 lg:static lg:translate-x-0",
           ].join(" ")}
         >
-          {/* 顶部品牌 */}
-          <div className="flex h-14 items-center gap-2 px-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <MachiAvatar size={22} className="h-[22px] w-[22px] rounded-sm" />
-            </span>
-            {!collapsed && (
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold">AgenticX</div>
-                <div className="truncate text-[11px] text-muted-foreground">Workspace</div>
-              </div>
-            )}
+          {/* 顶部品牌 + 收起侧栏（与主区分界侧对齐，见设计稿图2；窄栏时纵向排布） */}
+          <div
+            className={[
+              "flex shrink-0 border-b border-sidebar-border",
+              collapsed
+                ? "flex-col items-center gap-1.5 px-1 py-2.5"
+                : "h-14 flex-row items-center gap-1 px-2 sm:px-3",
+            ].join(" ")}
+          >
+            <div className={`flex min-w-0 items-center gap-2 ${collapsed ? "justify-center" : "flex-1"}`}>
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                <MachiAvatar size={22} className="h-[22px] w-[22px] rounded-sm" />
+              </span>
+              {!collapsed && (
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold">AgenticX</div>
+                  <div className="truncate text-[11px] text-muted-foreground">Workspace</div>
+                </div>
+              )}
+            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={() => setCollapsed((prev) => !prev)}
+                  aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
+                  className={[
+                    "hidden shrink-0 border-sidebar-border/80 bg-background/60 text-muted-foreground shadow-none hover:bg-muted/80 hover:text-foreground lg:inline-flex",
+                    collapsed ? "h-7 w-7" : "h-8 w-8",
+                  ].join(" ")}
+                >
+                  {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-[12rem]">
+                {collapsed ? "展开侧栏" : "收起侧栏"}
+              </TooltipContent>
+            </Tooltip>
           </div>
-
-          <Separator className="bg-sidebar-border" />
 
           {/* 主操作 */}
           <div className="space-y-1.5 p-3">
@@ -331,20 +357,6 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-
-          {/* 折叠按钮 */}
-          <Separator className="bg-sidebar-border" />
-          <div className="flex items-center gap-2 px-2 py-2">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setCollapsed((prev) => !prev)}
-              aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
-              className="hidden lg:inline-flex"
-            >
-              {collapsed ? <ChevronRight /> : <ChevronLeft />}
-            </Button>
-          </div>
         </aside>
 
         {mobileOpen && (
@@ -356,41 +368,33 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
         )}
 
         {/* 主区 */}
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur">
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="lg:hidden"
-                onClick={() => setMobileOpen((prev) => !prev)}
-                aria-label="打开菜单"
-              >
-                <Menu />
-              </Button>
-              <Badge variant="success" className="gap-1">
-                <Activity className="h-3 w-3" />
-                <span className="hidden sm:inline">Gateway online</span>
-                <span className="sm:hidden">on</span>
-              </Badge>
-            </div>
-            {panelMode === "settings" ? (
+        <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+          <div className="absolute left-4 top-4 z-30 lg:hidden">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setMobileOpen((prev) => !prev)}
+              aria-label="打开菜单"
+            >
+              <Menu />
+            </Button>
+          </div>
+          {panelMode === "settings" && (
+            <div className="absolute right-4 top-4 z-30">
               <Button variant="outline" size="sm" onClick={() => setPanelMode("chat")}>
                 {t.backToChat}
               </Button>
-            ) : null}
-          </header>
-
-          <div className="flex min-h-0 flex-1 p-3 sm:p-4">
-            <div className="flex h-full min-h-0 w-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-              {panelMode === "chat" ? (
-                <MachiChatView client={client} />
-              ) : (
-                <div className="h-full w-full overflow-auto">
-                  <SettingsPanel />
-                </div>
-              )}
             </div>
+          )}
+
+          <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden">
+            {panelMode === "chat" ? (
+              <MachiChatView client={client} />
+            ) : (
+              <div className="h-full w-full overflow-auto">
+                <SettingsPanel />
+              </div>
+            )}
           </div>
         </section>
 
