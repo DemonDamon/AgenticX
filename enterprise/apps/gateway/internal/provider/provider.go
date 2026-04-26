@@ -3,97 +3,25 @@ package provider
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 )
 
+// ChatProvider 抽象 OpenAI 兼容的聊天补全调用，支持非流式与 SSE 流式两种模式。
 type ChatProvider interface {
 	Complete(ctx context.Context, req openai.ChatCompletionRequest, decision routing.Decision) (openai.ChatCompletionResponse, error)
 	Stream(ctx context.Context, req openai.ChatCompletionRequest, decision routing.Decision, push func(openai.StreamChunk) error) error
 }
 
-type OpenAICompatibleProvider struct{}
-
-func NewOpenAICompatibleProvider() *OpenAICompatibleProvider {
-	return &OpenAICompatibleProvider{}
-}
-
-func (p *OpenAICompatibleProvider) Complete(
-	_ context.Context,
-	req openai.ChatCompletionRequest,
-	decision routing.Decision,
-) (openai.ChatCompletionResponse, error) {
-	// W3-T03: provider 抽象已准备就绪；当前先返回 mock，下一阶段可替换为真实 endpoint 调用。
-	content := "mock completion from " + nonEmpty(decision.Provider, decision.Route)
-	return openai.ChatCompletionResponse{
-		ID:      "chatcmpl_mock_" + time.Now().Format("150405"),
-		Object:  "chat.completion",
-		Created: time.Now().Unix(),
-		Model:   nonEmpty(decision.Model, req.Model),
-		Choices: []openai.ChatCompletionChoice{
-			{
-				Index: 0,
-				Message: openai.ChatMessage{
-					Role:    "assistant",
-					Content: content,
-				},
-				FinishReason: "stop",
-			},
-		},
-		Usage: openai.Usage{
-			PromptTokens:     estimateTokens(req.Messages),
-			CompletionTokens: 12,
-			TotalTokens:      estimateTokens(req.Messages) + 12,
-		},
-	}, nil
-}
-
-func (p *OpenAICompatibleProvider) Stream(
-	_ context.Context,
-	req openai.ChatCompletionRequest,
-	decision routing.Decision,
-	push func(openai.StreamChunk) error,
-) error {
-	responseText := "mock streaming response via " + nonEmpty(decision.Provider, decision.Route)
-	parts := strings.Split(responseText, " ")
-	for idx, part := range parts {
-		chunk := openai.StreamChunk{
-			ID:      "chatcmpl_stream_" + time.Now().Format("150405"),
-			Object:  "chat.completion.chunk",
-			Created: time.Now().Unix(),
-			Model:   nonEmpty(decision.Model, req.Model),
-			Choices: []openai.StreamChoice{
-				{
-					Index: 0,
-					Delta: openai.StreamDelta{
-						Content: part + " ",
-					},
-				},
-			},
-		}
-		if idx == 0 {
-			chunk.Choices[0].Delta.Role = "assistant"
-		}
-		if err := push(chunk); err != nil {
-			return err
-		}
-	}
-	stop := "stop"
-	return push(openai.StreamChunk{
-		ID:      "chatcmpl_stream_" + time.Now().Format("150405"),
-		Object:  "chat.completion.chunk",
-		Created: time.Now().Unix(),
-		Model:   nonEmpty(decision.Model, req.Model),
-		Choices: []openai.StreamChoice{
-			{
-				Index:        0,
-				Delta:        openai.StreamDelta{},
-				FinishReason: &stop,
-			},
-		},
-	})
+// NewOpenAICompatibleProvider 构造默认 provider：
+//
+//   - 当路由 Decision 携带 Endpoint 且环境变量解析出 API Key 时，向上游真实调用；
+//   - 否则回退到本地 mock，保证未配置 Key 的开发环境也能完成端到端联调。
+//
+// 这样 admin/portal 不需要改动配置，只需在网关进程上设置 `<PROVIDER>_API_KEY` 即可切换为真实模型。
+func NewOpenAICompatibleProvider(opts ...Option) *OpenAICompatibleProvider {
+	return newOpenAIHTTPProvider(opts...)
 }
 
 func nonEmpty(a, fallback string) string {

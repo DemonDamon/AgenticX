@@ -72,6 +72,26 @@ bash scripts/start-dev.sh     # 每天开工跑这一条
 - 前台：`owner@agenticx.local` + `AUTH_DEV_OWNER_PASSWORD`
   - 如果输入 `staff@agenticx.local` 会报 `Invalid credentials` —— 默认种子里没有这个人，需要先在后台或注册页创建
 
+> 默认 `owner` 已自带 `workspace:chat` 权限；旧种子环境若 HMR 命中也会被自动补齐，无需手动改库。
+
+### 让聊天回真实模型
+
+未配置 Key 时网关回放 mock 占位回复，链路完整但内容是假的。配真实 Key 走以下两步即可：
+
+1. 在 `enterprise/.env.local` 末尾追加任一 provider 的 Key（变量名规则：`<PROVIDER>_API_KEY`）：
+
+   ```bash
+   DEEPSEEK_API_KEY=sk-...
+   MOONSHOT_API_KEY=sk-...
+   OPENAI_API_KEY=sk-...
+   # 或自托管 OpenAI 兼容网关：
+   LLM_API_KEY=sk-...
+   ```
+
+2. 重启 `bash scripts/start-dev.sh`。前台选 `deepseek-chat` / `moonshot-v1-8k` 等模型即走真调；其余模型若没对应 Key 会自动回退 mock。
+
+详细 Key 解析规则与生产部署建议见 `apps/gateway/README.md`。
+
 ### `start-dev.sh` 的 3 个参数（只要记这些）
 
 | 命令 | 行为 |
