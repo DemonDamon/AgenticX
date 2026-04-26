@@ -300,7 +300,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
               </div>
             </div>
           ) : (
-            <div className="relative h-full min-h-0 px-4 py-3 sm:px-5">
+            <div className="relative h-full min-h-0">
               <MessageList
                 messages={messages}
                 className="h-full"
