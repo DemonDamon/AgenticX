@@ -104,7 +104,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !hasScope(identity.Scopes, "workspace:chat") {
-		writeAPIError(w, openai.Unauthorized("missing workspace:chat scope"))
+		writeAPIError(w, openai.Forbidden("missing workspace:chat scope"))
 		return
 	}
 
