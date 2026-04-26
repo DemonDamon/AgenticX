@@ -239,11 +239,11 @@ export function MessageList({
                   className={[
                     "flex items-start gap-3",
                     isUser ? "flex-row-reverse" : "flex-row",
-                    isTerminal ? "w-full max-w-[min(95%,860px)]" : "max-w-[min(88%,840px)]",
+                    isTerminal ? "w-full max-w-3xl" : "w-full max-w-3xl",
                     isSelectionMode && isSelected ? "opacity-60" : "",
                   ].join(" ")}
                 >
-                  {!isTerminal && !(isIm && isUser) ? (
+                  {!isTerminal ? (
                     <div className="mt-0.5 shrink-0">
                       {isUser ? (
                         <span className="flex h-8 w-8 items-center justify-center rounded-full border border-border/70 bg-surface-subtle text-xs font-medium text-muted-foreground">
