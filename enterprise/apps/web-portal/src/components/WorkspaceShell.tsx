@@ -368,9 +368,10 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
               >
                 <Menu />
               </Button>
-              <Badge variant="success" className="gap-1 bg-transparent border-transparent text-muted-foreground hover:bg-transparent shadow-none px-0">
-                <Activity className="h-3 w-3 text-success" />
-                <span className="hidden sm:inline text-[11px]">Gateway online</span>
+              <Badge variant="success" className="gap-1">
+                <Activity className="h-3 w-3" />
+                <span className="hidden sm:inline">Gateway online</span>
+                <span className="sm:hidden">on</span>
               </Badge>
             </div>
             {panelMode === "settings" ? (
