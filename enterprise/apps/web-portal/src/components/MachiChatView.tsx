@@ -85,9 +85,13 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     activeModel,
     errorMessage,
     sessionTokens,
+    responseVersionsByUserMessageId,
     bootstrap,
     switchModel,
     sendMessage,
+    editUserMessageAndResend,
+    showPreviousResponseVersion,
+    showNextResponseVersion,
     cancel,
   } = useChatStore();
   const [draft, setDraft] = React.useState("");
@@ -180,6 +184,19 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     [availableModels, activeModel]
   );
   const isEmpty = messages.length === 0;
+  const responseVersionMetaByUserMessageId = React.useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(responseVersionsByUserMessageId).map(([userMessageId, versionState]) => [
+          userMessageId,
+          {
+            activeIndex: versionState.activeIndex,
+            total: versionState.versions.length,
+          },
+        ]),
+      ),
+    [responseVersionsByUserMessageId],
+  );
   const [sessionTitle, setSessionTitle] = React.useState("新对话");
   const [isEditingTitle, setIsEditingTitle] = React.useState(false);
   const titleInputRef = React.useRef<HTMLInputElement>(null);
@@ -312,6 +329,9 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                 className="h-full"
                 styleVariant="im"
                 assistantFrameless
+                responseVersionMetaByUserMessageId={responseVersionMetaByUserMessageId}
+                onShowPreviousResponseVersion={showPreviousResponseVersion}
+                onShowNextResponseVersion={showNextResponseVersion}
                 onCopy={(content) => {
                   console.log("Copied:", content);
                 }}
@@ -321,9 +341,9 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                     void sendMessage(client, { content: msg.content });
                   }
                 }}
-                onUserEditResend={(_messageId, content) => {
+                onUserEditResend={(messageId, content) => {
                   if (!content.trim()) return;
-                  void sendMessage(client, { content });
+                  void editUserMessageAndResend(client, { messageId, content });
                 }}
                 onShare={(messageId) => {
                   const url = `${window.location.origin}/workspace?share=${messageId}`;

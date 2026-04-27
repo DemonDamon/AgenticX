@@ -10,6 +10,13 @@ type SendMessageInput = {
   userId?: string;
 };
 
+type EditUserMessageInput = {
+  messageId: string;
+  content: string;
+  tenantId?: string;
+  userId?: string;
+};
+
 export type SessionTokenUsage = {
   inputTokens: number;
   outputTokens: number;
@@ -17,6 +24,18 @@ export type SessionTokenUsage = {
   lastInputTokens: number;
   lastOutputTokens: number;
   lastUpdatedAt: string | null;
+};
+
+export type AssistantResponseVersion = {
+  id: string;
+  content: string;
+  created_at: string;
+  model?: string;
+};
+
+export type UserResponseVersionState = {
+  versions: AssistantResponseVersion[];
+  activeIndex: number;
 };
 
 export type ChatStoreState = {
@@ -28,6 +47,7 @@ export type ChatStoreState = {
   activeRequestId: string | null;
   errorMessage: string | null;
   sessionTokens: SessionTokenUsage;
+  responseVersionsByUserMessageId: Record<string, UserResponseVersionState>;
 };
 
 const EMPTY_USAGE: SessionTokenUsage = {
@@ -44,6 +64,9 @@ export type ChatStoreActions = {
   switchSession(sessionId: string): void;
   switchModel(model: string): void;
   sendMessage(client: ChatClient, input: SendMessageInput): Promise<void>;
+  editUserMessageAndResend(client: ChatClient, input: EditUserMessageInput): Promise<void>;
+  showPreviousResponseVersion(userMessageId: string): void;
+  showNextResponseVersion(userMessageId: string): void;
   cancel(client: ChatClient): Promise<void>;
   deleteMessage(messageId: string): void;
 };
@@ -76,6 +99,30 @@ function toSdkRequest(sessionId: string, model: string, messages: ChatMessage[])
   };
 }
 
+function findUserAndAssistantIndex(messages: ChatMessage[], userMessageId: string): { userIndex: number; assistantIndex: number } {
+  const userIndex = messages.findIndex((message) => message.id === userMessageId && message.role === "user");
+  if (userIndex < 0) return { userIndex: -1, assistantIndex: -1 };
+
+  let assistantIndex = -1;
+  for (let i = userIndex + 1; i < messages.length; i += 1) {
+    if (messages[i]?.role === "user") break;
+    if (messages[i]?.role === "assistant") {
+      assistantIndex = i;
+      break;
+    }
+  }
+  return { userIndex, assistantIndex };
+}
+
+function toAssistantVersion(message: ChatMessage): AssistantResponseVersion {
+  return {
+    id: message.id,
+    content: message.content,
+    created_at: message.created_at,
+    model: message.model,
+  };
+}
+
 export const useChatStore = create<ChatStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
@@ -85,6 +132,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   activeRequestId: null,
   errorMessage: null,
   sessionTokens: { ...EMPTY_USAGE },
+  responseVersionsByUserMessageId: {},
 
   bootstrap(params) {
     const sessionId = makeId("session");
@@ -108,6 +156,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       errorMessage: null,
       activeRequestId: null,
       sessionTokens: { ...EMPTY_USAGE },
+      responseVersionsByUserMessageId: {},
     });
   },
 
@@ -173,6 +222,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       messages: nextMessages,
       status: "sending",
       errorMessage: null,
+      responseVersionsByUserMessageId: {
+        ...prev.responseVersionsByUserMessageId,
+        [userMessage.id]: {
+          versions: [toAssistantVersion(assistantMessage)],
+          activeIndex: 0,
+        },
+      },
       sessions: prev.sessions.map((session) =>
         session.id === sessionId
           ? {
@@ -201,11 +257,29 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.delta) {
-          set((prev) => ({
-            messages: prev.messages.map((message) =>
-              message.id === assistantMessage.id ? { ...message, content: `${message.content}${chunk.delta}` } : message
-            ),
-          }));
+          set((prev) => {
+            const current = prev.responseVersionsByUserMessageId[userMessage.id];
+            const nextVersionState = current
+              ? {
+                  ...current,
+                  versions: current.versions.map((version, index) =>
+                    index === current.activeIndex ? { ...version, content: `${version.content}${chunk.delta}` } : version
+                  ),
+                }
+              : undefined;
+
+            return {
+              messages: prev.messages.map((message) =>
+                message.id === assistantMessage.id ? { ...message, content: `${message.content}${chunk.delta}` } : message
+              ),
+              responseVersionsByUserMessageId: nextVersionState
+                ? {
+                    ...prev.responseVersionsByUserMessageId,
+                    [userMessage.id]: nextVersionState,
+                  }
+                : prev.responseVersionsByUserMessageId,
+            };
+          });
         }
 
         if (chunk.usage) {
@@ -234,6 +308,213 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
   },
 
+  async editUserMessageAndResend(client, input) {
+    const state = get();
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return;
+    if (state.status === "sending" || state.status === "streaming") return;
+
+    const nextContent = input.content.trim();
+    if (!nextContent) return;
+
+    const { userIndex, assistantIndex } = findUserAndAssistantIndex(state.messages, input.messageId);
+    if (userIndex < 0) return;
+
+    const tenantId = input.tenantId ?? state.sessions.find((session) => session.id === sessionId)?.tenant_id ?? DEFAULT_TENANT;
+    const userId = input.userId ?? state.sessions.find((session) => session.id === sessionId)?.user_id ?? DEFAULT_USER;
+    const sourceUserMessage = state.messages[userIndex];
+    const sourceAssistantMessage = assistantIndex >= 0 ? state.messages[assistantIndex] : undefined;
+    if (!sourceUserMessage || sourceUserMessage.role !== "user") return;
+
+    const replacementAssistant: ChatMessage = {
+      id: makeId("msg_assistant"),
+      session_id: sessionId,
+      tenant_id: tenantId,
+      user_id: userId,
+      role: "assistant",
+      content: "",
+      model: state.activeModel,
+      created_at: now(),
+    };
+
+    const editedMessages = [...state.messages];
+    editedMessages[userIndex] = {
+      ...sourceUserMessage,
+      content: nextContent,
+      created_at: now(),
+    };
+
+    let targetAssistantIndex = assistantIndex;
+    if (targetAssistantIndex >= 0) {
+      editedMessages[targetAssistantIndex] = replacementAssistant;
+    } else {
+      targetAssistantIndex = userIndex + 1;
+      editedMessages.splice(targetAssistantIndex, 0, replacementAssistant);
+    }
+
+    const truncatedMessages = editedMessages.slice(0, targetAssistantIndex + 1);
+    const userIdsInScope = new Set(
+      truncatedMessages.filter((message) => message.role === "user").map((message) => message.id)
+    );
+    const scopedVersionMap = Object.fromEntries(
+      Object.entries(state.responseVersionsByUserMessageId).filter(([userMessageId]) => userIdsInScope.has(userMessageId))
+    );
+
+    const previousVersionState = state.responseVersionsByUserMessageId[input.messageId];
+    const previousVersions =
+      previousVersionState?.versions ??
+      (sourceAssistantMessage
+        ? [toAssistantVersion(sourceAssistantMessage)]
+        : []);
+    const nextVersions = [...previousVersions, toAssistantVersion(replacementAssistant)];
+    const nextActiveIndex = Math.max(0, nextVersions.length - 1);
+
+    set((prev) => ({
+      messages: truncatedMessages,
+      status: "sending",
+      errorMessage: null,
+      responseVersionsByUserMessageId: {
+        ...Object.fromEntries(
+          Object.entries(prev.responseVersionsByUserMessageId).filter(([userMessageId]) => userIdsInScope.has(userMessageId))
+        ),
+        ...scopedVersionMap,
+        [input.messageId]: {
+          versions: nextVersions,
+          activeIndex: nextActiveIndex,
+        },
+      },
+      sessions: prev.sessions.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              message_count: truncatedMessages.length,
+              updated_at: now(),
+              last_message_at: now(),
+            }
+          : session
+      ),
+    }));
+
+    try {
+      const request = toSdkRequest(sessionId, state.activeModel, truncatedMessages);
+      const { requestId } = await client.sendMessage(request);
+      set({ status: "streaming", activeRequestId: requestId });
+
+      for await (const chunk of client.stream(requestId)) {
+        if (chunk.error) {
+          set({
+            status: "error",
+            errorMessage: toComplianceMessage(chunk.error.code, chunk.error.message),
+            activeRequestId: null,
+          });
+          return;
+        }
+
+        if (chunk.delta) {
+          set((prev) => {
+            const versionState = prev.responseVersionsByUserMessageId[input.messageId];
+            const nextVersionState = versionState
+              ? {
+                  ...versionState,
+                  versions: versionState.versions.map((version, index) =>
+                    index === versionState.activeIndex ? { ...version, content: `${version.content}${chunk.delta}` } : version
+                  ),
+                }
+              : versionState;
+            return {
+              messages: prev.messages.map((message) =>
+                message.id === replacementAssistant.id ? { ...message, content: `${message.content}${chunk.delta}` } : message
+              ),
+              responseVersionsByUserMessageId: versionState
+                ? {
+                    ...prev.responseVersionsByUserMessageId,
+                    [input.messageId]: nextVersionState as UserResponseVersionState,
+                  }
+                : prev.responseVersionsByUserMessageId,
+            };
+          });
+        }
+
+        if (chunk.usage) {
+          set((prev) => ({
+            sessionTokens: {
+              inputTokens: prev.sessionTokens.inputTokens + (chunk.usage?.inputTokens ?? 0),
+              outputTokens: prev.sessionTokens.outputTokens + (chunk.usage?.outputTokens ?? 0),
+              totalTokens: prev.sessionTokens.totalTokens + (chunk.usage?.totalTokens ?? 0),
+              lastInputTokens: chunk.usage?.inputTokens ?? 0,
+              lastOutputTokens: chunk.usage?.outputTokens ?? 0,
+              lastUpdatedAt: now(),
+            },
+          }));
+        }
+
+        if (chunk.done) {
+          set({ status: "idle", activeRequestId: null });
+        }
+      }
+    } catch (error) {
+      set({
+        status: "error",
+        errorMessage: error instanceof Error ? error.message : "Unknown send error",
+        activeRequestId: null,
+      });
+    }
+  },
+
+  showPreviousResponseVersion(userMessageId) {
+    set((state) => {
+      const versionState = state.responseVersionsByUserMessageId[userMessageId];
+      if (!versionState || versionState.activeIndex <= 0) return state;
+      const { assistantIndex } = findUserAndAssistantIndex(state.messages, userMessageId);
+      if (assistantIndex < 0) return state;
+
+      const targetIndex = versionState.activeIndex - 1;
+      const targetVersion = versionState.versions[targetIndex];
+      if (!targetVersion) return state;
+
+      return {
+        ...state,
+        responseVersionsByUserMessageId: {
+          ...state.responseVersionsByUserMessageId,
+          [userMessageId]: {
+            ...versionState,
+            activeIndex: targetIndex,
+          },
+        },
+        messages: state.messages.map((message, index) =>
+          index === assistantIndex ? { ...message, content: targetVersion.content } : message
+        ),
+      };
+    });
+  },
+
+  showNextResponseVersion(userMessageId) {
+    set((state) => {
+      const versionState = state.responseVersionsByUserMessageId[userMessageId];
+      if (!versionState || versionState.activeIndex >= versionState.versions.length - 1) return state;
+      const { assistantIndex } = findUserAndAssistantIndex(state.messages, userMessageId);
+      if (assistantIndex < 0) return state;
+
+      const targetIndex = versionState.activeIndex + 1;
+      const targetVersion = versionState.versions[targetIndex];
+      if (!targetVersion) return state;
+
+      return {
+        ...state,
+        responseVersionsByUserMessageId: {
+          ...state.responseVersionsByUserMessageId,
+          [userMessageId]: {
+            ...versionState,
+            activeIndex: targetIndex,
+          },
+        },
+        messages: state.messages.map((message, index) =>
+          index === assistantIndex ? { ...message, content: targetVersion.content } : message
+        ),
+      };
+    });
+  },
+
   async cancel(client) {
     const requestId = get().activeRequestId;
     if (!requestId) return;
@@ -242,9 +523,21 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   deleteMessage(messageId) {
-    set((state) => ({
-      messages: state.messages.filter((message) => message.id !== messageId),
-    }));
+    set((state) => {
+      const filteredMessages = state.messages.filter((message) => message.id !== messageId);
+      const existing = state.responseVersionsByUserMessageId[messageId];
+      if (!existing) {
+        return {
+          messages: filteredMessages,
+        };
+      }
+      const nextVersionMap = { ...state.responseVersionsByUserMessageId };
+      delete nextVersionMap[messageId];
+      return {
+        messages: filteredMessages,
+        responseVersionsByUserMessageId: nextVersionMap,
+      };
+    });
   },
 }));
 

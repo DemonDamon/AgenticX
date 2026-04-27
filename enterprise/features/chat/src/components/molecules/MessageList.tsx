@@ -72,6 +72,27 @@ function IconCheck({ className }: { className?: string }) {
   );
 }
 
+function IconChevronLeft({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="m15 18-6-6 6-6" />
+    </svg>
+  );
+}
+
+function IconChevronRight({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
+type ResponseVersionMeta = {
+  activeIndex: number;
+  total: number;
+};
+
 type MessageListProps = {
   messages: ChatMessage[];
   emptyText?: string;
@@ -81,6 +102,9 @@ type MessageListProps = {
   assistantFrameless?: boolean;
   onRetry?: (messageId: string) => void;
   onUserEditResend?: (messageId: string, content: string) => void;
+  responseVersionMetaByUserMessageId?: Record<string, ResponseVersionMeta>;
+  onShowPreviousResponseVersion?: (userMessageId: string) => void;
+  onShowNextResponseVersion?: (userMessageId: string) => void;
   onShare?: (messageId: string) => void;
   onCopy?: (content: string) => void;
   onFeedback?: (messageId: string, type: "like" | "dislike") => void;
@@ -209,6 +233,9 @@ export function MessageList({
   assistantFrameless = false,
   onRetry,
   onUserEditResend,
+  responseVersionMetaByUserMessageId,
+  onShowPreviousResponseVersion,
+  onShowNextResponseVersion,
   onShare,
   onCopy,
   onFeedback,
@@ -355,6 +382,11 @@ export function MessageList({
               isAssistant && showReasoningBlock ? displayContent.replace(/^\s+/, "") : displayContent;
             const hideContentParagraph = isAssistant && (showThinkingDots || (!hasVisibleContent && showReasoningBlock));
             const isEditingThisUserMessage = isUser && editingMessageId === message.id;
+            const responseVersionMeta = isUser ? responseVersionMetaByUserMessageId?.[message.id] : undefined;
+            const hasResponseVersions = !!responseVersionMeta && responseVersionMeta.total > 1;
+            const canShowPreviousVersion = !!responseVersionMeta && responseVersionMeta.activeIndex > 0;
+            const canShowNextVersion =
+              !!responseVersionMeta && responseVersionMeta.activeIndex < responseVersionMeta.total - 1;
 
             // 使用 ref 存储每个消息的长按计时器
             const onPointerDown = () => {
@@ -469,7 +501,7 @@ export function MessageList({
                         <div
                           className={`mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 ${
                             isUser ? "justify-end -mr-0.5" : "justify-start -ml-1.5"
-                          }`}
+                          } ${isUser && hasResponseVersions ? "opacity-100" : ""}`}
                         >
                           {/* 复制 */}
                           <Tooltip>
@@ -494,22 +526,67 @@ export function MessageList({
                           </Tooltip>
 
                           {isUser ? (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant={isEditingThisUserMessage ? "secondary" : "ghost"}
-                                  size="icon"
-                                  className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    startEditMessage(message.id, message.content ?? "");
-                                  }}
-                                >
-                                  <IconEdit className="h-3.5 w-3.5" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>编辑</TooltipContent>
-                            </Tooltip>
+                            <>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant={isEditingThisUserMessage ? "secondary" : "ghost"}
+                                    size="icon"
+                                    className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startEditMessage(message.id, message.content ?? "");
+                                    }}
+                                  >
+                                    <IconEdit className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>编辑</TooltipContent>
+                              </Tooltip>
+
+                              {hasResponseVersions && (
+                                <>
+                                  <div className="mx-0.5 h-4 w-px bg-border/80" />
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onShowPreviousResponseVersion?.(message.id);
+                                        }}
+                                        disabled={!canShowPreviousVersion}
+                                      >
+                                        <IconChevronLeft className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>上一版回复</TooltipContent>
+                                  </Tooltip>
+                                  <span className="min-w-[2.3rem] text-center text-sm font-medium text-muted-foreground">
+                                    {responseVersionMeta!.activeIndex + 1}/{responseVersionMeta!.total}
+                                  </span>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onShowNextResponseVersion?.(message.id);
+                                        }}
+                                        disabled={!canShowNextVersion}
+                                      >
+                                        <IconChevronRight className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>下一版回复</TooltipContent>
+                                  </Tooltip>
+                                </>
+                              )}
+                            </>
                           ) : (
                             <>
                               {/* 重试 */}
