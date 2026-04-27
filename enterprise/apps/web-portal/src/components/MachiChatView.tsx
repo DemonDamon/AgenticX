@@ -90,8 +90,11 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     switchModel,
     sendMessage,
     editUserMessageAndResend,
+    regenerateAssistantResponse,
     showPreviousResponseVersion,
     showNextResponseVersion,
+    showPreviousRetryVersion,
+    showNextRetryVersion,
     cancel,
   } = useChatStore();
   const [draft, setDraft] = React.useState("");
@@ -184,19 +187,47 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     [availableModels, activeModel]
   );
   const isEmpty = messages.length === 0;
-  const responseVersionMetaByUserMessageId = React.useMemo(
-    () =>
-      Object.fromEntries(
-        Object.entries(responseVersionsByUserMessageId).map(([userMessageId, versionState]) => [
-          userMessageId,
-          {
-            activeIndex: versionState.activeIndex,
-            total: versionState.versions.length,
-          },
-        ]),
-      ),
-    [responseVersionsByUserMessageId],
-  );
+  React.useEffect(() => {
+    setModelMenuOpen(false);
+  }, [isEmpty]);
+  const { responseVersionMetaByUserMessageId, retryVersionMetaByUserMessageId } = React.useMemo(() => {
+    const queryMeta: Record<string, { activeIndex: number; total: number }> = {};
+    const retryMeta: Record<string, { activeIndex: number; total: number }> = {};
+
+    Object.entries(responseVersionsByUserMessageId).forEach(([userMessageId, versionState]) => {
+      const versions = versionState.versions ?? [];
+      if (versions.length === 0) {
+        queryMeta[userMessageId] = { activeIndex: 0, total: 0 };
+        retryMeta[userMessageId] = { activeIndex: 0, total: 0 };
+        return;
+      }
+
+      const queryVersionIndices = Array.from(new Set(versions.map((version) => version.queryVersionIndex ?? 0))).sort((a, b) => a - b);
+      const activeVersion = versions[versionState.activeIndex] ?? versions[versions.length - 1];
+      const activeQueryVersionIndex = activeVersion?.queryVersionIndex ?? 0;
+      const activeQueryPosition = Math.max(0, queryVersionIndices.indexOf(activeQueryVersionIndex));
+      queryMeta[userMessageId] = {
+        activeIndex: activeQueryPosition,
+        total: queryVersionIndices.length,
+      };
+
+      const activeRetryVersions = versions
+        .map((version, index) => ({ version, index }))
+        .filter(({ version }) => (version.queryVersionIndex ?? 0) === activeQueryVersionIndex)
+        .sort((a, b) => ((a.version.retryAttempt ?? 0) - (b.version.retryAttempt ?? 0)) || (a.index - b.index));
+      const activeRetryIndices = activeRetryVersions.map(({ index }) => index);
+      const activeRetryPosition = Math.max(0, activeRetryIndices.indexOf(versionState.activeIndex));
+      retryMeta[userMessageId] = {
+        activeIndex: activeRetryPosition,
+        total: activeRetryIndices.length,
+      };
+    });
+
+    return {
+      responseVersionMetaByUserMessageId: queryMeta,
+      retryVersionMetaByUserMessageId: retryMeta,
+    };
+  }, [responseVersionsByUserMessageId]);
   const [sessionTitle, setSessionTitle] = React.useState("新对话");
   const [isEditingTitle, setIsEditingTitle] = React.useState(false);
   const titleInputRef = React.useRef<HTMLInputElement>(null);
@@ -206,6 +237,116 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     void sendMessage(client, { content: text });
     setDraft("");
   };
+
+  const composer = (
+    <div className="mx-auto w-full max-w-4xl space-y-3">
+      {errorMessage && (
+        <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
+          <ShieldAlert className="h-5 w-5" />
+          <AlertTitle>{t.complianceTitle}</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      )}
+
+      <InputArea
+        value={draft}
+        status={status}
+        onChange={setDraft}
+        onSend={() => handleSend(draft)}
+        onCancel={() => void cancel(client)}
+        appearance="portal"
+        leftToolbar={
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label="附件" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
+                  <Paperclip className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>上传文件（即将上线）</TooltipContent>
+            </Tooltip>
+            <Button
+              variant={webSearch ? "secondary" : "ghost"}
+              size="icon"
+              onClick={() => setWebSearch((prev) => !prev)}
+              className={`h-8 w-8 rounded-full ${webSearch ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              <Globe className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={deepResearch ? "secondary" : "ghost"}
+              size="icon"
+              onClick={() => setDeepResearch((prev) => !prev)}
+              className={`h-8 w-8 rounded-full ${deepResearch ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              <Microscope className="h-4 w-4" />
+            </Button>
+          </>
+        }
+        rightToolbar={
+          <div ref={modelMenuRef} className="relative">
+            {modelMenuOpen ? (
+              <div
+                className="fixed z-[80] overflow-hidden rounded-2xl border border-border/70 bg-popover/95 p-1 shadow-2xl backdrop-blur"
+                style={{
+                  width: modelMenuPosition.width,
+                  left: modelMenuPosition.left,
+                  top: modelMenuPosition.top,
+                  transform: "translateY(-100%)",
+                }}
+              >
+                {availableModels.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground">
+                    暂无可用模型，请联系管理员在「平台配置 · 模型服务」启用并分配。
+                  </div>
+                ) : (
+                  availableModels.map((opt) => {
+                    const isSelected = opt.id === activeModel;
+                    const icon = opt.route === "local"
+                      ? <Cpu className="h-4 w-4" />
+                      : opt.route === "private-cloud"
+                        ? <Microscope className="h-4 w-4" />
+                        : <Sparkles className="h-4 w-4" />;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          switchModel(opt.id);
+                          setModelMenuOpen(false);
+                        }}
+                        className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${isSelected ? "bg-primary-soft/70" : "hover:bg-muted/70"}`}
+                      >
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center pt-0.5 text-primary">{icon}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-semibold leading-5 text-foreground">
+                            {opt.label}
+                          </span>
+                          <span className="block truncate text-[11px] leading-4 text-muted-foreground mt-0.5">
+                            {opt.providerLabel} · <span className="font-mono">{opt.model}</span>
+                          </span>
+                        </span>
+                        {isSelected && <Check className="h-4 w-4 shrink-0 text-primary mt-0.5" />}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            ) : null}
+            <button
+              ref={modelTriggerRef}
+              type="button"
+              onClick={() => setModelMenuOpen((prev) => !prev)}
+              className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
+            >
+              <span>{activeOption?.label ?? (modelsLoaded ? "无可用模型" : "加载中...")}</span>
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${modelMenuOpen ? "rotate-180" : ""}`} />
+            </button>
+          </div>
+        }
+      />
+    </div>
+  );
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -288,7 +429,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
         <div className="relative min-h-0 flex-1 overflow-hidden">
           {isEmpty ? (
             /* 欢迎态 */
-            <div className="relative flex h-full flex-col items-center justify-center gap-8 px-4 py-8">
+            <div className="relative flex h-full flex-col items-center justify-start gap-8 overflow-y-auto px-4 py-8 md:justify-center">
               <div className="flex flex-col items-center gap-4 text-center">
                 <div className="relative">
                   <MachiAvatar size={210} className="relative h-[210px] w-[210px]" />
@@ -321,6 +462,10 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                   </button>
                 ))}
               </div>
+
+              <div className="mt-2 w-full">
+                {composer}
+              </div>
             </div>
           ) : (
             <div className="relative h-full min-h-0">
@@ -330,16 +475,16 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                 styleVariant="im"
                 assistantFrameless
                 responseVersionMetaByUserMessageId={responseVersionMetaByUserMessageId}
+                retryVersionMetaByUserMessageId={retryVersionMetaByUserMessageId}
                 onShowPreviousResponseVersion={showPreviousResponseVersion}
                 onShowNextResponseVersion={showNextResponseVersion}
+                onShowPreviousRetryVersion={showPreviousRetryVersion}
+                onShowNextRetryVersion={showNextRetryVersion}
                 onCopy={(content) => {
                   console.log("Copied:", content);
                 }}
                 onRetry={(messageId) => {
-                  const msg = messages.find((m) => m.id === messageId);
-                  if (msg?.content) {
-                    void sendMessage(client, { content: msg.content });
-                  }
+                  void regenerateAssistantResponse(client, messageId);
                 }}
                 onUserEditResend={(messageId, content) => {
                   if (!content.trim()) return;
@@ -358,116 +503,11 @@ export function MachiChatView({ client }: MachiChatViewProps) {
           )}
         </div>
 
-        {/* 底部输入区 */}
-        <div className="relative z-10 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-6 pt-4 sm:px-6 sm:pb-8">
-          <div className="mx-auto w-full max-w-4xl space-y-3">
-            {errorMessage && (
-              <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
-                <ShieldAlert className="h-5 w-5" />
-                <AlertTitle>{t.complianceTitle}</AlertTitle>
-                <AlertDescription>{errorMessage}</AlertDescription>
-              </Alert>
-            )}
-
-            <InputArea
-              value={draft}
-              status={status}
-              onChange={setDraft}
-              onSend={() => handleSend(draft)}
-              onCancel={() => void cancel(client)}
-              appearance="portal"
-              leftToolbar={
-                <>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" aria-label="附件" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
-                        <Paperclip className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>上传文件（即将上线）</TooltipContent>
-                  </Tooltip>
-                  <Button
-                    variant={webSearch ? "secondary" : "ghost"}
-                    size="icon"
-                    onClick={() => setWebSearch((prev) => !prev)}
-                    className={`h-8 w-8 rounded-full ${webSearch ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    <Globe className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant={deepResearch ? "secondary" : "ghost"}
-                    size="icon"
-                    onClick={() => setDeepResearch((prev) => !prev)}
-                    className={`h-8 w-8 rounded-full ${deepResearch ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    <Microscope className="h-4 w-4" />
-                  </Button>
-                </>
-              }
-              rightToolbar={
-                <div ref={modelMenuRef} className="relative">
-                  {modelMenuOpen ? (
-                    <div
-                      className="fixed z-[80] overflow-hidden rounded-2xl border border-border/70 bg-popover/95 p-1 shadow-2xl backdrop-blur"
-                      style={{
-                        width: modelMenuPosition.width,
-                        left: modelMenuPosition.left,
-                        top: modelMenuPosition.top,
-                        transform: "translateY(-100%)",
-                      }}
-                    >
-                      {availableModels.length === 0 ? (
-                        <div className="px-3 py-3 text-xs text-muted-foreground">
-                          暂无可用模型，请联系管理员在「平台配置 · 模型服务」启用并分配。
-                        </div>
-                      ) : (
-                        availableModels.map((opt) => {
-                          const isSelected = opt.id === activeModel;
-                          const icon = opt.route === "local"
-                            ? <Cpu className="h-4 w-4" />
-                            : opt.route === "private-cloud"
-                              ? <Microscope className="h-4 w-4" />
-                              : <Sparkles className="h-4 w-4" />;
-                          return (
-                            <button
-                              key={opt.id}
-                              type="button"
-                              onClick={() => {
-                                switchModel(opt.id);
-                                setModelMenuOpen(false);
-                              }}
-                              className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${isSelected ? "bg-primary-soft/70" : "hover:bg-muted/70"}`}
-                            >
-                              <span className="flex h-5 w-5 shrink-0 items-center justify-center pt-0.5 text-primary">{icon}</span>
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm font-semibold leading-5 text-foreground">
-                                  {opt.label}
-                                </span>
-                                <span className="block truncate text-[11px] leading-4 text-muted-foreground mt-0.5">
-                                  {opt.providerLabel} · <span className="font-mono">{opt.model}</span>
-                                </span>
-                              </span>
-                              {isSelected && <Check className="h-4 w-4 shrink-0 text-primary mt-0.5" />}
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  ) : null}
-                  <button
-                    ref={modelTriggerRef}
-                    type="button"
-                    onClick={() => setModelMenuOpen((prev) => !prev)}
-                    className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
-                  >
-                    <span>{activeOption?.label ?? (modelsLoaded ? "无可用模型" : "加载中...")}</span>
-                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${modelMenuOpen ? "rotate-180" : ""}`} />
-                  </button>
-                </div>
-              }
-            />
+        {!isEmpty && (
+          <div className="relative z-10 shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-6 pt-4 sm:px-6 sm:pb-8">
+            {composer}
           </div>
-        </div>
+        )}
       </div>
     </TooltipProvider>
   );

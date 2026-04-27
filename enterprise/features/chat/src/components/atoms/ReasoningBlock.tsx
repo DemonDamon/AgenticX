@@ -65,7 +65,6 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
     }
     if (finishedAtRef.current === null) {
       finishedAtRef.current = Date.now();
-      setOpen(false);
     }
   }, [thinkingStarted, thinkingInProgress]);
 
