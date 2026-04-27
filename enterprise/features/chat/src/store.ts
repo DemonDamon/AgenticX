@@ -51,6 +51,8 @@ export type ChatStoreState = {
   activeRequestId: string | null;
   errorMessage: string | null;
   sessionTokens: SessionTokenUsage;
+  /** 按会话累计 token，切换会话时与 sessionTokens 同步 */
+  sessionTokensBySessionId: Record<string, SessionTokenUsage>;
   responseVersionsByUserMessageId: Record<string, UserResponseVersionState>;
 };
 
@@ -64,8 +66,11 @@ const EMPTY_USAGE: SessionTokenUsage = {
 };
 
 export type ChatStoreActions = {
-  bootstrap(params?: { tenantId?: string; userId?: string; defaultModel?: string }): void;
+  bootstrap(params?: { tenantId?: string; userId?: string; defaultModel?: string; title?: string }): void;
+  createSession(params?: { tenantId?: string; userId?: string; defaultModel?: string; title?: string }): void;
   switchSession(sessionId: string): void;
+  renameSession(sessionId: string, title: string): void;
+  deleteSession(sessionId: string): void;
   switchModel(model: string): void;
   sendMessage(client: ChatClient, input: SendMessageInput): Promise<void>;
   editUserMessageAndResend(client: ChatClient, input: EditUserMessageInput): Promise<void>;
@@ -90,6 +95,56 @@ function makeId(prefix: string): string {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+/** 与 agenticx/studio/session_manager.py _PLACEHOLDER_SESSION_TITLE_CF + 前缀规则对齐 */
+const PLACEHOLDER_SESSION_TITLES_CF = new Set(
+  [
+    "微信会话",
+    "微信对话",
+    "微信聊天",
+    "飞书会话",
+    "飞书对话",
+    "新对话",
+    "新会话",
+    "new chat",
+    "new conversation",
+    "欢迎使用 agenticx",
+  ].map((s) => s.toLowerCase()),
+);
+
+export function sessionTitleNeedsAutoFill(name: string | null | undefined): boolean {
+  const raw = String(name ?? "").trim();
+  if (!raw) return true;
+  const key = raw.toLowerCase();
+  if (PLACEHOLDER_SESSION_TITLES_CF.has(key)) return true;
+  if (key.startsWith("新会话") || key.startsWith("新对话")) return true;
+  if (key.startsWith("new session") || key.startsWith("new chat")) return true;
+  return false;
+}
+
+/** 与 session_manager._build_auto_title 一致：空白压平后取前 48 字 */
+export function buildAutoTitleFromFirstUserMessage(message: string): string {
+  const compact = String(message ?? "")
+    .trim()
+    .split(/\s+/)
+    .join(" ");
+  if (!compact) return "";
+  return compact.length > 48 ? compact.slice(0, 48).trimEnd() : compact;
+}
+
+function addChunkToSessionTokens(
+  prev: SessionTokenUsage,
+  chunk: { inputTokens?: number; outputTokens?: number; totalTokens?: number },
+): SessionTokenUsage {
+  return {
+    inputTokens: prev.inputTokens + (chunk.inputTokens ?? 0),
+    outputTokens: prev.outputTokens + (chunk.outputTokens ?? 0),
+    totalTokens: prev.totalTokens + (chunk.totalTokens ?? 0),
+    lastInputTokens: chunk.inputTokens ?? 0,
+    lastOutputTokens: chunk.outputTokens ?? 0,
+    lastUpdatedAt: now(),
+  };
 }
 
 function toSdkRequest(sessionId: string, model: string, messages: ChatMessage[]): SdkChatRequest {
@@ -169,6 +224,15 @@ function getIndicesForQueryVersion(versions: AssistantResponseVersion[], queryVe
     .map(({ index }) => index);
 }
 
+function getSessionMessages(messages: ChatMessage[], sessionId: string): ChatMessage[] {
+  return messages.filter((message) => message.session_id === sessionId);
+}
+
+function mergeSessionMessages(messages: ChatMessage[], sessionId: string, sessionMessages: ChatMessage[]): ChatMessage[] {
+  const rest = messages.filter((message) => message.session_id !== sessionId);
+  return [...rest, ...sessionMessages];
+}
+
 export const useChatStore = create<ChatStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
@@ -178,6 +242,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   activeRequestId: null,
   errorMessage: null,
   sessionTokens: { ...EMPTY_USAGE },
+  sessionTokensBySessionId: {},
   responseVersionsByUserMessageId: {},
 
   bootstrap(params) {
@@ -186,7 +251,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       id: sessionId,
       tenant_id: params?.tenantId ?? DEFAULT_TENANT,
       user_id: params?.userId ?? DEFAULT_USER,
-      title: "New chat",
+      title: params?.title?.trim() || "New chat",
       active_model: params?.defaultModel ?? DEFAULT_MODEL,
       message_count: 0,
       created_at: now(),
@@ -202,17 +267,94 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       errorMessage: null,
       activeRequestId: null,
       sessionTokens: { ...EMPTY_USAGE },
+      sessionTokensBySessionId: { [sessionId]: { ...EMPTY_USAGE } },
       responseVersionsByUserMessageId: {},
     });
+  },
+
+  createSession(params) {
+    const sessionId = makeId("session");
+    const session: ChatSession = {
+      id: sessionId,
+      tenant_id: params?.tenantId ?? DEFAULT_TENANT,
+      user_id: params?.userId ?? DEFAULT_USER,
+      title: params?.title?.trim() || "New chat",
+      active_model: params?.defaultModel ?? get().activeModel ?? DEFAULT_MODEL,
+      message_count: 0,
+      created_at: now(),
+      updated_at: now(),
+    };
+
+    set((prev) => ({
+      sessions: [...prev.sessions, session],
+      activeSessionId: sessionId,
+      activeModel: session.active_model ?? DEFAULT_MODEL,
+      status: "idle",
+      errorMessage: null,
+      activeRequestId: null,
+      sessionTokens: { ...EMPTY_USAGE },
+      sessionTokensBySessionId: {
+        ...prev.sessionTokensBySessionId,
+        [sessionId]: { ...EMPTY_USAGE },
+      },
+    }));
   },
 
   switchSession(sessionId) {
     const target = get().sessions.find((session) => session.id === sessionId);
     if (!target) return;
+    const tokens = get().sessionTokensBySessionId[sessionId] ?? { ...EMPTY_USAGE };
     set({
       activeSessionId: sessionId,
       activeModel: target.active_model ?? DEFAULT_MODEL,
       errorMessage: null,
+      sessionTokens: { ...tokens },
+    });
+  },
+
+  renameSession(sessionId, title) {
+    const nextTitle = title.trim() || "New chat";
+    set((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === sessionId ? { ...session, title: nextTitle, updated_at: now() } : session,
+      ),
+    }));
+  },
+
+  deleteSession(sessionId) {
+    set((state) => {
+      const removedUserIds = new Set(
+        state.messages
+          .filter((message) => message.session_id === sessionId && message.role === "user")
+          .map((message) => message.id),
+      );
+      const nextMessages = state.messages.filter((message) => message.session_id !== sessionId);
+      const nextSessions = state.sessions.filter((session) => session.id !== sessionId);
+      const nextTokensMap = { ...state.sessionTokensBySessionId };
+      delete nextTokensMap[sessionId];
+      const nextVersions = { ...state.responseVersionsByUserMessageId };
+      for (const id of removedUserIds) {
+        delete nextVersions[id];
+      }
+      let nextActive = state.activeSessionId;
+      if (nextActive === sessionId) {
+        nextActive = nextSessions[0]?.id ?? null;
+      }
+      const nextTarget = nextSessions.find((session) => session.id === nextActive);
+      const nextSessionTokens = nextActive ? (nextTokensMap[nextActive] ?? { ...EMPTY_USAGE }) : { ...EMPTY_USAGE };
+
+      return {
+        sessions: nextSessions,
+        activeSessionId: nextActive,
+        messages: nextMessages,
+        sessionTokensBySessionId: nextTokensMap,
+        responseVersionsByUserMessageId: nextVersions,
+        activeModel: nextTarget?.active_model ?? state.activeModel,
+        sessionTokens: nextSessionTokens,
+        status: "idle",
+        activeRequestId: null,
+        errorMessage: null,
+      };
     });
   },
 
@@ -262,10 +404,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       created_at: now(),
     };
 
-    const nextMessages = [...state.messages, userMessage, assistantMessage];
+    const sessionMessages = getSessionMessages(state.messages, sessionId);
+    const nextSessionMessages = [...sessionMessages, userMessage, assistantMessage];
+    const priorUserCount = sessionMessages.filter((m) => m.role === "user").length;
+    const shouldAutoTitle = priorUserCount === 0;
 
     set((prev) => ({
-      messages: nextMessages,
+      messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
       status: "sending",
       errorMessage: null,
       responseVersionsByUserMessageId: {
@@ -276,20 +421,24 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           activeAssistantIndexByQueryVersion: { 0: 0 },
         },
       },
-      sessions: prev.sessions.map((session) =>
-        session.id === sessionId
-          ? {
-              ...session,
-              message_count: session.message_count + 2,
-              last_message_at: now(),
-              updated_at: now(),
-            }
-          : session
-      ),
+      sessions: prev.sessions.map((session) => {
+        if (session.id !== sessionId) return session;
+        const autoTitle =
+          shouldAutoTitle && sessionTitleNeedsAutoFill(session.title)
+            ? buildAutoTitleFromFirstUserMessage(content) || session.title
+            : session.title;
+        return {
+          ...session,
+          title: autoTitle,
+          message_count: session.message_count + 2,
+          last_message_at: now(),
+          updated_at: now(),
+        };
+      }),
     }));
 
     try {
-      const request = toSdkRequest(sessionId, state.activeModel, nextMessages);
+      const request = toSdkRequest(sessionId, state.activeModel, nextSessionMessages);
       const { requestId } = await client.sendMessage(request);
       set({ status: "streaming", activeRequestId: requestId });
 
@@ -330,16 +479,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.usage) {
-          set((prev) => ({
-            sessionTokens: {
-              inputTokens: prev.sessionTokens.inputTokens + (chunk.usage?.inputTokens ?? 0),
-              outputTokens: prev.sessionTokens.outputTokens + (chunk.usage?.outputTokens ?? 0),
-              totalTokens: prev.sessionTokens.totalTokens + (chunk.usage?.totalTokens ?? 0),
-              lastInputTokens: chunk.usage?.inputTokens ?? 0,
-              lastOutputTokens: chunk.usage?.outputTokens ?? 0,
-              lastUpdatedAt: now(),
-            },
-          }));
+          set((prev) => {
+            const nextTokens = addChunkToSessionTokens(prev.sessionTokens, chunk.usage ?? {});
+            const prevForSession = prev.sessionTokensBySessionId[sessionId] ?? { ...EMPTY_USAGE };
+            const nextForSession = addChunkToSessionTokens(prevForSession, chunk.usage ?? {});
+            return {
+              sessionTokens: nextTokens,
+              sessionTokensBySessionId: {
+                ...prev.sessionTokensBySessionId,
+                [sessionId]: nextForSession,
+              },
+            };
+          });
         }
 
         if (chunk.done) {
@@ -364,13 +515,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const nextContent = input.content.trim();
     if (!nextContent) return;
 
-    const { userIndex, assistantIndex } = findUserAndAssistantIndex(state.messages, input.messageId);
+    const sessionMessages = getSessionMessages(state.messages, sessionId);
+    const sessionUserIds = new Set(sessionMessages.filter((message) => message.role === "user").map((message) => message.id));
+    const { userIndex, assistantIndex } = findUserAndAssistantIndex(sessionMessages, input.messageId);
     if (userIndex < 0) return;
 
     const tenantId = input.tenantId ?? state.sessions.find((session) => session.id === sessionId)?.tenant_id ?? DEFAULT_TENANT;
     const userId = input.userId ?? state.sessions.find((session) => session.id === sessionId)?.user_id ?? DEFAULT_USER;
-    const sourceUserMessage = state.messages[userIndex];
-    const sourceAssistantMessage = assistantIndex >= 0 ? state.messages[assistantIndex] : undefined;
+    const sourceUserMessage = sessionMessages[userIndex];
+    const sourceAssistantMessage = assistantIndex >= 0 ? sessionMessages[assistantIndex] : undefined;
     if (!sourceUserMessage || sourceUserMessage.role !== "user") return;
 
     const replacementAssistant: ChatMessage = {
@@ -384,7 +537,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       created_at: now(),
     };
 
-    const editedMessages = [...state.messages];
+    const editedMessages = [...sessionMessages];
     editedMessages[userIndex] = {
       ...sourceUserMessage,
       content: nextContent,
@@ -399,12 +552,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       editedMessages.splice(targetAssistantIndex, 0, replacementAssistant);
     }
 
-    const truncatedMessages = editedMessages.slice(0, targetAssistantIndex + 1);
+    const truncatedSessionMessages = editedMessages.slice(0, targetAssistantIndex + 1);
     const userIdsInScope = new Set(
-      truncatedMessages.filter((message) => message.role === "user").map((message) => message.id)
-    );
-    const scopedVersionMap = Object.fromEntries(
-      Object.entries(state.responseVersionsByUserMessageId).filter(([userMessageId]) => userIdsInScope.has(userMessageId))
+      truncatedSessionMessages.filter((message) => message.role === "user").map((message) => message.id)
     );
 
     const previousVersionState = state.responseVersionsByUserMessageId[input.messageId];
@@ -430,14 +580,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     };
 
     set((prev) => ({
-      messages: truncatedMessages,
+      messages: mergeSessionMessages(prev.messages, sessionId, truncatedSessionMessages),
       status: "sending",
       errorMessage: null,
       responseVersionsByUserMessageId: {
         ...Object.fromEntries(
-          Object.entries(prev.responseVersionsByUserMessageId).filter(([userMessageId]) => userIdsInScope.has(userMessageId))
+          Object.entries(prev.responseVersionsByUserMessageId).filter(
+            ([userMessageId]) => !sessionUserIds.has(userMessageId) || userIdsInScope.has(userMessageId)
+          )
         ),
-        ...scopedVersionMap,
         [input.messageId]: {
           versions: nextVersions,
           activeIndex: nextActiveIndex,
@@ -448,7 +599,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         session.id === sessionId
           ? {
               ...session,
-              message_count: truncatedMessages.length,
+              message_count: truncatedSessionMessages.length,
               updated_at: now(),
               last_message_at: now(),
             }
@@ -457,7 +608,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }));
 
     try {
-      const request = toSdkRequest(sessionId, state.activeModel, truncatedMessages);
+      const request = toSdkRequest(sessionId, state.activeModel, truncatedSessionMessages);
       const { requestId } = await client.sendMessage(request);
       set({ status: "streaming", activeRequestId: requestId });
 
@@ -497,16 +648,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.usage) {
-          set((prev) => ({
-            sessionTokens: {
-              inputTokens: prev.sessionTokens.inputTokens + (chunk.usage?.inputTokens ?? 0),
-              outputTokens: prev.sessionTokens.outputTokens + (chunk.usage?.outputTokens ?? 0),
-              totalTokens: prev.sessionTokens.totalTokens + (chunk.usage?.totalTokens ?? 0),
-              lastInputTokens: chunk.usage?.inputTokens ?? 0,
-              lastOutputTokens: chunk.usage?.outputTokens ?? 0,
-              lastUpdatedAt: now(),
-            },
-          }));
+          set((prev) => {
+            const nextTokens = addChunkToSessionTokens(prev.sessionTokens, chunk.usage ?? {});
+            const prevForSession = prev.sessionTokensBySessionId[sessionId] ?? { ...EMPTY_USAGE };
+            const nextForSession = addChunkToSessionTokens(prevForSession, chunk.usage ?? {});
+            return {
+              sessionTokens: nextTokens,
+              sessionTokensBySessionId: {
+                ...prev.sessionTokensBySessionId,
+                [sessionId]: nextForSession,
+              },
+            };
+          });
         }
 
         if (chunk.done) {
@@ -528,11 +681,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     if (!sessionId) return;
     if (state.status === "sending" || state.status === "streaming") return;
 
-    const { assistantIndex, userIndex } = findAssistantAndRelatedUserIndex(state.messages, assistantMessageId);
+    const sessionMessages = getSessionMessages(state.messages, sessionId);
+    const { assistantIndex, userIndex } = findAssistantAndRelatedUserIndex(sessionMessages, assistantMessageId);
     if (assistantIndex < 0 || userIndex < 0) return;
 
-    const sourceAssistantMessage = state.messages[assistantIndex];
-    const sourceUserMessage = state.messages[userIndex];
+    const sourceAssistantMessage = sessionMessages[assistantIndex];
+    const sourceUserMessage = sessionMessages[userIndex];
     if (!sourceAssistantMessage || sourceAssistantMessage.role !== "assistant") return;
     if (!sourceUserMessage || sourceUserMessage.role !== "user") return;
 
@@ -551,8 +705,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       created_at: now(),
     };
 
-    const nextMessages = [...state.messages];
-    nextMessages[assistantIndex] = replacementAssistant;
+    const nextSessionMessages = [...sessionMessages];
+    nextSessionMessages[assistantIndex] = replacementAssistant;
 
     const previousVersionState = state.responseVersionsByUserMessageId[targetUserMessageId];
     const previousVersions =
@@ -582,10 +736,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     };
 
     // 只把目标 query 及其之前上下文发送给模型，避免“重试旧 query”误用后续 query 作为当前提问。
-    const regenerateRequestMessages = nextMessages.slice(0, assistantIndex + 1);
+    const regenerateRequestMessages = nextSessionMessages.slice(0, assistantIndex + 1);
 
     set((prev) => ({
-      messages: nextMessages,
+      messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
       status: "sending",
       errorMessage: null,
       responseVersionsByUserMessageId: {
@@ -648,16 +802,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.usage) {
-          set((prev) => ({
-            sessionTokens: {
-              inputTokens: prev.sessionTokens.inputTokens + (chunk.usage?.inputTokens ?? 0),
-              outputTokens: prev.sessionTokens.outputTokens + (chunk.usage?.outputTokens ?? 0),
-              totalTokens: prev.sessionTokens.totalTokens + (chunk.usage?.totalTokens ?? 0),
-              lastInputTokens: chunk.usage?.inputTokens ?? 0,
-              lastOutputTokens: chunk.usage?.outputTokens ?? 0,
-              lastUpdatedAt: now(),
-            },
-          }));
+          set((prev) => {
+            const nextTokens = addChunkToSessionTokens(prev.sessionTokens, chunk.usage ?? {});
+            const prevForSession = prev.sessionTokensBySessionId[sessionId] ?? { ...EMPTY_USAGE };
+            const nextForSession = addChunkToSessionTokens(prevForSession, chunk.usage ?? {});
+            return {
+              sessionTokens: nextTokens,
+              sessionTokensBySessionId: {
+                ...prev.sessionTokensBySessionId,
+                [sessionId]: nextForSession,
+              },
+            };
+          });
         }
 
         if (chunk.done) {

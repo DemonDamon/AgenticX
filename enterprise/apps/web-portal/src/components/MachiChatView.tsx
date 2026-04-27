@@ -79,6 +79,7 @@ const SUGGESTIONS = [
 export function MachiChatView({ client }: MachiChatViewProps) {
   const t = usePortalCopy();
   const {
+    sessions,
     activeSessionId,
     messages,
     status,
@@ -87,6 +88,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     sessionTokens,
     responseVersionsByUserMessageId,
     bootstrap,
+    renameSession,
     switchModel,
     sendMessage,
     editUserMessageAndResend,
@@ -143,11 +145,11 @@ export function MachiChatView({ client }: MachiChatViewProps) {
   }, [modelsLoaded, availableModels, activeModel, switchModel]);
 
   React.useEffect(() => {
-    if (!activeSessionId) {
-      const initial = availableModels.find((m) => m.isDefault) ?? availableModels[0];
-      bootstrap({ defaultModel: initial?.id });
-    }
-  }, [activeSessionId, bootstrap, availableModels]);
+    if (sessions.length > 0) return;
+    if (activeSessionId) return;
+    const initial = availableModels.find((m) => m.isDefault) ?? availableModels[0];
+    bootstrap({ defaultModel: initial?.id, title: "欢迎使用 AgenticX" });
+  }, [activeSessionId, sessions.length, bootstrap, availableModels]);
 
   React.useEffect(() => {
     if (!modelMenuOpen) return;
@@ -186,7 +188,17 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     () => availableModels.find((m) => m.id === activeModel) ?? null,
     [availableModels, activeModel]
   );
-  const isEmpty = messages.length === 0;
+
+  const visibleMessages = React.useMemo(() => {
+    if (!activeSessionId) return [];
+    return messages.filter((message) => message.session_id === activeSessionId);
+  }, [messages, activeSessionId]);
+
+  const userIdsInActiveSession = React.useMemo(() => {
+    return new Set(visibleMessages.filter((message) => message.role === "user").map((message) => message.id));
+  }, [visibleMessages]);
+
+  const isEmpty = visibleMessages.length === 0;
   React.useEffect(() => {
     setModelMenuOpen(false);
   }, [isEmpty]);
@@ -195,6 +207,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     const retryMeta: Record<string, { activeIndex: number; total: number }> = {};
 
     Object.entries(responseVersionsByUserMessageId).forEach(([userMessageId, versionState]) => {
+      if (!userIdsInActiveSession.has(userMessageId)) return;
       const versions = versionState.versions ?? [];
       if (versions.length === 0) {
         queryMeta[userMessageId] = { activeIndex: 0, total: 0 };
@@ -227,10 +240,18 @@ export function MachiChatView({ client }: MachiChatViewProps) {
       responseVersionMetaByUserMessageId: queryMeta,
       retryVersionMetaByUserMessageId: retryMeta,
     };
-  }, [responseVersionsByUserMessageId]);
+  }, [responseVersionsByUserMessageId, userIdsInActiveSession]);
+  const activeSession = React.useMemo(
+    () => sessions.find((session) => session.id === activeSessionId),
+    [sessions, activeSessionId],
+  );
   const [sessionTitle, setSessionTitle] = React.useState("新对话");
   const [isEditingTitle, setIsEditingTitle] = React.useState(false);
   const titleInputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (activeSession) setSessionTitle(activeSession.title);
+  }, [activeSession?.id, activeSession?.title]);
 
   const handleSend = (text: string) => {
     if (!text.trim()) return;
@@ -360,10 +381,18 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                 type="text"
                 value={sessionTitle}
                 onChange={(e) => setSessionTitle(e.target.value)}
-                onBlur={() => setIsEditingTitle(false)}
+                onBlur={() => {
+                  setIsEditingTitle(false);
+                  if (activeSessionId) {
+                    renameSession(activeSessionId, sessionTitle.trim() || "New chat");
+                  }
+                }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") setIsEditingTitle(false);
-                  if (e.key === "Escape") setIsEditingTitle(false);
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  if (e.key === "Escape") {
+                    if (activeSession) setSessionTitle(activeSession.title);
+                    setIsEditingTitle(false);
+                  }
                 }}
                 className="rounded-md border border-border bg-background px-2 py-1 text-sm font-medium outline-none focus:border-ring"
                 autoFocus
@@ -470,7 +499,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
           ) : (
             <div className="relative h-full min-h-0">
               <MessageList
-                messages={messages}
+                messages={visibleMessages}
                 className="h-full"
                 styleVariant="im"
                 assistantFrameless
