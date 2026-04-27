@@ -359,7 +359,7 @@ export function MessageList({
         className={`min-h-0 overflow-y-auto px-4 sm:px-6 ${className ?? ""}`}
       >
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 py-4">
-          {messages.map((message) => {
+          {messages.map((message, messageIndex) => {
             const isUser = message.role === "user";
             const isAssistant = message.role === "assistant";
             const isTerminal = styleVariant === "terminal";
@@ -382,7 +382,16 @@ export function MessageList({
               isAssistant && showReasoningBlock ? displayContent.replace(/^\s+/, "") : displayContent;
             const hideContentParagraph = isAssistant && (showThinkingDots || (!hasVisibleContent && showReasoningBlock));
             const isEditingThisUserMessage = isUser && editingMessageId === message.id;
-            const responseVersionMeta = isUser ? responseVersionMetaByUserMessageId?.[message.id] : undefined;
+            const linkedUserMessageId = isUser
+              ? message.id
+              : (() => {
+                  if (!isAssistant) return undefined;
+                  for (let i = messageIndex - 1; i >= 0; i -= 1) {
+                    if (messages[i]?.role === "user") return messages[i]?.id;
+                  }
+                  return undefined;
+                })();
+            const responseVersionMeta = linkedUserMessageId ? responseVersionMetaByUserMessageId?.[linkedUserMessageId] : undefined;
             const hasResponseVersions = !!responseVersionMeta && responseVersionMeta.total > 1;
             const canShowPreviousVersion = !!responseVersionMeta && responseVersionMeta.activeIndex > 0;
             const canShowNextVersion =
@@ -507,8 +516,51 @@ export function MessageList({
                         <div
                           className={`mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 ${
                             isUser ? "justify-end" : "justify-start -ml-1.5"
-                          } ${isUser && hasResponseVersions ? "opacity-100" : ""}`}
+                          } ${(isUser || isAssistant) && hasResponseVersions ? "opacity-100" : ""}`}
                         >
+                          {isAssistant && hasResponseVersions && linkedUserMessageId && (
+                            <>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onShowPreviousResponseVersion?.(linkedUserMessageId);
+                                    }}
+                                    disabled={!canShowPreviousVersion}
+                                  >
+                                    <IconChevronLeft className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>上一版回复</TooltipContent>
+                              </Tooltip>
+                              <span className="min-w-[2.3rem] text-center text-sm font-medium text-muted-foreground">
+                                {responseVersionMeta!.activeIndex + 1}/{responseVersionMeta!.total}
+                              </span>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onShowNextResponseVersion?.(linkedUserMessageId);
+                                    }}
+                                    disabled={!canShowNextVersion}
+                                  >
+                                    <IconChevronRight className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>下一版回复</TooltipContent>
+                              </Tooltip>
+                              <div className="mx-0.5 h-4 w-px bg-border/80" />
+                            </>
+                          )}
+
                           {/* 复制 */}
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -605,6 +657,15 @@ export function MessageList({
                                       className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
                                       onClick={(e) => {
                                         e.stopPropagation();
+                                        if (linkedUserMessageId) {
+                                          const linkedUserMessage = messages.find(
+                                            (candidate) => candidate.id === linkedUserMessageId && candidate.role === "user",
+                                          );
+                                          if (linkedUserMessage?.content?.trim()) {
+                                            onUserEditResend?.(linkedUserMessageId, linkedUserMessage.content);
+                                            return;
+                                          }
+                                        }
                                         onRetry?.(message.id);
                                       }}
                                     >
