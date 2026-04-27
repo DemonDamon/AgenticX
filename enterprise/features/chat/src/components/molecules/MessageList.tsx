@@ -446,7 +446,13 @@ export function MessageList({
                       isSelectionMode && isSelected ? "opacity-60" : "",
                     ].join(" ")}
                   >
-                    <div className={isAssistant ? "min-w-0 w-full pl-1" : "min-w-0 max-w-full"}>
+                    <div
+                      className={
+                        isAssistant
+                          ? "min-w-0 w-full pl-1"
+                          : "min-w-0 w-full"
+                      }
+                    >
                       <div
                         className={[
                           "relative",
@@ -455,7 +461,7 @@ export function MessageList({
                             : isClean
                               ? "w-full rounded-2xl border border-border/70 bg-card/85 px-5 py-3 shadow-sm"
                               : isUser
-                                ? "rounded-[24px] bg-primary px-4 py-2.5 text-primary-foreground"
+                                ? "ml-auto block w-fit max-w-[min(90%,38rem)] rounded-[24px] bg-primary px-4 py-2.5 text-primary-foreground"
                               : assistantFrameless
                                 ? "w-full bg-transparent px-0 py-0 text-foreground"
                                 : "w-full rounded-[24px] border border-border/40 bg-card px-5 py-3 text-card-foreground shadow-sm",
@@ -500,7 +506,7 @@ export function MessageList({
                       {!isSelectionMode && (
                         <div
                           className={`mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 ${
-                            isUser ? "justify-end -mr-0.5" : "justify-start -ml-1.5"
+                            isUser ? "justify-end" : "justify-start -ml-1.5"
                           } ${isUser && hasResponseVersions ? "opacity-100" : ""}`}
                         >
                           {/* 复制 */}
