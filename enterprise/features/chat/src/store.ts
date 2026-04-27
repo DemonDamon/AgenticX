@@ -31,11 +31,15 @@ export type AssistantResponseVersion = {
   content: string;
   created_at: string;
   model?: string;
+  queryVersionIndex: number;
+  retryAttempt: number;
+  queryText: string;
 };
 
 export type UserResponseVersionState = {
   versions: AssistantResponseVersion[];
   activeIndex: number;
+  activeAssistantIndexByQueryVersion: Record<number, number>;
 };
 
 export type ChatStoreState = {
@@ -65,8 +69,11 @@ export type ChatStoreActions = {
   switchModel(model: string): void;
   sendMessage(client: ChatClient, input: SendMessageInput): Promise<void>;
   editUserMessageAndResend(client: ChatClient, input: EditUserMessageInput): Promise<void>;
+  regenerateAssistantResponse(client: ChatClient, assistantMessageId: string): Promise<void>;
   showPreviousResponseVersion(userMessageId: string): void;
   showNextResponseVersion(userMessageId: string): void;
+  showPreviousRetryVersion(userMessageId: string): void;
+  showNextRetryVersion(userMessageId: string): void;
   cancel(client: ChatClient): Promise<void>;
   deleteMessage(messageId: string): void;
 };
@@ -114,13 +121,52 @@ function findUserAndAssistantIndex(messages: ChatMessage[], userMessageId: strin
   return { userIndex, assistantIndex };
 }
 
-function toAssistantVersion(message: ChatMessage): AssistantResponseVersion {
+function findAssistantAndRelatedUserIndex(
+  messages: ChatMessage[],
+  assistantMessageId: string,
+): { assistantIndex: number; userIndex: number } {
+  const assistantIndex = messages.findIndex((message) => message.id === assistantMessageId && message.role === "assistant");
+  if (assistantIndex < 0) return { assistantIndex: -1, userIndex: -1 };
+
+  let userIndex = -1;
+  for (let i = assistantIndex - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") {
+      userIndex = i;
+      break;
+    }
+  }
+  return { assistantIndex, userIndex };
+}
+
+function toAssistantVersion(
+  message: ChatMessage,
+  meta?: { queryVersionIndex?: number; retryAttempt?: number; queryText?: string },
+): AssistantResponseVersion {
   return {
     id: message.id,
     content: message.content,
     created_at: message.created_at,
     model: message.model,
+    queryVersionIndex: meta?.queryVersionIndex ?? 0,
+    retryAttempt: meta?.retryAttempt ?? 0,
+    queryText: meta?.queryText ?? "",
   };
+}
+
+function findVersionIndexByAssistantId(versions: AssistantResponseVersion[], assistantId: string): number {
+  return versions.findIndex((version) => version.id === assistantId);
+}
+
+function getSortedQueryVersionIndices(versions: AssistantResponseVersion[]): number[] {
+  return Array.from(new Set(versions.map((version) => version.queryVersionIndex))).sort((a, b) => a - b);
+}
+
+function getIndicesForQueryVersion(versions: AssistantResponseVersion[], queryVersionIndex: number): number[] {
+  return versions
+    .map((version, index) => ({ version, index }))
+    .filter(({ version }) => version.queryVersionIndex === queryVersionIndex)
+    .sort((a, b) => (a.version.retryAttempt - b.version.retryAttempt) || (a.index - b.index))
+    .map(({ index }) => index);
 }
 
 export const useChatStore = create<ChatStore>((set, get) => ({
@@ -225,8 +271,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       responseVersionsByUserMessageId: {
         ...prev.responseVersionsByUserMessageId,
         [userMessage.id]: {
-          versions: [toAssistantVersion(assistantMessage)],
+          versions: [toAssistantVersion(assistantMessage, { queryVersionIndex: 0, retryAttempt: 0, queryText: content })],
           activeIndex: 0,
+          activeAssistantIndexByQueryVersion: { 0: 0 },
         },
       },
       sessions: prev.sessions.map((session) =>
@@ -364,10 +411,23 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const previousVersions =
       previousVersionState?.versions ??
       (sourceAssistantMessage
-        ? [toAssistantVersion(sourceAssistantMessage)]
+        ? [toAssistantVersion(sourceAssistantMessage, { queryVersionIndex: 0, retryAttempt: 0, queryText: sourceUserMessage.content })]
         : []);
-    const nextVersions = [...previousVersions, toAssistantVersion(replacementAssistant)];
+    const previousQueryIndices = getSortedQueryVersionIndices(previousVersions);
+    const nextQueryVersionIndex =
+      previousQueryIndices.length > 0 ? Math.max(...previousQueryIndices) + 1 : 0;
+    const nextVersions = [
+      ...previousVersions,
+      toAssistantVersion(replacementAssistant, { queryVersionIndex: nextQueryVersionIndex, retryAttempt: 0, queryText: nextContent }),
+    ];
     const nextActiveIndex = Math.max(0, nextVersions.length - 1);
+    const previousActiveAssistantIndexByQueryVersion =
+      previousVersionState?.activeAssistantIndexByQueryVersion ??
+      { 0: Math.max(0, previousVersions.length - 1) };
+    const nextActiveAssistantIndexByQueryVersion = {
+      ...previousActiveAssistantIndexByQueryVersion,
+      [nextQueryVersionIndex]: nextActiveIndex,
+    };
 
     set((prev) => ({
       messages: truncatedMessages,
@@ -381,6 +441,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         [input.messageId]: {
           versions: nextVersions,
           activeIndex: nextActiveIndex,
+          activeAssistantIndexByQueryVersion: nextActiveAssistantIndexByQueryVersion,
         },
       },
       sessions: prev.sessions.map((session) =>
@@ -461,14 +522,180 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
   },
 
+  async regenerateAssistantResponse(client, assistantMessageId) {
+    const state = get();
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return;
+    if (state.status === "sending" || state.status === "streaming") return;
+
+    const { assistantIndex, userIndex } = findAssistantAndRelatedUserIndex(state.messages, assistantMessageId);
+    if (assistantIndex < 0 || userIndex < 0) return;
+
+    const sourceAssistantMessage = state.messages[assistantIndex];
+    const sourceUserMessage = state.messages[userIndex];
+    if (!sourceAssistantMessage || sourceAssistantMessage.role !== "assistant") return;
+    if (!sourceUserMessage || sourceUserMessage.role !== "user") return;
+
+    const tenantId = sourceAssistantMessage.tenant_id ?? sourceUserMessage.tenant_id ?? DEFAULT_TENANT;
+    const userId = sourceAssistantMessage.user_id ?? sourceUserMessage.user_id ?? DEFAULT_USER;
+    const targetUserMessageId = sourceUserMessage.id;
+
+    const replacementAssistant: ChatMessage = {
+      id: makeId("msg_assistant"),
+      session_id: sessionId,
+      tenant_id: tenantId,
+      user_id: userId,
+      role: "assistant",
+      content: "",
+      model: state.activeModel,
+      created_at: now(),
+    };
+
+    const nextMessages = [...state.messages];
+    nextMessages[assistantIndex] = replacementAssistant;
+
+    const previousVersionState = state.responseVersionsByUserMessageId[targetUserMessageId];
+    const previousVersions =
+      previousVersionState?.versions ??
+      [toAssistantVersion(sourceAssistantMessage, { queryVersionIndex: 0, retryAttempt: 0, queryText: sourceUserMessage.content })];
+    const fallbackActiveIndex = findVersionIndexByAssistantId(previousVersions, sourceAssistantMessage.id);
+    const currentVersionIndex = previousVersionState?.activeIndex ?? (fallbackActiveIndex >= 0 ? fallbackActiveIndex : 0);
+    const currentVersion = previousVersions[currentVersionIndex] ?? previousVersions[previousVersions.length - 1];
+    const currentQueryVersionIndex = currentVersion?.queryVersionIndex ?? 0;
+    const queryVersionIndices = getIndicesForQueryVersion(previousVersions, currentQueryVersionIndex);
+    const currentMaxRetryAttempt = Math.max(
+      ...queryVersionIndices.map((index) => previousVersions[index]?.retryAttempt ?? 0),
+      0,
+    );
+    const nextVersions = [
+      ...previousVersions,
+      toAssistantVersion(replacementAssistant, {
+        queryVersionIndex: currentQueryVersionIndex,
+        retryAttempt: currentMaxRetryAttempt + 1,
+        queryText: currentVersion?.queryText ?? sourceUserMessage.content,
+      }),
+    ];
+    const nextActiveIndex = Math.max(0, nextVersions.length - 1);
+    const nextActiveAssistantIndexByQueryVersion = {
+      ...(previousVersionState?.activeAssistantIndexByQueryVersion ?? { [currentQueryVersionIndex]: currentVersionIndex }),
+      [currentQueryVersionIndex]: nextActiveIndex,
+    };
+
+    // 只把目标 query 及其之前上下文发送给模型，避免“重试旧 query”误用后续 query 作为当前提问。
+    const regenerateRequestMessages = nextMessages.slice(0, assistantIndex + 1);
+
+    set((prev) => ({
+      messages: nextMessages,
+      status: "sending",
+      errorMessage: null,
+      responseVersionsByUserMessageId: {
+        ...prev.responseVersionsByUserMessageId,
+        [targetUserMessageId]: {
+          versions: nextVersions,
+          activeIndex: nextActiveIndex,
+          activeAssistantIndexByQueryVersion: nextActiveAssistantIndexByQueryVersion,
+        },
+      },
+      sessions: prev.sessions.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              updated_at: now(),
+              last_message_at: now(),
+            }
+          : session
+      ),
+    }));
+
+    try {
+      const request = toSdkRequest(sessionId, state.activeModel, regenerateRequestMessages);
+      const { requestId } = await client.sendMessage(request);
+      set({ status: "streaming", activeRequestId: requestId });
+
+      for await (const chunk of client.stream(requestId)) {
+        if (chunk.error) {
+          set({
+            status: "error",
+            errorMessage: toComplianceMessage(chunk.error.code, chunk.error.message),
+            activeRequestId: null,
+          });
+          return;
+        }
+
+        if (chunk.delta) {
+          set((prev) => {
+            const versionState = prev.responseVersionsByUserMessageId[targetUserMessageId];
+            const nextVersionState = versionState
+              ? {
+                  ...versionState,
+                  versions: versionState.versions.map((version, index) =>
+                    index === versionState.activeIndex ? { ...version, content: `${version.content}${chunk.delta}` } : version
+                  ),
+                }
+              : versionState;
+            return {
+              messages: prev.messages.map((message) =>
+                message.id === replacementAssistant.id ? { ...message, content: `${message.content}${chunk.delta}` } : message
+              ),
+              responseVersionsByUserMessageId: versionState
+                ? {
+                    ...prev.responseVersionsByUserMessageId,
+                    [targetUserMessageId]: nextVersionState as UserResponseVersionState,
+                  }
+                : prev.responseVersionsByUserMessageId,
+            };
+          });
+        }
+
+        if (chunk.usage) {
+          set((prev) => ({
+            sessionTokens: {
+              inputTokens: prev.sessionTokens.inputTokens + (chunk.usage?.inputTokens ?? 0),
+              outputTokens: prev.sessionTokens.outputTokens + (chunk.usage?.outputTokens ?? 0),
+              totalTokens: prev.sessionTokens.totalTokens + (chunk.usage?.totalTokens ?? 0),
+              lastInputTokens: chunk.usage?.inputTokens ?? 0,
+              lastOutputTokens: chunk.usage?.outputTokens ?? 0,
+              lastUpdatedAt: now(),
+            },
+          }));
+        }
+
+        if (chunk.done) {
+          set({ status: "idle", activeRequestId: null });
+        }
+      }
+    } catch (error) {
+      set({
+        status: "error",
+        errorMessage: error instanceof Error ? error.message : "Unknown send error",
+        activeRequestId: null,
+      });
+    }
+  },
+
   showPreviousResponseVersion(userMessageId) {
     set((state) => {
       const versionState = state.responseVersionsByUserMessageId[userMessageId];
-      if (!versionState || versionState.activeIndex <= 0) return state;
-      const { assistantIndex } = findUserAndAssistantIndex(state.messages, userMessageId);
-      if (assistantIndex < 0) return state;
+      if (!versionState || versionState.versions.length === 0) return state;
+      const { userIndex, assistantIndex } = findUserAndAssistantIndex(state.messages, userMessageId);
+      if (assistantIndex < 0 || userIndex < 0) return state;
 
-      const targetIndex = versionState.activeIndex - 1;
+      const activeVersion = versionState.versions[versionState.activeIndex];
+      const activeQueryVersionIndex = activeVersion?.queryVersionIndex ?? 0;
+      const activeAssistantMap = versionState.activeAssistantIndexByQueryVersion ?? {};
+      const queryVersionIndices = getSortedQueryVersionIndices(versionState.versions);
+      const activeQueryPosition = queryVersionIndices.indexOf(activeQueryVersionIndex);
+      if (activeQueryPosition <= 0) return state;
+      const targetQueryVersionIndex = queryVersionIndices[activeQueryPosition - 1];
+      if (typeof targetQueryVersionIndex !== "number") return state;
+      const maybeTargetIndex =
+        activeAssistantMap[targetQueryVersionIndex] ??
+        (() => {
+          const indices = getIndicesForQueryVersion(versionState.versions, targetQueryVersionIndex);
+          return indices.length > 0 ? indices[indices.length - 1] : -1;
+        })();
+      if (typeof maybeTargetIndex !== "number" || maybeTargetIndex < 0) return state;
+      const targetIndex = maybeTargetIndex;
       const targetVersion = versionState.versions[targetIndex];
       if (!targetVersion) return state;
 
@@ -479,6 +706,102 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           [userMessageId]: {
             ...versionState,
             activeIndex: targetIndex,
+            activeAssistantIndexByQueryVersion: {
+              ...activeAssistantMap,
+              [targetQueryVersionIndex]: targetIndex,
+            },
+          },
+        },
+        messages: state.messages.map((message, index) =>
+          index === assistantIndex
+            ? { ...message, content: targetVersion.content }
+            : index === userIndex
+              ? { ...message, content: targetVersion.queryText || message.content }
+              : message
+        ),
+      };
+    });
+  },
+
+  showNextResponseVersion(userMessageId) {
+    set((state) => {
+      const versionState = state.responseVersionsByUserMessageId[userMessageId];
+      if (!versionState || versionState.versions.length === 0) return state;
+      const { userIndex, assistantIndex } = findUserAndAssistantIndex(state.messages, userMessageId);
+      if (assistantIndex < 0 || userIndex < 0) return state;
+
+      const activeVersion = versionState.versions[versionState.activeIndex];
+      const activeQueryVersionIndex = activeVersion?.queryVersionIndex ?? 0;
+      const activeAssistantMap = versionState.activeAssistantIndexByQueryVersion ?? {};
+      const queryVersionIndices = getSortedQueryVersionIndices(versionState.versions);
+      const activeQueryPosition = queryVersionIndices.indexOf(activeQueryVersionIndex);
+      if (activeQueryPosition < 0 || activeQueryPosition >= queryVersionIndices.length - 1) return state;
+      const targetQueryVersionIndex = queryVersionIndices[activeQueryPosition + 1];
+      if (typeof targetQueryVersionIndex !== "number") return state;
+      const maybeTargetIndex =
+        activeAssistantMap[targetQueryVersionIndex] ??
+        (() => {
+          const indices = getIndicesForQueryVersion(versionState.versions, targetQueryVersionIndex);
+          return indices.length > 0 ? indices[indices.length - 1] : -1;
+        })();
+      if (typeof maybeTargetIndex !== "number" || maybeTargetIndex < 0) return state;
+      const targetIndex = maybeTargetIndex;
+      const targetVersion = versionState.versions[targetIndex];
+      if (!targetVersion) return state;
+
+      return {
+        ...state,
+        responseVersionsByUserMessageId: {
+          ...state.responseVersionsByUserMessageId,
+          [userMessageId]: {
+            ...versionState,
+            activeIndex: targetIndex,
+            activeAssistantIndexByQueryVersion: {
+              ...activeAssistantMap,
+              [targetQueryVersionIndex]: targetIndex,
+            },
+          },
+        },
+        messages: state.messages.map((message, index) =>
+          index === assistantIndex
+            ? { ...message, content: targetVersion.content }
+            : index === userIndex
+              ? { ...message, content: targetVersion.queryText || message.content }
+              : message
+        ),
+      };
+    });
+  },
+
+  showPreviousRetryVersion(userMessageId) {
+    set((state) => {
+      const versionState = state.responseVersionsByUserMessageId[userMessageId];
+      if (!versionState || versionState.versions.length === 0) return state;
+      const { assistantIndex } = findUserAndAssistantIndex(state.messages, userMessageId);
+      if (assistantIndex < 0) return state;
+
+      const activeVersion = versionState.versions[versionState.activeIndex];
+      const activeQueryVersionIndex = activeVersion?.queryVersionIndex ?? 0;
+      const activeAssistantMap = versionState.activeAssistantIndexByQueryVersion ?? {};
+      const retryIndices = getIndicesForQueryVersion(versionState.versions, activeQueryVersionIndex);
+      const activeRetryPosition = retryIndices.indexOf(versionState.activeIndex);
+      if (activeRetryPosition <= 0) return state;
+      const targetIndex = retryIndices[activeRetryPosition - 1];
+      if (typeof targetIndex !== "number") return state;
+      const targetVersion = versionState.versions[targetIndex];
+      if (!targetVersion) return state;
+
+      return {
+        ...state,
+        responseVersionsByUserMessageId: {
+          ...state.responseVersionsByUserMessageId,
+          [userMessageId]: {
+            ...versionState,
+            activeIndex: targetIndex,
+            activeAssistantIndexByQueryVersion: {
+              ...activeAssistantMap,
+              [activeQueryVersionIndex]: targetIndex,
+            },
           },
         },
         messages: state.messages.map((message, index) =>
@@ -488,14 +811,21 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     });
   },
 
-  showNextResponseVersion(userMessageId) {
+  showNextRetryVersion(userMessageId) {
     set((state) => {
       const versionState = state.responseVersionsByUserMessageId[userMessageId];
-      if (!versionState || versionState.activeIndex >= versionState.versions.length - 1) return state;
+      if (!versionState || versionState.versions.length === 0) return state;
       const { assistantIndex } = findUserAndAssistantIndex(state.messages, userMessageId);
       if (assistantIndex < 0) return state;
 
-      const targetIndex = versionState.activeIndex + 1;
+      const activeVersion = versionState.versions[versionState.activeIndex];
+      const activeQueryVersionIndex = activeVersion?.queryVersionIndex ?? 0;
+      const activeAssistantMap = versionState.activeAssistantIndexByQueryVersion ?? {};
+      const retryIndices = getIndicesForQueryVersion(versionState.versions, activeQueryVersionIndex);
+      const activeRetryPosition = retryIndices.indexOf(versionState.activeIndex);
+      if (activeRetryPosition < 0 || activeRetryPosition >= retryIndices.length - 1) return state;
+      const targetIndex = retryIndices[activeRetryPosition + 1];
+      if (typeof targetIndex !== "number") return state;
       const targetVersion = versionState.versions[targetIndex];
       if (!targetVersion) return state;
 
@@ -506,6 +836,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           [userMessageId]: {
             ...versionState,
             activeIndex: targetIndex,
+            activeAssistantIndexByQueryVersion: {
+              ...activeAssistantMap,
+              [activeQueryVersionIndex]: targetIndex,
+            },
           },
         },
         messages: state.messages.map((message, index) =>

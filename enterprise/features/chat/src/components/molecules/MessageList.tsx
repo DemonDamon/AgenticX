@@ -103,8 +103,11 @@ type MessageListProps = {
   onRetry?: (messageId: string) => void;
   onUserEditResend?: (messageId: string, content: string) => void;
   responseVersionMetaByUserMessageId?: Record<string, ResponseVersionMeta>;
+  retryVersionMetaByUserMessageId?: Record<string, ResponseVersionMeta>;
   onShowPreviousResponseVersion?: (userMessageId: string) => void;
   onShowNextResponseVersion?: (userMessageId: string) => void;
+  onShowPreviousRetryVersion?: (userMessageId: string) => void;
+  onShowNextRetryVersion?: (userMessageId: string) => void;
   onShare?: (messageId: string) => void;
   onCopy?: (content: string) => void;
   onFeedback?: (messageId: string, type: "like" | "dislike") => void;
@@ -234,8 +237,11 @@ export function MessageList({
   onRetry,
   onUserEditResend,
   responseVersionMetaByUserMessageId,
+  retryVersionMetaByUserMessageId,
   onShowPreviousResponseVersion,
   onShowNextResponseVersion,
+  onShowPreviousRetryVersion,
+  onShowNextRetryVersion,
   onShare,
   onCopy,
   onFeedback,
@@ -391,11 +397,15 @@ export function MessageList({
                   }
                   return undefined;
                 })();
-            const responseVersionMeta = linkedUserMessageId ? responseVersionMetaByUserMessageId?.[linkedUserMessageId] : undefined;
-            const hasResponseVersions = !!responseVersionMeta && responseVersionMeta.total > 1;
-            const canShowPreviousVersion = !!responseVersionMeta && responseVersionMeta.activeIndex > 0;
-            const canShowNextVersion =
-              !!responseVersionMeta && responseVersionMeta.activeIndex < responseVersionMeta.total - 1;
+            const userResponseVersionMeta = linkedUserMessageId ? responseVersionMetaByUserMessageId?.[linkedUserMessageId] : undefined;
+            const hasUserResponseVersions = !!userResponseVersionMeta && userResponseVersionMeta.total > 1;
+            const canShowPreviousUserVersion = !!userResponseVersionMeta && userResponseVersionMeta.activeIndex > 0;
+            const canShowNextUserVersion =
+              !!userResponseVersionMeta && userResponseVersionMeta.activeIndex < userResponseVersionMeta.total - 1;
+            const retryVersionMeta = linkedUserMessageId ? retryVersionMetaByUserMessageId?.[linkedUserMessageId] : undefined;
+            const hasRetryVersions = !!retryVersionMeta && retryVersionMeta.total > 1;
+            const canShowPreviousRetryVersion = !!retryVersionMeta && retryVersionMeta.activeIndex > 0;
+            const canShowNextRetryVersion = !!retryVersionMeta && retryVersionMeta.activeIndex < retryVersionMeta.total - 1;
 
             // 使用 ref 存储每个消息的长按计时器
             const onPointerDown = () => {
@@ -516,9 +526,9 @@ export function MessageList({
                         <div
                           className={`mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 ${
                             isUser ? "justify-end" : "justify-start -ml-1.5"
-                          } ${(isUser || isAssistant) && hasResponseVersions ? "opacity-100" : ""}`}
+                          } ${(isUser && hasUserResponseVersions) || (isAssistant && hasRetryVersions) ? "opacity-100" : ""}`}
                         >
-                          {isAssistant && hasResponseVersions && linkedUserMessageId && (
+                          {isAssistant && hasRetryVersions && linkedUserMessageId && (
                             <>
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -528,9 +538,9 @@ export function MessageList({
                                     className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      onShowPreviousResponseVersion?.(linkedUserMessageId);
+                                      onShowPreviousRetryVersion?.(linkedUserMessageId);
                                     }}
-                                    disabled={!canShowPreviousVersion}
+                                    disabled={!canShowPreviousRetryVersion}
                                   >
                                     <IconChevronLeft className="h-3.5 w-3.5" />
                                   </Button>
@@ -538,7 +548,7 @@ export function MessageList({
                                 <TooltipContent>上一版回复</TooltipContent>
                               </Tooltip>
                               <span className="min-w-[2.3rem] text-center text-sm font-medium text-muted-foreground">
-                                {responseVersionMeta!.activeIndex + 1}/{responseVersionMeta!.total}
+                                {retryVersionMeta!.activeIndex + 1}/{retryVersionMeta!.total}
                               </span>
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -548,9 +558,9 @@ export function MessageList({
                                     className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      onShowNextResponseVersion?.(linkedUserMessageId);
+                                      onShowNextRetryVersion?.(linkedUserMessageId);
                                     }}
-                                    disabled={!canShowNextVersion}
+                                    disabled={!canShowNextRetryVersion}
                                   >
                                     <IconChevronRight className="h-3.5 w-3.5" />
                                   </Button>
@@ -602,7 +612,7 @@ export function MessageList({
                                 <TooltipContent>编辑</TooltipContent>
                               </Tooltip>
 
-                              {hasResponseVersions && (
+                              {hasUserResponseVersions && (
                                 <>
                                   <div className="mx-0.5 h-4 w-px bg-border/80" />
                                   <Tooltip>
@@ -615,7 +625,7 @@ export function MessageList({
                                           e.stopPropagation();
                                           onShowPreviousResponseVersion?.(message.id);
                                         }}
-                                        disabled={!canShowPreviousVersion}
+                                        disabled={!canShowPreviousUserVersion}
                                       >
                                         <IconChevronLeft className="h-3.5 w-3.5" />
                                       </Button>
@@ -623,7 +633,7 @@ export function MessageList({
                                     <TooltipContent>上一版回复</TooltipContent>
                                   </Tooltip>
                                   <span className="min-w-[2.3rem] text-center text-sm font-medium text-muted-foreground">
-                                    {responseVersionMeta!.activeIndex + 1}/{responseVersionMeta!.total}
+                                    {userResponseVersionMeta!.activeIndex + 1}/{userResponseVersionMeta!.total}
                                   </span>
                                   <Tooltip>
                                     <TooltipTrigger asChild>
@@ -635,7 +645,7 @@ export function MessageList({
                                           e.stopPropagation();
                                           onShowNextResponseVersion?.(message.id);
                                         }}
-                                        disabled={!canShowNextVersion}
+                                        disabled={!canShowNextUserVersion}
                                       >
                                         <IconChevronRight className="h-3.5 w-3.5" />
                                       </Button>
@@ -657,15 +667,6 @@ export function MessageList({
                                       className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        if (linkedUserMessageId) {
-                                          const linkedUserMessage = messages.find(
-                                            (candidate) => candidate.id === linkedUserMessageId && candidate.role === "user",
-                                          );
-                                          if (linkedUserMessage?.content?.trim()) {
-                                            onUserEditResend?.(linkedUserMessageId, linkedUserMessage.content);
-                                            return;
-                                          }
-                                        }
                                         onRetry?.(message.id);
                                       }}
                                     >
