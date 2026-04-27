@@ -10,6 +10,15 @@ type SendMessageInput = {
   userId?: string;
 };
 
+export type SessionTokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  lastInputTokens: number;
+  lastOutputTokens: number;
+  lastUpdatedAt: string | null;
+};
+
 export type ChatStoreState = {
   sessions: ChatSession[];
   activeSessionId: string | null;
@@ -18,6 +27,16 @@ export type ChatStoreState = {
   activeModel: string;
   activeRequestId: string | null;
   errorMessage: string | null;
+  sessionTokens: SessionTokenUsage;
+};
+
+const EMPTY_USAGE: SessionTokenUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  totalTokens: 0,
+  lastInputTokens: 0,
+  lastOutputTokens: 0,
+  lastUpdatedAt: null,
 };
 
 export type ChatStoreActions = {
@@ -65,6 +84,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   activeModel: DEFAULT_MODEL,
   activeRequestId: null,
   errorMessage: null,
+  sessionTokens: { ...EMPTY_USAGE },
 
   bootstrap(params) {
     const sessionId = makeId("session");
@@ -87,6 +107,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       activeModel: session.active_model ?? DEFAULT_MODEL,
       errorMessage: null,
       activeRequestId: null,
+      sessionTokens: { ...EMPTY_USAGE },
     });
   },
 
@@ -184,6 +205,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             messages: prev.messages.map((message) =>
               message.id === assistantMessage.id ? { ...message, content: `${message.content}${chunk.delta}` } : message
             ),
+          }));
+        }
+
+        if (chunk.usage) {
+          set((prev) => ({
+            sessionTokens: {
+              inputTokens: prev.sessionTokens.inputTokens + (chunk.usage?.inputTokens ?? 0),
+              outputTokens: prev.sessionTokens.outputTokens + (chunk.usage?.outputTokens ?? 0),
+              totalTokens: prev.sessionTokens.totalTokens + (chunk.usage?.totalTokens ?? 0),
+              lastInputTokens: chunk.usage?.inputTokens ?? 0,
+              lastOutputTokens: chunk.usage?.outputTokens ?? 0,
+              lastUpdatedAt: now(),
+            },
           }));
         }
 

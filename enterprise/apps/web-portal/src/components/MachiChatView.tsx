@@ -39,16 +39,16 @@ import {
 } from "@agenticx/ui";
 import { usePortalCopy } from "../lib/portal-copy";
 
-const MODELS = ["deepseek-chat", "moonshot-v1-8k", "gpt-4o-mini"];
-const MODEL_LABELS: Record<string, string> = {
-  "deepseek-chat": "DeepSeek Chat",
-  "moonshot-v1-8k": "Moonshot v1",
-  "gpt-4o-mini": "GPT-4o Mini",
-};
-const MODEL_DESCRIPTIONS: Record<string, string> = {
-  "deepseek-chat": "适合日常问答与知识检索",
-  "moonshot-v1-8k": "擅长长文理解与总结",
-  "gpt-4o-mini": "通用稳定，响应速度快",
+// 模型清单从 /api/me/models 动态获取（admin 配置 + 用户可见性）。
+// 没有任何分配时为空，UI 会提示「请联系管理员分配模型」。
+type PortalModelOption = {
+  id: string;
+  provider: string;
+  providerLabel: string;
+  model: string;
+  label: string;
+  route: "local" | "private-cloud" | "third-party";
+  isDefault: boolean;
 };
 const CHAT_STYLE_OPTIONS = [
   { id: "im", label: "IM 风格", desc: "头像 + 气泡，更亲和" },
@@ -62,11 +62,6 @@ type MachiChatViewProps = {
   client: ChatClient;
 };
 
-function inferRoute(model: string): { label: string; variant: "success" | "info" | "warning" } {
-  if (model.includes("local")) return { label: "local", variant: "success" };
-  if (model.includes("moonshot")) return { label: "private-cloud", variant: "info" };
-  return { label: "third-party", variant: "warning" };
-}
 
 const SUGGESTIONS = [
   {
@@ -97,6 +92,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     status,
     activeModel,
     errorMessage,
+    sessionTokens,
     bootstrap,
     switchModel,
     sendMessage,
@@ -117,11 +113,45 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     width: 320,
   });
 
+  // 动态拉取当前用户可见的模型清单
+  const [availableModels, setAvailableModels] = React.useState<PortalModelOption[]>([]);
+  const [modelsLoaded, setModelsLoaded] = React.useState(false);
+
+  React.useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/me/models", { cache: "no-store" });
+        const json = (await res.json()) as { data?: { models: PortalModelOption[] } };
+        if (alive) {
+          setAvailableModels(json.data?.models ?? []);
+          setModelsLoaded(true);
+        }
+      } catch {
+        if (alive) setModelsLoaded(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // 收到模型列表后兜底选默认：优先 isDefault，否则首项
+  React.useEffect(() => {
+    if (!modelsLoaded) return;
+    if (availableModels.length === 0) return;
+    const exists = availableModels.find((m) => m.id === activeModel);
+    if (exists) return;
+    const next = availableModels.find((m) => m.isDefault) ?? availableModels[0];
+    if (next) switchModel(next.id);
+  }, [modelsLoaded, availableModels, activeModel, switchModel]);
+
   React.useEffect(() => {
     if (!activeSessionId) {
-      bootstrap({ defaultModel: MODELS[0] });
+      const initial = availableModels.find((m) => m.isDefault) ?? availableModels[0];
+      bootstrap({ defaultModel: initial?.id });
     }
-  }, [activeSessionId, bootstrap]);
+  }, [activeSessionId, bootstrap, availableModels]);
 
   React.useEffect(() => {
     const saved = window.localStorage.getItem(CHAT_STYLE_STORAGE_KEY);
@@ -199,7 +229,10 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     };
   }, [chatStyleMenuOpen]);
 
-  const route = inferRoute(activeModel);
+  const activeOption = React.useMemo(
+    () => availableModels.find((m) => m.id === activeModel) ?? null,
+    [availableModels, activeModel]
+  );
   const isEmpty = messages.length === 0;
   const [sessionTitle, setSessionTitle] = React.useState("新对话");
   const [isEditingTitle, setIsEditingTitle] = React.useState(false);
@@ -248,6 +281,25 @@ export function MachiChatView({ client }: MachiChatViewProps) {
               <span className="hidden sm:inline">Gateway online</span>
               <span className="sm:hidden">on</span>
             </Badge>
+            {sessionTokens.totalTokens > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge variant="soft" className="mr-2 gap-1 px-2.5 py-0.5 font-mono text-[11px]">
+                    <span aria-hidden>↑</span>
+                    {sessionTokens.inputTokens.toLocaleString()}
+                    <span className="opacity-50" aria-hidden>·</span>
+                    <span aria-hidden>↓</span>
+                    {sessionTokens.outputTokens.toLocaleString()}
+                    <span className="opacity-50" aria-hidden>·</span>
+                    Σ {sessionTokens.totalTokens.toLocaleString()}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  本会话累计 token：输入 {sessionTokens.inputTokens.toLocaleString()} · 输出{" "}
+                  {sessionTokens.outputTokens.toLocaleString()} · 合计 {sessionTokens.totalTokens.toLocaleString()}
+                </TooltipContent>
+              </Tooltip>
+            )}
             {!isEmpty && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -432,39 +484,42 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                         transform: "translateY(-100%)",
                       }}
                     >
-                      {MODELS.map((model) => {
-                        const isSelected = model === activeModel;
-                        const icon =
-                          model === "moonshot-v1-8k" ? (
-                            <Microscope className="h-4 w-4" />
-                          ) : model === "gpt-4o-mini" ? (
-                            <Cpu className="h-4 w-4" />
-                          ) : (
-                            <Sparkles className="h-4 w-4" />
+                      {availableModels.length === 0 ? (
+                        <div className="px-3 py-3 text-xs text-muted-foreground">
+                          暂无可用模型，请联系管理员在「平台配置 · 模型服务」启用并分配。
+                        </div>
+                      ) : (
+                        availableModels.map((opt) => {
+                          const isSelected = opt.id === activeModel;
+                          const icon = opt.route === "local"
+                            ? <Cpu className="h-4 w-4" />
+                            : opt.route === "private-cloud"
+                              ? <Microscope className="h-4 w-4" />
+                              : <Sparkles className="h-4 w-4" />;
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => {
+                                switchModel(opt.id);
+                                setModelMenuOpen(false);
+                              }}
+                              className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${isSelected ? "bg-primary-soft/70" : "hover:bg-muted/70"}`}
+                            >
+                              <span className="flex h-5 w-5 shrink-0 items-center justify-center pt-0.5 text-primary">{icon}</span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-semibold leading-5 text-foreground">
+                                  {opt.label}
+                                </span>
+                                <span className="block truncate text-[11px] leading-4 text-muted-foreground mt-0.5">
+                                  {opt.providerLabel} · <span className="font-mono">{opt.model}</span>
+                                </span>
+                              </span>
+                              {isSelected && <Check className="h-4 w-4 shrink-0 text-primary mt-0.5" />}
+                            </button>
                           );
-                        return (
-                          <button
-                            key={model}
-                            type="button"
-                            onClick={() => {
-                              switchModel(model);
-                              setModelMenuOpen(false);
-                            }}
-                            className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${isSelected ? "bg-primary-soft/70" : "hover:bg-muted/70"}`}
-                          >
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center pt-0.5 text-primary">{icon}</span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-sm font-semibold leading-5 text-foreground">
-                                {MODEL_LABELS[model] ?? model}
-                              </span>
-                              <span className="block truncate text-[11px] leading-4 text-muted-foreground mt-0.5">
-                                {MODEL_DESCRIPTIONS[model] ?? ""}
-                              </span>
-                            </span>
-                            {isSelected && <Check className="h-4 w-4 shrink-0 text-primary mt-0.5" />}
-                          </button>
-                        );
-                      })}
+                        })
+                      )}
                     </div>
                   ) : null}
                   <button
@@ -473,7 +528,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                     onClick={() => setModelMenuOpen((prev) => !prev)}
                     className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
                   >
-                    <span>{MODEL_LABELS[activeModel] ?? activeModel}</span>
+                    <span>{activeOption?.label ?? (modelsLoaded ? "无可用模型" : "加载中...")}</span>
                     <ChevronDown className={`h-3.5 w-3.5 transition-transform ${modelMenuOpen ? "rotate-180" : ""}`} />
                   </button>
                 </div>

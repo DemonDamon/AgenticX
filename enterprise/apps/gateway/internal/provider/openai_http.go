@@ -93,7 +93,11 @@ func (p *OpenAICompatibleProvider) shouldFallback(decision routing.Decision) (st
 	if endpoint == "" {
 		return "", "", true
 	}
-	apiKey := p.resolveKey(decision.Provider)
+	// admin-console 落盘的 Decision.APIKey 优先；缺省时回退环境变量解析。
+	apiKey := strings.TrimSpace(decision.APIKey)
+	if apiKey == "" {
+		apiKey = p.resolveKey(decision.Provider)
+	}
 	if apiKey == "" {
 		return "", "", true
 	}
