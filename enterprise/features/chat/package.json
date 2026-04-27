@@ -16,6 +16,8 @@
     "@agenticx/ui": "workspace:^",
     "@tanstack/react-virtual": "^3.13.24",
     "react": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "zustand": "^5.0.12"
   },
   "devDependencies": {

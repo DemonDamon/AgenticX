@@ -9,6 +9,8 @@ type InputAreaProps = {
   onCancel: () => void;
   leftToolbar?: React.ReactNode;
   rightToolbar?: React.ReactNode;
+  className?: string;
+  appearance?: "default" | "portal";
 };
 
 function SendIcon({ className }: { className?: string }) {
@@ -28,7 +30,17 @@ function SquareIcon({ className }: { className?: string }) {
   );
 }
 
-export function InputArea({ value, status, onChange, onSend, onCancel, leftToolbar, rightToolbar }: InputAreaProps) {
+export function InputArea({
+  value,
+  status,
+  onChange,
+  onSend,
+  onCancel,
+  leftToolbar,
+  rightToolbar,
+  className,
+  appearance = "default",
+}: InputAreaProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const canSend = status !== "sending" && status !== "streaming" && value.trim().length > 0;
   const canCancel = status === "sending" || status === "streaming";
@@ -40,8 +52,19 @@ export function InputArea({ value, status, onChange, onSend, onCancel, leftToolb
     element.style.height = `${Math.min(Math.max(element.scrollHeight, 40), 260)}px`;
   }, [value]);
 
+  const appearanceClassName =
+    appearance === "portal"
+      ? "border-zinc-200/90 dark:border-zinc-700/80 focus-within:!border-indigo-600 dark:focus-within:!border-indigo-500 focus-within:shadow-[0_0_0_1px_rgba(79,70,229,0.78),0_18px_38px_-20px_rgba(79,70,229,0.45)] dark:focus-within:shadow-[0_0_0_1px_rgba(99,102,241,0.78),0_18px_38px_-20px_rgba(79,70,229,0.42)]"
+      : "border-border/80 focus-within:!border-border/80 focus-within:shadow-[0_16px_40px_-12px_rgba(0,0,0,0.15)]";
+
   return (
-    <div className="flex flex-col gap-1 rounded-3xl border border-border/80 bg-background p-2 shadow-sm transition-all duration-300 focus-within:!border-border/80 focus-within:shadow-[0_16px_40px_-12px_rgba(0,0,0,0.15)] focus-within:!outline-none focus-within:!ring-0 focus-within:!ring-offset-0">
+    <div
+      className={[
+        "flex flex-col gap-1 rounded-3xl border bg-background p-2 shadow-sm transition-all duration-300 focus-within:!outline-none focus-within:!ring-0 focus-within:!ring-offset-0",
+        appearanceClassName,
+        className ?? "",
+      ].join(" ")}
+    >
       <textarea
         ref={textareaRef}
         value={value}

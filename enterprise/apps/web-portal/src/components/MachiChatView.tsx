@@ -12,7 +12,6 @@ import {
   FileText,
   Globe,
   Link,
-  MessageSquare,
   Microscope,
   Paperclip,
   Pencil,
@@ -50,13 +49,6 @@ type PortalModelOption = {
   route: "local" | "private-cloud" | "third-party";
   isDefault: boolean;
 };
-const CHAT_STYLE_OPTIONS = [
-  { id: "im", label: "IM 风格", desc: "头像 + 气泡，更亲和" },
-  { id: "terminal", label: "Terminal 风格", desc: "前缀分明，信息密度高" },
-  { id: "clean", label: "Clean 风格", desc: "留白更大，阅读更舒服" },
-] as const;
-type ChatStyleVariant = (typeof CHAT_STYLE_OPTIONS)[number]["id"];
-const CHAT_STYLE_STORAGE_KEY = "agx-enterprise-chat-style";
 
 type MachiChatViewProps = {
   client: ChatClient;
@@ -101,12 +93,9 @@ export function MachiChatView({ client }: MachiChatViewProps) {
   const [draft, setDraft] = React.useState("");
   const [webSearch, setWebSearch] = React.useState(false);
   const [deepResearch, setDeepResearch] = React.useState(false);
-  const [chatStyle, setChatStyle] = React.useState<ChatStyleVariant>("im");
   const [modelMenuOpen, setModelMenuOpen] = React.useState(false);
-  const [chatStyleMenuOpen, setChatStyleMenuOpen] = React.useState(false);
   const modelMenuRef = React.useRef<HTMLDivElement>(null);
   const modelTriggerRef = React.useRef<HTMLButtonElement>(null);
-  const chatStyleMenuRef = React.useRef<HTMLDivElement>(null);
   const [modelMenuPosition, setModelMenuPosition] = React.useState<{ top: number; left: number; width: number }>({
     top: 0,
     left: 0,
@@ -154,31 +143,6 @@ export function MachiChatView({ client }: MachiChatViewProps) {
   }, [activeSessionId, bootstrap, availableModels]);
 
   React.useEffect(() => {
-    const saved = window.localStorage.getItem(CHAT_STYLE_STORAGE_KEY);
-    if (saved === "im" || saved === "terminal" || saved === "clean") {
-      setChatStyle(saved);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    window.localStorage.setItem(CHAT_STYLE_STORAGE_KEY, chatStyle);
-  }, [chatStyle]);
-
-  React.useEffect(() => {
-    const onStyleChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ style?: string }>).detail;
-      const style = detail?.style;
-      if (style === "im" || style === "terminal" || style === "clean") {
-        setChatStyle(style);
-      }
-    };
-    window.addEventListener("agx-enterprise-chat-style-change", onStyleChange as EventListener);
-    return () => {
-      window.removeEventListener("agx-enterprise-chat-style-change", onStyleChange as EventListener);
-    };
-  }, []);
-
-  React.useEffect(() => {
     if (!modelMenuOpen) return;
     const updatePosition = () => {
       const trigger = modelTriggerRef.current;
@@ -210,24 +174,6 @@ export function MachiChatView({ client }: MachiChatViewProps) {
       window.removeEventListener("scroll", updatePosition, true);
     };
   }, [modelMenuOpen]);
-
-  React.useEffect(() => {
-    if (!chatStyleMenuOpen) return;
-    const onClickOutside = (event: MouseEvent) => {
-      const el = chatStyleMenuRef.current;
-      if (!el) return;
-      if (!el.contains(event.target as Node)) setChatStyleMenuOpen(false);
-    };
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setChatStyleMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onClickOutside);
-    document.addEventListener("keydown", onEscape);
-    return () => {
-      document.removeEventListener("mousedown", onClickOutside);
-      document.removeEventListener("keydown", onEscape);
-    };
-  }, [chatStyleMenuOpen]);
 
   const activeOption = React.useMemo(
     () => availableModels.find((m) => m.id === activeModel) ?? null,
@@ -364,7 +310,8 @@ export function MachiChatView({ client }: MachiChatViewProps) {
               <MessageList
                 messages={messages}
                 className="h-full"
-                styleVariant={chatStyle}
+                styleVariant="im"
+                assistantFrameless
                 onCopy={(content) => {
                   console.log("Copied:", content);
                 }}
@@ -373,6 +320,10 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                   if (msg?.content) {
                     void sendMessage(client, { content: msg.content });
                   }
+                }}
+                onUserEditResend={(_messageId, content) => {
+                  if (!content.trim()) return;
+                  void sendMessage(client, { content });
                 }}
                 onShare={(messageId) => {
                   const url = `${window.location.origin}/workspace?share=${messageId}`;
@@ -404,6 +355,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
               onChange={setDraft}
               onSend={() => handleSend(draft)}
               onCancel={() => void cancel(client)}
+              appearance="portal"
               leftToolbar={
                 <>
                   <Tooltip>
@@ -430,46 +382,6 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                   >
                     <Microscope className="h-4 w-4" />
                   </Button>
-                  <div ref={chatStyleMenuRef} className="relative">
-                    {chatStyleMenuOpen ? (
-                      <div className="absolute bottom-full left-0 z-[70] mb-2 w-[240px] overflow-hidden rounded-2xl border border-border/70 bg-popover/95 p-1 shadow-2xl backdrop-blur">
-                        {CHAT_STYLE_OPTIONS.map((style) => {
-                          const isActive = style.id === chatStyle;
-                          return (
-                            <button
-                              key={style.id}
-                              type="button"
-                              onClick={() => {
-                                setChatStyle(style.id);
-                                window.localStorage.setItem(CHAT_STYLE_STORAGE_KEY, style.id);
-                                window.dispatchEvent(
-                                  new CustomEvent("agx-enterprise-chat-style-change", {
-                                    detail: { style: style.id },
-                                  }),
-                                );
-                                setChatStyleMenuOpen(false);
-                              }}
-                              className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left transition-colors ${
-                                isActive ? "bg-primary-soft/70 text-primary" : "hover:bg-muted/70"
-                              }`}
-                            >
-                              <MessageSquare className="h-4 w-4 shrink-0" />
-                              <span className="flex-1 text-sm font-medium">{style.label}</span>
-                              {isActive && <Check className="h-4 w-4 shrink-0" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setChatStyleMenuOpen((prev) => !prev)}
-                      className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
-                    >
-                      <MessageSquare className="h-4 w-4" />
-                    </Button>
-                  </div>
                 </>
               }
               rightToolbar={

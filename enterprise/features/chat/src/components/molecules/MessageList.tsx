@@ -1,6 +1,9 @@
 import * as React from "react";
+import type { Components } from "react-markdown";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { ChatMessage } from "@agenticx/core-api";
-import { Badge, Button, MachiAvatar, Tooltip, TooltipContent, TooltipTrigger } from "@agenticx/ui";
+import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@agenticx/ui";
 import { ReasoningBlock } from "../atoms/ReasoningBlock";
 import { ToolCallCard } from "../atoms/ToolCallCard";
 
@@ -25,6 +28,14 @@ function IconRefresh({ className }: { className?: string }) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
       <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/>
+    </svg>
+  );
+}
+
+function IconEdit({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M12 20h9"/><path d="m16.5 3.5 4 4L7 21l-4 1 1-4L16.5 3.5z"/>
     </svg>
   );
 }
@@ -67,11 +78,127 @@ type MessageListProps = {
   height?: number;
   className?: string;
   styleVariant?: "im" | "terminal" | "clean";
+  assistantFrameless?: boolean;
   onRetry?: (messageId: string) => void;
+  onUserEditResend?: (messageId: string, content: string) => void;
   onShare?: (messageId: string) => void;
   onCopy?: (content: string) => void;
   onFeedback?: (messageId: string, type: "like" | "dislike") => void;
 };
+
+type ParsedAssistantContent = {
+  displayContent: string;
+  reasoningContent: string;
+  thinkingStarted: boolean;
+  thinkingInProgress: boolean;
+};
+
+function parseAssistantContent(message: ChatMessage): ParsedAssistantContent {
+  const fallbackReasoning = (message.reasoning ?? "").trim();
+  const raw = message.content ?? "";
+  const lower = raw.toLowerCase();
+  const openTag = "<think>";
+  const closeTag = "</think>";
+  const openIdx = lower.indexOf(openTag);
+
+  if (openIdx < 0) {
+    return {
+      displayContent: raw,
+      reasoningContent: fallbackReasoning,
+      thinkingStarted: fallbackReasoning.length > 0,
+      thinkingInProgress: false,
+    };
+  }
+
+  const before = raw.slice(0, openIdx);
+  const reasoningStart = openIdx + openTag.length;
+  const closeIdx = lower.indexOf(closeTag, reasoningStart);
+
+  if (closeIdx < 0) {
+    return {
+      displayContent: before,
+      reasoningContent: raw.slice(reasoningStart),
+      thinkingStarted: true,
+      thinkingInProgress: true,
+    };
+  }
+
+  return {
+    displayContent: `${before}${raw.slice(closeIdx + closeTag.length)}`,
+    reasoningContent: raw.slice(reasoningStart, closeIdx),
+    thinkingStarted: true,
+    thinkingInProgress: false,
+  };
+}
+
+function ThinkingDotsPlaceholder() {
+  return (
+    <div className="inline-flex min-h-[40px] items-center gap-2 py-1">
+      <span className="agx-thinking-dot h-2.5 w-2.5 rounded-full bg-muted-foreground/70" />
+      <span className="agx-thinking-dot h-2.5 w-2.5 rounded-full bg-muted-foreground/70 [animation-delay:160ms]" />
+      <span className="agx-thinking-dot h-2.5 w-2.5 rounded-full bg-muted-foreground/70 [animation-delay:320ms]" />
+    </div>
+  );
+}
+
+/** 助手主文 Markdown：GFM + 与主题 token 对齐的基础排版
+ *  列表使用 list-inside，避免 marker 溢出到正文容器外造成“左侧多出一截”。 */
+const ASSISTANT_MD_COMPONENTS: Components = {
+  h1: ({ children }) => <h1 className="mb-2 mt-3 text-balance pl-0 text-xl font-semibold first:mt-0">{children}</h1>,
+  h2: ({ children }) => <h2 className="mb-1.5 mt-3 text-balance pl-0 text-lg font-semibold first:mt-0">{children}</h2>,
+  h3: ({ children }) => <h3 className="mb-1.5 mt-2 text-balance pl-0 text-base font-semibold first:mt-0">{children}</h3>,
+  p: ({ children }) => <p className="mb-2.5 pl-0 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="mb-2.5 list-inside list-disc pl-0 last:mb-0">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-2.5 list-inside list-decimal pl-0 last:mb-0">{children}</ol>,
+  li: ({ children }) => <li className="mb-0.5 pl-0 [&>p]:mb-0">{children}</li>,
+  blockquote: ({ children }) => (
+    <blockquote className="my-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>
+  ),
+  a: ({ children, href }) => (
+    <a className="font-medium text-primary underline underline-offset-2 hover:opacity-90" href={href} rel="noreferrer" target="_blank">
+      {children}
+    </a>
+  ),
+  hr: () => <hr className="my-3 border-border" />,
+  table: ({ children }) => (
+    <div className="my-2 max-w-full overflow-x-auto rounded-md border border-border">
+      <table className="w-full min-w-[280px] border-collapse text-left text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
+  th: ({ children }) => <th className="border-b border-border px-3 py-2 font-medium">{children}</th>,
+  td: ({ children }) => <td className="border-b border-border/80 px-3 py-2 align-top">{children}</td>,
+  code: ({ className, children, ...rest }) => {
+    const isBlock = /language-/.test(className ?? "");
+    if (isBlock) {
+      return (
+        <code className={`${className ?? ""} block`} {...rest}>
+          {children}
+        </code>
+      );
+    }
+    return (
+      <code className="rounded bg-muted/80 px-1 py-0.5 font-mono text-[0.9em] text-foreground" {...rest}>
+        {children}
+      </code>
+    );
+  },
+  pre: ({ children }) => (
+    <pre className="mb-2.5 overflow-x-auto rounded-lg border border-border/70 bg-muted/40 p-3 font-mono text-xs leading-relaxed last:mb-0">
+      {children}
+    </pre>
+  ),
+};
+
+function AssistantMessageMarkdown({ text, className }: { text: string; className?: string }) {
+  return (
+    <div className={className}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={ASSISTANT_MD_COMPONENTS}>
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+}
 
 export function MessageList({
   messages,
@@ -79,7 +206,9 @@ export function MessageList({
   height,
   className,
   styleVariant = "im",
+  assistantFrameless = false,
   onRetry,
+  onUserEditResend,
   onShare,
   onCopy,
   onFeedback,
@@ -88,6 +217,8 @@ export function MessageList({
   const [selectedMessages, setSelectedMessages] = React.useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = React.useState(false);
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
+  const [editingMessageId, setEditingMessageId] = React.useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = React.useState("");
   const longPressTimerRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
   const prevMessageCountRef = React.useRef(messages.length);
 
@@ -130,6 +261,24 @@ export function MessageList({
     onCopy?.(content);
   };
 
+  const startEditMessage = (messageId: string, content: string) => {
+    setEditingMessageId(messageId);
+    setEditingDraft(content);
+  };
+
+  const cancelEditMessage = () => {
+    setEditingMessageId(null);
+    setEditingDraft("");
+  };
+
+  const submitEditedMessage = () => {
+    if (!editingMessageId) return;
+    const next = editingDraft.trim();
+    if (!next) return;
+    onUserEditResend?.(editingMessageId, next);
+    cancelEditMessage();
+  };
+
   const selectAll = () => {
     setSelectedMessages(new Set(messages.map((m) => m.id)));
   };
@@ -154,13 +303,6 @@ export function MessageList({
       </div>
     );
   }
-
-  const formatTime = (iso?: string) => {
-    if (!iso) return "";
-    const date = new Date(iso);
-    if (Number.isNaN(date.getTime())) return "";
-    return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-  };
 
   return (
     <div className="relative h-full">
@@ -195,8 +337,24 @@ export function MessageList({
             const isAssistant = message.role === "assistant";
             const isTerminal = styleVariant === "terminal";
             const isClean = styleVariant === "clean";
-            const isIm = styleVariant === "im";
             const isSelected = selectedMessages.has(message.id);
+            const parsedAssistant = isAssistant ? parseAssistantContent(message) : null;
+            const displayContent = parsedAssistant ? parsedAssistant.displayContent : message.content;
+            const displayText = displayContent?.trim() ?? "";
+            const hasVisibleContent = displayText.length > 0;
+            const showThinkingDots =
+              isAssistant &&
+              !hasVisibleContent &&
+              !parsedAssistant?.thinkingStarted &&
+              !(message.reasoning?.trim());
+            const showReasoningBlock =
+              isAssistant &&
+              !!parsedAssistant &&
+              (parsedAssistant.thinkingStarted || parsedAssistant.reasoningContent.trim().length > 0);
+            const displayContentForRender =
+              isAssistant && showReasoningBlock ? displayContent.replace(/^\s+/, "") : displayContent;
+            const hideContentParagraph = isAssistant && (showThinkingDots || (!hasVisibleContent && showReasoningBlock));
+            const isEditingThisUserMessage = isUser && editingMessageId === message.id;
 
             // 使用 ref 存储每个消息的长按计时器
             const onPointerDown = () => {
@@ -235,99 +393,85 @@ export function MessageList({
                   </div>
                 )}
 
-                <div
-                  className={[
-                    "flex w-full items-start gap-3",
-                    isUser ? "flex-row-reverse" : "flex-row",
-                    isSelectionMode && isSelected ? "opacity-60" : "",
-                  ].join(" ")}
-                >
-                  {!isTerminal ? (
-                    <div className="mt-0.5 shrink-0">
-                      {isUser ? (
-                        <span className="flex h-8 w-8 items-center justify-center rounded-full border border-border/70 bg-surface-subtle text-xs font-medium text-muted-foreground">
-                          U
-                        </span>
-                      ) : (
-                        <MachiAvatar size={32} className="h-8 w-8" />
-                      )}
-                    </div>
-                  ) : null}
-
+                {showThinkingDots ? (
                   <div
                     className={[
-                      "relative min-w-0 max-w-[calc(100%-2.5rem)]",
-                      isTerminal
-                        ? "flex-1 rounded-xl border border-border/70 bg-surface-subtle/45 px-4 py-3"
-                        : isClean
-                          ? "w-full rounded-2xl border border-border/70 bg-card/85 px-5 py-4 shadow-sm"
-                          : isUser
-                            ? "rounded-[24px] bg-primary px-4 py-2.5 text-primary-foreground"
-                            : "rounded-[24px] border border-border/40 bg-card px-5 py-4 text-card-foreground shadow-sm",
+                      "flex w-full items-start",
+                      isSelectionMode && isSelected ? "opacity-60" : "",
                     ].join(" ")}
                   >
-                    {/* 消息头部 */}
-                    {!(isIm && isUser) && (
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        {isTerminal ? (
-                          <span className="font-mono text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                            {isUser ? "YOU>" : "MACHI>"}
-                          </span>
-                        ) : (
-                          <Badge variant={isUser ? "secondary" : "soft"} className="px-2 py-0 text-[11px]">
-                            {isUser ? "你" : "Machi"}
-                          </Badge>
+                    <div className="min-w-0 w-full pl-1">
+                      <div className="w-full">
+                        <ThinkingDotsPlaceholder />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className={[
+                      "flex w-full items-start",
+                      isUser ? "flex-row-reverse" : "flex-row",
+                      isSelectionMode && isSelected ? "opacity-60" : "",
+                    ].join(" ")}
+                  >
+                    <div className={isAssistant ? "min-w-0 w-full pl-1" : "min-w-0 max-w-full"}>
+                      <div
+                        className={[
+                          "relative",
+                          isTerminal
+                            ? "flex-1 rounded-xl border border-border/70 bg-surface-subtle/45 px-4 py-3"
+                            : isClean
+                              ? "w-full rounded-2xl border border-border/70 bg-card/85 px-5 py-3 shadow-sm"
+                              : isUser
+                                ? "rounded-[24px] bg-primary px-4 py-2.5 text-primary-foreground"
+                              : assistantFrameless
+                                ? "w-full bg-transparent px-0 py-0 text-foreground"
+                                : "w-full rounded-[24px] border border-border/40 bg-card px-5 py-3 text-card-foreground shadow-sm",
+                        ].join(" ")}
+                      >
+                        {showReasoningBlock && parsedAssistant ? (
+                          <div className={hasVisibleContent ? "mb-1.5" : ""}>
+                            <ReasoningBlock
+                              reasoning={parsedAssistant.reasoningContent}
+                              thinkingStarted={parsedAssistant.thinkingStarted}
+                              thinkingInProgress={parsedAssistant.thinkingInProgress}
+                            />
+                          </div>
+                        ) : null}
+
+                        {/* 消息内容 */}
+                        {!hideContentParagraph ? (
+                          isAssistant ? (
+                            <AssistantMessageMarkdown
+                              text={displayContentForRender || "..."}
+                              className={`break-words text-base leading-7 ${!message.content ? "opacity-70" : ""}`}
+                            />
+                          ) : (
+                            <p
+                              className={`whitespace-pre-wrap break-words text-base leading-7 ${!message.content ? "opacity-70" : ""}`}
+                            >
+                              {displayContentForRender || "..."}
+                            </p>
+                          )
+                        ) : null}
+
+                        {/* 工具调用 */}
+                        {isAssistant && (
+                          <div className="mt-3 space-y-2.5">
+                            <ToolCallCard toolCall={message.tool_calls?.[0]} />
+                          </div>
                         )}
-                        <span
-                          className={`text-[11px] ${
-                            isUser && !isTerminal ? "text-primary-foreground/80" : "text-muted-foreground"
+                      </div>
+
+                      {/* 消息操作按钮 - 移到气泡外部
+                       *  不使用负外边距，避免左右边界“超出正文容器”的观感。 */}
+                      {!isSelectionMode && (
+                        <div
+                          className={`mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 ${
+                            isUser ? "justify-end -mr-0.5" : "justify-start -ml-1.5"
                           }`}
                         >
-                          {formatTime(message.created_at)}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* 消息内容 */}
-                    <p className={`whitespace-pre-wrap break-words text-sm leading-7 ${!message.content ? "opacity-70" : ""}`}>
-                      {message.content || "..."}
-                    </p>
-
-                    {/* 推理和工具调用 */}
-                    {isAssistant && (
-                      <div className="mt-3 space-y-2.5">
-                        <ReasoningBlock reasoning={message.reasoning} />
-                        <ToolCallCard toolCall={message.tool_calls?.[0]} />
-                      </div>
-                    )}
-
-                    {/* 消息操作按钮 - 仅在非选择模式下显示 */}
-                    {!isSelectionMode && (
-                      <div className="mt-3 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100">
-                        {/* 复制 */}
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleCopy(message.content || "", message.id);
-                              }}
-                            >
-                              {copiedId === message.id ? (
-                                <IconCheck className="h-3.5 w-3.5 text-success" />
-                              ) : (
-                                <IconCopy className="h-3.5 w-3.5" />
-                              )}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>复制</TooltipContent>
-                        </Tooltip>
-
-                        {/* 重试 */}
-                        {onRetry && (
+                          {/* 复制 */}
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
@@ -336,76 +480,154 @@ export function MessageList({
                                 className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  onRetry?.(message.id);
+                                  handleCopy(message.content || "", message.id);
                                 }}
                               >
-                                <IconRefresh className="h-3.5 w-3.5" />
+                                {copiedId === message.id ? (
+                                  <IconCheck className="h-3.5 w-3.5 text-success" />
+                                ) : (
+                                  <IconCopy className="h-3.5 w-3.5" />
+                                )}
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent>{isUser ? "重新发送" : "重新生成"}</TooltipContent>
+                            <TooltipContent>复制</TooltipContent>
                           </Tooltip>
-                        )}
 
-                        {/* 分享 */}
-                        <Tooltip>
-                          <TooltipTrigger asChild>
+                          {isUser ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant={isEditingThisUserMessage ? "secondary" : "ghost"}
+                                  size="icon"
+                                  className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startEditMessage(message.id, message.content ?? "");
+                                  }}
+                                >
+                                  <IconEdit className="h-3.5 w-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>编辑</TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <>
+                              {/* 重试 */}
+                              {onRetry && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onRetry?.(message.id);
+                                      }}
+                                    >
+                                      <IconRefresh className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>重新生成</TooltipContent>
+                                </Tooltip>
+                              )}
+
+                              {/* 分享 */}
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onShare?.(message.id);
+                                    }}
+                                  >
+                                    <IconShare className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>分享</TooltipContent>
+                              </Tooltip>
+                            </>
+                          )}
+
+                          {/* 反馈 - 仅对助手消息 */}
+                          {isAssistant && (
+                            <>
+                              <div className="mx-1 h-4 w-px bg-border" />
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onFeedback?.(message.id, "like");
+                                    }}
+                                  >
+                                    <IconThumbsUp className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>有帮助</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onFeedback?.(message.id, "dislike");
+                                    }}
+                                  >
+                                    <IconThumbsDown className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>没帮助</TooltipContent>
+                              </Tooltip>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {isEditingThisUserMessage && (
+                        <div className="mt-2 w-full rounded-[24px] border-2 border-primary/90 bg-background px-4 py-3 shadow-sm">
+                          <textarea
+                            value={editingDraft}
+                            onChange={(e) => setEditingDraft(e.target.value)}
+                            rows={2}
+                            className="w-full resize-none border-0 bg-transparent text-base leading-7 text-foreground outline-none placeholder:text-muted-foreground"
+                          />
+                          <div className="mt-3 flex items-center justify-end gap-2">
                             <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                              variant="outline"
+                              size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onShare?.(message.id);
+                                cancelEditMessage();
                               }}
                             >
-                              <IconShare className="h-3.5 w-3.5" />
+                              取消
                             </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>分享</TooltipContent>
-                        </Tooltip>
-
-                        {/* 反馈 - 仅对助手消息 */}
-                        {isAssistant && (
-                          <>
-                            <div className="mx-1 h-4 w-px bg-border" />
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onFeedback?.(message.id, "like");
-                                  }}
-                                >
-                                  <IconThumbsUp className="h-3.5 w-3.5" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>有帮助</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onFeedback?.(message.id, "dislike");
-                                  }}
-                                >
-                                  <IconThumbsDown className="h-3.5 w-3.5" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>没帮助</TooltipContent>
-                            </Tooltip>
-                          </>
-                        )}
-                      </div>
-                    )}
+                            <Button
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                submitEditedMessage();
+                              }}
+                              disabled={!editingDraft.trim()}
+                            >
+                              发送
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             );
           })}
@@ -424,7 +646,7 @@ export function MessageList({
                 onClick={() => {
                   const content = messages
                     .filter((m) => selectedMessages.has(m.id))
-                    .map((m) => `${m.role === "user" ? "用户" : "Machi"}: ${m.content}`)
+                    .map((m) => `${m.role === "user" ? "用户" : "助手"}: ${m.content}`)
                     .join("\n\n");
                   navigator.clipboard.writeText(content);
                 }}
@@ -447,6 +669,30 @@ export function MessageList({
           </div>
         </div>
       )}
+      <style>{`
+        @keyframes agx-thinking-dot-pulse {
+          0%, 80%, 100% {
+            opacity: 0.28;
+            transform: scale(0.82);
+          }
+          40% {
+            opacity: 0.95;
+            transform: scale(1);
+          }
+        }
+        .agx-thinking-dot {
+          animation: agx-thinking-dot-pulse 1.15s ease-in-out infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .agx-thinking-dot {
+            animation: none !important;
+          }
+          .agx-thinking-dot {
+            opacity: 0.65;
+            transform: none;
+          }
+        }
+      `}</style>
     </div>
   );
 }
