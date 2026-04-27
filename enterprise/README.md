@@ -74,21 +74,29 @@ bash scripts/start-dev.sh     # 每天开工跑这一条
 
 > 默认 `owner` 已自带 `workspace:chat` 权限；旧种子环境若 HMR 命中也会被自动补齐，无需手动改库。
 
-### 让聊天回真实模型
+### 让聊天回真实模型（推荐 ① · admin GUI 控制）
 
-未配置 Key 时网关回放 mock 占位回复，链路完整但内容是假的。配真实 Key 走以下两步即可：
+后台 → 平台配置 → **模型服务**：
 
-1. 在 `enterprise/.env.local` 末尾追加任一 provider 的 Key（变量名规则：`<PROVIDER>_API_KEY`）：
+1. 「+ 添加厂商」从模板选 OpenAI / DeepSeek / Moonshot / 阿里云百炼 / 智谱 / MiniMax / 月之暗面 / 千帆 / 火山引擎 / Ollama，或手动添加任意 OpenAI 兼容上游
+2. 填入 API Key，点击「检测」做一次连通性探活；通过后保存
+3. 在「模型列表」内勾选要启用的 model
+4. 后台 → 身份与权限 → **用户**：点开任一用户，在「可见模型分配」勾选要授予该用户的模型，自动保存
+5. 用该用户的账号登录前台 portal：模型下拉只会出现刚才分配的模型，发送消息走真调
+6. 顶部 token chip 实时显示「↑输入 ↓输出 Σ合计」累计
 
-   ```bash
-   DEEPSEEK_API_KEY=sk-...
-   MOONSHOT_API_KEY=sk-...
-   OPENAI_API_KEY=sk-...
-   # 或自托管 OpenAI 兼容网关：
-   LLM_API_KEY=sk-...
-   ```
+> 配置数据落在 `enterprise/.runtime/admin/{providers,user-models}.json`（chmod 600，已 `.gitignore`）。
+> Gateway 后台每 5 秒重读一次，admin 改完几秒内生效，无需重启。
 
-2. 重启 `bash scripts/start-dev.sh`。前台选 `deepseek-chat` / `moonshot-v1-8k` 等模型即走真调；其余模型若没对应 Key 会自动回退 mock。
+### 让聊天回真实模型（备选 ② · 环境变量）
+
+未通过 admin 配置 Key 的厂商，gateway 会回退到环境变量解析（变量名规则：`<PROVIDER>_API_KEY`）：
+
+```bash
+# enterprise/.env.local 末尾追加（admin GUI 已配置时不需要）
+DEEPSEEK_API_KEY=sk-...
+LLM_API_KEY=sk-...   # 通用兜底
+```
 
 详细 Key 解析规则与生产部署建议见 `apps/gateway/README.md`。
 

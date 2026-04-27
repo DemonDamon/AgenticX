@@ -104,7 +104,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "平台配置",
     items: [
       { href: "/iam/roles", label: "策略规则", icon: Shield },
-      { href: "/iam/departments", label: "模型服务", icon: Package },
+      { href: "/admin/models", label: "模型服务", icon: Package, shortcut: "G K" },
     ],
   },
 ];
