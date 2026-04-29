@@ -3119,6 +3119,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     async () => {}
   );
 
+  /** Send a team-mode action (ADD_TASK / PAUSE / RESUME / STOP) to TaskLock via Studio API. */
+  const sendGroupTeamAction = async (action: string, data?: Record<string, unknown>) => {
+    if (!isGroupPane || !groupChatId || !pane?.sessionId) return;
+    try {
+      const agxUrl = (window as unknown as { __AGX_URL__?: string }).__AGX_URL__ ?? "http://localhost:19080";
+      await fetch(`${agxUrl}/api/groups/${groupChatId}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, session_id: pane.sessionId, data: data ?? {} }),
+      });
+    } catch (e) {
+      console.warn("[GroupTeam] action failed:", e);
+    }
+  };
+
   const sendChat = async (
     userText: string,
     options?: {
@@ -3630,6 +3645,89 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 delete next[eventAgentId];
                 return next;
               });
+              continue;
+            }
+            // ── workforce.* events (routing="team") ──────────────────────
+            if (typeof payload.type === "string" && payload.type.startsWith("workforce.")) {
+              const wfAction = payload.type.replace("workforce.", "");
+              const wfContent = String(payload.data?.content || "").trim();
+              const wfData = payload.data || {};
+              // Clear typing indicator for the member
+              setGroupTyping((prev) => {
+                const next = { ...prev };
+                delete next[eventAgentId];
+                return next;
+              });
+              if (wfAction === "message.assistant" && wfContent) {
+                // Route assistant messages to the message area (visible to user)
+                const avatarName = String(wfData.avatar_name ?? eventAgentId);
+                const avatarUrl = String(wfData.avatar_url ?? "");
+                addPaneMessageIfSessionActive(
+                  pane.id,
+                  "assistant",
+                  wfContent,
+                  eventAgentId,
+                  chatProvider,
+                  chatModel,
+                  undefined,
+                  { avatarName, avatarUrl: avatarUrl || undefined }
+                );
+              } else if (wfAction === "task.created" || wfAction === "task.assigned" || wfAction === "task.started") {
+                // Show a brief notice for task lifecycle events (using assistant role, system-like prefix)
+                const desc = String(wfData.task_description || wfData.content || "").slice(0, 120);
+                if (desc) {
+                  const label =
+                    wfAction === "task.created" ? "📋 任务创建" :
+                    wfAction === "task.assigned" ? "👤 任务分配" : "▶️ 执行中";
+                  addPaneMessageIfSessionActive(
+                    pane.id,
+                    "assistant",
+                    `[系统] ${label}：${desc}`,
+                    "__meta__",
+                    chatProvider,
+                    chatModel,
+                    undefined,
+                    { avatarName: "Team", avatarUrl: undefined }
+                  );
+                }
+              } else if (wfAction === "task.completed") {
+                const result = String(wfData.result || wfData.content || "").slice(0, 200);
+                if (result) {
+                  addPaneMessageIfSessionActive(
+                    pane.id,
+                    "assistant",
+                    `[系统] ✅ 任务完成：${result}`,
+                    "__meta__",
+                    chatProvider,
+                    chatModel,
+                    undefined,
+                    { avatarName: "Team", avatarUrl: undefined }
+                  );
+                }
+              } else if (wfAction === "task.failed") {
+                const err = String(wfData.error || wfData.content || "失败").slice(0, 120);
+                addPaneMessageIfSessionActive(
+                  pane.id,
+                  "assistant",
+                  `[系统] ❌ 任务失败：${err}`,
+                  "__meta__",
+                  chatProvider,
+                  chatModel,
+                  undefined,
+                  { avatarName: "Team", avatarUrl: undefined }
+                );
+              } else if (wfAction === "system.workforce_stopped") {
+                addPaneMessageIfSessionActive(
+                  pane.id,
+                  "assistant",
+                  "[系统] 🏁 团队任务已完成",
+                  "__meta__",
+                  chatProvider,
+                  chatModel,
+                  undefined,
+                  { avatarName: "Team", avatarUrl: undefined }
+                );
+              }
               continue;
             }
             if (payload.type === "tool_progress") {
@@ -4797,6 +4895,39 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   <span>更多</span>
                 </button>
               </div>
+              {/* ── Team mode action bar (routing="team" only) ─────────── */}
+              {isGroupPane && activeGroup?.routing === "team" && (
+                <div className="flex items-center gap-1 mr-1">
+                  <button
+                    className="flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] text-text-faint transition hover:bg-indigo-500/10 hover:text-indigo-400"
+                    title="插入任务到队列"
+                    onClick={() => {
+                      const taskDesc = extractComposerText().trim();
+                      if (taskDesc) {
+                        void sendGroupTeamAction("add_task", { task_description: taskDesc });
+                      }
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                    <span className="hidden sm:inline">插入任务</span>
+                  </button>
+                  {isStreamingCurrentSession ? (
+                    <button
+                      className="flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] text-amber-400 transition hover:bg-amber-500/10"
+                      title="暂停团队任务"
+                      onClick={() => void sendGroupTeamAction("pause")}
+                    >
+                      <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5">
+                        <rect x="6" y="4" width="4" height="16" />
+                        <rect x="14" y="4" width="4" height="16" />
+                      </svg>
+                      <span className="hidden sm:inline">暂停</span>
+                    </button>
+                  ) : null}
+                </div>
+              )}
               <ActionCircleButton
                 hasInput={!!pane.sessionId && (!!input.trim() || readyAttachments.length > 0)}
                 streaming={isStreamingCurrentSession}

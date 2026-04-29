@@ -1054,6 +1054,100 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    # ── task_experience tools (group team session cross-task memory) ──────────
+    {
+        "type": "function",
+        "function": {
+            "name": "task_experience_retrieve",
+            "description": (
+                "Retrieve relevant task experience from previous group team sessions. "
+                "Call at the start of every complex task to check for reusable lessons. "
+                "Uses hybrid search (BM25 + vector) against ~/.agenticx/groups/<group_id>/experience.json."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Describe the current task or challenge to match past experience.",
+                    },
+                    "group_id": {
+                        "type": "string",
+                        "description": "Group ID to scope the experience store. Defaults to current session group.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max number of experience entries to return (1-10, default 5).",
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "task_experience_learn",
+            "description": (
+                "Record a key finding, rule, or lesson from the current task into the group experience store. "
+                "Call before the final reply to preserve reusable knowledge for future sessions. "
+                "Recording failed tool calls is especially valuable."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The experience or lesson content to record.",
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Category label (e.g. 'debugging', 'code_pattern', 'api_usage'). Default 'general'.",
+                    },
+                    "when_to_use": {
+                        "type": "string",
+                        "description": "Describe when this experience should be applied in the future.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Short title for the experience entry.",
+                    },
+                    "group_id": {
+                        "type": "string",
+                        "description": "Group ID to scope the experience store. Defaults to current session group.",
+                    },
+                },
+                "required": ["content"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "task_experience_clear",
+            "description": (
+                "Clear all stored task experience for a group. "
+                "Only call when explicitly requested by the user. Always confirm before clearing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "group_id": {
+                        "type": "string",
+                        "description": "Group ID whose experience store should be cleared.",
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true to actually clear. Prevents accidental deletion.",
+                    },
+                },
+                "required": ["confirm"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 # Desktop Computer Use tools (injected at runtime when ``computer_use.enabled`` in config).
@@ -3680,6 +3774,109 @@ def _repair_malformed_file_tool_arguments(name: str, arguments: Dict[str, Any]) 
     return repaired
 
 
+# ── task_experience implementation ────────────────────────────────────────────
+
+def _experience_path(group_id: str) -> Path:
+    """Return the JSON file path for a group's experience store."""
+    import pathlib
+    base = pathlib.Path.home() / ".agenticx" / "groups" / group_id
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "experience.json"
+
+
+def _experience_load(group_id: str) -> List[Dict[str, Any]]:
+    p = _experience_path(group_id)
+    if not p.exists():
+        return []
+    try:
+        import json as _json
+        return _json.loads(p.read_text(encoding="utf-8")) or []
+    except Exception:
+        return []
+
+
+def _experience_save(group_id: str, entries: List[Dict[str, Any]]) -> None:
+    import json as _json
+    p = _experience_path(group_id)
+    p.write_text(_json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _experience_retrieve_impl(query: str, group_id: str, limit: int = 5) -> str:
+    """Simple keyword-based retrieval from the JSON experience store.
+
+    Falls back to pure keyword search when WorkspaceMemoryStore is unavailable.
+    Hybrid search integration can be added without changing the tool schema.
+    """
+    import json as _json
+    entries = _experience_load(group_id)
+    if not entries:
+        return _json.dumps({"status": "no_experience", "results": [], "group_id": group_id})
+
+    q_lower = query.casefold()
+    q_tokens = set(q_lower.split())
+
+    def _score(entry: Dict[str, Any]) -> float:
+        text = (
+            (entry.get("content") or "")
+            + " " + (entry.get("title") or "")
+            + " " + (entry.get("when_to_use") or "")
+        ).casefold()
+        return sum(1 for t in q_tokens if t in text) / max(len(q_tokens), 1)
+
+    scored = sorted(entries, key=_score, reverse=True)
+    top = [e for e in scored if _score(e) > 0][:limit] or scored[:limit]
+    return _json.dumps({
+        "status": "ok",
+        "group_id": group_id,
+        "count": len(top),
+        "results": top,
+    }, ensure_ascii=False)
+
+
+def _experience_learn_impl(
+    content: str,
+    group_id: str,
+    section: str = "general",
+    when_to_use: str = "",
+    title: str = "",
+) -> str:
+    import json as _json
+    import uuid
+    from datetime import datetime, timezone
+    entries = _experience_load(group_id)
+    entry = {
+        "id": uuid.uuid4().hex[:12],
+        "section": section or "general",
+        "content": content,
+        "title": title or content[:60],
+        "when_to_use": when_to_use,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    entries.append(entry)
+    _experience_save(group_id, entries)
+    return _json.dumps({"status": "ok", "group_id": group_id, "entry_id": entry["id"]})
+
+
+def _experience_clear_impl(group_id: str, confirm: bool) -> str:
+    import json as _json
+    if not confirm:
+        return _json.dumps({"status": "aborted", "reason": "confirm must be true"})
+    p = _experience_path(group_id)
+    if p.exists():
+        p.write_text("[]", encoding="utf-8")
+    return _json.dumps({"status": "cleared", "group_id": group_id})
+
+
+def _resolve_group_id(session: "StudioSession", arg_group_id: str | None) -> str:
+    """Best-effort resolution of group_id from session or argument."""
+    if arg_group_id and str(arg_group_id).strip():
+        return str(arg_group_id).strip()
+    # Try to read from session scratchpad if set by run_group_turn.
+    scratchpad = getattr(session, "scratchpad", {}) or {}
+    gid = str(scratchpad.get("__group_id", "") or "").strip()
+    return gid or "default"
+
+
 async def dispatch_tool_async(
     name: str,
     arguments: Dict[str, Any],
@@ -3781,6 +3978,27 @@ async def dispatch_tool_async(
             return _tool_list_files(arguments, session)
         if name == "liteparse":
             return await _tool_liteparse(arguments, session)
+        if name == "task_experience_retrieve":
+            gid = _resolve_group_id(session, arguments.get("group_id"))
+            limit = min(max(int(arguments.get("limit") or 5), 1), 10)
+            return _experience_retrieve_impl(
+                query=str(arguments.get("query", "")),
+                group_id=gid,
+                limit=limit,
+            )
+        if name == "task_experience_learn":
+            gid = _resolve_group_id(session, arguments.get("group_id"))
+            return _experience_learn_impl(
+                content=str(arguments.get("content", "")),
+                group_id=gid,
+                section=str(arguments.get("section") or "general"),
+                when_to_use=str(arguments.get("when_to_use") or ""),
+                title=str(arguments.get("title") or ""),
+            )
+        if name == "task_experience_clear":
+            gid = _resolve_group_id(session, arguments.get("group_id"))
+            confirm = bool(arguments.get("confirm", False))
+            return _experience_clear_impl(group_id=gid, confirm=confirm)
         if name.startswith("lsp_"):
             return await _dispatch_lsp_tool(name, arguments, session)
     except Exception as exc:

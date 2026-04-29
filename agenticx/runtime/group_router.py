@@ -23,8 +23,31 @@ from agenticx.runtime.group_context import GroupChatContext
 
 META_LEADER_AGENT_ID = "__meta__"
 META_LEADER_NAME = "组长"
-# Max @-mention follow-up hops per user turn (feitan @machi -> machi -> …).
-GROUP_MENTION_FOLLOWUP_HOPS = 2
+# Max @-mention follow-up hops per user turn.
+# Can be overridden in ~/.agenticx/config.yaml under group_chat.mention_hops.
+_DEFAULT_MENTION_HOPS = 2
+
+# Maximum workers per group team session (maps to WorkforcePattern workers list).
+MAX_WORKERS_PER_GROUP = 5
+# Maximum subtasks the TaskPlannerAgent may produce.
+MAX_DECOMPOSE_SUBTASKS = 10
+
+
+def _get_mention_hops() -> int:
+    """Read group_chat.mention_hops from config.yaml, default 2."""
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+        raw = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH) or {}
+        val = raw.get("group_chat", {}).get("mention_hops")
+        if isinstance(val, int) and 1 <= val <= 10:
+            return val
+    except Exception:
+        pass
+    return _DEFAULT_MENTION_HOPS
+
+
+# Keep the module-level name for backward-compat callers that import it directly.
+GROUP_MENTION_FOLLOWUP_HOPS = _DEFAULT_MENTION_HOPS
 
 _META_AT_SUFFIX = r"(?=[\s\u3000\u4e00-\u9fff，。！？、：:；;,.!?\[\]（）()【】\"'「」]|$)"
 
@@ -911,7 +934,7 @@ class GroupChatRouter:
                 group_name=group_name,
                 should_stop=should_stop,
                 user_display_name=user_display_name,
-                hops=GROUP_MENTION_FOLLOWUP_HOPS,
+                hops=_get_mention_hops(),
                 responded_this_turn=responded_this_turn,
             ):
                 yield fu
@@ -956,7 +979,7 @@ class GroupChatRouter:
                 group_name=group_name,
                 should_stop=should_stop,
                 user_display_name=user_display_name,
-                hops=GROUP_MENTION_FOLLOWUP_HOPS,
+                hops=_get_mention_hops(),
                 responded_this_turn=responded_this_turn,
             ):
                 yield fu
@@ -1011,7 +1034,7 @@ class GroupChatRouter:
                 group_name=group_name,
                 should_stop=should_stop,
                 user_display_name=user_display_name,
-                hops=GROUP_MENTION_FOLLOWUP_HOPS,
+                hops=_get_mention_hops(),
                 responded_this_turn=responded_this_turn,
             ):
                 yield fu
@@ -1049,7 +1072,7 @@ class GroupChatRouter:
                 group_name=group_name,
                 should_stop=should_stop,
                 user_display_name=user_display_name,
-                hops=GROUP_MENTION_FOLLOWUP_HOPS,
+                hops=_get_mention_hops(),
                 responded_this_turn=responded_this_turn,
             ):
                 yield fu
@@ -1108,7 +1131,7 @@ class GroupChatRouter:
             group_name=group_name,
             should_stop=should_stop,
             user_display_name=user_display_name,
-            hops=GROUP_MENTION_FOLLOWUP_HOPS,
+            hops=_get_mention_hops(),
             responded_this_turn=responded_this_turn,
         ):
             yield fu
@@ -1142,10 +1165,379 @@ class GroupChatRouter:
             group_name=group_name,
             should_stop=should_stop,
             user_display_name=user_display_name,
-            hops=GROUP_MENTION_FOLLOWUP_HOPS,
+            hops=_get_mention_hops(),
             responded_this_turn=responded_this_turn,
         ):
             yield fu
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Team routing path (routing == "team")
+    # Hybrid stack: WorkforcePattern for *planning*, AgentRuntime for *execution*.
+    # See docs/adr/0002-group-chat-workforce-bridge.md for rationale.
+    # ──────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_planning_agent(name: str, role: str, goal: str) -> "Any":
+        """Construct a lightweight core.Agent for the planning layer (decompose/assign)."""
+        from agenticx.core.agent import Agent
+        return Agent(name=name, role=role, goal=goal, organization_id="agenticx")
+
+    @staticmethod
+    def _workforce_event_to_group_reply(
+        evt: Any,
+        *,
+        agent_id: str = "__leader__",
+        avatar_name: str = "组长",
+        avatar_url: str = "",
+    ) -> "GroupReply":
+        """Map a WorkforceEvent to a GroupReply so the existing SSE pipeline can stream it."""
+        from agenticx.collaboration.workforce.events import WorkforceEvent
+        if not isinstance(evt, WorkforceEvent):
+            return GroupReply(
+                agent_id=agent_id,
+                avatar_name=avatar_name,
+                avatar_url=avatar_url,
+                content=str(evt),
+                skipped=True,
+                event_type="workforce.unknown",
+            )
+        data = evt.data or {}
+        # Derive readable content for the UI from common data fields.
+        content = (
+            data.get("text")
+            or data.get("result")
+            or data.get("task_description")
+            or data.get("error")
+            or ""
+        )
+        agent_id_override = evt.agent_id or agent_id
+        # Map action → event_type namespace for frontend classification.
+        event_type = f"workforce.{evt.action.value}"
+        return GroupReply(
+            agent_id=agent_id_override,
+            avatar_name=avatar_name,
+            avatar_url=avatar_url,
+            content=str(content).strip(),
+            skipped=False,
+            event_type=event_type,
+        )
+
+    async def _run_team_turn(
+        self,
+        *,
+        base_session: StudioSession,
+        context: "GroupChatContext",
+        group_id: str,
+        group_name: str,
+        group_avatar_ids: Sequence[str],
+        user_input: str,
+        quoted_content: str,
+        should_stop: Callable[[], Any],
+        user_display_name: str = "我",
+    ) -> AsyncGenerator[GroupReply, None]:
+        """Bridge routing="team" to WorkforcePattern (planning) + AgentRuntime (execution).
+
+        Hybrid stack strategy (see ADR 0002):
+        - Planning layer (decompose_task + assign_tasks): WorkforcePattern / AgentExecutor
+        - Execution layer (per-subtask): existing _run_one_target / AgentRuntime
+        """
+        from agenticx.collaboration.workforce.workforce_pattern import WorkforcePattern
+        from agenticx.collaboration.workforce.events import WorkforceEventBus, WorkforceEvent, WorkforceAction
+        from agenticx.collaboration.workforce.coordinator import CoordinatorAgent
+        from agenticx.collaboration.workforce.task_planner import TaskPlannerAgent
+        from agenticx.collaboration.workforce.worker import SingleAgentWorker
+        from agenticx.collaboration.task_lock import get_or_create_task_lock
+        from agenticx.core.agent import Agent
+        from agenticx.core.task import Task
+        from agenticx.core.agent_executor import AgentExecutor
+
+        provider = getattr(base_session, "provider_name", None)
+        model = getattr(base_session, "model_name", None)
+        llm = self.llm_factory(provider or None, model or None)
+
+        # ── 1. TaskLock (session-scoped project state) ─────────────────────
+        task_lock = get_or_create_task_lock(
+            project_id=f"group::{group_id}::{getattr(base_session, 'session_id', group_id)}"
+        )
+        task_lock.add_conversation("user", user_input)
+
+        # ── 2. WorkforceEventBus ────────────────────────────────────────────
+        event_bus = WorkforceEventBus()
+        relay_queue: asyncio.Queue[GroupReply] = asyncio.Queue()
+
+        def _on_event(evt: WorkforceEvent) -> None:
+            # resolve avatar_name from agent_id when possible
+            av_name = self._meta_leader_label
+            aid = evt.agent_id or META_LEADER_AGENT_ID
+            if aid not in (META_LEADER_AGENT_ID, None):
+                av = self.avatar_registry.get_avatar(aid)
+                if av:
+                    av_name = str(getattr(av, "name", "") or aid)
+            reply = self._workforce_event_to_group_reply(
+                evt, agent_id=aid, avatar_name=av_name
+            )
+            relay_queue.put_nowait(reply)
+
+        event_bus.subscribe(_on_event)
+
+        # ── 3. Construct planning-layer Agents (lightweight, for decompose/assign) ──
+        exec_ = AgentExecutor(llm_provider=llm, enable_context_compilation=False)
+
+        coordinator_agent = Agent(
+            name=self._meta_leader_label,
+            role="Group Coordinator",
+            goal=(
+                f"Coordinate tasks in group '{group_name}' and assign them to team members. "
+                "At the start of each complex task, use task_experience_retrieve to check for "
+                "reusable lessons from previous sessions. After completing a task, use "
+                "task_experience_learn to record key findings for future reference."
+            ),
+            organization_id="agenticx",
+        )
+        planner_agent = Agent(
+            name="TaskPlanner",
+            role="Task Planner",
+            goal="Decompose complex requests into self-contained subtasks",
+            organization_id="agenticx",
+        )
+
+        # Map up to MAX_WORKERS_PER_GROUP avatars to Worker objects.
+        valid_member_ids = [
+            str(aid).strip() for aid in group_avatar_ids
+            if str(aid).strip()
+        ][:MAX_WORKERS_PER_GROUP]
+
+        worker_agents: list[Agent] = []
+        worker_id_to_avatar_id: dict[str, str] = {}
+
+        for avatar_id in valid_member_ids:
+            av = self.avatar_registry.get_avatar(avatar_id)
+            av_name = str(getattr(av, "name", "") or avatar_id) if av else avatar_id
+            av_role = str(getattr(av, "role", "") or "General Assistant") if av else "General Assistant"
+            av_goal = str(getattr(av, "system_prompt", "") or "Execute assigned tasks")[:200]
+            w_agent = Agent(
+                id=avatar_id,
+                name=av_name,
+                role=av_role,
+                goal=av_goal,
+                organization_id="agenticx",
+            )
+            worker_agents.append(w_agent)
+            worker_id_to_avatar_id[avatar_id] = avatar_id
+
+        if not worker_agents:
+            # Fallback: nothing to orchestrate, skip team mode.
+            yield GroupReply(
+                agent_id=META_LEADER_AGENT_ID,
+                avatar_name=self._meta_leader_label,
+                avatar_url="",
+                content="群聊没有成员，无法启动 Team 模式。",
+                skipped=False,
+                event_type="group_reply",
+            )
+            return
+
+        worker_instances = [
+            SingleAgentWorker(agent=wa, executor=exec_)
+            for wa in worker_agents
+        ]
+
+        # ── 4. Build WorkforcePattern (planning layer only) ─────────────────
+        pattern = WorkforcePattern(
+            coordinator_agent=coordinator_agent,
+            task_agent=planner_agent,
+            workers=worker_instances,
+            llm_provider=llm,
+            event_bus=event_bus,
+        )
+
+        # ── 5. Emit WORKFORCE_STARTED ───────────────────────────────────────
+        event_bus.publish(WorkforceEvent(
+            action=WorkforceAction.WORKFORCE_STARTED,
+            data={"group_name": group_name, "member_count": len(worker_instances)},
+        ))
+
+        # Drain relay_queue helper
+        async def _drain_relay() -> None:
+            while not relay_queue.empty():
+                yield relay_queue.get_nowait()
+
+        async for r in _drain_relay():
+            yield r
+
+        # ── 6. Planning: decompose ──────────────────────────────────────────
+        main_task = Task(
+            description=user_input,
+            expected_output="Group task execution result",
+        )
+        try:
+            subtasks = await pattern.decompose_task(main_task)
+        except Exception as exc:
+            yield GroupReply(
+                agent_id=META_LEADER_AGENT_ID,
+                avatar_name=self._meta_leader_label,
+                avatar_url="",
+                content="",
+                skipped=False,
+                error=f"任务分解失败: {exc}",
+                event_type="group_reply",
+            )
+            return
+
+        async for r in _drain_relay():
+            yield r
+
+        if not subtasks:
+            # No subtasks: let the meta leader handle it directly.
+            pm = await self._run_meta_project_manager_reply(
+                base_session=base_session,
+                context=context,
+                group_name=group_name,
+                user_input=user_input,
+                quoted_content=quoted_content,
+                extra_instruction="以项目经理身份直接回答，无需分解任务。",
+                user_display_name=user_display_name,
+            )
+            yield pm
+            event_bus.publish(WorkforceEvent(action=WorkforceAction.WORKFORCE_STOPPED, data={}))
+            return
+
+        # Cap subtasks.
+        if len(subtasks) > MAX_DECOMPOSE_SUBTASKS:
+            subtasks = subtasks[:MAX_DECOMPOSE_SUBTASKS]
+
+        # ── 7. Planning: assign ─────────────────────────────────────────────
+        try:
+            assignment_map = await pattern.coordinator.assign_tasks(
+                tasks=subtasks,
+                workers=worker_instances,
+            )
+        except Exception:
+            # Fallback: round-robin
+            assignment_map = {
+                st.id: worker_instances[i % len(worker_instances)].id
+                for i, st in enumerate(subtasks)
+            }
+
+        async for r in _drain_relay():
+            yield r
+
+        # Emit TASK_ASSIGNED for each subtask.
+        for subtask in subtasks:
+            worker_id = assignment_map.get(subtask.id)
+            if worker_id:
+                event_bus.publish(WorkforceEvent(
+                    action=WorkforceAction.TASK_ASSIGNED,
+                    task_id=subtask.id,
+                    agent_id=worker_id,
+                    data={
+                        "task_description": subtask.description,
+                        "assignee": worker_id,
+                    },
+                ))
+
+        async for r in _drain_relay():
+            yield r
+
+        # ── 8. Execution: per-subtask via AgentRuntime (_run_one_target) ───
+        responded_this_turn: set[str] = set()
+
+        for subtask in subtasks:
+            if await self._should_stop(should_stop):
+                break
+
+            worker_id = assignment_map.get(subtask.id, "")
+            avatar_id = worker_id_to_avatar_id.get(worker_id, worker_id)
+
+            # Emit TASK_STARTED
+            event_bus.publish(WorkforceEvent(
+                action=WorkforceAction.TASK_STARTED,
+                task_id=subtask.id,
+                agent_id=avatar_id or META_LEADER_AGENT_ID,
+                data={"task_description": subtask.description},
+            ))
+            async for r in _drain_relay():
+                yield r
+
+            if not avatar_id:
+                avatar_id = META_LEADER_AGENT_ID
+
+            # Show typing indicator.
+            if avatar_id == META_LEADER_AGENT_ID:
+                ty_name = self._meta_leader_label
+            else:
+                av = self.avatar_registry.get_avatar(avatar_id)
+                ty_name = str(getattr(av, "name", "") or avatar_id) if av else avatar_id
+            yield self._typing_event(avatar_id, ty_name)
+
+            # Execute via AgentRuntime (full Studio capabilities).
+            subtask_input = subtask.description
+            if quoted_content.strip():
+                subtask_input = f"{subtask_input}\n\n[用户引用内容]\n{quoted_content.strip()}"
+
+            reply: GroupReply | None = None
+            async for target_evt in self._run_one_target_stream(
+                base_session=base_session,
+                context=context,
+                group_id=group_id,
+                group_name=group_name,
+                avatar_id=avatar_id,
+                user_input=subtask_input,
+                quoted_content="",
+                should_stop=should_stop,
+                force_reply=True,
+                user_display_name=user_display_name,
+            ):
+                yield target_evt
+                if target_evt.event_type in {"group_reply", "group_skipped"}:
+                    reply = target_evt
+
+            if reply is None or reply.skipped:
+                event_bus.publish(WorkforceEvent(
+                    action=WorkforceAction.TASK_FAILED,
+                    task_id=subtask.id,
+                    agent_id=avatar_id,
+                    data={"error": reply.error if reply else "no response"},
+                ))
+            else:
+                self._record_turn_response(responded_this_turn, reply)
+                task_lock.add_conversation("assistant", reply.content or "")
+                event_bus.publish(WorkforceEvent(
+                    action=WorkforceAction.TASK_COMPLETED,
+                    task_id=subtask.id,
+                    agent_id=avatar_id,
+                    data={"result": (reply.content or "")[:500]},
+                ))
+
+            async for r in _drain_relay():
+                yield r
+
+        # ── 9. Leader summary ───────────────────────────────────────────────
+        if not await self._should_stop(should_stop):
+            yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
+            summary_prompt = (
+                f"{user_input}\n\n"
+                "[系统] 所有子任务已执行完毕，请以项目经理身份综合以上成员的工作成果，"
+                "给出简洁的最终答复和下一步建议。"
+            )
+            pm = await self._run_meta_project_manager_reply(
+                base_session=base_session,
+                context=context,
+                group_name=group_name,
+                user_input=summary_prompt,
+                quoted_content="",
+                extra_instruction="请综合所有成员成果，给出最终答复。",
+                user_display_name=user_display_name,
+            )
+            yield pm
+            task_lock.add_conversation("assistant", pm.content or "")
+
+        # ── 10. WORKFORCE_STOPPED ───────────────────────────────────────────
+        event_bus.publish(WorkforceEvent(action=WorkforceAction.WORKFORCE_STOPPED, data={}))
+        async for r in _drain_relay():
+            yield r
+
+    # ──────────────────────────────────────────────────────────────────────────
 
     async def run_group_turn(
         self,
@@ -1187,6 +1579,20 @@ class GroupChatRouter:
         for tid in plain_mentions:
             if tid not in resolved_mentions:
                 resolved_mentions.append(tid)
+        if routing == "team":
+            async for reply in self._run_team_turn(
+                base_session=base_session,
+                context=context,
+                group_id=group_id,
+                group_name=group_name,
+                group_avatar_ids=group_avatar_ids,
+                user_input=user_input,
+                quoted_content=quoted_content,
+                should_stop=should_stop,
+                user_display_name=udn,
+            ):
+                yield reply
+            return
         if routing == "intelligent":
             async for reply in self._run_intelligent_turn(
                 base_session=base_session,
@@ -1266,7 +1672,7 @@ class GroupChatRouter:
                 group_name=group_name,
                 should_stop=should_stop,
                 user_display_name=udn,
-                hops=GROUP_MENTION_FOLLOWUP_HOPS,
+                hops=_get_mention_hops(),
                 responded_this_turn=responded_this_turn,
             ):
                 yield fu

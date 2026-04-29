@@ -1161,6 +1161,7 @@ function GroupEditorInline({
           <option value="user-directed">用户指定 · 你点谁谁回复</option>
           <option value="meta-routed">智能路由 · Machi 自动选人</option>
           <option value="round-robin">轮流回复 · 按顺序每人答一次</option>
+          <option value="team">团队模式 · Workforce 结构化任务编排</option>
         </select>
         <p className="mb-4 text-[10px] text-text-faint">
           {{
@@ -1168,7 +1169,8 @@ function GroupEditorInline({
             "user-directed": "每次发消息时，手动 @某个分身，只有被点名的人回复。",
             "meta-routed": "由 Machi 根据问题内容自动判断最合适的分身来回复。",
             "round-robin": "分身按加入顺序轮流回复，每人一次，周而复始。",
-          }[routing]}
+            "team": "Workforce 三层架构：Leader 分解任务 → 分身并行执行 → Leader 汇总。适合复杂多步协作。",
+          }[routing as string] ?? ""}
         </p>
 
         <div className="flex items-center justify-between gap-2">
