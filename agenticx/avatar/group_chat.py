@@ -25,7 +25,7 @@ class GroupChatConfig:
     id: str
     name: str
     avatar_ids: List[str] = field(default_factory=list)
-    routing: str = "intelligent"  # intelligent | user-directed | meta-routed | round-robin
+    routing: str = "intelligent"  # intelligent | user-directed | meta-routed | round-robin | team
     created_at: str = ""
     updated_at: str = ""
 

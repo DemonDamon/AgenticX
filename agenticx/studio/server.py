@@ -3519,7 +3519,7 @@ def create_studio_app() -> FastAPI:
         name = str(payload.get("name", "")).strip()
         avatar_ids = payload.get("avatar_ids", [])
         routing = str(payload.get("routing", "intelligent")).strip()
-        allowed_routing = {"user-directed", "meta-routed", "round-robin", "intelligent"}
+        allowed_routing = {"user-directed", "meta-routed", "round-robin", "intelligent", "team"}
         if not name or not avatar_ids:
             raise HTTPException(status_code=400, detail="name and avatar_ids are required")
         if not isinstance(avatar_ids, list):
@@ -3581,6 +3581,77 @@ def create_studio_app() -> FastAPI:
         if config is None:
             raise HTTPException(status_code=404, detail="group not found")
         return {"ok": True, "group": config.to_dict()}
+
+    # ── Group Team Events SSE + Action endpoints ──────────────────────────────
+    # Registered event buses keyed by (group_id, session_id).
+    # Populated by _run_team_turn in group_router.py; drained here via SSE.
+    _group_team_event_buses: dict[str, Any] = {}
+
+    @app.get("/api/groups/{group_id}/events")
+    async def stream_group_events(
+        group_id: str,
+        session_id: str | None = None,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ):
+        """SSE stream of WorkforceEvents for a group team session.
+
+        Clients subscribe here to receive structured workforce events
+        (decompose_start / task_assigned / task_completed / workforce_stopped …)
+        emitted by _run_team_turn when routing="team".
+        """
+        from agenticx.collaboration.workforce.events import WorkforceEventBus
+        from fastapi.responses import StreamingResponse
+
+        _check_token(x_agx_desktop_token)
+        bus_key = f"{group_id}::{session_id or 'default'}"
+        bus = _group_team_event_buses.get(bus_key)
+
+        async def event_generator():
+            if bus is None:
+                # No active team session; send a heartbeat and end.
+                yield "data: {\"action\":\"no_active_session\"}\n\n"
+                return
+            while True:
+                evt = await bus.get_next_event(timeout=30)
+                if evt is None:
+                    yield ": heartbeat\n\n"
+                    continue
+                try:
+                    yield f"data: {evt.json()}\n\n"
+                except Exception:
+                    yield f"data: {{\"action\":\"{evt.action.value}\"}}\n\n"
+                # Stop streaming after workforce session ends.
+                from agenticx.collaboration.workforce.events import WorkforceAction
+                if evt.action in (WorkforceAction.WORKFORCE_STOPPED, WorkforceAction.WORKFORCE_PAUSED):
+                    break
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+    @app.post("/api/groups/{group_id}/action")
+    async def post_group_action(
+        group_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Forward a UI action (ADD_TASK / PAUSE / RESUME / STOP / SKIP_TASK) to TaskLock."""
+        from agenticx.collaboration.task_lock import get_or_create_task_lock, ActionData, Action
+
+        _check_token(x_agx_desktop_token)
+        action_str = str(payload.get("action", "")).strip()
+        session_id = str(payload.get("session_id", "default")).strip()
+        data = payload.get("data") or {}
+        try:
+            action = Action(action_str)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"unknown action: {action_str!r}")
+        task_lock = get_or_create_task_lock(
+            project_id=f"group::{group_id}::{session_id}"
+        )
+        try:
+            await task_lock.put_queue(ActionData(action=action, data=data))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"queue full: {exc}")
+        return {"ok": True, "action": action_str}
 
     @app.delete("/api/groups/{group_id}")
     async def delete_group(

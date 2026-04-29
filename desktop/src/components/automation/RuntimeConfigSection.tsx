@@ -31,6 +31,11 @@ export function RuntimeConfigSection({ value, onChange, disabled }: RuntimeConfi
       <p className="mt-1 text-xs leading-relaxed text-text-muted">
         Agent 单次对话中可连续调用工具的最大轮数。长任务建议适当提高。修改后请点击窗口底部「保存」写入本机配置。
       </p>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-text-faint">
+        群聊 @mention 多跳次数（默认 2）可在{" "}
+        <code className="rounded bg-surface-panel px-1">~/.agenticx/config.yaml</code>{" "}
+        中设置 <code className="rounded bg-surface-panel px-1">group_chat.mention_hops: 2</code>（范围 1-10）。
+      </p>
 
       <div className="mt-3 flex items-center gap-3">
         <input
