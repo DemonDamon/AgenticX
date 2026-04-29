@@ -1,0 +1,203 @@
+/**
+ * Chat Markdown fenced blocks: syntax colors scoped per app theme.
+ * Light ≈ Prism default (high contrast on grey surface); dark/dim ≈ Tomorrow.
+ */
+
+/* --- Shared layout for highlighted fences --- */
+.msg-content pre.agx-chat-prism {
+  margin: 0.5em 0;
+}
+.msg-content pre.agx-chat-prism code {
+  display: block;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  white-space: pre;
+  word-break: normal;
+  tab-size: 4;
+  background: transparent !important;
+  text-shadow: none !important;
+}
+
+/* --- Inline code: stronger contrast in bubbles --- */
+:root[data-theme="light"] .msg-content :not(pre) > code {
+  color: #24292f;
+  background: rgba(175, 184, 193, 0.28) !important;
+}
+:root[data-theme="dark"] .msg-content :not(pre) > code,
+:root[data-theme="dim"] .msg-content :not(pre) > code {
+  color: #e6edf3;
+  background: rgba(110, 118, 129, 0.35) !important;
+}
+
+/* ========== Light ========== */
+:root[data-theme="light"] .msg-content pre.agx-chat-prism {
+  background: #f6f8fa;
+  border-color: color-mix(in srgb, var(--border-subtle) 85%, #24292f);
+}
+:root[data-theme="light"] .msg-content pre.agx-chat-prism code {
+  color: #24292f;
+}
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.comment,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.prolog,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.doctype,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.cdata {
+  color: #57606a;
+}
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.punctuation {
+  color: #656d76;
+}
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.namespace {
+  opacity: 0.85;
+}
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.property,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.tag,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.boolean,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.number,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.constant,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.symbol,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.deleted {
+  color: #953800;
+}
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.selector,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.attr-name,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.string,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.char,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.builtin,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.inserted {
+  color: #116329;
+}
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.operator,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.entity,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.url,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .language-css .token.string,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .style .token.string {
+  color: #953800;
+}
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.atrule,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.attr-value,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.keyword {
+  color: #0550ae;
+}
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.function,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.class-name {
+  color: #8250df;
+}
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.regex,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.important,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.variable {
+  color: #bf3989;
+}
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.important,
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.bold {
+  font-weight: 700;
+}
+:root[data-theme="light"] .msg-content pre.agx-chat-prism .token.italic {
+  font-style: italic;
+}
+
+/* ========== Dark / Dim (Tomorrow-style) ========== */
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism {
+  background: #2d2d2d;
+  border-color: color-mix(in srgb, var(--border-subtle) 90%, transparent);
+}
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism code,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism code {
+  color: #ccc;
+}
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.comment,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.block-comment,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.prolog,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.doctype,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.cdata,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.comment,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.block-comment,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.prolog,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.doctype,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.cdata {
+  color: #999;
+}
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.punctuation,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.punctuation {
+  color: #ccc;
+}
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.tag,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.attr-name,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.namespace,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.deleted,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.tag,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.attr-name,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.namespace,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.deleted {
+  color: #e2777a;
+}
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.function-name,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.function-name {
+  color: #6196cc;
+}
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.boolean,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.number,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.function,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.boolean,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.number,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.function {
+  color: #f08d49;
+}
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.property,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.class-name,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.constant,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.symbol,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.property,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.class-name,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.constant,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.symbol {
+  color: #f8c555;
+}
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.selector,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.important,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.atrule,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.keyword,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.builtin,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.selector,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.important,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.atrule,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.keyword,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.builtin {
+  color: #cc99cd;
+}
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.string,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.char,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.attr-value,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.regex,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.variable,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.string,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.char,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.attr-value,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.regex,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.variable {
+  color: #7ec699;
+}
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.operator,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.entity,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.url,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.operator,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.entity,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.url {
+  color: #67cdcc;
+}
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.inserted,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.inserted {
+  color: #7ec699;
+}
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.important,
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.bold,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.important,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.bold {
+  font-weight: 700;
+}
+:root[data-theme="dark"] .msg-content pre.agx-chat-prism .token.italic,
+:root[data-theme="dim"] .msg-content pre.agx-chat-prism .token.italic {
+  font-style: italic;
+}
