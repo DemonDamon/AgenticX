@@ -1245,33 +1245,38 @@ function GroupEditorInline({
           </div>
         ) : null}
 
-        <div className="mt-1 flex items-center justify-between gap-2">
-          {initialGroup ? (
+        <div className="mt-1 flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            {initialGroup ? (
+              <button
+                type="button"
+                className="rounded-md px-3 py-1.5 text-xs text-rose-400 transition hover:bg-rose-500/10"
+                onClick={() => {
+                  if (!onDelete || !initialGroup) return;
+                  void onDelete(initialGroup.id);
+                }}
+              >
+                删除群聊
+              </button>
+            ) : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
             <button
-              className="rounded-md px-3 py-1.5 text-xs text-rose-400 transition hover:bg-rose-500/10"
-              onClick={() => {
-                if (!onDelete || !initialGroup) return;
-                void onDelete(initialGroup.id);
-              }}
+              type="button"
+              className="rounded-md px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+              onClick={onClose}
             >
-              删除群聊
+              取消
             </button>
-          ) : (
-            <div />
-          )}
-          <button
-            className="rounded-md px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-            onClick={onClose}
-          >
-            取消
-          </button>
-          <button
-            className="rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-cyan-500 disabled:opacity-40"
-            disabled={!name.trim() || selectedIds.size === 0 || loading}
-            onClick={() => void handleSave()}
-          >
-            {loading ? "保存中..." : initialGroup ? "保存" : "创建"}
-          </button>
+            <button
+              type="button"
+              className="rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-cyan-500 disabled:opacity-40"
+              disabled={!name.trim() || selectedIds.size === 0 || loading}
+              onClick={() => void handleSave()}
+            >
+              {loading ? "保存中..." : initialGroup ? "保存" : "创建"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
