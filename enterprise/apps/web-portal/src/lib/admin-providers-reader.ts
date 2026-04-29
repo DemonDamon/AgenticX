@@ -66,14 +66,42 @@ export interface PortalModelOption {
   isDefault: boolean;
 }
 
+const LEGACY_ADMIN_EMAIL_TO_USER_ID: Record<string, string> = {
+  "owner@agenticx.local": "u_001",
+  "ops@agenticx.local": "u_002",
+  "audit@agenticx.local": "u_003",
+};
+
+function resolveAssignmentKeys(userId: string, email?: string): string[] {
+  const keys = new Set<string>();
+  if (userId) keys.add(userId);
+  if (!email) return Array.from(keys);
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail) return Array.from(keys);
+
+  // 新链路：admin 分配会同时写入 email 别名 key。
+  keys.add(`email:${normalizedEmail}`);
+
+  // 兼容旧数据：历史分配只按 admin-console 内存种子 id（u_001 等）存储。
+  const legacyUserId = LEGACY_ADMIN_EMAIL_TO_USER_ID[normalizedEmail];
+  if (legacyUserId) keys.add(legacyUserId);
+
+  return Array.from(keys);
+}
+
 /**
  * 当前用户**最终可见**的模型 = （admin 启用的 provider × admin 启用的 model）∩ 用户分配集合。
  * 如果用户没有分配过任何模型（首次登录），返回空集合 → 前台展示「无可用模型，请联系管理员分配」。
  */
-export function listAvailableModelsForUser(userId: string): PortalModelOption[] {
+export function listAvailableModelsForUser(userId: string, email?: string): PortalModelOption[] {
   const providers = readProviders();
   const userMap = readUserModels();
-  const allowed = new Set(userMap[userId] ?? []);
+  const allowed = new Set<string>();
+  for (const key of resolveAssignmentKeys(userId, email)) {
+    for (const modelId of userMap[key] ?? []) {
+      if (modelId) allowed.add(modelId);
+    }
+  }
   const out: PortalModelOption[] = [];
   for (const p of providers) {
     if (!p.enabled) continue;
