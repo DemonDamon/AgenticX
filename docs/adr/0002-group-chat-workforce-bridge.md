@@ -115,8 +115,34 @@ GroupChatRouter._run_team_turn()
 
 ---
 
+---
+
+## 修订（2026-04-29 同日）：自动 dispatch 而非显式 routing 切换
+
+### 触发原因
+
+产品复盘发现：让用户在 SettingsPanel 显式选 `routing="team"` 才能用 Workforce，违背了"群聊本身就该是智能的"这一基础假设。用户的 mental model 是「我 @ 谁谁回复 / 没 @ 就 Machi 选人 / 复杂任务自动拆分」，不应该被路由策略下拉框打断。
+
+### 修订决策
+
+**`intelligent` 路由内嵌 Workforce auto-dispatch**：
+
+- 在 `_run_intelligent_turn` 入口处加启发式 `_is_complex_multistep_task(user_input)`
+- 当 (no @ mention) AND (heuristic hits) AND (members ≥ 2) 时，yield from `_run_team_turn(...)`，否则继续 legacy 流程
+- UI 隐藏 `team` 选项（API 兼容保留）；评测和文档去掉 `/team` 前缀
+- 启发式定位：高精度低召回（宁漏检不假阳性），避免把简单问题误装饰成 Workforce
+
+### 兼容性
+
+- 所有已有 `routing="team"` 配置仍然工作（强制每条消息都走 Workforce）
+- 4 种 legacy routing 仍 100% 不触发 auto-dispatch
+- 启发式只在 `intelligent` 路径生效
+
+---
+
 ## 关联
 
 - Plan-Id: `group-chat-workforce-bridge`
 - Plan-File: `.cursor/plans/2026-04-29-group-chat-workforce-bridge.plan.md`
 - 研究来源: `research/codedeepresearch/jiuwenclaw/jiuwenclaw_proposal.md` (v2)
+- 用户文档: `docs/guides/group-chat-team-mode.md`

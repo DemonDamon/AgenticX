@@ -1161,15 +1161,16 @@ function GroupEditorInline({
           <option value="user-directed">用户指定 · 你点谁谁回复</option>
           <option value="meta-routed">智能路由 · Machi 自动选人</option>
           <option value="round-robin">轮流回复 · 按顺序每人答一次</option>
-          <option value="team">团队模式 · Workforce 结构化任务编排</option>
         </select>
         <p className="mb-4 text-[10px] text-text-faint">
           {{
-            "intelligent": "Machi 在后台持续看全局上下文，自动选人、追踪线程，并在成员未响应时主动督办。",
+            "intelligent": "Machi 在后台持续看全局上下文，自动选人、追踪线程，并在成员未响应时主动督办；遇到明显是多步任务时（如「先…后…」「步骤」「调研…然后写…」）会自动启用 Workforce 任务编排，无需手动切换。",
             "user-directed": "每次发消息时，手动 @某个分身，只有被点名的人回复。",
             "meta-routed": "由 Machi 根据问题内容自动判断最合适的分身来回复。",
             "round-robin": "分身按加入顺序轮流回复，每人一次，周而复始。",
-            "team": "Workforce 三层架构：Leader 分解任务 → 分身并行执行 → Leader 汇总。适合复杂多步协作。",
+            // "team" 仍是合法 routing 值（API 层兼容），但不再暴露给用户——
+            // intelligent 路径会按消息内容自动 dispatch 到 Workforce。
+            "team": "团队模式 · Workforce 结构化任务编排（已自动整合至「智能对话」，建议改用 intelligent）。",
           }[routing as string] ?? ""}
         </p>
 

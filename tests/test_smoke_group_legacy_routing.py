@@ -56,8 +56,13 @@ def _make_session():
     "meta-routed",
     "round-robin",
 ])
-async def test_legacy_routing_does_not_call_team_turn(routing: str):
-    """All 4 legacy routing modes must bypass _run_team_turn entirely."""
+async def test_legacy_routing_simple_prompt_does_not_call_team_turn(routing: str):
+    """All 4 legacy routing modes with simple prompts must bypass _run_team_turn.
+
+    NOTE: with the auto-dispatch heuristic, intelligent + complex prompt CAN
+    invoke Workforce — that's the intended product behaviour.  This test
+    pins the regression contract that *simple* prompts always stay legacy.
+    """
     router = _make_router_with_spies()
     team_called = False
 
@@ -68,16 +73,24 @@ async def test_legacy_routing_does_not_call_team_turn(routing: str):
 
     router._run_team_turn = spy_team_turn  # type: ignore[assignment]
 
-    # Patch the downstream methods so they return immediately.
-    async def _noop_intelligent(**kwargs):
-        return
-        yield  # noqa: unreachable
-
-    async def _noop_one_target(*args, **kwargs):
+    # Stub legacy downstream methods so the test terminates fast.
+    async def _stub_one_target(*args, **kwargs):
         return GroupReply("x", "x", "", "", True, event_type="group_skipped")
 
-    router._run_intelligent_turn = _noop_intelligent  # type: ignore[assignment]
-    router._run_one_target = _noop_one_target  # type: ignore[assignment]
+    async def _stub_one_target_stream(**kwargs):
+        yield GroupReply("x", "x", "", "", True, event_type="group_skipped")
+
+    async def _stub_analyze_intent(**kwargs):
+        from agenticx.runtime.group_router import IntentDecision
+        return IntentDecision(action="meta_direct", target_ids=[], reason="stub")
+
+    async def _stub_meta_pm(**kwargs):
+        return GroupReply("__meta__", "Machi", "", "ok", False, event_type="group_reply")
+
+    router._run_one_target = _stub_one_target  # type: ignore[assignment]
+    router._run_one_target_stream = _stub_one_target_stream  # type: ignore[assignment]
+    router._analyze_intent = _stub_analyze_intent  # type: ignore[assignment]
+    router._run_meta_project_manager_reply = _stub_meta_pm  # type: ignore[assignment]
 
     session = _make_session()
     async for _ in router.run_group_turn(
@@ -87,14 +100,61 @@ async def test_legacy_routing_does_not_call_team_turn(routing: str):
         routing=routing,
         group_avatar_ids=["av1", "av2"],
         mentioned_avatar_ids=[],
-        user_input="你好",
+        user_input="你好",  # simple prompt — heuristic returns False
         quoted_content="",
         should_stop=lambda: False,
     ):
         pass
 
     assert not team_called, (
-        f"routing={routing!r} must NOT invoke _run_team_turn, but it did"
+        f"routing={routing!r} + simple prompt must NOT invoke _run_team_turn, but it did"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("routing", [
+    "user-directed",
+    "meta-routed",
+    "round-robin",
+])
+async def test_non_intelligent_routing_never_auto_dispatches_even_on_complex(routing: str):
+    """user-directed / meta-routed / round-robin must NOT auto-dispatch even for complex prompts.
+
+    Auto-dispatch is exclusively a feature of the `intelligent` routing path.
+    The other 3 strategies preserve their explicit semantics.
+    """
+    router = _make_router_with_spies()
+    team_called = False
+
+    async def spy_team_turn(**kwargs):
+        nonlocal team_called
+        team_called = True
+        yield GroupReply("x", "x", "", "", True, event_type="group_reply")
+
+    router._run_team_turn = spy_team_turn  # type: ignore[assignment]
+
+    async def _stub_one_target(*args, **kwargs):
+        return GroupReply("x", "x", "", "", True, event_type="group_skipped")
+
+    router._run_one_target = _stub_one_target  # type: ignore[assignment]
+
+    session = _make_session()
+    async for _ in router.run_group_turn(
+        base_session=session,
+        group_id="g-noauto",
+        group_name="No Auto Dispatch",
+        routing=routing,
+        group_avatar_ids=["av1", "av2"],
+        mentioned_avatar_ids=[],
+        # Complex prompt that WOULD trip heuristic under intelligent routing.
+        user_input="先调研 X 库，然后写一个 hello world demo，再加测试。",
+        quoted_content="",
+        should_stop=lambda: False,
+    ):
+        pass
+
+    assert not team_called, (
+        f"routing={routing!r} must never auto-dispatch to Workforce regardless of prompt"
     )
 
 
