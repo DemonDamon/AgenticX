@@ -233,6 +233,72 @@ def test_server_chat_sse_stream(monkeypatch) -> None:
     assert all((e.get("data") or {}).get("agent_id") for e in events if e.get("type") != "done")
 
 
+def test_group_chat_branch_sets_execution_state_running_then_idle(monkeypatch) -> None:
+    from agenticx.runtime.group_router import GroupReply
+    from agenticx.studio import server as server_module
+
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", lambda **_kwargs: _TextLLM())
+
+    class _FakeGroupRouter:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def pick_targets(self, **_kwargs):
+            return []
+
+        async def run_group_turn(self, **_kwargs):
+            yield GroupReply(
+                agent_id="meta",
+                avatar_name="Machi",
+                avatar_url="",
+                content="group done",
+                skipped=False,
+                event_type="group_reply",
+            )
+
+    monkeypatch.setattr(server_module, "GroupChatRouter", _FakeGroupRouter)
+
+    app = create_studio_app()
+    client = TestClient(app)
+    manager = app.state.session_manager
+    avatar_registry = app.state.avatar_registry
+    group_registry = app.state.group_registry
+
+    session_id = client.get("/api/session").json()["session_id"]
+    avatar = avatar_registry.create_avatar(name="测试成员", role="Engineer")
+    group = group_registry.create_group(name="测试群", avatar_ids=[avatar.id], routing="intelligent")
+
+    # Simulate prior user interrupt; a new group turn must reset to running.
+    manager.set_execution_state(session_id, "interrupted")
+
+    state_calls: List[str] = []
+    original_set_state = manager.set_execution_state
+
+    def _spy_set_state(sid: str, state: str) -> None:
+        state_calls.append(state)
+        original_set_state(sid, state)
+
+    monkeypatch.setattr(manager, "set_execution_state", _spy_set_state)
+
+    resp = client.post(
+        "/api/chat",
+        json={
+            "session_id": session_id,
+            "group_id": group.id,
+            "user_input": "你好，群聊测试一下",
+        },
+    )
+    assert resp.status_code == 200
+    _ = _extract_events(resp.text.splitlines())
+
+    assert "running" in state_calls
+    assert state_calls[-1] == "idle"
+    rows = client.get("/api/sessions").json().get("sessions", [])
+    current = next((r for r in rows if r.get("session_id") == session_id), None)
+    assert current is not None
+    assert current.get("execution_state") == "idle"
+
+
 def test_server_confirm_gate_flow(monkeypatch) -> None:
     app = create_studio_app()
     client = TestClient(app)

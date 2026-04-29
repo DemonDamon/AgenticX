@@ -1508,6 +1508,8 @@ def create_studio_app() -> FastAPI:
         )
         is_group_session = group_payload is not None
         if is_group_session:
+            manager.clear_interrupt(payload.session_id)
+            manager.set_execution_state(payload.session_id, "running")
             async def _group_chat_stream() -> AsyncGenerator[str, None]:
                 try:
                     llm_factory = lambda provider, model: ProviderResolver.resolve(
@@ -1606,6 +1608,8 @@ def create_studio_app() -> FastAPI:
                     err = SseEvent(type="error", data={"text": f"Group runtime error: {exc}"})
                     yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
                 finally:
+                    manager.clear_interrupt(payload.session_id)
+                    manager.set_execution_state(payload.session_id, "idle")
                     manager.persist(payload.session_id)
                 yield 'data: {"type":"done","data":{}}\n\n'
 

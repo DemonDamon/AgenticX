@@ -198,6 +198,20 @@ class SessionManager:
             managed.execution_state = state
             managed.updated_at = time.time()
 
+    def _normalize_execution_state_for_listing(self, session_id: str, state: Any) -> str:
+        """Normalize execution_state for session list display.
+
+        Persisted stale `interrupted` states (left by old flows or historical data)
+        should not be shown forever. Only keep `interrupted` visible when there is
+        an active interrupt request in this process.
+        """
+        raw = str(state or "idle").strip().lower()
+        if raw not in {"idle", "running", "interrupted"}:
+            raw = "idle"
+        if raw == "interrupted" and not self.should_interrupt(session_id):
+            return "idle"
+        return raw
+
     def request_interrupt(self, session_id: str) -> bool:
         sid = str(session_id or "").strip()
         if not sid:
@@ -322,7 +336,9 @@ class SessionManager:
                 "created_at": getattr(managed, "created_at", managed.updated_at),
                 "pinned": bool(getattr(managed, "pinned", False)),
                 "archived": bool(getattr(managed, "archived", False)),
-                "execution_state": str(getattr(managed, "execution_state", "idle") or "idle"),
+                "execution_state": self._normalize_execution_state_for_listing(
+                    sid, getattr(managed, "execution_state", "idle")
+                ),
                 "provider": str(getattr(managed.studio_session, "provider_name", "") or ""),
                 "model": str(getattr(managed.studio_session, "model_name", "") or ""),
             })
@@ -334,6 +350,9 @@ class SessionManager:
                 continue
             if avatar_id and row.get("avatar_id") != avatar_id:
                 continue
+            row["execution_state"] = self._normalize_execution_state_for_listing(
+                sid, row.get("execution_state", "idle")
+            )
             result.append(row)
             seen_session_ids.add(sid)
         result.sort(
