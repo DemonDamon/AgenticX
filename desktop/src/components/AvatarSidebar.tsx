@@ -1075,7 +1075,6 @@ function GroupEditorInline({
 }) {
   const [name, setName] = useState(initialGroup?.name ?? "");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(initialGroup?.avatarIds ?? []));
-  const [routing, setRouting] = useState(initialGroup?.routing ?? "intelligent");
   const [loading, setLoading] = useState(false);
 
   const toggle = (id: string) => {
@@ -1096,14 +1095,14 @@ function GroupEditorInline({
           id: initialGroup.id,
           name: name.trim(),
           avatar_ids: Array.from(selectedIds),
-          routing,
+          routing: "intelligent",
         });
         if (result.ok) onSaved();
       } else {
         const result = await window.agenticxDesktop.createGroup({
           name: name.trim(),
           avatar_ids: Array.from(selectedIds),
-          routing,
+          routing: "intelligent",
         });
         if (result.ok) onSaved();
       }
@@ -1151,27 +1150,8 @@ function GroupEditorInline({
           ))}
         </div>
 
-        <label className="mb-1 block text-[11px] text-text-subtle">路由策略</label>
-        <select
-          className="mb-1 w-full rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-strong"
-          value={routing}
-          onChange={(e) => setRouting(e.target.value)}
-        >
-          <option value="intelligent">智能对话 · 像项目经理一样自动分配</option>
-          <option value="user-directed">用户指定 · 你点谁谁回复</option>
-          <option value="meta-routed">智能路由 · Machi 自动选人</option>
-          <option value="round-robin">轮流回复 · 按顺序每人答一次</option>
-        </select>
         <p className="mb-4 text-[10px] text-text-faint">
-          {{
-            "intelligent": "Machi 在后台持续看全局上下文，自动选人、追踪线程，并在成员未响应时主动督办；遇到明显是多步任务时（如「先…后…」「步骤」「调研…然后写…」）会自动启用 Workforce 任务编排，无需手动切换。",
-            "user-directed": "每次发消息时，手动 @某个分身，只有被点名的人回复。",
-            "meta-routed": "由 Machi 根据问题内容自动判断最合适的分身来回复。",
-            "round-robin": "分身按加入顺序轮流回复，每人一次，周而复始。",
-            // "team" 仍是合法 routing 值（API 层兼容），但不再暴露给用户——
-            // intelligent 路径会按消息内容自动 dispatch 到 Workforce。
-            "team": "团队模式 · Workforce 结构化任务编排（已自动整合至「智能对话」，建议改用 intelligent）。",
-          }[routing as string] ?? ""}
+          群聊默认使用「智能对话」：Machi 会持续跟踪上下文并自动分配成员；遇到明显多步任务时，会自动启用 Workforce 编排，无需手动设置策略。
         </p>
 
         <div className="flex items-center justify-between gap-2">
