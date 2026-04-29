@@ -1,179 +1,140 @@
-# 群聊 Team 模式（Workforce 结构化任务编排）
+# 群聊智能任务编排（Workforce 自动 dispatch）
 
-## 概述
+## TL;DR
 
-AgenticX 群聊默认使用 `intelligent` 路由——Meta-Agent 根据上下文自动判断由哪个分身回复。
+**你不需要做任何配置。** 群聊默认 `intelligent` 路由会自动判断：
 
-**Team 模式**（`routing="team"`）在此基础上启用了 **Workforce 三层协作架构**：
+- 你 **@ 了某个分身** → 那个分身回复（保持原有行为）
+- 你 **没有 @ 任何人** + 消息看起来是 **简单问答 / 闲聊** → Machi 智能选人（保持原有行为）
+- 你 **没有 @ 任何人** + 消息看起来是 **复杂多步任务** → 自动启用 **Workforce 任务编排**：Machi 把任务拆成子任务、分配给合适的分身并行执行、最后汇总结果
+- 谁都不响应 → Machi 兜底
 
-```
-用户输入
-   │
-   ▼
-Leader（Meta-Agent 角色）
-   ├─ TaskPlannerAgent 分解任务
-   ├─ CoordinatorAgent 分配任务给分身
-   │
-   ▼
-分身（Worker，AgentRuntime 全 Studio 能力执行）
-   ├─ 分身 A：调研子任务
-   └─ 分身 B：实现子任务
-   │
-   ▼
-Leader 汇总 → 最终答复
-```
-
-每一步都生成结构化事件（`workforce.task_assigned`、`workforce.task_completed` 等），前端可按区域展示任务进度。
+整个过程对用户透明，无需切换路由策略，无需 `/team` 前缀。
 
 ---
 
-## 何时使用 Team 模式
+## 触发 Workforce 的启发式
 
-| 场景 | 推荐 routing |
-|------|-------------|
-| 简单问答 / 闲聊 | `intelligent`（默认） |
-| 复杂多步任务（调研 → 实现 → 测试） | `team` |
-| 需要多人并行协作 | `team` |
-| 需要看到任务分解过程 | `team` |
-| 用户希望插入新任务到执行队列 | `team` |
+Machi 在 `intelligent` 路由下自动识别多步任务，触发条件（满足任一）：
 
----
+### 强信号词（任一命中即触发）
+- `步骤` / `第一步` / `第二步`
+- `拆分` / `分解` / `分步`
+- `并行`
 
-## 如何启用
+### 顺序对（前后都命中即触发）
+- `先...后...` / `先...再...`
+- `1)...2)` / `1....2.` / `1、...2、`
+- `一...二...`
 
-### 在 Desktop 设置页
+### 弱信号词（仅当文本 ≥ 20 字时触发）
+- `然后` / `接着` / `再` / `之后` / `先后`
+- `并且` / `同时` / `分别` / `逐步`
+- `调研` / `研究`
 
-1. 打开群聊设置（点击群聊名称 → ⚙️ 设置）
-2. 找到「路由策略」下拉菜单
-3. 选择「**团队模式 · Workforce 结构化任务编排**」
-4. 保存
+### 其它前置条件
+- 用户没有 @ 明确的分身（也不是 @ Machi）
+- 群聊有 ≥ 2 个分身
 
-### 通过 API
-
-```bash
-curl -X PUT http://localhost:19080/api/groups/<group_id> \
-  -H "Content-Type: application/json" \
-  -d '{"routing": "team"}'
-```
-
-### 通过 group.yaml
-
-```yaml
-id: <group_id>
-name: My Team
-avatar_ids: [avatar1_id, avatar2_id]
-routing: team
-```
+任一条件不满足时，仍走原 `intelligent` 路径（单 LLM intent 判断 → 选 avatar 回复 → Meta 兜底）。
 
 ---
 
-## 使用方法
+## 例子
 
-### 发送任务
+| 用户消息 | 触发 Workforce？ | 原因 |
+|----------|----------------|------|
+| `@小明 项目主页有什么内容？` | ❌ | 有明确 @ |
+| `你好` | ❌ | 简单问候，不命中启发式 |
+| `调研 X 库然后写 demo` | ✅ | 包含弱信号 `然后` 且 ≥ 20 字 |
+| `先调研 streaming，再写代码` | ✅ | 命中 `先...再...` 顺序对 |
+| `请按以下步骤执行：分析需求...` | ✅ | 强信号 `步骤` |
+| `把这个任务分解一下` | ✅ | 强信号 `分解` |
+| `天气怎么样？` | ❌ | 简单问题 |
+| `1) 调查 ChromaDB 2) 写 demo` | ✅ | 顺序对 `1)...2)` |
 
-直接发消息，Leader 会自动分解并分配：
+启发式的目标是**避免假阳性**——把简单问题误送进 Workforce 会增加 token 开销且体验变慢。所以宁可漏检一个复杂任务（用户感觉跟以前一样自然），也不要把简单问题装模作样地分解。如果你确实想强制启用 Workforce，把消息里加上「请按步骤执行」或「先...再...」即可触发。
+
+---
+
+## Workforce 工作流
+
+触发后的执行链路：
 
 ```
-/team 帮我调研 ChromaDB 和 Milvus 的对比，然后基于调研结果写一段 RAG 入库 demo
+用户输入 (intelligent 路由 + 启发式命中)
+   │
+   ▼
+TaskPlannerAgent 分解任务  ←─ AgentExecutor（仅 LLM 规划）
+   │  发布 workforce.decompose_start / decompose_complete 事件
+   ▼
+CoordinatorAgent 分配任务  ←─ AgentExecutor
+   │  发布 workforce.task_assigned 事件
+   ▼
+分身（Worker）逐个执行     ←─ AgentRuntime（全 Studio 能力：MCP/流式/确认门）
+   │  发布 workforce.task_started / task_completed / task_failed 事件
+   ▼
+Leader 汇总              ←─ AgentRuntime
+   │  发布 workforce.workforce_stopped 事件
+   ▼
+最终回答
 ```
 
-### 插入新任务（Team 模式下）
+---
 
-在输入框左侧点击 **「插入任务」** 按钮，输入框内容将作为新任务注入 TaskLock 队列（不会立即触发新的 LLM 调用，等待下一轮消费）。
+## 控制操作（运行中）
 
-### 暂停
+Workforce 执行期间，Desktop 群聊输入区会出现以下按钮：
 
-点击输入框旁的 **「暂停」** 按钮（团队执行中时出现），发送 PAUSE 信号给 TaskLock。
+- **插入任务**：把当前输入框内容作为新子任务推入 TaskLock 队列
+- **暂停 / 恢复 / 停止**
 
-### 通过 API 插入任务
+API 调用：
 
 ```bash
 curl -X POST http://localhost:19080/api/groups/<group_id>/action \
   -H "Content-Type: application/json" \
-  -d '{"action": "add_task", "session_id": "<session_id>", "data": {"task_description": "新增一个单元测试"}}'
+  -d '{"action": "add_task", "session_id": "<session_id>", "data": {"task_description": "..."}}'
 ```
 
-支持的 action：`add_task` / `pause` / `resume` / `stop` / `skip_task`
+支持 action：`add_task` / `pause` / `resume` / `stop` / `skip_task`
 
 ---
 
-## 事件流 SSE
+## 事件流
 
-在 Team 模式下，Studio 会在以下端点暴露实时事件流：
+实时 SSE 端点：
 
 ```
 GET /api/groups/<group_id>/events?session_id=<session_id>
 ```
 
-事件按 `workforce.*` 命名空间分类：
-
-| 事件类型 | 含义 | UI 区域 |
-|----------|------|---------|
-| `workforce.decompose_start` | 任务分解开始 | 任务区 |
-| `workforce.decompose_complete` | 分解完成，显示子任务列表 | 任务区 |
-| `workforce.task_assigned` | 任务分配给某分身 | 任务区 |
-| `workforce.task_started` | 分身开始执行 | 成员区 |
-| `workforce.task_completed` | 任务完成，包含摘要结果 | 任务区 |
-| `workforce.task_failed` | 任务失败 | 任务区 |
-| `workforce.agent_activated` | 分身被激活 | 成员区 |
-| `workforce.message.assistant` | 分身发出的对话回复 | 消息区 |
-| `workforce.system.workforce_stopped` | 全部任务结束 | 顶栏状态 |
+事件按 `workforce.*` 分类（详见 ADR `docs/adr/0002-group-chat-workforce-bridge.md`）。
 
 ---
 
 ## 跨任务经验沉淀
 
-Team 模式下注册了三个 STUDIO_TOOLS：
-
-| 工具 | 用途 |
-|------|------|
-| `task_experience_retrieve` | 任务开始时检索历史经验 |
-| `task_experience_learn` | 任务结束前记录关键发现 |
-| `task_experience_clear` | 清空群组经验库（需确认） |
-
-经验存储路径：`~/.agenticx/groups/<group_id>/experience.json`
-
-CoordinatorAgent 已被提示在每个复杂任务开始时调用 `task_experience_retrieve`。
+CoordinatorAgent 在每个复杂任务开始前会调用 `task_experience_retrieve`，结束前调用 `task_experience_learn`。经验存储在 `~/.agenticx/groups/<group_id>/experience.json`，跨会话复用。
 
 ---
 
-## mention 多跳次数配置
+## 与其它路由策略的关系
 
-Team 模式下 mention 跳数固定由 `_run_team_turn` 管理（基于任务分配）。Legacy routing 下的 `@mention` 跳数可通过 config.yaml 配置：
-
-```yaml
-# ~/.agenticx/config.yaml
-group_chat:
-  mention_hops: 3  # 默认 2，范围 1-10
-```
-
----
-
-## 技术限制
-
-| 限制 | 原因 |
-|------|------|
-| 最多 5 个 Worker（分身） | `MAX_WORKERS_PER_GROUP = 5` |
-| 最多 10 个子任务 | `MAX_DECOMPOSE_SUBTASKS = 10` |
-| 任务分解层（Coordinator/Planner）无 MCP 工具 | 规划层使用 AgentExecutor（不含 Studio 工具集） |
-| 执行层（Worker）有完整 Studio 能力 | 使用 AgentRuntime + 全 STUDIO_TOOLS + MCP + ConfirmGate |
-
----
-
-## 与其他路由策略的兼容性
-
-Team 模式是第 5 种路由策略，完全独立于其他 4 种：
-
-- `intelligent`：保持原有行为（一次 LLM intent 判断 → 选 avatar 回复）
-- `user-directed`、`meta-routed`、`round-robin`：保持原有行为
-
-切换回这些策略后，Team 模式完全不生效。
+| Routing | 自动 Workforce dispatch？ | 何时使用 |
+|---------|--------------------------|----------|
+| `intelligent`（默认） | ✅ 复杂多步任务自动触发 | 推荐所有日常使用 |
+| `user-directed` | ❌ | 只想严格按 @ 选人 |
+| `meta-routed` | ❌ | 只想 Machi 选 1 个分身回复 |
+| `round-robin` | ❌ | 只想轮流 |
+| `team`（API 兼容，UI 不暴露） | 强制每条消息都 Workforce | 仅 API 调试 / 已设置过的老用户 |
 
 ---
 
 ## 相关资源
 
-- ADR：`docs/adr/0002-group-chat-workforce-bridge.md`
-- Plan：`.cursor/plans/2026-04-29-group-chat-workforce-bridge.plan.md`
-- 研究产物：`research/codedeepresearch/jiuwenclaw/`
-- 测试：`tests/test_smoke_group_workforce_bridge.py` / `test_smoke_group_legacy_routing.py`
+- ADR: `docs/adr/0002-group-chat-workforce-bridge.md`
+- Plan: `.cursor/plans/2026-04-29-group-chat-workforce-bridge.plan.md`
+- 调研: `research/codedeepresearch/jiuwenclaw/`
+- 启发式实现: `agenticx/runtime/group_router.py:_is_complex_multistep_task`
+- 测试: `tests/test_smoke_group_workforce_bridge.py::TestComplexMultistepHeuristic`

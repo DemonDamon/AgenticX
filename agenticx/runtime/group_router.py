@@ -49,6 +49,92 @@ def _get_mention_hops() -> int:
 # Keep the module-level name for backward-compat callers that import it directly.
 GROUP_MENTION_FOLLOWUP_HOPS = _DEFAULT_MENTION_HOPS
 
+
+# Heuristic markers that hint a complex multi-step task suitable for Workforce
+# task-board orchestration.  We deliberately keep this rule-based (no LLM call)
+# so the fast path stays fast: simple questions remain on the single-LLM
+# intelligent route.
+_MULTISTEP_MARKERS_CN: tuple[str, ...] = (
+    "然后",
+    "接着",
+    "再",
+    "之后",
+    "先后",
+    "并且",
+    "同时",
+    "并行",
+    "分别",
+    "逐步",
+    "分步",
+    "步骤",
+    "第一步",
+    "第二步",
+    "拆分",
+    "分解",
+    "调研",
+    "研究",
+)
+# Bigram/ordering markers — must contain BOTH halves to count as a step pair.
+_MULTISTEP_BIGRAMS_CN: tuple[tuple[str, str], ...] = (
+    ("先", "后"),
+    ("先", "再"),
+    ("一", "二"),
+    ("1)", "2)"),
+    ("1.", "2."),
+    ("1、", "2、"),
+)
+# Strong markers explicitly imply multi-step orchestration regardless of length.
+_MULTISTEP_STRONG_MARKERS_CN: tuple[str, ...] = (
+    "步骤",
+    "第一步",
+    "第二步",
+    "拆分",
+    "分解",
+    "分步",
+    "并行",
+)
+_MULTISTEP_MIN_LENGTH_FOR_WEAK = 20  # Weak markers require some prose around them.
+
+
+def _is_complex_multistep_task(user_input: str) -> bool:
+    """Heuristic detector for complex multi-step tasks.
+
+    Returns True if the message looks like it should be decomposed into
+    subtasks and orchestrated by the Workforce path; False for simple
+    questions / chitchat.
+
+    The heuristic is intentionally conservative: false negatives (a complex
+    task slipping through to legacy intelligent) are acceptable; false
+    positives (a simple question wrongly routed to Workforce) are NOT,
+    because they incur token overhead and unnecessary task decomposition.
+    """
+    text = (user_input or "").strip()
+    if not text:
+        return False
+
+    # Strong markers fire regardless of length.
+    for marker in _MULTISTEP_STRONG_MARKERS_CN:
+        if marker in text:
+            return True
+
+    # Bigram ordering markers (e.g. "先...后..." / "1)...2)") fire regardless of length.
+    for first, second in _MULTISTEP_BIGRAMS_CN:
+        idx_first = text.find(first)
+        if idx_first == -1:
+            continue
+        idx_second = text.find(second, idx_first + len(first))
+        if idx_second != -1:
+            return True
+
+    # Weak markers require some prose to avoid matching short questions
+    # like "再来一个" / "然后呢".
+    if len(text) < _MULTISTEP_MIN_LENGTH_FOR_WEAK:
+        return False
+    for marker in _MULTISTEP_MARKERS_CN:
+        if marker in text:
+            return True
+    return False
+
 _META_AT_SUFFIX = r"(?=[\s\u3000\u4e00-\u9fff，。！？、：:；;,.!?\[\]（）()【】\"'「」]|$)"
 
 
@@ -898,6 +984,31 @@ class GroupChatRouter:
         valid_members = [str(x).strip() for x in group_avatar_ids if str(x).strip()]
         mention_set = {str(i).strip() for i in mentioned_avatar_ids if str(i).strip()}
         responded_this_turn: set[str] = set()
+        # ── Auto-dispatch to Workforce path for complex multi-step tasks ──────
+        # If the user did NOT @-mention anyone AND the message looks like a
+        # multi-step task AND we have at least 2 members, hand off to the
+        # team / Workforce path so the user gets structured task decomposition
+        # without having to choose a routing strategy.
+        explicit_member_mentions = [m for m in mention_set if m in valid_members]
+        if (
+            not explicit_member_mentions
+            and META_LEADER_AGENT_ID not in mention_set
+            and len(valid_members) >= 2
+            and _is_complex_multistep_task(user_input)
+        ):
+            async for reply in self._run_team_turn(
+                base_session=base_session,
+                context=context,
+                group_id=group_id,
+                group_name=group_name,
+                group_avatar_ids=group_avatar_ids,
+                user_input=user_input,
+                quoted_content=quoted_content,
+                should_stop=should_stop,
+                user_display_name=user_display_name,
+            ):
+                yield reply
+            return
         if META_LEADER_AGENT_ID in mention_set:
             context.clear_active_thread()
             yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)

@@ -18,6 +18,7 @@ from agenticx.runtime.group_router import (
     GroupChatRouter,
     GroupReply,
     _get_mention_hops,
+    _is_complex_multistep_task,
     MAX_WORKERS_PER_GROUP,
 )
 from agenticx.collaboration.workforce.events import WorkforceEvent, WorkforceAction
@@ -74,6 +75,40 @@ class TestGroupChatConfigTeamRouting:
 # ---------------------------------------------------------------------------
 # _get_mention_hops: config-based, default 2
 # ---------------------------------------------------------------------------
+
+class TestComplexMultistepHeuristic:
+    """Validate the heuristic that drives intelligent → Workforce auto-dispatch."""
+
+    @pytest.mark.parametrize("text", [
+        "帮我调研一下 X 库，然后基于它写一个 hello world demo",
+        "同时做这两件事：1) 调查 ChromaDB vs Milvus 2) 写一段 RAG 入库 demo",
+        "先调研 streaming API，再写一个 demo 验证",
+        "请按以下步骤执行：分析需求、设计方案、实现代码、写测试。",
+        "拆分这个任务给团队",
+        "需要并行处理多个任务",
+        "把这个任务分解成几个子任务",
+    ])
+    def test_complex_prompts_trip_heuristic(self, text):
+        assert _is_complex_multistep_task(text), f"Should trip on: {text!r}"
+
+    @pytest.mark.parametrize("text", [
+        "你好",
+        "@avatar1 项目主页有什么内容？",
+        "@avatar1 你好",
+        "天气怎么样？",
+        "再来一个",
+        "然后呢",
+        "",
+        "ok",
+    ])
+    def test_simple_prompts_skip_heuristic(self, text):
+        assert not _is_complex_multistep_task(text), f"Should NOT trip on: {text!r}"
+
+    def test_empty_input_returns_false(self):
+        assert _is_complex_multistep_task("") is False
+        assert _is_complex_multistep_task(None) is False  # type: ignore[arg-type]
+        assert _is_complex_multistep_task("   ") is False
+
 
 class TestMentionHopsConfig:
     def test_default_is_two(self):
@@ -175,8 +210,13 @@ class TestRoutingDispatch:
         assert len(replies) > 0
 
     @pytest.mark.asyncio
-    async def test_intelligent_routing_does_not_call_team_turn(self):
-        """When routing="intelligent", _run_team_turn must NOT be called."""
+    async def test_intelligent_routing_simple_prompt_skips_team_turn(self):
+        """When routing="intelligent" + simple prompt, _run_team_turn must NOT be called.
+
+        With the auto-dispatch heuristic, intelligent routing only calls
+        _run_team_turn for complex multi-step tasks.  A simple greeting must
+        stay on the legacy path.
+        """
         router = _make_router()
         team_called = False
 
@@ -187,12 +227,16 @@ class TestRoutingDispatch:
 
         router._run_team_turn = fake_team_turn  # type: ignore[assignment]
 
-        # Patch _run_intelligent_turn to return immediately
-        async def fake_intelligent(**kwargs):
-            return
-            yield  # noqa: unreachable
+        # Stub the rest of the legacy path so the test terminates fast.
+        async def stub_analyze_intent(**kwargs):
+            from agenticx.runtime.group_router import IntentDecision
+            return IntentDecision(action="meta_direct", target_ids=[], reason="stub")
 
-        router._run_intelligent_turn = fake_intelligent  # type: ignore[assignment]
+        async def stub_meta_pm(**kwargs):
+            return GroupReply("__meta__", "Machi", "", "ok", False, event_type="group_reply")
+
+        router._analyze_intent = stub_analyze_intent  # type: ignore[assignment]
+        router._run_meta_project_manager_reply = stub_meta_pm  # type: ignore[assignment]
 
         session = _make_session()
         async for _ in router.run_group_turn(
@@ -208,7 +252,132 @@ class TestRoutingDispatch:
         ):
             pass
 
-        assert not team_called, "_run_team_turn must NOT be called for routing='intelligent'"
+        assert not team_called, (
+            "Simple prompt under intelligent routing must NOT trigger _run_team_turn"
+        )
+
+    @pytest.mark.asyncio
+    async def test_intelligent_routing_complex_prompt_auto_dispatches_to_team(self):
+        """When routing="intelligent" + multi-step prompt + ≥2 avatars, _run_team_turn IS called."""
+        router = _make_router()
+        team_called = False
+        captured_input: list[str] = []
+
+        async def fake_team_turn(**kwargs):
+            nonlocal team_called
+            team_called = True
+            captured_input.append(kwargs.get("user_input", ""))
+            yield GroupReply(
+                "__meta__", "Machi", "", "team done", False, event_type="group_reply"
+            )
+
+        router._run_team_turn = fake_team_turn  # type: ignore[assignment]
+
+        session = _make_session()
+        replies = []
+        async for r in router.run_group_turn(
+            base_session=session,
+            group_id="g-auto",
+            group_name="Auto Dispatch",
+            routing="intelligent",
+            group_avatar_ids=["av1", "av2"],  # ≥ 2 members
+            mentioned_avatar_ids=[],  # no @ mention
+            user_input="帮我调研一下 X 库，然后基于它写一个 hello world demo",
+            quoted_content="",
+            should_stop=lambda: False,
+        ):
+            replies.append(r)
+
+        assert team_called, (
+            "intelligent routing should auto-dispatch to _run_team_turn for complex prompts"
+        )
+        assert "调研" in captured_input[0]
+
+    @pytest.mark.asyncio
+    async def test_intelligent_routing_with_explicit_mention_skips_auto_dispatch(self):
+        """Even with multi-step prompt, explicit @ mention skips auto-dispatch (user knows best)."""
+        router = _make_router()
+        team_called = False
+
+        async def fake_team_turn(**kwargs):
+            nonlocal team_called
+            team_called = True
+            yield GroupReply("x", "x", "", "", True, event_type="group_reply")
+
+        router._run_team_turn = fake_team_turn  # type: ignore[assignment]
+
+        # Stub legacy path
+        async def stub_analyze_intent(**kwargs):
+            from agenticx.runtime.group_router import IntentDecision
+            return IntentDecision(action="route_to", target_ids=["av1"], reason="explicit")
+
+        async def stub_one_target_stream(**kwargs):
+            yield GroupReply(
+                kwargs.get("avatar_id", "av1"), "Avatar1", "",
+                "ok", False, event_type="group_reply"
+            )
+
+        router._analyze_intent = stub_analyze_intent  # type: ignore[assignment]
+        router._run_one_target_stream = stub_one_target_stream  # type: ignore[assignment]
+
+        session = _make_session()
+        async for _ in router.run_group_turn(
+            base_session=session,
+            group_id="g-mention",
+            group_name="Mention Test",
+            routing="intelligent",
+            group_avatar_ids=["av1", "av2"],
+            mentioned_avatar_ids=["av1"],  # explicit @
+            user_input="@av1 然后再调研一下 ChromaDB 步骤",  # has multi-step markers
+            quoted_content="",
+            should_stop=lambda: False,
+        ):
+            pass
+
+        assert not team_called, (
+            "Explicit @ mention should skip auto-dispatch even with multi-step prompt"
+        )
+
+    @pytest.mark.asyncio
+    async def test_intelligent_routing_single_member_skips_auto_dispatch(self):
+        """Group with only 1 avatar should skip Workforce dispatch (no point decomposing)."""
+        router = _make_router()
+        team_called = False
+
+        async def fake_team_turn(**kwargs):
+            nonlocal team_called
+            team_called = True
+            yield GroupReply("x", "x", "", "", True, event_type="group_reply")
+
+        router._run_team_turn = fake_team_turn  # type: ignore[assignment]
+
+        async def stub_analyze_intent(**kwargs):
+            from agenticx.runtime.group_router import IntentDecision
+            return IntentDecision(action="meta_direct", target_ids=[], reason="stub")
+
+        async def stub_meta_pm(**kwargs):
+            return GroupReply("__meta__", "Machi", "", "ok", False, event_type="group_reply")
+
+        router._analyze_intent = stub_analyze_intent  # type: ignore[assignment]
+        router._run_meta_project_manager_reply = stub_meta_pm  # type: ignore[assignment]
+
+        session = _make_session()
+        async for _ in router.run_group_turn(
+            base_session=session,
+            group_id="g-single",
+            group_name="Single Member",
+            routing="intelligent",
+            group_avatar_ids=["av1"],  # only 1 member
+            mentioned_avatar_ids=[],
+            user_input="先调研 X，再写 demo 实现一下",  # complex prompt
+            quoted_content="",
+            should_stop=lambda: False,
+        ):
+            pass
+
+        assert not team_called, (
+            "Single-member group should not invoke Workforce auto-dispatch"
+        )
 
     @pytest.mark.asyncio
     async def test_team_routing_no_avatars_yields_error_message(self):
