@@ -24,6 +24,14 @@ func Unauthorized(message string) APIError {
 	}
 }
 
+func Forbidden(message string) APIError {
+	return APIError{
+		Code:       "40300",
+		Message:    message,
+		HTTPStatus: http.StatusForbidden,
+	}
+}
+
 func PolicyBlocked(message string) APIError {
 	return APIError{
 		Code:       "90001",

@@ -14,6 +14,16 @@ const DEFAULT_DEPT_ID = process.env.DEFAULT_DEPT_ID;
 const ENABLE_DEV_BOOTSTRAP = process.env.NODE_ENV !== "production" && process.env.ENABLE_DEV_BOOTSTRAP === "true";
 const DEV_OWNER_PASSWORD = process.env.AUTH_DEV_OWNER_PASSWORD;
 const WEAK_PASSWORDS = new Set(["admin123", "admin123!", "password", "password123", "qwerty123"]);
+const OWNER_DEFAULT_SCOPES = [
+  "workspace:chat",
+  "user:create",
+  "user:read",
+  "user:update",
+  "user:delete",
+  "role:read",
+  "dept:read",
+  "audit:read",
+];
 
 type ProvisionInput = {
   tenantId: string;
@@ -99,7 +109,16 @@ function createRuntime(): AuthRuntime {
       throw new Error("AUTH_DEV_OWNER_PASSWORD must include upper/lower/number/symbol and be at least 14 chars.");
     }
     const exists = await repo.findByEmail("owner@agenticx.local");
-    if (exists) return;
+    if (exists) {
+      // Dev runtime may keep an old in-memory user across HMR; ensure owner can use chat.
+      if (!exists.scopes.includes("workspace:chat")) {
+        await repo.upsert({
+          ...exists,
+          scopes: Array.from(new Set([...exists.scopes, "workspace:chat"])),
+        });
+      }
+      return;
+    }
     const passwordHash = await hashPassword(DEV_OWNER_PASSWORD);
     await repo.upsert({
       id: "01J00000000000000000000004",
@@ -111,7 +130,7 @@ function createRuntime(): AuthRuntime {
       status: "active",
       failedLoginCount: 0,
       lockedUntil: null,
-      scopes: ["user:create", "user:read", "user:update", "user:delete", "role:read", "dept:read", "audit:read"],
+      scopes: OWNER_DEFAULT_SCOPES,
     });
   })();
 
@@ -123,9 +142,20 @@ function createRuntime(): AuthRuntime {
   };
 }
 
+async function ensureDevOwnerChatScope(repo: SharedAuthUserRepository): Promise<void> {
+  if (!ENABLE_DEV_BOOTSTRAP) return;
+  const owner = await repo.findByEmail("owner@agenticx.local");
+  if (!owner || owner.scopes.includes("workspace:chat")) return;
+  await repo.upsert({
+    ...owner,
+    scopes: Array.from(new Set([...owner.scopes, "workspace:chat"])),
+  });
+}
+
 async function getRuntime(): Promise<AuthRuntime> {
   globalThis.__agenticxWebPortalAuthRuntime ??= createRuntime();
   await globalThis.__agenticxWebPortalAuthRuntime.bootstrapPromise;
+  await ensureDevOwnerChatScope(globalThis.__agenticxWebPortalAuthRuntime.repo);
   return globalThis.__agenticxWebPortalAuthRuntime;
 }
 

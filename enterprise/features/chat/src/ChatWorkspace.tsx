@@ -17,6 +17,7 @@ export function ChatWorkspace({ brand, features, rulePacks = [], client, slots }
     activeModel,
     errorMessage,
     bootstrap,
+    switchSession,
     switchModel,
     sendMessage,
     cancel,
@@ -25,10 +26,15 @@ export function ChatWorkspace({ brand, features, rulePacks = [], client, slots }
   const [draft, setDraft] = React.useState("");
 
   React.useEffect(() => {
-    if (!activeSessionId) {
-      bootstrap({ defaultModel: DEFAULT_MODELS[0] });
-    }
-  }, [activeSessionId, bootstrap]);
+    if (sessions.length > 0) return;
+    if (activeSessionId) return;
+    bootstrap({ defaultModel: DEFAULT_MODELS[0] });
+  }, [activeSessionId, sessions.length, bootstrap]);
+
+  const visibleMessages = React.useMemo(() => {
+    if (!activeSessionId) return [];
+    return messages.filter((message) => message.session_id === activeSessionId);
+  }, [messages, activeSessionId]);
 
   const modelOptions = React.useMemo(() => {
     const enabledWebSearch = features["chat.web_search"] ?? true;
@@ -50,7 +56,22 @@ export function ChatWorkspace({ brand, features, rulePacks = [], client, slots }
           <div className="space-y-3">
             <h3 className="text-sm font-semibold">Sessions</h3>
             {sessions.map((session) => (
-              <Card key={session.id} className={session.id === activeSessionId ? "border-[var(--ui-color-primary)]" : ""}>
+              <Card
+                key={session.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => switchSession(session.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    switchSession(session.id);
+                  }
+                }}
+                className={[
+                  session.id === activeSessionId ? "border-[var(--ui-color-primary)]" : "",
+                  "cursor-pointer transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/50",
+                ].join(" ")}
+              >
                 <CardHeader className="p-3">
                   <CardTitle className="text-sm">{session.title}</CardTitle>
                 </CardHeader>
@@ -77,7 +98,7 @@ export function ChatWorkspace({ brand, features, rulePacks = [], client, slots }
         )}
 
         <div className="flex-1 px-4 py-3">
-          <MessageList messages={messages} />
+          <MessageList messages={visibleMessages} />
         </div>
 
         <footer className="border-t border-zinc-200 p-4 dark:border-zinc-800">

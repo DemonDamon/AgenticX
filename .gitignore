@@ -101,3 +101,4 @@ task_plan.md
 **/.playwright-state/
 **/out/
 enterprise/apps/gateway/.runtime/
+enterprise/.runtime/
