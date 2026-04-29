@@ -90,19 +90,30 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
   const t = usePortalCopy();
   const { locale, setLocale } = useLocale();
   const { resolved: resolvedTheme, theme, setTheme, toggle: toggleTheme } = useUiTheme();
-  const { bootstrap } = useChatStore();
+  const sessions = useChatStore((s) => s.sessions);
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const activeModel = useChatStore((s) => s.activeModel);
+  const createSession = useChatStore((s) => s.createSession);
+  const switchSession = useChatStore((s) => s.switchSession);
+  const renameSessionInStore = useChatStore((s) => s.renameSession);
+  const deleteSessionInStore = useChatStore((s) => s.deleteSession);
+
+  const history = React.useMemo<HistorySession[]>(
+    () =>
+      [...sessions]
+        .map((session) => ({
+          id: session.id,
+          title: session.title,
+          updatedAt: new Date(session.updated_at).getTime(),
+        }))
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+    [sessions],
+  );
 
   const [collapsed, setCollapsed] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [deepResearch, setDeepResearch] = React.useState(false);
   const [panelMode, setPanelMode] = React.useState<PanelMode>("chat");
-  const [activeSessionId, setActiveSessionId] = React.useState<string | null>("session_1");
-  const [history, setHistory] = React.useState<HistorySession[]>([
-    { id: "session_1", title: "欢迎使用 AgenticX", updatedAt: Date.now() - 60 * 1000 },
-    { id: "session_2", title: "Policy review draft", updatedAt: Date.now() - 3 * 3600 * 1000 },
-    { id: "session_3", title: "合规报告重点提取", updatedAt: Date.now() - 2 * 24 * 3600 * 1000 },
-    { id: "session_4", title: "Q3 数据分析对齐", updatedAt: Date.now() - 5 * 24 * 3600 * 1000 },
-  ]);
 
   React.useEffect(() => {
     try {
@@ -128,38 +139,30 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
   }, []);
 
   const onNewChat = React.useCallback(() => {
-    bootstrap({ defaultModel: "deepseek-chat" });
-    const next: HistorySession = {
-      id: `session_${Date.now()}`,
-      title: t.newChat,
-      updatedAt: Date.now(),
-    };
-    setHistory((prev) => [next, ...prev].slice(0, 30));
-    setActiveSessionId(next.id);
+    createSession({ defaultModel: activeModel || "deepseek-chat", title: t.newChat });
     setPanelMode("chat");
     setMobileOpen(false);
-  }, [bootstrap, t.newChat]);
+  }, [createSession, activeModel, t.newChat]);
 
   const onSelectSession = React.useCallback((id: string) => {
-    setActiveSessionId(id);
+    switchSession(id);
     setPanelMode("chat");
     setMobileOpen(false);
-  }, []);
+  }, [switchSession]);
 
   const onRenameSession = React.useCallback((id: string) => {
     const current = history.find((item) => item.id === id);
     const next = window.prompt("重命名会话", current?.title ?? "");
     if (!next) return;
-    setHistory((prev) => prev.map((item) => (item.id === id ? { ...item, title: next } : item)));
-  }, [history]);
+    renameSessionInStore(id, next);
+  }, [history, renameSessionInStore]);
 
   const onDeleteSession = React.useCallback(
     (id: string) => {
       if (!window.confirm("删除这条会话？")) return;
-      setHistory((prev) => prev.filter((item) => item.id !== id));
-      if (activeSessionId === id) setActiveSessionId(null);
+      deleteSessionInStore(id);
     },
-    [activeSessionId]
+    [deleteSessionInStore]
   );
 
   const onSignOut = React.useCallback(async () => {

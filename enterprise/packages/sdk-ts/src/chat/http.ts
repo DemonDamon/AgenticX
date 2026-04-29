@@ -122,7 +122,40 @@ export class HttpChatClient implements ChatClient {
           }
           const chunk = JSON.parse(data) as {
             choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
+            agenticx_usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+            usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
           };
+
+          // 自定义 usage 事件（gateway 真调流末追加），不算 delta
+          if (chunk.agenticx_usage) {
+            yield {
+              requestId,
+              done: false,
+              usage: {
+                inputTokens: chunk.agenticx_usage.input_tokens ?? 0,
+                outputTokens: chunk.agenticx_usage.output_tokens ?? 0,
+                totalTokens:
+                  chunk.agenticx_usage.total_tokens ??
+                  (chunk.agenticx_usage.input_tokens ?? 0) + (chunk.agenticx_usage.output_tokens ?? 0),
+              },
+            };
+            continue;
+          }
+          // 兼容部分上游在 chunk 上直接带标准 usage
+          if (chunk.usage) {
+            yield {
+              requestId,
+              done: false,
+              usage: {
+                inputTokens: chunk.usage.prompt_tokens ?? 0,
+                outputTokens: chunk.usage.completion_tokens ?? 0,
+                totalTokens:
+                  chunk.usage.total_tokens ??
+                  (chunk.usage.prompt_tokens ?? 0) + (chunk.usage.completion_tokens ?? 0),
+              },
+            };
+          }
+
           const delta = chunk.choices?.[0]?.delta?.content;
           const finished = chunk.choices?.[0]?.finish_reason === "stop";
           if (delta) {

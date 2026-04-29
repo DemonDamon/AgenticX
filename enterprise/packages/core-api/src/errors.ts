@@ -18,6 +18,9 @@ export function isPolicyErrorCode(code: string | undefined | null): boolean {
 }
 
 export function toComplianceMessage(code: string | undefined, fallback: string): string {
+  if (code === BUSINESS_ERROR_CODES.FORBIDDEN) {
+    return "当前账号未开通聊天权限（workspace:chat）。请重新登录，或联系管理员为账号分配聊天权限。";
+  }
   if (!isPolicyErrorCode(code)) return fallback;
   if (code === POLICY_ERROR_CODES.REQUEST_BLOCKED) {
     return "请求触发合规策略，已被网关拦截。请调整输入后重试。";

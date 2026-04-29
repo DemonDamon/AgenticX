@@ -33,7 +33,25 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = await request.text();
+  const rawBody = await request.text();
+  let providerHint = "";
+  let forwardBody = rawBody;
+  // portal 把模型 id 编码为 "<provider>/<model>"；admin 配置好的 provider 与上游 endpoint 一一对应。
+  // gateway 用 model 字段查表，所以这里把 provider 拆出来放请求头，body.model 仅保留模型名。
+  try {
+    const parsed = JSON.parse(rawBody) as { model?: string };
+    if (typeof parsed.model === "string" && parsed.model.includes("/")) {
+      const [providerId, ...rest] = parsed.model.split("/");
+      const modelName = rest.join("/");
+      if (providerId && modelName) {
+        providerHint = providerId;
+        forwardBody = JSON.stringify({ ...parsed, model: modelName });
+      }
+    }
+  } catch {
+    // body 不是 JSON 时维持原样转发
+  }
+
   const upstream = await fetch(GATEWAY_COMPLETIONS_URL, {
     method: "POST",
     headers: {
@@ -44,8 +62,9 @@ export async function POST(request: Request) {
       "x-dept-id": session.deptId ?? "",
       "x-user-email": session.email,
       "x-session-id": session.sessionId,
+      ...(providerHint ? { "x-agenticx-provider": providerHint } : {}),
     },
-    body,
+    body: forwardBody,
   });
 
   if (!upstream.ok) {

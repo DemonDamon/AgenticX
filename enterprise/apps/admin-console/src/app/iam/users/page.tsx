@@ -43,7 +43,7 @@ import {
   toast,
 } from "@agenticx/ui";
 import type { ColumnDef } from "@tanstack/react-table";
-import { MoreHorizontal, Pencil, Plus, RefreshCcw, ShieldCheck, ShieldX, Trash2, UserPlus, Users } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, RefreshCcw, ShieldCheck, ShieldX, Trash2, UserPlus, Users, Sparkles, Check } from "lucide-react";
 
 type Status = "active" | "disabled" | "locked";
 
@@ -77,6 +77,14 @@ const STATUS_META: Record<Status, { label: string; variant: "success" | "warning
   locked: { label: "锁定", variant: "destructive" },
 };
 
+interface ModelOption {
+  id: string;
+  provider: string;
+  providerLabel: string;
+  model: string;
+  label: string;
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,6 +93,9 @@ export default function UsersPage() {
   const [selected, setSelected] = useState<AdminUser | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+  const [userModels, setUserModels] = useState<string[]>([]);
+  const [savingModels, setSavingModels] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -110,6 +121,94 @@ export default function UsersPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 并行加载所有可分配的模型（来自管理员配置）
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/admin/providers", { cache: "no-store" });
+        const json = (await res.json()) as {
+          data?: {
+            providers: Array<{
+              id: string;
+              displayName: string;
+              enabled: boolean;
+              apiKeyConfigured: boolean;
+              models: Array<{ name: string; label: string; enabled: boolean }>;
+            }>;
+          };
+        };
+        if (!alive || !json.data) return;
+        const opts: ModelOption[] = [];
+        for (const p of json.data.providers) {
+          if (!p.enabled) continue;
+          for (const m of p.models) {
+            if (!m.enabled) continue;
+            opts.push({
+              id: `${p.id}/${m.name}`,
+              provider: p.id,
+              providerLabel: p.displayName,
+              model: m.name,
+              label: m.label,
+            });
+          }
+        }
+        setModelOptions(opts);
+      } catch {
+        // 静默：模型分配仅是用户详情的子区域，加载失败不影响主页
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // 选中某用户时拉取其当前的可见模型
+  useEffect(() => {
+    if (!selected) {
+      setUserModels([]);
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/admin/users/${selected.id}/models`, { cache: "no-store" });
+        if (!res.ok) return;
+        const json = (await res.json()) as { data?: { modelIds: string[] } };
+        if (alive && json.data) setUserModels(json.data.modelIds);
+      } catch {
+        // 静默
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [selected?.id]);
+
+  const handleToggleUserModel = async (modelId: string) => {
+    if (!selected) return;
+    const next = userModels.includes(modelId)
+      ? userModels.filter((m) => m !== modelId)
+      : [...userModels, modelId];
+    setUserModels(next);
+    setSavingModels(true);
+    try {
+      const res = await fetch(`/api/admin/users/${selected.id}/models`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ modelIds: next }),
+      });
+      const json = (await res.json()) as { data?: { modelIds: string[] }; message?: string };
+      if (!res.ok || !json.data) {
+        toast.error(json.message ?? "保存失败");
+        return;
+      }
+      setUserModels(json.data.modelIds);
+    } finally {
+      setSavingModels(false);
+    }
+  };
 
   const handleCreate = async (input: { email: string; displayName: string; status: Status; deptId: string }) => {
     const res = await fetch("/api/admin/users", {
@@ -436,6 +535,61 @@ export default function UsersPage() {
                   label="更新时间"
                   value={<span className="font-mono text-xs">{new Date(selected.updatedAt).toLocaleString("zh-CN")}</span>}
                 />
+
+                <div className="space-y-2 rounded-lg border border-border p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-1.5 text-sm font-semibold">
+                        <Sparkles className="h-3.5 w-3.5 text-primary" />
+                        可见模型分配
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        勾选后该用户登录前台仅能看到这些模型；未勾选时无可用模型
+                      </div>
+                    </div>
+                    <Badge variant="soft" className="text-[10px]">
+                      已选 {userModels.length} / 可选 {modelOptions.length}
+                    </Badge>
+                  </div>
+                  {modelOptions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      尚无可分配模型，请先到「平台配置 · 模型服务」启用厂商与模型。
+                    </p>
+                  ) : (
+                    <div className="grid gap-1.5 sm:grid-cols-2">
+                      {modelOptions.map((opt) => {
+                        const checked = userModels.includes(opt.id);
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => void handleToggleUserModel(opt.id)}
+                            disabled={savingModels}
+                            className={[
+                              "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors",
+                              checked
+                                ? "border-primary bg-primary-soft/50 text-foreground"
+                                : "border-border bg-surface-card hover:bg-muted",
+                            ].join(" ")}
+                          >
+                            <Check
+                              className={[
+                                "h-3.5 w-3.5 shrink-0",
+                                checked ? "text-primary" : "opacity-0",
+                              ].join(" ")}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate font-medium">{opt.label}</div>
+                              <div className="truncate text-[10px] text-muted-foreground">
+                                {opt.providerLabel} · <span className="font-mono">{opt.model}</span>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex gap-2 border-t border-border pt-3">

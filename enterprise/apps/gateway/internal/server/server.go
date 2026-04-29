@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rsa"
 	"encoding/hex"
 	"encoding/json"
@@ -19,6 +20,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/provider"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
+	"github.com/agenticx/enterprise/gateway/internal/runtimeconfig"
 	policyengine "github.com/agenticx/enterprise/policy-engine"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -27,13 +29,14 @@ import (
 )
 
 type Server struct {
-	cfg      config.Config
-	logger   *slog.Logger
-	provider provider.ChatProvider
-	decider  *routing.Decider
-	policy   *policyengine.Engine
-	audit    *audit.FileWriter
-	metering *metering.Reporter
+	cfg          config.Config
+	logger       *slog.Logger
+	provider     provider.ChatProvider
+	decider      *routing.Decider
+	policy       *policyengine.Engine
+	audit        *audit.FileWriter
+	metering     metering.Sink
+	adminLoader  *runtimeconfig.Loader
 }
 
 var (
@@ -51,23 +54,42 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build policy engine: %w", err)
 	}
-	dbURL, err := databaseURL()
-	if err != nil {
-		return nil, err
-	}
-	meteringReporter, err := metering.NewReporter(dbURL, logger)
-	if err != nil {
-		return nil, fmt.Errorf("init metering reporter: %w", err)
+
+	// metering：开发态可选 PG，未配 DATABASE_URL 时降级到本地 jsonl，
+	// 让前台 token chip 与 admin 看用量都能继续工作而不必启 PG。
+	dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	var sink metering.Sink
+	if dbURL != "" {
+		reporter, err := metering.NewReporter(dbURL, logger)
+		if err != nil {
+			return nil, fmt.Errorf("init metering reporter: %w", err)
+		}
+		sink = reporter
+	} else {
+		path := strings.TrimSpace(os.Getenv("GATEWAY_USAGE_LOG"))
+		if path == "" {
+			path = "./.runtime/usage.jsonl"
+		}
+		fileSink, err := metering.NewFileSink(path, logger)
+		if err != nil {
+			return nil, fmt.Errorf("init metering file sink: %w", err)
+		}
+		sink = fileSink
+		logger.Info("metering using file sink", "path", path)
 	}
 
+	adminLoader := runtimeconfig.New(logger)
+	adminLoader.Start(context.Background())
+
 	return &Server{
-		cfg:      cfg,
-		logger:   logger,
-		provider: provider.NewOpenAICompatibleProvider(),
-		decider:  routing.NewDecider(cfg),
-		policy:   engine,
-		audit:    audit.NewFileWriter(cfg.AuditDir),
-		metering: meteringReporter,
+		cfg:         cfg,
+		logger:      logger,
+		provider:    provider.NewOpenAICompatibleProvider(),
+		decider:     routing.NewDeciderWithAdmin(cfg, adminLoader),
+		policy:      engine,
+		audit:       audit.NewFileWriter(cfg.AuditDir),
+		metering:    sink,
+		adminLoader: adminLoader,
 	}, nil
 }
 
@@ -104,7 +126,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !hasScope(identity.Scopes, "workspace:chat") {
-		writeAPIError(w, openai.Unauthorized("missing workspace:chat scope"))
+		writeAPIError(w, openai.Forbidden("missing workspace:chat scope"))
 		return
 	}
 
@@ -248,7 +270,16 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, openai.Internal("audit write failed"))
 		return
 	}
-	s.reportUsage(identity, decision, joinMessages(req.Messages), responseContent)
+	// 非流式：上游 usage 命中时直接采用其真实数；缺失时回到字符估算。
+	inputTokens := resp.Usage.PromptTokens
+	outputTokens := resp.Usage.CompletionTokens
+	if inputTokens == 0 {
+		inputTokens = estimateTextTokens(joinMessages(req.Messages))
+	}
+	if outputTokens == 0 {
+		outputTokens = estimateTextTokens(responseContent)
+	}
+	s.reportUsage(identity, decision, inputTokens, outputTokens)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -328,7 +359,21 @@ func (s *Server) handleStream(
 		writeStreamError(w, flusher, "audit write failed")
 		return
 	}
-	s.reportUsage(identity, decision, inputText, responseText)
+	inputTokens := estimateTextTokens(inputText)
+	outputTokens := estimateTextTokens(responseText)
+	s.reportUsage(identity, decision, inputTokens, outputTokens)
+
+	usagePayload, _ := json.Marshal(map[string]any{
+		"agenticx_usage": map[string]any{
+			"input_tokens":  inputTokens,
+			"output_tokens": outputTokens,
+			"total_tokens":  inputTokens + outputTokens,
+			"provider":      decision.Provider,
+			"model":         decision.Model,
+		},
+	})
+	_, _ = w.Write([]byte("data: " + string(usagePayload) + "\n\n"))
+	flusher.Flush()
 
 	_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	flusher.Flush()
@@ -512,9 +557,7 @@ func (s *Server) writeAuditEvent(event audit.Event) error {
 	return nil
 }
 
-func (s *Server) reportUsage(identity requestIdentity, decision routing.Decision, prompt, response string) {
-	inputTokens := estimateTextTokens(prompt)
-	outputTokens := estimateTextTokens(response)
+func (s *Server) reportUsage(identity requestIdentity, decision routing.Decision, inputTokens, outputTokens int) {
 	total := inputTokens + outputTokens
 	s.metering.ReportAsync(metering.UsageRecord{
 		ID:           makeID("usage"),
@@ -532,6 +575,7 @@ func (s *Server) reportUsage(identity requestIdentity, decision routing.Decision
 	})
 }
 
+// databaseURL 已在 New() 中内联读取（允许为空时降级 file sink），保留此 helper 仅为后续 admin 状态接口预留。
 func databaseURL() (string, error) {
 	if value := strings.TrimSpace(os.Getenv("DATABASE_URL")); value != "" {
 		return value, nil

@@ -14,10 +14,17 @@ export type ChatRequest = {
   stream?: boolean;
 };
 
+export type ChatUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
 export type ChatChunk = {
   requestId: string;
   delta?: string;
   done: boolean;
+  usage?: ChatUsage;
   error?: {
     code: string;
     message: string;
