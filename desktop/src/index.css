@@ -1,5 +1,6 @@
 @import "./styles/base.css";
 @import "./styles/animations.css";
+@import "./styles/chat-prism-themes.css";
 
 @tailwind base;
 @tailwind components;

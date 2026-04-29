@@ -1,11 +1,12 @@
 import type { Components } from "react-markdown";
 import type { Element as HastElement, ElementContent } from "hast";
-import type { ReactElement, ReactNode } from "react";
+import type { HTMLAttributes, ReactElement, ReactNode } from "react";
 import { Children, isValidElement } from "react";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { MermaidBlock } from "./MermaidBlock";
+import { highlightChatCode } from "./highlight-chat-code";
 
 const MERMAID_LANG = new Set(["mermaid", "mmd"]);
 /** 无语言或通用代码块：仅当正文明显为 Mermaid 时才接管 */
@@ -83,6 +84,22 @@ function extractMermaidFromPreChildren(children: ReactNode): string | null {
   return text;
 }
 
+function codeElementFromPreHast(pre: HastElement): HastElement | undefined {
+  return pre.children?.find(
+    (c): c is HastElement =>
+      typeof c === "object" &&
+      c !== null &&
+      "type" in c &&
+      (c as HastElement).type === "element" &&
+      (c as HastElement).tagName === "code",
+  );
+}
+
+function classNameFromHastProperty(cls: unknown): string | undefined {
+  if (cls == null) return undefined;
+  return Array.isArray(cls) ? cls.join(" ") : String(cls);
+}
+
 function normalizeLatexMathDelimitersInText(text: string): string {
   let next = text;
   // Convert LaTeX delimiters to remark-math syntax.
@@ -113,13 +130,34 @@ export const chatRehypePlugins = [rehypeKatex];
 
 /** Shared ReactMarkdown `components` map (GFM + Mermaid fenced blocks). */
 export const chatMarkdownComponents: Partial<Components> = {
-  pre({ children, node, ...rest }) {
+  pre({ children, node, className, ...rest }) {
     const fromHast = extractMermaidFromHastPre(node as HastElement | undefined);
     const mermaidSrc = fromHast ?? extractMermaidFromPreChildren(children);
     if (mermaidSrc !== null) {
       return <MermaidBlock code={mermaidSrc} />;
     }
-    return <pre {...rest}>{children}</pre>;
+    const preHast = node as HastElement | undefined;
+    if (preHast?.tagName === "pre") {
+      const codeEl = codeElementFromPreHast(preHast);
+      if (codeEl) {
+        const lang = languageTokenFromHastClass(codeEl.properties?.className);
+        const text = hastTextContent(codeEl).replace(/\n$/, "");
+        const html = highlightChatCode(text, lang);
+        const codeCls = classNameFromHastProperty(codeEl.properties?.className);
+        const wrapClass = ["agx-chat-prism", className].filter(Boolean).join(" ");
+        return (
+          <pre {...(rest as HTMLAttributes<HTMLPreElement>)} className={wrapClass}>
+            <code className={codeCls} dangerouslySetInnerHTML={{ __html: html }} />
+          </pre>
+        );
+      }
+    }
+    const wrapClass = ["agx-chat-prism", className].filter(Boolean).join(" ");
+    return (
+      <pre {...(rest as HTMLAttributes<HTMLPreElement>)} className={wrapClass}>
+        {children}
+      </pre>
+    );
   },
   table({ children, ...rest }) {
     return (
