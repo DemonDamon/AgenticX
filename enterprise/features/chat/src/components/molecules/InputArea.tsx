@@ -44,13 +44,14 @@ export function InputArea({
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const canSend = status !== "sending" && status !== "streaming" && value.trim().length > 0;
   const canCancel = status === "sending" || status === "streaming";
+  const minTextareaHeight = appearance === "portal" ? 48 : 40;
 
   React.useEffect(() => {
     const element = textareaRef.current;
     if (!element) return;
     element.style.height = "auto";
-    element.style.height = `${Math.min(Math.max(element.scrollHeight, 40), 260)}px`;
-  }, [value]);
+    element.style.height = `${Math.min(Math.max(element.scrollHeight, minTextareaHeight), 260)}px`;
+  }, [value, minTextareaHeight]);
 
   const appearanceClassName =
     appearance === "portal"
@@ -70,7 +71,7 @@ export function InputArea({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         rows={1}
-        className="min-h-[40px] w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pb-2 pt-2.5 text-sm leading-6 text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+        className={`w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pb-2 pt-2.5 text-sm leading-6 text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${appearance === "portal" ? "min-h-[48px]" : "min-h-[40px]"}`}
         placeholder="发送消息给 Machi..."
         onKeyDown={(event) => {
           if (event.key !== "Enter") return;
