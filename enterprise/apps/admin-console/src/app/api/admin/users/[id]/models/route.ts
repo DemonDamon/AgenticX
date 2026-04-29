@@ -21,7 +21,8 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
   const auth = await requireAdminSession();
   if (!auth.ok) return auth.response;
   const { id } = await context.params;
-  if (!getUser(id)) {
+  const user = getUser(id);
+  if (!user) {
     return NextResponse.json({ code: "40400", message: "user not found" }, { status: 404 });
   }
   try {
@@ -29,6 +30,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     const raw = Array.isArray(body.modelIds) ? body.modelIds : [];
     const modelIds = raw.filter((x): x is string => typeof x === "string");
     const saved = setUserModels(id, modelIds);
+    setUserModels(`email:${user.email.toLowerCase()}`, modelIds);
     return NextResponse.json({ code: "00000", message: "ok", data: { userId: id, modelIds: saved } });
   } catch (error) {
     return NextResponse.json(
