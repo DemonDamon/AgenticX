@@ -119,9 +119,6 @@ export class LocalAuditStore implements AuditStore {
   public async query(actor: AuditActor, input: AuditQueryInput): Promise<AuditQueryResult> {
     const events = await this.readAllEvents();
     const chainValid = this.checkChain(events);
-    if (!chainValid) {
-      throw new Error("audit checksum chain verification failed");
-    }
     const start = input.start ? Date.parse(input.start) : Number.NEGATIVE_INFINITY;
     const end = input.end ? Date.parse(input.end) : Number.POSITIVE_INFINITY;
 
