@@ -95,6 +95,46 @@ _MULTISTEP_STRONG_MARKERS_CN: tuple[str, ...] = (
 )
 _MULTISTEP_MIN_LENGTH_FOR_WEAK = 20  # Weak markers require some prose around them.
 
+# Open-call markers — phrases where the user is broadcasting a question to the
+# group rather than addressing one specific role. When matched and no member is
+# explicitly @-mentioned, we prefer Machi (the meta leader / project manager)
+# to answer first and optionally point to one relevant member, instead of
+# silently picking a single member via single-target route_to.
+_OPEN_CALL_MARKERS_CN: tuple[str, ...] = (
+    "群里谁",
+    "谁能",
+    "谁来",
+    "谁知道",
+    "哪位",
+    "有人能",
+    "有人知道",
+    "请问群里",
+    "在线的兄弟",
+    "在线的同学",
+)
+
+
+def _is_open_call_question(user_input: str) -> bool:
+    """Heuristic detector for "broadcast to group" style questions.
+
+    Examples that should match (return True):
+        - "群里谁能一句话说下 X 主要干啥的？"
+        - "哪位帮我看下 ..."
+        - "有人能讲讲 Y 吗？"
+
+    Examples that should NOT match (return False):
+        - "@小滴 帮我看下 X"
+        - "machi 你觉得 X 怎么样"
+        - "X 是什么？"
+    """
+    text = (user_input or "").strip()
+    if not text:
+        return False
+    for marker in _OPEN_CALL_MARKERS_CN:
+        if marker in text:
+            return True
+    return False
+
 
 def _is_complex_multistep_task(user_input: str) -> bool:
     """Heuristic detector for complex multi-step tasks.
@@ -394,9 +434,33 @@ class GroupChatRouter:
             return "开始处理任务..."
         if et == EventType.TOOL_CALL.value:
             tool_name = str(data.get("name", "") or data.get("tool_name", "") or "tool")
+            raw_args = data.get("arguments", data.get("args", {}))
+            if isinstance(raw_args, str):
+                args_preview = raw_args.strip()
+            else:
+                try:
+                    args_preview = json.dumps(raw_args, ensure_ascii=False)
+                except Exception:
+                    args_preview = str(raw_args)
+            if len(args_preview) > 180:
+                args_preview = args_preview[:177] + "..."
+            if args_preview and args_preview not in {"{}", "null", "None"}:
+                return f"正在调用工具：{tool_name} {args_preview}"
             return f"正在调用工具：{tool_name}"
         if et == EventType.TOOL_RESULT.value:
             tool_name = str(data.get("name", "") or data.get("tool_name", "") or "tool")
+            raw_result = data.get("result", "")
+            if isinstance(raw_result, str):
+                result_preview = raw_result.strip()
+            else:
+                try:
+                    result_preview = json.dumps(raw_result, ensure_ascii=False)
+                except Exception:
+                    result_preview = str(raw_result)
+            if len(result_preview) > 220:
+                result_preview = result_preview[:217] + "..."
+            if result_preview and result_preview not in {"{}", "null", "None"}:
+                return f"工具已完成：{tool_name} · {result_preview}"
             return f"工具已完成：{tool_name}"
         if et == EventType.CONFIRM_REQUIRED.value:
             question = str(data.get("question", "") or "").strip()
@@ -1009,6 +1073,51 @@ class GroupChatRouter:
             ):
                 yield reply
             return
+        # ── Open-call broadcast questions go to Machi first ─────────────────
+        # When the user is broadcasting to the group ("群里谁能…", "哪位…")
+        # without naming anyone, prefer the meta leader (Machi) as the
+        # primary responder and let her optionally point to one relevant
+        # member at the end. This avoids silently funnelling every open
+        # question to a single member via single-target route_to.
+        if (
+            not explicit_member_mentions
+            and META_LEADER_AGENT_ID not in mention_set
+            and len(valid_members) >= 1
+            and _is_open_call_question(user_input)
+        ):
+            context.clear_active_thread()
+            yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
+            if await self._should_stop(should_stop):
+                return
+            pm = await self._run_meta_project_manager_reply(
+                base_session=base_session,
+                context=context,
+                group_name=group_name,
+                user_input=user_input,
+                quoted_content=quoted_content,
+                extra_instruction=(
+                    "用户在群里发起的是开放性提问（『群里谁能…』『哪位…』），请你以项目经理身份"
+                    "**直接给出一句到三句话的核心答案**；如确实存在某位成员更适合补充细节，"
+                    "可在结尾追加一行『需要 XX 的细节可以问 @某某』，不要把主答交给成员。"
+                ),
+                user_display_name=user_display_name,
+            )
+            yield pm
+            self._record_turn_response(responded_this_turn, pm)
+            async for fu in self._emit_mention_follow_ups(
+                reply=pm,
+                group_avatar_ids=group_avatar_ids,
+                base_session=base_session,
+                context=context,
+                group_id=group_id,
+                group_name=group_name,
+                should_stop=should_stop,
+                user_display_name=user_display_name,
+                hops=_get_mention_hops(),
+                responded_this_turn=responded_this_turn,
+            ):
+                yield fu
+            return
         if META_LEADER_AGENT_ID in mention_set:
             context.clear_active_thread()
             yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
@@ -1356,11 +1465,9 @@ class GroupChatRouter:
         from agenticx.collaboration.workforce.events import WorkforceEventBus, WorkforceEvent, WorkforceAction
         from agenticx.collaboration.workforce.coordinator import CoordinatorAgent
         from agenticx.collaboration.workforce.task_planner import TaskPlannerAgent
-        from agenticx.collaboration.workforce.worker import SingleAgentWorker
         from agenticx.collaboration.task_lock import get_or_create_task_lock
         from agenticx.core.agent import Agent
         from agenticx.core.task import Task
-        from agenticx.core.agent_executor import AgentExecutor
 
         provider = getattr(base_session, "provider_name", None)
         model = getattr(base_session, "model_name", None)
@@ -1392,8 +1499,6 @@ class GroupChatRouter:
         event_bus.subscribe(_on_event)
 
         # ── 3. Construct planning-layer Agents (lightweight, for decompose/assign) ──
-        exec_ = AgentExecutor(llm_provider=llm, enable_context_compilation=False)
-
         coordinator_agent = Agent(
             name=self._meta_leader_label,
             role="Group Coordinator",
@@ -1448,19 +1553,15 @@ class GroupChatRouter:
             )
             return
 
-        worker_instances = [
-            SingleAgentWorker(agent=wa, executor=exec_)
-            for wa in worker_agents
-        ]
-
         # ── 4. Build WorkforcePattern (planning layer only) ─────────────────
         pattern = WorkforcePattern(
             coordinator_agent=coordinator_agent,
             task_agent=planner_agent,
-            workers=worker_instances,
+            workers=worker_agents,
             llm_provider=llm,
             event_bus=event_bus,
         )
+        worker_instances = pattern.worker_instances
 
         # ── 5. Emit WORKFORCE_STARTED ───────────────────────────────────────
         event_bus.publish(WorkforceEvent(
