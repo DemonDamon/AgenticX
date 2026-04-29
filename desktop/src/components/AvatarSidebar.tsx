@@ -4,6 +4,11 @@ import { useAppStore, type Avatar, type GroupChat } from "../store";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { avatarBgClass, avatarDotColor, groupColorByIndex } from "../utils/avatar-color";
+import {
+  extractUnknownAvatarIdFromError,
+  getGroupSaveErrorMessage,
+  sanitizeGroupAvatarIds,
+} from "../utils/group-editor-utils";
 import { AvatarCreateDialog } from "./AvatarCreateDialog";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
 import { TaskFormPanel } from "./automation/TaskFormPanel";
@@ -1051,7 +1056,6 @@ export function AvatarSidebar() {
             setGroupEditTarget(null);
           }}
           onSaved={() => {
-            setGroupEditTarget(null);
             void refreshGroups();
           }}
         />
@@ -1076,8 +1080,26 @@ function GroupEditorInline({
   const [name, setName] = useState(initialGroup?.name ?? "");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(initialGroup?.avatarIds ?? []));
   const [loading, setLoading] = useState(false);
+  const [saveNotice, setSaveNotice] = useState<{ type: "success" | "error" | "warning"; text: string } | null>(null);
+  const validAvatarIds = useMemo(() => avatars.map((item) => String(item.id ?? "").trim()).filter(Boolean), [avatars]);
+
+  useEffect(() => {
+    if (validAvatarIds.length === 0) return;
+    const current = Array.from(selectedIds);
+    const normalized = sanitizeGroupAvatarIds({
+      requestedIds: current,
+      validAvatarIds,
+    });
+    if (normalized.removedIds.length === 0) return;
+    setSelectedIds(new Set(normalized.avatarIds));
+    setSaveNotice({
+      type: "warning",
+      text: `已自动移除 ${normalized.removedIds.length} 个失效成员，请点击保存同步群成员。`,
+    });
+  }, [selectedIds, validAvatarIds]);
 
   const toggle = (id: string) => {
+    setSaveNotice(null);
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -1087,34 +1109,93 @@ function GroupEditorInline({
   };
 
   const handleSave = async () => {
-    if (!name.trim() || selectedIds.size === 0) return;
+    if (validAvatarIds.length === 0) {
+      setSaveNotice({
+        type: "error",
+        text: "分身列表尚未加载完成，请稍后再保存。",
+      });
+      return;
+    }
+    const normalized = sanitizeGroupAvatarIds({
+      requestedIds: Array.from(selectedIds),
+      validAvatarIds,
+    });
+    if (normalized.removedIds.length > 0) {
+      setSelectedIds(new Set(normalized.avatarIds));
+    }
+    if (!name.trim() || normalized.avatarIds.length === 0) {
+      setSaveNotice({
+        type: "error",
+        text: "请至少选择 1 个有效分身后再保存。",
+      });
+      return;
+    }
     setLoading(true);
+    setSaveNotice(null);
     try {
       if (initialGroup) {
         const result = await window.agenticxDesktop.updateGroup({
           id: initialGroup.id,
           name: name.trim(),
-          avatar_ids: Array.from(selectedIds),
+          avatar_ids: normalized.avatarIds,
           routing: "intelligent",
         });
-        if (result.ok) onSaved();
+        if (result.ok) {
+          onSaved();
+          setSaveNotice({ type: "success", text: "保存成功。" });
+        } else {
+          const staleId = extractUnknownAvatarIdFromError(result.error);
+          if (staleId) {
+            setSelectedIds((prev) => {
+              if (!prev.has(staleId)) return prev;
+              const next = new Set(prev);
+              next.delete(staleId);
+              return next;
+            });
+          }
+          setSaveNotice({
+            type: "error",
+            text: getGroupSaveErrorMessage(result.error),
+          });
+        }
       } else {
         const result = await window.agenticxDesktop.createGroup({
           name: name.trim(),
-          avatar_ids: Array.from(selectedIds),
+          avatar_ids: normalized.avatarIds,
           routing: "intelligent",
         });
-        if (result.ok) onSaved();
+        if (result.ok) {
+          onSaved();
+        } else {
+          const staleId = extractUnknownAvatarIdFromError(result.error);
+          if (staleId) {
+            setSelectedIds((prev) => {
+              if (!prev.has(staleId)) return prev;
+              const next = new Set(prev);
+              next.delete(staleId);
+              return next;
+            });
+          }
+          setSaveNotice({
+            type: "error",
+            text: getGroupSaveErrorMessage(result.error),
+          });
+        }
       }
+    } catch (err) {
+      setSaveNotice({
+        type: "error",
+        text: err instanceof Error ? err.message : "保存失败，请稍后重试。",
+      });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="w-80 rounded-xl border border-border bg-surface-panel p-4 shadow-2xl"
+        className="w-80 max-w-[95vw] rounded-xl border border-border bg-surface-panel p-4 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="mb-3 text-sm font-semibold text-white">{initialGroup ? "编辑群聊" : "新建群聊"}</h3>
@@ -1150,11 +1231,21 @@ function GroupEditorInline({
           ))}
         </div>
 
-        <p className="mb-4 text-[10px] text-text-faint">
-          群聊默认使用「智能对话」：Machi 会持续跟踪上下文并自动分配成员；遇到明显多步任务时，会自动启用 Workforce 编排，无需手动设置策略。
-        </p>
+        {saveNotice ? (
+          <div
+            className={`mb-3 rounded-md border px-2.5 py-2 text-[11px] ${
+              saveNotice.type === "success"
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                : saveNotice.type === "warning"
+                  ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                  : "border-rose-500/40 bg-rose-500/10 text-rose-300"
+            }`}
+          >
+            {saveNotice.text}
+          </div>
+        ) : null}
 
-        <div className="flex items-center justify-between gap-2">
+        <div className="mt-1 flex items-center justify-between gap-2">
           {initialGroup ? (
             <button
               className="rounded-md px-3 py-1.5 text-xs text-rose-400 transition hover:bg-rose-500/10"
