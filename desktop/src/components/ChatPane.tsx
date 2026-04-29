@@ -29,6 +29,10 @@ import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/cl
 import { clipboardPlainTextForPaste } from "../utils/clipboard-plain-text";
 import { isKnownNonVisionChatModel } from "../utils/model-vision";
 import {
+  canStopCurrentRun,
+  shouldInterruptOnResend,
+} from "../utils/streaming-stop-policy";
+import {
   attachmentsFromSessionRow,
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
@@ -2762,6 +2766,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     !isGroupPane &&
     !!streamingSessionId &&
     streamingSessionId === (pane.sessionId || "").trim();
+  // Group chats also have a real streaming run in flight; only the
+  // assistant-text overlay is gated by !isGroupPane (group chats render
+  // per-member typing bubbles instead). The stop button + barge-in resend
+  // judgment must work in both modes.
+  const canInterruptCurrentSession = canStopCurrentRun({
+    streaming,
+    streamingSessionId,
+    currentSessionId: pane.sessionId || "",
+  });
   const streamTextForCurrentSession = isStreamingCurrentSession ? (streamedAssistantText || "") : "";
   /** Mid-turn commit can persist assistant text while SSE keeps streaming the same body — hide __stream__ so we don't show two identical bubbles (store still has correct count). */
   const hideStreamOverlayAsDuplicate = useMemo(() => {
@@ -3231,18 +3244,41 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         return;
       }
     }
-    if (sessionStreamStateRef.current[requestSessionId]?.active) {
-      const { enqueuePaneMessage } = useAppStore.getState();
-      enqueuePaneMessage(pane.id, {
-        id: crypto.randomUUID(),
-        text: messageText,
-        attachments: [...userAttachments],
-        contextFiles: userAttachments.filter((a) => !!a.referenceToken || !!a.sourcePath),
-        timestamp: Date.now(),
-      });
-      setComposerText("");
-      setContextFiles({});
-      return;
+    if (
+      shouldInterruptOnResend({
+        isStreamRunActive: !!sessionStreamStateRef.current[requestSessionId]?.active,
+      })
+    ) {
+      // Barge-in semantics (Cursor / ChatGPT style): when the user sends a
+      // follow-up while the previous round is still streaming, abort the
+      // current run and start a new round. The natural chat history (Q1 +
+      // partial assistant + Q2) is preserved by the SSE finally block which
+      // commits any non-empty partial text before resolving.
+      try {
+        await window.agenticxDesktop.interruptSession?.(requestSessionId);
+      } catch (err) {
+        console.warn("[ChatPane] barge-in interrupt failed:", err);
+      }
+      const prevAbort = sessionAbortControllersRef.current[requestSessionId];
+      if (prevAbort) {
+        try {
+          prevAbort.abort();
+        } catch {
+          // Already aborted.
+        }
+        delete sessionAbortControllersRef.current[requestSessionId];
+      }
+      const prevState = sessionStreamStateRef.current[requestSessionId];
+      if (prevState) {
+        prevState.active = false;
+        prevState.text = "";
+        sessionStreamStateRef.current[requestSessionId] = prevState;
+      }
+      if ((pane.sessionId || "").trim() === requestSessionId) {
+        setStreamedAssistantText("");
+      }
+      setStallState("none");
+      // Fall through: proceed with a normal send below.
     }
 
     const otherPanesWithSameSession = panes.filter(
@@ -4837,7 +4873,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               </div>
             ) : null}
             <div className="agx-pane-composer-actions flex min-w-0 items-center justify-between gap-1 px-2 pb-2 pt-1">
-              <div className="flex min-w-0 items-center gap-0.5">
+              <div className="flex shrink-0 items-center gap-0.5">
                 {focusMode ? (
                   <button
                     type="button"
@@ -4883,16 +4919,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 </button>
                 <NewTopicIconButtons onNewTopic={createNewTopic} />
                 <button
-                  className="flex h-7 items-center gap-1 rounded-lg px-2 text-[12px] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+                  type="button"
+                  className="flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-[12px] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
                   title="更多"
                 >
-                  <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    className="h-3.5 w-3.5 shrink-0"
+                    aria-hidden
+                  >
                     <rect x="3" y="3" width="8" height="8" rx="1.5" />
                     <rect x="13" y="3" width="8" height="8" rx="1.5" />
                     <rect x="3" y="13" width="8" height="8" rx="1.5" />
                     <rect x="13" y="13" width="8" height="8" rx="1.5" />
                   </svg>
-                  <span>更多</span>
+                  <span className="shrink-0">更多</span>
                 </button>
               </div>
               {/* ── Team mode action bar (routing="team" only) ─────────── */}
@@ -4930,7 +4972,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               )}
               <ActionCircleButton
                 hasInput={!!pane.sessionId && (!!input.trim() || readyAttachments.length > 0)}
-                streaming={isStreamingCurrentSession}
+                streaming={canInterruptCurrentSession}
                 recording={recording}
                 onSend={() => {
                   void sendChat(extractComposerText());
