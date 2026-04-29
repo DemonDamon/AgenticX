@@ -335,3 +335,39 @@ def test_list_sessions_excludes_in_memory_sessions_with_empty_chat_history(tmp_p
     listed2 = manager.list_sessions()
     ids2 = {row["session_id"] for row in listed2}
     assert "empty-memory-session" in ids2
+
+
+def test_list_sessions_normalizes_stale_interrupted_state(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    sid = "stale-interrupted-session-id"
+    managed = manager.create(session_id=sid)
+    managed.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "hello"},
+    ]
+    manager.set_execution_state(sid, "interrupted")
+    assert manager.persist(sid) is True
+
+    # No active interrupt request -> listing should not keep stale "interrupted".
+    rows = manager.list_sessions()
+    row = next(r for r in rows if r["session_id"] == sid)
+    assert row["execution_state"] == "idle"
+
+    # Active interrupt request -> keep "interrupted" visible.
+    assert manager.request_interrupt(sid) is True
+    rows = manager.list_sessions()
+    row = next(r for r in rows if r["session_id"] == sid)
+    assert row["execution_state"] == "interrupted"
+
+    # Restarted manager (no in-memory interrupt request) should also normalize stale metadata.
+    fresh = SessionManager()
+    fresh._session_store = store
+    fresh._sessions_root = str(sessions_root)
+    fresh_rows = fresh.list_sessions()
+    fresh_row = next(r for r in fresh_rows if r["session_id"] == sid)
+    assert fresh_row["execution_state"] == "idle"
