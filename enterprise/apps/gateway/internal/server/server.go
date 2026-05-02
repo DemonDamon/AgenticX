@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"encoding/hex"
@@ -19,6 +20,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/metering"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/provider"
+	"github.com/agenticx/enterprise/gateway/internal/quota"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 	"github.com/agenticx/enterprise/gateway/internal/runtimeconfig"
 	policyengine "github.com/agenticx/enterprise/policy-engine"
@@ -37,6 +39,7 @@ type Server struct {
 	audit        *audit.FileWriter
 	metering     metering.Sink
 	adminLoader  *runtimeconfig.Loader
+	quotaTracker *quota.Tracker
 }
 
 var (
@@ -81,6 +84,15 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	adminLoader := runtimeconfig.New(logger)
 	adminLoader.Start(context.Background())
 
+	quotaCfgPath := strings.TrimSpace(os.Getenv("GATEWAY_QUOTA_CONFIG_FILE"))
+	if quotaCfgPath == "" {
+		quotaCfgPath = quota.DefaultConfigPath()
+	}
+	quotaUsagePath := strings.TrimSpace(os.Getenv("GATEWAY_QUOTA_USAGE_FILE"))
+	if quotaUsagePath == "" {
+		quotaUsagePath = quota.DefaultUsagePath()
+	}
+
 	return &Server{
 		cfg:         cfg,
 		logger:      logger,
@@ -90,6 +102,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		audit:       audit.NewFileWriter(cfg.AuditDir),
 		metering:    sink,
 		adminLoader: adminLoader,
+		quotaTracker: quota.NewTracker(quotaCfgPath, quotaUsagePath),
 	}, nil
 }
 
@@ -102,6 +115,7 @@ func (s *Server) Router() http.Handler {
 
 	r.Get("/healthz", s.handleHealth)
 	r.Post("/v1/chat/completions", s.handleChatCompletions)
+	r.Post("/v1/embeddings", s.handleEmbeddings)
 
 	return r
 }
@@ -181,7 +195,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, openai.Internal("audit write failed"))
 			return
 		}
-		writePolicyError(w, "请求触发合规拦截", reqPolicy.Hits)
+		writePolicyError(w, "90001", "请求触发合规拦截", reqPolicy.Hits)
 		return
 	}
 	if reqPolicy.RedactedText != joinMessages(req.Messages) {
@@ -192,17 +206,45 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 	}
+	estimatedInputTokens := estimateTextTokens(joinMessages(req.Messages))
+	quotaDecision := s.quotaTracker.CheckAndAdd(
+		identity.UserID,
+		identity.DepartmentID,
+		roleFromScopes(identity.Scopes),
+		req.Model,
+		int64(estimatedInputTokens),
+	)
+	if !quotaDecision.Allowed {
+		writeAPIError(w, openai.QuotaExceeded("token quota exceeded"))
+		return
+	}
 
 	if req.Stream {
-		s.handleStream(w, r, req, decision, startedAt, identity)
+		s.handleStream(w, r, req, decision, startedAt, identity, estimatedInputTokens)
 		return
 	}
 
 	resp, err := s.provider.Complete(r.Context(), req, decision)
 	if err != nil {
+		s.rollbackQuotaReservation(identity, estimatedInputTokens)
 		writeAPIError(w, openai.Internal(err.Error()))
 		return
 	}
+	responseContent := ""
+	if len(resp.Choices) > 0 {
+		responseContent = resp.Choices[0].Message.Content
+	}
+	providerInputTokens := resp.Usage.PromptTokens
+	providerOutputTokens := resp.Usage.CompletionTokens
+	if providerInputTokens == 0 {
+		providerInputTokens = estimatedInputTokens
+	}
+	if providerOutputTokens == 0 {
+		providerOutputTokens = estimateTextTokens(responseContent)
+	}
+	s.reportUsage(identity, decision, providerInputTokens, providerOutputTokens)
+	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, providerInputTokens+providerOutputTokens)
+
 	if len(resp.Choices) > 0 {
 		respPolicy := s.policy.Evaluate(resp.Choices[0].Message.Content, "response")
 		if respPolicy.Blocked {
@@ -231,17 +273,14 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 				writeAPIError(w, openai.Internal("audit write failed"))
 				return
 			}
-			writePolicyError(w, "响应触发合规拦截", respPolicy.Hits)
+			writePolicyError(w, "90002", "响应触发合规拦截", respPolicy.Hits)
 			return
 		}
 		if respPolicy.RedactedText != resp.Choices[0].Message.Content {
 			resp.Choices[0].Message.Content = respPolicy.RedactedText
 		}
 	}
-	responseContent := ""
-	if len(resp.Choices) > 0 {
-		responseContent = resp.Choices[0].Message.Content
-	}
+
 	if err := s.writeAuditEvent(audit.Event{
 		ID:           makeID("audit"),
 		TenantID:     identity.TenantID,
@@ -270,16 +309,140 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, openai.Internal("audit write failed"))
 		return
 	}
-	// 非流式：上游 usage 命中时直接采用其真实数；缺失时回到字符估算。
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
+	startedAt := time.Now()
+	identity, err := identityFromRequest(r)
+	if err != nil {
+		writeAPIError(w, openai.Unauthorized("invalid or missing bearer token"))
+		return
+	}
+	if !hasScope(identity.Scopes, "workspace:chat") {
+		writeAPIError(w, openai.Forbidden("missing workspace:chat scope"))
+		return
+	}
+	var payload struct {
+		Model string          `json:"model"`
+		Input json.RawMessage `json:"input"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeAPIError(w, openai.BadRequest("invalid request body"))
+		return
+	}
+	if strings.TrimSpace(payload.Model) == "" {
+		writeAPIError(w, openai.BadRequest("model is required"))
+		return
+	}
+	inputs, err := normalizeEmbeddingInput(payload.Input)
+	if err != nil {
+		writeAPIError(w, openai.BadRequest(err.Error()))
+		return
+	}
+	if len(inputs) == 0 {
+		writeAPIError(w, openai.BadRequest("input is required"))
+		return
+	}
+	req := openai.EmbeddingRequest{
+		Model: payload.Model,
+		Input: inputs,
+	}
+	decision := s.decider.Decide(r, req.Model)
+	sanitizedInputs := make([]string, 0, len(req.Input))
+	hits := make([]policyengine.HitEvent, 0)
+	for _, item := range req.Input {
+		reqPolicy := s.policy.Evaluate(item, "request")
+		if reqPolicy.Blocked {
+			hits = append(hits, reqPolicy.Hits...)
+			continue
+		}
+		sanitizedInputs = append(sanitizedInputs, reqPolicy.RedactedText)
+	}
+	if len(hits) > 0 {
+		joined := strings.Join(req.Input, "\n")
+		if err := s.writeAuditEvent(audit.Event{
+			ID:           makeID("audit"),
+			TenantID:     identity.TenantID,
+			EventTime:    time.Now().UTC().Format(time.RFC3339),
+			EventType:    "policy_hit",
+			UserID:       identity.UserID,
+			UserEmail:    identity.UserEmail,
+			DepartmentID: identity.DepartmentID,
+			SessionID:    identity.SessionID,
+			ClientType:   "web-portal",
+			ClientIP:     r.RemoteAddr,
+			Model:        req.Model,
+			Provider:     decision.Provider,
+			Route:        decision.Route,
+			Digest: &audit.Digest{
+				PromptHash: hashText(joined),
+			},
+			PoliciesHit:  toAuditPolicyHits(hits),
+			LatencyMS:    time.Since(startedAt).Milliseconds(),
+			InputTokens:  estimateTextTokens(joined),
+			OutputTokens: 0,
+			TotalTokens:  estimateTextTokens(joined),
+		}); err != nil {
+			writeAPIError(w, openai.Internal("audit write failed"))
+			return
+		}
+		writePolicyError(w, "90001", "请求触发合规拦截", hits)
+		return
+	}
+	req.Input = sanitizedInputs
+	estimatedInputTokens := estimateTextTokens(strings.Join(req.Input, "\n"))
+	quotaDecision := s.quotaTracker.CheckAndAdd(
+		identity.UserID,
+		identity.DepartmentID,
+		roleFromScopes(identity.Scopes),
+		req.Model,
+		int64(estimatedInputTokens),
+	)
+	if !quotaDecision.Allowed {
+		writeAPIError(w, openai.QuotaExceeded("token quota exceeded"))
+		return
+	}
+	resp, err := s.provider.Embeddings(r.Context(), req, decision)
+	if err != nil {
+		s.rollbackQuotaReservation(identity, estimatedInputTokens)
+		writeAPIError(w, openai.Internal(err.Error()))
+		return
+	}
 	inputTokens := resp.Usage.PromptTokens
-	outputTokens := resp.Usage.CompletionTokens
 	if inputTokens == 0 {
-		inputTokens = estimateTextTokens(joinMessages(req.Messages))
+		inputTokens = estimatedInputTokens
 	}
-	if outputTokens == 0 {
-		outputTokens = estimateTextTokens(responseContent)
+	s.reportUsage(identity, decision, inputTokens, 0)
+	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, inputTokens)
+
+	if err := s.writeAuditEvent(audit.Event{
+		ID:           makeID("audit"),
+		TenantID:     identity.TenantID,
+		EventTime:    time.Now().UTC().Format(time.RFC3339),
+		EventType:    "embedding_call",
+		UserID:       identity.UserID,
+		UserEmail:    identity.UserEmail,
+		DepartmentID: identity.DepartmentID,
+		SessionID:    identity.SessionID,
+		ClientType:   "web-portal",
+		ClientIP:     r.RemoteAddr,
+		Provider:     decision.Provider,
+		Model:        req.Model,
+		Route:        decision.Route,
+		InputTokens:  resp.Usage.PromptTokens,
+		OutputTokens: 0,
+		TotalTokens:  resp.Usage.TotalTokens,
+		LatencyMS:    time.Since(startedAt).Milliseconds(),
+		Digest: &audit.Digest{
+			PromptHash:    hashText(strings.Join(req.Input, "\n")),
+			ResponseHash:  hashText(fmt.Sprintf("%d", len(resp.Data))),
+			PromptSummary: summarize(strings.Join(req.Input, "\n"), 120),
+		},
+	}); err != nil {
+		writeAPIError(w, openai.Internal("audit write failed"))
+		return
 	}
-	s.reportUsage(identity, decision, inputTokens, outputTokens)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -290,6 +453,7 @@ func (s *Server) handleStream(
 	decision routing.Decision,
 	startedAt time.Time,
 	identity requestIdentity,
+	estimatedInputTokens int,
 ) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -303,12 +467,14 @@ func (s *Server) handleStream(
 
 	var responseBuilder strings.Builder
 	inputText := joinMessages(req.Messages)
+	var blockedHits []policyengine.HitEvent
 
 	push := func(chunk openai.StreamChunk) error {
 		if len(chunk.Choices) > 0 {
 			deltaContent := chunk.Choices[0].Delta.Content
 			policyResult := s.policy.Evaluate(deltaContent, "response")
 			if policyResult.Blocked {
+				blockedHits = append(blockedHits, policyResult.Hits...)
 				return fmt.Errorf("policy blocked stream chunk")
 			}
 			chunk.Choices[0].Delta.Content = policyResult.RedactedText
@@ -326,11 +492,47 @@ func (s *Server) handleStream(
 	}
 
 	if err := s.provider.Stream(r.Context(), req, decision, push); err != nil {
-		writeAPIError(w, openai.Internal(err.Error()))
+		if len(blockedHits) > 0 {
+			_ = s.writeAuditEvent(audit.Event{
+				ID:           makeID("audit"),
+				TenantID:     identity.TenantID,
+				EventTime:    time.Now().UTC().Format(time.RFC3339),
+				EventType:    "policy_hit",
+				UserID:       identity.UserID,
+				UserEmail:    identity.UserEmail,
+				DepartmentID: identity.DepartmentID,
+				SessionID:    identity.SessionID,
+				ClientType:   "web-portal",
+				ClientIP:     r.RemoteAddr,
+				Provider:     decision.Provider,
+				Model:        req.Model,
+				Route:        decision.Route,
+				Digest: &audit.Digest{
+					PromptHash:   hashText(inputText),
+					ResponseHash: hashText(responseBuilder.String()),
+				},
+				PoliciesHit: toAuditPolicyHits(blockedHits),
+				LatencyMS:   time.Since(startedAt).Milliseconds(),
+			})
+			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
+			partialOutputTokens := estimateTextTokens(responseBuilder.String())
+			s.reportUsage(identity, decision, 0, partialOutputTokens)
+			s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, partialOutputTokens)
+			return
+		}
+		partialOutputTokens := estimateTextTokens(responseBuilder.String())
+		s.reportUsage(identity, decision, 0, partialOutputTokens)
+		s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, partialOutputTokens)
+		writeStreamError(w, flusher, err.Error())
 		return
 	}
 
 	responseText := responseBuilder.String()
+	inputTokens := estimatedInputTokens
+	outputTokens := estimateTextTokens(responseText)
+	s.reportUsage(identity, decision, inputTokens, outputTokens)
+	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, inputTokens+outputTokens)
+
 	if err := s.writeAuditEvent(audit.Event{
 		ID:           makeID("audit"),
 		TenantID:     identity.TenantID,
@@ -345,9 +547,9 @@ func (s *Server) handleStream(
 		Provider:     decision.Provider,
 		Model:        req.Model,
 		Route:        decision.Route,
-		InputTokens:  estimateTextTokens(inputText),
-		OutputTokens: estimateTextTokens(responseText),
-		TotalTokens:  estimateTextTokens(inputText) + estimateTextTokens(responseText),
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
+		TotalTokens:  inputTokens + outputTokens,
 		LatencyMS:    time.Since(startedAt).Milliseconds(),
 		Digest: &audit.Digest{
 			PromptHash:      hashText(inputText),
@@ -359,9 +561,6 @@ func (s *Server) handleStream(
 		writeStreamError(w, flusher, "audit write failed")
 		return
 	}
-	inputTokens := estimateTextTokens(inputText)
-	outputTokens := estimateTextTokens(responseText)
-	s.reportUsage(identity, decision, inputTokens, outputTokens)
 
 	usagePayload, _ := json.Marshal(map[string]any{
 		"agenticx_usage": map[string]any{
@@ -388,10 +587,11 @@ func writeAPIError(w http.ResponseWriter, apiErr openai.APIError) {
 	})
 }
 
-func writePolicyError(w http.ResponseWriter, message string, hits []policyengine.HitEvent) {
+func writePolicyError(w http.ResponseWriter, code string, message string, hits []policyengine.HitEvent) {
+	message = policyMessageWithHits(message, hits)
 	writeJSON(w, openai.PolicyBlocked(message).HTTPStatus, map[string]any{
 		"error": map[string]any{
-			"code":    "90001",
+			"code":    code,
 			"message": message,
 			"hits":    hits,
 		},
@@ -413,6 +613,36 @@ func joinMessages(messages []openai.ChatMessage) string {
 		parts = append(parts, msg.Content)
 	}
 	return strings.Join(parts, "\n")
+}
+
+func normalizeEmbeddingInput(raw json.RawMessage) ([]string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, errors.New("input is required")
+	}
+	if trimmed[0] == '"' {
+		var input string
+		if err := json.Unmarshal(trimmed, &input); err != nil {
+			return nil, errors.New("input must be string or string[]")
+		}
+		if strings.TrimSpace(input) == "" {
+			return nil, errors.New("input is required")
+		}
+		return []string{input}, nil
+	}
+	var inputs []string
+	if err := json.Unmarshal(trimmed, &inputs); err != nil {
+		return nil, errors.New("input must be string or string[]")
+	}
+	if len(inputs) == 0 {
+		return nil, errors.New("input is required")
+	}
+	for _, item := range inputs {
+		if strings.TrimSpace(item) == "" {
+			return nil, errors.New("input contains empty string")
+		}
+	}
+	return inputs, nil
 }
 
 type requestIdentity struct {
@@ -575,6 +805,68 @@ func (s *Server) reportUsage(identity requestIdentity, decision routing.Decision
 	})
 }
 
+func (s *Server) reconcileQuotaUsage(
+	identity requestIdentity,
+	model string,
+	estimatedInputTokens int,
+	finalTotalTokens int,
+) {
+	delta := finalTotalTokens - estimatedInputTokens
+	if delta == 0 {
+		return
+	}
+	if delta < 0 {
+		s.rollbackQuotaReservation(identity, -delta)
+		return
+	}
+	decision := s.quotaTracker.CheckAndAdd(
+		identity.UserID,
+		identity.DepartmentID,
+		roleFromScopes(identity.Scopes),
+		model,
+		int64(delta),
+	)
+	if !decision.Allowed {
+		if usedAfter, ok := s.quotaTracker.AddUsage(identity.UserID, int64(delta)); !ok {
+			s.logger.Warn("quota settle persist failed",
+				"user_id", identity.UserID,
+				"model", model,
+				"delta_tokens", delta,
+			)
+		} else {
+			s.logger.Warn("quota exceeded during final settle",
+				"user_id", identity.UserID,
+				"model", model,
+				"delta_tokens", delta,
+				"used_after", usedAfter,
+				"limit", decision.Rule.MonthlyTokens,
+			)
+		}
+		return
+	}
+	if decision.Rule.MonthlyTokens > 0 && decision.UsedAfter > decision.Rule.MonthlyTokens {
+		s.logger.Warn("quota exceeded during final settle",
+			"user_id", identity.UserID,
+			"model", model,
+			"delta_tokens", delta,
+			"used_after", decision.UsedAfter,
+			"limit", decision.Rule.MonthlyTokens,
+		)
+	}
+}
+
+func (s *Server) rollbackQuotaReservation(identity requestIdentity, tokens int) {
+	if tokens <= 0 {
+		return
+	}
+	if ok := s.quotaTracker.Rollback(identity.UserID, int64(tokens)); !ok {
+		s.logger.Warn("quota rollback failed",
+			"user_id", identity.UserID,
+			"tokens", tokens,
+		)
+	}
+}
+
 // databaseURL 已在 New() 中内联读取（允许为空时降级 file sink），保留此 helper 仅为后续 admin 状态接口预留。
 func databaseURL() (string, error) {
 	if value := strings.TrimSpace(os.Getenv("DATABASE_URL")); value != "" {
@@ -604,6 +896,17 @@ func hasScope(scopes []string, required string) bool {
 	return false
 }
 
+func roleFromScopes(scopes []string) string {
+	for _, scope := range scopes {
+		scope = strings.ToLower(strings.TrimSpace(scope))
+		switch scope {
+		case "iam:admin", "role:admin", "workspace:admin", "admin":
+			return "admin"
+		}
+	}
+	return "staff"
+}
+
 func writeStreamError(w http.ResponseWriter, flusher http.Flusher, message string) {
 	payload := map[string]any{
 		"error": map[string]string{
@@ -615,4 +918,45 @@ func writeStreamError(w http.ResponseWriter, flusher http.Flusher, message strin
 	_, _ = w.Write([]byte("event: error\n"))
 	_, _ = w.Write([]byte("data: " + string(raw) + "\n\n"))
 	flusher.Flush()
+}
+
+func writeStreamPolicyError(
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	code string,
+	message string,
+	hits []policyengine.HitEvent,
+) {
+	message = policyMessageWithHits(message, hits)
+	payload := map[string]any{
+		"error": map[string]any{
+			"code":    code,
+			"message": message,
+			"hits":    hits,
+		},
+	}
+	raw, _ := json.Marshal(payload)
+	_, _ = w.Write([]byte("event: error\n"))
+	_, _ = w.Write([]byte("data: " + string(raw) + "\n\n"))
+	flusher.Flush()
+}
+
+func policyMessageWithHits(message string, hits []policyengine.HitEvent) string {
+	policyIDs := make([]string, 0, len(hits))
+	seen := map[string]struct{}{}
+	for _, hit := range hits {
+		id := strings.TrimSpace(hit.RuleID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		policyIDs = append(policyIDs, id)
+	}
+	if len(policyIDs) > 0 {
+		return fmt.Sprintf("%s（命中策略: %s）", message, strings.Join(policyIDs, ", "))
+	}
+	return message
 }

@@ -12,6 +12,7 @@ import (
 type ChatProvider interface {
 	Complete(ctx context.Context, req openai.ChatCompletionRequest, decision routing.Decision) (openai.ChatCompletionResponse, error)
 	Stream(ctx context.Context, req openai.ChatCompletionRequest, decision routing.Decision, push func(openai.StreamChunk) error) error
+	Embeddings(ctx context.Context, req openai.EmbeddingRequest, decision routing.Decision) (openai.EmbeddingResponse, error)
 }
 
 // NewOpenAICompatibleProvider 构造默认 provider：

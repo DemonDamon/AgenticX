@@ -51,3 +51,21 @@ type StreamChunk struct {
 	Model   string         `json:"model"`
 	Choices []StreamChoice `json:"choices"`
 }
+
+type EmbeddingRequest struct {
+	Model string   `json:"model"`
+	Input []string `json:"input"`
+}
+
+type EmbeddingDatum struct {
+	Object    string    `json:"object"`
+	Index     int       `json:"index"`
+	Embedding []float64 `json:"embedding"`
+}
+
+type EmbeddingResponse struct {
+	Object string          `json:"object"`
+	Model  string          `json:"model"`
+	Data   []EmbeddingDatum `json:"data"`
+	Usage  Usage           `json:"usage"`
+}

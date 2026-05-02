@@ -198,6 +198,48 @@ func (p *OpenAICompatibleProvider) Stream(
 	return parseSSEStream(resp.Body, push)
 }
 
+func (p *OpenAICompatibleProvider) Embeddings(
+	ctx context.Context,
+	req openai.EmbeddingRequest,
+	decision routing.Decision,
+) (openai.EmbeddingResponse, error) {
+	endpoint, apiKey, fallback := p.shouldFallback(decision)
+	if fallback {
+		return p.fallback.Embeddings(ctx, req, decision)
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		req.Model = decision.Model
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return openai.EmbeddingResponse{}, fmt.Errorf("marshal embedding request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, joinURL(endpoint, "/embeddings"), bytes.NewReader(body))
+	if err != nil {
+		return openai.EmbeddingResponse{}, fmt.Errorf("build embedding request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := p.httpClient.Do(httpReq)
+	if err != nil {
+		return openai.EmbeddingResponse{}, fmt.Errorf("embedding upstream request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		preview, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return openai.EmbeddingResponse{}, fmt.Errorf("embedding upstream %d: %s", resp.StatusCode, strings.TrimSpace(string(preview)))
+	}
+	var decoded openai.EmbeddingResponse
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return openai.EmbeddingResponse{}, fmt.Errorf("decode embedding response: %w", err)
+	}
+	if strings.TrimSpace(decoded.Model) == "" {
+		decoded.Model = nonEmpty(decision.Model, req.Model)
+	}
+	return decoded, nil
+}
+
 // parseSSEStream 增量解析 OpenAI 兼容的 SSE 流：忽略心跳/注释行，遇到 `data: [DONE]` 即终止。
 func parseSSEStream(body io.Reader, push func(openai.StreamChunk) error) error {
 	reader := bufio.NewReader(body)
