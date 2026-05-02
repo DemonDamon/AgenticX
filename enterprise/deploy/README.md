@@ -9,6 +9,8 @@
 
 ## Usage
 
+启动前在 shell 中设置强口令的 `ADMIN_CONSOLE_LOGIN_PASSWORD`（勿写入仓库），再执行：
+
 ```bash
 cd enterprise/deploy/docker-compose
 POSTGRES_PASSWORD=replace-me \
@@ -17,7 +19,10 @@ JWT_PRIVATE_KEY="$(cat /path/to/jwt.key)" \
 docker compose -f prod.yml up -d
 ```
 
+（`prod.yml` 会通过 `${ADMIN_CONSOLE_LOGIN_PASSWORD?...}` 强制要求该变量已导出。）
+
 ## Important
 
 - `prod.yml` 为模板，不直接承诺客户侧最终网络拓扑；上云前按客户 VPC、WAF、证书体系做二次适配。
+- `config/policies.yaml` 是 Gateway 配置片段，默认挂载 `/app/plugins/moderation-*/manifest.yaml`；Admin 策略启停与额度配置写入共享 `/runtime/admin`。
 - PostgreSQL 主从复制参数（`wal_level`、`primary_conninfo` 等）由客户环境初始化脚本补齐。

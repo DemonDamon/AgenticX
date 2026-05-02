@@ -29,13 +29,15 @@ services:
       GATEWAY_PORT: 8088
       DATABASE_URL: postgresql://agenticx:${POSTGRES_PASSWORD}@postgres-primary:5432/agenticx?sslmode=disable
       REDIS_URL: redis://redis:6379/0
-      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
-      POLICY_MANIFEST: /app/config/policies.yaml
+      AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      GATEWAY_CONFIG_PATH: /app/config/policies.yaml
       GATEWAY_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
       GATEWAY_QUOTA_USAGE_FILE: /runtime/gateway/quota-usage.json
+      GATEWAY_POLICY_OVERRIDE_FILE: /runtime/admin/policy-overrides.json
     volumes:
       - gateway_runtime:/runtime
       - ../config/policies.yaml:/app/config/policies.yaml:ro
+      - ../../plugins:/app/plugins:ro
     networks:
       - agenticx-backbone
 
@@ -47,13 +49,15 @@ services:
       GATEWAY_PORT: 8088
       DATABASE_URL: postgresql://agenticx:${POSTGRES_PASSWORD}@postgres-primary:5432/agenticx?sslmode=disable
       REDIS_URL: redis://redis:6379/0
-      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
-      POLICY_MANIFEST: /app/config/policies.yaml
+      AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      GATEWAY_CONFIG_PATH: /app/config/policies.yaml
       GATEWAY_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
       GATEWAY_QUOTA_USAGE_FILE: /runtime/gateway/quota-usage.json
+      GATEWAY_POLICY_OVERRIDE_FILE: /runtime/admin/policy-overrides.json
     volumes:
       - gateway_runtime:/runtime
       - ../config/policies.yaml:/app/config/policies.yaml:ro
+      - ../../plugins:/app/plugins:ro
     networks:
       - agenticx-backbone
 
@@ -77,7 +81,13 @@ services:
       NODE_ENV: production
       AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
       AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
-      ADMIN_CONSOLE_LOGIN_PASSWORD: ${ADMIN_CONSOLE_LOGIN_PASSWORD:-change-me}
+      ADMIN_CONSOLE_LOGIN_PASSWORD: ${ADMIN_CONSOLE_LOGIN_PASSWORD:?ADMIN_CONSOLE_LOGIN_PASSWORD is required}
+      ENTERPRISE_ADMIN_RUNTIME_DIR: /runtime/admin
+      ENTERPRISE_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
+      ENTERPRISE_POLICY_OVERRIDE_FILE: /runtime/admin/policy-overrides.json
+    volumes:
+      - gateway_runtime:/runtime
+      - ../../plugins:/app/plugins:ro
     networks:
       - agenticx-backbone
 
