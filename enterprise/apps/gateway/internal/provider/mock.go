@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"math"
 	"strings"
 	"time"
 
@@ -87,4 +88,41 @@ func (p *MockProvider) Stream(
 			},
 		},
 	})
+}
+
+func (p *MockProvider) Embeddings(
+	_ context.Context,
+	req openai.EmbeddingRequest,
+	decision routing.Decision,
+) (openai.EmbeddingResponse, error) {
+	const dims = 16
+	data := make([]openai.EmbeddingDatum, 0, len(req.Input))
+	totalChars := 0
+	for idx, text := range req.Input {
+		totalChars += len(text)
+		vec := make([]float64, dims)
+		base := float64(len(text) + idx + 1)
+		for i := 0; i < dims; i++ {
+			vec[i] = math.Sin(base + float64(i)/3.0)
+		}
+		data = append(data, openai.EmbeddingDatum{
+			Object:    "embedding",
+			Index:     idx,
+			Embedding: vec,
+		})
+	}
+	promptTokens := totalChars / 3
+	if promptTokens == 0 && len(req.Input) > 0 {
+		promptTokens = 1
+	}
+	return openai.EmbeddingResponse{
+		Object: "list",
+		Model:  nonEmpty(decision.Model, req.Model),
+		Data:   data,
+		Usage: openai.Usage{
+			PromptTokens:     promptTokens,
+			CompletionTokens: 0,
+			TotalTokens:      promptTokens,
+		},
+	}, nil
 }

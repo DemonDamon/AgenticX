@@ -40,6 +40,14 @@ func PolicyBlocked(message string) APIError {
 	}
 }
 
+func QuotaExceeded(message string) APIError {
+	return APIError{
+		Code:       "42901",
+		Message:    message,
+		HTTPStatus: http.StatusTooManyRequests,
+	}
+}
+
 func Internal(message string) APIError {
 	return APIError{
 		Code:       "50000",
