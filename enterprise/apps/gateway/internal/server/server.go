@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -31,15 +32,19 @@ import (
 )
 
 type Server struct {
-	cfg          config.Config
-	logger       *slog.Logger
-	provider     provider.ChatProvider
-	decider      *routing.Decider
-	policy       *policyengine.Engine
-	audit        *audit.FileWriter
-	metering     metering.Sink
-	adminLoader  *runtimeconfig.Loader
-	quotaTracker *quota.Tracker
+	cfg               config.Config
+	logger            *slog.Logger
+	provider          provider.ChatProvider
+	decider           *routing.Decider
+	policy            *policyengine.Engine
+	policyMu          sync.RWMutex
+	policyManifest    string
+	policyOverride    string
+	policyOverrideMod time.Time
+	audit             *audit.FileWriter
+	metering          metering.Sink
+	adminLoader       *runtimeconfig.Loader
+	quotaTracker      *quota.Tracker
 }
 
 var (
@@ -49,15 +54,6 @@ var (
 )
 
 func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
-	manifests, err := policyengine.LoadRulePacks(cfg.PolicyManifest)
-	if err != nil {
-		return nil, fmt.Errorf("load policy manifests: %w", err)
-	}
-	engine, err := policyengine.NewEngine(manifests)
-	if err != nil {
-		return nil, fmt.Errorf("build policy engine: %w", err)
-	}
-
 	// metering：开发态可选 PG，未配 DATABASE_URL 时降级到本地 jsonl，
 	// 让前台 token chip 与 admin 看用量都能继续工作而不必启 PG。
 	dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
@@ -92,18 +88,121 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	if quotaUsagePath == "" {
 		quotaUsagePath = quota.DefaultUsagePath()
 	}
+	policyOverridePath := strings.TrimSpace(os.Getenv("GATEWAY_POLICY_OVERRIDE_FILE"))
+	if policyOverridePath == "" {
+		policyOverridePath = filepath.Join(filepath.Dir(quotaCfgPath), "policy-overrides.json")
+	}
+
+	engine, overrideModTime, err := buildPolicyEngine(cfg.PolicyManifest, policyOverridePath)
+	if err != nil {
+		return nil, err
+	}
 
 	return &Server{
-		cfg:         cfg,
-		logger:      logger,
-		provider:    provider.NewOpenAICompatibleProvider(),
-		decider:     routing.NewDeciderWithAdmin(cfg, adminLoader),
-		policy:      engine,
-		audit:       audit.NewFileWriter(cfg.AuditDir),
-		metering:    sink,
-		adminLoader: adminLoader,
-		quotaTracker: quota.NewTracker(quotaCfgPath, quotaUsagePath),
+		cfg:               cfg,
+		logger:            logger,
+		provider:          provider.NewOpenAICompatibleProvider(),
+		decider:           routing.NewDeciderWithAdmin(cfg, adminLoader),
+		policy:            engine,
+		policyManifest:    cfg.PolicyManifest,
+		policyOverride:    policyOverridePath,
+		policyOverrideMod: overrideModTime,
+		audit:             audit.NewFileWriter(cfg.AuditDir),
+		metering:          sink,
+		adminLoader:       adminLoader,
+		quotaTracker:      quota.NewTracker(quotaCfgPath, quotaUsagePath),
 	}, nil
+}
+
+type policyOverrideFile struct {
+	DisabledPacks []string `json:"disabledPacks"`
+}
+
+func buildPolicyEngine(manifestGlob, overridePath string) (*policyengine.Engine, time.Time, error) {
+	disabled, modTime, err := readDisabledPolicyPacks(overridePath)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	manifests, err := policyengine.LoadRulePacksWithDisabled(manifestGlob, disabled)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("load policy manifests: %w", err)
+	}
+	engine, err := policyengine.NewEngine(manifests)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("build policy engine: %w", err)
+	}
+	return engine, modTime, nil
+}
+
+func readDisabledPolicyPacks(path string) (map[string]bool, time.Time, error) {
+	disabled := map[string]bool{}
+	if strings.TrimSpace(path) == "" {
+		return disabled, time.Time{}, nil
+	}
+	info, statErr := os.Stat(path)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return disabled, time.Time{}, nil
+		}
+		return nil, time.Time{}, fmt.Errorf("stat policy override file: %w", statErr)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("read policy override file: %w", err)
+	}
+	var parsed policyOverrideFile
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, time.Time{}, fmt.Errorf("parse policy override file: %w", err)
+	}
+	for _, name := range parsed.DisabledPacks {
+		clean := strings.TrimSpace(name)
+		if clean != "" {
+			disabled[clean] = true
+		}
+	}
+	return disabled, info.ModTime(), nil
+}
+
+func (s *Server) evaluatePolicy(text string, stage string) policyengine.EvaluateResult {
+	s.reloadPolicyIfNeeded()
+	s.policyMu.RLock()
+	engine := s.policy
+	s.policyMu.RUnlock()
+	return engine.Evaluate(text, stage)
+}
+
+func (s *Server) reloadPolicyIfNeeded() {
+	if strings.TrimSpace(s.policyOverride) == "" {
+		return
+	}
+	info, err := os.Stat(s.policyOverride)
+	var nextMod time.Time
+	if err != nil {
+		if !os.IsNotExist(err) {
+			s.logger.Warn("policy override stat failed", "path", s.policyOverride, "error", err)
+			return
+		}
+	} else {
+		nextMod = info.ModTime()
+	}
+
+	s.policyMu.RLock()
+	currentMod := s.policyOverrideMod
+	s.policyMu.RUnlock()
+	if nextMod.Equal(currentMod) {
+		return
+	}
+
+	engine, modTime, buildErr := buildPolicyEngine(s.policyManifest, s.policyOverride)
+	if buildErr != nil {
+		s.logger.Warn("policy override reload failed", "path", s.policyOverride, "error", buildErr)
+		return
+	}
+	s.policyMu.Lock()
+	s.policy = engine
+	s.policyOverrideMod = modTime
+	s.policyMu.Unlock()
+	s.logger.Info("policy engine reloaded", "override_file", s.policyOverride)
 }
 
 func (s *Server) Router() http.Handler {
@@ -111,7 +210,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(middleware.Timeout(10 * time.Minute))
 
 	r.Get("/healthz", s.handleHealth)
 	r.Post("/v1/chat/completions", s.handleChatCompletions)
@@ -166,7 +265,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		"endpoint", decision.Endpoint,
 	)
 
-	reqPolicy := s.policy.Evaluate(joinMessages(req.Messages), "request")
+	reqPolicy := s.evaluatePolicy(joinMessages(req.Messages), "request")
 	if reqPolicy.Blocked {
 		s.logger.Warn("policy blocked request", "model", req.Model, "hits", len(reqPolicy.Hits))
 		if err := s.writeAuditEvent(audit.Event{
@@ -246,7 +345,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, providerInputTokens+providerOutputTokens)
 
 	if len(resp.Choices) > 0 {
-		respPolicy := s.policy.Evaluate(resp.Choices[0].Message.Content, "response")
+		respPolicy := s.evaluatePolicy(resp.Choices[0].Message.Content, "response")
 		if respPolicy.Blocked {
 			s.logger.Warn("policy blocked response", "model", req.Model, "hits", len(respPolicy.Hits))
 			if err := s.writeAuditEvent(audit.Event{
@@ -352,7 +451,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	sanitizedInputs := make([]string, 0, len(req.Input))
 	hits := make([]policyengine.HitEvent, 0)
 	for _, item := range req.Input {
-		reqPolicy := s.policy.Evaluate(item, "request")
+		reqPolicy := s.evaluatePolicy(item, "request")
 		if reqPolicy.Blocked {
 			hits = append(hits, reqPolicy.Hits...)
 			continue
@@ -472,7 +571,7 @@ func (s *Server) handleStream(
 	push := func(chunk openai.StreamChunk) error {
 		if len(chunk.Choices) > 0 {
 			deltaContent := chunk.Choices[0].Delta.Content
-			policyResult := s.policy.Evaluate(deltaContent, "response")
+			policyResult := s.evaluatePolicy(deltaContent, "response")
 			if policyResult.Blocked {
 				blockedHits = append(blockedHits, policyResult.Hits...)
 				return fmt.Errorf("policy blocked stream chunk")
@@ -516,13 +615,13 @@ func (s *Server) handleStream(
 			})
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			partialOutputTokens := estimateTextTokens(responseBuilder.String())
-			s.reportUsage(identity, decision, 0, partialOutputTokens)
-			s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, partialOutputTokens)
+			s.reportUsage(identity, decision, estimatedInputTokens, partialOutputTokens)
+			s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, estimatedInputTokens+partialOutputTokens)
 			return
 		}
 		partialOutputTokens := estimateTextTokens(responseBuilder.String())
-		s.reportUsage(identity, decision, 0, partialOutputTokens)
-		s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, partialOutputTokens)
+		s.reportUsage(identity, decision, estimatedInputTokens, partialOutputTokens)
+		s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, estimatedInputTokens+partialOutputTokens)
 		writeStreamError(w, flusher, err.Error())
 		return
 	}

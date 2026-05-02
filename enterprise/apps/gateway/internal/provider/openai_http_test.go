@@ -152,6 +152,36 @@ func TestOpenAIHTTP_Stream_ParsesSSEChunksAndStopsOnDone(t *testing.T) {
 	}
 }
 
+func TestOpenAIHTTP_Stream_PropagatesUpstreamSSEError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `event: error`+"\n")
+		_, _ = io.WriteString(w, `data: {"error":{"message":"upstream quota exceeded","code":"insufficient_quota"}}`+"\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewOpenAICompatibleProvider(
+		WithKeyResolver(func(string) string { return "test-key" }),
+	)
+
+	err := provider.Stream(context.Background(),
+		openai.ChatCompletionRequest{
+			Model:    "m",
+			Messages: []openai.ChatMessage{{Role: "user", Content: "hi"}},
+			Stream:   true,
+		},
+		routing.Decision{Provider: "moonshot", Endpoint: server.URL + "/v1", Model: "m"},
+		func(chunk openai.StreamChunk) error {
+			t.Fatalf("unexpected stream chunk: %+v", chunk)
+			return nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "upstream quota exceeded") {
+		t.Fatalf("expected upstream SSE error, got %v", err)
+	}
+}
+
 func TestOpenAIHTTP_Complete_PropagatesUpstreamError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
