@@ -93,7 +93,7 @@ def main() -> int:
         "input_file": str(Path(args.input)),
         "rules_file": str(Path(args.rules)),
         "findings_count": len(findings),
-        "findings": [
+        "issues": [
             {
                 "rule_id": f.rule_id,
                 "severity": f.severity,
@@ -105,6 +105,7 @@ def main() -> int:
             for f in findings
         ],
     }
+    payload["findings"] = payload["issues"]
 
     raw = json.dumps(payload, ensure_ascii=False, indent=2)
     if args.output:
