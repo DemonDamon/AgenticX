@@ -97,13 +97,14 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/audit", label: "审计日志", icon: FileWarning, shortcut: "G A" },
       { href: "/metering", label: "四维消耗", icon: BarChart3, shortcut: "G M" },
+      { href: "/metering/quota", label: "额度控制", icon: Sliders },
     ],
   },
   {
     id: "platform",
     label: "平台配置",
     items: [
-      { href: "/iam/roles", label: "策略规则", icon: Shield },
+      { href: "/policy", label: "策略规则", icon: Shield },
       { href: "/admin/models", label: "模型服务", icon: Package, shortcut: "G K" },
     ],
   },
@@ -126,6 +127,7 @@ const NAV_ITEM_LABELS: Record<string, { zh: string; en: string }> = {
   "iam:批量导入": { zh: "批量导入", en: "Bulk Import" },
   "ops:审计日志": { zh: "审计日志", en: "Audit Logs" },
   "ops:四维消耗": { zh: "四维消耗", en: "Metering" },
+  "ops:额度控制": { zh: "额度控制", en: "Quota Control" },
   "platform:策略规则": { zh: "策略规则", en: "Policy Rules" },
   "platform:模型服务": { zh: "模型服务", en: "Model Services" },
 };
