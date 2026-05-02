@@ -16,8 +16,8 @@ type OverrideFile = {
 
 const ROOT = path.resolve(process.cwd(), "../..");
 const PLUGINS_DIR = path.join(ROOT, "plugins");
-const RUNTIME_DIR = path.join(ROOT, ".runtime/admin");
-const OVERRIDE_FILE = path.join(RUNTIME_DIR, "policy-overrides.json");
+const RUNTIME_DIR = process.env.ENTERPRISE_ADMIN_RUNTIME_DIR || path.join(ROOT, ".runtime/admin");
+const OVERRIDE_FILE = process.env.ENTERPRISE_POLICY_OVERRIDE_FILE || path.join(RUNTIME_DIR, "policy-overrides.json");
 
 function ensureRuntimeDir(): void {
   if (!fs.existsSync(RUNTIME_DIR)) {

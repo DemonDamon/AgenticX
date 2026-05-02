@@ -19,8 +19,8 @@ export type QuotaConfig = {
 };
 
 const ROOT = path.resolve(process.cwd(), "../..");
-const RUNTIME_DIR = path.join(ROOT, ".runtime/admin");
-const FILE_PATH = path.join(RUNTIME_DIR, "quotas.json");
+const RUNTIME_DIR = process.env.ENTERPRISE_ADMIN_RUNTIME_DIR || path.join(ROOT, ".runtime/admin");
+const FILE_PATH = process.env.ENTERPRISE_QUOTA_CONFIG_FILE || path.join(RUNTIME_DIR, "quotas.json");
 
 const DEFAULT_CONFIG: QuotaConfig = {
   defaults: {
