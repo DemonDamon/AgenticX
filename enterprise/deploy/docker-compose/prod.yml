@@ -1,0 +1,139 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: agenticx-nginx-prod
+    restart: unless-stopped
+    depends_on:
+      gateway-a:
+        condition: service_started
+      gateway-b:
+        condition: service_started
+      web-portal:
+        condition: service_started
+      admin-console:
+        condition: service_started
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../nginx/gateway.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/certs:/etc/nginx/certs:ro
+    networks:
+      - agenticx-backbone
+
+  gateway-a:
+    image: ghcr.io/agenticx/enterprise-gateway:latest
+    container_name: agenticx-gateway-a
+    restart: unless-stopped
+    environment:
+      GATEWAY_PORT: 8088
+      DATABASE_URL: postgresql://agenticx:${POSTGRES_PASSWORD}@postgres-primary:5432/agenticx?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      POLICY_MANIFEST: /app/config/policies.yaml
+      GATEWAY_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
+      GATEWAY_QUOTA_USAGE_FILE: /runtime/gateway/quota-usage.json
+    volumes:
+      - gateway_runtime:/runtime
+      - ../config/policies.yaml:/app/config/policies.yaml:ro
+    networks:
+      - agenticx-backbone
+
+  gateway-b:
+    image: ghcr.io/agenticx/enterprise-gateway:latest
+    container_name: agenticx-gateway-b
+    restart: unless-stopped
+    environment:
+      GATEWAY_PORT: 8088
+      DATABASE_URL: postgresql://agenticx:${POSTGRES_PASSWORD}@postgres-primary:5432/agenticx?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      POLICY_MANIFEST: /app/config/policies.yaml
+      GATEWAY_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
+      GATEWAY_QUOTA_USAGE_FILE: /runtime/gateway/quota-usage.json
+    volumes:
+      - gateway_runtime:/runtime
+      - ../config/policies.yaml:/app/config/policies.yaml:ro
+    networks:
+      - agenticx-backbone
+
+  web-portal:
+    image: ghcr.io/agenticx/enterprise-web-portal:latest
+    container_name: agenticx-web-portal
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_GATEWAY_BASE: http://nginx
+      AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+    networks:
+      - agenticx-backbone
+
+  admin-console:
+    image: ghcr.io/agenticx/enterprise-admin-console:latest
+    container_name: agenticx-admin-console
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+      ADMIN_CONSOLE_LOGIN_PASSWORD: ${ADMIN_CONSOLE_LOGIN_PASSWORD:-change-me}
+    networks:
+      - agenticx-backbone
+
+  postgres-primary:
+    image: postgres:16-alpine
+    container_name: agenticx-postgres-primary
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agenticx
+      POSTGRES_USER: agenticx
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: UTC
+    volumes:
+      - pg_primary_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agenticx -d agenticx"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - agenticx-backbone
+
+  postgres-replica:
+    image: postgres:16-alpine
+    container_name: agenticx-postgres-replica
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agenticx
+      POSTGRES_USER: agenticx
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: UTC
+      # 说明：实际主从复制参数（wal_level/primary_conninfo 等）由客户环境初始化脚本注入。
+    volumes:
+      - pg_replica_data:/var/lib/postgresql/data
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    networks:
+      - agenticx-backbone
+
+  redis:
+    image: redis:7-alpine
+    container_name: agenticx-redis-prod
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "900", "1", "300", "10"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - agenticx-backbone
+
+networks:
+  agenticx-backbone:
+    driver: bridge
+
+volumes:
+  gateway_runtime:
+  pg_primary_data:
+  pg_replica_data:
+  redis_data:

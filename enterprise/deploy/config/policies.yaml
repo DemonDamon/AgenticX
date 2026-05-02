@@ -1,0 +1,3 @@
+rule_packs:
+  - ../../plugins/moderation-finance/manifest.yaml
+  - ../../plugins/moderation-pii-baseline/manifest.yaml
