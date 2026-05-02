@@ -7,6 +7,7 @@ This implementation appends trace watermark metadata comment to output PDF bytes
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 
@@ -26,9 +27,7 @@ def main() -> int:
 
     marker = f"\n% AGX-WATERMARK: {args.text}\n".encode("utf-8")
     out_path.write_bytes(raw + marker)
-    print(
-        f'{{"ok": true, "input": "{in_path}", "output": "{out_path}", "watermark": "{args.text}"}}'
-    )
+    print(json.dumps({"ok": True, "input": str(in_path), "output": str(out_path), "watermark": args.text}, ensure_ascii=False))
     return 0
 
 
