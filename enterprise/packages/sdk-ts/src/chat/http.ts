@@ -113,8 +113,13 @@ export class HttpChatClient implements ChatClient {
           buffer = buffer.slice(splitIdx + 2);
           splitIdx = buffer.indexOf("\n\n");
 
-          if (!frame.startsWith("data:")) continue;
-          const data = frame.replace(/^data:\s*/, "");
+          const dataLines = frame
+            .split("\n")
+            .map((line) => line.trim())
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.replace(/^data:\s*/, ""));
+          if (dataLines.length === 0) continue;
+          const data = dataLines.join("\n");
           if (data === "[DONE]") {
             yield { requestId, done: true };
             this.pending.delete(requestId);
@@ -124,7 +129,21 @@ export class HttpChatClient implements ChatClient {
             choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
             agenticx_usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
             usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+            error?: { code?: string; message?: string };
           };
+
+          if (chunk.error) {
+            yield {
+              requestId,
+              done: true,
+              error: {
+                code: chunk.error.code ?? "50000",
+                message: chunk.error.message ?? "Gateway request failed",
+              },
+            };
+            this.pending.delete(requestId);
+            return;
+          }
 
           // 自定义 usage 事件（gateway 真调流末追加），不算 delta
           if (chunk.agenticx_usage) {
