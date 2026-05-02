@@ -65,6 +65,8 @@ export class LocalAuditStore implements AuditStore {
 
   private async readAllEvents(): Promise<{ items: AuditEvent[]; parseErrorAt?: string; parseErrorReason?: string }> {
     let files: string[];
+    let parseErrorAt: string | undefined;
+    let parseErrorReason: string | undefined;
     try {
       files = await fs.readdir(this.dir);
     } catch (error) {
@@ -86,15 +88,13 @@ export class LocalAuditStore implements AuditStore {
         try {
           items.push(JSON.parse(line) as AuditEvent);
         } catch {
-          return {
-            items,
-            parseErrorAt: `${file}:${lineIndex + 1}`,
-            parseErrorReason: "invalid_json_line",
-          };
+          parseErrorAt ??= `${file}:${lineIndex + 1}`;
+          parseErrorReason ??= "invalid_json_line";
+          console.warn(`[audit] skip invalid JSONL line ${file}:${lineIndex + 1}`);
         }
       }
     }
-    return { items };
+    return { items, parseErrorAt, parseErrorReason };
   }
 
   private checkChain(items: AuditEvent[]): { valid: boolean; at?: string; reason?: string } {
