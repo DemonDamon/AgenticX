@@ -1,3 +1,2 @@
-rule_packs:
-  - ../../plugins/moderation-finance/manifest.yaml
-  - ../../plugins/moderation-pii-baseline/manifest.yaml
+policy_manifest: /app/plugins/moderation-*/manifest.yaml
+audit_dir: /runtime/audit
