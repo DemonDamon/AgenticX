@@ -74,5 +74,7 @@ export type AuditQueryResult = {
   total: number;
   items: AuditEvent[];
   chain_valid: boolean;
+  chain_error_at?: string;
+  chain_error_reason?: string;
 };
 

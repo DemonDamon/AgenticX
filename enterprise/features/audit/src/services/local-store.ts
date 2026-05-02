@@ -63,14 +63,14 @@ export class LocalAuditStore implements AuditStore {
     this.dir = dir;
   }
 
-  private async readAllEvents(): Promise<AuditEvent[]> {
+  private async readAllEvents(): Promise<{ items: AuditEvent[]; parseErrorAt?: string; parseErrorReason?: string }> {
     let files: string[];
     try {
       files = await fs.readdir(this.dir);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
-        return [];
+        return { items: [] };
       }
       throw error;
     }
@@ -86,24 +86,34 @@ export class LocalAuditStore implements AuditStore {
         try {
           items.push(JSON.parse(line) as AuditEvent);
         } catch {
-          throw new Error(`invalid audit json line at ${file}:${lineIndex + 1}`);
+          return {
+            items,
+            parseErrorAt: `${file}:${lineIndex + 1}`,
+            parseErrorReason: "invalid_json_line",
+          };
         }
       }
     }
-    return items;
+    return { items };
   }
 
-  private checkChain(items: AuditEvent[]): boolean {
+  private checkChain(items: AuditEvent[]): { valid: boolean; at?: string; reason?: string } {
     let prev = "GENESIS";
     let index = 0;
     for (const current of items) {
-      if (index > 0 && current.prev_checksum === "GENESIS") return false;
-      if (current.prev_checksum !== prev) return false;
-      if (computeChecksum(current) !== current.checksum) return false;
+      if (index > 0 && current.prev_checksum === "GENESIS") {
+        return { valid: false, at: current.id, reason: "unexpected_genesis_pointer" };
+      }
+      if (current.prev_checksum !== prev) {
+        return { valid: false, at: current.id, reason: "prev_checksum_mismatch" };
+      }
+      if (computeChecksum(current) !== current.checksum) {
+        return { valid: false, at: current.id, reason: "checksum_mismatch" };
+      }
       prev = current.checksum;
       index += 1;
     }
-    return true;
+    return { valid: true };
   }
 
   private canReadEvent(actor: AuditActor, event: AuditEvent): boolean {
@@ -117,8 +127,10 @@ export class LocalAuditStore implements AuditStore {
   }
 
   public async query(actor: AuditActor, input: AuditQueryInput): Promise<AuditQueryResult> {
-    const events = await this.readAllEvents();
-    const chainValid = this.checkChain(events);
+    const readResult = await this.readAllEvents();
+    const events = readResult.items;
+    const chainStatus = this.checkChain(events);
+    const chainValid = !readResult.parseErrorAt && chainStatus.valid;
     const start = input.start ? Date.parse(input.start) : Number.NEGATIVE_INFINITY;
     const end = input.end ? Date.parse(input.end) : Number.POSITIVE_INFINITY;
 
@@ -143,6 +155,8 @@ export class LocalAuditStore implements AuditStore {
       total: filtered.length,
       items: filtered.slice(offset, offset + limit),
       chain_valid: chainValid,
+      chain_error_at: readResult.parseErrorAt ?? chainStatus.at,
+      chain_error_reason: readResult.parseErrorReason ?? chainStatus.reason,
     };
   }
 
