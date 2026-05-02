@@ -41,12 +41,15 @@ type QueryResult = {
   total: number;
   items: AuditEvent[];
   chain_valid: boolean;
+  chain_error_at?: string;
+  chain_error_reason?: string;
 };
 
 export default function AuditPage() {
   const [items, setItems] = useState<AuditEvent[]>([]);
   const [selected, setSelected] = useState<AuditEvent | null>(null);
   const [chainValid, setChainValid] = useState(true);
+  const [chainError, setChainError] = useState<{ at?: string; reason?: string } | null>(null);
   const [userId, setUserId] = useState("");
   const [model, setModel] = useState("");
   const [policyHit, setPolicyHit] = useState("");
@@ -67,7 +70,15 @@ export default function AuditPage() {
       const payload = (await response.json()) as { data?: QueryResult };
       const data = payload.data;
       setItems(data?.items ?? []);
-      setChainValid(data?.chain_valid ?? false);
+      setChainValid(data?.chain_valid ?? true);
+      setChainError(
+        data?.chain_valid
+          ? null
+          : {
+              at: data?.chain_error_at,
+              reason: data?.chain_error_reason,
+            }
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载失败");
     } finally {
@@ -190,13 +201,18 @@ export default function AuditPage() {
           </Breadcrumb>
         }
         title="审计日志"
-        description={`共 ${items.length} 条记录 · ${chainValid ? "链完整性校验通过" : "链校验失败"}`}
+        description={`共 ${items.length} 条记录 · ${chainValid ? "链完整性校验通过" : `链校验失败${chainError?.reason ? `（${chainError.reason}）` : ""}`}`}
         actions={
           <>
             <Badge variant={chainValid ? "success" : "destructive"} className="gap-1">
               <ShieldCheck className="h-3 w-3" />
               {chainValid ? "链完整" : "链异常"}
             </Badge>
+            {!chainValid && chainError?.at ? (
+              <Badge variant="warning" className="font-mono text-[10px]">
+                {chainError.at}
+              </Badge>
+            ) : null}
             <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
               <RefreshCcw />
               刷新
