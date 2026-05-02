@@ -21,7 +21,12 @@ export function toComplianceMessage(code: string | undefined, fallback: string):
   if (code === BUSINESS_ERROR_CODES.FORBIDDEN) {
     return "当前账号未开通聊天权限（workspace:chat）。请重新登录，或联系管理员为账号分配聊天权限。";
   }
+  if (code === "42901") {
+    return "本月 token 配额已用尽，请联系管理员调整额度或切换更低成本模型。";
+  }
   if (!isPolicyErrorCode(code)) return fallback;
+  // 网关已把命中策略拼入 message 时，优先保留具体原因，避免前端只显示泛化文案。
+  if (fallback.includes("命中策略")) return fallback;
   if (code === POLICY_ERROR_CODES.REQUEST_BLOCKED) {
     return "请求触发合规策略，已被网关拦截。请调整输入后重试。";
   }
