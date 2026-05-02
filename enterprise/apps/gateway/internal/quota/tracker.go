@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -49,9 +50,9 @@ type Decision struct {
 }
 
 type Tracker struct {
-	cfgPath   string
-	usagePath string
-	mu        sync.Mutex
+	cfgPath    string
+	usagePath  string
+	mu         sync.Mutex
 	usageCache map[string]int64
 }
 
@@ -80,6 +81,18 @@ func (t *Tracker) CheckAndAdd(userID, deptID, role, model string, tokens int64) 
 	rule := selectRule(cfg, userID, deptID, role, model)
 	if rule.MonthlyTokens <= 0 {
 		return Decision{Allowed: true, Rule: rule, Description: "no quota"}
+	}
+	unlock, lockOK := t.lockUsageFile()
+	if !lockOK {
+		if rule.Action == ActionBlock {
+			return Decision{
+				Allowed:     false,
+				Rule:        rule,
+				Description: "quota lock failed in block mode",
+			}
+		}
+	} else {
+		defer unlock()
 	}
 	rows := t.readUsage()
 	month := time.Now().UTC().Format("2006-01")
@@ -142,16 +155,14 @@ func (t *Tracker) Rollback(userID string, tokens int64) bool {
 	if tokens <= 0 {
 		return true
 	}
+	unlock, lockOK := t.lockUsageFile()
+	if !lockOK {
+		return false
+	}
+	defer unlock()
 	rows := t.readUsage()
 	month := time.Now().UTC().Format("2006-01")
 	key := cacheKey(userID, month)
-	if cached, ok := t.usageCache[key]; ok {
-		next := cached - tokens
-		if next < 0 {
-			next = 0
-		}
-		t.usageCache[key] = next
-	}
 	changed := false
 	for i := range rows {
 		if rows[i].UserID == userID && rows[i].Month == month {
@@ -160,16 +171,19 @@ func (t *Tracker) Rollback(userID string, tokens int64) bool {
 				next = 0
 			}
 			rows[i].UsedTotal = next
-			if cache, ok := t.usageCache[key]; ok {
-				rows[i].UsedTotal = cache
-			}
+			t.usageCache[key] = next
 			changed = true
 			break
 		}
 	}
 	if !changed {
 		if cache, ok := t.usageCache[key]; ok {
-			rows = append(rows, usageRow{UserID: userID, Month: month, UsedTotal: cache})
+			next := cache - tokens
+			if next < 0 {
+				next = 0
+			}
+			t.usageCache[key] = next
+			rows = append(rows, usageRow{UserID: userID, Month: month, UsedTotal: next})
 			changed = true
 		}
 	}
@@ -186,6 +200,12 @@ func (t *Tracker) AddUsage(userID string, tokens int64) (int64, bool) {
 		month := time.Now().UTC().Format("2006-01")
 		return t.currentUsed(userID, month), true
 	}
+	unlock, lockOK := t.lockUsageFile()
+	if !lockOK {
+		month := time.Now().UTC().Format("2006-01")
+		return t.currentUsed(userID, month), false
+	}
+	defer unlock()
 	rows := t.readUsage()
 	month := time.Now().UTC().Format("2006-01")
 	key := cacheKey(userID, month)
@@ -299,7 +319,7 @@ func (t *Tracker) writeUsage(rows []usageRow) bool {
 		log.Printf("[quota] ensure usage dir failed path=%s err=%v", t.usagePath, err)
 		return false
 	}
-	tmp := t.usagePath + ".tmp"
+	tmp := fmt.Sprintf("%s.%d.%d.tmp", t.usagePath, os.Getpid(), time.Now().UnixNano())
 	bytes, err := json.MarshalIndent(rows, "", "  ")
 	if err != nil {
 		log.Printf("[quota] marshal usage failed err=%v", err)
@@ -314,6 +334,28 @@ func (t *Tracker) writeUsage(rows []usageRow) bool {
 		return false
 	}
 	return true
+}
+
+func (t *Tracker) lockUsageFile() (func(), bool) {
+	if err := os.MkdirAll(filepath.Dir(t.usagePath), 0o700); err != nil {
+		log.Printf("[quota] ensure lock dir failed path=%s err=%v", t.usagePath, err)
+		return nil, false
+	}
+	lockPath := t.usagePath + ".lock"
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		log.Printf("[quota] open lock file failed path=%s err=%v", lockPath, err)
+		return nil, false
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		log.Printf("[quota] lock usage file failed path=%s err=%v", lockPath, err)
+		_ = file.Close()
+		return nil, false
+	}
+	return func() {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+	}, true
 }
 
 func max64(a, b int64) int64 {

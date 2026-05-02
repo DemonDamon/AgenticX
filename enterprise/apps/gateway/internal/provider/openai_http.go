@@ -184,7 +184,9 @@ func (p *OpenAICompatibleProvider) Stream(
 	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := p.httpClient.Do(httpReq)
+	streamClient := *p.httpClient
+	streamClient.Timeout = 0
+	resp, err := streamClient.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("upstream request failed: %w", err)
 	}
@@ -243,48 +245,82 @@ func (p *OpenAICompatibleProvider) Embeddings(
 // parseSSEStream 增量解析 OpenAI 兼容的 SSE 流：忽略心跳/注释行，遇到 `data: [DONE]` 即终止。
 func parseSSEStream(body io.Reader, push func(openai.StreamChunk) error) error {
 	reader := bufio.NewReader(body)
+	var eventName string
+	var dataLines []string
+	flushEvent := func() (bool, error) {
+		if len(dataLines) == 0 {
+			eventName = ""
+			return false, nil
+		}
+		payload := strings.TrimSpace(strings.Join(dataLines, "\n"))
+		event := strings.TrimSpace(eventName)
+		eventName = ""
+		dataLines = nil
+		if payload == "" {
+			return false, nil
+		}
+		if payload == "[DONE]" {
+			return true, nil
+		}
+
+		var envelope struct {
+			Error *struct {
+				Message string `json:"message"`
+				Code    string `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(payload), &envelope); err == nil && envelope.Error != nil {
+			message := strings.TrimSpace(envelope.Error.Message)
+			if message == "" {
+				message = "upstream stream error"
+			}
+			if code := strings.TrimSpace(envelope.Error.Code); code != "" {
+				return false, fmt.Errorf("upstream stream error %s: %s", code, message)
+			}
+			return false, fmt.Errorf("upstream stream error: %s", message)
+		}
+		if event == "error" {
+			return false, fmt.Errorf("upstream stream error: %s", payload)
+		}
+
+		var chunk openai.StreamChunk
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			// 容忍上游偶发的非标准事件（如 keepalive ping），跳过即可。
+			return false, nil
+		}
+		if chunk.ID == "" && chunk.Object == "" && len(chunk.Choices) == 0 {
+			return false, nil
+		}
+		if err := push(chunk); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {
 			trimmed := bytes.TrimRight(line, "\r\n")
 			if len(trimmed) == 0 {
+				done, err := flushEvent()
+				if err != nil || done {
+					return err
+				}
 				if readErr == io.EOF {
 					return nil
 				}
 				continue
 			}
-			if !bytes.HasPrefix(trimmed, []byte("data:")) {
-				if readErr == io.EOF {
-					return nil
-				}
-				continue
-			}
-			payload := bytes.TrimSpace(bytes.TrimPrefix(trimmed, []byte("data:")))
-			if len(payload) == 0 {
-				if readErr == io.EOF {
-					return nil
-				}
-				continue
-			}
-			if bytes.Equal(payload, []byte("[DONE]")) {
-				return nil
-			}
-
-			var chunk openai.StreamChunk
-			if err := json.Unmarshal(payload, &chunk); err != nil {
-				// 容忍上游偶发的非标准事件（如 keepalive ping），跳过即可。
-				if readErr == io.EOF {
-					return nil
-				}
-				continue
-			}
-			if err := push(chunk); err != nil {
-				return err
+			if bytes.HasPrefix(trimmed, []byte("event:")) {
+				eventName = strings.TrimSpace(string(bytes.TrimPrefix(trimmed, []byte("event:"))))
+			} else if bytes.HasPrefix(trimmed, []byte("data:")) {
+				dataLines = append(dataLines, strings.TrimSpace(string(bytes.TrimPrefix(trimmed, []byte("data:")))))
 			}
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
-				return nil
+				_, err := flushEvent()
+				return err
 			}
 			return fmt.Errorf("read upstream stream: %w", readErr)
 		}
