@@ -11,6 +11,10 @@ import (
 )
 
 func LoadRulePacks(manifestGlob string) ([]RulePackManifest, error) {
+	return LoadRulePacksWithDisabled(manifestGlob, nil)
+}
+
+func LoadRulePacksWithDisabled(manifestGlob string, disabledPacks map[string]bool) ([]RulePackManifest, error) {
 	files, err := filepath.Glob(manifestGlob)
 	if err != nil {
 		return nil, err
@@ -52,7 +56,7 @@ func LoadRulePacks(manifestGlob string) ([]RulePackManifest, error) {
 			return manifests[name], nil
 		}
 		stack[name] = true
-		if parent := strings.TrimSpace(manifest.Extends); parent != "" {
+		if parent := strings.TrimSpace(manifest.Extends); parent != "" && !disabledPacks[parent] {
 			parentManifest, parentErr := dfs(parent)
 			if parentErr != nil {
 				return RulePackManifest{}, parentErr
@@ -66,6 +70,9 @@ func LoadRulePacks(manifestGlob string) ([]RulePackManifest, error) {
 	}
 
 	for name := range manifests {
+		if disabledPacks[name] {
+			continue
+		}
 		manifest, resolveErr := dfs(name)
 		if resolveErr != nil {
 			return nil, resolveErr
