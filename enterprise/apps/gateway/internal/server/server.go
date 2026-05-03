@@ -58,23 +58,29 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	// 让前台 token chip 与 admin 看用量都能继续工作而不必启 PG。
 	dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	var sink metering.Sink
+	usageLogPath := strings.TrimSpace(os.Getenv("GATEWAY_USAGE_LOG"))
+	if usageLogPath == "" {
+		usageLogPath = "./.runtime/usage.jsonl"
+	}
 	if dbURL != "" {
 		reporter, err := metering.NewReporter(dbURL, logger)
 		if err != nil {
-			return nil, fmt.Errorf("init metering reporter: %w", err)
+			logger.Warn("metering reporter unavailable, fallback to file sink", "error", err, "path", usageLogPath)
+			fileSink, fileErr := metering.NewFileSink(usageLogPath, logger)
+			if fileErr != nil {
+				return nil, fmt.Errorf("init metering fallback file sink: %w", fileErr)
+			}
+			sink = fileSink
+		} else {
+			sink = reporter
 		}
-		sink = reporter
 	} else {
-		path := strings.TrimSpace(os.Getenv("GATEWAY_USAGE_LOG"))
-		if path == "" {
-			path = "./.runtime/usage.jsonl"
-		}
-		fileSink, err := metering.NewFileSink(path, logger)
+		fileSink, err := metering.NewFileSink(usageLogPath, logger)
 		if err != nil {
 			return nil, fmt.Errorf("init metering file sink: %w", err)
 		}
 		sink = fileSink
-		logger.Info("metering using file sink", "path", path)
+		logger.Info("metering using file sink", "path", usageLogPath)
 	}
 
 	adminLoader := runtimeconfig.New(logger)
