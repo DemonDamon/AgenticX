@@ -51,6 +51,28 @@ bash scripts/start-dev-with-infra.sh --all
 bash scripts/start-dev-with-infra.sh --down
 ```
 
+## Reset Local Dev Data
+
+当前后台 metering 与前台聊天历史对不上时，可用一键重置脚本回到干净基线。
+
+```bash
+cd enterprise
+
+# 交互确认后清空（聊天历史 + 用量记录）
+bash scripts/reset-dev-data.sh
+
+# 无确认直接清空
+bash scripts/reset-dev-data.sh --yes
+
+# 清空后回填默认租户/用户种子
+bash scripts/reset-dev-data.sh --with-seed --yes
+```
+
+会清空的数据：
+
+- PostgreSQL：`chat_messages`、`chat_sessions`、`usage_records`
+- 本地文件：`apps/gateway/.runtime/usage.jsonl`、`apps/gateway/.runtime/gateway/quota-usage.json`
+
 ## Important
 
 - `prod.yml` 为模板，不直接承诺客户侧最终网络拓扑；上云前按客户 VPC、WAF、证书体系做二次适配。
