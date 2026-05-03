@@ -5,27 +5,23 @@ import {
   hashPassword,
   type AuthContext,
   type AuthTokens,
-  type AuthUser,
-  type AuthUserRepository,
 } from "@agenticx/auth";
+import {
+  PgAuthUserRepository,
+  ensureSystemRoles,
+  getDefaultOrgId,
+  loadAuthUserByEmail,
+  replaceUserRoleAssignments,
+  upsertUserRowFromAuthUser,
+} from "@agenticx/iam-core";
 import { createHash } from "node:crypto";
 import { syncAuthUserToPostgres } from "./chat-history";
 
-const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID;
-const DEFAULT_DEPT_ID = process.env.DEFAULT_DEPT_ID;
+const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID?.trim();
+const DEFAULT_DEPT_ID = process.env.DEFAULT_DEPT_ID?.trim();
 const ENABLE_DEV_BOOTSTRAP = process.env.NODE_ENV !== "production" && process.env.ENABLE_DEV_BOOTSTRAP === "true";
 const DEV_OWNER_PASSWORD = process.env.AUTH_DEV_OWNER_PASSWORD;
 const WEAK_PASSWORDS = new Set(["admin123", "admin123!", "password", "password123", "qwerty123"]);
-const OWNER_DEFAULT_SCOPES = [
-  "workspace:chat",
-  "user:create",
-  "user:read",
-  "user:update",
-  "user:delete",
-  "role:read",
-  "dept:read",
-  "audit:read",
-];
 
 type ProvisionInput = {
   tenantId: string;
@@ -36,49 +32,12 @@ type ProvisionInput = {
   scopes?: string[];
 };
 
-class SharedAuthUserRepository implements AuthUserRepository {
-  private readonly users = new Map<string, AuthUser>();
-
-  public async upsert(user: AuthUser): Promise<void> {
-    const emailKey = user.email.toLowerCase();
-    const existing = this.users.get(emailKey);
-    if (existing && existing.tenantId !== user.tenantId) {
-      throw new Error("email already exists in another tenant");
-    }
-    this.users.set(emailKey, user);
-  }
-
-  public async findByEmail(email: string): Promise<AuthUser | null> {
-    return this.users.get(email.toLowerCase()) ?? null;
-  }
-
-  public async updateFailedLogin(email: string, nextFailedCount: number, lockedUntil: number | null): Promise<void> {
-    const current = this.users.get(email.toLowerCase());
-    if (!current) return;
-    this.users.set(email.toLowerCase(), {
-      ...current,
-      failedLoginCount: nextFailedCount,
-      lockedUntil,
-      status: lockedUntil && lockedUntil > Date.now() ? "locked" : current.status,
-    });
-  }
-
-  public async resetFailedLogin(email: string): Promise<void> {
-    const current = this.users.get(email.toLowerCase());
-    if (!current) return;
-    this.users.set(email.toLowerCase(), {
-      ...current,
-      failedLoginCount: 0,
-      lockedUntil: null,
-      status: current.status === "locked" ? "active" : current.status,
-    });
-  }
-}
-
 type AuthRuntime = {
-  repo: SharedAuthUserRepository;
+  repo: PgAuthUserRepository;
   authService: AuthService;
+  jwtService: JwtService;
   refreshStore: InMemoryRefreshTokenStore;
+  tenantId: string;
   bootstrapPromise: Promise<void>;
 };
 
@@ -87,7 +46,8 @@ declare global {
 }
 
 function createRuntime(): AuthRuntime {
-  const repo = new SharedAuthUserRepository();
+  const tenantId = DEFAULT_TENANT_ID ?? "";
+  const repo = new PgAuthUserRepository(tenantId);
   const refreshStore = new InMemoryRefreshTokenStore();
   const jwtService = new JwtService({
     issuer: "agenticx-enterprise-web-portal",
@@ -98,39 +58,35 @@ function createRuntime(): AuthRuntime {
   const authService = new AuthService({ userRepo: repo, jwtService, refreshStore });
 
   const bootstrapPromise = (async () => {
+    if (!process.env.DATABASE_URL?.trim() || !tenantId) {
+      return;
+    }
+    await ensureSystemRoles(tenantId);
     if (!ENABLE_DEV_BOOTSTRAP) {
       return;
     }
     if (!DEV_OWNER_PASSWORD) {
       throw new Error("AUTH_DEV_OWNER_PASSWORD is required when ENABLE_DEV_BOOTSTRAP=true.");
     }
-    if (!DEFAULT_TENANT_ID || !DEFAULT_DEPT_ID) {
-      throw new Error("DEFAULT_TENANT_ID and DEFAULT_DEPT_ID are required when ENABLE_DEV_BOOTSTRAP=true.");
+    if (!DEFAULT_DEPT_ID) {
+      throw new Error("DEFAULT_DEPT_ID is required when ENABLE_DEV_BOOTSTRAP=true.");
     }
     if (!isStrongBootstrapPassword(DEV_OWNER_PASSWORD)) {
       throw new Error("AUTH_DEV_OWNER_PASSWORD must include upper/lower/number/symbol and be at least 14 chars.");
     }
-    const exists = await repo.findByEmail("owner@agenticx.local");
+    const exists = await loadAuthUserByEmail(tenantId, "owner@agenticx.local");
     if (exists) {
-      // Dev runtime may keep an old in-memory user across HMR; ensure owner can use chat.
-      if (!exists.scopes.includes("workspace:chat")) {
-        await repo.upsert({
-          ...exists,
-          scopes: Array.from(new Set([...exists.scopes, "workspace:chat"])),
-        });
-      }
-      const ownerRow = (await repo.findByEmail("owner@agenticx.local")) ?? exists;
       try {
-        await syncAuthUserToPostgres(ownerRow);
+        await syncAuthUserToPostgres(exists);
       } catch (err) {
         console.error("[web-portal] dev owner syncAuthUserToPostgres failed:", err);
       }
       return;
     }
     const passwordHash = await hashPassword(DEV_OWNER_PASSWORD);
-    await repo.upsert({
+    const owner: import("@agenticx/auth").AuthUser = {
       id: "01J00000000000000000000004",
-      tenantId: DEFAULT_TENANT_ID,
+      tenantId,
       deptId: DEFAULT_DEPT_ID,
       email: "owner@agenticx.local",
       displayName: "Seed Owner",
@@ -138,14 +94,23 @@ function createRuntime(): AuthRuntime {
       status: "active",
       failedLoginCount: 0,
       lockedUntil: null,
-      scopes: OWNER_DEFAULT_SCOPES,
+      scopes: [],
+    };
+    await upsertUserRowFromAuthUser(owner);
+    const orgId = await getDefaultOrgId(tenantId);
+    await replaceUserRoleAssignments({
+      tenantId,
+      userId: owner.id,
+      roleCodes: ["super_admin"],
+      defaultOrgId: orgId,
+      defaultDeptId: DEFAULT_DEPT_ID,
     });
-    const devOwner = await repo.findByEmail("owner@agenticx.local");
-    if (devOwner) {
+    const hydrated = await loadAuthUserByEmail(tenantId, owner.email);
+    if (hydrated) {
       try {
-        await syncAuthUserToPostgres(devOwner);
+        await syncAuthUserToPostgres(hydrated);
       } catch (err) {
-        console.error("[web-portal] dev owner syncAuthUserToPostgres failed:", err);
+        console.error("[web-portal] dev owner sync after PG insert failed:", err);
       }
     }
   })();
@@ -153,25 +118,16 @@ function createRuntime(): AuthRuntime {
   return {
     repo,
     authService,
+    jwtService,
     refreshStore,
+    tenantId,
     bootstrapPromise,
   };
-}
-
-async function ensureDevOwnerChatScope(repo: SharedAuthUserRepository): Promise<void> {
-  if (!ENABLE_DEV_BOOTSTRAP) return;
-  const owner = await repo.findByEmail("owner@agenticx.local");
-  if (!owner || owner.scopes.includes("workspace:chat")) return;
-  await repo.upsert({
-    ...owner,
-    scopes: Array.from(new Set([...owner.scopes, "workspace:chat"])),
-  });
 }
 
 async function getRuntime(): Promise<AuthRuntime> {
   globalThis.__agenticxWebPortalAuthRuntime ??= createRuntime();
   await globalThis.__agenticxWebPortalAuthRuntime.bootstrapPromise;
-  await ensureDevOwnerChatScope(globalThis.__agenticxWebPortalAuthRuntime.repo);
   return globalThis.__agenticxWebPortalAuthRuntime;
 }
 
@@ -191,11 +147,20 @@ function isStrongBootstrapPassword(password: string): boolean {
   return true;
 }
 
+function roleCodesForProvisionScopes(scopes: string[] | undefined): string[] {
+  const s = scopes ?? [];
+  if (s.some((x) => x.includes("user:create"))) {
+    return ["admin", "member"];
+  }
+  return ["member"];
+}
+
 export async function provisionUserFromAdmin(input: ProvisionInput): Promise<void> {
   const runtime = await getRuntime();
   const passwordHash = await hashPassword(input.password);
-  await runtime.repo.upsert({
-    id: buildUserId(input.email),
+  const id = buildUserId(input.email);
+  const authUser: import("@agenticx/auth").AuthUser = {
+    id,
     tenantId: input.tenantId,
     deptId: input.deptId ?? null,
     email: input.email.toLowerCase(),
@@ -204,12 +169,26 @@ export async function provisionUserFromAdmin(input: ProvisionInput): Promise<voi
     status: "active",
     failedLoginCount: 0,
     lockedUntil: null,
-    scopes: input.scopes ?? ["workspace:chat", "user:read"],
+    scopes: input.scopes?.length ? input.scopes : ["workspace:chat", "user:read"],
+  };
+  await runtime.repo.upsertUser(authUser);
+  if (!process.env.DATABASE_URL?.trim()) return;
+  const orgId = await getDefaultOrgId(input.tenantId);
+  await replaceUserRoleAssignments({
+    tenantId: input.tenantId,
+    userId: id,
+    roleCodes: roleCodesForProvisionScopes(input.scopes),
+    defaultOrgId: orgId,
+    defaultDeptId: input.deptId ?? null,
   });
   const saved = await runtime.repo.findByEmail(input.email.toLowerCase());
-  if (!saved) return;
-  if (!process.env.DATABASE_URL?.trim()) return;
-  await syncAuthUserToPostgres(saved);
+  if (saved) {
+    try {
+      await syncAuthUserToPostgres(saved);
+    } catch (err) {
+      console.error("[web-portal] provisionUserFromAdmin sync failed:", err);
+    }
+  }
 }
 
 export async function loginWithPassword(email: string, password: string): Promise<AuthTokens> {
@@ -233,6 +212,39 @@ export async function verifyAccessToken(accessToken: string): Promise<AuthContex
 
 export async function refreshTokens(refreshToken: string): Promise<AuthTokens> {
   const runtime = await getRuntime();
-  return runtime.authService.refresh(refreshToken);
-}
+  const refreshContext = await runtime.jwtService.verifyRefreshToken(refreshToken);
+  if (!refreshContext) throw new Error("Invalid refresh token.");
 
+  const stored = await runtime.refreshStore.get(refreshContext.sessionId);
+  if (!stored || stored.userId !== refreshContext.userId || stored.tenantId !== refreshContext.tenantId) {
+    throw new Error("Refresh session expired.");
+  }
+
+  const user = await runtime.repo.findByEmail(refreshContext.email.toLowerCase());
+  if (!user || user.status === "disabled") throw new Error("Refresh session expired.");
+  if (user.status === "locked") throw new Error("Refresh session expired.");
+  if (user.lockedUntil && user.lockedUntil > Date.now()) throw new Error("Refresh session expired.");
+
+  const nextContext: AuthContext = {
+    ...refreshContext,
+    scopes: user.scopes,
+    deptId: user.deptId ?? null,
+  };
+
+  const access = await runtime.jwtService.signAccessToken(nextContext);
+  const nextRefresh = await runtime.jwtService.signRefreshToken(nextContext);
+
+  await runtime.refreshStore.set({
+    ...stored,
+    scopes: nextContext.scopes,
+    deptId: nextContext.deptId ?? null,
+    expiresAt: Date.now() + nextRefresh.expiresInSeconds * 1000,
+  });
+
+  return {
+    accessToken: access.token,
+    refreshToken: nextRefresh.token,
+    tokenType: "Bearer",
+    expiresInSeconds: access.expiresInSeconds,
+  };
+}

@@ -21,6 +21,7 @@
     "@agenticx/feature-knowledge-base": "workspace:*",
     "@agenticx/feature-model-service": "workspace:*",
     "@agenticx/feature-settings": "workspace:*",
+    "@agenticx/iam-core": "workspace:*",
     "@agenticx/sdk-ts": "workspace:^",
     "@agenticx/ui": "workspace:*",
     "drizzle-orm": "^0.45.2",
