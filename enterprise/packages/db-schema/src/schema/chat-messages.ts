@@ -1,4 +1,5 @@
-import { index, jsonb, pgTable, text, varchar } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { check, foreignKey, index, jsonb, pgTable, text, varchar } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { users } from "./users";
 import { auditColumns, ulid } from "./_shared";
@@ -25,12 +26,25 @@ export const chatMessages = pgTable(
     ...auditColumns,
   },
   (table) => ({
+    roleCheck: check(
+      "chat_messages_role_check",
+      sql`${table.role} in ('system', 'user', 'assistant', 'tool')`
+    ),
+    statusCheck: check(
+      "chat_messages_status_check",
+      sql`${table.status} in ('complete', 'streaming', 'failed')`
+    ),
     sessionCreatedIdx: index("chat_messages_session_created_idx").on(table.sessionId, table.createdAt),
     tenantUserSessionIdx: index("chat_messages_tenant_user_session_idx").on(
       table.tenantId,
       table.userId,
       table.sessionId
     ),
+    sessionTenantUserFk: foreignKey({
+      name: "chat_messages_session_tenant_user_fk",
+      columns: [table.sessionId, table.tenantId, table.userId],
+      foreignColumns: [chatSessions.id, chatSessions.tenantId, chatSessions.userId],
+    }).onDelete("restrict"),
   })
 );
 
