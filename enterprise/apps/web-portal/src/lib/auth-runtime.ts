@@ -8,6 +8,8 @@ import {
   type AuthUser,
   type AuthUserRepository,
 } from "@agenticx/auth";
+import { createHash } from "node:crypto";
+import { syncAuthUserToPostgres } from "./chat-history";
 
 const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID;
 const DEFAULT_DEPT_ID = process.env.DEFAULT_DEPT_ID;
@@ -117,6 +119,12 @@ function createRuntime(): AuthRuntime {
           scopes: Array.from(new Set([...exists.scopes, "workspace:chat"])),
         });
       }
+      const ownerRow = (await repo.findByEmail("owner@agenticx.local")) ?? exists;
+      try {
+        await syncAuthUserToPostgres(ownerRow);
+      } catch (err) {
+        console.error("[web-portal] dev owner syncAuthUserToPostgres failed:", err);
+      }
       return;
     }
     const passwordHash = await hashPassword(DEV_OWNER_PASSWORD);
@@ -132,6 +140,14 @@ function createRuntime(): AuthRuntime {
       lockedUntil: null,
       scopes: OWNER_DEFAULT_SCOPES,
     });
+    const devOwner = await repo.findByEmail("owner@agenticx.local");
+    if (devOwner) {
+      try {
+        await syncAuthUserToPostgres(devOwner);
+      } catch (err) {
+        console.error("[web-portal] dev owner syncAuthUserToPostgres failed:", err);
+      }
+    }
   })();
 
   return {
@@ -160,7 +176,9 @@ async function getRuntime(): Promise<AuthRuntime> {
 }
 
 function buildUserId(email: string): string {
-  return `user_${email.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
+  const slug = `user_${email.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
+  if (slug.length <= 26) return slug;
+  return createHash("sha256").update(email.toLowerCase()).digest("hex").slice(0, 26);
 }
 
 function isStrongBootstrapPassword(password: string): boolean {
@@ -188,11 +206,24 @@ export async function provisionUserFromAdmin(input: ProvisionInput): Promise<voi
     lockedUntil: null,
     scopes: input.scopes ?? ["workspace:chat", "user:read"],
   });
+  const saved = await runtime.repo.findByEmail(input.email.toLowerCase());
+  if (!saved) return;
+  if (!process.env.DATABASE_URL?.trim()) return;
+  await syncAuthUserToPostgres(saved);
 }
 
 export async function loginWithPassword(email: string, password: string): Promise<AuthTokens> {
   const runtime = await getRuntime();
-  return runtime.authService.loginWithPassword({ email, password });
+  const tokens = await runtime.authService.loginWithPassword({ email, password });
+  const user = await runtime.repo.findByEmail(email.toLowerCase());
+  if (user) {
+    try {
+      await syncAuthUserToPostgres(user);
+    } catch (err) {
+      console.error("[web-portal] syncAuthUserToPostgres after login failed:", err);
+    }
+  }
+  return tokens;
 }
 
 export async function verifyAccessToken(accessToken: string): Promise<AuthContext | null> {

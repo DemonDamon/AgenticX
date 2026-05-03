@@ -22,6 +22,12 @@ export function chatHistoryBadRequest(message: string) {
   return NextResponse.json({ error: { code: "40001", message } }, { status: 400 });
 }
 
-export function chatHistoryServerError(message: string) {
-  return NextResponse.json({ error: { code: "50001", message } }, { status: 500 });
+export function chatHistoryServerError(error?: unknown) {
+  if (process.env.NODE_ENV !== "production") {
+    console.error("[chat-history] server error:", error);
+  }
+  return NextResponse.json(
+    { error: { code: "50001", message: "chat history operation failed" } },
+    { status: 500 }
+  );
 }

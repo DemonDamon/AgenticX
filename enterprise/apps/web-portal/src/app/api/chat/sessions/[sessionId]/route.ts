@@ -41,8 +41,7 @@ export async function PATCH(request: Request, segmentData: { params: Params }) {
     if (error instanceof Error && error.message.includes("patch must include")) {
       return NextResponse.json({ error: { code: "40001", message: error.message } }, { status: 400 });
     }
-    const message = error instanceof Error ? error.message : "patch session failed";
-    return chatHistoryServerError(message);
+    return chatHistoryServerError(error);
   }
 }
 
@@ -59,7 +58,6 @@ export async function DELETE(_request: Request, segmentData: { params: Params })
     return NextResponse.json({ code: "00000", message: "ok" });
   } catch (error) {
     if (error instanceof ChatHistoryNotFoundError) return chatHistoryNotFound();
-    const message = error instanceof Error ? error.message : "delete session failed";
-    return chatHistoryServerError(message);
+    return chatHistoryServerError(error);
   }
 }
