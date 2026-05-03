@@ -74,9 +74,13 @@ function now(): string {
 
 function seed(store: Store): void {
   if (store.size > 0) return;
+  // 重要：seed 用户的 id 必须与 web-portal dev-bootstrap（auth-runtime.ts）
+  // 以及 packages/db-schema/scripts/db-seed.mjs 中的 ULID 体系对齐，
+  // 否则 admin 「四维消耗」按员工筛选时，下拉发的是 admin id，
+  // 而 DB usage_records.user_id 是 portal JWT 注入的 ULID，永远查不到任何记录。
   const seeds: AdminUser[] = [
     {
-      id: "u_001",
+      id: "01J00000000000000000000004",
       tenantId: DEFAULT_TENANT_ID,
       deptId: DEFAULT_DEPT_ID,
       email: "owner@agenticx.local",
@@ -87,7 +91,7 @@ function seed(store: Store): void {
       updatedAt: now(),
     },
     {
-      id: "u_002",
+      id: "01J00000000000000000000006",
       tenantId: DEFAULT_TENANT_ID,
       deptId: DEFAULT_DEPT_ID,
       email: "ops@agenticx.local",
@@ -98,7 +102,7 @@ function seed(store: Store): void {
       updatedAt: now(),
     },
     {
-      id: "u_003",
+      id: "01J00000000000000000000007",
       tenantId: DEFAULT_TENANT_ID,
       deptId: DEFAULT_DEPT_ID,
       email: "audit@agenticx.local",
@@ -116,8 +120,18 @@ function getStore(): Store {
   if (!globalThis.__agenticxAdminUsersStore) {
     globalThis.__agenticxAdminUsersStore = new Map<string, AdminUser>();
     seed(globalThis.__agenticxAdminUsersStore);
+    return globalThis.__agenticxAdminUsersStore;
   }
-  return globalThis.__agenticxAdminUsersStore;
+  // 迁移守卫：如果存量 store 里的 owner 还是旧的 mock id（u_001 等），
+  // 在 dev 热更新时直接清掉重 seed，避免 dev 必须 ⌘C 重启 admin-console
+  // 才能让 ID 体系与 portal/DB 对齐。
+  const store = globalThis.__agenticxAdminUsersStore;
+  const ownerByEmail = Array.from(store.values()).find((u) => u.email === "owner@agenticx.local");
+  if (ownerByEmail && !/^01J/.test(ownerByEmail.id)) {
+    store.clear();
+    seed(store);
+  }
+  return store;
 }
 
 function generateId(): string {
