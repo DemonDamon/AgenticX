@@ -1,4 +1,4 @@
-import { index, integer, pgTable, timestamp, varchar } from "drizzle-orm/pg-core";
+import { foreignKey, index, integer, pgTable, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { users } from "./users";
 import { auditColumns, ulid } from "./_shared";
@@ -21,6 +21,11 @@ export const chatSessions = pgTable(
     ...auditColumns,
   },
   (table) => ({
+    idTenantUserUq: uniqueIndex("chat_sessions_id_tenant_user_uq").on(
+      table.id,
+      table.tenantId,
+      table.userId
+    ),
     tenantUserUpdatedIdx: index("chat_sessions_tenant_user_updated_idx").on(
       table.tenantId,
       table.userId,
@@ -31,6 +36,11 @@ export const chatSessions = pgTable(
       table.userId,
       table.deletedAt
     ),
+    userTenantFk: foreignKey({
+      name: "chat_sessions_user_tenant_fk",
+      columns: [table.userId, table.tenantId],
+      foreignColumns: [users.id, users.tenantId],
+    }).onDelete("restrict"),
   })
 );
 

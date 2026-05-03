@@ -1,0 +1,6 @@
+CREATE UNIQUE INDEX "users_id_tenant_uq" ON "users" USING btree ("id","tenant_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "chat_sessions_id_tenant_user_uq" ON "chat_sessions" USING btree ("id","tenant_id","user_id");--> statement-breakpoint
+ALTER TABLE "chat_sessions" ADD CONSTRAINT "chat_sessions_user_tenant_fk" FOREIGN KEY ("user_id","tenant_id") REFERENCES "public"."users"("id","tenant_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "chat_messages" ADD CONSTRAINT "chat_messages_session_tenant_user_fk" FOREIGN KEY ("session_id","tenant_id","user_id") REFERENCES "public"."chat_sessions"("id","tenant_id","user_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "chat_messages" ADD CONSTRAINT "chat_messages_role_check" CHECK ("chat_messages"."role" in ('system', 'user', 'assistant', 'tool'));--> statement-breakpoint
+ALTER TABLE "chat_messages" ADD CONSTRAINT "chat_messages_status_check" CHECK ("chat_messages"."status" in ('complete', 'streaming', 'failed'));
