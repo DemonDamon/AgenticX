@@ -10,9 +10,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:seed": "node ./scripts/db-seed.mjs"
+    "db:seed": "node ./scripts/db-seed.mjs",
+    "db:seed:iam": "node ./scripts/iam-demo-seed.mjs"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.20.0"
   },
