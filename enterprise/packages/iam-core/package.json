@@ -1,0 +1,24 @@
+{
+  "name": "@agenticx/iam-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Enterprise IAM PostgreSQL repositories (Drizzle)",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "echo 'lint placeholder'"
+  },
+  "dependencies": {
+    "@agenticx/auth": "workspace:*",
+    "@agenticx/db-schema": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.20.0",
+    "ulid": "^2.3.0"
+  },
+    "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/pg": "^8.16.0",
+    "typescript": "^5.9.2"
+  }
+}
