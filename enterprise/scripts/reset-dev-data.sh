@@ -15,6 +15,7 @@ ENV_FILE="$ENTERPRISE_DIR/.env.local"
 
 AUTO_YES=0
 WITH_SEED=0
+WITH_IAM_SEED=0
 
 print_help() {
   cat <<'EOF'
@@ -25,7 +26,8 @@ reset-dev-data.sh — 清空本地开发数据
 
 选项：
   --yes        跳过确认，直接执行
-  --with-seed  清空后执行 db:seed，恢复默认租户/用户种子
+  --with-seed      清空后执行 db:seed，恢复默认租户/用户种子
+  --with-iam-seed  在 --with-seed 之后额外执行 IAM 演示数据脚本（多级部门 + 4 角色 + 10 演示用户）
   -h, --help   显示帮助
 EOF
 }
@@ -34,6 +36,7 @@ for arg in "$@"; do
   case "$arg" in
     --yes) AUTO_YES=1 ;;
     --with-seed) WITH_SEED=1 ;;
+    --with-iam-seed) WITH_IAM_SEED=1 ;;
     -h|--help) print_help; exit 0 ;;
     *)
       echo "[reset-dev-data] 未知参数: $arg" >&2
@@ -41,6 +44,11 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if [ "$WITH_IAM_SEED" -eq 1 ] && [ "$WITH_SEED" -ne 1 ]; then
+  echo "[reset-dev-data] --with-iam-seed 需同时指定 --with-seed（先恢复基础租户与 owner）" >&2
+  exit 2
+fi
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "[reset-dev-data] $ENV_FILE 不存在，请先执行：bash scripts/bootstrap.sh" >&2
@@ -106,6 +114,11 @@ rm -f \
 if [ "$WITH_SEED" -eq 1 ]; then
   echo "[reset-dev-data] re-seeding default tenant/user..."
   pnpm --filter @agenticx/db-schema db:seed
+fi
+
+if [ "$WITH_IAM_SEED" -eq 1 ]; then
+  echo "[reset-dev-data] running IAM demo seed (departments + roles + demo users)..."
+  pnpm --filter @agenticx/db-schema run db:seed:iam
 fi
 
 echo "[reset-dev-data] done."
