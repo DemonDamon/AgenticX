@@ -27,6 +27,11 @@ services:
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     volumes:
       - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
 volumes:
   pgdata:
