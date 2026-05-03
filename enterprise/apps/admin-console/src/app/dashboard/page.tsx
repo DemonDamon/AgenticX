@@ -54,6 +54,16 @@ type KpiData = {
 
 const REFRESH_MS = 5000;
 
+async function readJsonBody<T>(res: Response, fallback: T): Promise<T> {
+  const raw = await res.text();
+  if (!raw.trim()) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function DashboardPage() {
   const [kpi, setKpi] = useState<KpiData>({
     calls: 0,
@@ -88,8 +98,10 @@ export default function DashboardPage() {
             body: JSON.stringify({ limit: 20 }),
           }),
         ]);
-        const meteringJson = (await meteringRes.json()) as { data?: { rows?: MeteringRow[] } };
-        const auditJson = (await auditRes.json()) as { data?: { items?: AuditEvent[] } };
+        const emptyMetering = { data: { rows: [] as MeteringRow[] } };
+        const emptyAudit = { data: { items: [] as AuditEvent[] } };
+        const meteringJson = await readJsonBody<{ data?: { rows?: MeteringRow[] } }>(meteringRes, emptyMetering);
+        const auditJson = await readJsonBody<{ data?: { items?: AuditEvent[] } }>(auditRes, emptyAudit);
         if (!active) return;
         const rows = meteringJson.data?.rows ?? [];
         const audits = auditJson.data?.items ?? [];

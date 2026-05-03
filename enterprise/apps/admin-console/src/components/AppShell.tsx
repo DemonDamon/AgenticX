@@ -282,10 +282,11 @@ export function AppShell({ children }: AppShellProps) {
     };
   }, []);
 
-  const activeItem = useMemo(
-    () => FLAT_NAV.find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`)),
-    [pathname]
-  );
+  const activeItem = useMemo(() => {
+    const matches = FLAT_NAV.filter((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+    if (matches.length === 0) return undefined;
+    return matches.reduce((best, item) => (item.href.length > best.href.length ? item : best));
+  }, [pathname]);
 
   const breadcrumbs = useMemo(() => {
     const group = NAV_GROUPS.find((g) => g.items.some((item) => item === activeItem));
