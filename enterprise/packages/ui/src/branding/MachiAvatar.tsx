@@ -8,6 +8,7 @@ type MachiAvatarProps = {
 };
 
 export function MachiAvatar({ className, size = 96, src = "/machi-logo-transparent.png" }: MachiAvatarProps) {
+  const isDefaultLogo = src === "/machi-logo-transparent.png";
   return (
     <span
       className={cn(
@@ -22,7 +23,10 @@ export function MachiAvatar({ className, size = 96, src = "/machi-logo-transpare
         alt="Machi"
         width={size}
         height={size}
-        className="h-full w-full object-cover"
+        className={cn(
+          "h-full w-full object-cover",
+          isDefaultLogo && "dark:invert opacity-90 dark:opacity-100"
+        )}
       />
     </span>
   );
