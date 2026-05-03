@@ -1,4 +1,5 @@
 import { Client } from "pg";
+import bcrypt from "bcryptjs";
 
 const databaseUrl = process.env.DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:5432/agenticx";
 
@@ -10,28 +11,11 @@ const ids = {
   role: "01J00000000000000000000005",
 };
 
-const defaultScopes = [
-  "user:create",
-  "user:read",
-  "user:update",
-  "user:delete",
-  "dept:create",
-  "dept:read",
-  "dept:update",
-  "dept:delete",
-  "role:create",
-  "role:read",
-  "role:update",
-  "role:delete",
-  "audit:read",
-  "metering:read",
-];
-
-const superAdminPasswordHash = "$2b$12$YkhFXF2uQ9r8xGi99ZTS7ecgBtm5jBrYqKqRR3YKHyCuXapnwMaIC";
-
 async function main() {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
+  const seedPassword = process.env.AUTH_DEV_OWNER_PASSWORD?.trim() || "ChangeMe_Dev14!Aa";
+  const passwordHash = await bcrypt.hash(seedPassword, 12);
 
   try {
     await client.query("BEGIN");
@@ -79,19 +63,20 @@ async function main() {
         status = EXCLUDED.status,
         updated_at = now()
       `,
-      [ids.user, ids.tenant, ids.dept, "admin@agenticx.local", "super-admin", superAdminPasswordHash, "active"]
+      [ids.user, ids.tenant, ids.dept, "owner@agenticx.local", "Seed Owner", passwordHash, "active"]
     );
 
     await client.query(
       `
       INSERT INTO roles (id, tenant_id, code, name, scopes, immutable)
-      VALUES ($1, $2, $3, $4, $5::jsonb, true)
+      VALUES ($1, $2, $3, $4, $5::jsonb, $6)
       ON CONFLICT (tenant_id, code) DO UPDATE SET
         name = EXCLUDED.name,
         scopes = EXCLUDED.scopes,
+        immutable = EXCLUDED.immutable,
         updated_at = now()
       `,
-      [ids.role, ids.tenant, "super_admin", "Super Admin", JSON.stringify(defaultScopes)]
+      [ids.role, ids.tenant, "super_admin", "Super Admin", JSON.stringify(["*"]), true]
     );
 
     await client.query(
@@ -107,7 +92,7 @@ async function main() {
     );
 
     await client.query("COMMIT");
-    console.log("Seed complete: default tenant + super-admin.");
+    console.log("Seed complete: default tenant + owner + super_admin.");
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
