@@ -65,6 +65,11 @@ set -a
 source "$ENV_FILE"
 set +a
 
+if [ -z "${DATABASE_URL:-}" ]; then
+  export DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/agenticx'
+  echo "[start-dev] DATABASE_URL 未设置，回退到默认本地地址: $DATABASE_URL"
+fi
+
 # 2) PEM -> 环境变量（PEM 多行不能直接写进 .env.local）
 if [ -n "${AUTH_JWT_PRIVATE_KEY_FILE:-}" ] && [ -f "$AUTH_JWT_PRIVATE_KEY_FILE" ]; then
   AUTH_JWT_PRIVATE_KEY="$(cat "$AUTH_JWT_PRIVATE_KEY_FILE")"; export AUTH_JWT_PRIVATE_KEY

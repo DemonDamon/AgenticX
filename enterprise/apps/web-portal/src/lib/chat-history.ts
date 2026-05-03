@@ -5,7 +5,8 @@ import {
   type ChatMessageRole,
   type ChatSession,
 } from "@agenticx/core-api";
-import { chatMessages, chatSessions } from "@agenticx/db-schema";
+import type { AuthUser } from "@agenticx/auth";
+import { chatMessages, chatSessions, users } from "@agenticx/db-schema";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -35,7 +36,10 @@ declare global {
 }
 
 function getDatabaseUrl(): string {
-  const raw = process.env.DATABASE_URL?.trim();
+  const configured = process.env.DATABASE_URL?.trim();
+  const raw =
+    configured ||
+    (process.env.NODE_ENV !== "production" ? "postgresql://postgres:postgres@127.0.0.1:5432/agenticx" : "");
   if (!raw) throw new Error("DATABASE_URL is not configured");
   if (/sslmode=/i.test(raw)) return raw;
   const joiner = raw.includes("?") ? "&" : "?";
@@ -401,6 +405,37 @@ export async function softDeleteChatSession(ctx: ChatHistoryContext, sessionId: 
     )
     .returning({ id: chatSessions.id });
   if (result.length === 0) throw new ChatHistoryNotFoundError();
+}
+
+/**
+ * Mirror in-memory auth users into Postgres so chat_sessions FK (user_id, tenant_id) → users exists.
+ */
+export async function syncAuthUserToPostgres(user: AuthUser): Promise<void> {
+  if (!process.env.DATABASE_URL?.trim()) return;
+  const db = getDb();
+  const now = new Date();
+  await db
+    .insert(users)
+    .values({
+      id: user.id,
+      tenantId: user.tenantId,
+      deptId: user.deptId ?? null,
+      email: user.email.toLowerCase(),
+      displayName: user.displayName,
+      passwordHash: user.passwordHash,
+      status: user.status,
+    })
+    .onConflictDoUpdate({
+      target: users.id,
+      set: {
+        email: user.email.toLowerCase(),
+        displayName: user.displayName,
+        passwordHash: user.passwordHash,
+        deptId: user.deptId ?? null,
+        status: user.status,
+        updatedAt: now,
+      },
+    });
 }
 
 /** Test hook: reset pool (do not use in route handlers). */

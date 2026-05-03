@@ -19,8 +19,7 @@ export async function GET() {
       data: { sessions },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "list sessions failed";
-    return chatHistoryServerError(message);
+    return chatHistoryServerError(error);
   }
 }
 
@@ -44,7 +43,6 @@ export async function POST(request: Request) {
       data: { session: created },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "create session failed";
-    return chatHistoryServerError(message);
+    return chatHistoryServerError(error);
   }
 }
