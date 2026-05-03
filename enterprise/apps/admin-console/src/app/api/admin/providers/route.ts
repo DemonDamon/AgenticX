@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "../../../../lib/admin-auth";
+import { requireAdminScope } from "../../../../lib/admin-auth";
 import {
   createProvider,
   listProviders,
@@ -14,7 +14,7 @@ function parseRoute(value: unknown): ProviderRoute | undefined {
 }
 
 export async function GET() {
-  const auth = await requireAdminSession();
+  const auth = await requireAdminScope(["provider:read"]);
   if (!auth.ok) return auth.response;
 
   return NextResponse.json({
@@ -28,7 +28,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireAdminSession();
+  const auth = await requireAdminScope(["provider:create"]);
   if (!auth.ok) return auth.response;
 
   try {

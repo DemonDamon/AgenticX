@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "../../../../../lib/admin-auth";
+import { requireAdminScope } from "../../../../../lib/admin-auth";
 import { setPolicyPackEnabled } from "../../../../../lib/policy-store";
 
 export async function PATCH(request: Request, context: { params: Promise<{ name: string }> }) {
-  const guard = await requireAdminSession();
+  const guard = await requireAdminScope(["policy:update"]);
   if (!guard.ok) return guard.response;
   const { name } = await context.params;
   let body: { enabled?: boolean };

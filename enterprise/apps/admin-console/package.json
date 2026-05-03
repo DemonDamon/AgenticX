@@ -21,7 +21,9 @@
     "@agenticx/feature-model-service": "workspace:*",
     "@agenticx/feature-policy": "workspace:*",
     "@agenticx/feature-tools-mcp": "workspace:*",
+    "@agenticx/iam-core": "workspace:*",
     "@agenticx/ui": "workspace:*",
+    "papaparse": "^5.5.3",
     "@tanstack/react-table": "^8.21.3",
     "lucide-react": "^0.542.0",
     "next": "^15.1.0",
@@ -30,6 +32,7 @@
     "recharts": "^3.2.1"
   },
   "devDependencies": {
+    "@types/papaparse": "^5.3.15",
     "@types/react": "19.2.14"
   }
 }

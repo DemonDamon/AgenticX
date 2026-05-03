@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "../../../../lib/admin-auth";
+import { requireAdminScope } from "../../../../lib/admin-auth";
 
 function gatewayBaseUrl(): string {
   const value = process.env.GATEWAY_BASE_URL?.trim();
@@ -8,7 +8,7 @@ function gatewayBaseUrl(): string {
 }
 
 export async function GET() {
-  const guard = await requireAdminSession();
+  const guard = await requireAdminScope(["gateway:read"]);
   if (!guard.ok) {
     return guard.response;
   }

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "../../../../../../lib/admin-auth";
+import { requireAdminScope } from "../../../../../../lib/admin-auth";
 import { addProviderModel, type ProviderModel } from "../../../../../../lib/model-providers-store";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  const auth = await requireAdminSession();
+  const auth = await requireAdminScope(["provider:update"]);
   if (!auth.ok) return auth.response;
   const { id } = await context.params;
   try {

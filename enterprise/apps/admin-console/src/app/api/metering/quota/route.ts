@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "../../../../lib/admin-auth";
+import { requireAdminScope } from "../../../../lib/admin-auth";
 import { getQuotaConfig, quotaFilePath, setQuotaConfig } from "../../../../lib/token-quota-store";
 
 export async function GET() {
-  const guard = await requireAdminSession();
+  const guard = await requireAdminScope(["metering:read"]);
   if (!guard.ok) return guard.response;
   return NextResponse.json({
     code: "00000",
@@ -13,7 +13,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  const guard = await requireAdminSession();
+  const guard = await requireAdminScope(["metering:manage"]);
   if (!guard.ok) return guard.response;
   let body: unknown;
   try {
