@@ -21,6 +21,36 @@ docker compose -f prod.yml up -d
 
 （`prod.yml` 会通过 `${ADMIN_CONSOLE_LOGIN_PASSWORD?...}` 强制要求该变量已导出。）
 
+## Local Development Startup Order
+
+推荐顺序（本地开发）：
+
+1. 先起中间件：Postgres + Redis（Docker）
+2. 再起应用：gateway + web-portal + admin-console（脚本）
+
+一条命令（推荐）：
+
+```bash
+cd enterprise
+bash scripts/start-dev-with-infra.sh
+```
+
+常用变体：
+
+```bash
+# 仅起中间件
+bash scripts/start-dev-with-infra.sh --infra-only
+
+# 中间件已起，仅起应用
+bash scripts/start-dev-with-infra.sh --skip-infra --ui=stream
+
+# 同时拉起 customers/*
+bash scripts/start-dev-with-infra.sh --all
+
+# 关闭中间件
+bash scripts/start-dev-with-infra.sh --down
+```
+
 ## Important
 
 - `prod.yml` 为模板，不直接承诺客户侧最终网络拓扑；上云前按客户 VPC、WAF、证书体系做二次适配。
