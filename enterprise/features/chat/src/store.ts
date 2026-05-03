@@ -212,6 +212,7 @@ function mergeSessionMessages(messages: ChatMessage[], sessionId: string, sessio
 }
 
 let chatHydrateInFlight: Promise<void> | null = null;
+let sessionMessageLoadSeq = 0;
 const portalHistory = createPortalChatHistoryClient();
 
 function stripVersionsForSession(
@@ -430,7 +431,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       return;
     }
 
-    const previousActiveId = get().activeSessionId;
+    const loadSeq = ++sessionMessageLoadSeq;
     set({
       activeSessionId: sessionId,
       activeModel: target.active_model ?? DEFAULT_MODEL,
@@ -442,6 +443,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     try {
       const remoteMessages = await portalHistory.getMessages(sessionId);
       const responseVersions = buildHydratedResponseVersions(remoteMessages);
+      if (loadSeq !== sessionMessageLoadSeq || get().activeSessionId !== sessionId) return;
       set((state) => ({
         messages: mergeSessionMessages(state.messages, sessionId, remoteMessages),
         responseVersionsByUserMessageId: {
@@ -451,8 +453,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         sessionMessagesLoading: false,
       }));
     } catch (error) {
+      if (loadSeq !== sessionMessageLoadSeq || get().activeSessionId !== sessionId) return;
       set({
-        activeSessionId: previousActiveId,
         sessionMessagesLoading: false,
         historyError: error instanceof Error ? error.message : "加载消息失败",
       });
