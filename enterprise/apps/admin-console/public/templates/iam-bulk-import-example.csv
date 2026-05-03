@@ -1,0 +1,3 @@
+email,display_name,dept_path,role_codes,phone,employee_no,job_title
+alice@example.com,Alice,总部/研发/前端,"member;auditor",13800000001,E001,工程师
+bob@example.com,Bob,总部/运营,,13900000002,E002,运营

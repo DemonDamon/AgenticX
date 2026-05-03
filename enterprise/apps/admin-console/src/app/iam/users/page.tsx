@@ -55,6 +55,10 @@ interface AdminUser {
   displayName: string;
   status: Status;
   scopes: string[];
+  roleCodes: string[];
+  phone: string | null;
+  employeeNo: string | null;
+  jobTitle: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -68,7 +72,7 @@ type ApiListResp = {
 type ApiUserResp = {
   code: string;
   message: string;
-  data?: { user: AdminUser };
+  data?: { user: AdminUser; initialPassword?: string };
 };
 
 const STATUS_META: Record<Status, { label: string; variant: "success" | "warning" | "destructive" }> = {
@@ -85,10 +89,16 @@ interface ModelOption {
   label: string;
 }
 
+type DeptOption = { id: string; label: string };
+type RoleOption = { id: string; code: string; name: string };
+
+const PAGE_SIZE = 50;
+
 export default function UsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<"all" | Status>("all");
   const [selected, setSelected] = useState<AdminUser | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -96,13 +106,22 @@ export default function UsersPage() {
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [userModels, setUserModels] = useState<string[]>([]);
   const [savingModels, setSavingModels] = useState(false);
+  const [deptOptions, setDeptOptions] = useState<DeptOption[]>([]);
+  const [roleOptions, setRoleOptions] = useState<RoleOption[]>([]);
+
+  const deptLabelMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const d of deptOptions) m.set(d.id, d.label);
+    return m;
+  }, [deptOptions]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.set("status", statusFilter);
-      params.set("limit", "100");
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String((page - 1) * PAGE_SIZE));
       const res = await fetch(`/api/admin/users?${params.toString()}`, { cache: "no-store" });
       const json = (await res.json()) as ApiListResp;
       if (res.ok && json.data) {
@@ -116,11 +135,52 @@ export default function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, page]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/admin/departments?shape=flat", { cache: "no-store" });
+        const json = (await res.json()) as {
+          data?: { items: Array<{ id: string; name: string; path: string }> };
+        };
+        if (!alive || !json.data?.items) return;
+        setDeptOptions(
+          json.data.items.map((d) => ({
+            id: d.id,
+            label: `${d.name}（${d.path}）`,
+          }))
+        );
+      } catch {
+        /* 部门下拉仅辅助展示 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/admin/roles", { cache: "no-store" });
+        const json = (await res.json()) as { data?: { items: RoleOption[] } };
+        if (!alive || !json.data?.items) return;
+        setRoleOptions(json.data.items.map((r) => ({ id: r.id, code: r.code, name: r.name })));
+      } catch {
+        /* silent */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 并行加载所有可分配的模型（来自管理员配置）
   useEffect(() => {
@@ -210,30 +270,39 @@ export default function UsersPage() {
     }
   };
 
-  const handleCreate = async (input: { email: string; displayName: string; status: Status; deptId: string }) => {
+  const handleCreate = async (input: Record<string, unknown>) => {
     const res = await fetch("/api/admin/users", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
     });
     const json = (await res.json()) as ApiUserResp;
-    if (!res.ok || !json.data) {
+    if (!res.ok || !json.data?.user) {
       toast.error(json.message ?? "创建失败");
       return false;
     }
     toast.success(`已创建用户 ${json.data.user.email}`);
+    if (json.data.initialPassword) {
+      toast.success(`初始密码（仅此一次）：${json.data.initialPassword}`, { duration: 15_000 });
+      try {
+        await navigator.clipboard.writeText(json.data.initialPassword);
+        toast.success("初始密码已复制到剪贴板");
+      } catch {
+        /* ignore */
+      }
+    }
     await load();
     return true;
   };
 
-  const handleUpdate = async (id: string, patch: Partial<AdminUser>) => {
+  const handleUpdate = async (id: string, patch: Partial<AdminUser> & Record<string, unknown>) => {
     const res = await fetch(`/api/admin/users/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(patch),
     });
     const json = (await res.json()) as ApiUserResp;
-    if (!res.ok || !json.data) {
+    if (!res.ok || !json.data?.user) {
       toast.error(json.message ?? "更新失败");
       return false;
     }
@@ -241,6 +310,22 @@ export default function UsersPage() {
     await load();
     if (selected?.id === id) setSelected(json.data.user);
     return true;
+  };
+
+  const handleResetPassword = async (user: AdminUser) => {
+    const res = await fetch(`/api/admin/users/${user.id}/reset-password`, { method: "POST" });
+    const json = (await res.json()) as { data?: { initialPassword?: string }; message?: string };
+    if (!res.ok || !json.data?.initialPassword) {
+      toast.error(json.message ?? "重置失败");
+      return;
+    }
+    toast.success(`新密码（仅此一次）：${json.data.initialPassword}`, { duration: 15_000 });
+    try {
+      await navigator.clipboard.writeText(json.data.initialPassword);
+      toast.success("新密码已复制到剪贴板");
+    } catch {
+      /* ignore */
+    }
   };
 
   const handleDelete = async (user: AdminUser) => {
@@ -282,7 +367,9 @@ export default function UsersPage() {
         accessorKey: "deptId",
         header: "部门",
         cell: ({ row }) => (
-          <span className="text-sm text-muted-foreground">{row.original.deptId ?? "—"}</span>
+          <span className="text-sm text-muted-foreground" title={row.original.deptId ?? ""}>
+            {row.original.deptId ? (deptLabelMap.get(row.original.deptId) ?? row.original.deptId) : "—"}
+          </span>
         ),
       },
       {
@@ -378,7 +465,7 @@ export default function UsersPage() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selected?.id]
+    [selected?.id, deptLabelMap]
   );
 
   const activeFilters = useMemo(() => {
@@ -413,7 +500,7 @@ export default function UsersPage() {
           </Breadcrumb>
         }
         title="用户管理"
-        description={`共 ${total} 位用户 · 支持搜索 / 筛选 / 批量操作 / 详情抽屉`}
+        description={`共 ${total} 位用户 · 每页 ${PAGE_SIZE} 条 · 支持搜索 / 筛选 / 批量操作 / 详情抽屉`}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => void load()}>
@@ -444,13 +531,22 @@ export default function UsersPage() {
               data={users}
               searchPlaceholder="按邮箱 / 姓名 / ID 搜索..."
               activeFilters={activeFilters}
-              onClearFilters={() => setStatusFilter("all")}
+              onClearFilters={() => {
+                setStatusFilter("all");
+                setPage(1);
+              }}
               onRowClick={(row) => {
                 setSelected(row.original);
                 setEditOpen(false);
               }}
               toolbarLeft={
-                <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as "all" | Status)}>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => {
+                    setPage(1);
+                    setStatusFilter(value as "all" | Status);
+                  }}
+                >
                   <SelectTrigger className="h-9 w-[140px]">
                     <SelectValue placeholder="全部状态" />
                   </SelectTrigger>
@@ -478,13 +574,35 @@ export default function UsersPage() {
                 a.download = `users-${new Date().toISOString().slice(0, 10)}.csv`;
                 a.click();
                 URL.revokeObjectURL(url);
-                toast.success(`已导出 ${users.length} 条记录`);
+                toast.success(`已导出本页 ${users.length} 条记录`);
               }}
               getRowId={(row) => row.id}
             />
           )}
         </CardContent>
       </Card>
+
+      <div className="flex flex-wrap items-center justify-end gap-2 text-sm text-muted-foreground">
+        <span>
+          第 {page} / {Math.max(1, Math.ceil(total / PAGE_SIZE))} 页 · 共 {total} 人
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={page <= 1 || loading}
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+        >
+          上一页
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={page >= Math.max(1, Math.ceil(total / PAGE_SIZE)) || loading}
+          onClick={() => setPage((p) => p + 1)}
+        >
+          下一页
+        </Button>
+      </div>
 
       {/* 详情抽屉 */}
       <Sheet open={!!selected && !editOpen} onOpenChange={(open) => !open && setSelected(null)}>
@@ -506,7 +624,31 @@ export default function UsersPage() {
               <div className="flex-1 space-y-4 overflow-y-auto pr-1">
                 <DetailRow label="用户 ID" value={<span className="font-mono text-xs">{selected.id}</span>} />
                 <DetailRow label="租户" value={<span className="font-mono text-xs">{selected.tenantId}</span>} />
-                <DetailRow label="部门" value={selected.deptId ?? "—"} />
+                <DetailRow
+                  label="部门"
+                  value={
+                    selected.deptId ? (deptLabelMap.get(selected.deptId) ?? selected.deptId) : "—"
+                  }
+                />
+                <DetailRow label="手机" value={selected.phone ?? "—"} />
+                <DetailRow label="工号" value={selected.employeeNo ?? "—"} />
+                <DetailRow label="职位" value={selected.jobTitle ?? "—"} />
+                <DetailRow
+                  label="角色"
+                  value={
+                    selected.roleCodes?.length ? (
+                      <div className="flex flex-wrap gap-1">
+                        {selected.roleCodes.map((c) => (
+                          <Badge key={c} variant="outline" className="font-mono text-[10px]">
+                            {c}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      "—"
+                    )
+                  }
+                />
                 <DetailRow
                   label="状态"
                   value={<Badge variant={STATUS_META[selected.status].variant}>{STATUS_META[selected.status].label}</Badge>}
@@ -592,10 +734,13 @@ export default function UsersPage() {
                 </div>
               </div>
 
-              <div className="flex gap-2 border-t border-border pt-3">
-                <Button variant="outline" className="flex-1" onClick={() => setEditOpen(true)}>
+              <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+                <Button variant="outline" className="flex-1 min-w-[100px]" onClick={() => setEditOpen(true)}>
                   <Pencil />
                   编辑
+                </Button>
+                <Button variant="outline" className="flex-1 min-w-[100px]" onClick={() => void handleResetPassword(selected)}>
+                  重置密码
                 </Button>
                 <Button
                   variant={selected.status === "active" ? "outline" : "default"}
@@ -621,8 +766,20 @@ export default function UsersPage() {
         title="新建用户"
         description="创建后用户将立即出现在 workspace 可登录列表"
         submitLabel="创建"
+        roleOptions={roleOptions}
+        deptOptions={deptOptions}
         onSubmit={async (values) => {
-          const ok = await handleCreate(values);
+          const ok = await handleCreate({
+            email: values.email,
+            displayName: values.displayName,
+            status: values.status,
+            deptId: values.deptId || null,
+            phone: values.phone || null,
+            employeeNo: values.employeeNo || null,
+            jobTitle: values.jobTitle || null,
+            roleCodes: values.roleCodes.length ? values.roleCodes : undefined,
+            initialPassword: values.initialPassword || undefined,
+          });
           if (ok) setCreateOpen(false);
         }}
       />
@@ -637,6 +794,8 @@ export default function UsersPage() {
         title="编辑用户"
         description={selected?.email}
         submitLabel="保存"
+        roleOptions={roleOptions}
+        deptOptions={deptOptions}
         initial={
           selected
             ? {
@@ -644,6 +803,11 @@ export default function UsersPage() {
                 displayName: selected.displayName,
                 status: selected.status,
                 deptId: selected.deptId ?? "",
+                phone: selected.phone ?? "",
+                employeeNo: selected.employeeNo ?? "",
+                jobTitle: selected.jobTitle ?? "",
+                roleCodes: selected.roleCodes ?? [],
+                initialPassword: "",
               }
             : undefined
         }
@@ -654,6 +818,10 @@ export default function UsersPage() {
             displayName: values.displayName,
             status: values.status,
             deptId: values.deptId || null,
+            phone: values.phone || null,
+            employeeNo: values.employeeNo || null,
+            jobTitle: values.jobTitle || null,
+            roleCodes: values.roleCodes,
           });
           if (ok) setEditOpen(false);
         }}
@@ -676,7 +844,24 @@ interface UserFormValues {
   displayName: string;
   status: Status;
   deptId: string;
+  phone: string;
+  employeeNo: string;
+  jobTitle: string;
+  roleCodes: string[];
+  initialPassword: string;
 }
+
+const EMPTY_USER_FORM: UserFormValues = {
+  email: "",
+  displayName: "",
+  status: "active",
+  deptId: "",
+  phone: "",
+  employeeNo: "",
+  jobTitle: "",
+  roleCodes: ["member"],
+  initialPassword: "",
+};
 
 function UserFormDialog({
   open,
@@ -686,6 +871,8 @@ function UserFormDialog({
   submitLabel,
   initial,
   emailReadOnly,
+  deptOptions,
+  roleOptions,
   onSubmit,
 }: {
   open: boolean;
@@ -695,16 +882,16 @@ function UserFormDialog({
   submitLabel: string;
   initial?: UserFormValues;
   emailReadOnly?: boolean;
+  deptOptions: DeptOption[];
+  roleOptions: RoleOption[];
   onSubmit: (values: UserFormValues) => Promise<void>;
 }) {
-  const [values, setValues] = useState<UserFormValues>(
-    () => initial ?? { email: "", displayName: "", status: "active", deptId: "" }
-  );
+  const [values, setValues] = useState<UserFormValues>(() => initial ?? EMPTY_USER_FORM);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setValues(initial ?? { email: "", displayName: "", status: "active", deptId: "" });
+      setValues(initial ?? EMPTY_USER_FORM);
     }
   }, [open, initial]);
 
@@ -750,7 +937,7 @@ function UserFormDialog({
               placeholder="例如：张三"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>状态</Label>
               <Select
@@ -768,15 +955,103 @@ function UserFormDialog({
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="user-dept">部门 ID（可选）</Label>
+              <Label>部门</Label>
+              <Select
+                value={values.deptId || "__none__"}
+                onValueChange={(v) => setValues((prev) => ({ ...prev, deptId: v === "__none__" ? "" : v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="选择部门" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">（未分配）</SelectItem>
+                  {deptOptions.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="user-phone">手机</Label>
               <Input
-                id="user-dept"
-                value={values.deptId}
-                onChange={(event) => setValues((prev) => ({ ...prev, deptId: event.target.value }))}
-                placeholder="dept_xxx"
+                id="user-phone"
+                value={values.phone}
+                onChange={(e) => setValues((prev) => ({ ...prev, phone: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="user-eno">工号</Label>
+              <Input
+                id="user-eno"
+                value={values.employeeNo}
+                onChange={(e) => setValues((prev) => ({ ...prev, employeeNo: e.target.value }))}
               />
             </div>
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="user-job">职位</Label>
+            <Input
+              id="user-job"
+              value={values.jobTitle}
+              onChange={(e) => setValues((prev) => ({ ...prev, jobTitle: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>角色</Label>
+            <div className="grid max-h-40 gap-1.5 overflow-y-auto rounded-md border border-border p-2 sm:grid-cols-2">
+              {roleOptions.map((r) => {
+                const checked = values.roleCodes.includes(r.code);
+                return (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className={[
+                      "flex items-center gap-2 rounded px-2 py-1 text-left text-xs",
+                      checked ? "bg-primary-soft ring-1 ring-primary" : "hover:bg-muted",
+                    ].join(" ")}
+                    onClick={() =>
+                      setValues((prev) => {
+                        const next = new Set(prev.roleCodes);
+                        if (next.has(r.code)) next.delete(r.code);
+                        else next.add(r.code);
+                        const arr = [...next];
+                        return { ...prev, roleCodes: arr.length ? arr : ["member"] };
+                      })
+                    }
+                  >
+                    <span
+                      className={[
+                        "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border",
+                        checked ? "border-primary bg-primary text-primary-foreground" : "border-border",
+                      ].join(" ")}
+                    >
+                      {checked ? <Check className="h-2.5 w-2.5" /> : null}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="font-mono text-[10px] text-muted-foreground">{r.code}</span> · {r.name}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {!emailReadOnly ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="user-init-pw">初始密码（可选，留空则自动生成）</Label>
+              <Input
+                id="user-init-pw"
+                type="password"
+                autoComplete="new-password"
+                value={values.initialPassword}
+                onChange={(e) => setValues((prev) => ({ ...prev, initialPassword: e.target.value }))}
+              />
+            </div>
+          ) : null}
 
           <DialogFooter className="mt-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
