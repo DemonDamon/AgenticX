@@ -1,4 +1,6 @@
 export * from "./types";
+export * from "./history-client";
+export { sessionTitleNeedsAutoFill, buildAutoTitleFromFirstUserMessage } from "@agenticx/core-api";
 export * from "./store";
 export * from "./ChatWorkspace";
 export * from "./components/molecules/MessageList";

@@ -16,7 +16,7 @@ export function ChatWorkspace({ brand, features, rulePacks = [], client, slots }
     status,
     activeModel,
     errorMessage,
-    bootstrap,
+    hydrateSessions,
     switchSession,
     switchModel,
     sendMessage,
@@ -26,10 +26,8 @@ export function ChatWorkspace({ brand, features, rulePacks = [], client, slots }
   const [draft, setDraft] = React.useState("");
 
   React.useEffect(() => {
-    if (sessions.length > 0) return;
-    if (activeSessionId) return;
-    bootstrap({ defaultModel: DEFAULT_MODELS[0] });
-  }, [activeSessionId, sessions.length, bootstrap]);
+    void hydrateSessions();
+  }, [hydrateSessions]);
 
   const visibleMessages = React.useMemo(() => {
     if (!activeSessionId) return [];
@@ -60,11 +58,11 @@ export function ChatWorkspace({ brand, features, rulePacks = [], client, slots }
                 key={session.id}
                 role="button"
                 tabIndex={0}
-                onClick={() => switchSession(session.id)}
+                onClick={() => void switchSession(session.id)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    switchSession(session.id);
+                    void switchSession(session.id);
                   }
                 }}
                 className={[

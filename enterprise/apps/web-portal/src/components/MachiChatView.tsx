@@ -87,7 +87,10 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     errorMessage,
     sessionTokens,
     responseVersionsByUserMessageId,
-    bootstrap,
+    hydrateSessions,
+    historyLoading,
+    historyError,
+    sessionMessagesLoading,
     renameSession,
     switchModel,
     sendMessage,
@@ -145,11 +148,8 @@ export function MachiChatView({ client }: MachiChatViewProps) {
   }, [modelsLoaded, availableModels, activeModel, switchModel]);
 
   React.useEffect(() => {
-    if (sessions.length > 0) return;
-    if (activeSessionId) return;
-    const initial = availableModels.find((m) => m.isDefault) ?? availableModels[0];
-    bootstrap({ defaultModel: initial?.id, title: "欢迎使用 AgenticX" });
-  }, [activeSessionId, sessions.length, bootstrap, availableModels]);
+    void hydrateSessions();
+  }, [hydrateSessions]);
 
   React.useEffect(() => {
     if (!modelMenuOpen) return;
@@ -261,6 +261,13 @@ export function MachiChatView({ client }: MachiChatViewProps) {
 
   const composer = (
     <div className="mx-auto w-full max-w-4xl space-y-3">
+      {historyError && (
+        <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
+          <ShieldAlert className="h-5 w-5" />
+          <AlertTitle>历史同步</AlertTitle>
+          <AlertDescription>{historyError}</AlertDescription>
+        </Alert>
+      )}
       {errorMessage && (
         <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
           <ShieldAlert className="h-5 w-5" />
@@ -384,7 +391,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                 onBlur={() => {
                   setIsEditingTitle(false);
                   if (activeSessionId) {
-                    renameSession(activeSessionId, sessionTitle.trim() || "New chat");
+                    void renameSession(activeSessionId, sessionTitle.trim() || "New chat");
                   }
                 }}
                 onKeyDown={(e) => {
@@ -498,6 +505,11 @@ export function MachiChatView({ client }: MachiChatViewProps) {
             </div>
           ) : (
             <div className="relative h-full min-h-0">
+              {sessionMessagesLoading && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 text-sm text-muted-foreground backdrop-blur-[1px]">
+                  加载消息…
+                </div>
+              )}
               <MessageList
                 messages={visibleMessages}
                 className="h-full"

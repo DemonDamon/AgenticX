@@ -93,6 +93,7 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const activeModel = useChatStore((s) => s.activeModel);
+  const historyLoading = useChatStore((s) => s.historyLoading);
   const createSession = useChatStore((s) => s.createSession);
   const switchSession = useChatStore((s) => s.switchSession);
   const renameSessionInStore = useChatStore((s) => s.renameSession);
@@ -139,13 +140,13 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
   }, []);
 
   const onNewChat = React.useCallback(() => {
-    createSession({ defaultModel: activeModel || "deepseek-chat", title: t.newChat });
+    void createSession({ defaultModel: activeModel || "deepseek-chat", title: t.newChat });
     setPanelMode("chat");
     setMobileOpen(false);
   }, [createSession, activeModel, t.newChat]);
 
   const onSelectSession = React.useCallback((id: string) => {
-    switchSession(id);
+    void switchSession(id);
     setPanelMode("chat");
     setMobileOpen(false);
   }, [switchSession]);
@@ -154,13 +155,13 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
     const current = history.find((item) => item.id === id);
     const next = window.prompt("重命名会话", current?.title ?? "");
     if (!next) return;
-    renameSessionInStore(id, next);
+    void renameSessionInStore(id, next);
   }, [history, renameSessionInStore]);
 
   const onDeleteSession = React.useCallback(
     (id: string) => {
       if (!window.confirm("删除这条会话？")) return;
-      deleteSessionInStore(id);
+      void deleteSessionInStore(id);
     },
     [deleteSessionInStore]
   );
@@ -248,7 +249,9 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
           {/* 历史分组 */}
           <div className="flex-1 overflow-y-auto px-2 py-2">
             {!collapsed ? (
-              grouped.length === 0 ? (
+              historyLoading ? (
+                <div className="px-3 py-4 text-xs text-muted-foreground">加载历史…</div>
+              ) : grouped.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center gap-2 px-3 py-10 text-center text-xs text-muted-foreground">
                   <MessageSquare className="h-5 w-5" />
                   <span>{t.noHistory}</span>
