@@ -4,8 +4,21 @@ export const ADMIN_SESSION_COOKIE = "admin_console_session";
 
 type AdminSessionPayload = {
   email: string;
+  userId: string;
+  tenantId: string;
   exp: number;
 };
+
+type LegacyPayload = {
+  email: string;
+  exp: number;
+};
+
+function isLegacyPayload(p: unknown): p is LegacyPayload {
+  if (!p || typeof p !== "object") return false;
+  const o = p as Record<string, unknown>;
+  return typeof o.email === "string" && typeof o.exp === "number" && !("userId" in o && o.userId);
+}
 
 function toBase64Url(input: string): string {
   return Buffer.from(input, "utf8").toString("base64url");
@@ -35,9 +48,16 @@ function normalizeCompare(left: string, right: string): boolean {
   return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-export function createAdminSessionToken(email: string, expiresInSeconds = 60 * 60 * 8): string {
+export function createAdminSessionToken(
+  email: string,
+  userId: string,
+  tenantId: string,
+  expiresInSeconds = 60 * 60 * 8
+): string {
   const payload: AdminSessionPayload = {
     email,
+    userId,
+    tenantId,
     exp: Math.floor(Date.now() / 1000) + expiresInSeconds,
   };
   const encoded = toBase64Url(JSON.stringify(payload));
@@ -53,8 +73,11 @@ export function verifyAdminSessionToken(token: string | undefined | null): Admin
   if (!normalizeCompare(signature, expected)) return null;
 
   try {
-    const payload = JSON.parse(fromBase64Url(encoded)) as AdminSessionPayload;
+    const raw = JSON.parse(fromBase64Url(encoded)) as unknown;
+    if (isLegacyPayload(raw)) return null;
+    const payload = raw as AdminSessionPayload;
     if (!payload.email || typeof payload.exp !== "number") return null;
+    if (!payload.userId || !payload.tenantId) return null;
     if (payload.exp <= Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch {

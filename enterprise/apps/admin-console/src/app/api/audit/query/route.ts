@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { queryAudit } from "../../../../lib/audit-service";
-import { requireAdminSession } from "../../../../lib/admin-auth";
+import { requireAdminScope } from "../../../../lib/admin-auth";
 
 export async function POST(request: Request) {
-  const guard = await requireAdminSession();
+  const guard = await requireAdminScope(["audit:read"]);
   if (!guard.ok) {
     return guard.response;
   }

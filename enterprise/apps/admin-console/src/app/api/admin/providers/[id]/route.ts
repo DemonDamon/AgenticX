@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "../../../../../lib/admin-auth";
+import { requireAdminScope } from "../../../../../lib/admin-auth";
 import {
   deleteProvider,
   getProvider,
@@ -14,7 +14,7 @@ function parseRoute(value: unknown): ProviderRoute | undefined {
 }
 
 export async function GET(_req: Request, context: { params: Promise<{ id: string }> }) {
-  const auth = await requireAdminSession();
+  const auth = await requireAdminScope(["provider:read"]);
   if (!auth.ok) return auth.response;
   const { id } = await context.params;
   const provider = getProvider(id);
@@ -25,7 +25,7 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
-  const auth = await requireAdminSession();
+  const auth = await requireAdminScope(["provider:update"]);
   if (!auth.ok) return auth.response;
   const { id } = await context.params;
   try {
@@ -53,7 +53,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function DELETE(_req: Request, context: { params: Promise<{ id: string }> }) {
-  const auth = await requireAdminSession();
+  const auth = await requireAdminScope(["provider:delete"]);
   if (!auth.ok) return auth.response;
   const { id } = await context.params;
   const ok = deleteProvider(id);

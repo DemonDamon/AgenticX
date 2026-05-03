@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireAdminSession } from "../../../../lib/admin-auth";
+import { requireAdminScope } from "../../../../lib/admin-auth";
 import { listPolicyPacks, policyOverridePath } from "../../../../lib/policy-store";
 
 export async function GET() {
-  const guard = await requireAdminSession();
+  const guard = await requireAdminScope(["policy:read"]);
   if (!guard.ok) return guard.response;
   return NextResponse.json({
     code: "00000",
