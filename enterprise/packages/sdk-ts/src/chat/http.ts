@@ -64,7 +64,12 @@ export class HttpChatClient implements ChatClient {
     try {
       const response = await fetch(this.endpoint, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(pending.request.sessionId?.trim()
+            ? { "x-chat-session-id": pending.request.sessionId.trim() }
+            : {}),
+        },
         body: JSON.stringify({
           model: pending.request.model,
           stream: true,

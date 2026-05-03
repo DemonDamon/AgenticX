@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getSessionFromCookies } from "../../../../lib/session";
 import { ACCESS_COOKIE } from "../../../../lib/session";
+import { isChatSessionOwned } from "../../../../lib/chat-history";
+import { toChatHistoryContext } from "../../../../lib/chat-history-http";
 
 const GATEWAY_COMPLETIONS_URL =
   process.env.GATEWAY_COMPLETIONS_URL ?? "http://127.0.0.1:8088/v1/chat/completions";
@@ -30,6 +32,33 @@ export async function POST(request: Request) {
         },
       },
       { status: 401 }
+    );
+  }
+
+  const chatSessionId = request.headers.get("x-chat-session-id")?.trim();
+  if (!chatSessionId) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "40001",
+          message: "missing chat session",
+        },
+      },
+      { status: 400 }
+    );
+  }
+
+  const ctx = toChatHistoryContext(session);
+  const owned = await isChatSessionOwned(ctx, chatSessionId);
+  if (!owned) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "40301",
+          message: "forbidden",
+        },
+      },
+      { status: 403 }
     );
   }
 
