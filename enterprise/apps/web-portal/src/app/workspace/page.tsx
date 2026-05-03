@@ -8,6 +8,6 @@ export default async function WorkspacePage() {
     redirect("/auth");
   }
 
-  return <WorkspaceShell userEmail={session.email} />;
+  return <WorkspaceShell userEmail={session.email} userScopes={session.scopes} />;
 }
 

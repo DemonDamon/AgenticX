@@ -27,6 +27,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Crown,
+  LayoutDashboard,
   LogOut,
   Menu,
   MessageSquare,
@@ -48,6 +49,7 @@ import { usePortalCopy } from "../lib/portal-copy";
 
 type WorkspaceShellProps = {
   userEmail: string;
+  userScopes: string[];
 };
 
 type PanelMode = "chat" | "settings";
@@ -85,9 +87,10 @@ function groupHistory(history: HistorySession[]): Array<{ key: string; label: st
   ].filter((group) => group.items.length > 0);
 }
 
-export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
+export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const router = useRouter();
   const t = usePortalCopy();
+  const showAdminEntry = userScopes.includes("admin:enter");
   const { locale, setLocale } = useLocale();
   const { resolved: resolvedTheme, theme, setTheme, toggle: toggleTheme } = useUiTheme();
   const sessions = useChatStore((s) => s.sessions);
@@ -358,6 +361,20 @@ export function WorkspaceShell({ userEmail }: WorkspaceShellProps) {
                   <Languages className="mr-2 h-4 w-4" />
                   语言：{locale === "zh" ? "中文" : "English"}
                 </DropdownMenuItem>
+                {showAdminEntry ? (
+                  <DropdownMenuItem
+                    onClick={() =>
+                      window.open(
+                        process.env.NEXT_PUBLIC_ADMIN_CONSOLE_URL ?? "http://localhost:3001",
+                        "_blank",
+                        "noopener,noreferrer"
+                      )
+                    }
+                  >
+                    <LayoutDashboard className="mr-2 h-4 w-4" />
+                    管理后台
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={onSignOut}>
                   <LogOut className="mr-2 h-4 w-4" />
