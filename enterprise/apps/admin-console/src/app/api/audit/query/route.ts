@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { queryAudit } from "../../../../lib/audit-service";
-import { requireAdminScope } from "../../../../lib/admin-auth";
+import { buildAuditActor, queryAudit } from "../../../../lib/audit-service";
+import { requireAdminSomeScope } from "../../../../lib/admin-auth";
 
 export async function POST(request: Request) {
-  const guard = await requireAdminScope(["audit:read"]);
+  const guard = await requireAdminSomeScope(["audit:read", "audit:read:all", "audit:read:dept", "audit:manage"]);
   if (!guard.ok) {
     return guard.response;
   }
@@ -14,8 +14,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ code: "40001", message: "invalid json" }, { status: 400 });
   }
   try {
-    const result = await queryAudit({
-      tenant_id: "tenant_default",
+    const actor = await buildAuditActor(guard.session, guard.scopes);
+    const result = await queryAudit(actor, {
+      tenant_id: guard.session.tenantId,
       user_id: typeof body.user_id === "string" ? body.user_id : undefined,
       department_id: typeof body.department_id === "string" ? body.department_id : undefined,
       provider: typeof body.provider === "string" ? body.provider : undefined,
@@ -35,4 +36,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

@@ -55,6 +55,25 @@ export default function AuditPage() {
   const [policyHit, setPolicyHit] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const [chainFull, setChainFull] = useState<{
+    valid: boolean;
+    at?: string;
+    reason?: string;
+    scanned?: number;
+  } | null>(null);
+
+  const loadChainVerify = useCallback(async () => {
+    try {
+      const response = await fetch("/api/audit/chain-verify");
+      const payload = (await response.json()) as {
+        data?: { valid: boolean; at?: string; reason?: string; scanned: number };
+      };
+      setChainFull(payload.data ?? null);
+    } catch {
+      setChainFull(null);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -67,7 +86,7 @@ export default function AuditPage() {
           policy_hit: policyHit || undefined,
         }),
       });
-      const payload = (await response.json()) as { data?: QueryResult };
+      const payload = (await response.json()) as { code?: string; data?: QueryResult; message?: string };
       const data = payload.data;
       setItems(data?.items ?? []);
       setChainValid(data?.chain_valid ?? true);
@@ -79,12 +98,13 @@ export default function AuditPage() {
               reason: data?.chain_error_reason,
             }
       );
+      await loadChainVerify();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载失败");
     } finally {
       setLoading(false);
     }
-  }, [userId, model, policyHit]);
+  }, [userId, model, policyHit, loadChainVerify]);
 
   useEffect(() => {
     void load();
@@ -182,6 +202,10 @@ export default function AuditPage() {
     return list;
   }, [userId, model, policyHit]);
 
+  const headerChainOk = chainFull != null ? chainFull.valid : chainValid;
+  const headerChainAt =
+    chainFull != null && !chainFull.valid ? chainFull.at : chainFull == null && !chainValid ? chainError?.at : undefined;
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -201,16 +225,22 @@ export default function AuditPage() {
           </Breadcrumb>
         }
         title="审计日志"
-        description={`共 ${items.length} 条记录 · ${chainValid ? "链完整性校验通过" : `链校验失败${chainError?.reason ? `（${chainError.reason}）` : ""}`}`}
+        description={`共 ${items.length} 条记录 · ${
+          chainFull != null
+            ? `${chainFull.valid ? "全表链校验通过" : `全表链校验失败${chainFull.reason ? `（${chainFull.reason}）` : ""}`} · 已扫 ${chainFull.scanned} 行`
+            : chainValid
+              ? "全表链校验加载中…"
+              : `当前页链校验失败${chainError?.reason ? `（${chainError.reason}）` : ""}`
+        }`}
         actions={
           <>
-            <Badge variant={chainValid ? "success" : "destructive"} className="gap-1">
+            <Badge variant={headerChainOk ? "success" : "destructive"} className="gap-1">
               <ShieldCheck className="h-3 w-3" />
-              {chainValid ? "链完整" : "链异常"}
+              {headerChainOk ? "链完整" : "链异常"}
             </Badge>
-            {!chainValid && chainError?.at ? (
+            {!headerChainOk && headerChainAt ? (
               <Badge variant="warning" className="font-mono text-[10px]">
-                {chainError.at}
+                {headerChainAt}
               </Badge>
             ) : null}
             <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>

@@ -54,7 +54,8 @@ const SYSTEM_ROLE_SEED: Array<{ code: string; name: string; scopes: string[] }> 
       "role:update",
       "role:delete",
       "role:manage",
-      "audit:read",
+      "audit:read:all",
+      "audit:export",
       "metering:read",
       "policy:read",
       "model:read",
@@ -72,11 +73,21 @@ const SYSTEM_ROLE_SEED: Array<{ code: string; name: string; scopes: string[] }> 
       "dept:read",
       "dept:create",
       "role:read",
-      "audit:read",
+      "audit:read:all",
+      "audit:export",
       "metering:read",
     ],
   },
-  { code: "auditor", name: "审计员", scopes: ["admin:enter", "audit:read", "metering:read"] },
+  {
+    code: "dept_admin",
+    name: "部门审计",
+    scopes: ["admin:enter", "audit:read:dept", "audit:export", "metering:read", "user:read", "dept:read"],
+  },
+  {
+    code: "auditor",
+    name: "审计员",
+    scopes: ["admin:enter", "audit:read:all", "audit:export", "metering:read"],
+  },
   { code: "member", name: "成员", scopes: ["workspace:chat", "user:read"] },
 ];
 
