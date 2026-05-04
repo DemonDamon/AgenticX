@@ -33,7 +33,7 @@ import {
   SheetTitle,
   toast,
 } from "@agenticx/ui";
-import { ALL_REGISTERED_SCOPES, SCOPE_REGISTRY } from "@agenticx/iam-core";
+import { ALL_REGISTERED_SCOPES, SCOPE_REGISTRY } from "@agenticx/iam-core/scope-registry";
 import { Check, Copy, KeyRound, Pencil, Plus, RefreshCw, Shield, ShieldAlert, Trash2, UserCog, Users } from "lucide-react";
 
 type RoleRow = {

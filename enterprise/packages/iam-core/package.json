@@ -5,6 +5,10 @@
   "description": "Enterprise IAM PostgreSQL repositories (Drizzle)",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./scope-registry": "./src/scope-registry.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "echo 'lint placeholder'"
