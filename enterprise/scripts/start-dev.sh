@@ -83,7 +83,23 @@ if [ -z "${AUTH_JWT_PRIVATE_KEY:-}" ] || [ -z "${AUTH_JWT_PUBLIC_KEY:-}" ]; then
   exit 1
 fi
 
-# 3) 子进程管理
+# 3) 可选自动迁移：仅本地 DB 默认开启，避免共享库被意外改 schema。
+AUTO_MIGRATE="${AGX_AUTO_DB_MIGRATE:-1}"
+if [[ "$AUTO_MIGRATE" = "1" ]]; then
+  if [[ "$DATABASE_URL" == *"127.0.0.1"* || "$DATABASE_URL" == *"localhost"* ]]; then
+    echo "[start-dev] running local database migrations ..."
+    (
+      cd "$ENTERPRISE_DIR"
+      pnpm --filter @agenticx/db-schema db:migrate
+    )
+  else
+    echo "[start-dev] skip auto migration (non-local DATABASE_URL)."
+  fi
+else
+  echo "[start-dev] skip auto migration (AGX_AUTO_DB_MIGRATE=$AUTO_MIGRATE)."
+fi
+
+# 4) 子进程管理
 PIDS=()
 cleanup() {
   echo; echo "[start-dev] stopping services..."
@@ -94,7 +110,7 @@ cleanup() {
 }
 trap cleanup INT TERM EXIT
 
-# 4) 拉起 gateway
+# 5) 拉起 gateway
 echo "[start-dev] booting gateway (:8088) ..."
 (
   cd "$ENTERPRISE_DIR/apps/gateway"
@@ -110,7 +126,7 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
-# 5) 拉起 Next 应用（默认仅 enterprise，--all 时含 customers/*）
+# 6) 拉起 Next 应用（默认仅 enterprise，--all 时含 customers/*）
 TURBO_ARGS=(run dev "--ui=$TURBO_UI")
 if [ "$ALL_APPS" -eq 0 ]; then
   TURBO_ARGS+=(

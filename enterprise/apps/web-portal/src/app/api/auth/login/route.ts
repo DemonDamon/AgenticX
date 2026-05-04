@@ -6,6 +6,20 @@ function isEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function resolveLoginError(error: unknown): { status: number; code: string; message: string } {
+  if (!(error instanceof Error)) {
+    return { status: 401, code: "40100", message: "invalid credentials" };
+  }
+  const raw = `${error.message}\n${String((error as { cause?: unknown }).cause ?? "")}`.toLowerCase();
+  if (raw.includes("column") && raw.includes("does not exist")) {
+    return { status: 503, code: "50300", message: "service temporarily unavailable" };
+  }
+  if (raw.includes("invalid credentials")) {
+    return { status: 401, code: "40100", message: "invalid credentials" };
+  }
+  return { status: 401, code: "40100", message: "invalid credentials" };
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
@@ -32,12 +46,13 @@ export async function POST(request: Request) {
     });
     return response;
   } catch (error) {
+    const resolved = resolveLoginError(error);
     return NextResponse.json(
       {
-        code: "40100",
-        message: error instanceof Error ? error.message : "invalid credentials",
+        code: resolved.code,
+        message: resolved.message,
       },
-      { status: 401 }
+      { status: resolved.status }
     );
   }
 }
