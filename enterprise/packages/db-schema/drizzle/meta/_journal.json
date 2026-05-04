@@ -43,6 +43,13 @@
       "when": 1777825401073,
       "tag": "0005_supreme_boomer",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777878921866,
+      "tag": "0006_complete_ben_parker",
+      "breakpoints": true
     }
   ]
 }
