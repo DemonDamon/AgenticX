@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  Badge,
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbLink,
@@ -11,19 +12,21 @@ import {
   BreadcrumbSeparator,
   Button,
   Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
+  DialogFooter,
   Input,
   Label,
   PageHeader,
   toast,
 } from "@agenticx/ui";
-import { DepartmentTree } from "@agenticx/feature-iam";
 import type { DepartmentTreeNode } from "@agenticx/feature-iam";
-import { Download, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Download, Pencil, Plus, RefreshCw, Trash2, FolderTree, Users, ChevronRight, CornerRightUp } from "lucide-react";
 
 type ApiDept = {
   id: string;
@@ -63,14 +66,40 @@ function findNode(nodes: DepartmentTreeNode[], id: string): DepartmentTreeNode |
   return null;
 }
 
+function getBreadcrumbPath(nodes: DepartmentTreeNode[], targetId: string | null): DepartmentTreeNode[] {
+  if (!targetId) return [];
+  const path: DepartmentTreeNode[] = [];
+  function dfs(current: DepartmentTreeNode[], currentPath: DepartmentTreeNode[]): boolean {
+    for (const n of current) {
+      if (n.id === targetId) {
+        path.push(...currentPath, n);
+        return true;
+      }
+      if (n.children.length > 0) {
+        if (dfs(n.children, [...currentPath, n])) return true;
+      }
+    }
+    return false;
+  }
+  dfs(nodes, []);
+  return path;
+}
+
 export default function DepartmentsPage() {
   const [tree, setTree] = useState<DepartmentTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  
+  // Drill-down state
+  const [currentDeptId, setCurrentDeptId] = useState<string | null>(null);
+
+  // Modals state
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
-  const [parentForCreate, setParentForCreate] = useState<string | null>(null);
+
+  const [editOpen, setEditOpen] = useState(false);
   const [editName, setEditName] = useState("");
+
+  const [moveOpen, setMoveOpen] = useState(false);
   const [moveParentId, setMoveParentId] = useState<string | null>(null);
 
   const loadTree = useCallback(async () => {
@@ -94,14 +123,9 @@ export default function DepartmentsPage() {
     void loadTree();
   }, [loadTree]);
 
-  const selected = selectedId ? findNode(tree, selectedId) : null;
-
-  useEffect(() => {
-    if (selected) {
-      setEditName(selected.name);
-      setMoveParentId(selected.parentId ?? null);
-    }
-  }, [selected?.id, selected?.name, selected?.parentId]);
+  const currentNode = currentDeptId ? findNode(tree, currentDeptId) : null;
+  const childNodes = currentNode ? currentNode.children : tree;
+  const breadcrumbs = getBreadcrumbPath(tree, currentDeptId);
 
   const flatForParentSelect = useMemo(() => {
     const out: { id: string; label: string }[] = [];
@@ -120,7 +144,7 @@ export default function DepartmentsPage() {
     const res = await fetch("/api/admin/departments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newName.trim(), parentId: parentForCreate }),
+      body: JSON.stringify({ name: newName.trim(), parentId: currentDeptId }),
     });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
@@ -130,13 +154,12 @@ export default function DepartmentsPage() {
     toast.success("已创建部门");
     setCreateOpen(false);
     setNewName("");
-    setParentForCreate(null);
     await loadTree();
   }
 
   async function handleSaveName() {
-    if (!selected || !editName.trim()) return;
-    const res = await fetch(`/api/admin/departments/${selected.id}`, {
+    if (!currentNode || !editName.trim()) return;
+    const res = await fetch(`/api/admin/departments/${currentNode.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: editName.trim() }),
@@ -147,12 +170,13 @@ export default function DepartmentsPage() {
       return;
     }
     toast.success("已更新名称");
+    setEditOpen(false);
     await loadTree();
   }
 
   async function handleMove() {
-    if (!selected) return;
-    const res = await fetch(`/api/admin/departments/${selected.id}`, {
+    if (!currentNode) return;
+    const res = await fetch(`/api/admin/departments/${currentNode.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ parentId: moveParentId }),
@@ -163,19 +187,22 @@ export default function DepartmentsPage() {
       return;
     }
     toast.success("已移动部门");
+    setMoveOpen(false);
     await loadTree();
   }
 
-  async function handleDelete() {
-    if (!selected) return;
-    const res = await fetch(`/api/admin/departments/${selected.id}`, { method: "DELETE" });
+  async function handleDelete(id: string) {
+    if (!confirm("确定要删除此部门吗？下级部门及成员将被解绑。")) return;
+    const res = await fetch(`/api/admin/departments/${id}`, { method: "DELETE" });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
       toast.error(json.message ?? "删除失败");
       return;
     }
     toast.success("已删除");
-    setSelectedId(null);
+    if (currentDeptId === id) {
+      setCurrentDeptId(currentNode?.parentId ?? null);
+    }
     await loadTree();
   }
 
@@ -207,7 +234,7 @@ export default function DepartmentsPage() {
   }
 
   return (
-    <div className="space-y-5 p-1">
+    <div className="space-y-6 p-1 pb-10">
       <PageHeader
         breadcrumb={
           <Breadcrumb>
@@ -227,134 +254,245 @@ export default function DepartmentsPage() {
           </Breadcrumb>
         }
         title="部门管理"
-        description="组织树与 path 由服务端维护，可与用户部门、用量按部门维度联动。"
+        description="层级目录式组织架构，点击部门卡片进入下级。支持在任意层级新建与管理。"
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => void loadTree()} disabled={loading}>
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              刷新
             </Button>
             <Button variant="outline" size="sm" onClick={() => void exportStructure()}>
-              <Download className="mr-1 h-4 w-4" />
+              <Download className="mr-2 h-4 w-4" />
               导出结构
             </Button>
-            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm">
-                  <Plus className="mr-2 h-4 w-4" />
-                  新建部门
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>新建部门</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4 py-2">
-                  <div className="space-y-2">
-                    <Label>上级部门</Label>
-                    <select
-                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                      value={parentForCreate ?? ""}
-                      onChange={(e) => setParentForCreate(e.target.value || null)}
-                    >
-                      <option value="">（根级）</option>
-                      {flatForParentSelect.map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>名称</Label>
-                    <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="例如：研发中心" />
-                  </div>
-                  <Button className="w-full" onClick={() => void handleCreate()}>
-                    创建
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
           </div>
         }
       />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(280px,360px)_1fr]">
-        <Card className="p-4">
-          {loading ? (
-            <p className="text-sm text-muted-foreground">加载中…</p>
-          ) : (
-            <DepartmentTree
-              nodes={tree}
-              selectedDepartmentId={selectedId ?? undefined}
-              onSelect={(id) => setSelectedId(id)}
-            />
-          )}
-        </Card>
+      {/* 面包屑导航栏（钻取用） */}
+      <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-border bg-card p-2 shadow-sm">
+        <Button
+          variant={currentDeptId === null ? "secondary" : "ghost"}
+          size="sm"
+          className="font-medium"
+          onClick={() => setCurrentDeptId(null)}
+        >
+          <FolderTree className="mr-2 h-4 w-4" />
+          （根目录）企业架构
+        </Button>
 
-        <Card className="p-6 space-y-4">
-          {!selected ? (
-            <p className="text-sm text-muted-foreground">在左侧选择部门查看详情</p>
-          ) : (
-            <>
-              <div>
-                <h3 className="text-lg font-semibold">{selected.name}</h3>
-                <p className="font-mono text-xs text-muted-foreground break-all">path: {selected.path}</p>
-                <p className="text-xs text-muted-foreground">成员数: {selected.memberCount}</p>
-              </div>
-              <div className="space-y-2">
-                <Label>编辑名称</Label>
-                <div className="flex flex-wrap gap-2">
-                  <Input className="max-w-md" value={editName} onChange={(e) => setEditName(e.target.value)} />
-                  <Button variant="outline" onClick={() => void handleSaveName()}>
-                    <Pencil className="mr-1 h-4 w-4" />
-                    保存名称
-                  </Button>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>移动到</Label>
-                <div className="flex flex-wrap gap-2">
-                  <select
-                    className="max-w-md flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
-                    value={moveParentId ?? ""}
-                    onChange={(e) => setMoveParentId(e.target.value || null)}
-                  >
-                    <option value="">（根级）</option>
-                    {flatForParentSelect
-                      .filter((o) => o.id !== selected.id)
-                      .map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.label}
-                        </option>
-                      ))}
-                  </select>
-                  <Button variant="secondary" onClick={() => void handleMove()}>
-                    应用移动
-                  </Button>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setParentForCreate(selected.id);
-                    setNewName("");
-                    setCreateOpen(true);
-                  }}
-                >
-                  <Plus className="mr-1 h-4 w-4" />
-                  新建子部门
-                </Button>
-                <Button variant="destructive" size="sm" onClick={() => void handleDelete()}>
-                  <Trash2 className="mr-1 h-4 w-4" />
-                  删除
-                </Button>
-              </div>
-            </>
-          )}
-        </Card>
+        {breadcrumbs.map((b) => (
+          <React.Fragment key={b.id}>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50" />
+            <Button
+              variant={currentDeptId === b.id ? "secondary" : "ghost"}
+              size="sm"
+              className="font-medium"
+              onClick={() => setCurrentDeptId(b.id)}
+            >
+              {b.name}
+            </Button>
+          </React.Fragment>
+        ))}
       </div>
+
+      {/* 当前部门的信息与操作栏 */}
+      {currentNode && (
+        <Card className="overflow-hidden border-primary/20 bg-primary/5 shadow-sm">
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
+            <div className="space-y-1.5">
+              <h3 className="flex items-center gap-3 text-lg font-bold text-foreground">
+                {currentNode.name}
+                <Link 
+                  href={`/iam/users?dept=${currentNode.id}`}
+                  className="inline-flex items-center hover:opacity-80 transition-opacity"
+                  title="点击跳转至成员管理页面"
+                >
+                  <Badge variant="secondary" className="bg-background shadow-sm hover:bg-muted cursor-pointer">
+                    {currentNode.memberCount} 名成员
+                  </Badge>
+                </Link>
+              </h3>
+              <p className="break-all font-mono text-xs text-muted-foreground">Path: {currentNode.path}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                className="bg-background"
+                onClick={() => {
+                  setEditName(currentNode.name);
+                  setEditOpen(true);
+                }}
+              >
+                <Pencil className="mr-2 h-4 w-4" /> 编辑
+              </Button>
+              <Button
+                variant="outline"
+                className="bg-background"
+                onClick={() => {
+                  setMoveParentId(currentNode.parentId ?? null);
+                  setMoveOpen(true);
+                }}
+              >
+                <CornerRightUp className="mr-2 h-4 w-4" /> 移动
+              </Button>
+              <Button
+                variant="destructive"
+                className="bg-destructive/10 text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                onClick={() => void handleDelete(currentNode.id)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" /> 删除
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 当前层级的子部门卡片网格 */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {childNodes.map((child) => (
+          <Card
+            key={child.id}
+            className="group relative flex cursor-pointer flex-col overflow-hidden transition-all hover:border-primary/50 hover:shadow-md"
+            onClick={() => setCurrentDeptId(child.id)}
+          >
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                  <FolderTree className="h-5 w-5" />
+                </div>
+              </div>
+              <CardTitle className="mt-3 line-clamp-1 text-base leading-relaxed" title={child.name}>
+                {child.name}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="mt-auto">
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                <Link 
+                  href={`/iam/users?dept=${child.id}`} 
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-1.5 hover:text-primary transition-colors" 
+                  title="点击跳转至成员管理页面查看"
+                >
+                  <Users className="h-4 w-4" />
+                  {child.memberCount} 成员
+                </Link>
+                <div className="flex items-center gap-1.5" title="点击进入此部门">
+                  <FolderTree className="h-4 w-4" />
+                  {child.children.length} 子部门
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+
+        {/* 新建子部门占位卡片 */}
+        <button
+          onClick={() => {
+            setNewName("");
+            setCreateOpen(true);
+          }}
+          className="group flex min-h-[160px] flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-border bg-transparent px-4 py-6 text-muted-foreground transition-all hover:border-primary/50 hover:bg-primary/5 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted transition-colors group-hover:bg-primary/20">
+            <Plus className="h-5 w-5" />
+          </div>
+          <span className="font-medium">{currentNode ? "新建子部门" : "新建一级部门"}</span>
+        </button>
+      </div>
+
+      {/* --- 对话框区域 --- */}
+
+      {/* 新建对话框 */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{currentNode ? `在 [${currentNode.name}] 下新建部门` : "新建一级部门"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>部门名称</Label>
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="例如：研发中心"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleCreate();
+                }}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={() => void handleCreate()}>确认创建</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 编辑对话框 */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>编辑部门名称</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>新名称</Label>
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleSaveName();
+                }}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={() => void handleSaveName()}>保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 移动对话框 */}
+      <Dialog open={moveOpen} onOpenChange={setMoveOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>移动部门</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>选择新的上级部门</Label>
+              <select
+                className="w-full rounded-md border border-border bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                value={moveParentId ?? ""}
+                onChange={(e) => setMoveParentId(e.target.value || null)}
+              >
+                <option value="">（移至根级）</option>
+                {flatForParentSelect
+                  .filter((o) => o.id !== currentDeptId)
+                  .map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMoveOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={() => void handleMove()}>确认移动</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
