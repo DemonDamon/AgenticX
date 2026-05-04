@@ -11,7 +11,11 @@ function computeChecksum(event: AuditEvent): string {
 }
 
 function normalizeActorScope(actor: AuditActor): "auditor" | "dept-admin" | "member" {
-  if (actor.scopes.includes("audit:read:all") || actor.scopes.includes("audit:read")) {
+  if (
+    actor.scopes.includes("*") ||
+    actor.scopes.includes("audit:manage") ||
+    actor.scopes.includes("audit:read:all")
+  ) {
     return "auditor";
   }
   if (actor.scopes.includes("audit:read:dept")) {

@@ -10,7 +10,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@agenticx/core-api": "workspace:^"
+    "@agenticx/core-api": "workspace:^",
+    "@agenticx/db-schema": "workspace:^",
+    "@agenticx/iam-core": "workspace:^",
+    "drizzle-orm": "^0.45.2",
+    "ulid": "^2.3.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0"

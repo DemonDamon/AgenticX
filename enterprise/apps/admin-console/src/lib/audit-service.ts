@@ -1,23 +1,41 @@
-import path from "node:path";
-import { AuditApi, LocalAuditStore, type AuditActor, type AuditQueryInput } from "@agenticx/feature-audit";
+import {
+  AuditApi,
+  type AuditActor,
+  type AuditQueryInput,
+  insertGatewayAuditExportEvent,
+  PgAuditStore,
+  verifyGatewayAuditChain,
+} from "@agenticx/feature-audit";
+import { getIamDb } from "@agenticx/iam-core";
+import { users } from "@agenticx/db-schema";
+import { and, eq } from "drizzle-orm";
+import type { AdminSession } from "./admin-auth";
 
-const auditLogDir = path.resolve(process.cwd(), "../gateway/.runtime/audit");
-
-const store = new LocalAuditStore(auditLogDir);
+const store = new PgAuditStore();
 const api = new AuditApi(store);
 
-const auditorActor: AuditActor = {
-  tenantId: "tenant_default",
-  userId: "user_auditor",
-  deptId: null,
-  scopes: ["audit:read:all"],
-};
-
-export async function queryAudit(input: AuditQueryInput) {
-  return api.query(auditorActor, input);
+export async function buildAuditActor(session: AdminSession, scopes: string[]): Promise<AuditActor> {
+  const db = getIamDb();
+  const [row] = await db
+    .select({ deptId: users.deptId })
+    .from(users)
+    .where(and(eq(users.tenantId, session.tenantId), eq(users.id, session.userId)))
+    .limit(1);
+  return {
+    tenantId: session.tenantId,
+    userId: session.userId,
+    deptId: row?.deptId ?? null,
+    scopes,
+  };
 }
 
-export async function exportAuditCsv(input: AuditQueryInput) {
-  return api.exportCsv(auditorActor, input);
+export async function queryAudit(actor: AuditActor, input: AuditQueryInput) {
+  return api.query(actor, input);
 }
 
+export async function exportAuditCsv(actor: AuditActor, input: AuditQueryInput) {
+  return api.exportCsv(actor, input);
+}
+
+export { insertGatewayAuditExportEvent, verifyGatewayAuditChain };
+export type { AuditActor };

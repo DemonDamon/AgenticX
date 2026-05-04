@@ -1,6 +1,7 @@
 import {
   auditEvents,
   departments,
+  gatewayAuditEvents,
   organizations,
   roles,
   userRoles,
@@ -9,7 +10,7 @@ import {
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
-const schema = { users, departments, organizations, roles, userRoles, auditEvents };
+const schema = { users, departments, organizations, roles, userRoles, auditEvents, gatewayAuditEvents };
 
 export type IamDbSchema = typeof schema;
 

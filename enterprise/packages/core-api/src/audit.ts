@@ -7,7 +7,7 @@ export type AuditEventType =
   | "audit_export";
 
 export type AuditRoute = "local" | "private-cloud" | "third-party";
-export type AuditClientType = "web-portal" | "desktop" | "edge-agent";
+export type AuditClientType = "web-portal" | "desktop" | "edge-agent" | "admin-console";
 export type AuditPolicySeverity = "low" | "medium" | "high" | "critical";
 export type AuditPolicyAction = "allow" | "redact" | "block";
 

@@ -7,7 +7,7 @@ export const SCOPE_REGISTRY: Record<string, readonly string[]> = {
   user: ["read", "create", "update", "delete", "manage"],
   dept: ["read", "create", "update", "delete", "manage"],
   role: ["read", "create", "update", "delete", "manage"],
-  audit: ["read", "export", "manage"],
+  audit: ["read", "read:all", "read:dept", "export", "manage"],
   metering: ["read", "export", "manage"],
   workspace: ["read", "chat", "manage"],
   policy: ["read", "create", "update", "delete", "manage"],

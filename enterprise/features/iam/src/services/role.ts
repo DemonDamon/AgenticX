@@ -14,19 +14,49 @@ function makeId(prefix: string): string {
 export const SYSTEM_ROLE_TEMPLATES: Record<string, { name: string; scopes: string[] }> = {
   owner: {
     name: "Owner",
-    scopes: ["user:create", "user:read", "user:update", "user:delete", "dept:create", "dept:read", "dept:update", "dept:delete", "role:create", "role:read", "role:update", "role:delete", "audit:read", "metering:read"],
+    scopes: [
+      "user:create",
+      "user:read",
+      "user:update",
+      "user:delete",
+      "dept:create",
+      "dept:read",
+      "dept:update",
+      "dept:delete",
+      "role:create",
+      "role:read",
+      "role:update",
+      "role:delete",
+      "audit:read:all",
+      "audit:export",
+      "metering:read",
+    ],
   },
   admin: {
     name: "Admin",
-    scopes: ["user:create", "user:read", "user:update", "dept:read", "dept:update", "role:read", "audit:read", "metering:read"],
+    scopes: [
+      "user:create",
+      "user:read",
+      "user:update",
+      "dept:read",
+      "dept:update",
+      "role:read",
+      "audit:read:all",
+      "audit:export",
+      "metering:read",
+    ],
   },
   member: {
     name: "Member",
     scopes: ["user:read"],
   },
+  dept_admin: {
+    name: "Dept auditor",
+    scopes: ["admin:enter", "audit:read:dept", "audit:export", "metering:read", "user:read", "dept:read"],
+  },
   auditor: {
     name: "Auditor",
-    scopes: ["audit:read", "metering:read", "user:read", "dept:read", "role:read"],
+    scopes: ["audit:read:all", "audit:export", "metering:read", "user:read", "dept:read", "role:read"],
   },
 };
 
