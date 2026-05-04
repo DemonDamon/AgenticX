@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   Badge,
   Breadcrumb,
@@ -94,12 +95,16 @@ type RoleOption = { id: string; code: string; name: string };
 
 const PAGE_SIZE = 50;
 
-export default function UsersPage() {
+function UsersPageContent() {
+  const searchParams = useSearchParams();
+  const initialDept = searchParams.get("dept") || "all";
+
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<"all" | Status>("all");
+  const [deptFilter, setDeptFilter] = useState<string>(initialDept);
   const [selected, setSelected] = useState<AdminUser | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -120,6 +125,7 @@ export default function UsersPage() {
     try {
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.set("status", statusFilter);
+      if (deptFilter !== "all") params.set("deptId", deptFilter);
       params.set("limit", String(PAGE_SIZE));
       params.set("offset", String((page - 1) * PAGE_SIZE));
       const res = await fetch(`/api/admin/users?${params.toString()}`, { cache: "no-store" });
@@ -135,7 +141,7 @@ export default function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, page]);
+  }, [statusFilter, deptFilter, page]);
 
   useEffect(() => {
     void load();
@@ -469,15 +475,23 @@ export default function UsersPage() {
   );
 
   const activeFilters = useMemo(() => {
-    if (statusFilter === "all") return [];
-    return [
-      {
+    const filters: Array<{ id: string; label: string; onRemove: () => void }> = [];
+    if (statusFilter !== "all") {
+      filters.push({
         id: "status",
         label: `状态：${STATUS_META[statusFilter].label}`,
         onRemove: () => setStatusFilter("all"),
-      },
-    ];
-  }, [statusFilter]);
+      });
+    }
+    if (deptFilter !== "all") {
+      filters.push({
+        id: "dept",
+        label: `部门：${deptLabelMap.get(deptFilter) ?? deptFilter}`,
+        onRemove: () => setDeptFilter("all"),
+      });
+    }
+    return filters;
+  }, [statusFilter, deptFilter, deptLabelMap]);
 
   return (
     <div className="space-y-5">
@@ -533,6 +547,7 @@ export default function UsersPage() {
               activeFilters={activeFilters}
               onClearFilters={() => {
                 setStatusFilter("all");
+                setDeptFilter("all");
                 setPage(1);
               }}
               onRowClick={(row) => {
@@ -540,23 +555,44 @@ export default function UsersPage() {
                 setEditOpen(false);
               }}
               toolbarLeft={
-                <Select
-                  value={statusFilter}
-                  onValueChange={(value) => {
-                    setPage(1);
-                    setStatusFilter(value as "all" | Status);
-                  }}
-                >
-                  <SelectTrigger className="h-9 w-[140px]">
-                    <SelectValue placeholder="全部状态" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">全部状态</SelectItem>
-                    <SelectItem value="active">启用</SelectItem>
-                    <SelectItem value="disabled">停用</SelectItem>
-                    <SelectItem value="locked">锁定</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="flex flex-wrap gap-2">
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(value) => {
+                      setPage(1);
+                      setStatusFilter(value as "all" | Status);
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-[140px]">
+                      <SelectValue placeholder="全部状态" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部状态</SelectItem>
+                      <SelectItem value="active">启用</SelectItem>
+                      <SelectItem value="disabled">停用</SelectItem>
+                      <SelectItem value="locked">锁定</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={deptFilter}
+                    onValueChange={(value) => {
+                      setPage(1);
+                      setDeptFilter(value);
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-[200px]">
+                      <SelectValue placeholder="全部部门" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部部门</SelectItem>
+                      {deptOptions.map((opt) => (
+                        <SelectItem key={opt.id} value={opt.id}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               }
               onExport={() => {
                 const csv = [
@@ -1065,5 +1101,13 @@ function UserFormDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+export default function UsersPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-muted-foreground">加载中...</div>}>
+      <UsersPageContent />
+    </Suspense>
   );
 }
