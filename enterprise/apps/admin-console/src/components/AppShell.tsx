@@ -304,7 +304,7 @@ export function AppShell({ children }: AppShellProps) {
           className={[
             "group/sidebar fixed inset-y-0 left-0 z-40 flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width,transform] duration-200",
             "w-[244px] data-[collapsed=1]:w-[68px]",
-            "-translate-x-full data-[mobile-open=1]:translate-x-0 lg:static lg:translate-x-0",
+            "-translate-x-full data-[mobile-open=1]:translate-x-0 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0",
           ].join(" ")}
         >
           {/* brand */}
