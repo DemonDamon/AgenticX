@@ -62,7 +62,10 @@ func NewFileWriter(dir string) *FileWriter {
 	return &FileWriter{dir: dir}
 }
 
-func (w *FileWriter) Write(event Event) error {
+func (w *FileWriter) Write(event *Event) error {
+	if event == nil {
+		return os.ErrInvalid
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 

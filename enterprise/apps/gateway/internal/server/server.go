@@ -41,7 +41,7 @@ type Server struct {
 	policyManifest    string
 	policyOverride    string
 	policyOverrideMod time.Time
-	audit             *audit.FileWriter
+	audit             audit.EventWriter
 	metering          metering.Sink
 	adminLoader       *runtimeconfig.Loader
 	quotaTracker      *quota.Tracker
@@ -104,6 +104,26 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		return nil, err
 	}
 
+	fileWriter := audit.NewFileWriter(cfg.AuditDir)
+	var auditWriter audit.EventWriter = fileWriter
+	if dbURL != "" {
+		pool, aerr := audit.NewPgxPool(dbURL)
+		if aerr != nil {
+			logger.Warn("audit pg unavailable, using file-only audit", "error", aerr)
+		} else {
+			auditWriter = audit.NewDualWriter(fileWriter, audit.NewPgWriter(pool), cfg.AuditDir, logger)
+			days := audit.BackfillDaysFromEnv()
+			realPool := pool
+			realDays := days
+			realDir := cfg.AuditDir
+			go func() {
+				if err := audit.RunBackfill(context.Background(), realPool, realDir, realDays, logger); err != nil {
+					logger.Warn("audit backfill failed", "error", err)
+				}
+			}()
+		}
+	}
+
 	return &Server{
 		cfg:               cfg,
 		logger:            logger,
@@ -113,7 +133,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		policyManifest:    cfg.PolicyManifest,
 		policyOverride:    policyOverridePath,
 		policyOverrideMod: overrideModTime,
-		audit:             audit.NewFileWriter(cfg.AuditDir),
+		audit:             auditWriter,
 		metering:          sink,
 		adminLoader:       adminLoader,
 		quotaTracker:      quota.NewTracker(quotaCfgPath, quotaUsagePath),
@@ -885,7 +905,8 @@ func makeID(prefix string) string {
 }
 
 func (s *Server) writeAuditEvent(event audit.Event) error {
-	if err := s.audit.Write(event); err != nil {
+	ev := event
+	if err := s.audit.Write(&ev); err != nil {
 		s.logger.Error("write audit event failed", "error", err)
 		return err
 	}
