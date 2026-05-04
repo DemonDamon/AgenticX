@@ -35,12 +35,17 @@
                                               （客户自选，非强依赖）
 
                  查询路径（RBAC · 只读 · 签名校验）
-  ┌─────────────┐    ┌──────────────┐
-  │  Admin UI   │───►│ Audit Query  │───► 数据源（JSON / CH）
-  │ （审计员）   │    │ - RBAC        │
-  └─────────────┘    │ - 签名校验    │
-                     │ - 导出审计    │
-                     └──────────────┘
+  ┌─────────────┐    ┌──────────────┐     ┌─────────────────────┐
+  │  Admin UI   │───►│ PgAuditStore │────►│ PostgreSQL          │
+  │ （审计员）   │    │ - RBAC        │     │ gateway_audit_events │
+  └─────────────┘    │ - 链校验 API  │     └─────────────────────┘
+                     │ - 导出审计    │              ▲
+                     └──────────────┘              │
+                                                   │ 回灌 / 双写 best-effort
+                                            ┌──────┴───────┐
+                                            │ Go Gateway   │
+                                            │ JSONL 强制成功 │
+                                            └──────────────┘
 ```
 
 ---
@@ -61,7 +66,7 @@ export interface AuditEvent {
   user_email?: string;           // 冗余便于查询
   department_id?: string;
   session_id?: string;
-  client_type: "web-portal" | "desktop" | "edge-agent";
+  client_type: "web-portal" | "desktop" | "edge-agent" | "admin-console";
   client_ip?: string;
 
   // 模型相关
@@ -120,12 +125,12 @@ export interface AuditEvent {
 
 ### S3. 查询权限
 
-| 角色 | 可查询范围 |
-|---|---|
-| 合规审计员（auditor）| 本租户全量 + 导出权限 |
-| 部门管理员（dept-admin）| 本部门成员 |
-| 普通员工（member）| 只看自己 |
-| 超管（super-admin）| 跨租户（仅 SaaS 模式）|
+| 角色 | 可查询范围 | Scopes（示例） |
+|---|---|---|
+| 合规审计员 / 拥有者 / 管理员 | 本租户全量 | `audit:read:all`（+ 导出需 `audit:export`） |
+| 部门管理员（部门审计）| 本部门成员 | `audit:read:dept` |
+| 普通员工（仅自建角色放行读审计）| 只看自己 | `audit:read`（无 all/dept 时 SQL 限制 `user_id`） |
+| 超管（SaaS）| 依赖会话租户，仍强制 `tenant_id` 过滤 | `*` |
 
 RBAC 在 `@agenticx/feature-iam` 中定义，本模块强制检查。
 
@@ -165,10 +170,10 @@ RBAC 在 `@agenticx/feature-iam` 中定义，本模块强制检查。
 | **本地** | 网关/Edge Agent 本地应急日志 | JSON append-only | 随合同期 |
 
 **首个客户项目当期策略（对齐技术规范书 §1.5(3)）：**
-- 仅启用「本地 JSON」层 → 本地磁盘 append-only 文件
-- ClickHouse 为远期规划
-- 存储期 ≥ 项目服务期，不自动清理
-- 支持基础指令或简易界面查看
+- **PostgreSQL**：表 `gateway_audit_events` 为 Admin 查询与导出的主数据源（多租户 `tenant_id` 强制过滤）。
+- **本地 JSONL**：Gateway 侧 **始终写入** 同目录 append-only 文件；PG 故障时以 JSONL 为权威，启动回灌补齐 PG。
+- ClickHouse / OTel 为远期规划。
+- 存储期 ≥ 项目服务期策略由部署约定；Gateway JSONL 默认按日滚动文件名。
 
 ---
 
@@ -197,19 +202,24 @@ audit:
 
 ---
 
-## 当期实现范围（MVP，对齐首个客户项目）
+## 当期实现范围（MVP）
 
-- [x] AuditEvent schema 定义（`packages/core-api`）
-- [ ] 本地 JSON 写入 + checksum 链
-- [ ] 基础查询 API + RBAC
-- [ ] Admin UI：列表 + 过滤 + 导出
-- [ ] 四维查询数据源对接（`features/metering`）
+- [x] AuditEvent schema（`packages/core-api`），含 `audit_export` 与 `admin-console` client
+- [x] Gateway：**JSONL 强制成功** + **PG 异步双写**（`DATABASE_URL`）+ `.pg-pending` + 启动 **JSONL→PG 回灌**
+- [x] Drizzle 表 `gateway_audit_events` + 迁移（与 IAM `audit_events` 分离）
+- [x] `PgAuditStore`：过滤/分页/总数 **下沉 SQL**；RBAC 三档（`audit:read:all` / `audit:read:dept` / 本人）
+- [x] Admin：`/api/audit/query`、`/api/audit/export`、**`GET /api/audit/chain-verify`**（需 `audit:read:all`）；导出 **3 次/分钟/用户**；导出后 **自审计** 写入 PG
+- [ ] 四维查询与 `features/metering` 全量对接（进行中/迭代项）
 
 **远期**：
-- [ ] ClickHouse 集成
+- [ ] ClickHouse 热/温层
 - [ ] OTel Exporter
-- [ ] 链完整性定期审计任务
+- [ ] Ed25519 链尾签名
 - [ ] 冷归档 + 销毁策略
+
+**Runbook**：[enterprise/docs/runbooks/audit-pg-backfill.md](../../docs/runbooks/audit-pg-backfill.md)
+
+**Plan-Id**：`2026-05-04-gateway-audit-production`
 
 ---
 
