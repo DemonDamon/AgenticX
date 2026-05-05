@@ -1,113 +1,146 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { users } from "@agenticx/db-schema";
+import {
+  PgPolicyStore,
+  type PolicyPack,
+  type PolicyPublishEvent,
+  type PolicyRule,
+  type PolicyRuleFilter,
+  type PolicyStage,
+  type PolicyTestResult,
+} from "@agenticx/feature-policy";
+import { getIamDb } from "@agenticx/iam-core";
+import { and, eq } from "drizzle-orm";
+import type { AdminSession } from "./admin-auth";
 
-export type PolicyPackState = {
-  name: string;
-  version: string;
-  description: string;
-  source: string;
-  enabled: boolean;
+const store = new PgPolicyStore();
+
+export type PolicyActor = {
+  tenantId: string;
+  userId: string;
+  deptId: string | null;
 };
 
-type OverrideFile = {
-  disabledPacks: string[];
-  updatedAt?: string;
-};
-
-const ROOT = path.resolve(process.cwd(), "../..");
-const PLUGINS_DIR = path.join(ROOT, "plugins");
-const RUNTIME_DIR = process.env.ENTERPRISE_ADMIN_RUNTIME_DIR || path.join(ROOT, ".runtime/admin");
-const OVERRIDE_FILE = process.env.ENTERPRISE_POLICY_OVERRIDE_FILE || path.join(RUNTIME_DIR, "policy-overrides.json");
-
-function ensureRuntimeDir(): void {
-  if (!fs.existsSync(RUNTIME_DIR)) {
-    fs.mkdirSync(RUNTIME_DIR, { recursive: true, mode: 0o700 });
-  }
-}
-
-function parseManifestLite(manifestPath: string): { name: string; version: string; description: string } {
-  const raw = fs.readFileSync(manifestPath, "utf-8");
-  const pick = (key: string) => {
-    const match = raw.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
-    return (match?.[1] ?? "").trim().replace(/^['"]|['"]$/g, "");
-  };
+export async function buildPolicyActor(session: AdminSession): Promise<PolicyActor> {
+  const db = getIamDb();
+  const [row] = await db
+    .select({ deptId: users.deptId })
+    .from(users)
+    .where(and(eq(users.tenantId, session.tenantId), eq(users.id, session.userId)))
+    .limit(1);
   return {
-    name: pick("name"),
-    version: pick("version") || "0.1.0",
-    description: pick("description") || "",
+    tenantId: session.tenantId,
+    userId: session.userId,
+    deptId: row?.deptId ?? null,
   };
 }
 
-function readOverrides(): OverrideFile {
-  ensureRuntimeDir();
-  if (!fs.existsSync(OVERRIDE_FILE)) {
-    return { disabledPacks: [] };
-  }
-  try {
-    const parsed = JSON.parse(fs.readFileSync(OVERRIDE_FILE, "utf-8")) as OverrideFile;
-    return {
-      disabledPacks: Array.isArray(parsed.disabledPacks)
-        ? parsed.disabledPacks.filter((v): v is string => typeof v === "string" && v.trim().length > 0)
-        : [],
-      updatedAt: parsed.updatedAt,
-    };
-  } catch {
-    return { disabledPacks: [] };
-  }
+export async function listPolicyPacks(tenantId: string): Promise<PolicyPack[]> {
+  return store.listPacks(tenantId);
 }
 
-function writeOverrides(next: OverrideFile): void {
-  ensureRuntimeDir();
-  const tmp = `${OVERRIDE_FILE}.tmp`;
-  fs.writeFileSync(
-    tmp,
-    JSON.stringify({ disabledPacks: Array.from(new Set(next.disabledPacks)).sort(), updatedAt: new Date().toISOString() }, null, 2),
-    { mode: 0o600 }
-  );
-  fs.renameSync(tmp, OVERRIDE_FILE);
-}
-
-export function listPolicyPacks(): PolicyPackState[] {
-  if (!fs.existsSync(PLUGINS_DIR)) return [];
-  const overrides = readOverrides();
-  const disabled = new Set(overrides.disabledPacks);
-  const dirs = fs
-    .readdirSync(PLUGINS_DIR, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && d.name.startsWith("moderation-"))
-    .map((d) => d.name)
-    .sort();
-  const rows: PolicyPackState[] = [];
-  for (const dirName of dirs) {
-    const manifestPath = path.join(PLUGINS_DIR, dirName, "manifest.yaml");
-    if (!fs.existsSync(manifestPath)) continue;
-    const parsed = parseManifestLite(manifestPath);
-    const name = parsed.name || dirName;
-    rows.push({
-      name,
-      version: parsed.version,
-      description: parsed.description,
-      source: path.relative(ROOT, manifestPath),
-      enabled: !disabled.has(name),
-    });
+export async function createPolicyPack(
+  actor: PolicyActor,
+  input: {
+    code: string;
+    name: string;
+    description?: string | null;
+    enabled?: boolean;
+    appliesTo?: Record<string, unknown> | null;
   }
-  return rows;
+): Promise<PolicyPack> {
+  const pack = await store.createPack({
+    tenantId: actor.tenantId,
+    code: input.code,
+    name: input.name,
+    description: input.description,
+    enabled: input.enabled,
+    appliesTo: input.appliesTo as never,
+  });
+  await store.recordRuleChange(actor, { action: "create_pack", packCode: pack.code });
+  return pack;
 }
 
-export function setPolicyPackEnabled(packName: string, enabled: boolean): PolicyPackState[] {
-  const clean = packName.trim();
-  if (!clean) throw new Error("packName is required");
-  const all = listPolicyPacks();
-  if (!all.some((p) => p.name === clean)) {
-    throw new Error(`unknown policy pack: ${clean}`);
+export async function updatePolicyPack(
+  actor: PolicyActor,
+  code: string,
+  patch: {
+    name?: string;
+    description?: string | null;
+    enabled?: boolean;
+    appliesTo?: Record<string, unknown> | null;
   }
-  const overrides = readOverrides();
-  const next = new Set(overrides.disabledPacks);
-  if (enabled) next.delete(clean);
-  else next.add(clean);
-  writeOverrides({ disabledPacks: Array.from(next) });
-  return listPolicyPacks();
+): Promise<PolicyPack> {
+  const pack = await store.updatePack(actor.tenantId, code, {
+    name: patch.name,
+    description: patch.description,
+    enabled: patch.enabled,
+    appliesTo: patch.appliesTo as never,
+  });
+  await store.recordRuleChange(actor, { action: "update_pack", packCode: code, patch });
+  return pack;
 }
 
-export function policyOverridePath(): string {
-  return OVERRIDE_FILE;
+export async function deletePolicyPack(actor: PolicyActor, code: string): Promise<void> {
+  await store.deletePack(actor.tenantId, code);
+  await store.recordRuleChange(actor, { action: "delete_pack", packCode: code });
 }
+
+export async function listPolicyRules(tenantId: string, filter?: PolicyRuleFilter): Promise<PolicyRule[]> {
+  return store.listRules(tenantId, filter);
+}
+
+export async function upsertPolicyRule(
+  actor: PolicyActor,
+  input: {
+    id?: string;
+    packId: string;
+    code: string;
+    kind: "keyword" | "regex" | "pii";
+    action: "block" | "redact" | "warn";
+    severity: "low" | "medium" | "high" | "critical";
+    message?: string | null;
+    payload: Record<string, unknown>;
+    appliesTo?: Record<string, unknown> | null;
+    status?: "draft" | "active" | "disabled";
+  }
+): Promise<PolicyRule> {
+  const rule = await store.upsertRule({
+    ...input,
+    tenantId: actor.tenantId,
+    payload: input.payload as never,
+    appliesTo: input.appliesTo as never,
+    updatedBy: actor.userId,
+  });
+  await store.recordRuleChange(actor, {
+    action: input.id ? "update_rule" : "create_rule",
+    ruleId: rule.id,
+    code: rule.code,
+    kind: rule.kind,
+  });
+  return rule;
+}
+
+export async function deletePolicyRule(actor: PolicyActor, ruleId: string): Promise<void> {
+  await store.deleteRule(actor.tenantId, ruleId);
+  await store.recordRuleChange(actor, { action: "delete_rule", ruleId });
+}
+
+export async function testPolicyRules(
+  tenantId: string,
+  input: { ruleIds: string[]; sampleText: string; stage?: PolicyStage }
+): Promise<PolicyTestResult> {
+  return store.testRules(tenantId, input.ruleIds, input.sampleText, input.stage ?? "request");
+}
+
+export async function publishPolicy(actor: PolicyActor, activateDraftRuleIds?: string[]) {
+  return store.publish(actor.tenantId, actor, { activateDraftRuleIds });
+}
+
+export async function listPolicyPublishes(tenantId: string): Promise<PolicyPublishEvent[]> {
+  return store.listPublishes(tenantId);
+}
+
+export async function rollbackPolicyPublish(actor: PolicyActor, eventId: string) {
+  return store.rollback(actor.tenantId, eventId, actor);
+}
+
