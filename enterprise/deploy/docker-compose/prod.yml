@@ -33,6 +33,7 @@ services:
       GATEWAY_CONFIG_PATH: /app/config/policies.yaml
       GATEWAY_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
       GATEWAY_QUOTA_USAGE_FILE: /runtime/gateway/quota-usage.json
+      GATEWAY_POLICY_SNAPSHOT_FILE: /runtime/admin/policy-snapshot.json
       GATEWAY_POLICY_OVERRIDE_FILE: /runtime/admin/policy-overrides.json
     volumes:
       - gateway_runtime:/runtime
@@ -53,6 +54,7 @@ services:
       GATEWAY_CONFIG_PATH: /app/config/policies.yaml
       GATEWAY_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
       GATEWAY_QUOTA_USAGE_FILE: /runtime/gateway/quota-usage.json
+      GATEWAY_POLICY_SNAPSHOT_FILE: /runtime/admin/policy-snapshot.json
       GATEWAY_POLICY_OVERRIDE_FILE: /runtime/admin/policy-overrides.json
     volumes:
       - gateway_runtime:/runtime
