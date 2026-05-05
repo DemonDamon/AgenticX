@@ -10,7 +10,7 @@ export const SCOPE_REGISTRY: Record<string, readonly string[]> = {
   audit: ["read", "read:all", "read:dept", "export", "manage"],
   metering: ["read", "export", "manage"],
   workspace: ["read", "chat", "manage"],
-  policy: ["read", "create", "update", "delete", "manage"],
+  policy: ["read", "create", "update", "delete", "publish", "disable", "manage"],
   model: ["read", "create", "update", "delete", "manage"],
   kb: ["read", "create", "update", "delete", "manage"],
   automation: ["read", "create", "update", "delete", "manage"],
