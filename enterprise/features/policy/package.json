@@ -7,6 +7,18 @@
   "types": "./src/index.ts",
   "scripts": {
     "lint": "echo 'lint placeholder'",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agenticx/db-schema": "workspace:*",
+    "@agenticx/iam-core": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "ulid": "^3.0.1",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "vitest": "^3.2.4"
   }
 }
