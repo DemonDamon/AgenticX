@@ -12,7 +12,7 @@ import { and, asc, desc, eq, inArray, max } from "drizzle-orm";
 import { ulid } from "ulid";
 import { parse } from "yaml";
 import { insertPolicyAuditEvent, type PolicyAuditActor } from "../audit";
-import { writeSnapshot } from "../snapshot/writer";
+import { readTenantSnapshot, replaceTenantSnapshot, writeSnapshotWithCas } from "../snapshot/writer";
 import {
   DEFAULT_POLICY_APPLIES_TO,
   type PolicyAppliesTo,
@@ -176,6 +176,16 @@ function findMatches(rule: PolicyRule, text: string): string[] {
 
 export class PgPolicyStore {
   private builtinSeeded = new Set<string>();
+
+  private async assertPackBelongsToTenant(tenantId: string, packId: string): Promise<void> {
+    const db = getIamDb();
+    const [pack] = await db
+      .select({ id: policyRulePacks.id })
+      .from(policyRulePacks)
+      .where(and(eq(policyRulePacks.tenantId, tenantId), eq(policyRulePacks.id, packId)))
+      .limit(1);
+    if (!pack) throw new Error("规则包不存在或不属于当前租户");
+  }
 
   public async ensureBuiltinSeed(tenantId: string): Promise<void> {
     if (this.builtinSeeded.has(tenantId)) return;
@@ -408,6 +418,7 @@ export class PgPolicyStore {
     const payload = normalizeRulePayload(input.kind, input.payload);
     const nextAppliesTo = input.appliesTo === null ? null : input.appliesTo ? normalizeAppliesTo(input.appliesTo) : undefined;
     const now = new Date();
+    await this.assertPackBelongsToTenant(input.tenantId, input.packId);
 
     if (input.id) {
       const [current] = await db
@@ -472,12 +483,21 @@ export class PgPolicyStore {
     await db.delete(policyRules).where(and(eq(policyRules.tenantId, tenantId), eq(policyRules.id, ruleId)));
   }
 
-  public async setRuleStatus(tenantId: string, ruleId: string, status: PolicyRuleStatus): Promise<void> {
+  public async setRuleStatus(
+    tenantId: string,
+    ruleId: string,
+    status: PolicyRuleStatus,
+    updatedBy?: string
+  ): Promise<void> {
     const db = getIamDb();
-    await db
+    const updated = await db
       .update(policyRules)
-      .set({ status, updatedAt: new Date() })
-      .where(and(eq(policyRules.tenantId, tenantId), eq(policyRules.id, ruleId)));
+      .set({ status, updatedBy: updatedBy ?? null, updatedAt: new Date() })
+      .where(and(eq(policyRules.tenantId, tenantId), eq(policyRules.id, ruleId)))
+      .returning({ id: policyRules.id });
+    if (!updated.length) {
+      throw new Error("规则不存在");
+    }
   }
 
   public async testRules(
@@ -636,45 +656,145 @@ export class PgPolicyStore {
     actor: PolicyAuditActor,
     options?: { activateDraftRuleIds?: string[] }
   ): Promise<PublishResult> {
+    await this.ensureBuiltinSeed(tenantId);
     const db = getIamDb();
-    if (options?.activateDraftRuleIds?.length) {
-      const clean = uniq(options.activateDraftRuleIds);
-      await db
-        .update(policyRules)
-        .set({ status: "active", updatedBy: actor.userId, updatedAt: new Date() })
-        .where(and(eq(policyRules.tenantId, tenantId), inArray(policyRules.id, clean)));
-    }
-    const version = await this.nextPublishVersion(tenantId);
-    const snapshot = await this.buildSnapshot(tenantId, version, actor.userId);
-    const activeRules = await this.listRules(tenantId, { status: "active" });
-    await this.appendRuleVersions(tenantId, activeRules, actor.userId);
+    const previousSnapshot = await readTenantSnapshot(tenantId);
+    const previousPublishId = previousSnapshot?.publishId ?? null;
+    let snapshotWritten = false;
+    let snapshotPath = "";
+    let publishId = "";
+    let publishVersion = 0;
+    let publishedRuleCount = 0;
+    let publishedPackCount = 0;
 
-    const now = new Date();
-    const id = ulid();
-    await db.insert(policyPublishEvents).values({
-      id,
-      tenantId,
-      version,
-      snapshot,
-      summary: { packCount: snapshot.packs.length, ruleCount: activeRules.length },
-      publisher: actor.userId,
-      publishedAt: now,
-      status: "published",
-      createdAt: now,
-      updatedAt: now,
-    });
-    const snapshotPath = await writeSnapshot(snapshot);
-    await insertPolicyAuditEvent(actor, "policy_publish", {
-      publish_id: id,
-      version,
-      pack_count: snapshot.packs.length,
-      rule_count: activeRules.length,
-    });
+    try {
+      await db.transaction(async (tx) => {
+        publishId = ulid();
+        if (options?.activateDraftRuleIds?.length) {
+          const clean = uniq(options.activateDraftRuleIds);
+          await tx
+            .update(policyRules)
+            .set({ status: "active", updatedBy: actor.userId, updatedAt: new Date() })
+            .where(and(eq(policyRules.tenantId, tenantId), inArray(policyRules.id, clean)));
+        }
+
+        const [versionRow] = await tx
+          .select({ maxVersion: max(policyPublishEvents.version) })
+          .from(policyPublishEvents)
+          .where(eq(policyPublishEvents.tenantId, tenantId));
+        const version = (versionRow?.maxVersion ?? 0) + 1;
+        publishVersion = version;
+
+        const packs = await tx
+          .select()
+          .from(policyRulePacks)
+          .where(and(eq(policyRulePacks.tenantId, tenantId), eq(policyRulePacks.enabled, true)))
+          .orderBy(asc(policyRulePacks.code));
+        const activeRuleRows = await tx
+          .select()
+          .from(policyRules)
+          .orderBy(asc(policyRules.code))
+          .where(and(eq(policyRules.tenantId, tenantId), eq(policyRules.status, "active")));
+        const activeRules = activeRuleRows.map(dbRuleToModel);
+
+        const rulesByPack = new Map<string, PolicyRule[]>();
+        for (const row of activeRules) {
+          const list = rulesByPack.get(row.packId) ?? [];
+          list.push(row);
+          rulesByPack.set(row.packId, list);
+        }
+
+        const snapshot: PolicySnapshot = {
+          tenantId,
+          version,
+          publishId,
+          publishedAt: new Date().toISOString(),
+          publisher: actor.userId,
+          deptIndex: {},
+          packs: packs.map((pack) => {
+            const packModel = dbPackToModel(pack);
+            const childRules = rulesByPack.get(pack.id) ?? [];
+            return {
+              code: packModel.code,
+              name: packModel.name,
+              description: packModel.description,
+              source: packModel.source,
+              enabled: packModel.enabled,
+              appliesTo: packModel.appliesTo,
+              rules: childRules.map((r) => ({
+                id: r.id,
+                code: r.code,
+                kind: r.kind,
+                action: r.action,
+                severity: r.severity,
+                message: r.message,
+                payload: r.payload,
+                appliesTo: r.appliesTo,
+                status: r.status,
+                updatedBy: r.updatedBy,
+              })),
+            };
+          }),
+        };
+        publishedRuleCount = activeRules.length;
+        publishedPackCount = snapshot.packs.length;
+
+        for (const rule of activeRules) {
+          const [row] = await tx
+            .select({ maxVersion: max(policyRuleVersions.version) })
+            .from(policyRuleVersions)
+            .where(and(eq(policyRuleVersions.tenantId, tenantId), eq(policyRuleVersions.ruleId, rule.id)));
+          const nextVersion = (row?.maxVersion ?? 0) + 1;
+          await tx.insert(policyRuleVersions).values({
+            id: ulid(),
+            tenantId,
+            ruleId: rule.id,
+            version: nextVersion,
+            snapshot: rule,
+            author: actor.userId,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
+
+        const now = new Date();
+        snapshotPath = await writeSnapshotWithCas(snapshot, previousPublishId);
+        snapshotWritten = true;
+        await tx.insert(policyPublishEvents).values({
+          id: publishId,
+          tenantId,
+          version,
+          snapshot,
+          summary: { packCount: snapshot.packs.length, ruleCount: activeRules.length },
+          publisher: actor.userId,
+          publishedAt: now,
+          status: "published",
+          createdAt: now,
+          updatedAt: now,
+        });
+      });
+    } catch (error) {
+      if (snapshotWritten) {
+        await replaceTenantSnapshot(tenantId, previousSnapshot, { expectedCurrentPublishId: publishId }).catch(
+          () => undefined
+        );
+      }
+      throw error;
+    }
+
+    if (publishId) {
+      await insertPolicyAuditEvent(actor, "policy_publish", {
+        publish_id: publishId,
+        version: publishVersion,
+        pack_count: publishedPackCount,
+        rule_count: publishedRuleCount,
+      }).catch(() => undefined);
+    }
 
     const [row] = await db
       .select()
       .from(policyPublishEvents)
-      .where(and(eq(policyPublishEvents.tenantId, tenantId), eq(policyPublishEvents.id, id)))
+      .where(and(eq(policyPublishEvents.tenantId, tenantId), eq(policyPublishEvents.id, publishId)))
       .limit(1);
     if (!row) throw new Error("发布记录写入失败");
     return { event: await this.toPublishEvent(row), snapshotPath };
@@ -682,52 +802,79 @@ export class PgPolicyStore {
 
   public async rollback(tenantId: string, eventId: string, actor: PolicyAuditActor): Promise<PublishResult> {
     const db = getIamDb();
-    const [target] = await db
-      .select()
-      .from(policyPublishEvents)
-      .where(and(eq(policyPublishEvents.tenantId, tenantId), eq(policyPublishEvents.id, eventId)))
-      .limit(1);
-    if (!target) throw new Error("目标发布记录不存在");
+    const previousSnapshot = await readTenantSnapshot(tenantId);
+    const previousPublishId = previousSnapshot?.publishId ?? null;
+    let snapshotWritten = false;
+    let snapshotPath = "";
+    let publishId = "";
+    let version = 0;
 
-    const sourceSnapshot = target.snapshot as PolicySnapshot;
-    const version = await this.nextPublishVersion(tenantId);
-    const now = new Date();
-    const nextSnapshot: PolicySnapshot = {
-      ...sourceSnapshot,
-      version,
-      publishedAt: now.toISOString(),
-      publisher: actor.userId,
-    };
+    try {
+      await db.transaction(async (tx) => {
+        const [target] = await tx
+          .select()
+          .from(policyPublishEvents)
+          .where(and(eq(policyPublishEvents.tenantId, tenantId), eq(policyPublishEvents.id, eventId)))
+          .limit(1);
+        if (!target) throw new Error("目标发布记录不存在");
 
-    await db
-      .update(policyPublishEvents)
-      .set({ status: "rolled_back", updatedAt: now })
-      .where(and(eq(policyPublishEvents.tenantId, tenantId), eq(policyPublishEvents.id, eventId)));
+        const sourceSnapshot = target.snapshot as PolicySnapshot;
+        const [versionRow] = await tx
+          .select({ maxVersion: max(policyPublishEvents.version) })
+          .from(policyPublishEvents)
+          .where(eq(policyPublishEvents.tenantId, tenantId));
+        version = (versionRow?.maxVersion ?? 0) + 1;
+        publishId = ulid();
+        const now = new Date();
+        const nextSnapshot: PolicySnapshot = {
+          ...sourceSnapshot,
+          version,
+          publishId,
+          publishedAt: now.toISOString(),
+          publisher: actor.userId,
+        };
 
-    const id = ulid();
-    await db.insert(policyPublishEvents).values({
-      id,
-      tenantId,
-      version,
-      snapshot: nextSnapshot,
-      summary: { rollbackFrom: eventId, packCount: nextSnapshot.packs.length },
-      publisher: actor.userId,
-      publishedAt: now,
-      status: "published",
-      createdAt: now,
-      updatedAt: now,
-    });
-    const snapshotPath = await writeSnapshot(nextSnapshot);
-    await insertPolicyAuditEvent(actor, "policy_publish", {
-      publish_id: id,
-      version,
-      rollback_from: eventId,
-    });
+        await tx
+          .update(policyPublishEvents)
+          .set({ status: "rolled_back", updatedAt: now })
+          .where(and(eq(policyPublishEvents.tenantId, tenantId), eq(policyPublishEvents.id, eventId)));
+
+        snapshotPath = await writeSnapshotWithCas(nextSnapshot, previousPublishId);
+        snapshotWritten = true;
+        await tx.insert(policyPublishEvents).values({
+          id: publishId,
+          tenantId,
+          version,
+          snapshot: nextSnapshot,
+          summary: { rollbackFrom: eventId, packCount: nextSnapshot.packs.length },
+          publisher: actor.userId,
+          publishedAt: now,
+          status: "published",
+          createdAt: now,
+          updatedAt: now,
+        });
+      });
+    } catch (error) {
+      if (snapshotWritten) {
+        await replaceTenantSnapshot(tenantId, previousSnapshot, { expectedCurrentPublishId: publishId }).catch(
+          () => undefined
+        );
+      }
+      throw error;
+    }
+
+    if (publishId) {
+      await insertPolicyAuditEvent(actor, "policy_publish", {
+        publish_id: publishId,
+        version,
+        rollback_from: eventId,
+      }).catch(() => undefined);
+    }
 
     const [row] = await db
       .select()
       .from(policyPublishEvents)
-      .where(and(eq(policyPublishEvents.tenantId, tenantId), eq(policyPublishEvents.id, id)))
+      .where(and(eq(policyPublishEvents.tenantId, tenantId), eq(policyPublishEvents.id, publishId)))
       .limit(1);
     if (!row) throw new Error("回滚发布记录写入失败");
     return { event: await this.toPublishEvent(row), snapshotPath };
