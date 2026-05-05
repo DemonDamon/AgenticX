@@ -77,4 +77,8 @@ bash scripts/reset-dev-data.sh --with-seed --yes
 
 - `prod.yml` 为模板，不直接承诺客户侧最终网络拓扑；上云前按客户 VPC、WAF、证书体系做二次适配。
 - `config/policies.yaml` 是 Gateway 配置片段，默认挂载 `/app/plugins/moderation-*/manifest.yaml`；Admin 策略启停与额度配置写入共享 `/runtime/admin`。
+- Gateway 新增 `GATEWAY_POLICY_SNAPSHOT_FILE=/runtime/admin/policy-snapshot.json`：
+  - 优先加载 PG 发布生成的快照文件；
+  - 若快照不存在，则回退到 `config/policies.yaml + GATEWAY_POLICY_OVERRIDE_FILE`；
+  - `GATEWAY_POLICY_OVERRIDE_FILE` 仅保留兼容路径，后续版本会逐步弃用。
 - PostgreSQL 主从复制参数（`wal_level`、`primary_conninfo` 等）由客户环境初始化脚本补齐。
