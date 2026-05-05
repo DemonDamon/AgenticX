@@ -1292,16 +1292,32 @@ func writeStreamPolicyError(
 func policyMessageWithHits(message string, hits []policyengine.HitEvent) string {
 	policyIDs := make([]string, 0, len(hits))
 	seen := map[string]struct{}{}
+	ruleMessages := make([]string, 0, len(hits))
+	seenMessage := map[string]struct{}{}
 	for _, hit := range hits {
 		id := strings.TrimSpace(hit.RuleID)
 		if id == "" {
+		} else {
+			if _, ok := seen[id]; !ok {
+				seen[id] = struct{}{}
+				policyIDs = append(policyIDs, id)
+			}
+		}
+		msg := strings.TrimSpace(hit.Message)
+		if msg == "" {
 			continue
 		}
-		if _, ok := seen[id]; ok {
+		if _, ok := seenMessage[msg]; ok {
 			continue
 		}
-		seen[id] = struct{}{}
-		policyIDs = append(policyIDs, id)
+		seenMessage[msg] = struct{}{}
+		ruleMessages = append(ruleMessages, msg)
+	}
+	if len(ruleMessages) > 0 {
+		if len(policyIDs) > 0 {
+			return fmt.Sprintf("%s：%s（命中策略: %s）", message, strings.Join(ruleMessages, "；"), strings.Join(policyIDs, ", "))
+		}
+		return fmt.Sprintf("%s：%s", message, strings.Join(ruleMessages, "；"))
 	}
 	if len(policyIDs) > 0 {
 		return fmt.Sprintf("%s（命中策略: %s）", message, strings.Join(policyIDs, ", "))

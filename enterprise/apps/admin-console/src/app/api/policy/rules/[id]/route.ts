@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../lib/admin-auth";
-import { buildPolicyActor, deletePolicyRule, setPolicyRuleStatus, upsertPolicyRule } from "../../../../../lib/policy-store";
+import { buildPolicyActor, setPolicyRuleStatus, upsertPolicyRule } from "../../../../../lib/policy-store";
 
 const ALLOWED_STATUSES = new Set(["draft", "active", "disabled"] as const);
 
@@ -82,16 +82,16 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
 }
 
 export async function DELETE(_req: Request, context: { params: Promise<{ id: string }> }) {
-  const guard = await requireAdminScope(["policy:delete"]);
+  const guard = await requireAdminScope(["policy:disable"]);
   if (!guard.ok) return guard.response;
   const { id } = await context.params;
   try {
     const actor = await buildPolicyActor(guard.session);
-    await deletePolicyRule(actor, id);
+    await setPolicyRuleStatus(actor, id, "disabled");
     return NextResponse.json({ code: "00000", message: "ok" });
   } catch (error) {
     return NextResponse.json(
-      { code: "40000", message: error instanceof Error ? error.message : "删除规则失败" },
+      { code: "40000", message: error instanceof Error ? error.message : "停用规则失败" },
       { status: 400 }
     );
   }

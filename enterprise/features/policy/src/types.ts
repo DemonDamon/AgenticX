@@ -107,6 +107,11 @@ export type PolicyTestHit = {
   stage: PolicyStage;
 };
 
+/** 与已落库规则合并后再跑样本测试（用于未保存的表单改动） */
+export type PolicyRuleTestPreview = Partial<
+  Pick<PolicyRule, "action" | "kind" | "severity" | "message" | "payload">
+>;
+
 export type PolicyTestResult = {
   blocked: boolean;
   redactedText: string;

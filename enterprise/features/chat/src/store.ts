@@ -626,11 +626,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.error) {
+          const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
           set({
             status: "error",
-            errorMessage: toComplianceMessage(chunk.error.code, chunk.error.message),
+            errorMessage: complianceMessage,
             activeRequestId: null,
           });
+          set((prev) => ({
+            messages: prev.messages.map((message) =>
+              message.id === assistantMessage.id ? { ...message, content: complianceMessage } : message
+            ),
+          }));
           return;
         }
 
@@ -811,11 +817,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.error) {
+          const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
           set({
             status: "error",
-            errorMessage: toComplianceMessage(chunk.error.code, chunk.error.message),
+            errorMessage: complianceMessage,
             activeRequestId: null,
           });
+          set((prev) => ({
+            messages: prev.messages.map((message) =>
+              message.id === replacementAssistant.id ? { ...message, content: complianceMessage } : message
+            ),
+          }));
           return;
         }
 
@@ -977,11 +989,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.error) {
+          const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
           set({
             status: "error",
-            errorMessage: toComplianceMessage(chunk.error.code, chunk.error.message),
+            errorMessage: complianceMessage,
             activeRequestId: null,
           });
+          set((prev) => ({
+            messages: prev.messages.map((message) =>
+              message.id === replacementAssistant.id ? { ...message, content: complianceMessage } : message
+            ),
+          }));
           return;
         }
 
