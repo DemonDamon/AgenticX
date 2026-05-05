@@ -458,7 +458,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		"endpoint", decision.Endpoint,
 	)
 
-	reqPolicy := s.evaluatePolicy(joinMessages(req.Messages), makeEvalContext(identity, "request"))
+	latestUserText := latestUserMessageContent(req.Messages)
+	reqPolicy := s.evaluatePolicy(latestUserText, makeEvalContext(identity, "request"))
 	if reqPolicy.Blocked {
 		s.logger.Warn("policy blocked request", "model", req.Model, "hits", len(reqPolicy.Hits))
 		if err := s.writeAuditEvent(audit.Event{
@@ -490,13 +491,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, "90001", "请求触发合规拦截", reqPolicy.Hits)
 		return
 	}
-	if reqPolicy.RedactedText != joinMessages(req.Messages) {
-		req.Messages = []openai.ChatMessage{
-			{
-				Role:    "user",
-				Content: reqPolicy.RedactedText,
-			},
-		}
+	if reqPolicy.RedactedText != latestUserText {
+		req.Messages = replaceLastUserMessageContent(req.Messages, reqPolicy.RedactedText)
 	}
 	estimatedInputTokens := estimateTextTokens(joinMessages(req.Messages))
 	quotaDecision := s.quotaTracker.CheckAndAdd(
@@ -905,6 +901,34 @@ func joinMessages(messages []openai.ChatMessage) string {
 		parts = append(parts, msg.Content)
 	}
 	return strings.Join(parts, "\n")
+}
+
+// latestUserMessageContent 返回最后一条 user 消息的 content。
+// 仅当本轮新增的 user 输入需要单独评估（如 request 阶段策略扫描）时使用，
+// 避免历史轮次中残留的 PII/敏感词导致整个会话不可用。
+// 若没有任何 user 消息，则回退到 joinMessages 全量内容，保留原始行为。
+func latestUserMessageContent(messages []openai.ChatMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if strings.EqualFold(msg.Role, "user") && strings.TrimSpace(msg.Content) != "" {
+			return msg.Content
+		}
+	}
+	return joinMessages(messages)
+}
+
+// replaceLastUserMessageContent 仅替换最后一条 user 消息的 content，
+// 保留多轮对话结构，避免把整段历史压成单条 user message。
+func replaceLastUserMessageContent(messages []openai.ChatMessage, content string) []openai.ChatMessage {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.EqualFold(messages[i].Role, "user") {
+			next := make([]openai.ChatMessage, len(messages))
+			copy(next, messages)
+			next[i].Content = content
+			return next
+		}
+	}
+	return messages
 }
 
 func normalizeEmbeddingInput(raw json.RawMessage) ([]string, error) {
