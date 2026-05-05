@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 扩展 IAM 演示数据：在已有 db:seed（租户 + owner + super_admin）基础上，
- * 插入多级部门、系统角色（owner/admin/auditor/member）与 10 个示例用户。
+ * 插入多级部门、系统角色（owner/admin/dept_admin/auditor/policy_* /member）与 10 个示例用户。
  *
  * 用法（在 monorepo 根目录）：
  *   pnpm --filter @agenticx/db-schema run db:seed:iam
@@ -51,6 +51,12 @@ const ROLE_SEED = [
       "audit:export",
       "metering:read",
       "policy:read",
+      "policy:create",
+      "policy:update",
+      "policy:delete",
+      "policy:publish",
+      "policy:disable",
+      "policy:manage",
       "model:read",
     ]),
   },
@@ -90,6 +96,31 @@ const ROLE_SEED = [
     code: "auditor",
     name: "审计员",
     scopes: JSON.stringify(["admin:enter", "audit:read:all", "audit:export", "metering:read"]),
+  },
+  {
+    id: "01J00000000000000000001106",
+    code: "policy_admin",
+    name: "策略管理员",
+    scopes: JSON.stringify([
+      "admin:enter",
+      "policy:read",
+      "policy:create",
+      "policy:update",
+      "policy:delete",
+      "policy:disable",
+    ]),
+  },
+  {
+    id: "01J00000000000000000001107",
+    code: "policy_publisher",
+    name: "策略发布员",
+    scopes: JSON.stringify(["admin:enter", "policy:read", "policy:publish"]),
+  },
+  {
+    id: "01J00000000000000000001108",
+    code: "policy_auditor",
+    name: "策略审阅员",
+    scopes: JSON.stringify(["admin:enter", "policy:read"]),
   },
   {
     id: "01J00000000000000000001104",
@@ -198,7 +229,7 @@ async function main() {
     );
 
     await client.query("COMMIT");
-    console.log("IAM demo seed complete: 5 departments, 4 system roles, 10 demo users.");
+    console.log("IAM demo seed complete: 5 departments, 8 system roles, 10 demo users.");
     console.log(
       "Demo login password: AUTH_DEV_IAM_DEMO_PASSWORD > AUTH_DEV_OWNER_PASSWORD > default ChangeMe_Dev14!Aa"
     );
