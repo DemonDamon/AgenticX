@@ -809,7 +809,7 @@ def create_studio_app() -> FastAPI:
     def _modelscope_headers() -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "AgenticX/0.3.7",
+            "User-Agent": "AgenticX/0.3.8",
         }
         token = str(os.getenv("MODELSCOPE_API_TOKEN", "")).strip()
         if token:

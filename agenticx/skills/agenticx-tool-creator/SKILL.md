@@ -3,7 +3,7 @@ name: agenticx-tool-creator
 description: Guide for creating custom tools in AgenticX including function decorator tools, MCP tool integration, tool registries, and remote tool access. Use when the user wants to create tools for agents, integrate external APIs as tools, build MCP servers, or extend agent capabilities with custom functions.
 metadata:
   author: AgenticX
-  version: "0.3.7"
+  version: "0.3.8"
 ---
 
 # AgenticX Tool Creator
