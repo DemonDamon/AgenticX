@@ -63,6 +63,7 @@ type PolicyRule = {
   payload: { keywords?: string[]; pattern?: string; piiType?: string };
   appliesTo: PolicyAppliesTo | null;
   status: "draft" | "active" | "disabled";
+  updatedAt: string;
 };
 
 type PublishEvent = {
@@ -114,6 +115,18 @@ function summarizeAppliesTo(appliesTo: PolicyAppliesTo | null): string {
   return chunks.join(" · ") || "全员";
 }
 
+function labelPolicyKind(kind: PolicyRule["kind"]): string {
+  if (kind === "keyword") return "关键词";
+  if (kind === "regex") return "正则";
+  return "PII";
+}
+
+function labelPolicyAction(action: PolicyRule["action"]): string {
+  if (action === "block") return "拦截";
+  if (action === "redact") return "脱敏";
+  return "警告";
+}
+
 export default function PolicyPage() {
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState("all");
@@ -123,6 +136,8 @@ export default function PolicyPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [sampleText, setSampleText] = useState("");
   const [testSummary, setTestSummary] = useState<string>("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [pendingDeleteRule, setPendingDeleteRule] = useState<PolicyRule | null>(null);
   const [syncStatus, setSyncStatus] = useState<"unknown" | "pending" | "synced">("unknown");
   const [form, setForm] = useState<RuleForm>({
     packId: "",
@@ -144,6 +159,12 @@ export default function PolicyPage() {
   });
 
   const latestPublish = publishes[0] ?? null;
+  const latestPublishAtMs = latestPublish ? Date.parse(latestPublish.publishedAt) : null;
+  const isDisabledPendingPublish = useCallback(
+    (rule: PolicyRule) =>
+      rule.status === "disabled" && (latestPublishAtMs === null || Date.parse(rule.updatedAt) > latestPublishAtMs),
+    [latestPublishAtMs]
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -176,10 +197,11 @@ export default function PolicyPage() {
   }, [load]);
 
   const filteredRules = useMemo(() => {
-    if (tab === "all") return rules;
-    if (tab === "keyword" || tab === "regex" || tab === "pii") return rules.filter((rule) => rule.kind === tab);
-    return rules;
-  }, [rules, tab]);
+    const visibleRules = rules.filter((rule) => rule.status !== "disabled" || isDisabledPendingPublish(rule));
+    if (tab === "all") return visibleRules;
+    if (tab === "keyword" || tab === "regex" || tab === "pii") return visibleRules.filter((rule) => rule.kind === tab);
+    return visibleRules;
+  }, [rules, tab, isDisabledPendingPublish]);
 
   const resetForm = () => {
     setForm({
@@ -300,15 +322,45 @@ export default function PolicyPage() {
     setSyncStatus("unknown");
   };
 
-  const deleteRule = async (id: string) => {
+  const deleteRule = async (id: string): Promise<boolean> => {
     const res = await fetch(`/api/policy/rules/${id}`, { method: "DELETE" });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "删除失败");
+      toast.error(json.message ?? "停用失败");
+      return false;
+    }
+    toast.success("规则已停用，可恢复");
+    await load();
+    return true;
+  };
+
+  const restoreRule = async (id: string) => {
+    const res = await fetch(`/api/policy/rules/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "draft" }),
+    });
+    const json = (await res.json()) as { message?: string };
+    if (!res.ok) {
+      toast.error(json.message ?? "恢复失败");
       return;
     }
-    toast.success("规则已删除");
+    toast.success("规则已恢复为草稿");
     await load();
+  };
+
+  const requestDeleteRule = (rule: PolicyRule) => {
+    setPendingDeleteRule(rule);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDeleteRule = async () => {
+    if (!pendingDeleteRule) return;
+    const success = await deleteRule(pendingDeleteRule.id);
+    if (success) {
+      setDeleteDialogOpen(false);
+      setPendingDeleteRule(null);
+    }
   };
 
   const runTest = async () => {
@@ -316,17 +368,44 @@ export default function PolicyPage() {
       toast.error("请先保存规则再测试");
       return;
     }
+    const payload =
+      form.kind === "keyword"
+        ? { keywords: parseList(form.payloadKeywords) }
+        : form.kind === "regex"
+          ? { pattern: form.payloadPattern.trim() }
+          : { piiType: form.payloadPiiType.trim() };
     const res = await fetch("/api/policy/test", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ruleIds: [form.id], sampleText, stage: "request" }),
+      body: JSON.stringify({
+        ruleIds: [form.id],
+        sampleText,
+        stage: "request",
+        preview: {
+          kind: form.kind,
+          action: form.action,
+          severity: form.severity,
+          message: form.message.trim() || null,
+          payload,
+        },
+      }),
     });
-    const json = (await res.json()) as { message?: string; data?: { blocked?: boolean; hits?: unknown[] } };
+    const json = (await res.json()) as {
+      message?: string;
+      data?: { blocked?: boolean; hits?: unknown[]; redactedText?: string };
+    };
     if (!res.ok || !json.data) {
       toast.error(json.message ?? "测试失败");
       return;
     }
-    setTestSummary(`blocked=${Boolean(json.data.blocked)} · hits=${Array.isArray(json.data.hits) ? json.data.hits.length : 0}`);
+    const hitCount = Array.isArray(json.data.hits) ? json.data.hits.length : 0;
+    const parts = [`命中：${hitCount} 处`, `是否拦截：${json.data.blocked ? "是" : "否"}`];
+    const redacted = json.data.redactedText ?? sampleText;
+    if (redacted !== sampleText && hitCount > 0) {
+      const clip = redacted.length > 160 ? `${redacted.slice(0, 160)}…` : redacted;
+      parts.push(`脱敏预览：${clip}`);
+    }
+    setTestSummary(parts.join(" · "));
   };
 
   const togglePack = async (pack: PolicyPack, enabled: boolean) => {
@@ -418,13 +497,16 @@ export default function PolicyPage() {
         {["all", "keyword", "regex", "pii"].map((key) => (
           <TabsContent key={key} value={key} className="space-y-3 pt-3">
             {filteredRules.map((rule) => (
-              <div key={rule.id} className="rounded-md border border-border p-3">
+              <div
+                key={rule.id}
+                className={`rounded-md border p-3 ${rule.status === "disabled" ? "border-border bg-muted/40 text-text-faint" : "border-border"}`}
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{rule.code}</span>
-                      <Badge variant="outline">{rule.kind.toUpperCase()}</Badge>
-                      <Badge variant="secondary">{rule.action}</Badge>
+                      <Badge variant="outline">{labelPolicyKind(rule.kind)}</Badge>
+                      <Badge variant="secondary">{labelPolicyAction(rule.action)}</Badge>
                       <Badge variant={rule.status === "active" ? "success" : "outline"}>
                         {rule.status === "active" ? "已发布" : rule.status === "draft" ? "草稿" : "已停用"}
                       </Badge>
@@ -433,14 +515,24 @@ export default function PolicyPage() {
                     <p className="text-xs text-text-faint">适用范围：{summarizeAppliesTo(rule.appliesTo)}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" onClick={() => openEdit(rule)}>
+                    <Button size="sm" variant="outline" onClick={() => openEdit(rule)} disabled={rule.status === "disabled"}>
                       <Pencil className="h-4 w-4" />
                       编辑
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => void deleteRule(rule.id)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => requestDeleteRule(rule)}
+                      disabled={rule.status === "disabled"}
+                    >
                       <Trash2 className="h-4 w-4" />
                       删除
                     </Button>
+                    {rule.status === "disabled" ? (
+                      <Button size="sm" variant="destructive" onClick={() => void restoreRule(rule.id)}>
+                        恢复
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -538,12 +630,13 @@ export default function PolicyPage() {
               </select>
             </div>
             <div className="space-y-1">
-              <Label>动作</Label>
+              <Label>处置动作</Label>
               <select className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" value={form.action} onChange={(e) => setForm((prev) => ({ ...prev, action: e.target.value as RuleForm["action"] }))}>
-                <option value="warn">warn</option>
-                <option value="redact">redact</option>
-                <option value="block">block</option>
+                <option value="warn">警告（记录命中，通常不拦截）</option>
+                <option value="redact">脱敏（命中片段替换为占位符，一般仍放行）</option>
+                <option value="block">拦截（命中则策略判定为阻断）</option>
               </select>
+              <p className="text-xs text-text-faint">脱敏：将敏感片段替换为 [REDACTED]，与「拦截」不同。</p>
             </div>
             <div className="col-span-2 space-y-1">
               <Label>文案</Label>
@@ -598,6 +691,34 @@ export default function PolicyPage() {
               保存草稿
             </Button>
             <Button onClick={() => void saveRule("publish")}>发布并立即生效</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          setDeleteDialogOpen(open);
+          if (!open) setPendingDeleteRule(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>确认停用规则？</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm text-text-subtle">
+            <p>
+              将停用规则 <span className="font-semibold text-text-strong">{pendingDeleteRule?.code ?? "-"}</span>，停用后不会进入下一次发布快照。
+            </p>
+            <p>后续可在规则列表中点击「恢复」将其还原为草稿。</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={() => void confirmDeleteRule()}>
+              确认停用
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

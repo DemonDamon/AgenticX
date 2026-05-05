@@ -66,12 +66,13 @@ func NewTracker(cfgPath, usagePath string) *Tracker {
 
 func DefaultConfigPath() string {
 	cwd, _ := os.Getwd()
-	return filepath.Clean(filepath.Join(cwd, "../../../.runtime/admin/quotas.json"))
+	// apps/gateway → enterprise/.runtime/admin（与 admin-console 发布 policy-snapshot 同目录）
+	return filepath.Clean(filepath.Join(cwd, "../../.runtime/admin/quotas.json"))
 }
 
 func DefaultUsagePath() string {
 	cwd, _ := os.Getwd()
-	return filepath.Clean(filepath.Join(cwd, "../../../.runtime/gateway/quota-usage.json"))
+	return filepath.Clean(filepath.Join(cwd, "../../.runtime/gateway/quota-usage.json"))
 }
 
 func (t *Tracker) CheckAndAdd(userID, deptID, role, model string, tokens int64) Decision {

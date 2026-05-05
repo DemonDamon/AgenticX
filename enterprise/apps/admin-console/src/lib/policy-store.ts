@@ -5,6 +5,7 @@ import {
   type PolicyPublishEvent,
   type PolicyRule,
   type PolicyRuleFilter,
+  type PolicyRuleTestPreview,
   type PolicyStage,
   type PolicyTestResult,
 } from "@agenticx/feature-policy";
@@ -136,9 +137,20 @@ export async function setPolicyRuleStatus(
 
 export async function testPolicyRules(
   tenantId: string,
-  input: { ruleIds: string[]; sampleText: string; stage?: PolicyStage }
+  input: {
+    ruleIds: string[];
+    sampleText: string;
+    stage?: PolicyStage;
+    previewByRuleId?: Record<string, PolicyRuleTestPreview>;
+  }
 ): Promise<PolicyTestResult> {
-  return store.testRules(tenantId, input.ruleIds, input.sampleText, input.stage ?? "request");
+  return store.testRules(
+    tenantId,
+    input.ruleIds,
+    input.sampleText,
+    input.stage ?? "request",
+    input.previewByRuleId
+  );
 }
 
 export async function publishPolicy(actor: PolicyActor, activateDraftRuleIds?: string[]) {

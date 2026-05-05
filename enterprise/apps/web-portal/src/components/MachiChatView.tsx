@@ -264,15 +264,19 @@ export function MachiChatView({ client }: MachiChatViewProps) {
       {historyError && (
         <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
           <ShieldAlert className="h-5 w-5" />
-          <AlertTitle>历史同步</AlertTitle>
-          <AlertDescription>{historyError}</AlertDescription>
+          <div>
+            <AlertTitle>历史同步</AlertTitle>
+            <AlertDescription>{historyError}</AlertDescription>
+          </div>
         </Alert>
       )}
       {errorMessage && (
         <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
           <ShieldAlert className="h-5 w-5" />
-          <AlertTitle>{t.complianceTitle}</AlertTitle>
-          <AlertDescription>{errorMessage}</AlertDescription>
+          <div>
+            <AlertTitle>{t.complianceTitle}</AlertTitle>
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </div>
         </Alert>
       )}
 

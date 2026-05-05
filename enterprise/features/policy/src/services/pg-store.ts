@@ -8,7 +8,7 @@ import {
   type PolicyAppliesTo as DbPolicyAppliesTo,
 } from "@agenticx/db-schema";
 import { getIamDb } from "@agenticx/iam-core";
-import { and, asc, desc, eq, inArray, max } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, max, ne } from "drizzle-orm";
 import { ulid } from "ulid";
 import { parse } from "yaml";
 import { insertPolicyAuditEvent, type PolicyAuditActor } from "../audit";
@@ -24,6 +24,7 @@ import {
   type PolicyRuleStatus,
   type PolicySnapshot,
   type PolicyStage,
+  type PolicyRuleTestPreview,
   type PolicyTestHit,
   type PolicyTestResult,
   type PublishResult,
@@ -150,6 +151,23 @@ function normalizeRegex(pattern: string): { source: string; flags: string } {
     return { source: pattern.slice(4), flags: "gi" };
   }
   return { source: pattern, flags: "g" };
+}
+
+function mergeRuleWithTestPreview(row: PolicyRule, preview?: PolicyRuleTestPreview): PolicyRule {
+  if (!preview) return row;
+  const kind = preview.kind ?? row.kind;
+  const payload =
+    preview.payload !== undefined
+      ? normalizeRulePayload(kind, preview.payload)
+      : normalizeRulePayload(kind, row.payload);
+  return {
+    ...row,
+    kind,
+    payload,
+    ...(preview.action !== undefined ? { action: preview.action } : {}),
+    ...(preview.severity !== undefined ? { severity: preview.severity } : {}),
+    ...(preview.message !== undefined ? { message: preview.message } : {}),
+  };
 }
 
 function findMatches(rule: PolicyRule, text: string): string[] {
@@ -419,6 +437,19 @@ export class PgPolicyStore {
     const nextAppliesTo = input.appliesTo === null ? null : input.appliesTo ? normalizeAppliesTo(input.appliesTo) : undefined;
     const now = new Date();
     await this.assertPackBelongsToTenant(input.tenantId, input.packId);
+    const duplicateConditions = [eq(policyRules.tenantId, input.tenantId), eq(policyRules.packId, input.packId), eq(policyRules.code, code)];
+    if (input.id) duplicateConditions.push(ne(policyRules.id, input.id));
+    const [duplicate] = await db
+      .select({ id: policyRules.id, status: policyRules.status })
+      .from(policyRules)
+      .where(and(...duplicateConditions))
+      .limit(1);
+    if (duplicate) {
+      if (duplicate.status === "disabled") {
+        throw new Error("规则编码已存在且处于停用状态，请在列表中恢复该规则或更换编码");
+      }
+      throw new Error("同一规则包下规则编码已存在，请修改规则编码");
+    }
 
     if (input.id) {
       const [current] = await db
@@ -504,7 +535,8 @@ export class PgPolicyStore {
     tenantId: string,
     ruleIds: string[],
     sampleText: string,
-    stage: PolicyStage = "request"
+    stage: PolicyStage = "request",
+    previewByRuleId?: Record<string, PolicyRuleTestPreview>
   ): Promise<PolicyTestResult> {
     const db = getIamDb();
     const cleanIds = uniq(ruleIds);
@@ -519,20 +551,21 @@ export class PgPolicyStore {
     let blocked = false;
     const hits: PolicyTestHit[] = [];
     for (const row of rows.map(dbRuleToModel)) {
-      const matched = findMatches(row, redactedText);
+      const effective = mergeRuleWithTestPreview(row, previewByRuleId?.[row.id]);
+      const matched = findMatches(effective, redactedText);
       for (const item of matched) {
         hits.push({
-          ruleId: row.id,
-          code: row.code,
-          kind: row.kind,
-          action: row.action,
-          severity: row.severity,
-          message: row.message ?? null,
+          ruleId: effective.id,
+          code: effective.code,
+          kind: effective.kind,
+          action: effective.action,
+          severity: effective.severity,
+          message: effective.message ?? null,
           matched: item,
           stage,
         });
-        if (row.action === "block") blocked = true;
-        if (row.action === "redact") {
+        if (effective.action === "block") blocked = true;
+        if (effective.action === "redact") {
           redactedText = redactedText.split(item).join("[REDACTED]");
         }
       }
