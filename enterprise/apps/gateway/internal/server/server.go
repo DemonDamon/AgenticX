@@ -39,6 +39,8 @@ type Server struct {
 	policy            *policyengine.Engine
 	policyMu          sync.RWMutex
 	policyManifest    string
+	policySnapshot    string
+	policySnapshotMod time.Time
 	policyOverride    string
 	policyOverrideMod time.Time
 	audit             audit.EventWriter
@@ -98,8 +100,12 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	if policyOverridePath == "" {
 		policyOverridePath = filepath.Join(filepath.Dir(quotaCfgPath), "policy-overrides.json")
 	}
+	policySnapshotPath := strings.TrimSpace(os.Getenv("GATEWAY_POLICY_SNAPSHOT_FILE"))
+	if policySnapshotPath == "" {
+		policySnapshotPath = filepath.Join(filepath.Dir(quotaCfgPath), "policy-snapshot.json")
+	}
 
-	engine, overrideModTime, err := buildPolicyEngine(cfg.PolicyManifest, policyOverridePath)
+	engine, snapshotModTime, overrideModTime, err := buildPolicyEngine(cfg.PolicyManifest, policySnapshotPath, policyOverridePath)
 	if err != nil {
 		return nil, err
 	}
@@ -131,6 +137,8 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		decider:           routing.NewDeciderWithAdmin(cfg, adminLoader),
 		policy:            engine,
 		policyManifest:    cfg.PolicyManifest,
+		policySnapshot:    policySnapshotPath,
+		policySnapshotMod: snapshotModTime,
 		policyOverride:    policyOverridePath,
 		policyOverrideMod: overrideModTime,
 		audit:             auditWriter,
@@ -144,20 +152,135 @@ type policyOverrideFile struct {
 	DisabledPacks []string `json:"disabledPacks"`
 }
 
-func buildPolicyEngine(manifestGlob, overridePath string) (*policyengine.Engine, time.Time, error) {
+type policySnapshotStoreFile struct {
+	UpdatedAt string                          `json:"updatedAt"`
+	Tenants   map[string]tenantPolicySnapshot `json:"tenants"`
+}
+
+type tenantPolicySnapshot struct {
+	Version int                `json:"version"`
+	Packs   []snapshotPackItem `json:"packs"`
+}
+
+type snapshotPackItem struct {
+	Code      string                  `json:"code"`
+	Name      string                  `json:"name"`
+	Type      string                  `json:"type"`
+	Source    string                  `json:"source"`
+	AppliesTo *policyengine.AppliesTo `json:"appliesTo"`
+	Rules     []snapshotRuleItem      `json:"rules"`
+}
+
+type snapshotRuleItem struct {
+	ID        string                  `json:"id"`
+	Code      string                  `json:"code"`
+	Kind      policyengine.RuleKind   `json:"kind"`
+	Action    policyengine.Action     `json:"action"`
+	Severity  string                  `json:"severity"`
+	Message   string                  `json:"message"`
+	Payload   map[string]any          `json:"payload"`
+	AppliesTo *policyengine.AppliesTo `json:"appliesTo"`
+}
+
+func buildPolicyEngine(manifestGlob, snapshotPath, overridePath string) (*policyengine.Engine, time.Time, time.Time, error) {
+	if manifests, snapshotMod, err := loadPolicySnapshot(snapshotPath); err != nil {
+		return nil, time.Time{}, time.Time{}, err
+	} else if len(manifests) > 0 {
+		engine, buildErr := policyengine.NewEngine(manifests)
+		if buildErr != nil {
+			return nil, time.Time{}, time.Time{}, fmt.Errorf("build snapshot policy engine: %w", buildErr)
+		}
+		return engine, snapshotMod, time.Time{}, nil
+	}
+
 	disabled, modTime, err := readDisabledPolicyPacks(overridePath)
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, time.Time{}, time.Time{}, err
 	}
 	manifests, err := policyengine.LoadRulePacksWithDisabled(manifestGlob, disabled)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("load policy manifests: %w", err)
+		return nil, time.Time{}, time.Time{}, fmt.Errorf("load policy manifests: %w", err)
 	}
 	engine, err := policyengine.NewEngine(manifests)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("build policy engine: %w", err)
+		return nil, time.Time{}, time.Time{}, fmt.Errorf("build policy engine: %w", err)
 	}
-	return engine, modTime, nil
+	return engine, time.Time{}, modTime, nil
+}
+
+func loadPolicySnapshot(snapshotPath string) ([]policyengine.RulePackManifest, time.Time, error) {
+	if strings.TrimSpace(snapshotPath) == "" {
+		return nil, time.Time{}, nil
+	}
+	info, statErr := os.Stat(snapshotPath)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return nil, time.Time{}, nil
+		}
+		return nil, time.Time{}, fmt.Errorf("stat policy snapshot file: %w", statErr)
+	}
+	raw, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("read policy snapshot file: %w", err)
+	}
+	var parsed policySnapshotStoreFile
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, time.Time{}, fmt.Errorf("parse policy snapshot file: %w", err)
+	}
+	if len(parsed.Tenants) == 0 {
+		return nil, info.ModTime(), nil
+	}
+	manifests := make([]policyengine.RulePackManifest, 0)
+	for tenantID, tenantSnapshot := range parsed.Tenants {
+		for _, pack := range tenantSnapshot.Packs {
+			manifest := policyengine.RulePackManifest{
+				Name:      pack.Code,
+				Version:   fmt.Sprintf("%d", tenantSnapshot.Version),
+				Type:      "snapshot-pack",
+				AppliesTo: pack.AppliesTo,
+				Rules:     make([]policyengine.Rule, 0, len(pack.Rules)),
+			}
+			for _, rule := range pack.Rules {
+				normalizedID := strings.TrimSpace(rule.Code)
+				if normalizedID == "" {
+					normalizedID = strings.TrimSpace(rule.ID)
+				}
+				if normalizedID == "" {
+					normalizedID = makeID("policy_rule")
+				}
+				nextRule := policyengine.Rule{
+					ID:        normalizedID,
+					TenantID:  tenantID,
+					Kind:      rule.Kind,
+					Action:    rule.Action,
+					Severity:  rule.Severity,
+					Message:   rule.Message,
+					AppliesTo: rule.AppliesTo,
+				}
+				switch rule.Kind {
+				case policyengine.RuleKindKeyword:
+					if values, ok := rule.Payload["keywords"].([]any); ok {
+						for _, value := range values {
+							if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
+								nextRule.Keywords = append(nextRule.Keywords, text)
+							}
+						}
+					}
+				case policyengine.RuleKindRegex:
+					if value, ok := rule.Payload["pattern"].(string); ok {
+						nextRule.Pattern = value
+					}
+				case policyengine.RuleKindPII:
+					if value, ok := rule.Payload["piiType"].(string); ok {
+						nextRule.PIIType = value
+					}
+				}
+				manifest.Rules = append(manifest.Rules, nextRule)
+			}
+			manifests = append(manifests, manifest)
+		}
+	}
+	return manifests, info.ModTime(), nil
 }
 
 func readDisabledPolicyPacks(path string) (map[string]bool, time.Time, error) {
@@ -189,46 +312,90 @@ func readDisabledPolicyPacks(path string) (map[string]bool, time.Time, error) {
 	return disabled, info.ModTime(), nil
 }
 
-func (s *Server) evaluatePolicy(text string, stage string) policyengine.EvaluateResult {
+func makeEvalContext(identity requestIdentity, stage string) policyengine.EvalContext {
+	roleCodes := identity.RoleCodes
+	if len(roleCodes) == 0 {
+		roleCodes = []string{roleFromScopes(identity.Scopes)}
+	}
+	deptIDs := identity.DepartmentIDs
+	if len(deptIDs) == 0 && strings.TrimSpace(identity.DepartmentID) != "" {
+		deptIDs = []string{identity.DepartmentID}
+	}
+	if len(deptIDs) == 0 {
+		deptIDs = []string{"*"}
+	}
+	clientType := strings.TrimSpace(identity.ClientType)
+	if clientType == "" {
+		clientType = "web-portal"
+	}
+	return policyengine.EvalContext{
+		TenantID:   identity.TenantID,
+		DeptIDs:    deptIDs,
+		RoleCodes:  roleCodes,
+		UserID:     identity.UserID,
+		ClientType: clientType,
+		Stage:      stage,
+	}
+}
+
+func (s *Server) evaluatePolicy(text string, ctx policyengine.EvalContext) policyengine.EvaluateResult {
 	s.reloadPolicyIfNeeded()
 	s.policyMu.RLock()
 	engine := s.policy
 	s.policyMu.RUnlock()
-	return engine.Evaluate(text, stage)
+	return engine.EvaluateWithContext(text, ctx)
 }
 
 func (s *Server) reloadPolicyIfNeeded() {
-	if strings.TrimSpace(s.policyOverride) == "" {
+	if strings.TrimSpace(s.policyOverride) == "" && strings.TrimSpace(s.policySnapshot) == "" {
 		return
 	}
-	info, err := os.Stat(s.policyOverride)
-	var nextMod time.Time
-	if err != nil {
-		if !os.IsNotExist(err) {
-			s.logger.Warn("policy override stat failed", "path", s.policyOverride, "error", err)
-			return
+
+	var nextOverrideMod time.Time
+	if strings.TrimSpace(s.policyOverride) != "" {
+		info, err := os.Stat(s.policyOverride)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				s.logger.Warn("policy override stat failed", "path", s.policyOverride, "error", err)
+				return
+			}
+		} else {
+			nextOverrideMod = info.ModTime()
 		}
-	} else {
-		nextMod = info.ModTime()
+	}
+
+	var nextSnapshotMod time.Time
+	if strings.TrimSpace(s.policySnapshot) != "" {
+		info, err := os.Stat(s.policySnapshot)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				s.logger.Warn("policy snapshot stat failed", "path", s.policySnapshot, "error", err)
+				return
+			}
+		} else {
+			nextSnapshotMod = info.ModTime()
+		}
 	}
 
 	s.policyMu.RLock()
-	currentMod := s.policyOverrideMod
+	currentOverrideMod := s.policyOverrideMod
+	currentSnapshotMod := s.policySnapshotMod
 	s.policyMu.RUnlock()
-	if nextMod.Equal(currentMod) {
+	if nextOverrideMod.Equal(currentOverrideMod) && nextSnapshotMod.Equal(currentSnapshotMod) {
 		return
 	}
 
-	engine, modTime, buildErr := buildPolicyEngine(s.policyManifest, s.policyOverride)
+	engine, snapshotMod, overrideMod, buildErr := buildPolicyEngine(s.policyManifest, s.policySnapshot, s.policyOverride)
 	if buildErr != nil {
-		s.logger.Warn("policy override reload failed", "path", s.policyOverride, "error", buildErr)
+		s.logger.Warn("policy reload failed", "snapshot", s.policySnapshot, "override", s.policyOverride, "error", buildErr)
 		return
 	}
 	s.policyMu.Lock()
 	s.policy = engine
-	s.policyOverrideMod = modTime
+	s.policySnapshotMod = snapshotMod
+	s.policyOverrideMod = overrideMod
 	s.policyMu.Unlock()
-	s.logger.Info("policy engine reloaded", "override_file", s.policyOverride)
+	s.logger.Info("policy engine reloaded", "snapshot_file", s.policySnapshot, "override_file", s.policyOverride)
 }
 
 func (s *Server) Router() http.Handler {
@@ -291,7 +458,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		"endpoint", decision.Endpoint,
 	)
 
-	reqPolicy := s.evaluatePolicy(joinMessages(req.Messages), "request")
+	reqPolicy := s.evaluatePolicy(joinMessages(req.Messages), makeEvalContext(identity, "request"))
 	if reqPolicy.Blocked {
 		s.logger.Warn("policy blocked request", "model", req.Model, "hits", len(reqPolicy.Hits))
 		if err := s.writeAuditEvent(audit.Event{
@@ -371,7 +538,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, providerInputTokens+providerOutputTokens)
 
 	if len(resp.Choices) > 0 {
-		respPolicy := s.evaluatePolicy(resp.Choices[0].Message.Content, "response")
+		respPolicy := s.evaluatePolicy(resp.Choices[0].Message.Content, makeEvalContext(identity, "response"))
 		if respPolicy.Blocked {
 			s.logger.Warn("policy blocked response", "model", req.Model, "hits", len(respPolicy.Hits))
 			if err := s.writeAuditEvent(audit.Event{
@@ -477,7 +644,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	sanitizedInputs := make([]string, 0, len(req.Input))
 	hits := make([]policyengine.HitEvent, 0)
 	for _, item := range req.Input {
-		reqPolicy := s.evaluatePolicy(item, "request")
+		reqPolicy := s.evaluatePolicy(item, makeEvalContext(identity, "request"))
 		if reqPolicy.Blocked {
 			hits = append(hits, reqPolicy.Hits...)
 			continue
@@ -597,7 +764,7 @@ func (s *Server) handleStream(
 	push := func(chunk openai.StreamChunk) error {
 		if len(chunk.Choices) > 0 {
 			deltaContent := chunk.Choices[0].Delta.Content
-			policyResult := s.evaluatePolicy(deltaContent, "response")
+			policyResult := s.evaluatePolicy(deltaContent, makeEvalContext(identity, "response"))
 			if policyResult.Blocked {
 				blockedHits = append(blockedHits, policyResult.Hits...)
 				return fmt.Errorf("policy blocked stream chunk")
@@ -771,12 +938,15 @@ func normalizeEmbeddingInput(raw json.RawMessage) ([]string, error) {
 }
 
 type requestIdentity struct {
-	TenantID     string
-	UserID       string
-	UserEmail    string
-	DepartmentID string
-	SessionID    string
-	Scopes       []string
+	TenantID      string
+	UserID        string
+	UserEmail     string
+	DepartmentID  string
+	DepartmentIDs []string
+	SessionID     string
+	RoleCodes     []string
+	ClientType    string
+	Scopes        []string
 }
 
 func identityFromRequest(r *http.Request) (requestIdentity, error) {
@@ -803,13 +973,16 @@ func bearerToken(authHeader string) string {
 }
 
 type accessClaims struct {
-	UserID       string   `json:"userId"`
-	TenantID     string   `json:"tenantId"`
-	Email        string   `json:"email"`
-	DepartmentID string   `json:"deptId"`
-	SessionID    string   `json:"sessionId"`
-	Scopes       []string `json:"scopes"`
-	Type         string   `json:"typ"`
+	UserID         string   `json:"userId"`
+	TenantID       string   `json:"tenantId"`
+	Email          string   `json:"email"`
+	DepartmentID   string   `json:"deptId"`
+	DepartmentPath []string `json:"deptPath"`
+	SessionID      string   `json:"sessionId"`
+	RoleCodes      []string `json:"roleCodes"`
+	ClientType     string   `json:"clientType"`
+	Scopes         []string `json:"scopes"`
+	Type           string   `json:"typ"`
 	jwt.RegisteredClaims
 }
 
@@ -838,12 +1011,15 @@ func parseIdentityFromJWT(token string) (requestIdentity, error) {
 		return requestIdentity{}, errors.New("token missing identity claims")
 	}
 	return requestIdentity{
-		TenantID:     strings.TrimSpace(claims.TenantID),
-		UserID:       strings.TrimSpace(claims.UserID),
-		UserEmail:    strings.TrimSpace(claims.Email),
-		DepartmentID: strings.TrimSpace(claims.DepartmentID),
-		SessionID:    strings.TrimSpace(claims.SessionID),
-		Scopes:       sanitizeScopes(claims.Scopes),
+		TenantID:      strings.TrimSpace(claims.TenantID),
+		UserID:        strings.TrimSpace(claims.UserID),
+		UserEmail:     strings.TrimSpace(claims.Email),
+		DepartmentID:  strings.TrimSpace(claims.DepartmentID),
+		DepartmentIDs: buildDepartmentIDs(strings.TrimSpace(claims.DepartmentID), claims.DepartmentPath),
+		SessionID:     strings.TrimSpace(claims.SessionID),
+		RoleCodes:     sanitizeRoleCodes(claims.RoleCodes),
+		ClientType:    sanitizeClientType(claims.ClientType),
+		Scopes:        sanitizeScopes(claims.Scopes),
 	}, nil
 }
 
@@ -999,6 +1175,52 @@ func databaseURL() (string, error) {
 		return value, nil
 	}
 	return "", errors.New("DATABASE_URL is required")
+}
+
+func buildDepartmentIDs(primary string, pathValues []string) []string {
+	out := make([]string, 0, len(pathValues)+1)
+	seen := map[string]struct{}{}
+	if clean := strings.TrimSpace(primary); clean != "" {
+		out = append(out, clean)
+		seen[clean] = struct{}{}
+	}
+	for _, value := range pathValues {
+		clean := strings.TrimSpace(value)
+		if clean == "" {
+			continue
+		}
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		out = append(out, clean)
+	}
+	return out
+}
+
+func sanitizeRoleCodes(codes []string) []string {
+	out := make([]string, 0, len(codes))
+	seen := map[string]struct{}{}
+	for _, code := range codes {
+		clean := strings.TrimSpace(code)
+		if clean == "" {
+			continue
+		}
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		out = append(out, clean)
+	}
+	return out
+}
+
+func sanitizeClientType(value string) string {
+	clean := strings.TrimSpace(value)
+	if clean == "" {
+		return "web-portal"
+	}
+	return clean
 }
 
 func sanitizeScopes(scopes []string) []string {

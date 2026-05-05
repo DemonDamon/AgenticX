@@ -7,7 +7,19 @@ import (
 	"testing"
 
 	"github.com/agenticx/enterprise/gateway/internal/config"
+	policyengine "github.com/agenticx/enterprise/policy-engine"
 )
+
+func testEvalContext() policyengine.EvalContext {
+	return policyengine.EvalContext{
+		TenantID:   "tenant_default",
+		UserID:     "user_test",
+		DeptIDs:    []string{"*"},
+		RoleCodes:  []string{"*"},
+		ClientType: "web-portal",
+		Stage:      "request",
+	}
+}
 
 func TestNew_AppliesPolicyOverrideFile(t *testing.T) {
 	dir := t.TempDir()
@@ -51,7 +63,7 @@ rules:
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	result := srv.evaluatePolicy("secret", "request")
+	result := srv.evaluatePolicy("secret", testEvalContext())
 	if result.Blocked {
 		t.Fatalf("expected disabled pack not to block request, got hits: %+v", result.Hits)
 	}
@@ -119,10 +131,10 @@ rules:
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	if result := srv.evaluatePolicy("secret", "request"); result.Blocked {
+	if result := srv.evaluatePolicy("secret", testEvalContext()); result.Blocked {
 		t.Fatalf("expected disabled parent pack not to be inherited, got hits: %+v", result.Hits)
 	}
-	if result := srv.evaluatePolicy("child-only", "request"); !result.Blocked {
+	if result := srv.evaluatePolicy("child-only", testEvalContext()); !result.Blocked {
 		t.Fatalf("expected enabled child pack to remain active")
 	}
 }
