@@ -629,7 +629,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
           set({
             status: "error",
-            errorMessage: complianceMessage,
+            errorMessage: null,
             activeRequestId: null,
           });
           set((prev) => ({
@@ -820,7 +820,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
           set({
             status: "error",
-            errorMessage: complianceMessage,
+            errorMessage: null,
             activeRequestId: null,
           });
           set((prev) => ({
@@ -992,7 +992,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
           set({
             status: "error",
-            errorMessage: complianceMessage,
+            errorMessage: null,
             activeRequestId: null,
           });
           set((prev) => ({
