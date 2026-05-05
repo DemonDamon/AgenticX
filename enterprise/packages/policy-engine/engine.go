@@ -22,6 +22,9 @@ func NewEngine(manifests []RulePackManifest) (*Engine, error) {
 	rules := make([]compiledRule, 0)
 	for _, manifest := range manifests {
 		for _, rule := range manifest.Rules {
+			if rule.AppliesTo == nil {
+				rule.AppliesTo = manifest.AppliesTo
+			}
 			compiled, err := compileRule(rule)
 			if err != nil {
 				return nil, fmt.Errorf("compile rule %s failed: %w", rule.ID, err)
@@ -56,32 +59,105 @@ func compileRule(rule Rule) (compiledRule, error) {
 }
 
 func (e *Engine) Evaluate(text string, stage string) EvaluateResult {
+	return e.EvaluateWithContext(text, EvalContext{
+		Stage:      stage,
+		ClientType: "*",
+		DeptIDs:    []string{"*"},
+		RoleCodes:  []string{"*"},
+		UserID:     "*",
+	})
+}
+
+func (e *Engine) EvaluateWithContext(text string, ctx EvalContext) EvaluateResult {
 	result := EvaluateResult{
 		Blocked:      false,
 		RedactedText: text,
 		Hits:         []HitEvent{},
 	}
+	if strings.TrimSpace(ctx.Stage) == "" {
+		ctx.Stage = "request"
+	}
 
 	for _, compiled := range e.rules {
+		if strings.TrimSpace(compiled.rule.TenantID) != "" && strings.TrimSpace(ctx.TenantID) != "" &&
+			!strings.EqualFold(strings.TrimSpace(compiled.rule.TenantID), strings.TrimSpace(ctx.TenantID)) {
+			continue
+		}
+		if !matchesAppliesTo(compiled.rule.AppliesTo, ctx) {
+			continue
+		}
 		switch compiled.rule.Kind {
 		case RuleKindKeyword:
 			hits := compiled.trie.findAll(result.RedactedText)
 			for _, hit := range hits {
-				result = applyHit(result, compiled.rule, stage, hit)
+				result = applyHit(result, compiled.rule, ctx.Stage, hit)
 			}
 		case RuleKindRegex:
 			hits := compiled.compiled.FindAllString(result.RedactedText, -1)
 			for _, hit := range hits {
-				result = applyHit(result, compiled.rule, stage, hit)
+				result = applyHit(result, compiled.rule, ctx.Stage, hit)
 			}
 		case RuleKindPII:
 			hits := compiled.piiRegexp.FindAllString(result.RedactedText, -1)
 			for _, hit := range hits {
-				result = applyHit(result, compiled.rule, stage, hit)
+				result = applyHit(result, compiled.rule, ctx.Stage, hit)
 			}
 		}
 	}
 	return result
+}
+
+func matchesAppliesTo(applies *AppliesTo, ctx EvalContext) bool {
+	if applies == nil {
+		return true
+	}
+	if contains(applies.UserExcludeIDs, ctx.UserID) {
+		return false
+	}
+	if !matchesDim(applies.Stages, ctx.Stage) {
+		return false
+	}
+	if !matchesDim(applies.ClientTypes, ctx.ClientType) {
+		return false
+	}
+	if len(applies.UserIDs) > 0 && !contains(applies.UserIDs, ctx.UserID) {
+		return false
+	}
+	deptMatch := matchesAny(applies.DepartmentIDs, ctx.DeptIDs)
+	roleMatch := matchesAny(applies.RoleCodes, ctx.RoleCodes)
+	return deptMatch || roleMatch
+}
+
+func matchesAny(configured []string, actual []string) bool {
+	if len(configured) == 0 || contains(configured, "*") {
+		return true
+	}
+	for _, item := range actual {
+		if contains(configured, item) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesDim(configured []string, actual string) bool {
+	if len(configured) == 0 || contains(configured, "*") {
+		return true
+	}
+	return contains(configured, actual)
+}
+
+func contains(items []string, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item), target) {
+			return true
+		}
+	}
+	return false
 }
 
 func applyHit(result EvaluateResult, rule Rule, stage string, hit string) EvaluateResult {
