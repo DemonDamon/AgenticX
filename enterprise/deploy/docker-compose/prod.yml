@@ -86,6 +86,7 @@ services:
       ADMIN_CONSOLE_LOGIN_PASSWORD: ${ADMIN_CONSOLE_LOGIN_PASSWORD:?ADMIN_CONSOLE_LOGIN_PASSWORD is required}
       ENTERPRISE_ADMIN_RUNTIME_DIR: /runtime/admin
       ENTERPRISE_QUOTA_CONFIG_FILE: /runtime/admin/quotas.json
+      ENTERPRISE_POLICY_SNAPSHOT_FILE: /runtime/admin/policy-snapshot.json
       ENTERPRISE_POLICY_OVERRIDE_FILE: /runtime/admin/policy-overrides.json
     volumes:
       - gateway_runtime:/runtime

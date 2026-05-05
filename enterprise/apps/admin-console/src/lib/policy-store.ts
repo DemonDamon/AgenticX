@@ -125,6 +125,15 @@ export async function deletePolicyRule(actor: PolicyActor, ruleId: string): Prom
   await store.recordRuleChange(actor, { action: "delete_rule", ruleId });
 }
 
+export async function setPolicyRuleStatus(
+  actor: PolicyActor,
+  ruleId: string,
+  status: "draft" | "active" | "disabled"
+): Promise<void> {
+  await store.setRuleStatus(actor.tenantId, ruleId, status, actor.userId);
+  await store.recordRuleChange(actor, { action: "set_rule_status", ruleId, status });
+}
+
 export async function testPolicyRules(
   tenantId: string,
   input: { ruleIds: string[]; sampleText: string; stage?: PolicyStage }

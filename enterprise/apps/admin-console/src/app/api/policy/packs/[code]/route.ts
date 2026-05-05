@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdminScope } from "../../../../../lib/admin-auth";
+import { requireAdminScope, type AdminSession } from "../../../../../lib/admin-auth";
 import { buildPolicyActor, deletePolicyPack, updatePolicyPack } from "../../../../../lib/policy-store";
 
 export async function PATCH(request: Request, context: { params: Promise<{ code: string }> }) {
@@ -9,14 +9,31 @@ export async function PATCH(request: Request, context: { params: Promise<{ code:
     enabled?: boolean;
     appliesTo?: Record<string, unknown> | null;
   };
-  const guard =
-    body.enabled !== undefined
-      ? await requireAdminScope(["policy:disable"])
-      : await requireAdminScope(["policy:update"]);
-  if (!guard.ok) return guard.response;
+  const requiresDisable = body.enabled !== undefined;
+  const requiresUpdate =
+    body.name !== undefined || body.description !== undefined || body.appliesTo !== undefined;
+
+  if (!requiresDisable && !requiresUpdate) {
+    return NextResponse.json({ code: "40000", message: "缺少可更新字段" }, { status: 400 });
+  }
+
+  let session: AdminSession | null = null;
+  if (requiresDisable) {
+    const disableGuard = await requireAdminScope(["policy:disable"]);
+    if (!disableGuard.ok) return disableGuard.response;
+    session = disableGuard.session;
+  }
+  if (requiresUpdate) {
+    const updateGuard = await requireAdminScope(["policy:update"]);
+    if (!updateGuard.ok) return updateGuard.response;
+    session = updateGuard.session;
+  }
   const { code } = await context.params;
   try {
-    const actor = await buildPolicyActor(guard.session);
+    if (!session) {
+      return NextResponse.json({ code: "40000", message: "权限校验失败" }, { status: 400 });
+    }
+    const actor = await buildPolicyActor(session);
     const pack = await updatePolicyPack(actor, code, body);
     return NextResponse.json({ code: "00000", message: "ok", data: { pack } });
   } catch (error) {

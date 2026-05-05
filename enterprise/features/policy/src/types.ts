@@ -128,6 +128,7 @@ export type PolicySnapshotPack = {
 export type PolicySnapshot = {
   tenantId: string;
   version: number;
+  publishId?: string;
   publishedAt: string;
   publisher: string | null;
   deptIndex: Record<string, string[]>;
