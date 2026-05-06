@@ -65,6 +65,7 @@ const SYSTEM_ROLE_SEED: Array<{ code: string; name: string; scopes: string[] }> 
       "policy:disable",
       "policy:manage",
       "model:read",
+      "sso:manage",
     ],
   },
   {
@@ -93,6 +94,11 @@ const SYSTEM_ROLE_SEED: Array<{ code: string; name: string; scopes: string[] }> 
     code: "auditor",
     name: "审计员",
     scopes: ["admin:enter", "audit:read:all", "audit:export", "metering:read"],
+  },
+  {
+    code: "sso_admin",
+    name: "SSO 管理员",
+    scopes: ["admin:enter", "sso:read", "sso:create", "sso:update", "sso:delete", "sso:manage"],
   },
   {
     code: "policy_admin",

@@ -16,6 +16,7 @@ export const SCOPE_REGISTRY: Record<string, readonly string[]> = {
   automation: ["read", "create", "update", "delete", "manage"],
   gateway: ["read", "manage"],
   provider: ["read", "create", "update", "delete", "manage"],
+  sso: ["read", "create", "update", "delete", "manage"],
 } as const;
 
 export const ALL_REGISTERED_SCOPES: string[] = Object.entries(SCOPE_REGISTRY).flatMap(([resource, verbs]) =>

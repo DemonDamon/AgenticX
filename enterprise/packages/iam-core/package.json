@@ -11,7 +11,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "lint": "echo 'lint placeholder'"
+    "lint": "echo 'lint placeholder'",
+    "test": "vitest run"
   },
   "dependencies": {
     "@agenticx/auth": "workspace:*",
@@ -20,9 +21,10 @@
     "pg": "^8.20.0",
     "ulid": "^2.3.0"
   },
-    "devDependencies": {
+  "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/pg": "^8.16.0",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.5"
   }
 }

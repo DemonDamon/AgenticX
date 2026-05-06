@@ -8,6 +8,7 @@ export * from "./usage-records";
 export * from "./audit-events";
 export * from "./gateway-audit-events";
 export * from "./policy";
+export * from "./sso-providers";
 export * from "./chat-sessions";
 export * from "./chat-messages";
 
