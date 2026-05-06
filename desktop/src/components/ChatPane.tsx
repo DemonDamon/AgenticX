@@ -4864,7 +4864,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 }
               }}
               className={`agx-pane-composer-input block w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-0 pt-3 text-sm text-text-primary outline-none ${
-                composerExpanded ? "max-h-[62vh] min-h-[260px] pr-40" : "max-h-[220px] min-h-[40px] pr-4"
+                // 收起时右侧留白需覆盖「展开输入」角标（absolute right-3 + w-8），pr-4 会导致首行末字与按钮重叠
+                composerExpanded ? "max-h-[62vh] min-h-[260px] pr-40" : "max-h-[220px] min-h-[40px] pr-14"
               }`}
             />
             {input.trim().length === 0 ? (
