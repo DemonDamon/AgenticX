@@ -25,6 +25,7 @@
       "@agenticx/ui/*": ["packages/ui/src/*"],
       "@agenticx/branding": ["packages/branding/src/index.ts"],
       "@agenticx/auth": ["packages/auth/src/index.ts"],
+      "@agenticx/auth/*": ["packages/auth/src/*"],
       "@agenticx/db-schema": ["packages/db-schema/src/index.ts"],
       "@agenticx/core-api": ["packages/core-api/src/index.ts"],
       "@agenticx/policy-engine": ["packages/policy-engine/src/index.ts"],

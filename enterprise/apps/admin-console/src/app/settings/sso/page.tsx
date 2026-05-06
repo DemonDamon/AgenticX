@@ -1,6 +1,6 @@
 "use client";
 
-import { getAdminSsoErrorMessageZh } from "@agenticx/auth";
+import { getAdminSsoErrorMessageZh } from "@agenticx/auth/src/services/oidc-error-codes";
 import { useEffect, useState } from "react";
 import { Alert, AlertDescription, Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@agenticx/ui";
 

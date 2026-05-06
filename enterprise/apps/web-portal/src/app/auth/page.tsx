@@ -34,7 +34,7 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
-import { getPortalSsoErrorMessageZh } from "@agenticx/auth";
+import { getPortalSsoErrorMessageZh } from "@agenticx/auth/src/services/oidc-error-codes";
 import { usePortalCopy } from "../../lib/portal-copy";
 import { getPortalSsoProviderOptions } from "../../lib/sso-provider-options";
 
