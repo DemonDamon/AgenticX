@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   AlertDescription,
@@ -35,9 +35,11 @@ import {
   Zap,
 } from "lucide-react";
 import { usePortalCopy } from "../../lib/portal-copy";
+import { getPortalSsoProviderOptions } from "../../lib/sso-provider-options";
 
 export default function AuthPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const t = usePortalCopy();
   const { locale, setLocale } = useLocale();
   const [signInEmail, setSignInEmail] = useState("owner@agenticx.local");
@@ -48,6 +50,23 @@ export default function AuthPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [status, setStatus] = useState<{ type: "error" | "success" | "info"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const ssoProviders = useMemo(() => getPortalSsoProviderOptions(), []);
+
+  useEffect(() => {
+    const raw = searchParams.get("sso_error");
+    if (!raw) return;
+    const map: Record<string, string> = {
+      "oidc.discovery_failed": "SSO 服务暂不可用，请稍后重试或使用账号密码登录",
+      "oidc.invalid_state": "SSO 登录状态失效，请重新发起登录",
+      "oidc.account_disabled": "账号已被禁用或锁定，请联系管理员",
+      "oidc.provider_disabled": "当前 SSO Provider 已停用，请联系管理员",
+      "oidc.state_secret_missing": "SSO 配置缺失，请联系管理员",
+    };
+    setStatus({
+      type: "error",
+      message: map[raw] ?? `SSO 登录失败（${raw}）`,
+    });
+  }, [searchParams]);
 
   const handleSignIn = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -329,9 +348,13 @@ export default function AuthPage() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled
+                  disabled={ssoProviders.length === 0}
+                  onClick={() => {
+                    const provider = ssoProviders[0]?.id ?? "default";
+                    window.location.href = `/api/auth/sso/oidc/start?provider=${encodeURIComponent(provider)}&returnTo=${encodeURIComponent("/workspace")}`;
+                  }}
                 >
-                  SSO
+                  企业 SSO
                 </Button>
                 <Button
                   type="button"
