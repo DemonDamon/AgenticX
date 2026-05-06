@@ -808,23 +808,19 @@ def _list_mcps_payload(
     if session is None:
         return {"ok": True, "count": 0, "connected_count": 0, "servers": []}
 
-    if reload:
-        try:
-            session.mcp_configs = load_available_servers()
-        except Exception as exc:
-            _meta_log.warning("list_mcps reload failed: %s", exc)
+    # MCP state is now process-level; read from GlobalMcpManager directly.
+    from agenticx.runtime.global_mcp_manager import GlobalMcpManager
 
-    configs = session.mcp_configs if isinstance(session.mcp_configs, dict) else {}
-    connected = (
-        session.connected_servers
-        if isinstance(session.connected_servers, set)
-        else set(session.connected_servers or [])
-    )
-    # Keep session connection snapshot coherent when config files changed on disk.
+    gmcp = GlobalMcpManager.singleton()
+    if reload:
+        gmcp._reload_configs_if_needed()
+
+    configs = gmcp.mcp_configs
+    connected = gmcp.connected_servers
+    # Keep connection snapshot coherent when config files changed on disk.
     stale_connected = connected - set(configs.keys())
-    if stale_connected and isinstance(session.connected_servers, set):
-        session.connected_servers.difference_update(stale_connected)
-        connected = set(session.connected_servers)
+    if stale_connected:
+        connected.difference_update(stale_connected)
 
     tools_by_server = _mcp_tool_names_by_server(session)
     servers: List[Dict[str, Any]] = []

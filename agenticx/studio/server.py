@@ -2241,10 +2241,8 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="session not found")
         sess = managed.studio_session
         if reload:
-            try:
-                sess.mcp_configs = load_available_servers()
-            except Exception as exc:
-                logger.warning("Failed to reload MCP configs: %s", exc)
+            from agenticx.runtime.global_mcp_manager import GlobalMcpManager
+            GlobalMcpManager.singleton()._reload_configs_if_needed()
         configs = sess.mcp_configs if isinstance(sess.mcp_configs, dict) else {}
         connected = (
             sess.connected_servers
@@ -2306,10 +2304,9 @@ def create_studio_app() -> FastAPI:
         result = import_mcp_config(source_path)
         if not result.get("ok"):
             raise HTTPException(status_code=400, detail=str(result.get("error", "import failed")))
-        try:
-            managed.studio_session.mcp_configs = load_available_servers()
-        except Exception:
-            managed.studio_session.mcp_configs = {}
+        # Trigger config hot-reload in GlobalMcpManager (invalidate mtime cache).
+        from agenticx.runtime.global_mcp_manager import GlobalMcpManager
+        GlobalMcpManager.singleton()._configs_mtime = 0.0
         return result
 
     @app.post("/api/mcp/connect")
@@ -2337,8 +2334,6 @@ def create_studio_app() -> FastAPI:
         else:
             preflight_msg = "准备连接：初始化 MCP 客户端…"
         _set_mcp_server_op(sess, name, phase="preparing", message=preflight_msg)
-        if sess.mcp_hub is None:
-            sess.mcp_hub = MCPHub(clients=[], auto_mode=False)
         _set_mcp_server_op(sess, name, phase="connecting", message="连接中：握手并发现工具…")
         cancelled_set = _get_mcp_connect_cancelled(sess)
         cancelled_set.discard(name)
@@ -2702,14 +2697,6 @@ def create_studio_app() -> FastAPI:
             _set_mcp_server_op(sess, name, phase="idle", message="未连接")
             return {"ok": True, "name": name}
         _set_mcp_server_op(sess, name, phase="disconnecting", message="断开中：正在关闭 MCP 客户端…")
-        if sess.mcp_hub is None:
-            sess.connected_servers.discard(name)
-            try:
-                remove_mcp_auto_connect_name(name)
-            except Exception as exc:
-                logger.warning("MCP auto_connect remove failed: %s", exc)
-            _set_mcp_server_op(sess, name, phase="idle", message="未连接")
-            return {"ok": True, "name": name}
         okd, err = await mcp_disconnect_async(sess.mcp_hub, sess.mcp_configs, sess.connected_servers, name)
         if not okd:
             err_text = err.strip() or f"disconnect failed: {name}"

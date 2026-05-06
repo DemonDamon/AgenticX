@@ -2325,10 +2325,6 @@ def _tool_mcp_connect(arguments: Dict[str, Any], session: StudioSession) -> str:
     if not name:
         return "ERROR: missing server name"
 
-    if session.mcp_hub is None:
-        from agenticx.tools.mcp_hub import MCPHub
-
-        session.mcp_hub = MCPHub(clients=[], auto_mode=False)
     ok, detail = mcp_connect(session.mcp_hub, session.mcp_configs, session.connected_servers, name)
     if ok:
         return "OK"
