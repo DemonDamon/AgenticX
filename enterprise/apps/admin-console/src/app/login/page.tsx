@@ -17,7 +17,7 @@ import {
   MachiAvatar,
   Separator,
 } from "@agenticx/ui";
-import { getAdminSsoErrorMessageZh } from "@agenticx/auth";
+import { getAdminSsoErrorMessageZh } from "@agenticx/auth/src/services/oidc-error-codes";
 import { ArrowRight, ShieldAlert, ShieldCheck } from "lucide-react";
 import { getAdminSsoProviderOptions } from "../../lib/admin-sso-provider-options";
 
