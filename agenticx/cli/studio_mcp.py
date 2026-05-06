@@ -215,12 +215,24 @@ def append_mcp_auto_connect_name(name: str) -> None:
             names = []
         elif lowered == "all":
             ConfigManager.set_value("mcp.auto_connect", [key])
+            # Also sync to mcp_state.json for process-level restore.
+            try:
+                from agenticx.runtime.global_mcp_state import add_to_last_connected
+                add_to_last_connected(key)
+            except Exception:
+                pass
             return
         else:
             names = [cur.strip()]
     if key not in names:
         names.append(key)
     ConfigManager.set_value("mcp.auto_connect", names)
+    # Also sync to mcp_state.json for process-level restore.
+    try:
+        from agenticx.runtime.global_mcp_state import add_to_last_connected
+        add_to_last_connected(key)
+    except Exception:
+        pass
 
 
 def remove_mcp_auto_connect_name(name: str) -> None:
@@ -239,6 +251,12 @@ def remove_mcp_auto_connect_name(name: str) -> None:
             names = [cur.strip()]
     names = [n for n in names if n != key]
     ConfigManager.set_value("mcp.auto_connect", names)
+    # Also sync to mcp_state.json for process-level restore.
+    try:
+        from agenticx.runtime.global_mcp_state import remove_from_last_connected
+        remove_from_last_connected(key)
+    except Exception:
+        pass
 
 
 def all_mcp_config_search_paths() -> List[Path]:
