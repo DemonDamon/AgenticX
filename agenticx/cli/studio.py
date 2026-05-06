@@ -52,7 +52,12 @@ console = Console()
 
 @dataclass
 class StudioSession:
-    """State for an AGX studio session."""
+    """State for an AGX studio session.
+
+    MCP-related attributes (``mcp_hub``, ``mcp_configs``, ``connected_servers``) are
+    read-through properties delegating to the process-level ``GlobalMcpManager`` so that
+    all sessions share a single hub without per-session child-process spawning.
+    """
 
     provider_name: Optional[str] = None
     model_name: Optional[str] = None
@@ -65,10 +70,6 @@ class StudioSession:
     last_agent_events: List[Dict[str, object]] = field(default_factory=list)
     context_files: Dict[str, str] = field(default_factory=dict)
     workspace_dir: Optional[str] = None
-    # MCP state
-    mcp_hub: Optional[object] = None  # MCPHub instance (lazy init)
-    mcp_configs: Dict[str, object] = field(default_factory=dict)  # name -> MCPServerConfig
-    connected_servers: set = field(default_factory=set)
     # Per-server latest operation state for Desktop MCP cards.
     # Example: {"github": {"phase": "connecting", "message": "连接中…", "updated_at": 1710000000.0}}
     mcp_server_ops: Dict[str, Dict[str, object]] = field(default_factory=dict)
@@ -77,6 +78,55 @@ class StudioSession:
     file_state_tracker: FileStateTracker = field(default_factory=FileStateTracker)
     # Session-scoped providers blocked after hard LLM failures (billing/auth); see docs/adr/0001-*.md
     provider_hard_failure_providers: Set[str] = field(default_factory=set)
+
+    # ------------------------------------------------------------------
+    # MCP read-through properties → GlobalMcpManager
+    # ------------------------------------------------------------------
+
+    @property
+    def mcp_hub(self):
+        from agenticx.runtime.global_mcp_manager import GlobalMcpManager
+        return GlobalMcpManager.singleton().hub
+
+    @mcp_hub.setter
+    def mcp_hub(self, value):
+        import warnings
+        warnings.warn(
+            "StudioSession.mcp_hub is now a read-through property to GlobalMcpManager; "
+            "assignment is ignored. Use GlobalMcpManager.singleton().hub instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    @property
+    def mcp_configs(self):
+        from agenticx.runtime.global_mcp_manager import GlobalMcpManager
+        return GlobalMcpManager.singleton().mcp_configs
+
+    @mcp_configs.setter
+    def mcp_configs(self, value):
+        import warnings
+        warnings.warn(
+            "StudioSession.mcp_configs is now a read-through property to GlobalMcpManager; "
+            "assignment is ignored.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    @property
+    def connected_servers(self):
+        from agenticx.runtime.global_mcp_manager import GlobalMcpManager
+        return GlobalMcpManager.singleton().connected_servers
+
+    @connected_servers.setter
+    def connected_servers(self, value):
+        import warnings
+        warnings.warn(
+            "StudioSession.connected_servers is now a read-through property to GlobalMcpManager; "
+            "assignment is ignored.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
 
 @dataclass

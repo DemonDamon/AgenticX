@@ -457,6 +457,12 @@ def create_studio_app() -> FastAPI:
 
     @contextlib.asynccontextmanager
     async def _studio_lifespan(app: FastAPI):
+        # Initialise process-level MCP hub and kick off background restore.
+        from agenticx.runtime.global_mcp_manager import GlobalMcpManager as _GmcpM
+
+        _gmcp = _GmcpM.load_or_init()
+        _gmcp.schedule_restore()
+
         gw_task: asyncio.Task | None = None
         try:
             from agenticx.gateway.client import GatewayClient, load_gateway_client_settings
@@ -482,6 +488,12 @@ def create_studio_app() -> FastAPI:
             logger.debug("WeChat adapter not started: %s", exc)
 
         yield
+
+        # Shutdown: close all MCP child processes via the global hub.
+        try:
+            await _GmcpM.singleton().close_all()
+        except Exception as exc:
+            logger.warning("GlobalMcpManager.close_all error on shutdown: %s", exc)
 
         if wechat_adapter is not None:
             try:
@@ -1181,27 +1193,8 @@ def create_studio_app() -> FastAPI:
                 avatar_id=avatar_id or None,
                 avatar_name=avatar_cfg.name if avatar_cfg else None,
             )
-            try:
-                managed.studio_session.mcp_configs = load_available_servers()
-            except Exception as exc:
-                logger.warning("Failed to load MCP server configs: %s", exc)
-                managed.studio_session.mcp_configs = {}
-            auto_connect_names = _resolve_mcp_auto_connect_setting()
-            scoped_auto_connect_names = _effective_auto_connect_names_for_session(
-                auto_connect_names,
-                mcp_configs=managed.studio_session.mcp_configs,
-            )
-            if managed.studio_session.mcp_configs and scoped_auto_connect_names != []:
-                managed.studio_session.mcp_hub = MCPHub(clients=[], auto_mode=False)
-                try:
-                    await auto_connect_servers_async(
-                        managed.studio_session.mcp_hub,
-                        managed.studio_session.mcp_configs,
-                        managed.studio_session.connected_servers,
-                        scoped_auto_connect_names,
-                    )
-                except Exception as exc:
-                    logger.warning("MCP auto-connect failed: %s", exc)
+            # MCP state is now process-level; no per-session auto-connect.
+            # The global hub is already live (or being restored in background).
         sess = managed.studio_session
         return SessionState(
             session_id=managed.session_id,
@@ -3196,16 +3189,7 @@ def create_studio_app() -> FastAPI:
         if inherited_scratchpad:
             managed.studio_session.scratchpad.update(inherited_scratchpad)
 
-        try:
-            managed.studio_session.mcp_configs = load_available_servers()
-        except Exception:
-            managed.studio_session.mcp_configs = {}
-        auto_connect_names = _resolve_mcp_auto_connect_setting()
-        scoped_auto_connect_names = _effective_auto_connect_names_for_session(
-            auto_connect_names,
-            mcp_configs=managed.studio_session.mcp_configs,
-        )
-        _schedule_mcp_autoconnect_for_new_session(managed, scoped_auto_connect_names)
+        # MCP state is now process-level; new sessions do not trigger MCP auto-connect.
         return {
             "ok": True,
             "session_id": managed.session_id,
