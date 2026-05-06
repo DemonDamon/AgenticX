@@ -284,21 +284,8 @@ class SessionManager:
 
     @staticmethod
     def _close_mcp_hub_sync(managed: ManagedSession) -> None:
-        hub = getattr(managed.studio_session, "mcp_hub", None)
-        if hub is None:
-            return
-        try:
-            import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-            if loop is not None and loop.is_running():
-                loop.create_task(hub.close())
-            else:
-                asyncio.run(hub.close())
-        except Exception:
-            pass
+        """No-op: MCP children are now process-level resources owned by GlobalMcpManager.
+        They are closed once at server shutdown via GlobalMcpManager.close_all()."""
 
     def delete(self, session_id: str) -> bool:
         sid = str(session_id or "").strip()
@@ -308,7 +295,7 @@ class SessionManager:
         if managed is not None:
             if managed.team_manager is not None:
                 managed.team_manager.shutdown_now()
-            self._close_mcp_hub_sync(managed)
+            # MCP hub is global; do NOT kill child processes on session delete.
         purged = self._purge_session_state(sid)
         if managed is not None and not existed_in_persistence:
             return True
@@ -803,7 +790,7 @@ class SessionManager:
             self._sessions.pop(sid, None)
             if managed.team_manager is not None:
                 managed.team_manager.shutdown_now()
-            self._close_mcp_hub_sync(managed)
+            # MCP hub is global; do NOT kill child processes on session cleanup.
 
     def _restore_persisted_state(self, session_id: str, session: StudioSession) -> None:
         try:
