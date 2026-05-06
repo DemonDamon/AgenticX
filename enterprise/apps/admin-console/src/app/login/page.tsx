@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   AlertDescription,
@@ -21,7 +21,7 @@ import { getAdminSsoErrorMessageZh } from "@agenticx/auth/src/services/oidc-erro
 import { ArrowRight, ShieldAlert, ShieldCheck } from "lucide-react";
 import { getAdminSsoProviderOptions } from "../../lib/admin-sso-provider-options";
 
-export default function LoginPage() {
+function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("owner@agenticx.local");
@@ -215,5 +215,13 @@ export default function LoginPage() {
         <span>Apache 2.0</span>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
   );
 }

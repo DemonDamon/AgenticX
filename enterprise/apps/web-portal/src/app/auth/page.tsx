@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   AlertDescription,
@@ -38,7 +38,7 @@ import { getPortalSsoErrorMessageZh } from "@agenticx/auth/src/services/oidc-err
 import { usePortalCopy } from "../../lib/portal-copy";
 import { getPortalSsoProviderOptions } from "../../lib/sso-provider-options";
 
-export default function AuthPage() {
+function AuthPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const t = usePortalCopy();
@@ -378,5 +378,13 @@ export default function AuthPage() {
         <span>Made with ❤ in Beijing</span>
       </div>
     </main>
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense fallback={null}>
+      <AuthPageInner />
+    </Suspense>
   );
 }
