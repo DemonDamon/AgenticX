@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapClaimsToAuthUser } from "../oidc-claims";
+import { mapClaimsToAuthUser, OidcClaimError } from "../oidc-claims";
 
 describe("mapClaimsToAuthUser", () => {
   it("maps default claims with role array", () => {
@@ -40,6 +40,15 @@ describe("mapClaimsToAuthUser", () => {
       mapClaimsToAuthUser({
         sub: "oidc-sub-3",
       })
-    ).toThrowError("oidc.claim.email_missing");
+    ).toThrow(OidcClaimError);
+  });
+
+  it("throws when email claim is not a string (FR-C1.2)", () => {
+    expect(() =>
+      mapClaimsToAuthUser({
+        sub: "oidc-sub-4",
+        email: 12345,
+      })
+    ).toThrow(OidcClaimError);
   });
 });

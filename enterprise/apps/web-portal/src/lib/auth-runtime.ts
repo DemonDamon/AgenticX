@@ -14,6 +14,7 @@ import {
   insertAuditEvent,
   loadAuthUserByEmail,
   replaceUserRoleAssignments,
+  sanitizeSsoAuditDetail,
   upsertUserRowFromAuthUser,
 } from "@agenticx/iam-core";
 import { createHash } from "node:crypto";
@@ -289,11 +290,14 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
 
   let user = await runtime.repo.findByEmail(normalizedEmail);
   let jitCreated = false;
+  let jitAssignedRoles: string[] | null = null;
 
   if (!user) {
     const passwordHash = await hashPassword(randomBytes(32).toString("base64url"));
     const roleAllowlist = parseJitRoleAllowlist();
     const jitRoles = (input.roleCodeHints ?? []).filter((code) => roleAllowlist.has(code));
+    const assignedRoles = jitRoles.length ? jitRoles : parseDefaultSsoRoleCodes();
+    jitAssignedRoles = assignedRoles;
     const nextUser: import("@agenticx/auth").AuthUser = {
       id: ulid(),
       tenantId: runtime.tenantId,
@@ -311,7 +315,7 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
     await assignRolesIfNone({
       tenantId: runtime.tenantId,
       userId: nextUser.id,
-      roleCodes: jitRoles.length ? jitRoles : parseDefaultSsoRoleCodes(),
+      roleCodes: assignedRoles,
       defaultOrgId: orgId,
       defaultDeptId: null,
     });
@@ -326,6 +330,27 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
     throw new Error("oidc.account_disabled");
   }
 
+  if (jitCreated && jitAssignedRoles && process.env.DATABASE_URL?.trim()) {
+    try {
+      await insertAuditEvent({
+        tenantId: user.tenantId,
+        actorUserId: user.id,
+        eventType: "auth.sso.jit_create",
+        targetKind: "user",
+        targetId: user.id,
+        detail: sanitizeSsoAuditDetail({
+          provider: input.providerId,
+          issuer: input.issuer,
+          sub: input.subject,
+          email_lower: normalizedEmail,
+          role_codes: jitAssignedRoles,
+        }),
+      });
+    } catch (error) {
+      console.error("[web-portal] insertAuditEvent auth.sso.jit_create failed:", error);
+    }
+  }
+
   if (process.env.DATABASE_URL?.trim()) {
     try {
       await insertAuditEvent({
@@ -334,12 +359,12 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
         eventType: "auth.sso.login",
         targetKind: "user",
         targetId: user.id,
-        detail: {
+        detail: sanitizeSsoAuditDetail({
           provider: input.providerId,
           issuer: input.issuer,
           sub: input.subject,
           jit_created: jitCreated,
-        },
+        }),
       });
     } catch (error) {
       console.error("[web-portal] insertAuditEvent auth.sso.login failed:", error);

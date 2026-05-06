@@ -1,4 +1,5 @@
-import { validateStateFromCookie } from "@agenticx/auth";
+import { OidcCallbackError, OidcClaimError, OidcConfigError, validateStateFromCookie } from "@agenticx/auth";
+import { insertAuditEvent, sanitizeSsoAuditDetail } from "@agenticx/iam-core";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { authenticateAdminConsoleViaOidc } from "../../../../../../lib/admin-pg-auth";
@@ -27,11 +28,38 @@ function reasonToErrorCode(reason: "admin_unprovisioned" | "admin_scope_missing"
 }
 
 function mapCallbackError(error: unknown): string {
+  if (error instanceof OidcCallbackError) return error.code;
+  if (error instanceof OidcClaimError) return error.code;
+  if (error instanceof OidcConfigError) return error.code;
   if (error instanceof Error) {
     if (error.message.startsWith("oidc.")) return error.message;
     if (error.message.includes("state")) return "oidc.invalid_state";
   }
   return "oidc.callback_failed";
+}
+
+async function recordAdminSsoLoginFailed(input: {
+  tenantId: string;
+  reasonCode: string;
+  providerId?: string | null;
+  emailHint?: string | null;
+}): Promise<void> {
+  if (!process.env.DATABASE_URL?.trim()) return;
+  try {
+    await insertAuditEvent({
+      tenantId: input.tenantId,
+      actorUserId: null,
+      eventType: "auth.sso.login_failed",
+      targetKind: "sso_login",
+      detail: sanitizeSsoAuditDetail({
+        reason_code: input.reasonCode,
+        provider_id: input.providerId ?? null,
+        email_hint: input.emailHint ?? null,
+      }),
+    });
+  } catch (err) {
+    console.error("[admin-console] auth.sso.login_failed audit failed:", err);
+  }
 }
 
 export async function GET(request: Request) {
@@ -44,9 +72,12 @@ export async function GET(request: Request) {
   const cookieStore = await cookies();
   const stateCookie = cookieStore.get(ADMIN_OIDC_STATE_COOKIE)?.value;
 
+  let providerId: string | null = null;
+
   try {
     const secret = resolveStateSecret();
     const decoded = validateStateFromCookie(stateCookie, state, secret);
+    providerId = decoded.providerId;
     const provider = await getAdminSsoProviderConfigServer(decoded.providerId);
     const oidcClient = getOidcClientService();
     const exchanged = await oidcClient.exchangeCallback({
@@ -62,7 +93,14 @@ export async function GET(request: Request) {
       tenantId,
     });
     if (!result.ok) {
-      const response = NextResponse.redirect(new URL(`/login?sso_error=${reasonToErrorCode(result.reason)}`, url.origin));
+      const errCode = reasonToErrorCode(result.reason);
+      void recordAdminSsoLoginFailed({
+        tenantId,
+        reasonCode: errCode,
+        providerId,
+        emailHint: exchanged.mapped.email,
+      });
+      const response = NextResponse.redirect(new URL(`/login?sso_error=${errCode}`, url.origin));
       response.cookies.set(ADMIN_OIDC_STATE_COOKIE, "", {
         httpOnly: true,
         sameSite: "lax",
@@ -71,6 +109,25 @@ export async function GET(request: Request) {
         maxAge: 0,
       });
       return response;
+    }
+
+    if (process.env.DATABASE_URL?.trim()) {
+      try {
+        await insertAuditEvent({
+          tenantId,
+          actorUserId: result.userId,
+          eventType: "auth.sso.admin_login",
+          targetKind: "user",
+          targetId: result.userId,
+          detail: sanitizeSsoAuditDetail({
+            provider: providerId,
+            issuer: provider.issuer,
+            email: result.email,
+          }),
+        });
+      } catch (err) {
+        console.error("[admin-console] auth.sso.admin_login audit failed:", err);
+      }
     }
 
     const token = createAdminSessionToken(result.email, result.userId, result.tenantId);
@@ -92,6 +149,7 @@ export async function GET(request: Request) {
     return response;
   } catch (error) {
     const code = mapCallbackError(error);
+    void recordAdminSsoLoginFailed({ tenantId, reasonCode: code, providerId });
     const response = NextResponse.redirect(new URL(`/login?sso_error=${encodeURIComponent(code)}`, url.origin));
     response.cookies.set(ADMIN_OIDC_STATE_COOKIE, "", {
       httpOnly: true,

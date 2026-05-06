@@ -34,6 +34,7 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
+import { getPortalSsoErrorMessageZh } from "@agenticx/auth";
 import { usePortalCopy } from "../../lib/portal-copy";
 import { getPortalSsoProviderOptions } from "../../lib/sso-provider-options";
 
@@ -55,16 +56,9 @@ export default function AuthPage() {
   useEffect(() => {
     const raw = searchParams.get("sso_error");
     if (!raw) return;
-    const map: Record<string, string> = {
-      "oidc.discovery_failed": "SSO 服务暂不可用，请稍后重试或使用账号密码登录",
-      "oidc.invalid_state": "SSO 登录状态失效，请重新发起登录",
-      "oidc.account_disabled": "账号已被禁用或锁定，请联系管理员",
-      "oidc.provider_disabled": "当前 SSO Provider 已停用，请联系管理员",
-      "oidc.state_secret_missing": "SSO 配置缺失，请联系管理员",
-    };
     setStatus({
       type: "error",
-      message: map[raw] ?? `SSO 登录失败（${raw}）`,
+      message: getPortalSsoErrorMessageZh(raw),
     });
   }, [searchParams]);
 

@@ -5,6 +5,8 @@ export * from "./services/auth";
 export * from "./services/oidc-claims";
 export * from "./services/oidc-state";
 export * from "./services/oidc-client";
+export * from "./services/oidc-redirect-policy";
+export * from "./services/oidc-error-codes";
 export * from "./services/secret-cipher";
 export * from "./middleware/next";
 export * from "./providers/types";

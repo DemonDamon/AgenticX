@@ -1,5 +1,6 @@
 "use client";
 
+import { getAdminSsoErrorMessageZh } from "@agenticx/auth";
 import { useEffect, useState } from "react";
 import { Alert, AlertDescription, Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@agenticx/ui";
 
@@ -14,10 +15,28 @@ type Provider = {
   enabled: boolean;
 };
 
+type SsoCacheStatsPayload = {
+  global: {
+    hits: number;
+    misses: number;
+    staleHits: number;
+    staleEvictions: number;
+    lastError: string | null;
+  };
+  byProvider: Record<string, { hits: number; misses: number; staleHits: number; staleEvictions: number }>;
+  hitRateApprox: number | null;
+};
+
+function formatPercent(x: number | null): string {
+  if (x == null || Number.isNaN(x)) return "—";
+  return `${Math.round(x * 10_000) / 100}%`;
+}
+
 export default function SsoSettingsPage() {
   const [items, setItems] = useState<Provider[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [cacheStats, setCacheStats] = useState<SsoCacheStatsPayload | null>(null);
   const [form, setForm] = useState({
     providerId: "default",
     displayName: "企业统一认证",
@@ -28,6 +47,12 @@ export default function SsoSettingsPage() {
     scopes: "openid profile email",
   });
 
+  function formatApiError(data: { message?: string; ssoError?: string }): string {
+    const code = typeof data.ssoError === "string" ? data.ssoError : null;
+    if (code) return getAdminSsoErrorMessageZh(code);
+    return data.message ?? "操作失败";
+  }
+
   async function loadProviders() {
     const response = await fetch("/api/admin/sso/providers");
     const data = await response.json();
@@ -36,8 +61,17 @@ export default function SsoSettingsPage() {
     }
   }
 
+  async function loadCacheStats() {
+    const response = await fetch("/api/admin/sso/providers/stats");
+    const data = await response.json();
+    if (response.ok) {
+      setCacheStats((data.data?.stats ?? null) as SsoCacheStatsPayload | null);
+    }
+  }
+
   useEffect(() => {
     void loadProviders();
+    void loadCacheStats();
   }, []);
 
   async function saveProvider() {
@@ -55,11 +89,12 @@ export default function SsoSettingsPage() {
       });
       const data = await response.json();
       if (!response.ok) {
-        setStatus(data.message ?? "保存失败");
+        setStatus(formatApiError(data));
         return;
       }
       setStatus("保存成功");
       await loadProviders();
+      await loadCacheStats();
     } finally {
       setSaving(false);
     }
@@ -73,14 +108,73 @@ export default function SsoSettingsPage() {
     });
     const data = await response.json();
     if (!response.ok) {
-      setStatus(data.message ?? "更新失败");
+      setStatus(formatApiError(data));
       return;
     }
     await loadProviders();
+    await loadCacheStats();
   }
+
+  const g = cacheStats?.global;
+  const denom = g ? g.hits + g.misses : 0;
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-6">
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle>OIDC Discovery 缓存</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              命中率按「进程内累计」估算（hits / (hits + misses)），不等同于严格 1 小时滑动窗口；用于观察 IdP discovery 是否频繁未命中缓存。
+            </p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => void loadCacheStats()}>
+            刷新统计
+          </Button>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm">
+          {g ? (
+            <>
+              <div className="grid gap-1 rounded-md border p-3">
+                <p>
+                  <span className="font-medium">全局命中占比（近似）：</span> {formatPercent(cacheStats?.hitRateApprox ?? null)}
+                </p>
+                <p className="text-muted-foreground">
+                  hits: {g.hits} · misses: {g.misses} · staleHits: {g.staleHits} · staleEvictions: {g.staleEvictions}
+                  {denom === 0 ? "（尚无请求样本）" : null}
+                </p>
+                {g.lastError ? (
+                  <p className="text-destructive">
+                    最近 discovery 错误摘要：<span className="break-all">{g.lastError}</span>
+                  </p>
+                ) : null}
+              </div>
+              {cacheStats?.byProvider && Object.keys(cacheStats.byProvider).length > 0 ? (
+                <div className="rounded-md border p-3">
+                  <p className="mb-2 font-medium">按 Provider</p>
+                  <ul className="grid list-none gap-2">
+                    {Object.entries(cacheStats.byProvider).map(([pid, row]) => {
+                      const d = row.hits + row.misses;
+                      const rate = d > 0 ? row.hits / d : null;
+                      return (
+                        <li key={pid} className="flex justify-between gap-2 border-b border-border pb-2 last:border-0">
+                          <span className="font-mono text-xs">{pid}</span>
+                          <span className="text-muted-foreground">
+                            命中≈{formatPercent(rate)} · hits {row.hits} / misses {row.misses} · stale {row.staleHits}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <p className="text-muted-foreground">暂无统计数据（需具备 sso:read 并已产生过 OIDC 请求）。</p>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>SSO Provider 设置</CardTitle>

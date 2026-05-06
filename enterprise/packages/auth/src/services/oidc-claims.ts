@@ -14,6 +14,16 @@ export type OidcMappedUser = {
   roleCodeHints: string[];
 };
 
+export class OidcClaimError extends Error {
+  public constructor(
+    public readonly code: string,
+    message?: string
+  ) {
+    super(message ?? code);
+    this.name = "OidcClaimError";
+  }
+}
+
 export type OidcClaimDefaults = {
   email?: string;
   displayName?: string;
@@ -52,9 +62,12 @@ export function mapClaimsToAuthUser(
   defaults: OidcClaimDefaults = {}
 ): OidcMappedUser {
   const emailValue = getByPath(claims, mapping.email ?? "email");
+  if (emailValue != null && typeof emailValue !== "string") {
+    throw new OidcClaimError("oidc.claim.email_missing", "Email claim must be a string.");
+  }
   const email = `${emailValue ?? defaults.email ?? ""}`.trim().toLowerCase();
   if (!email) {
-    throw new Error("oidc.claim.email_missing");
+    throw new OidcClaimError("oidc.claim.email_missing");
   }
 
   const nameValue = getByPath(claims, mapping.name ?? "name");
