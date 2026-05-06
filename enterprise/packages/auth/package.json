@@ -7,13 +7,16 @@
   "types": "./src/index.ts",
   "scripts": {
     "lint": "echo 'lint placeholder'",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
-    "jose": "^6.2.2"
+    "jose": "^6.2.2",
+    "openid-client": "^6.0.0"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0"
+    "@types/node": "^20.11.0",
+    "vitest": "^4.1.5"
   }
 }
