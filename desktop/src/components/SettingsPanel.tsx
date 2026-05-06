@@ -6876,8 +6876,13 @@ export function SettingsPanel({
             {tab === "mcp" && (() => {
               return (
               <div className="space-y-5">
-                <div className="text-sm text-text-subtle">
-                  MCP（模型上下文协议）服务为 Agent 扩展外部工具 — 文件系统、数据库、网页搜索等。
+                <div className="space-y-1">
+                  <div className="text-sm text-text-subtle">
+                    MCP（模型上下文协议）服务为 Agent 扩展外部工具 — 文件系统、数据库、网页搜索等。
+                  </div>
+                  <div className="text-[11px] text-text-faint">
+                    已连接的 MCP 服务是 Machi <strong>进程级</strong>资源，所有对话共享；Machi 启动时自动恢复上次的连接记录，新建对话不会触发额外连接或断开。
+                  </div>
                 </div>
 
                 {mcpMessage && <div className="text-xs text-text-subtle">{mcpMessage}</div>}
