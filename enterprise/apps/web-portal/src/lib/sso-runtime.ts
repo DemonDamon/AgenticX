@@ -1,7 +1,7 @@
 import "server-only";
-import { OidcClientService, type OidcProviderConfig } from "@agenticx/auth";
+import { OidcClientService, type OidcProviderConfig, registerOidcDiscoveryDegradedReporter } from "@agenticx/auth";
 import { decryptSecret } from "@agenticx/auth";
-import { getSsoProviderByProviderId } from "@agenticx/iam-core";
+import { getSsoProviderByProviderId, insertAuditEvent } from "@agenticx/iam-core";
 export { resolveReturnToOrDefault } from "./sso-return-to";
 
 export type SsoProviderOption = {
@@ -115,3 +115,26 @@ export function getOidcClientService(): OidcClientService {
   return singleton;
 }
 
+(() => {
+  if (typeof globalThis === "undefined") return;
+  const g = globalThis as typeof globalThis & { __agxOidcDiscoveryRep?: boolean };
+  if (g.__agxOidcDiscoveryRep) return;
+  const tenantId = process.env.DEFAULT_TENANT_ID?.trim();
+  if (!tenantId) return;
+  g.__agxOidcDiscoveryRep = true;
+  registerOidcDiscoveryDegradedReporter(async (detail) => {
+    if (!process.env.DATABASE_URL?.trim()) return;
+    try {
+      await insertAuditEvent({
+        tenantId,
+        actorUserId: null,
+        eventType: "auth.sso.discovery_degraded",
+        targetKind: "sso_provider",
+        targetId: detail.providerId,
+        detail: { issuer: detail.issuer, consecutiveStaleCount: detail.consecutiveStaleCount },
+      });
+    } catch (err) {
+      console.error("[sso] discovery_degraded audit failed:", err);
+    }
+  });
+})();

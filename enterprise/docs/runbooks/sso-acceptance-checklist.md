@@ -22,32 +22,26 @@
 - [ ] `client_secret` 以加密形式存储（`client_secret_encrypted`）
 - [ ] 日志中不打印 token/id_token/client_secret
 
-## 并发验收（k6 示例）
+## 并发验收（k6）
 
-`k6/sso-login.js` 示例（按实际 IdP 调整）：
+脚本：`enterprise/scripts/perf/sso-200-concurrent.js`（200 VU ramp，摘要中查看 P50/P95/P99 与错误率）。
 
-```javascript
-import http from "k6/http";
-import { check, sleep } from "k6";
-
-export const options = {
-  vus: 200,
-  duration: "1m",
-};
-
-export default function () {
-  const res = http.get("http://localhost:3000/api/auth/sso/oidc/start?provider=default");
-  check(res, {
-    "start endpoint 302": (r) => r.status === 302,
-  });
-  sleep(1);
-}
+```bash
+# 需本机安装 k6；先启动 web-portal（默认 3000）
+SSO_K6_BASE=http://127.0.0.1:3000 k6 run enterprise/scripts/perf/sso-200-concurrent.js
 ```
 
-验收建议：
+读数模板（摘自 k6 运行结束摘要）：
 
-- 200 并发下，`/api/auth/sso/oidc/start` P95 < 800ms
+- `http_req_duration..............: avg=... min=... med=... max=... p(90)=... p(95)=...`
+- `http_req_failed................: 0.00%`
+
+验收建议（与采购条款对齐时用于自有基线；脚本内阈值为宽松默认，可按环境调紧）：
+
+- 200 并发（或 ramp 峰值 200）下，`/api/auth/sso/oidc/start` **P95 < 800ms**（建议在 4C/8G 类机器、稳定网络下记录一次基线）
 - callback 失败率为 0（测试账号有效前提）
+
+可选归档：将摘要贴入 `enterprise/docs/perf-baselines/`（见该目录 README）。
 
 ## 回归命令
 

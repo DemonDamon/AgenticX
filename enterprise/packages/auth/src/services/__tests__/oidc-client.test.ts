@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { OidcClientService } from "../oidc-client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { OidcClientService, registerOidcDiscoveryDegradedReporter } from "../oidc-client";
 import { buildStateCookieValue, validateStateFromCookie } from "../oidc-state";
 
 const mockDiscovery = vi.fn();
@@ -106,4 +106,91 @@ describe("OidcClientService", () => {
       validateStateFromCookie(cookieValue, "another-state", stateSecret)
     ).toThrowError("oidc.invalid_state");
   });
+
+  it("maps token endpoint 401 to oidc.callback_failed (FR-C1.1)", async () => {
+    mockDiscovery.mockResolvedValue({ issuer: provider.issuer });
+    mockAuthorizationCodeGrant.mockRejectedValue(new Error("401 unauthorized"));
+
+    await expect(
+      service.exchangeCallback({
+        provider,
+        callbackUrl: "https://portal.example.com/api/auth/sso/oidc/callback?code=abc&state=s1",
+        expectedState: "s1",
+        expectedNonce: "n1",
+        codeVerifier: "v1",
+      })
+    ).rejects.toMatchObject({ code: "oidc.callback_failed" });
+  });
+
+  it("maps nonce validation failure to oidc.invalid_nonce (FR-C1.1)", async () => {
+    mockDiscovery.mockResolvedValue({ issuer: provider.issuer });
+    mockAuthorizationCodeGrant.mockResolvedValue({ access_token: "t" });
+    mockGetValidatedIdTokenClaims.mockImplementation(() => {
+      throw new Error("expected nonce mismatch");
+    });
+
+    await expect(
+      service.exchangeCallback({
+        provider,
+        callbackUrl: "https://portal.example.com/api/auth/sso/oidc/callback?code=abc&state=s1",
+        expectedState: "s1",
+        expectedNonce: "n1",
+        codeVerifier: "v1",
+      })
+    ).rejects.toMatchObject({ code: "oidc.invalid_nonce" });
+  });
+
+  it("fires discovery degraded reporter after 5 consecutive stale fallbacks (AC-B2.1 / FR-C1.1)", async () => {
+    const degraded = vi.fn();
+    registerOidcDiscoveryDegradedReporter(degraded);
+    const local = new OidcClientService();
+    mockDiscovery.mockResolvedValueOnce({ issuer: provider.issuer });
+
+    vi.useFakeTimers();
+    const t0 = 1_000_000_000_000;
+    vi.setSystemTime(t0);
+    await local.getConfiguration(provider);
+
+    vi.setSystemTime(t0 + 61_000);
+    mockDiscovery.mockRejectedValue(new Error("discovery down"));
+
+    for (let i = 0; i < 5; i++) {
+      await local.getConfiguration(provider);
+    }
+
+    expect(degraded).toHaveBeenCalledTimes(1);
+    expect(degraded.mock.calls[0]?.[0]).toMatchObject({
+      providerId: provider.providerId,
+      consecutiveStaleCount: 5,
+    });
+
+    const stats = local.getOidcCacheStats();
+    expect(stats.global.staleHits).toBe(5);
+
+    vi.useRealTimers();
+  });
+
+  it("evicts stale discovery cache past max age and throws oidc.discovery_failed", async () => {
+    const local = new OidcClientService();
+    mockDiscovery.mockResolvedValueOnce({ issuer: provider.issuer });
+
+    vi.useFakeTimers();
+    const t0 = 1_700_000_000_000;
+    vi.setSystemTime(t0);
+    await local.getConfiguration(provider);
+
+    vi.setSystemTime(t0 + 61_000);
+    mockDiscovery.mockRejectedValue(new Error("discovery down"));
+    await local.getConfiguration(provider);
+
+    vi.setSystemTime(t0 + 3_600_000 + 60_000);
+    mockDiscovery.mockRejectedValue(new Error("discovery still down"));
+
+    await expect(local.getConfiguration(provider)).rejects.toMatchObject({ code: "oidc.discovery_failed" });
+    vi.useRealTimers();
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });

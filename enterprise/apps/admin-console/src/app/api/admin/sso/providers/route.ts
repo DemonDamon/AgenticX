@@ -2,7 +2,25 @@ import { encryptSecret } from "@agenticx/auth";
 import { createSsoProvider, listSsoProviders } from "@agenticx/iam-core";
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../lib/admin-auth";
-import { assertSafeIssuerUrl, assertValidRedirectUri } from "../../../../../lib/sso-url-guard";
+import { assertSafeIssuerUrl, assertSafeRedirectUri } from "../../../../../lib/sso-url-guard";
+
+function badSsoConfigResponse(error: unknown): NextResponse {
+  const message = error instanceof Error ? error.message : "invalid_sso_url";
+  const redirectIssue =
+    message.includes("redirect_uri") ||
+    message === "redirect_uri_https_required" ||
+    message === "redirect_uri_http_not_allowed" ||
+    message === "redirect_uri_origin_not_in_allowlist" ||
+    message === "redirect_uri_issuer_origin_mismatch";
+  return NextResponse.json(
+    {
+      code: "40000",
+      message: `SSO 配置不合法: ${message}`,
+      ...(redirectIssue ? { ssoError: "oidc.invalid_redirect_uri" as const } : {}),
+    },
+    { status: 400 }
+  );
+}
 
 function resolveSecretKey(): string {
   const secret = process.env.SSO_PROVIDER_SECRET_KEY?.trim();
@@ -67,10 +85,9 @@ export async function POST(request: Request) {
 
   try {
     await assertSafeIssuerUrl(issuer);
-    assertValidRedirectUri(redirectUri);
+    await assertSafeRedirectUri(redirectUri, { issuerUrl: issuer });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "invalid_sso_url";
-    return NextResponse.json({ code: "40000", message: `SSO 配置不合法: ${message}` }, { status: 400 });
+    return badSsoConfigResponse(error);
   }
 
   try {

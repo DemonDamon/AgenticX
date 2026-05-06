@@ -11,6 +11,15 @@
 - `AUTH_JWT_PRIVATE_KEY` / `AUTH_JWT_PUBLIC_KEY` 已配置
 - `SSO_STATE_SIGNING_SECRET` 与 `SSO_PROVIDER_SECRET_KEY` 已配置（建议 32+ 字节）
 
+## 安全语义（已实现，供审计/交付引用）
+
+| 能力 | 说明 |
+| --- | --- |
+| State cookie | `HttpOnly` + `SameSite=Lax`；载荷经 **AES-256-GCM** 对称加密后写入 cookie，避免明文 state/nonce/PKCE verifier 泄露 |
+| 密钥派生 | `SSO_STATE_SIGNING_SECRET` 须足够熵；实现层使用 **HKDF** 派生加密子密钥（详见 `@agenticx/auth` `oidc-state`） |
+| SSRF / 恶意 Issuer | Admin `sso-url-guard` 对 **issuer** 做 DNS 解析（**5s 超时** + **LRU 缓存**），拦截解析到私网/回环的结果 |
+| Redirect URI | 生产态 **`redirect_uri` 强制 HTTPS**；开发态仅允许本机 http 或 `SSO_DEV_INSECURE_REDIRECT_ALLOWLIST`；可用 `NEXT_PUBLIC_SSO_REDIRECT_ORIGIN_ALLOWLIST` 与 `SSO_REDIRECT_REQUIRE_ISSUER_ORIGIN_MATCH` 收紧 |
+
 ## 环境变量（最小集）
 
 ```bash
@@ -23,6 +32,19 @@ SSO_OIDC_DEFAULT_CLIENT_ID=agenticx-portal
 SSO_OIDC_DEFAULT_CLIENT_SECRET=replace-with-client-secret
 SSO_OIDC_DEFAULT_REDIRECT_URI=http://localhost:3000/api/auth/sso/oidc/callback
 SSO_OIDC_DEFAULT_ADMIN_REDIRECT_URI=http://localhost:3001/api/auth/sso/oidc/callback
+```
+
+### Redirect / Issuer 收紧（可选）
+
+```bash
+# 生产推荐：显式允许的回源列表（admin-console 保存 provider 时校验）
+NEXT_PUBLIC_SSO_REDIRECT_ORIGIN_ALLOWLIST=https://portal.example.com,https://admin.example.com
+
+# 要求 redirect_uri 的 origin 与 issuer 主机一致（部分多应用部署需关闭）
+SSO_REDIRECT_REQUIRE_ISSUER_ORIGIN_MATCH=true
+
+# 开发态非 localhost 的 http redirect（逗号分隔 origin），勿用于生产
+# SSO_DEV_INSECURE_REDIRECT_ALLOWLIST=http://192.168.1.10:3000
 ```
 
 ## Keycloak 示例

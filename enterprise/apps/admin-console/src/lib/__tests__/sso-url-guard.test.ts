@@ -24,6 +24,11 @@ function restoreEnv(): void {
   }
 }
 
+/** `process.env.NODE_ENV` is typed read-only in strict Node types — tests need to toggle it. */
+function setNodeEnv(value: string): void {
+  (process.env as Record<string, string | undefined>).NODE_ENV = value;
+}
+
 beforeEach(() => {
   lookupMock.mockReset();
   restoreEnv();
@@ -35,7 +40,7 @@ afterEach(() => {
 
 describe("assertSafeRedirectUri (FR-A1)", () => {
   it("rejects HTTP redirect outside dev allowlist in production (AC-A1.1: http)", async () => {
-    process.env.NODE_ENV = "production";
+    setNodeEnv("production");
     const { assertSafeRedirectUri } = await freshGuard();
     await expect(
       assertSafeRedirectUri("http://idp.example.com/cb")
@@ -44,7 +49,7 @@ describe("assertSafeRedirectUri (FR-A1)", () => {
   });
 
   it("rejects redirect_uri pointing to private IP (AC-A1.1: private)", async () => {
-    process.env.NODE_ENV = "production";
+    setNodeEnv("production");
     const { assertSafeRedirectUri } = await freshGuard();
     await expect(
       assertSafeRedirectUri("https://10.0.0.1/cb")
@@ -53,7 +58,7 @@ describe("assertSafeRedirectUri (FR-A1)", () => {
   });
 
   it("rejects redirect_uri whose hostname resolves to loopback IPv4 (AC-A1.1: dns-private)", async () => {
-    process.env.NODE_ENV = "production";
+    setNodeEnv("production");
     lookupMock.mockResolvedValueOnce([{ family: 4, address: "127.0.0.1" }]);
     const { assertSafeRedirectUri } = await freshGuard();
     await expect(
@@ -63,7 +68,7 @@ describe("assertSafeRedirectUri (FR-A1)", () => {
   });
 
   it("rejects redirect_uri whose origin is not in NEXT_PUBLIC_SSO_REDIRECT_ORIGIN_ALLOWLIST (AC-A1.1: cross-origin)", async () => {
-    process.env.NODE_ENV = "production";
+    setNodeEnv("production");
     process.env.NEXT_PUBLIC_SSO_REDIRECT_ORIGIN_ALLOWLIST = "https://portal.example.com";
     const { assertSafeRedirectUri } = await freshGuard();
     await expect(
@@ -72,7 +77,7 @@ describe("assertSafeRedirectUri (FR-A1)", () => {
   });
 
   it("accepts redirect_uri whose origin matches the allowlist (positive case)", async () => {
-    process.env.NODE_ENV = "production";
+    setNodeEnv("production");
     process.env.NEXT_PUBLIC_SSO_REDIRECT_ORIGIN_ALLOWLIST = "https://portal.example.com";
     lookupMock.mockResolvedValue([{ family: 4, address: "203.0.113.10" }]);
     const { assertSafeRedirectUri } = await freshGuard();
@@ -82,7 +87,7 @@ describe("assertSafeRedirectUri (FR-A1)", () => {
   });
 
   it("rejects redirect_uri whose origin does not match issuer when SSO_REDIRECT_REQUIRE_ISSUER_ORIGIN_MATCH=true", async () => {
-    process.env.NODE_ENV = "production";
+    setNodeEnv("production");
     process.env.SSO_REDIRECT_REQUIRE_ISSUER_ORIGIN_MATCH = "true";
     lookupMock.mockResolvedValue([{ family: 4, address: "203.0.113.10" }]);
     const { assertSafeRedirectUri } = await freshGuard();
@@ -94,7 +99,7 @@ describe("assertSafeRedirectUri (FR-A1)", () => {
   });
 
   it("allows http://localhost in development without allowlist (dev convenience)", async () => {
-    process.env.NODE_ENV = "development";
+    setNodeEnv("development");
     const { assertSafeRedirectUri } = await freshGuard();
     await expect(
       assertSafeRedirectUri("http://localhost:3000/api/auth/sso/oidc/callback")
@@ -104,7 +109,7 @@ describe("assertSafeRedirectUri (FR-A1)", () => {
 
 describe("assertSafeIssuerUrl + DNS timeout/cache (FR-A2)", () => {
   it("rejects issuer DNS lookup that hangs longer than 5s (AC-A2.1: timeout)", async () => {
-    process.env.NODE_ENV = "production";
+    setNodeEnv("production");
     vi.useFakeTimers();
     lookupMock.mockImplementation(
       () => new Promise(() => {
@@ -122,7 +127,7 @@ describe("assertSafeIssuerUrl + DNS timeout/cache (FR-A2)", () => {
   });
 
   it("uses LRU cache: identical issuer host triggers DNS lookup once (AC-A2.1: cache)", async () => {
-    process.env.NODE_ENV = "production";
+    setNodeEnv("production");
     lookupMock.mockResolvedValue([{ family: 4, address: "203.0.113.42" }]);
     const { assertSafeIssuerUrl } = await freshGuard();
     await assertSafeIssuerUrl("https://idp.example.com/realms/agenticx");
@@ -131,7 +136,7 @@ describe("assertSafeIssuerUrl + DNS timeout/cache (FR-A2)", () => {
   });
 
   it("invalidateIssuerDnsCacheForHost forces re-lookup (FR-A2.3)", async () => {
-    process.env.NODE_ENV = "production";
+    setNodeEnv("production");
     lookupMock.mockResolvedValue([{ family: 4, address: "203.0.113.42" }]);
     const { assertSafeIssuerUrl, invalidateIssuerDnsCacheForHost } = await freshGuard();
     await assertSafeIssuerUrl("https://idp.example.com");
@@ -141,7 +146,7 @@ describe("assertSafeIssuerUrl + DNS timeout/cache (FR-A2)", () => {
   });
 
   it("rejects issuer pointing to private IPv4 directly (no DNS)", async () => {
-    process.env.NODE_ENV = "production";
+    setNodeEnv("production");
     const { assertSafeIssuerUrl } = await freshGuard();
     await expect(assertSafeIssuerUrl("https://10.0.0.5")).rejects.toThrow("issuer_host_not_allowed");
     expect(lookupMock).not.toHaveBeenCalled();

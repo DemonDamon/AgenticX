@@ -8,8 +8,14 @@
 
 - `OidcClientService`：OIDC discovery 缓存、构造授权 URL、处理 callback code exchange
 - `mapClaimsToAuthUser`：按 claim mapping 解析 email/displayName/dept/roles
-- `buildStateCookieValue` / `validateStateFromCookie`：state/nonce/pkce verifier 的签名 cookie 存储与校验
-- `encryptSecret` / `decryptSecret`：AES-256-GCM 加密 provider secret
+- `buildStateCookieValue` / `validateStateFromCookie`：state/nonce/pkce verifier 的加密 cookie 存储与校验（**AES-256-GCM**，密钥材料经 **HKDF** 从 `SSO_STATE_SIGNING_SECRET` 派生）
+- `encryptSecret` / `decryptSecret`：AES-256-GCM 加密 provider `client_secret` 落库字段
+
+### 安全语义（摘要）
+
+- **redirect_uri**：生产环境强制 HTTPS；本地开发仅允许 `localhost`/`127.0.0.1` 的 http 或其它在 `SSO_DEV_INSECURE_REDIRECT_ALLOWLIST` 中的 origin（由 `oidc-redirect-policy` 校验，`OidcConfigError("oidc.invalid_redirect_uri")`）。
+- **OIDC discovery 缓存**：短 TTL 内存缓存；失败时可回落到未过最大年龄的 stale 配置；连续 5 次 stale 回落可由集成方注册 `registerOidcDiscoveryDegradedReporter` 写审计。
+- **错误码单一来源**：`oidc-error-codes.ts`（`OIDC_ERROR_CODES` + 中英对照 getter）供 portal / admin UI 共用。
 
 ### 常用环境变量
 

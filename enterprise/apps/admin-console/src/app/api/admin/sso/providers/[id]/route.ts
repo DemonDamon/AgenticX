@@ -1,13 +1,35 @@
 import { encryptSecret } from "@agenticx/auth";
-import { deleteSsoProvider, updateSsoProvider } from "@agenticx/iam-core";
+import { deleteSsoProvider, getSsoProviderById, updateSsoProvider } from "@agenticx/iam-core";
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../../lib/admin-auth";
 import { getOidcClientService } from "../../../../../../lib/admin-sso-runtime";
-import { assertSafeIssuerUrl, assertValidRedirectUri } from "../../../../../../lib/sso-url-guard";
+import {
+  assertSafeIssuerUrl,
+  assertSafeRedirectUri,
+  invalidateIssuerDnsCacheForHost,
+} from "../../../../../../lib/sso-url-guard";
 
 type RouteParams = {
   params: Promise<{ id: string }>;
 };
+
+function badSsoConfigResponse(error: unknown): NextResponse {
+  const message = error instanceof Error ? error.message : "invalid_sso_url";
+  const redirectIssue =
+    message.includes("redirect_uri") ||
+    message === "redirect_uri_https_required" ||
+    message === "redirect_uri_http_not_allowed" ||
+    message === "redirect_uri_origin_not_in_allowlist" ||
+    message === "redirect_uri_issuer_origin_mismatch";
+  return NextResponse.json(
+    {
+      code: "40000",
+      message: `SSO 配置不合法: ${message}`,
+      ...(redirectIssue ? { ssoError: "oidc.invalid_redirect_uri" as const } : {}),
+    },
+    { status: 400 }
+  );
+}
 
 function resolveSecretKey(): string {
   const secret = process.env.SSO_PROVIDER_SECRET_KEY?.trim();
@@ -36,20 +58,33 @@ export async function PATCH(request: Request, context: RouteParams) {
   if (!guard.ok) return guard.response;
 
   const { id } = await context.params;
+  const existing = await getSsoProviderById(guard.session.tenantId, id);
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const issuer = body.issuer !== undefined ? `${body.issuer ?? ""}`.trim() : undefined;
   const redirectUri = body.redirectUri !== undefined ? `${body.redirectUri ?? ""}`.trim() : undefined;
 
   try {
     if (issuer !== undefined) {
+      if (existing?.issuer) {
+        try {
+          invalidateIssuerDnsCacheForHost(new URL(existing.issuer).hostname);
+        } catch {
+          /* ignore invalid old issuer */
+        }
+      }
       await assertSafeIssuerUrl(issuer);
+      try {
+        invalidateIssuerDnsCacheForHost(new URL(issuer).hostname);
+      } catch {
+        /* ignore */
+      }
     }
+    const issuerForRedirect = issuer ?? existing?.issuer;
     if (redirectUri !== undefined) {
-      assertValidRedirectUri(redirectUri);
+      await assertSafeRedirectUri(redirectUri, { issuerUrl: issuerForRedirect });
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "invalid_sso_url";
-    return NextResponse.json({ code: "40000", message: `SSO 配置不合法: ${message}` }, { status: 400 });
+    return badSsoConfigResponse(error);
   }
 
   try {
