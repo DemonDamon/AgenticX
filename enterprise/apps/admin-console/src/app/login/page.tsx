@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   AlertDescription,
@@ -18,13 +18,31 @@ import {
   Separator,
 } from "@agenticx/ui";
 import { ArrowRight, ShieldAlert, ShieldCheck } from "lucide-react";
+import { getAdminSsoProviderOptions } from "../../lib/admin-sso-provider-options";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("owner@agenticx.local");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const ssoProviders = useMemo(() => getAdminSsoProviderOptions(), []);
+
+  useEffect(() => {
+    const raw = searchParams.get("sso_error");
+    if (!raw) return;
+    const map: Record<string, string> = {
+      "oidc.discovery_failed": "SSO 服务暂不可用，请稍后重试或使用账号密码登录",
+      "oidc.invalid_state": "SSO 登录状态失效，请重新发起登录",
+      "oidc.provider_disabled": "当前 SSO Provider 已停用，请联系管理员",
+      "oidc.state_secret_missing": "SSO 配置缺失，请联系管理员",
+      admin_unprovisioned: "当前账号未在管理后台开通，请联系超管分配权限",
+      admin_scope_missing: "当前账号缺少 admin:enter 权限，无法进入管理后台",
+      account_disabled: "账号已停用或锁定，请联系管理员",
+    };
+    setStatus(map[raw] ?? `SSO 登录失败（${raw}）`);
+  }, [searchParams]);
 
   const signIn = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -172,8 +190,16 @@ export default function LoginPage() {
               </Separator>
 
               <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" type="button" disabled>
-                  SSO（敬请期待）
+                <Button
+                  variant="outline"
+                  type="button"
+                  disabled={ssoProviders.length === 0}
+                  onClick={() => {
+                    const provider = ssoProviders[0]?.id ?? "default";
+                    window.location.href = `/api/auth/sso/oidc/start?provider=${encodeURIComponent(provider)}`;
+                  }}
+                >
+                  企业 SSO 登录
                 </Button>
                 <Button variant="outline" type="button" disabled>
                   LDAP（敬请期待）
