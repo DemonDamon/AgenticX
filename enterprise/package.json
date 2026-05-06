@@ -12,7 +12,8 @@
     "clean": "turbo run clean && rm -rf node_modules",
     "visual-tour": "tsx scripts/e2e-visual-tour.ts",
     "visual-tour:install": "playwright install chromium",
-    "e2e:iam": "tsx scripts/e2e-iam.ts"
+    "e2e:iam": "tsx scripts/e2e-iam.ts",
+    "e2e:sso": "tsx scripts/e2e-sso.ts"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

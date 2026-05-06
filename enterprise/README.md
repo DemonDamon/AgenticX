@@ -74,6 +74,13 @@ bash scripts/start-dev.sh     # 每天开工跑这一条
 
 > 默认 `owner` 已自带 `workspace:chat` 权限；旧种子环境若 HMR 命中也会被自动补齐，无需手动改库。
 
+### 启用 OIDC SSO（统一认证）
+
+已支持 OIDC SSO 登录（portal + admin）。配置参考：
+
+- `docs/runbooks/sso-oidc-setup.md`
+- `docs/runbooks/sso-acceptance-checklist.md`
+
 ### 让聊天回真实模型（推荐 ① · admin GUI 控制）
 
 后台 → 平台配置 → **模型服务**：
