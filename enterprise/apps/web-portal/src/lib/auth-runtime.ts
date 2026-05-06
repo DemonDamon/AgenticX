@@ -7,15 +7,19 @@ import {
   type AuthTokens,
 } from "@agenticx/auth";
 import {
+  assignRolesIfNone,
   PgAuthUserRepository,
   ensureSystemRoles,
   getDefaultOrgId,
+  insertAuditEvent,
   loadAuthUserByEmail,
   replaceUserRoleAssignments,
   upsertUserRowFromAuthUser,
 } from "@agenticx/iam-core";
 import { createHash } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { syncAuthUserToPostgres } from "./chat-history";
+import { ulid } from "ulid";
 
 const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID?.trim();
 const DEFAULT_DEPT_ID = process.env.DEFAULT_DEPT_ID?.trim();
@@ -203,6 +207,158 @@ export async function loginWithPassword(email: string, password: string): Promis
     }
   }
   return tokens;
+}
+
+type OidcLoginInput = {
+  providerId: string;
+  issuer: string;
+  subject: string | null;
+  email: string;
+  displayName: string;
+  deptHint?: string | null;
+  roleCodeHints?: string[];
+};
+
+type OidcLoginResult = {
+  tokens: AuthTokens;
+  userId: string;
+  tenantId: string;
+  jitCreated: boolean;
+};
+
+function parseDefaultSsoRoleCodes(): string[] {
+  const configured = process.env.SSO_DEFAULT_ROLE_CODES?.trim();
+  if (!configured) return ["member"];
+  const parsed = configured
+    .split(/[,\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return parsed.length ? parsed : ["member"];
+}
+
+function parseJitRoleAllowlist(): Set<string> {
+  const configured = process.env.SSO_JIT_ROLE_ALLOWLIST?.trim();
+  if (!configured) {
+    return new Set(parseDefaultSsoRoleCodes());
+  }
+  const parsed = configured
+    .split(/[,\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!parsed.length) return new Set(parseDefaultSsoRoleCodes());
+  return new Set(parsed);
+}
+
+async function issueTokensForUser(runtime: AuthRuntime, user: import("@agenticx/auth").AuthUser): Promise<AuthTokens> {
+  const context: AuthContext = {
+    userId: user.id,
+    tenantId: user.tenantId,
+    deptId: user.deptId ?? null,
+    email: user.email,
+    scopes: user.scopes,
+    sessionId: `${user.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+  };
+  const access = await runtime.jwtService.signAccessToken(context);
+  const refresh = await runtime.jwtService.signRefreshToken(context);
+  await runtime.refreshStore.set({
+    sessionId: context.sessionId,
+    userId: context.userId,
+    tenantId: context.tenantId,
+    deptId: context.deptId ?? null,
+    email: context.email,
+    scopes: context.scopes,
+    expiresAt: Date.now() + refresh.expiresInSeconds * 1000,
+  });
+  return {
+    accessToken: access.token,
+    refreshToken: refresh.token,
+    tokenType: "Bearer",
+    expiresInSeconds: access.expiresInSeconds,
+  };
+}
+
+export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLoginResult> {
+  const runtime = await getRuntime();
+  const normalizedEmail = input.email.trim().toLowerCase();
+  if (!normalizedEmail) {
+    throw new Error("oidc.invalid_email");
+  }
+  if (!runtime.tenantId) {
+    throw new Error("DEFAULT_TENANT_ID is required for OIDC login.");
+  }
+
+  let user = await runtime.repo.findByEmail(normalizedEmail);
+  let jitCreated = false;
+
+  if (!user) {
+    const passwordHash = await hashPassword(randomBytes(32).toString("base64url"));
+    const roleAllowlist = parseJitRoleAllowlist();
+    const jitRoles = (input.roleCodeHints ?? []).filter((code) => roleAllowlist.has(code));
+    const nextUser: import("@agenticx/auth").AuthUser = {
+      id: ulid(),
+      tenantId: runtime.tenantId,
+      deptId: null,
+      email: normalizedEmail,
+      displayName: input.displayName.trim() || normalizedEmail,
+      passwordHash,
+      status: "active",
+      failedLoginCount: 0,
+      lockedUntil: null,
+      scopes: [],
+    };
+    await runtime.repo.upsertUser(nextUser);
+    const orgId = process.env.DATABASE_URL?.trim() ? await getDefaultOrgId(runtime.tenantId) : null;
+    await assignRolesIfNone({
+      tenantId: runtime.tenantId,
+      userId: nextUser.id,
+      roleCodes: jitRoles.length ? jitRoles : parseDefaultSsoRoleCodes(),
+      defaultOrgId: orgId,
+      defaultDeptId: null,
+    });
+    user = await runtime.repo.findByEmail(normalizedEmail);
+    jitCreated = true;
+  }
+
+  if (!user) {
+    throw new Error("oidc.user_not_found");
+  }
+  if (user.status === "disabled" || user.status === "locked" || (user.lockedUntil && user.lockedUntil > Date.now())) {
+    throw new Error("oidc.account_disabled");
+  }
+
+  if (process.env.DATABASE_URL?.trim()) {
+    try {
+      await insertAuditEvent({
+        tenantId: user.tenantId,
+        actorUserId: user.id,
+        eventType: "auth.sso.login",
+        targetKind: "user",
+        targetId: user.id,
+        detail: {
+          provider: input.providerId,
+          issuer: input.issuer,
+          sub: input.subject,
+          jit_created: jitCreated,
+        },
+      });
+    } catch (error) {
+      console.error("[web-portal] insertAuditEvent auth.sso.login failed:", error);
+    }
+  }
+
+  try {
+    await syncAuthUserToPostgres(user);
+  } catch (error) {
+    console.error("[web-portal] syncAuthUserToPostgres after oidc login failed:", error);
+  }
+
+  const tokens = await issueTokensForUser(runtime, user);
+  return {
+    tokens,
+    userId: user.id,
+    tenantId: user.tenantId,
+    jitCreated,
+  };
 }
 
 export async function verifyAccessToken(accessToken: string): Promise<AuthContext | null> {
