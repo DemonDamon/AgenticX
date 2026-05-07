@@ -43,7 +43,7 @@ function AuthPageInner() {
   const searchParams = useSearchParams();
   const t = usePortalCopy();
   const { locale, setLocale } = useLocale();
-  const [signInEmail, setSignInEmail] = useState("owner@agenticx.local");
+  const [signInEmail, setSignInEmail] = useState("admin@agenticx.local");
   const [signInPassword, setSignInPassword] = useState("");
   const [signUpEmail, setSignUpEmail] = useState("");
   const [signUpUsername, setSignUpUsername] = useState("");

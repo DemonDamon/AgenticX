@@ -63,7 +63,7 @@ async function main() {
         status = EXCLUDED.status,
         updated_at = now()
       `,
-      [ids.user, ids.tenant, ids.dept, "owner@agenticx.local", "Seed Owner", passwordHash, "active"]
+      [ids.user, ids.tenant, ids.dept, "admin@agenticx.local", "Seed Admin", passwordHash, "active"]
     );
 
     await client.query(
@@ -92,7 +92,7 @@ async function main() {
     );
 
     await client.query("COMMIT");
-    console.log("Seed complete: default tenant + owner + super_admin.");
+    console.log("Seed complete: default tenant + admin + super_admin.");
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

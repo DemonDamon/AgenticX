@@ -24,7 +24,7 @@ import { getAdminSsoProviderOptions } from "../../lib/admin-sso-provider-options
 function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState("owner@agenticx.local");
+  const [email, setEmail] = useState("admin@agenticx.local");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

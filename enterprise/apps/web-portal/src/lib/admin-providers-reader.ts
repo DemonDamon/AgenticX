@@ -67,6 +67,7 @@ export interface PortalModelOption {
 }
 
 const LEGACY_ADMIN_EMAIL_TO_USER_ID: Record<string, string> = {
+  "admin@agenticx.local": "u_001",
   "owner@agenticx.local": "u_001",
   "ops@agenticx.local": "u_002",
   "audit@agenticx.local": "u_003",
