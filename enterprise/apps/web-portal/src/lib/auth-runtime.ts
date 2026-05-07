@@ -239,6 +239,7 @@ type OidcLoginInput = {
   displayName: string;
   deptHint?: string | null;
   roleCodeHints?: string[];
+  protocol?: "oidc" | "saml";
 };
 
 type OidcLoginResult = {
@@ -351,6 +352,7 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
     throw new Error("oidc.account_disabled");
   }
 
+  const auditProtocol = input.protocol ?? "oidc";
   if (jitCreated && jitAssignedRoles && process.env.DATABASE_URL?.trim()) {
     try {
       await insertAuditEvent({
@@ -360,8 +362,11 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
         targetKind: "user",
         targetId: user.id,
         detail: sanitizeSsoAuditDetail({
+          protocol: auditProtocol,
           provider: input.providerId,
+          provider_id: input.providerId,
           issuer: input.issuer,
+          external_subject: input.subject,
           sub: input.subject,
           email_lower: normalizedEmail,
           role_codes: jitAssignedRoles,
@@ -381,8 +386,11 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
         targetKind: "user",
         targetId: user.id,
         detail: sanitizeSsoAuditDetail({
+          protocol: auditProtocol,
           provider: input.providerId,
+          provider_id: input.providerId,
           issuer: input.issuer,
+          external_subject: input.subject,
           sub: input.subject,
           jit_created: jitCreated,
         }),

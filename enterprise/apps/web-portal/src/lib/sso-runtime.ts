@@ -1,8 +1,17 @@
 import "server-only";
-import { OidcClientService, type OidcProviderConfig, registerOidcDiscoveryDegradedReporter } from "@agenticx/auth";
+import {
+  OidcClientService,
+  type OidcProviderConfig,
+  type SamlSpProviderConfig,
+  registerOidcDiscoveryDegradedReporter,
+} from "@agenticx/auth";
 import { decryptSecret } from "@agenticx/auth";
 import { getSsoProviderByProviderId, insertAuditEvent } from "@agenticx/iam-core";
 export { resolveReturnToOrDefault } from "./sso-return-to";
+
+export type SamlSpProviderConfigWithIssuer = SamlSpProviderConfig & {
+  idpEntityIdSourceForAudit: string;
+};
 
 export type SsoProviderOption = {
   id: string;
@@ -96,6 +105,15 @@ export async function getPortalSsoProviderConfigServer(providerId: string): Prom
       if (!dbProvider.enabled) {
         throw new Error("oidc.provider_disabled");
       }
+      if (dbProvider.protocol !== "oidc") {
+        throw new Error("oidc.provider_not_configured");
+      }
+      if (!dbProvider.issuer || !dbProvider.clientId || !dbProvider.redirectUri) {
+        throw new Error("oidc.provider_not_configured");
+      }
+      if (isExampleIssuer(dbProvider.issuer)) {
+        throw new Error("oidc.provider_not_configured");
+      }
       return {
         providerId: dbProvider.providerId,
         issuer: dbProvider.issuer,
@@ -117,6 +135,49 @@ export async function getPortalSsoProviderConfigServer(providerId: string): Prom
     }
   }
   return getPortalSsoProviderConfig(providerId);
+}
+
+export async function getPortalSamlProviderConfigServer(providerId: string): Promise<SamlSpProviderConfig> {
+  const tenantId = process.env.DEFAULT_TENANT_ID?.trim();
+  if (!tenantId) {
+    throw new Error("saml.provider_not_configured");
+  }
+  const dbProvider = await getSsoProviderByProviderId(tenantId, providerId);
+  if (!dbProvider) {
+    throw new Error("saml.provider_not_configured");
+  }
+  if (!dbProvider.enabled) {
+    throw new Error("saml.provider_disabled");
+  }
+  if (dbProvider.protocol !== "saml" || !dbProvider.samlConfig) {
+    throw new Error("saml.provider_not_configured");
+  }
+  const cfg = dbProvider.samlConfig;
+  if (!cfg.idpEntityId || !cfg.idpSsoUrl || !cfg.spEntityId || !cfg.acsUrl) {
+    throw new Error("saml.provider_not_configured");
+  }
+  return {
+    providerId: dbProvider.providerId,
+    idpEntityId: cfg.idpEntityId,
+    idpSsoUrl: cfg.idpSsoUrl,
+    idpSloUrl: cfg.idpSloUrl ?? null,
+    idpCertPemList: cfg.idpCertPemList ?? [],
+    spEntityId: cfg.spEntityId,
+    acsUrl: cfg.acsUrl,
+    nameIdFormat: cfg.nameIdFormat ?? null,
+    wantAssertionsSigned: cfg.wantAssertionsSigned !== false,
+    wantResponseSigned: cfg.wantResponseSigned === true,
+    clockSkewSeconds: typeof cfg.clockSkewSeconds === "number" ? cfg.clockSkewSeconds : 60,
+    attributeMapping: {
+      email: cfg.attributeMapping?.email ?? "email",
+      displayName: cfg.attributeMapping?.displayName,
+      firstName: cfg.attributeMapping?.firstName,
+      lastName: cfg.attributeMapping?.lastName,
+      dept: cfg.attributeMapping?.dept,
+      roles: cfg.attributeMapping?.roles,
+      externalId: cfg.attributeMapping?.externalId,
+    },
+  };
 }
 
 let singleton: OidcClientService | null = null;

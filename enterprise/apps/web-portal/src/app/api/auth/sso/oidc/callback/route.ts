@@ -36,6 +36,7 @@ async function recordPortalSsoLoginFailed(input: {
   providerId?: string | null;
   emailHint?: string | null;
   subHint?: string | null;
+  issuer?: string | null;
 }): Promise<void> {
   const tenantId = process.env.DEFAULT_TENANT_ID?.trim();
   if (!tenantId || !process.env.DATABASE_URL?.trim()) return;
@@ -46,8 +47,11 @@ async function recordPortalSsoLoginFailed(input: {
       eventType: "auth.sso.login_failed",
       targetKind: "sso_login",
       detail: sanitizeSsoAuditDetail({
+        protocol: "oidc",
         reason_code: input.reasonCode,
         provider_id: input.providerId ?? null,
+        issuer: input.issuer ?? null,
+        external_subject: input.subHint ?? null,
         email_hint: input.emailHint ?? null,
         sub_hint: input.subHint ?? null,
       }),
@@ -64,12 +68,15 @@ export async function GET(request: Request) {
   const stateCookie = cookieStore.get(PORTAL_OIDC_STATE_COOKIE)?.value;
 
   let providerId: string | null = null;
+  let issuerForAudit: string | null = null;
+  let subjectForAudit: string | null = null;
 
   try {
     const secret = resolveStateSecret();
     const decoded = validateStateFromCookie(stateCookie, state, secret);
     providerId = decoded.providerId;
     const provider = await getPortalSsoProviderConfigServer(decoded.providerId);
+    issuerForAudit = provider.issuer;
     const oidcClient = getOidcClientService();
     const exchanged = await oidcClient.exchangeCallback({
       provider,
@@ -78,6 +85,7 @@ export async function GET(request: Request) {
       expectedNonce: decoded.nonce,
       codeVerifier: decoded.codeVerifier,
     });
+    subjectForAudit = exchanged.mapped.externalId ?? null;
 
     const loginResult = await loginWithOidcClaims({
       providerId: provider.providerId,
@@ -87,6 +95,7 @@ export async function GET(request: Request) {
       displayName: exchanged.mapped.displayName,
       deptHint: exchanged.mapped.deptHint,
       roleCodeHints: exchanged.mapped.roleCodeHints,
+      protocol: "oidc",
     });
 
     const returnTo = resolveReturnToOrDefault(decoded.returnTo ?? "/workspace");
@@ -118,6 +127,8 @@ export async function GET(request: Request) {
     void recordPortalSsoLoginFailed({
       reasonCode: code,
       providerId,
+      issuer: issuerForAudit,
+      subHint: subjectForAudit,
     });
     const response = NextResponse.redirect(new URL(`/auth?sso_error=${encodeURIComponent(code)}`, url.origin));
     response.cookies.set(PORTAL_OIDC_STATE_COOKIE, "", {
