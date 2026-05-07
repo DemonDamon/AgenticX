@@ -26,6 +26,8 @@ const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID?.trim();
 const DEFAULT_DEPT_ID = process.env.DEFAULT_DEPT_ID?.trim();
 const ENABLE_DEV_BOOTSTRAP = process.env.NODE_ENV !== "production" && process.env.ENABLE_DEV_BOOTSTRAP === "true";
 const DEV_OWNER_PASSWORD = process.env.AUTH_DEV_OWNER_PASSWORD;
+const DEV_ADMIN_EMAIL = "admin@agenticx.local";
+const LEGACY_OWNER_EMAIL = "owner@agenticx.local";
 const WEAK_PASSWORDS = new Set(["admin123", "admin123!", "password", "password123", "qwerty123"]);
 
 type ProvisionInput = {
@@ -79,22 +81,41 @@ function createRuntime(): AuthRuntime {
     if (!isStrongBootstrapPassword(DEV_OWNER_PASSWORD)) {
       throw new Error("AUTH_DEV_OWNER_PASSWORD must include upper/lower/number/symbol and be at least 14 chars.");
     }
-    const exists = await loadAuthUserByEmail(tenantId, "owner@agenticx.local");
-    if (exists) {
+    const adminExists = await loadAuthUserByEmail(tenantId, DEV_ADMIN_EMAIL);
+    if (adminExists) {
       try {
-        await syncAuthUserToPostgres(exists);
+        await syncAuthUserToPostgres(adminExists);
       } catch (err) {
-        console.error("[web-portal] dev owner syncAuthUserToPostgres failed:", err);
+        console.error("[web-portal] dev admin syncAuthUserToPostgres failed:", err);
       }
       return;
     }
+
+    const legacyOwner = await loadAuthUserByEmail(tenantId, LEGACY_OWNER_EMAIL);
+    if (legacyOwner) {
+      await upsertUserRowFromAuthUser({
+        ...legacyOwner,
+        email: DEV_ADMIN_EMAIL,
+        displayName: legacyOwner.displayName === "Seed Owner" ? "Seed Admin" : legacyOwner.displayName,
+      });
+      const migrated = await loadAuthUserByEmail(tenantId, DEV_ADMIN_EMAIL);
+      if (migrated) {
+        try {
+          await syncAuthUserToPostgres(migrated);
+        } catch (err) {
+          console.error("[web-portal] dev admin migrate syncAuthUserToPostgres failed:", err);
+        }
+      }
+      return;
+    }
+
     const passwordHash = await hashPassword(DEV_OWNER_PASSWORD);
     const owner: import("@agenticx/auth").AuthUser = {
       id: "01J00000000000000000000004",
       tenantId,
       deptId: DEFAULT_DEPT_ID,
-      email: "owner@agenticx.local",
-      displayName: "Seed Owner",
+      email: DEV_ADMIN_EMAIL,
+      displayName: "Seed Admin",
       passwordHash,
       status: "active",
       failedLoginCount: 0,
@@ -115,7 +136,7 @@ function createRuntime(): AuthRuntime {
       try {
         await syncAuthUserToPostgres(hydrated);
       } catch (err) {
-        console.error("[web-portal] dev owner sync after PG insert failed:", err);
+        console.error("[web-portal] dev admin sync after PG insert failed:", err);
       }
     }
   })();

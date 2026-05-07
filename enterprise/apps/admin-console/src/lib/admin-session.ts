@@ -91,7 +91,7 @@ export function resolveAdminCredentials():
       password: string;
     }
   | null {
-  const email = process.env.ADMIN_CONSOLE_LOGIN_EMAIL?.trim() || "owner@agenticx.local";
+  const email = process.env.ADMIN_CONSOLE_LOGIN_EMAIL?.trim() || "admin@agenticx.local";
   const password =
     process.env.ADMIN_CONSOLE_LOGIN_PASSWORD?.trim() ||
     (process.env.NODE_ENV !== "production" ? process.env.AUTH_DEV_OWNER_PASSWORD?.trim() : undefined);

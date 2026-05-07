@@ -529,7 +529,7 @@ export function AppShell({ children }: AppShellProps) {
                 >
                   <DropdownMenuLabel>
                     <div className="text-sm font-medium">{copy.adminLabel}</div>
-                    <div className="text-xs font-normal text-muted-foreground">owner@agenticx.local</div>
+                    <div className="text-xs font-normal text-muted-foreground">admin@agenticx.local</div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => router.push("/iam/users")}>
