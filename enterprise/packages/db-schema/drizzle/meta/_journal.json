@@ -57,6 +57,13 @@
       "when": 1777964822861,
       "tag": "0007_typical_roulette",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1778118000000,
+      "tag": "0008_sso_providers",
+      "breakpoints": true
     }
   ]
 }
