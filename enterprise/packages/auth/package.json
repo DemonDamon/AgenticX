@@ -11,12 +11,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@node-saml/node-saml": "^5",
     "bcryptjs": "^3.0.3",
     "jose": "^6.2.2",
     "openid-client": "^6.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.5",
+    "xmlbuilder2": "^4.0.0"
   }
 }
