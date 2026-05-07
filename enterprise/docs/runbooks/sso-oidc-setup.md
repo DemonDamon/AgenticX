@@ -1,5 +1,7 @@
 # SSO OIDC 配置手册
 
+> 双栈姊妹文档：[`sso-saml-setup.md`](./sso-saml-setup.md)（SAML 2.0 SP，含一键回退开关 `SSO_SAML_DISABLED`）。
+
 ## 目标
 
 在 `enterprise` 中启用 OIDC 单点登录，支持 `web-portal` 与 `admin-console` 统一认证。
@@ -73,6 +75,41 @@ SSO_REDIRECT_REQUIRE_ISSUER_ORIGIN_MATCH=true
 1. 创建 OIDC 应用
 2. 配置回调地址同上
 3. 记录 issuer/clientId/clientSecret 到 SSO 配置
+
+## 中移动 IDaaS（OIDC）接入信息收集清单
+
+> 本节用于 M0 阶段对接中移动客户云 IDaaS。**未拿到客户真实 issuer 之前，不要修改业务代码，也不要把 `idp.example.com` 占位值改成可解析域名**——这会让 OIDC discovery 真实发起请求，触发 `oidc.discovery_failed` 而非现有的 `oidc.provider_not_configured`。
+
+向客户对接同事索取下列信息后再去配置 `.env.local`（模板见 `.env.local.example` 末尾「中移动 IDaaS（OIDC）接入模板」）。
+
+| 字段 | 是否必填 | 说明 / 示例 |
+| --- | --- | --- |
+| 是否走 OIDC | 必填 | 若客户只能提供 SAML，转入 [sso-saml-setup.md](sso-saml-setup.md)（M3 阶段交付） |
+| issuer 完整 URL | 必填 | 形如 `https://<cmcc-idaas-host>/oauth2`，**不带尾斜杠** |
+| 是否支持 OIDC discovery | 必填 | 即能否访问 `<issuer>/.well-known/openid-configuration`；若不支持需要客户单独提供 `authorization_endpoint`、`token_endpoint`、`jwks_uri` |
+| client_id / client_secret | 必填 | 中移动 IDaaS 控制台创建 confidential client 后获得 |
+| redirect_uri | 必填 | 测试期至少包含 `http://localhost:3000/api/auth/sso/oidc/callback` 与 `http://localhost:3001/api/auth/sso/oidc/callback`；上线前替换为正式域名 |
+| 用户邮箱 claim 字段 | 必填 | 默认 `email`；若客户用 `mail` / `preferred_username` 需要在 `SSO_OIDC_CMCC_IDAAS_CLAIM_EMAIL` 覆盖 |
+| 显示名 claim | 推荐 | 通常 `name` 或 `display_name` |
+| 部门 claim | 可选 | 若客户希望 JIT 同步部门，需提供 claim 名（如 `department` / `dept_path`）与值规范 |
+| 角色 claim | 可选 | 若客户走「角色透传」，需提供 claim 名（如 `roles` / `groups`）与角色字典 |
+| 单点注销 endpoint | 可选 | OIDC RP-Initiated Logout / Back-Channel Logout，若不提供则保留本地登出语义 |
+| 测试白名单 | 必填 | 客户 IDaaS 是否允许把 `http://localhost:3000`、`http://localhost:3001` 写进 redirect 白名单做联调；如不允许需要走专用测试域名 |
+| 客户响应 SLA | 可选 | issuer / 证书轮换时通知方式与提前通告时间，便于运维准备 |
+
+收集完成后在 `.env.local` 中：
+
+1. 取消 `.env.local.example` 末尾「中移动 IDaaS（OIDC）接入模板」段的注释，按客户值填入。
+2. 把 `NEXT_PUBLIC_SSO_PROVIDERS` 改为 `cmcc-idaas:中移动统一身份` 等显示名。
+3. 重启 `web-portal` 与 `admin-console`：`NEXT_PUBLIC_*` 变更不会被 Next.js 热加载捕获。
+
+可在不发起真实 OIDC discovery 的前提下做一次基线自检：
+
+```bash
+pnpm --dir enterprise run sso:oidc-smoke
+```
+
+该命令仅读取当前进程环境变量与默认值，逐项打印 issuer / client_id / client_secret / redirect_uri / 必填 claim 是否满足；遇到任何一项缺失或仍为 `idp.example.com` 占位值时退出码 `1`。
 
 ## 验证步骤
 

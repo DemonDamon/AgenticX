@@ -231,6 +231,8 @@ fi
 : "${SSO_RETURN_TO_ALLOWLIST:=/workspace,/dashboard}"
 : "${SSO_DEFAULT_ROLE_CODES:=member}"
 : "${SSO_JIT_ROLE_ALLOWLIST:=member,admin}"
+# SAML 双栈一键回退开关（默认 false）；详见 docs/runbooks/sso-saml-setup.md。
+: "${SSO_SAML_DISABLED:=false}"
 
 if [ "$MODE" = "local" ]; then
   if is_placeholder_secret "${SSO_STATE_SIGNING_SECRET:-}"; then
@@ -309,6 +311,7 @@ SSO_OIDC_DEFAULT_CLAIM_DEPT='${SSO_OIDC_DEFAULT_CLAIM_DEPT:-}'
 SSO_OIDC_DEFAULT_CLAIM_ROLES='${SSO_OIDC_DEFAULT_CLAIM_ROLES:-}'
 SSO_OIDC_DEFAULT_CLAIM_EXTERNAL_ID='${SSO_OIDC_DEFAULT_CLAIM_EXTERNAL_ID:-}'
 SSO_PROVIDER_SECRET_KEY='$SSO_PROVIDER_SECRET_KEY'
+SSO_SAML_DISABLED='${SSO_SAML_DISABLED}'
 EOF
 chmod 600 "$ENV_FILE"
 ok "wrote $ENV_FILE (chmod 600)"
