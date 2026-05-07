@@ -3,8 +3,9 @@ import { parseSsoProviders } from "../sso-provider-options";
 import { resolveReturnToOrDefault } from "../sso-return-to";
 
 vi.mock("server-only", () => ({}));
+const getSsoProviderByProviderIdMock = vi.fn<(tenantId: string, providerId: string) => Promise<any>>();
 vi.mock("@agenticx/iam-core", () => ({
-  getSsoProviderByProviderId: vi.fn(async () => null),
+  getSsoProviderByProviderId: getSsoProviderByProviderIdMock,
   insertAuditEvent: vi.fn(),
 }));
 
@@ -22,6 +23,8 @@ function restoreEnv(): void {
 beforeEach(() => {
   vi.resetModules();
   restoreEnv();
+  getSsoProviderByProviderIdMock.mockReset();
+  getSsoProviderByProviderIdMock.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -30,10 +33,10 @@ afterEach(() => {
 
 describe("parseSsoProviders", () => {
   it("parses provider list from env-like string", () => {
-    const providers = parseSsoProviders("default:Keycloak, azure:Azure AD");
+    const providers = parseSsoProviders("default:Keycloak, azure:Azure AD:saml");
     expect(providers).toEqual([
-      { id: "default", name: "Keycloak" },
-      { id: "azure", name: "Azure AD" },
+      { id: "default", name: "Keycloak", protocol: "oidc" },
+      { id: "azure", name: "Azure AD", protocol: "saml" },
     ]);
   });
 
@@ -57,6 +60,25 @@ describe("getPortalSsoProviderConfigServer", () => {
     process.env.SSO_OIDC_DEFAULT_ISSUER = "https://idp.example.com/realms/agenticx";
     process.env.SSO_OIDC_DEFAULT_CLIENT_ID = "agenticx-portal";
     process.env.SSO_OIDC_DEFAULT_REDIRECT_URI = "http://localhost:3000/api/auth/sso/oidc/callback";
+
+    const { getPortalSsoProviderConfigServer } = await import("../sso-runtime");
+
+    await expect(getPortalSsoProviderConfigServer("default")).rejects.toThrow("oidc.provider_not_configured");
+  });
+
+  it("rejects db provider using example issuer placeholder", async () => {
+    process.env.DEFAULT_TENANT_ID = "01J00000000000000000000001";
+    getSsoProviderByProviderIdMock.mockResolvedValueOnce({
+      providerId: "default",
+      protocol: "oidc",
+      enabled: true,
+      issuer: "https://idp.example.com/realms/agenticx",
+      clientId: "agenticx-portal",
+      redirectUri: "http://localhost:3000/api/auth/sso/oidc/callback",
+      clientSecretEncrypted: null,
+      scopes: ["openid", "profile", "email"],
+      claimMapping: {},
+    });
 
     const { getPortalSsoProviderConfigServer } = await import("../sso-runtime");
 

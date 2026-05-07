@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { getPortalSsoErrorMessageZh } from "@agenticx/auth/src/services/oidc-error-codes";
 import { usePortalCopy } from "../../lib/portal-copy";
-import { getPortalSsoProviderOptions } from "../../lib/sso-provider-options";
+import { getPortalSsoProviderOptions, pickPreferredSsoProvider } from "../../lib/sso-provider-options";
 
 function AuthPageInner() {
   const router = useRouter();
@@ -344,8 +344,13 @@ function AuthPageInner() {
                   size="sm"
                   disabled={ssoProviders.length === 0}
                   onClick={() => {
-                    const provider = ssoProviders[0]?.id ?? "default";
-                    window.location.href = `/api/auth/sso/oidc/start?provider=${encodeURIComponent(provider)}&returnTo=${encodeURIComponent("/workspace")}`;
+                    const provider = pickPreferredSsoProvider(ssoProviders);
+                    const providerId = provider?.id ?? "default";
+                    const startPath =
+                      provider?.protocol === "saml"
+                        ? "/api/auth/sso/saml/start"
+                        : "/api/auth/sso/oidc/start";
+                    window.location.href = `${startPath}?provider=${encodeURIComponent(providerId)}&returnTo=${encodeURIComponent("/workspace")}`;
                   }}
                 >
                   企业 SSO

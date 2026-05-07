@@ -9,7 +9,8 @@
     "start": "next start -p 3000",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "saml:mock": "pnpm -C ../.. sso:saml-mock"
   },
   "dependencies": {
     "@agenticx/auth": "workspace:*",
