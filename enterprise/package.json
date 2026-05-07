@@ -13,14 +13,19 @@
     "visual-tour": "tsx scripts/e2e-visual-tour.ts",
     "visual-tour:install": "playwright install chromium",
     "e2e:iam": "tsx scripts/e2e-iam.ts",
-    "e2e:sso": "tsx scripts/e2e-sso.ts"
+    "e2e:sso": "tsx scripts/e2e-sso.ts",
+    "sso:oidc-smoke": "tsx scripts/sso/oidc-smoke.ts",
+    "sso:saml-mock": "node scripts/sso/mock-saml-idp/index.mjs",
+    "sso:saml-mock-setup": "bash scripts/sso/mock-saml-idp/setup-keypair.sh",
+    "saml:mock": "pnpm sso:saml-mock"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "playwright": "^1.59.1",
     "tsx": "^4.21.0",
     "turbo": "^2.3.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "xml-crypto": "^6.0.0"
   },
   "packageManager": "pnpm@9.12.0",
   "engines": {
