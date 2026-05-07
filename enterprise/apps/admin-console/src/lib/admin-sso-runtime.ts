@@ -40,13 +40,24 @@ function asClaimString(value: unknown, fallback: string): string {
 function requiredEnv(providerId: string, suffix: string): string {
   const value = process.env[envKey(providerId, suffix)]?.trim();
   if (!value) {
-    throw new Error(`oidc.missing_env.${providerId}.${suffix.toLowerCase()}`);
+    throw new Error("oidc.provider_not_configured");
+  }
+  if (suffix === "ISSUER" && isExampleIssuer(value)) {
+    throw new Error("oidc.provider_not_configured");
   }
   return value;
 }
 
 function optionalEnv(providerId: string, suffix: string): string | undefined {
   return process.env[envKey(providerId, suffix)]?.trim() || undefined;
+}
+
+function isExampleIssuer(value: string): boolean {
+  try {
+    return new URL(value).hostname === "idp.example.com";
+  } catch {
+    return false;
+  }
 }
 
 export function getAdminSsoProviderConfig(providerId: string): OidcProviderConfig {

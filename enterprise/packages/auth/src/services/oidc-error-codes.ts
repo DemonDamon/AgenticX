@@ -2,6 +2,7 @@
  * Single source for SSO / OIDC error codes shown on login pages (FR-D2).
  */
 export const OIDC_PORTAL_ERROR_MESSAGES_EN: Record<string, string> = {
+  "oidc.provider_not_configured": "SSO provider is not configured. Sign in with password or contact your administrator.",
   "oidc.discovery_failed": "SSO service is temporarily unavailable. Try again or sign in with password.",
   "oidc.invalid_state": "SSO session state is invalid. Start sign-in again.",
   "oidc.state_cookie_missing": "SSO session cookie is missing. Start sign-in again.",
@@ -19,6 +20,7 @@ export const OIDC_PORTAL_ERROR_MESSAGES_EN: Record<string, string> = {
 };
 
 export const OIDC_PORTAL_ERROR_MESSAGES_ZH: Record<string, string> = {
+  "oidc.provider_not_configured": "SSO Provider 尚未配置，请先使用账号密码登录或联系管理员配置企业 IdP",
   "oidc.discovery_failed": "SSO 服务暂不可用，请稍后重试或使用账号密码登录",
   "oidc.invalid_state": "SSO 登录状态失效，请重新发起登录",
   "oidc.state_cookie_missing": "SSO 登录状态缺失，请重新发起登录",
