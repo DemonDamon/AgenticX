@@ -1,5 +1,9 @@
 /**
- * Single source for SSO / OIDC error codes shown on login pages (FR-D2).
+ * Single source for SSO / OIDC + SAML error codes shown on login pages (FR-D2).
+ *
+ * 命名空间约定：
+ * - `oidc.*` 历史保留，OIDC 链路用。
+ * - `saml.*` 新增，SAML 链路用。`oidc-error-codes.ts` 文件名出于兼容保留，不重命名。
  */
 export const OIDC_PORTAL_ERROR_MESSAGES_EN: Record<string, string> = {
   "oidc.provider_not_configured": "SSO provider is not configured. Sign in with password or contact your administrator.",
@@ -17,6 +21,19 @@ export const OIDC_PORTAL_ERROR_MESSAGES_EN: Record<string, string> = {
   "oidc.invalid_redirect_uri": "Redirect URI is misconfigured for SSO. Contact your administrator.",
   "oidc.unsupported_runtime": "SSO runtime component missing. Contact your administrator.",
   "oidc.claim.email_missing": "ID token is missing a usable email claim.",
+  "saml.provider_not_configured": "SAML SSO provider is not configured. Contact your administrator.",
+  "saml.provider_disabled": "SAML SSO provider is disabled. Contact your administrator.",
+  "saml.state_secret_missing": "SAML state signing secret is missing. Contact your administrator.",
+  "saml.start_failed": "SAML sign-in start failed. Retry or contact your administrator.",
+  "saml.invalid_signature": "SAML response signature is invalid. Contact your administrator.",
+  "saml.expired_assertion": "SAML assertion expired. Sign in again.",
+  "saml.invalid_audience": "SAML audience is misconfigured. Contact your administrator.",
+  "saml.invalid_issuer": "SAML issuer mismatch. Contact your administrator.",
+  "saml.missing_in_response_to": "SAML InResponseTo missing or mismatched. Sign in again.",
+  "saml.relay_state_invalid": "SAML relay state is invalid. Sign in again.",
+  "saml.relay_state_expired": "SAML relay state expired. Sign in again.",
+  "saml.attribute_email_missing": "SAML response is missing a usable email attribute.",
+  "saml.callback_failed": "SAML callback failed. Retry or contact your administrator.",
 };
 
 export const OIDC_PORTAL_ERROR_MESSAGES_ZH: Record<string, string> = {
@@ -35,6 +52,19 @@ export const OIDC_PORTAL_ERROR_MESSAGES_ZH: Record<string, string> = {
   "oidc.invalid_redirect_uri": "SSO 回调地址配置不合法，请联系管理员检查 Redirect URI",
   "oidc.unsupported_runtime": "SSO 运行时组件缺失，请联系管理员",
   "oidc.claim.email_missing": "身份令牌缺少邮箱信息，无法完成登录",
+  "saml.provider_not_configured": "SAML SSO Provider 尚未配置，请联系管理员",
+  "saml.provider_disabled": "当前 SAML SSO Provider 已停用，请联系管理员",
+  "saml.state_secret_missing": "SAML 状态签名密钥缺失，请联系管理员",
+  "saml.start_failed": "SAML 登录发起失败，请重试或联系管理员",
+  "saml.invalid_signature": "SAML 响应签名无效，请联系管理员",
+  "saml.expired_assertion": "SAML 断言已过期，请重新登录",
+  "saml.invalid_audience": "SAML Audience 配置不匹配，请联系管理员",
+  "saml.invalid_issuer": "SAML Issuer 不匹配，请联系管理员",
+  "saml.missing_in_response_to": "SAML InResponseTo 缺失或不一致，请重新登录",
+  "saml.relay_state_invalid": "SAML RelayState 无效，请重新登录",
+  "saml.relay_state_expired": "SAML RelayState 已过期，请重新登录",
+  "saml.attribute_email_missing": "SAML 响应缺少邮箱属性，无法完成登录",
+  "saml.callback_failed": "SAML 回调处理失败，请重试或联系管理员",
 };
 
 export const OIDC_ADMIN_ERROR_MESSAGES_EN: Record<string, string> = {
