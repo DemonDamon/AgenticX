@@ -1,4 +1,4 @@
-import { buildStateCookieValue } from "@agenticx/auth";
+import { OidcConfigError, buildStateCookieValue } from "@agenticx/auth";
 import { NextResponse } from "next/server";
 import {
   getOidcClientService,
@@ -7,6 +7,12 @@ import {
 } from "../../../../../../lib/sso-runtime";
 
 const PORTAL_OIDC_STATE_COOKIE = "agenticx_oidc_state_portal";
+
+function mapStartError(error: unknown): string {
+  if (error instanceof OidcConfigError) return error.code;
+  if (error instanceof Error && error.message.startsWith("oidc.")) return error.message;
+  return "oidc.start_failed";
+}
 
 function resolveStateSecret(): string {
   const secret = process.env.SSO_STATE_SIGNING_SECRET?.trim();
@@ -54,7 +60,6 @@ export async function GET(request: Request) {
     });
     return response;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "oidc.start_failed";
-    return NextResponse.redirect(new URL(`/auth?sso_error=${encodeURIComponent(message)}`, url.origin));
+    return NextResponse.redirect(new URL(`/auth?sso_error=${encodeURIComponent(mapStartError(error))}`, url.origin));
   }
 }
