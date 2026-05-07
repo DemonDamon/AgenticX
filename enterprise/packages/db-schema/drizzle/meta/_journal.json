@@ -64,6 +64,13 @@
       "when": 1778118000000,
       "tag": "0008_sso_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1778135139422,
+      "tag": "0009_eager_famine",
+      "breakpoints": true
     }
   ]
 }
