@@ -1,0 +1,13 @@
+# Long-run + Linear（可选）示例片段 — 合并进 ~/.agenticx/config.yaml
+#
+# 启用后 Studio 会加载 agenticx/longrun 并在 lifespan 内启动后台 poll。
+#
+longrun:
+  enabled: false # 或 true；也可用环境变量 AGX_LONGRUN_ENABLED=1
+  workspace_root: ~/.agenticx/task-workspaces
+  stall_threshold_sec: 300
+  poll_interval_sec: 30
+  worker_session_id: __longrun_worker__
+  # Linear 可选：填写后自动并入 TaskSource
+  linear_api_key: "" # 或使用环境变量 LINEAR_API_KEY
+  linear_team_ids: "" # 可选，逗号分隔 team id

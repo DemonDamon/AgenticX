@@ -26,7 +26,7 @@ from .types import (
     HookEvent,
     HookHandler,
 )
-from .registry import HookRegistry, get_global_hook_registry
+from .registry import HookRegistry, dispatch_hook_event_sync, get_global_hook_registry
 from .loader import (
     discover_hooks,
     discover_declarative_hooks,
@@ -110,6 +110,7 @@ __all__ = [
     "HookEvent",
     "HookHandler",
     "HookRegistry",
+    "dispatch_hook_event_sync",
     "discover_hooks",
     "build_hook_status",
     "load_discovered_hooks",

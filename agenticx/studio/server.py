@@ -487,7 +487,29 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.debug("WeChat adapter not started: %s", exc)
 
+        longrun_bg: asyncio.Task[None] | None = None
+        try:
+            from agenticx.longrun.bootstrap import maybe_start_longrun
+
+            longrun_bg = await maybe_start_longrun(app)
+            app.state.longrun_background_task = longrun_bg
+        except Exception as exc:
+            logger.debug("LongRun orchestrator not started: %s", exc)
+
         yield
+
+        if longrun_bg is not None:
+            longrun_bg.cancel()
+            try:
+                await longrun_bg
+            except asyncio.CancelledError:
+                pass
+        orch = getattr(app.state, "longrun_orchestrator", None)
+        if orch is not None:
+            try:
+                await orch.stop()
+            except Exception as exc:
+                logger.debug("LongRun orchestrator stop error: %s", exc)
 
         # Shutdown: close all MCP child processes via the global hub.
         try:

@@ -10,7 +10,7 @@ import logging
 from collections import defaultdict
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 from .types import HookEvent, HookHandler
 
@@ -104,4 +104,31 @@ _GLOBAL_REGISTRY = HookRegistry()
 
 def get_global_hook_registry() -> HookRegistry:
     return _GLOBAL_REGISTRY
+
+
+def dispatch_hook_event_sync(
+    *,
+    hook_type: str,
+    action: str,
+    context_payload: Dict[str, Any],
+    agent_id: str = "longrun",
+    session_key: str = "",
+    task_id: Optional[str] = None,
+) -> bool:
+    """Fire-and-forget sync dispatch through :class:`HookRegistry`.
+
+    Used by ``agenticx.longrun`` task workspace lifecycle hooks. Payload lands in
+    :attr:`HookEvent.context` (merged shallow-copy); callers may include keys such as
+    ``cwd``, ``workspace_path``, ``phase``.
+    """
+
+    evt = HookEvent(
+        type=str(hook_type or "").strip(),
+        action=str(action or "").strip(),
+        agent_id=str(agent_id or "").strip() or "longrun",
+        session_key=str(session_key or "").strip(),
+        task_id=task_id,
+        context=dict(context_payload or {}),
+    )
+    return bool(get_global_hook_registry().trigger_sync(evt))
 
