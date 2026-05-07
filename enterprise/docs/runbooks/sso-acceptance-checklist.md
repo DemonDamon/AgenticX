@@ -15,9 +15,19 @@
 - [ ] 已禁用账号（`status=disabled`）SSO 登录被拒
 - [ ] provider 禁用时返回 `provider_disabled`
 
+### SAML 2.0 双栈验收
+
+> 详情见 [`sso-saml-setup.md`](./sso-saml-setup.md)。
+
+- [ ] 管理台可创建并启用 protocol=saml 的 provider，并通过「健康检查」按钮看到证书 validFrom/validTo
+- [ ] portal `/api/auth/sso/saml/start` 触发跳转 IdP；callback 成功后落 access/refresh cookie
+- [ ] admin SAML 登录走「预开户 + admin:enter」三态校验
+- [ ] callback 失败写入 `auth.sso.login_failed` 审计，含 `protocol=saml` 与 `reason_code=saml.*`
+- [ ] 设置 `SSO_SAML_DISABLED=true` 后 SAML 全部链路返回 `saml.provider_not_configured`，OIDC 不受影响
+
 ## 安全验收
 
-- [ ] state cookie 为 `HttpOnly + SameSite=Lax`
+- [ ] state cookie 为 `HttpOnly`，且 SameSite 策略符合环境：生产 `SameSite=None + Secure`，非生产 `SameSite=Lax`
 - [ ] callback 支持 state 防重放
 - [ ] `client_secret` 以加密形式存储（`client_secret_encrypted`）
 - [ ] 日志中不打印 token/id_token/client_secret
