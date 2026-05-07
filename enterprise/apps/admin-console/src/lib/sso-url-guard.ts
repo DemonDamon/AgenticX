@@ -48,8 +48,37 @@ function isLoopbackOrPrivateIPv4(ip: string): boolean {
   return false;
 }
 
+function normalizeIpLiteral(ip: string): string {
+  const normalized = ip.trim().toLowerCase();
+  if (normalized.startsWith("[") && normalized.endsWith("]")) {
+    return normalized.slice(1, -1);
+  }
+  return normalized;
+}
+
+function decodeMappedIpv6ToIpv4(ipv6: string): string | null {
+  if (!ipv6.startsWith("::ffff:")) return null;
+  const mapped = ipv6.slice("::ffff:".length);
+  if (!mapped) return null;
+  if (isIP(mapped) === 4) return mapped;
+
+  const parts = mapped.split(":");
+  if (parts.length === 2 && parts.every((part) => /^[0-9a-f]{1,4}$/i.test(part))) {
+    const high = Number.parseInt(parts[0]!, 16);
+    const low = Number.parseInt(parts[1]!, 16);
+    return `${(high >>> 8) & 0xff}.${high & 0xff}.${(low >>> 8) & 0xff}.${low & 0xff}`;
+  }
+  if (parts.length === 1 && /^[0-9a-f]{1,8}$/i.test(parts[0]!)) {
+    const value = Number.parseInt(parts[0]!, 16);
+    return `${(value >>> 24) & 0xff}.${(value >>> 16) & 0xff}.${(value >>> 8) & 0xff}.${value & 0xff}`;
+  }
+  return null;
+}
+
 function isLoopbackOrPrivateIPv6(ip: string): boolean {
-  const normalized = ip.toLowerCase();
+  const normalized = normalizeIpLiteral(ip);
+  const mappedIpv4 = decodeMappedIpv6ToIpv4(normalized);
+  if (mappedIpv4 && isLoopbackOrPrivateIPv4(mappedIpv4)) return true;
   if (normalized === "::1") return true;
   if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
   if (normalized.startsWith("fe80:")) return true;
@@ -120,11 +149,12 @@ export async function assertSafeIssuerUrl(raw: string): Promise<void> {
     throw new Error("issuer_host_not_allowed");
   }
 
-  const directIpType = isIP(host);
-  if (directIpType === 4 && isLoopbackOrPrivateIPv4(host)) {
+  const directIpHost = normalizeIpLiteral(host);
+  const directIpType = isIP(directIpHost);
+  if (directIpType === 4 && isLoopbackOrPrivateIPv4(directIpHost)) {
     throw new Error("issuer_host_not_allowed");
   }
-  if (directIpType === 6 && isLoopbackOrPrivateIPv6(host)) {
+  if (directIpType === 6 && isLoopbackOrPrivateIPv6(directIpHost)) {
     throw new Error("issuer_host_not_allowed");
   }
 
@@ -167,13 +197,14 @@ export async function assertSafeRedirectUri(raw: string, options?: { issuerUrl?:
 
   const nodeEnv = process.env.NODE_ENV ?? "development";
   const isProd = nodeEnv === "production";
+  const isDevHttpLoopback = !isProd && isDevLocalhostHttp(parsed);
 
   if (isProd && parsed.protocol !== "https:") {
     throw new Error("redirect_uri_https_required");
   }
 
   if (!isProd && parsed.protocol === "http:") {
-    if (isDevLocalhostHttp(parsed)) {
+    if (isDevHttpLoopback) {
       /* OK */
     } else {
       const allow = parseOriginAllowlist(process.env.SSO_DEV_INSECURE_REDIRECT_ALLOWLIST);
@@ -197,17 +228,21 @@ export async function assertSafeRedirectUri(raw: string, options?: { issuerUrl?:
       throw new Error("redirect_uri_issuer_origin_mismatch");
     }
   }
+  if (isDevHttpLoopback) {
+    return;
+  }
 
   const host = parsed.hostname.trim().toLowerCase();
   if (!host) {
     throw new Error("redirect_uri_host_invalid");
   }
 
-  const directIpType = isIP(host);
-  if (directIpType === 4 && isLoopbackOrPrivateIPv4(host)) {
+  const directIpHost = normalizeIpLiteral(host);
+  const directIpType = isIP(directIpHost);
+  if (directIpType === 4 && isLoopbackOrPrivateIPv4(directIpHost)) {
     throw new Error("redirect_uri_host_not_allowed");
   }
-  if (directIpType === 6 && isLoopbackOrPrivateIPv6(host)) {
+  if (directIpType === 6 && isLoopbackOrPrivateIPv6(directIpHost)) {
     throw new Error("redirect_uri_host_not_allowed");
   }
 

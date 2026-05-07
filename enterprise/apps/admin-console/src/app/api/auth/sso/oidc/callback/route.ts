@@ -43,6 +43,8 @@ async function recordAdminSsoLoginFailed(input: {
   reasonCode: string;
   providerId?: string | null;
   emailHint?: string | null;
+  issuer?: string | null;
+  subHint?: string | null;
 }): Promise<void> {
   if (!process.env.DATABASE_URL?.trim()) return;
   try {
@@ -52,8 +54,11 @@ async function recordAdminSsoLoginFailed(input: {
       eventType: "auth.sso.login_failed",
       targetKind: "sso_login",
       detail: sanitizeSsoAuditDetail({
+        protocol: "oidc",
         reason_code: input.reasonCode,
         provider_id: input.providerId ?? null,
+        issuer: input.issuer ?? null,
+        external_subject: input.subHint ?? null,
         email_hint: input.emailHint ?? null,
       }),
     });
@@ -73,12 +78,15 @@ export async function GET(request: Request) {
   const stateCookie = cookieStore.get(ADMIN_OIDC_STATE_COOKIE)?.value;
 
   let providerId: string | null = null;
+  let providerIssuer: string | null = null;
+  let externalSubjectHint: string | null = null;
 
   try {
     const secret = resolveStateSecret();
     const decoded = validateStateFromCookie(stateCookie, state, secret);
     providerId = decoded.providerId;
     const provider = await getAdminSsoProviderConfigServer(decoded.providerId);
+    providerIssuer = provider.issuer;
     const oidcClient = getOidcClientService();
     const exchanged = await oidcClient.exchangeCallback({
       provider,
@@ -87,6 +95,7 @@ export async function GET(request: Request) {
       expectedNonce: decoded.nonce,
       codeVerifier: decoded.codeVerifier,
     });
+    externalSubjectHint = exchanged.mapped.externalId ?? null;
 
     const result = await authenticateAdminConsoleViaOidc({
       email: exchanged.mapped.email,
@@ -99,6 +108,8 @@ export async function GET(request: Request) {
         reasonCode: errCode,
         providerId,
         emailHint: exchanged.mapped.email,
+        issuer: providerIssuer,
+        subHint: externalSubjectHint,
       });
       const response = NextResponse.redirect(new URL(`/login?sso_error=${errCode}`, url.origin));
       response.cookies.set(ADMIN_OIDC_STATE_COOKIE, "", {
@@ -120,8 +131,11 @@ export async function GET(request: Request) {
           targetKind: "user",
           targetId: result.userId,
           detail: sanitizeSsoAuditDetail({
+            protocol: "oidc",
             provider: providerId,
+            provider_id: providerId,
             issuer: provider.issuer,
+            external_subject: exchanged.mapped.externalId ?? null,
             email: result.email,
           }),
         });
@@ -149,7 +163,13 @@ export async function GET(request: Request) {
     return response;
   } catch (error) {
     const code = mapCallbackError(error);
-    void recordAdminSsoLoginFailed({ tenantId, reasonCode: code, providerId });
+    void recordAdminSsoLoginFailed({
+      tenantId,
+      reasonCode: code,
+      providerId,
+      issuer: providerIssuer,
+      subHint: externalSubjectHint,
+    });
     const response = NextResponse.redirect(new URL(`/login?sso_error=${encodeURIComponent(code)}`, url.origin));
     response.cookies.set(ADMIN_OIDC_STATE_COOKIE, "", {
       httpOnly: true,

@@ -1,8 +1,19 @@
 import { encryptSecret } from "@agenticx/auth";
-import { deleteSsoProvider, getSsoProviderById, updateSsoProvider } from "@agenticx/iam-core";
+import {
+  deleteSsoProvider,
+  getSsoProviderById,
+  updateSsoProvider,
+  type SsoProviderSamlConfig,
+} from "@agenticx/iam-core";
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../../lib/admin-auth";
 import { getOidcClientService } from "../../../../../../lib/admin-sso-runtime";
+import {
+  assertSafeSamlConfigUrls,
+  parseSamlConfigPayload,
+  SamlConfigPayloadError,
+  samlConfigErrorResponse,
+} from "../../../../../../lib/sso-saml-config";
 import {
   assertSafeIssuerUrl,
   assertSafeRedirectUri,
@@ -12,6 +23,10 @@ import {
 type RouteParams = {
   params: Promise<{ id: string }>;
 };
+
+function isSamlGloballyDisabled(): boolean {
+  return process.env.SSO_SAML_DISABLED?.trim().toLowerCase() === "true";
+}
 
 function badSsoConfigResponse(error: unknown): NextResponse {
   const message = error instanceof Error ? error.message : "invalid_sso_url";
@@ -60,6 +75,31 @@ export async function PATCH(request: Request, context: RouteParams) {
   const { id } = await context.params;
   const existing = await getSsoProviderById(guard.session.tenantId, id);
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const requestedProtocol =
+    typeof body.protocol === "string" && body.protocol.trim() ? body.protocol.trim() : undefined;
+  if (requestedProtocol && existing?.protocol && requestedProtocol !== existing.protocol) {
+    return NextResponse.json(
+      { code: "40000", message: "protocol cannot be changed" },
+      { status: 400 }
+    );
+  }
+  if (isSamlGloballyDisabled() && existing?.protocol === "saml" && body.enabled === true) {
+    return NextResponse.json(
+      { code: "40000", message: "当前 SAML 已被一键回退，禁止启用 SAML Provider" },
+      { status: 400 }
+    );
+  }
+  if (existing?.protocol === "oidc") {
+    const oidcRequiredFields = ["issuer", "clientId", "redirectUri"] as const;
+    for (const field of oidcRequiredFields) {
+      if (typeof body[field] === "string" && body[field].trim() === "") {
+        return NextResponse.json(
+          { code: "40000", message: `OIDC 字段 ${field} 不能为空` },
+          { status: 400 }
+        );
+      }
+    }
+  }
   const issuer = body.issuer !== undefined ? `${body.issuer ?? ""}`.trim() : undefined;
   const redirectUri = body.redirectUri !== undefined ? `${body.redirectUri ?? ""}`.trim() : undefined;
 
@@ -79,12 +119,25 @@ export async function PATCH(request: Request, context: RouteParams) {
         /* ignore */
       }
     }
-    const issuerForRedirect = issuer ?? existing?.issuer;
+    const issuerForRedirect = issuer ?? existing?.issuer ?? undefined;
     if (redirectUri !== undefined) {
-      await assertSafeRedirectUri(redirectUri, { issuerUrl: issuerForRedirect });
+      await assertSafeRedirectUri(redirectUri, { issuerUrl: issuerForRedirect ?? undefined });
     }
   } catch (error) {
     return badSsoConfigResponse(error);
+  }
+
+  let samlConfigPatch: SsoProviderSamlConfig | undefined;
+  if (body.samlConfig !== undefined) {
+    try {
+      samlConfigPatch = parseSamlConfigPayload(body.samlConfig);
+      await assertSafeSamlConfigUrls(samlConfigPatch);
+    } catch (error) {
+      if (error instanceof SamlConfigPayloadError) {
+        return samlConfigErrorResponse(error);
+      }
+      return badSsoConfigResponse(error);
+    }
   }
 
   try {
@@ -110,6 +163,7 @@ export async function PATCH(request: Request, context: RouteParams) {
                 : null,
             }
           : {}),
+        ...(samlConfigPatch !== undefined ? { samlConfig: samlConfigPatch } : {}),
       },
       guard.session.userId
     );

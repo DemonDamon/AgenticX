@@ -105,6 +105,22 @@ describe("assertSafeRedirectUri (FR-A1)", () => {
       assertSafeRedirectUri("http://localhost:3000/api/auth/sso/oidc/callback")
     ).resolves.not.toThrow();
   });
+
+  it("allows http://127.0.0.1 in development without allowlist", async () => {
+    setNodeEnv("development");
+    const { assertSafeRedirectUri } = await freshGuard();
+    await expect(
+      assertSafeRedirectUri("http://127.0.0.1:3000/api/auth/sso/oidc/callback")
+    ).resolves.not.toThrow();
+  });
+
+  it("allows http://[::1] in development without allowlist", async () => {
+    setNodeEnv("development");
+    const { assertSafeRedirectUri } = await freshGuard();
+    await expect(
+      assertSafeRedirectUri("http://[::1]:3000/api/auth/sso/oidc/callback")
+    ).resolves.not.toThrow();
+  });
 });
 
 describe("assertSafeIssuerUrl + DNS timeout/cache (FR-A2)", () => {
@@ -149,6 +165,22 @@ describe("assertSafeIssuerUrl + DNS timeout/cache (FR-A2)", () => {
     setNodeEnv("production");
     const { assertSafeIssuerUrl } = await freshGuard();
     await expect(assertSafeIssuerUrl("https://10.0.0.5")).rejects.toThrow("issuer_host_not_allowed");
+    expect(lookupMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects issuer pointing to IPv4-mapped loopback IPv6 directly", async () => {
+    setNodeEnv("production");
+    const { assertSafeIssuerUrl } = await freshGuard();
+    await expect(assertSafeIssuerUrl("https://[::ffff:127.0.0.1]")).rejects.toThrow("issuer_host_not_allowed");
+    expect(lookupMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects redirect_uri pointing to IPv4-mapped private IPv6 directly", async () => {
+    setNodeEnv("production");
+    const { assertSafeRedirectUri } = await freshGuard();
+    await expect(assertSafeRedirectUri("https://[::ffff:10.0.0.1]/cb")).rejects.toThrow(
+      "redirect_uri_host_not_allowed"
+    );
     expect(lookupMock).not.toHaveBeenCalled();
   });
 });

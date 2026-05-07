@@ -19,7 +19,7 @@ import {
 } from "@agenticx/ui";
 import { getAdminSsoErrorMessageZh } from "@agenticx/auth/src/services/oidc-error-codes";
 import { ArrowRight, ShieldAlert, ShieldCheck } from "lucide-react";
-import { getAdminSsoProviderOptions } from "../../lib/admin-sso-provider-options";
+import { getAdminSsoProviderOptions, pickPreferredSsoProvider } from "../../lib/admin-sso-provider-options";
 
 function LoginPageInner() {
   const router = useRouter();
@@ -187,8 +187,13 @@ function LoginPageInner() {
                   type="button"
                   disabled={ssoProviders.length === 0}
                   onClick={() => {
-                    const provider = ssoProviders[0]?.id ?? "default";
-                    window.location.href = `/api/auth/sso/oidc/start?provider=${encodeURIComponent(provider)}`;
+                    const provider = pickPreferredSsoProvider(ssoProviders);
+                    const providerId = provider?.id ?? "default";
+                    const startPath =
+                      provider?.protocol === "saml"
+                        ? "/api/auth/sso/saml/start"
+                        : "/api/auth/sso/oidc/start";
+                    window.location.href = `${startPath}?provider=${encodeURIComponent(providerId)}`;
                   }}
                 >
                   企业 SSO 登录
