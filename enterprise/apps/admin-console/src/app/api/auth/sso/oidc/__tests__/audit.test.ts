@@ -123,5 +123,7 @@ describe("admin-console SSO callback audit (FR-B1.2)", () => {
     expect(detail.reason_code).toBe("admin_scope_missing");
     expect(detail.email_hint).toBe("no-admin@example.com");
     expect(detail.provider_id).toBe("default");
+    expect(detail.issuer).toBe("https://idp.example.com");
+    expect(detail.external_subject).toBe("u1");
   });
 });

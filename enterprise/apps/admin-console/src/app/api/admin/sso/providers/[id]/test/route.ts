@@ -18,20 +18,35 @@ export async function POST(_request: Request, context: RouteParams) {
   if (!provider) {
     return NextResponse.json({ code: "40400", message: "provider not found" }, { status: 404 });
   }
+  if (provider.protocol !== "oidc") {
+    return NextResponse.json(
+      { code: "40000", message: "test endpoint only supports protocol=oidc" },
+      { status: 400 }
+    );
+  }
+  if (!provider.issuer || !provider.clientId || !provider.redirectUri) {
+    return NextResponse.json(
+      { code: "40000", message: "OIDC provider missing required fields (issuer/clientId/redirectUri)" },
+      { status: 400 }
+    );
+  }
+  const issuer = provider.issuer;
+  const clientId = provider.clientId;
+  const redirectUri = provider.redirectUri;
 
   try {
-    await assertSafeIssuerUrl(provider.issuer);
+    await assertSafeIssuerUrl(issuer);
     const service = new OidcClientService();
     const secretKey = process.env.SSO_PROVIDER_SECRET_KEY?.trim();
     await service.getConfiguration({
       providerId: provider.providerId,
-      issuer: provider.issuer,
-      clientId: provider.clientId,
+      issuer,
+      clientId,
       clientSecret:
         provider.clientSecretEncrypted && secretKey
           ? decryptSecret(provider.clientSecretEncrypted, secretKey)
           : undefined,
-      redirectUri: provider.redirectUri,
+      redirectUri,
       scopes: provider.scopes,
       claimMapping: {
         email: `${provider.claimMapping.email ?? "email"}`,
