@@ -725,6 +725,55 @@ class AgentTeamManager:
             new_context.artifacts.update(previous.artifacts)
         return result
 
+    async def submit_for_longrun(self, entry: Any) -> Dict[str, Any]:
+        """Run one long-running task entry via :meth:`spawn_subagent` and await completion."""
+        payload = getattr(entry, "payload", None)
+        if not isinstance(payload, dict):
+            payload = {}
+        workspace_obj = getattr(entry, "workspace", None)
+        ws_path = ""
+        if workspace_obj is not None:
+            p = getattr(workspace_obj, "path", None)
+            if p is not None:
+                ws_path = str(p)
+        task_text = str(payload.get("task") or payload.get("prompt") or "").strip()
+        if not task_text:
+            raise ValueError("longrun payload requires non-empty task or prompt")
+        name = str(payload.get("name") or "longrun").strip() or "longrun"
+        role = str(payload.get("role") or "worker").strip() or "worker"
+        spawn_res = await self.spawn_subagent(
+            name=name,
+            role=role,
+            task=task_text,
+            workspace_dir=ws_path or None,
+            provider=str(payload.get("provider") or "").strip() or None,
+            model=str(payload.get("model") or "").strip() or None,
+        )
+        if not spawn_res.get("ok"):
+            raise RuntimeError(str(spawn_res.get("error") or spawn_res))
+        agent_id = str(spawn_res.get("agent_id", "") or "").strip()
+        sub_task = self._tasks.get(agent_id)
+        if sub_task is not None:
+            await sub_task
+        ctx = self._agents.get(agent_id) or self._archived_agents.get(agent_id)
+        if ctx is None:
+            raise RuntimeError("subagent context missing after run")
+        if ctx.status == SubAgentStatus.FAILED:
+            raise RuntimeError(ctx.error_text or "subagent_failed")
+        if ctx.status == SubAgentStatus.CANCELLED:
+            raise asyncio.CancelledError()
+        text = (ctx.final_text or "").strip()
+        wants = bool(payload.get("wants_continuation"))
+        if not wants and "[longrun:continue]" in text.lower():
+            wants = True
+        return {
+            "ok": True,
+            "wants_continuation": wants,
+            "agent_id": agent_id,
+            "final_text": ctx.final_text,
+            "status": ctx.status.value,
+        }
+
     def _find_by_name_or_avatar(self, query: str) -> Optional[SubAgentContext]:
         """Fallback lookup by name (case-insensitive) or avatar_id."""
         q = query.strip().lower()
