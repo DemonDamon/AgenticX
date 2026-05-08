@@ -1,6 +1,7 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
+import { createPortal } from "react-dom";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { GitBranch, GripVertical, Expand, Sparkles } from "lucide-react";
+import { GitBranch, GripVertical, Expand, Sparkles, Wrench } from "lucide-react";
 import {
   useAppStore,
   type Avatar,
@@ -146,6 +147,170 @@ function NewTopicIconButtons({ onNewTopic }: { onNewTopic: (inherit: boolean) =>
         </button>
       </HoverTip>
     </div>
+  );
+}
+
+interface SkillItem {
+  name: string;
+  description: string;
+  icon?: string;
+  source?: string;
+  globally_disabled?: boolean;
+}
+
+interface SkillPickerButtonProps {
+  apiBase: string;
+  apiToken: string;
+  onSelect: (skill: SkillItem) => void;
+}
+
+function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonProps) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [skills, setSkills] = useState<SkillItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState<{ bottom: number; right: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const iconBtn =
+    "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-faint transition hover:bg-surface-hover hover:text-text-muted";
+
+  const fetchSkills = async () => {
+    if (!apiBase) return;
+    setLoading(true);
+    try {
+      const resp = await fetch(`${apiBase}/api/skills`, {
+        headers: { "x-agx-desktop-token": apiToken },
+      });
+      if (resp.ok) {
+        const data = (await resp.json()) as { items?: SkillItem[] };
+        const items: SkillItem[] = (data.items ?? []).filter((s) => !s.globally_disabled);
+        setSkills(items);
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpen = async () => {
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setDropdownPos({
+        bottom: window.innerHeight - rect.top + 6,
+        right: window.innerWidth - rect.right,
+      });
+    }
+    setOpen(true);
+    setQuery("");
+    if (skills.length === 0) await fetchSkills();
+    setTimeout(() => searchRef.current?.focus(), 60);
+  };
+
+  const handleClose = () => {
+    setOpen(false);
+    setQuery("");
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const btn = btnRef.current;
+      const dropdown = document.getElementById("agx-skill-picker-dropdown");
+      if (btn && btn.contains(target)) return;
+      if (dropdown && dropdown.contains(target)) return;
+      handleClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const filtered = query.trim()
+    ? skills.filter(
+        (s) =>
+          s.name.toLowerCase().includes(query.toLowerCase()) ||
+          s.description?.toLowerCase().includes(query.toLowerCase())
+      )
+    : skills;
+
+  const dropdown =
+    open && dropdownPos
+      ? createPortal(
+          <div
+            id="agx-skill-picker-dropdown"
+            style={{ bottom: dropdownPos.bottom, right: dropdownPos.right }}
+            className="fixed z-[9999] w-72 rounded-xl border border-border bg-surface-panel shadow-xl backdrop-blur-md"
+          >
+            <div className="border-b border-border p-2">
+              <input
+                ref={searchRef}
+                type="text"
+                className="w-full rounded-lg border border-border bg-surface-card px-2.5 py-1.5 text-[12px] text-text-strong outline-none placeholder:text-text-faint focus:border-[var(--ui-accent-border,#6a9dff)]"
+                placeholder="搜索技能…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") handleClose();
+                }}
+              />
+            </div>
+            <div className="max-h-60 overflow-y-auto p-1">
+              {loading ? (
+                <div className="px-3 py-4 text-center text-[11px] text-text-faint">加载中…</div>
+              ) : filtered.length === 0 ? (
+                <div className="px-3 py-4 text-center text-[11px] text-text-faint">
+                  {query ? `未找到"${query}"相关技能` : "暂无可用技能"}
+                </div>
+              ) : (
+                filtered.map((skill) => (
+                  <button
+                    key={skill.name}
+                    type="button"
+                    className="flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition hover:bg-surface-hover"
+                    onClick={() => {
+                      onSelect(skill);
+                      handleClose();
+                    }}
+                  >
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-violet-500/20 text-violet-400">
+                      <Wrench className="h-3 w-3" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[12px] font-medium leading-tight text-text-strong">
+                        {skill.name}
+                      </div>
+                      {skill.description ? (
+                        <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-text-faint">
+                          {skill.description}
+                        </div>
+                      ) : null}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
+  return (
+    <>
+      <HoverTip label="引用技能 · 注入 Skill 上下文">
+        <button
+          ref={btnRef}
+          type="button"
+          className={iconBtn}
+          aria-label="引用技能"
+          onClick={open ? handleClose : handleOpen}
+        >
+          <Wrench className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
+        </button>
+      </HoverTip>
+      {dropdown}
+    </>
   );
 }
 
@@ -2241,6 +2406,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const name = String(node.dataset.refName || node.textContent || "").trim();
       node.textContent = name ? `@${name}` : "";
     }
+    // Serialize skill tokens as "@skill://name"
+    const skillNodes = clone.querySelectorAll<HTMLElement>("[data-skill-token='1']");
+    for (const node of skillNodes) {
+      const name = String(node.dataset.skillName || "").trim();
+      node.textContent = name ? `@skill://${name}` : "";
+    }
     return (clone.innerText || "").replace(/\u00a0/g, " ");
   }, []);
 
@@ -2265,6 +2436,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     token.className =
       "mx-0.5 inline-flex items-center rounded-md border border-[#6a9dff90] bg-[#244766cc] px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2] text-[#e6f0ff]";
     token.textContent = name;
+    return token;
+  }, []);
+
+  const createSkillRefToken = useCallback((name: string) => {
+    const token = document.createElement("span");
+    token.setAttribute("contenteditable", "false");
+    token.setAttribute("data-skill-token", "1");
+    token.setAttribute("data-skill-name", name);
+    token.className =
+      "mx-0.5 inline-flex items-center gap-1 rounded-md border border-[#a78bfa60] bg-[#3b1f6acc] px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2] text-[#ddd6fe]";
+    // wrench SVG icon + name
+    const icon = document.createElement("span");
+    icon.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;display:inline-block;vertical-align:middle"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>';
+    token.appendChild(icon);
+    const label = document.createElement("span");
+    label.textContent = name;
+    token.appendChild(label);
     return token;
   }, []);
 
@@ -3432,6 +3621,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
       if (userBubbleLabel && userBubbleLabel !== "我") body.user_nickname = userBubbleLabel;
       if (userPreference.trim()) body.user_preference = userPreference.trim();
+      // Extract @skill:// references from message text
+      const skillSlugMatches = messageText.match(/@skill:\/\/([^\s@,，。！？\n]+)/g);
+      if (skillSlugMatches && skillSlugMatches.length > 0) {
+        const skillSlugs = [...new Set(skillSlugMatches.map((m) => m.replace("@skill://", "")))];
+        if (skillSlugs.length > 0) body.skill_slugs = skillSlugs;
+      }
       if (userAttachments.length > 0) {
         const imageInputs = userAttachments
           .filter((file) => !!file.dataUrl && file.mimeType.startsWith("image/"))
@@ -4919,6 +5114,34 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   </svg>
                 </button>
                 <NewTopicIconButtons onNewTopic={createNewTopic} />
+                <SkillPickerButton
+                  apiBase={apiBase}
+                  apiToken={apiToken}
+                  onSelect={(skill) => {
+                    const el = composerRef.current;
+                    if (!el) return;
+                    const skillToken = createSkillRefToken(skill.name);
+                    const space = document.createTextNode(" ");
+                    // Insert at current caret or append to end
+                    const sel = window.getSelection();
+                    if (sel && sel.rangeCount > 0 && el.contains(sel.anchorNode)) {
+                      const range = sel.getRangeAt(0);
+                      range.deleteContents();
+                      range.insertNode(space);
+                      range.insertNode(skillToken);
+                      range.setStartAfter(space);
+                      range.setEndAfter(space);
+                      sel.removeAllRanges();
+                      sel.addRange(range);
+                    } else {
+                      el.appendChild(skillToken);
+                      el.appendChild(space);
+                      focusComposerEnd();
+                    }
+                    // Sync input state
+                    setInput(extractComposerText());
+                  }}
+                />
                 <button
                   type="button"
                   className="flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-[12px] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
