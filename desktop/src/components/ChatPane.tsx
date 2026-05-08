@@ -164,12 +164,14 @@ interface SkillPickerButtonProps {
   onSelect: (skill: SkillItem) => void;
 }
 
+const SKILL_DROPDOWN_WIDTH = 288; // w-72
+
 function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [dropdownPos, setDropdownPos] = useState<{ bottom: number; right: number } | null>(null);
+  const [dropdownPos, setDropdownPos] = useState<{ bottom: number; left: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const iconBtn =
@@ -197,9 +199,12 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
   const handleOpen = async () => {
     if (btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
+      // Left-align the dropdown to the button so it opens rightward, staying within the chat pane.
+      // Clamp: don't let right edge go off screen (8px margin).
+      const left = Math.min(rect.left, window.innerWidth - SKILL_DROPDOWN_WIDTH - 8);
       setDropdownPos({
         bottom: window.innerHeight - rect.top + 6,
-        right: window.innerWidth - rect.right,
+        left: Math.max(8, left),
       });
     }
     setOpen(true);
@@ -240,7 +245,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
       ? createPortal(
           <div
             id="agx-skill-picker-dropdown"
-            style={{ bottom: dropdownPos.bottom, right: dropdownPos.right }}
+            style={{ bottom: dropdownPos.bottom, left: dropdownPos.left }}
             className="fixed z-[9999] w-72 rounded-xl border border-border bg-surface-panel shadow-xl backdrop-blur-md"
           >
             <div className="border-b border-border p-2">
@@ -275,7 +280,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
                     }}
                   >
                     <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-violet-500/20 text-violet-400">
-                      <Wrench className="h-3 w-3" />
+                      <Sparkles className="h-3 w-3" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[12px] font-medium leading-tight text-text-strong">
@@ -306,7 +311,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
           aria-label="引用技能"
           onClick={open ? handleClose : handleOpen}
         >
-          <Wrench className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
+          <Sparkles className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
         </button>
       </HoverTip>
       {dropdown}
