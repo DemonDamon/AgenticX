@@ -34,8 +34,53 @@ function extractPathFromToolResult(msg: string): string {
   return (match?.[1] ?? "").trim();
 }
 
-function isTodoUpdateToolMessage(content: string): boolean {
+export function isTodoUpdateToolMessage(content: string): boolean {
   return content.includes("Todos have been modified successfully.");
+}
+
+/** Shared extras row under tool cards (inline confirm + workspace reveal). */
+export function renderToolMessageExtras(
+  message: Message,
+  opts: {
+    onRevealPath?: (path: string) => void;
+    onResolveInlineConfirm?: (confirm: NonNullable<Message["inlineConfirm"]>, approved: boolean) => void;
+  }
+): ReactNode {
+  const inlineConfirm = message.inlineConfirm;
+  const inlineConfirmAction =
+    inlineConfirm && opts.onResolveInlineConfirm ? (
+      <div className="mt-1 flex items-center gap-2">
+        <button
+          type="button"
+          className="rounded border border-border bg-surface-hover px-2 py-0.5 text-[11px] text-text-strong hover:opacity-90"
+          onClick={() => opts.onResolveInlineConfirm!(inlineConfirm, true)}
+        >
+          同意
+        </button>
+        <button
+          type="button"
+          className="rounded border border-border bg-surface-hover px-2 py-0.5 text-[11px] text-text-strong hover:opacity-90"
+          onClick={() => opts.onResolveInlineConfirm!(inlineConfirm, false)}
+        >
+          拒绝
+        </button>
+      </div>
+    ) : null;
+  const path = extractPathFromToolResult(message.content);
+  return (
+    <>
+      {inlineConfirmAction}
+      {path && opts.onRevealPath ? (
+        <button
+          type="button"
+          className="rounded bg-surface-hover px-1.5 py-0.5 text-[10px] text-cyan-300 hover:bg-surface-hover"
+          onClick={() => opts.onRevealPath!(path)}
+        >
+          查看此文件
+        </button>
+      ) : null}
+    </>
+  );
 }
 
 export function MessageRenderer({
@@ -96,48 +141,15 @@ export function MessageRenderer({
         </div>
       );
     }
-    const inlineConfirm = message.inlineConfirm;
-    const inlineConfirmAction =
-      inlineConfirm && onResolveInlineConfirm ? (
-        <div className="mt-1 flex items-center gap-2">
-          <button
-            type="button"
-            className="rounded border border-border bg-surface-hover px-2 py-0.5 text-[11px] text-text-strong hover:opacity-90"
-            onClick={() => onResolveInlineConfirm(inlineConfirm, true)}
-          >
-            同意
-          </button>
-          <button
-            type="button"
-            className="rounded border border-border bg-surface-hover px-2 py-0.5 text-[11px] text-text-strong hover:opacity-90"
-            onClick={() => onResolveInlineConfirm(inlineConfirm, false)}
-          >
-            拒绝
-          </button>
-        </div>
-      ) : null;
-    const path = extractPathFromToolResult(message.content);
     return (
       <ToolCallCard
         message={message}
         highlightTerms={highlightTerms}
-        forceExpand={!!inlineConfirm}
+        forceExpand={!!message.inlineConfirm}
         selectable={selectable}
         selected={selected}
         onToggleSelectMessage={onToggleSelectMessage}
-        action={
-          <>
-            {inlineConfirmAction}
-            {path && onRevealPath ? (
-              <button
-                className="rounded bg-surface-hover px-1.5 py-0.5 text-[10px] text-cyan-300 hover:bg-surface-hover"
-                onClick={() => onRevealPath(path)}
-              >
-                查看此文件
-              </button>
-            ) : null}
-          </>
-        }
+        action={renderToolMessageExtras(message, { onRevealPath, onResolveInlineConfirm })}
       />
     );
   }

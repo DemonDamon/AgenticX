@@ -1833,6 +1833,44 @@ def _bash_exec_default_timeout_sec() -> int:
     return max(30, min(3600, v))
 
 
+_CD_PEEL_BLOCK_METACHAR_RE = re.compile(r"\|\||\||>|<|\$\(|`")
+
+
+def _command_blocks_cd_prefix_peel(command: str) -> bool:
+    """If True, do not peel ``cd … &&`` into cwd + argv — preserves pipes/redirs/subshells."""
+    return bool(_CD_PEEL_BLOCK_METACHAR_RE.search(command))
+
+
+_STDERR_REDIRECT_PEEL_HINT_RES = (
+    re.compile(r"unrecognized arguments:.*2>", re.I),
+    re.compile(r"syntax error.*unexpected token", re.I),
+    re.compile(r"unexpected token.*'\|'", re.I),
+    re.compile(r"command not found.*&&", re.I),
+)
+
+
+def _stderr_suggests_redirect_peel_damage(text: str) -> bool:
+    return any(rx.search(text) for rx in _STDERR_REDIRECT_PEEL_HINT_RES)
+
+
+def _bash_stdout_output_hint(stdout: str) -> str:
+    """Append-only hint so models notice answers already in stdout (FR-10)."""
+    if not stdout or not stdout.strip():
+        return ""
+    lines = [ln for ln in stdout.splitlines() if ln.strip()]
+    paths: List[str] = []
+    for m in re.finditer(r"(?:/[\w./+\-]{3,}|~/[\w./+\-]{2,})", stdout[:50_000]):
+        g = m.group(0)
+        if g not in paths:
+            paths.append(g)
+        if len(paths) >= 2:
+            break
+    path_part = ", ".join(paths[:2]) if paths else "(无路径匹配)"
+    return (
+        f"\nOUTPUT_HINT: stdout 已包含 {len(lines)} 个非空行，主要文件路径线索 = {path_part}\n"
+    )
+
+
 def _try_peel_cd_prefix_parts(
     parts: List[str],
     session: Optional[StudioSession],
@@ -1904,7 +1942,11 @@ async def _tool_bash_exec(
         return "ERROR: empty command"
 
     if cwd is None:
-        peeled = _try_peel_cd_prefix_parts(parts, session)
+        peeled = (
+            None
+            if _command_blocks_cd_prefix_peel(command)
+            else _try_peel_cd_prefix_parts(parts, session)
+        )
         if peeled:
             cwd, parts = peeled
             command = shlex.join(parts)
@@ -1928,7 +1970,8 @@ async def _tool_bash_exec(
                 )
         except Exception:
             pass
-    if command_name == "cd":
+    # Standalone ``cd DIR`` helper only — compound commands stay on shell/exec path.
+    if command_name == "cd" and len(parts) <= 2:
         target = str(parts[1]) if len(parts) > 1 else "~"
         try:
             resolved = _resolve_workspace_path(target, session)
@@ -2079,11 +2122,24 @@ async def _tool_bash_exec(
 
     stdout = "\n".join(stdout_lines).strip()
     stderr = "\n".join(stderr_lines).strip()
-    return (
+    out = (
         f"exit_code={proc.returncode}\n"
         f"stdout:\n{stdout or '(empty)'}\n"
         f"stderr:\n{stderr or '(empty)'}"
     )
+    if proc.returncode != 0:
+        blob = f"{stdout}\n{stderr}"
+        if _stderr_suggests_redirect_peel_damage(blob):
+            out += (
+                "\n\n[HINT] 检测到 shell 元字符（如 2>&1 / | / > 等）可能因 `cd` 前缀剥离或参数拆分被破坏。"
+                "建议：(a) 移除命令内的 cd 前缀并在 bash_exec 的 cwd 参数指定工作目录；"
+                "或 (b) 使用 bash -c '...' 显式包裹整条命令。\n"
+            )
+    elif stdout and len(stdout) >= 200:
+        hint_line = _bash_stdout_output_hint(stdout)
+        if hint_line:
+            out += hint_line
+    return out
 
 
 def _tool_file_read(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:

@@ -732,6 +732,7 @@ class AgentRuntime:
             warning_threshold=loop_warning_threshold,
             critical_threshold=loop_critical_threshold,
         )
+        self._pending_loop_nudge: Optional[str] = None
         self._recent_exploratory_fps: deque[str] = deque(maxlen=10)
         # Exploratory tools get a bounded "schema discovery" budget:
         # the first N consecutive unique errors count as progress, after
@@ -819,6 +820,7 @@ class AgentRuntime:
                 return False
 
         self.token_budget.reset_turn()
+        self._pending_loop_nudge = None
         self._last_persist_time = time.time()
         self._tools_since_persist = 0
         # Reset per-turn exploratory tracking so each turn starts with a
@@ -892,6 +894,20 @@ class AgentRuntime:
             if await _check_should_stop():
                 yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
                 return
+            if self._pending_loop_nudge:
+                nudge_text = self._pending_loop_nudge
+                self._pending_loop_nudge = None
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": f"[runtime-loop-hint]\n{nudge_text}",
+                    }
+                )
+                logger.info(
+                    "loop_nudge_injected=true session=%s round=%s",
+                    getattr(session, "session_id", ""),
+                    round_idx,
+                )
             yield RuntimeEvent(
                 type=EventType.ROUND_START.value,
                 data={"round": round_idx, "max_rounds": self.max_tool_rounds},
@@ -1956,6 +1972,9 @@ class AgentRuntime:
                             <= self._exploratory_error_budget
                         ):
                             logical_progress = True
+                result_fp: Optional[str] = None
+                if isinstance(result, str) and not is_error_result:
+                    result_fp = LoopDetector.fingerprint_from_result(result) or None
                 self.loop_detector.record_call(
                     tool_name,
                     LoopDetector.args_signature(arguments),
@@ -1965,8 +1984,11 @@ class AgentRuntime:
                         or disk_write_progress
                         or logical_progress
                     ),
+                    result_fingerprint=result_fp,
                 )
                 loop_issue = self.loop_detector.check()
+                if loop_issue is not None and loop_issue.nudge:
+                    self._pending_loop_nudge = loop_issue.nudge
                 loop_halt = loop_issue is not None and loop_issue.level == "critical"
                 if loop_issue is not None:
                     _original_task_snippet = (user_input or "").strip().replace("\n", " ")[:300]
