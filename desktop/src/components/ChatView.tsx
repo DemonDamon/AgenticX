@@ -16,15 +16,20 @@ import {
 } from "../utils/cc-bridge-ui";
 import { KeybindingsPanel } from "./KeybindingsPanel";
 import { attachmentsFromSessionRow } from "../utils/session-message-map";
-import { MessageRenderer } from "./messages/MessageRenderer";
+import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
+import { groupConsecutiveToolMessages } from "./messages/group-tool-messages";
+import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
 import { QueuedMessageBubble } from "./messages/QueuedMessageBubble";
-import { ToolOutputStream } from "./messages/ToolOutputStream";
-
 const EMPTY_QUEUE: QueuedMessage[] = [];
+
+/** Matches {@link useAppStore.getState().updateMessageByToolCallId} `patch` argument. */
+type ToolCallStreamPatch = Partial<
+  Pick<Message, "content" | "toolStatus" | "toolElapsedSec" | "toolResultPreview" | "toolStreamLines" | "inlineConfirm">
+> & { appendStreamLine?: string };
 
 type Props = {
   onOpenConfirm: (
@@ -146,14 +151,11 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
       }
       const rows = Array.isArray(parsed?.subagents) ? (parsed.subagents as Array<Record<string, unknown>>) : [];
       if (rows.length > 0) {
-        const counts = rows.reduce(
-          (acc, row) => {
-            const s = String(row.status ?? "unknown");
-            acc[s] = (acc[s] ?? 0) + 1;
-            return acc;
-          },
-          {} as Record<string, number>
-        );
+        const counts = rows.reduce<Record<string, number>>((acc, row) => {
+          const s = String(row.status ?? "unknown");
+          acc[s] = (acc[s] ?? 0) + 1;
+          return acc;
+        }, {});
         const summary = Object.entries(counts)
           .map(([k, v]) => `${k}:${v}`)
           .join(" ");
@@ -177,6 +179,32 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
     return { content: `⚠️ ${toolName} 提示: ${resultText}`, silent: false };
   }
   return { content: `✅ ${toolName} 结果: ${resultText}`, silent: false };
+}
+
+function deriveToolStatusFromResult(resultRaw: unknown): "done" | "error" {
+  const t =
+    typeof resultRaw === "string"
+      ? resultRaw
+      : (() => {
+          try {
+            return JSON.stringify(resultRaw ?? "");
+          } catch {
+            return String(resultRaw ?? "");
+          }
+        })();
+  if (/^\s*ERROR:/i.test(t)) return "error";
+  const m = t.match(/exit_code=(\d+)/);
+  if (m && m[1] !== "0") return "error";
+  return "done";
+}
+
+function serializeToolResultRaw(resultRaw: unknown): string {
+  if (typeof resultRaw === "string") return resultRaw;
+  try {
+    return JSON.stringify(resultRaw ?? "", null, 2);
+  } catch {
+    return String(resultRaw ?? "");
+  }
 }
 
 function buildToolCallLivePreview(toolNameRaw: unknown, argsRaw: unknown): string | null {
@@ -268,6 +296,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const messages = useAppStore((s) => s.messages);
   const status = useAppStore((s) => s.status);
   const addMessage = useAppStore((s) => s.addMessage);
+  const updateMessageByToolCallId = useAppStore((s) => s.updateMessageByToolCallId);
   const insertMessageAfter = useAppStore((s) => s.insertMessageAfter);
   const setStatus = useAppStore((s) => s.setStatus);
   const openSettings = useAppStore((s) => s.openSettings);
@@ -308,7 +337,6 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const [streaming, setStreaming] = useState(false);
   const [streamedAssistantText, setStreamedAssistantText] = useState("");
   const [streamingModel, setStreamingModel] = useState<{ provider: string; model: string } | null>(null);
-  const [toolOutputLines, setToolOutputLines] = useState<string[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [headerModelPickerOpen, setHeaderModelPickerOpen] = useState(false);
@@ -397,6 +425,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const visibleMessages = useMemo(
     () => messages.filter((item) => !item.agentId || item.agentId === "meta"),
     [messages]
+  );
+  const groupedVisibleMessages = useMemo(
+    () => groupConsecutiveToolMessages(visibleMessages),
+    [visibleMessages]
   );
   /** Avoid showing __stream__ on top of an already-committed assistant bubble with identical text. */
   const hideStreamOverlayAsDuplicate = useMemo(() => {
@@ -749,9 +781,11 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       addMessage("assistant", content, "meta", reqProvider, reqModel);
     };
     const commitCurrentStreamIfNeeded = () => {
-      const partial = streamTextRef.current.trim();
+      const raw = streamTextRef.current.trim();
+      // Trim trailing colon ("：" or ":") that model writes just before calling a tool.
+      const partial = raw.replace(/[：:]\s*$/, "").trimEnd();
       if (!partial || isThinkingPlaceholderText(partial) || streamCommittedRef.current) return false;
-      appendAssistantMessage(streamTextRef.current);
+      appendAssistantMessage(partial);
       streamCommittedRef.current = true;
       lastMidStreamAssistantCommitRef.current = partial;
       return true;
@@ -831,22 +865,26 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               const name = String(payload.data?.name ?? "tool");
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
               const outputLine = payload.data?.line as string | undefined;
-              if (outputLine !== undefined && eventAgentId === "meta") {
-                setToolOutputLines((prev) => [...prev.slice(-200), outputLine]);
-                const streamLabel = payload.data?.stream === "stderr" ? "stderr" : "stdout";
-                setStreamedAssistantText(`⏳ ${name} 执行中…（${streamLabel}）`);
+              const progressCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
+              if (eventAgentId === "meta" && progressCallId) {
+                const patch: ToolCallStreamPatch = {
+                  toolStatus: "running",
+                };
+                if (Number.isFinite(sec)) patch.toolElapsedSec = sec;
+                if (outputLine !== undefined) patch.appendStreamLine = String(outputLine);
+                updateMessageByToolCallId(progressCallId, patch);
                 continue;
               }
-              const waitLabel = (() => {
-                if (name === "cc_bridge_send") {
-                  return ccBridgeSendToolProgressLabel(sec, ccBridgeLastSessionModeRef.current);
-                }
-                return Number.isFinite(sec)
-                  ? `⏳ ${name} 执行中…（已等待 ${sec}s）`
-                  : `⏳ ${name} 执行中…`;
-              })();
+              if (outputLine !== undefined && eventAgentId === "meta" && !progressCallId) {
+                continue;
+              }
               if (eventAgentId === "meta") {
-                setStreamedAssistantText(waitLabel);
+                continue;
+              }
+              if (name === "cc_bridge_send") {
+                updateSubAgent(eventAgentId, {
+                  currentAction: ccBridgeSendToolProgressLabel(sec, ccBridgeLastSessionModeRef.current),
+                });
               } else {
                 updateSubAgent(eventAgentId, {
                   currentAction: Number.isFinite(sec) ? `${name} 执行中… (${sec}s)` : `${name} 执行中…`,
@@ -856,16 +894,19 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             }
             if (payload.type === "token") {
               if (eventAgentId !== "meta") { addSubAgentEvent(eventAgentId, { type: "token", content: "生成中..." }); continue; }
-              const tokenText = String(payload.data?.text ?? "");
+              const rawToken = String(payload.data?.text ?? "");
+              // Strip backend-emitted ⏳ waiting placeholder from streamed tokens.
+              const tokenText = rawToken.replace(/⏳\s*/g, "");
+              if (!tokenText) continue;
               full += tokenText;
               cumulativeFull += tokenText;
               scheduleStreamTextUpdate(full);
             }
             if (payload.type === "tool_call") {
-              setToolOutputLines([]);
-              const toolName = payload.data?.name ?? "tool";
+              const toolNameStr = String(payload.data?.name ?? "tool");
               const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
-              if (eventAgentId === "meta" && toolName === "cc_bridge_start") {
+              const toolCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
+              if (eventAgentId === "meta" && toolNameStr === "cc_bridge_start") {
                 const modeHint = parseCcBridgeModeFromPayload(toolArgs);
                 if (modeHint === "headless") {
                   ccBridgeLastSessionModeRef.current = "headless";
@@ -874,19 +915,37 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                 }
               }
               const SILENT_TOOLS_SSE = new Set(["check_resources"]);
-              if (!SILENT_TOOLS_SSE.has(toolName)) {
-                const content = `🔧 ${toolName}: ${JSON.stringify(
-                  payload.data?.arguments ?? payload.data?.args ?? {}
-                ).slice(0, 120)}`;
+              if (!SILENT_TOOLS_SSE.has(toolNameStr)) {
                 if (eventAgentId === "meta") {
                   commitCurrentStreamIfNeeded();
                   full = "";
                   resetStreamSegment();
-                  addMessage("tool", content, "meta");
+                  const globalMsgs = useAppStore.getState().messages;
+                  const lastMsg = globalMsgs.length ? globalMsgs[globalMsgs.length - 1] : undefined;
+                  const toolGroupId =
+                    lastMsg?.role === "tool" && lastMsg.toolGroupId
+                      ? lastMsg.toolGroupId
+                      : crypto.randomUUID();
+                  const rawArgs = JSON.stringify(toolArgs);
+                  const content =
+                    rawArgs.length > 80_000 ? `${rawArgs.slice(0, 80_000)}\n… (truncated)` : rawArgs;
+                  if (toolCallId) {
+                    addMessage("tool", content, "meta", undefined, undefined, undefined, {
+                      toolCallId,
+                      toolName: toolNameStr,
+                      toolArgs,
+                      toolStatus: "running",
+                      toolGroupId,
+                    });
+                  } else {
+                    const legacy = `\u{1F527} ${toolNameStr}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
+                    addMessage("tool", legacy, "meta");
+                  }
                 } else {
-                  updateSubAgent(eventAgentId, { status: "running", currentAction: `调用工具 ${toolName}` });
-                  addSubAgentEvent(eventAgentId, { type: "tool_call", content });
-                  const livePreview = buildToolCallLivePreview(toolName, toolArgs);
+                  const legacy = `\u{1F527} ${toolNameStr}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
+                  updateSubAgent(eventAgentId, { status: "running", currentAction: `调用工具 ${toolNameStr}` });
+                  addSubAgentEvent(eventAgentId, { type: "tool_call", content: legacy });
+                  const livePreview = buildToolCallLivePreview(toolNameStr, toolArgs);
                   if (livePreview) {
                     const sub = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
                     const prev = sub?.liveOutput ?? "";
@@ -897,14 +956,17 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             }
             if (payload.type === "tool_result") {
               const toolName = payload.data?.name ?? "tool";
-              let resultText = String(payload.data?.result ?? "");
               let resultObjForCc: Record<string, unknown> | null = null;
-              try {
-                const parsed = JSON.parse(resultText);
-                resultObjForCc = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
-                resultText = JSON.stringify(parsed, null, 2);
-              } catch {
-                // Keep original plain text if not JSON.
+              const resultRaw = payload.data?.result;
+              if (typeof resultRaw === "string") {
+                try {
+                  const parsed = JSON.parse(resultRaw);
+                  resultObjForCc = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+                } catch {
+                  resultObjForCc = null;
+                }
+              } else if (resultRaw && typeof resultRaw === "object") {
+                resultObjForCc = resultRaw as Record<string, unknown>;
               }
               if (eventAgentId === "meta" && toolName === "cc_bridge_start" && resultObjForCc) {
                 const hint = parseCcBridgeModeFromPayload(resultObjForCc);
@@ -912,10 +974,25 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                   ccBridgeLastSessionModeRef.current = hint;
                 }
               }
-              const formatted = formatToolResultMessage(toolName, resultText);
+              const formatted = formatToolResultMessage(toolName, resultRaw);
               if (formatted.silent) continue;
-              if (eventAgentId === "meta") addMessage("tool", formatted.content, "meta");
-              else {
+              const resultCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
+              const rawContent = serializeToolResultRaw(resultRaw);
+              const preview = formatted.content.replace(/\s+/g, " ").trim().slice(0, 160);
+              const mergedStatus = deriveToolStatusFromResult(resultRaw);
+              if (eventAgentId === "meta" && resultCallId) {
+                const merged = updateMessageByToolCallId(resultCallId, {
+                  content: rawContent,
+                  toolStatus: mergedStatus,
+                  toolResultPreview: preview,
+                  toolStreamLines: [],
+                });
+                if (!merged) {
+                  addMessage("tool", formatted.content, "meta");
+                }
+              } else if (eventAgentId === "meta") {
+                addMessage("tool", formatted.content, "meta");
+              } else {
                 addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content });
                 if (toolName === "file_write" || toolName === "file_edit") {
                   const sub = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
@@ -1107,7 +1184,6 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       streamTextRef.current = "";
       setStreamedAssistantText("");
       setStreamingModel(null);
-      setToolOutputLines([]);
       setStatus("idle");
       setStreaming(false);
       scrollToBottom();
@@ -1432,23 +1508,35 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           </div>
         )}
         <div className={`mx-auto max-w-2xl space-y-3 ${isLite ? "text-[15px]" : ""}`}>
-          {visibleMessages.map((m) => (
-            <div key={m.id} className={`${isLite ? "text-[15px]" : "text-sm"}`}>
-              <MessageRenderer
-                message={m}
-                assistantBadge={!isLite && m.role === "assistant" ? <ModelBadge provider={m.provider} model={m.model} /> : undefined}
-                assistantName="Machi"
+          {groupedVisibleMessages.map((row) => {
+            if (row.kind === "message") {
+              const m = row.message;
+              return (
+                <div key={m.id} className={`${isLite ? "text-[15px]" : "text-sm"}`}>
+                  <MessageRenderer
+                    message={m}
+                    assistantBadge={!isLite && m.role === "assistant" ? <ModelBadge provider={m.provider} model={m.model} /> : undefined}
+                    assistantName="Machi"
+                  />
+                  {!isLite && (
+                    <MessageActions
+                      msg={m}
+                      onCopy={() => onCopyMessage(m)}
+                      onRetry={() => onRetryMessage(m)}
+                      onReanswer={() => onReanswerMessage(m.id)}
+                    />
+                  )}
+                </div>
+              );
+            }
+            return (
+              <TurnToolGroupCard
+                key={`tg-${row.groupId}`}
+                messages={row.messages}
+                renderExtras={(msg) => renderToolMessageExtras(msg, {})}
               />
-              {!isLite && (
-                <MessageActions
-                  msg={m}
-                  onCopy={() => onCopyMessage(m)}
-                  onRetry={() => onRetryMessage(m)}
-                  onReanswer={() => onReanswerMessage(m.id)}
-                />
-              )}
-            </div>
-          ))}
+            );
+          })}
           {streaming && !hideStreamOverlayAsDuplicate && (
             <div className={`${isLite ? "text-[15px]" : "text-sm"}`}>
               {chatStyle === "terminal" ? (
@@ -1468,11 +1556,6 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                   assistantName="Machi"
                 />
               )}
-            </div>
-          )}
-          {streaming && toolOutputLines.length > 0 && (
-            <div className="ml-4">
-              <ToolOutputStream lines={toolOutputLines} />
             </div>
           )}
           {queuedMessages.length > 0 && queuedMessages.map((qm, qi) => (

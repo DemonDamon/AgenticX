@@ -15,13 +15,14 @@ import { startRecording, stopRecording } from "../voice/stt";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { WorkspacePanel } from "./WorkspacePanel";
 import { SpawnsColumn } from "./SpawnsColumn";
-import { MessageRenderer } from "./messages/MessageRenderer";
+import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
+import { groupConsecutiveToolMessages } from "./messages/group-tool-messages";
+import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
 import { QueuedMessageBubble } from "./messages/QueuedMessageBubble";
-import { ToolOutputStream } from "./messages/ToolOutputStream";
 import { StallRecoveryCard } from "./messages/StallRecoveryCard";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { HoverTip } from "./ds/HoverTip";
@@ -922,6 +923,32 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
   return { content: `✅ ${toolName} 结果: ${compact}`, silent: false };
 }
 
+function deriveToolStatusFromResult(resultRaw: unknown): "done" | "error" {
+  const t =
+    typeof resultRaw === "string"
+      ? resultRaw
+      : (() => {
+          try {
+            return JSON.stringify(resultRaw ?? "");
+          } catch {
+            return String(resultRaw ?? "");
+          }
+        })();
+  if (/^\s*ERROR:/i.test(t)) return "error";
+  const m = t.match(/exit_code=(\d+)/);
+  if (m && m[1] !== "0") return "error";
+  return "done";
+}
+
+function serializeToolResultRaw(resultRaw: unknown): string {
+  if (typeof resultRaw === "string") return resultRaw;
+  try {
+    return JSON.stringify(resultRaw ?? "", null, 2);
+  } catch {
+    return String(resultRaw ?? "");
+  }
+}
+
 function isSetTaskspaceToolSuccess(resultRaw: unknown): boolean {
   if (resultRaw && typeof resultRaw === "object") {
     return (resultRaw as { ok?: unknown }).ok === true;
@@ -1518,6 +1545,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const addPaneMessage = useAppStore((s) => s.addPaneMessage);
+  const updatePaneMessageByToolCallId = useAppStore((s) => s.updatePaneMessageByToolCallId);
   const clearPaneMessages = useAppStore((s) => s.clearPaneMessages);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
@@ -1609,7 +1637,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const streamCommittedRef = useRef(false);
   /** Text last committed at a tool_call boundary; avoids duplicating the same assistant bubble at stream end. */
   const lastMidStreamAssistantCommitRef = useRef<string | null>(null);
-  const [toolOutputLines, setToolOutputLines] = useState<string[]>([]);
   const [stallState, setStallState] = useState<"none" | "stall" | "exhausted">("none");
   const [exhaustedRounds, setExhaustedRounds] = useState<{ rounds: number; maxRounds: number } | null>(null);
   const lastSseEventAtRef = useRef(0);
@@ -1686,6 +1713,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         return !item.agentId || item.agentId === "meta";
       }),
     [isGroupPane, pane?.messages]
+  );
+  const groupedVisibleMessages = useMemo(
+    () => groupConsecutiveToolMessages(visibleMessages),
+    [visibleMessages]
   );
   const focusComposerOnly = focusMode && visibleMessages.length === 0;
 
@@ -3102,42 +3133,78 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const renderedMessages = useMemo(() => (
     <>
-      {visibleMessages.map((message) => {
-        const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
+      {groupedVisibleMessages.map((row, rowIdx) => {
+        if (row.kind === "message") {
+          const message = row.message;
+          const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
+          const isSelecting = selectedMessageIds.size > 0;
+          const isSelected = selectedMessageIds.has(message.id);
+          return (
+            <div key={message.id} className="group/sel relative">
+              {isSelecting && !isSelected && (
+                <button
+                  type="button"
+                  className="absolute -top-1 left-0 z-10 flex items-center gap-1 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[10px] text-text-muted shadow-sm opacity-0 transition-opacity group-hover/sel:opacity-100 hover:!opacity-100 hover:bg-surface-hover hover:text-text-strong"
+                  onClick={() => selectUpTo(message)}
+                >
+                  ↓ 选择到这里
+                </button>
+              )}
+              <MessageRenderer
+                message={message}
+                highlightTerms={pane.historySearchTerms}
+                assistantBadge={
+                  message.role === "assistant" ? (
+                    <ModelBadge provider={message.provider} model={message.model} />
+                  ) : undefined
+                }
+                onRevealPath={(path) => void revealFileInTaskspace(path)}
+                assistantName={paneAvatarMeta.name}
+                assistantAvatarUrl={paneAvatarMeta.url}
+                userName={userBubbleLabel}
+                userAvatarUrl={userAvatarUrl || undefined}
+                onCopyMessage={copyMessage}
+                onQuoteMessage={(msg, selectedText) =>
+                  setQuoteTarget({ message: msg, body: resolveQuoteBody(msg, selectedText) })
+                }
+                onFavoriteMessage={favoriteMessage}
+                onForwardMessage={forwardOneMessage}
+                onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
+                onToggleSelectMessage={toggleSelectMessage}
+                onResolveInlineConfirm={(confirm, approved) => void resolveGroupInlineConfirm(confirm, approved)}
+                selectable={isSelecting}
+                selected={isSelected}
+              />
+            </div>
+          );
+        }
+        const groupKey = `tg-${row.messages[0]?.id ?? rowIdx}`;
         const isSelecting = selectedMessageIds.size > 0;
-        const isSelected = selectedMessageIds.has(message.id);
+        const anySelected = row.messages.some((m) => selectedMessageIds.has(m.id));
+        const anchorMessage = row.messages[row.messages.length - 1];
         return (
-          <div key={message.id} className="group/sel relative">
-            {/* 「↓ 选择到这里」按钮：多选模式 + 未选中时显示 */}
-            {isSelecting && !isSelected && (
+          <div key={groupKey} className="group/sel relative">
+            {isSelecting && !anySelected && (
               <button
                 type="button"
                 className="absolute -top-1 left-0 z-10 flex items-center gap-1 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[10px] text-text-muted shadow-sm opacity-0 transition-opacity group-hover/sel:opacity-100 hover:!opacity-100 hover:bg-surface-hover hover:text-text-strong"
-                onClick={() => selectUpTo(message)}
+                onClick={() => selectUpTo(anchorMessage)}
               >
                 ↓ 选择到这里
               </button>
             )}
-            <MessageRenderer
-              message={message}
+            <TurnToolGroupCard
+              messages={row.messages}
               highlightTerms={pane.historySearchTerms}
-              assistantBadge={message.role === "assistant" ? <ModelBadge provider={message.provider} model={message.model} /> : undefined}
-              onRevealPath={(path) => void revealFileInTaskspace(path)}
-              assistantName={paneAvatarMeta.name}
-              assistantAvatarUrl={paneAvatarMeta.url}
-              userName={userBubbleLabel}
-              userAvatarUrl={userAvatarUrl || undefined}
-              onCopyMessage={copyMessage}
-              onQuoteMessage={(msg, selectedText) =>
-                setQuoteTarget({ message: msg, body: resolveQuoteBody(msg, selectedText) })
+              renderExtras={(m) =>
+                renderToolMessageExtras(m, {
+                  onRevealPath: (p) => void revealFileInTaskspace(p),
+                  onResolveInlineConfirm: (c, a) => void resolveGroupInlineConfirm(c, a),
+                })
               }
-              onFavoriteMessage={favoriteMessage}
-              onForwardMessage={forwardOneMessage}
-              onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
-              onToggleSelectMessage={toggleSelectMessage}
-              onResolveInlineConfirm={(confirm, approved) => void resolveGroupInlineConfirm(confirm, approved)}
               selectable={isSelecting}
-              selected={isSelected}
+              selectedIds={selectedMessageIds}
+              onToggleSelectMessage={toggleSelectMessage}
             />
           </div>
         );
@@ -3170,11 +3237,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           />
         )
       ) : null}
-      {isStreamingCurrentSession && toolOutputLines.length > 0 && (
-        <div className="ml-10">
-          <ToolOutputStream lines={toolOutputLines} />
-        </div>
-      )}
       {queuedMessages.length > 0 && queuedMessages.map((qm, qi) => (
         <QueuedMessageBubble
           key={qm.id}
@@ -3203,7 +3265,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         />
       )}
     </>
-  ), [chatStyle, copyMessage, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectMessage, toolOutputLines, userAvatarUrl, userBubbleLabel, visibleMessages]);
+  ), [chatStyle, copyMessage, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectMessage, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -3597,9 +3659,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       addPaneMessage(...args);
     };
     const commitCurrentStreamIfNeeded = () => {
-      const partial = streamTextRef.current.trim();
+      const raw = streamTextRef.current.trim();
+      // Trim trailing colon ("：" or ":") that model writes just before calling a tool
+      // — prevents orphaned "检查文件：" bubbles before a ToolCallCard.
+      const partial = raw.replace(/[：:]\s*$/, "").trimEnd();
       if (!partial || isThinkingPlaceholderText(partial) || streamCommittedRef.current) return false;
-      addPaneMessageIfSessionActive(pane.id, "assistant", streamTextRef.current, "meta", chatProvider, chatModel);
+      addPaneMessageIfSessionActive(pane.id, "assistant", partial, "meta", chatProvider, chatModel);
       streamCommittedRef.current = true;
       lastMidStreamAssistantCommitRef.current = partial;
       return true;
@@ -3985,23 +4050,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const name = String(payload.data?.name ?? "tool");
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
               const outputLine = payload.data?.line as string | undefined;
-              if (outputLine !== undefined && eventAgentId === "meta") {
-                setToolOutputLines((prev) => [...prev.slice(-200), outputLine]);
-                const streamLabel = payload.data?.stream === "stderr" ? "stderr" : "stdout";
-                const waitLabel = `⏳ ${name} 执行中…（${streamLabel}）`;
-                scheduleStreamTextUpdate(waitLabel);
+              const progressCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
+              if (eventAgentId === "meta" && progressCallId) {
+                const patch: Parameters<typeof updatePaneMessageByToolCallId>[2] = {
+                  toolStatus: "running",
+                };
+                if (Number.isFinite(sec)) patch.toolElapsedSec = sec;
+                if (outputLine !== undefined) patch.appendStreamLine = String(outputLine);
+                updatePaneMessageByToolCallId(pane.id, progressCallId, patch);
                 continue;
               }
-              const waitLabel = (() => {
-                if (name === "cc_bridge_send") {
-                  return ccBridgeSendToolProgressLabel(sec, ccBridgeLastSessionModeRef.current);
-                }
-                return Number.isFinite(sec)
-                  ? `⏳ ${name} 执行中…（已等待 ${sec}s）`
-                  : `⏳ ${name} 执行中…`;
-              })();
+              if (outputLine !== undefined && eventAgentId === "meta" && !progressCallId) {
+                // Legacy events without tool_call_id: keep liveness on stream (no merged card).
+                continue;
+              }
               if (eventAgentId === "meta") {
-                scheduleStreamTextUpdate(waitLabel);
+                continue;
+              }
+              if (name === "cc_bridge_send") {
+                updateSubAgent(eventAgentId, {
+                  currentAction: ccBridgeSendToolProgressLabel(sec, ccBridgeLastSessionModeRef.current),
+                });
               } else {
                 updateSubAgent(eventAgentId, {
                   currentAction: Number.isFinite(sec) ? `${name} 执行中… (${sec}s)` : `${name} 执行中…`,
@@ -4011,9 +4080,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             }
             if (payload.type === "token") {
               if (eventAgentId === "meta") {
-                const tokenText = String(payload.data?.text ?? "");
+                const rawToken = String(payload.data?.text ?? "");
+                // Strip backend-emitted ⏳ waiting placeholder — prevents it from appearing
+                // in Thought blocks or committed assistant messages.
+                const tokenText = rawToken.replace(/⏳\s*/g, "");
+                if (!tokenText) continue;
                 if (isThinkingPlaceholderText(tokenText) && !full.trim()) {
-                  // Ignore waiting placeholder tokens to prevent ghost "⏳" answers.
+                  // Ignore other placeholder tokens to prevent ghost answers.
                   continue;
                 }
                 full += tokenText;
@@ -4030,11 +4103,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               }
             }
             if (payload.type === "tool_call") {
-              setToolOutputLines([]);
-              const toolName = payload.data?.name ?? "tool";
+              const toolNameStr = String(payload.data?.name ?? "tool");
               const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
-              if (eventAgentId === "meta" && toolName === "cc_bridge_start") {
-                const toolCallId = String(payload.data?.id ?? "").trim();
+              const toolCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
+              if (eventAgentId === "meta" && toolNameStr === "cc_bridge_start") {
                 const callKey = toolCallId || `${requestSessionId || "session"}:cc_bridge_start`;
                 const modeHint = parseCcBridgeModeFromPayload(toolArgs);
                 if (modeHint === "headless") {
@@ -4048,10 +4120,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               }
               // Filter out internal housekeeping tools that add no user-visible signal
               const SILENT_TOOLS = new Set(["check_resources"]);
-              if (!SILENT_TOOLS.has(toolName)) {
-                const content = `🔧 ${toolName}: ${JSON.stringify(
-                  toolArgs
-                ).slice(0, 120)}`;
+              if (!SILENT_TOOLS.has(toolNameStr)) {
                 if (eventAgentId === "meta") {
                   commitCurrentStreamIfNeeded();
                   full = "";
@@ -4059,10 +4128,31 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   cancelStreamRenderFrame();
                   scheduleStreamTextUpdate("");
                   streamCommittedRef.current = false;
-                  addPaneMessageIfSessionActive(pane.id, "tool", content, "meta");
+                  const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
+                  const lastMsg = pan?.messages.length ? pan.messages[pan.messages.length - 1] : undefined;
+                  const toolGroupId =
+                    lastMsg?.role === "tool" && lastMsg.toolGroupId
+                      ? lastMsg.toolGroupId
+                      : crypto.randomUUID();
+                  const rawArgs = JSON.stringify(toolArgs);
+                  const content =
+                    rawArgs.length > 80_000 ? `${rawArgs.slice(0, 80_000)}\n… (truncated)` : rawArgs;
+                  if (toolCallId) {
+                    addPaneMessageIfSessionActive(pane.id, "tool", content, "meta", undefined, undefined, undefined, {
+                      toolCallId,
+                      toolName: toolNameStr,
+                      toolArgs,
+                      toolStatus: "running",
+                      toolGroupId,
+                    });
+                  } else {
+                    const legacy = `\u{1F527} ${toolNameStr}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
+                    addPaneMessageIfSessionActive(pane.id, "tool", legacy, "meta");
+                  }
                 } else {
-                  addSubAgentEvent(eventAgentId, { type: "tool_call", content });
-                  const livePreview = buildToolCallLivePreview(toolName, toolArgs);
+                  const legacy = `\u{1F527} ${toolNameStr}: ${JSON.stringify(toolArgs).slice(0, 120)}`;
+                  addSubAgentEvent(eventAgentId, { type: "tool_call", content: legacy });
+                  const livePreview = buildToolCallLivePreview(toolNameStr, toolArgs);
                   if (livePreview) {
                     const sub = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
                     const prev = sub?.liveOutput ?? "";
@@ -4076,8 +4166,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               const toolName = String(payload.data?.name ?? "");
               const formatted = formatToolResultMessage(toolName, payload.data?.result);
               if (formatted.silent) continue;
-              if (eventAgentId === "meta") addPaneMessageIfSessionActive(pane.id, "tool", formatted.content, "meta");
-              else {
+              const resultCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
+              const rawContent = serializeToolResultRaw(payload.data?.result);
+              const preview = formatted.content.replace(/\s+/g, " ").trim().slice(0, 160);
+              const mergedStatus = deriveToolStatusFromResult(payload.data?.result);
+              if (eventAgentId === "meta" && resultCallId) {
+                const merged = updatePaneMessageByToolCallId(pane.id, resultCallId, {
+                  content: rawContent,
+                  toolStatus: mergedStatus,
+                  toolResultPreview: preview,
+                  toolStreamLines: [],
+                });
+                if (!merged) {
+                  addPaneMessageIfSessionActive(pane.id, "tool", formatted.content, "meta");
+                }
+              } else if (eventAgentId === "meta") {
+                addPaneMessageIfSessionActive(pane.id, "tool", formatted.content, "meta");
+              } else {
                 addSubAgentEvent(eventAgentId, { type: "tool_result", content: formatted.content });
                 if (toolName === "file_write" || toolName === "file_edit") {
                   const sub = useAppStore.getState().subAgents.find((item) => item.id === eventAgentId);
@@ -4377,7 +4482,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       streamTextRef.current = "";
       streamCommittedRef.current = false;
       setGroupTyping({});
-      setToolOutputLines([]);
       setContextFiles({});
       useAppStore.getState().bumpSessionCatalogRevision();
       window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 500);

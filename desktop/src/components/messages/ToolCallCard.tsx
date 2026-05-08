@@ -1,11 +1,25 @@
 import type { Message } from "../../store";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { Wrench, ChevronDown, ChevronRight } from "lucide-react";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import {
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  ListChecks,
+  Plug,
+  Search,
+  Terminal,
+  Wrench,
+  Copy,
+} from "lucide-react";
+import { Shimmer } from "../ds/Shimmer";
+import { ToolOutputStream } from "./ToolOutputStream";
 
 type Props = {
   message: Message;
   action?: ReactNode;
+  /** Nested inside TurnToolGroupCard — lighter chrome */
+  variant?: "default" | "nested";
   /** 有需要用户操作的内联确认时强制展开 */
   forceExpand?: boolean;
   /** 历史搜索关键词高亮（命中时自动展开） */
@@ -16,16 +30,55 @@ type Props = {
   onToggleSelectMessage?: (message: Message) => void;
 };
 
-/** 从工具消息内容中提取工具名摘要，用于折叠状态显示 */
+/** Legacy: extract tool name from old 🔧/✅ prefixed content */
 function extractToolSummary(content: string): string {
-  // 格式：🔧 tool_name: {...}
   const toolMatch = content.match(/^🔧\s+([^:]+)/);
   if (toolMatch) return toolMatch[1].trim();
-  // 格式：⚠️ / ❌ / 🗣 前缀消息
   const emojiMatch = content.match(/^([⚠️❌🗣✅])\s+(.{0,60})/u);
   if (emojiMatch) return emojiMatch[2].trim();
-  // 纯内容截断
   return content.slice(0, 60).replace(/\n/g, " ").trim();
+}
+
+export function buildToolCardTitle(message: Message): string {
+  const name = (message.toolName ?? "").trim();
+  const args = message.toolArgs ?? {};
+  if (name === "file_read" || name === "file_write" || name === "file_edit") {
+    const p = String(args.path ?? "").trim();
+    const sl = args.start_line;
+    const el = args.end_line;
+    if (p && sl != null && el != null) return `Read ${p} L${sl}-${el}`;
+    if (p) return `${name} ${p}`;
+  }
+  if (name === "bash_exec") {
+    const cmd = String(args.command ?? "").replace(/\s+/g, " ").trim();
+    if (!cmd) return "bash_exec";
+    return cmd.length > 80 ? `${cmd.slice(0, 80)}…` : cmd;
+  }
+  if (name === "todo_write") return "todo_write";
+  if (name === "mcp_call") {
+    const tn = String(args.tool_name ?? "").trim();
+    return tn ? `mcp_call ${tn}` : "mcp_call";
+  }
+  if (name === "knowledge_search") return "knowledge_search";
+  if (name) return name;
+  return extractToolSummary(message.content);
+}
+
+function pickToolIcon(name: string) {
+  if (name === "bash_exec") return Terminal;
+  if (name === "file_read" || name === "file_write" || name === "file_edit") return FileText;
+  if (name === "todo_write") return ListChecks;
+  if (name === "mcp_call") return Plug;
+  if (name === "knowledge_search") return Search;
+  return Wrench;
+}
+
+function iconTone(st: Message["toolStatus"]): string {
+  if (st === "done") return "text-emerald-400";
+  if (st === "error") return "text-rose-400";
+  if (st === "cancelled") return "text-text-faint";
+  if (st === "running" || st === "pending") return "text-cyan-400";
+  return "text-text-subtle";
 }
 
 function escapeRegExp(input: string): string {
@@ -69,6 +122,7 @@ function renderHighlightedText(content: string, terms: string[]): ReactNode {
 export function ToolCallCard({
   message,
   action,
+  variant = "default",
   forceExpand = false,
   highlightTerms,
   selectable,
@@ -83,16 +137,108 @@ export function ToolCallCard({
   }, [message.content, normalizedTerms]);
   const shouldForceExpand = forceExpand || matchedByHighlight;
   const [expanded, setExpanded] = useState(shouldForceExpand);
-  const summary = extractToolSummary(message.content);
-  const hasDetail = message.content.length > 0;
+  const [copiedFlash, setCopiedFlash] = useState(false);
+
+  const title = useMemo(() => buildToolCardTitle(message), [message]);
+  const toolName = (message.toolName ?? "").trim();
+  const Icon = pickToolIcon(toolName || extractToolSummary(message.content).split(/\s/)[0] || "tool");
+  const status = message.toolStatus;
+  const hasStream = (message.toolStreamLines?.length ?? 0) > 0;
+  const hasDetail = message.content.length > 0 || hasStream;
+
+  const titleEl =
+    status === "running" || status === "pending" ? (
+      <Shimmer text={title} className="text-[11px] font-medium" />
+    ) : (
+      <span className="text-[11px] font-medium text-text-subtle">{title}</span>
+    );
+
+  const sec = message.toolElapsedSec;
+  const metaRight =
+    sec != null && Number.isFinite(sec) && (status === "running" || status === "pending") ? (
+      <span className="shrink-0 text-[10px] text-text-faint tabular-nums">{sec}s</span>
+    ) : null;
 
   useEffect(() => {
     if (shouldForceExpand) setExpanded(true);
   }, [shouldForceExpand]);
 
+  const onCopyPayload = useCallback(async () => {
+    try {
+      const payload = {
+        toolCallId: message.toolCallId,
+        toolName: message.toolName,
+        toolArgs: message.toolArgs,
+        toolStatus: message.toolStatus,
+        toolElapsedSec: message.toolElapsedSec,
+        content: message.content?.slice(0, 12_000),
+      };
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      setCopiedFlash(true);
+      window.setTimeout(() => setCopiedFlash(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  }, [message]);
+
+  const shell = (
+    <div
+      className={`w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-xs text-text-muted transition ${
+        selected ? "border-cyan-500/60" : "border-border"
+      }`}
+    >
+      <div className="flex w-full items-center gap-1.5 px-3 py-2 text-left">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left transition-colors hover:opacity-90 disabled:cursor-default disabled:opacity-60"
+          onClick={() => hasDetail && setExpanded((v) => !v)}
+          disabled={!hasDetail}
+        >
+          <Icon className={`h-3.5 w-3.5 shrink-0 ${iconTone(status)}`} />
+          <span className="min-w-0 flex-1 truncate">{titleEl}</span>
+          {metaRight}
+          {hasDetail &&
+            (expanded ? (
+              <ChevronDown className="h-3 w-3 shrink-0 text-text-muted" />
+            ) : (
+              <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" />
+            ))}
+        </button>
+        <button
+          type="button"
+          className="shrink-0 rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-muted"
+          onClick={() => void onCopyPayload()}
+          aria-label="复制工具详情"
+        >
+          <Copy className="h-3 w-3" />
+        </button>
+        {copiedFlash ? <span className="text-[10px] text-emerald-400">已复制</span> : null}
+      </div>
+
+      {expanded && (
+        <div className="space-y-1 border-t border-border px-3 pb-2 pt-1.5">
+          {hasStream ? <ToolOutputStream lines={message.toolStreamLines ?? []} /> : null}
+          {message.content ? (
+            <span className="break-all whitespace-pre-wrap">
+              {renderHighlightedText(message.content, normalizedTerms)}
+            </span>
+          ) : null}
+          {action}
+        </div>
+      )}
+
+      {!expanded && shouldForceExpand && action && (
+        <div className="border-t border-border px-3 pb-2 pt-1.5">{action}</div>
+      )}
+    </div>
+  );
+
+  if (variant === "nested") {
+    return <div className="min-w-0">{shell}</div>;
+  }
+
   return (
     <div className="flex min-w-0 items-start gap-2">
-      {/* 多选勾选框，与 ImBubble 对齐 */}
       {selectable && (
         <button
           type="button"
@@ -110,50 +256,11 @@ export function ToolCallCard({
         </button>
       )}
 
-      {/* 与 ImBubble 保持一致的对齐骨架 */}
       <div className="flex min-w-0 flex-1 justify-start gap-2">
         <div className="flex min-w-0 flex-1 flex-row gap-2">
           <div className="flex h-8 w-8 shrink-0" aria-hidden />
           <div className="flex min-w-0 flex-1 flex-col items-start" style={{ maxWidth: "min(92%, 960px)" }}>
-            <div
-              className={`w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-xs text-text-muted transition ${
-                selected ? "border-cyan-500/60" : "border-border"
-              }`}
-            >
-              {/* 折叠头部，始终可见 */}
-              <button
-                type="button"
-                className="flex w-full items-center gap-1.5 px-3 py-2 text-left transition-colors hover:bg-surface-hover"
-                onClick={() => setExpanded((v) => !v)}
-                disabled={!hasDetail}
-              >
-                <Wrench className="h-3.5 w-3.5 shrink-0 text-text-subtle" />
-                <span className="flex-1 truncate text-[11px] font-medium text-text-subtle">{summary}</span>
-                {hasDetail &&
-                  (expanded ? (
-                    <ChevronDown className="h-3 w-3 shrink-0 text-text-muted" />
-                  ) : (
-                    <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" />
-                  ))}
-              </button>
-
-              {/* 展开内容 */}
-              {expanded && (
-                <div className="space-y-1 border-t border-border px-3 pb-2 pt-1.5">
-                  <span className="break-all whitespace-pre-wrap">
-                    {renderHighlightedText(message.content, normalizedTerms)}
-                  </span>
-                  {action}
-                </div>
-              )}
-
-              {/* forceExpand 时 action 始终在外部显示（如确认按钮） */}
-              {!expanded && shouldForceExpand && action && (
-                <div className="border-t border-border px-3 pb-2 pt-1.5">
-                  {action}
-                </div>
-              )}
-            </div>
+            {shell}
           </div>
         </div>
       </div>

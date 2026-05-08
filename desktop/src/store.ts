@@ -121,6 +121,9 @@ export type ChatPane = {
   historySearchTerms: string[];
 };
 
+/** Lifecycle for merged tool_call + tool_result rows in chat (desktop Meta pane). */
+export type ToolCallStatus = "pending" | "running" | "done" | "error" | "cancelled";
+
 export type Message = {
   id: string;
   role: MsgRole;
@@ -136,7 +139,33 @@ export type Message = {
   forwardedHistory?: ForwardedHistoryCard;
   attachments?: MessageAttachment[];
   inlineConfirm?: PendingConfirm;
+  /** Correlates tool_call / tool_result / tool_progress from runtime SSE (`tool_call_id`). */
+  toolCallId?: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  toolStatus?: ToolCallStatus;
+  toolElapsedSec?: number;
+  /** One-line preview for collapsed header while running or after done. */
+  toolResultPreview?: string;
+  /** Consecutive tool messages with the same id render inside one TurnToolGroupCard. */
+  toolGroupId?: string;
+  /** Live stdout/stderr lines for long-running tools (e.g. bash_exec). */
+  toolStreamLines?: string[];
 };
+
+/** Extras allowed on tool messages from `addPaneMessage` / `addMessage`. */
+export type MessageToolExtras = Pick<
+  Message,
+  | "toolCallId"
+  | "toolName"
+  | "toolArgs"
+  | "toolStatus"
+  | "toolElapsedSec"
+  | "toolResultPreview"
+  | "toolGroupId"
+  | "toolStreamLines"
+  | "inlineConfirm"
+>;
 
 export type ForwardedHistoryItem = {
   sender: string;
@@ -364,8 +393,28 @@ type AppState = {
         | "forwardedHistory"
         | "inlineConfirm"
       >
-    >
+    > &
+      Partial<MessageToolExtras>
   ) => void;
+  /** Merge fields into an existing pane `tool` message by `toolCallId`. */
+  updatePaneMessageByToolCallId: (
+    paneId: string,
+    toolCallId: string,
+    patch: Partial<
+      Pick<Message, "content" | "toolStatus" | "toolElapsedSec" | "toolResultPreview" | "toolStreamLines" | "inlineConfirm">
+    > & {
+      appendStreamLine?: string;
+    }
+  ) => boolean;
+  /** Lite / global `messages` list: merge tool rows by `toolCallId` (mirrors pane path). */
+  updateMessageByToolCallId: (
+    toolCallId: string,
+    patch: Partial<
+      Pick<Message, "content" | "toolStatus" | "toolElapsedSec" | "toolResultPreview" | "toolStreamLines" | "inlineConfirm">
+    > & {
+      appendStreamLine?: string;
+    }
+  ) => boolean;
   updateLastPaneMessage: (paneId: string, content: string) => void;
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
@@ -409,7 +458,8 @@ type AppState = {
         | "forwardedHistory"
         | "inlineConfirm"
       >
-    >
+    > &
+      Partial<MessageToolExtras>
   ) => void;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
   clearMessages: () => void;
@@ -1027,6 +1077,70 @@ export const useAppStore = create<AppState>((set, get) => ({
           : pane
       ),
     })),
+  updatePaneMessageByToolCallId: (paneId, toolCallId, patch) => {
+    let found = false;
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const idx = pane.messages.findIndex(
+          (m) => m.role === "tool" && m.toolCallId === toolCallId
+        );
+        if (idx < 0) return pane;
+        found = true;
+        const msgs = [...pane.messages];
+        const prev = msgs[idx];
+        const { appendStreamLine, ...rest } = patch;
+        let nextStream = prev.toolStreamLines;
+        if (appendStreamLine !== undefined && appendStreamLine !== "") {
+          nextStream = [...(prev.toolStreamLines ?? []), appendStreamLine].slice(-200);
+        } else if (rest.toolStreamLines !== undefined) {
+          nextStream = rest.toolStreamLines;
+        }
+        msgs[idx] = {
+          ...prev,
+          ...rest,
+          ...(nextStream !== undefined ? { toolStreamLines: nextStream } : {}),
+        };
+        return { ...pane, messages: msgs };
+      }),
+    }));
+    return found;
+  },
+  updateMessageByToolCallId: (toolCallId, patch) => {
+    let found = false;
+    set((state) => {
+      const idx = state.messages.findIndex((m) => m.role === "tool" && m.toolCallId === toolCallId);
+      if (idx < 0) return state;
+      found = true;
+      const prev = state.messages[idx];
+      const { appendStreamLine, ...rest } = patch;
+      let nextStream = prev.toolStreamLines;
+      if (appendStreamLine !== undefined && appendStreamLine !== "") {
+        nextStream = [...(prev.toolStreamLines ?? []), appendStreamLine].slice(-200);
+      } else if (rest.toolStreamLines !== undefined) {
+        nextStream = rest.toolStreamLines;
+      }
+      const updated: Message = {
+        ...prev,
+        ...rest,
+        ...(nextStream !== undefined ? { toolStreamLines: nextStream } : {}),
+      };
+      const messages = [...state.messages];
+      messages[idx] = updated;
+      const msgId = updated.id;
+      return {
+        messages,
+        panes: state.panes.map((pane) => {
+          const pi = pane.messages.findIndex((m) => m.id === msgId);
+          if (pi < 0) return pane;
+          const pm = [...pane.messages];
+          pm[pi] = updated;
+          return { ...pane, messages: pm };
+        }),
+      };
+    });
+    return found;
+  },
   updateLastPaneMessage: (paneId, content) =>
     set((state) => ({
       panes: state.panes.map((pane) => {
