@@ -11,9 +11,19 @@ export type GroupedChatRow =
   | { kind: "message"; message: Message }
   | { kind: "tool_group"; groupId: string; messages: Message[] };
 
+function canGroupToolMessage(message: Message): boolean {
+  if (message.role !== "tool") return false;
+  // Only group the structured tool rows produced by the new SSE path.
+  // Legacy history rows often persist as plain text like "工具调用:" /
+  // "工具结果(...):"; grouping those together loses the original ReAct
+  // replay shape after switching sessions.
+  return Boolean(message.toolGroupId || message.toolCallId || (message.toolName ?? "").trim());
+}
+
 /**
  * Consecutive `role === "tool"` messages render inside one {@link TurnToolGroupCard}.
- * Legacy rows without `toolGroupId` still group when adjacent to reduce vertical noise.
+ * Legacy rows without structured tool metadata are kept as individual rows so
+ * history replay does not collapse the whole ReAct trace into one large group.
  */
 export function groupConsecutiveToolMessages(messages: Message[]): GroupedChatRow[] {
   const out: GroupedChatRow[] = [];
@@ -21,13 +31,13 @@ export function groupConsecutiveToolMessages(messages: Message[]): GroupedChatRo
   let i = 0;
   while (i < visibleMessages.length) {
     const m = visibleMessages[i];
-    if (m.role !== "tool") {
+    if (m.role !== "tool" || !canGroupToolMessage(m)) {
       out.push({ kind: "message", message: m });
       i += 1;
       continue;
     }
     const group: Message[] = [];
-    while (i < visibleMessages.length && visibleMessages[i].role === "tool") {
+    while (i < visibleMessages.length && canGroupToolMessage(visibleMessages[i])) {
       group.push(visibleMessages[i]);
       i += 1;
     }

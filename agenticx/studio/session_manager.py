@@ -981,6 +981,43 @@ class SessionManager:
                 "timestamp": parsed_timestamp,
                 "forwarded_history": item.get("forwarded_history"),
             }
+            if role == "tool":
+                tool_call_id = str(
+                    item.get("tool_call_id", item.get("toolCallId", "")) or ""
+                ).strip()
+                tool_name = str(item.get("tool_name", item.get("toolName", "")) or "").strip()
+                tool_status = str(
+                    item.get("tool_status", item.get("toolStatus", "")) or ""
+                ).strip()
+                tool_group_id = str(
+                    item.get("tool_group_id", item.get("toolGroupId", "")) or ""
+                ).strip()
+                if tool_call_id:
+                    row["tool_call_id"] = tool_call_id
+                if tool_name:
+                    row["tool_name"] = tool_name
+                raw_tool_args = item.get("tool_args", item.get("toolArgs"))
+                if isinstance(raw_tool_args, dict):
+                    row["tool_args"] = raw_tool_args
+                if tool_status in {"pending", "running", "done", "error", "cancelled"}:
+                    row["tool_status"] = tool_status
+                raw_elapsed = item.get("tool_elapsed_sec", item.get("toolElapsedSec"))
+                try:
+                    elapsed = int(raw_elapsed) if raw_elapsed is not None else None
+                except (TypeError, ValueError):
+                    elapsed = None
+                if elapsed is not None and elapsed >= 0:
+                    row["tool_elapsed_sec"] = elapsed
+                preview = str(
+                    item.get("tool_result_preview", item.get("toolResultPreview", "")) or ""
+                ).strip()
+                if preview:
+                    row["tool_result_preview"] = preview
+                if tool_group_id:
+                    row["tool_group_id"] = tool_group_id
+                raw_stream = item.get("tool_stream_lines", item.get("toolStreamLines"))
+                if isinstance(raw_stream, list):
+                    row["tool_stream_lines"] = [str(line) for line in raw_stream[:200]]
             raw_atts = item.get("attachments")
             if isinstance(raw_atts, list) and raw_atts:
                 clean_atts: list[dict[str, Any]] = []
