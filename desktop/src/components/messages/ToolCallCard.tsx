@@ -19,7 +19,9 @@ type Props = {
   message: Message;
   action?: ReactNode;
   /** Nested inside TurnToolGroupCard — lighter chrome */
-  variant?: "default" | "nested";
+  variant?: "default" | "nested" | "flat";
+  /** When true, remove left w-8 spacer (ReAct block already has avatar column). */
+  omitLeadingSpacer?: boolean;
   /** 有需要用户操作的内联确认时强制展开 */
   forceExpand?: boolean;
   /** 历史搜索关键词高亮（命中时自动展开） */
@@ -124,6 +126,7 @@ export function ToolCallCard({
   action,
   variant = "default",
   forceExpand = false,
+  omitLeadingSpacer = false,
   highlightTerms,
   selectable,
   selected,
@@ -163,6 +166,13 @@ export function ToolCallCard({
     if (shouldForceExpand) setExpanded(true);
   }, [shouldForceExpand]);
 
+  const expandedDetailClass =
+    variant === "flat"
+      ? "space-y-1 px-3 pb-2 pt-0.5"
+      : "space-y-1 border-t border-border px-3 pb-2 pt-1.5";
+  const forcedActionClass =
+    variant === "flat" ? "px-3 pb-2 pt-0.5" : "border-t border-border px-3 pb-2 pt-1.5";
+
   const onCopyPayload = useCallback(async () => {
     try {
       const payload = {
@@ -183,19 +193,21 @@ export function ToolCallCard({
 
   const shell = (
     <div
-      className={`w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-xs text-text-muted transition ${
-        selected ? "border-cyan-500/60" : "border-border"
-      }`}
+      className={
+        variant === "flat"
+          ? "w-full min-w-0 overflow-hidden text-xs text-text-muted"
+          : `w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-xs text-text-muted transition ${selected ? "border-cyan-500/60" : "border-border"}`
+      }
     >
       <div className="flex w-full items-center gap-1.5 px-3 py-2 text-left">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left transition-colors hover:opacity-90 disabled:cursor-default disabled:opacity-60"
+          className="inline-flex min-w-0 max-w-[calc(100%-2rem)] items-center gap-1.5 text-left transition-colors hover:opacity-90 disabled:cursor-default disabled:opacity-60"
           onClick={() => hasDetail && setExpanded((v) => !v)}
           disabled={!hasDetail}
         >
           <Icon className={`h-3.5 w-3.5 shrink-0 ${iconTone(status)}`} />
-          <span className="min-w-0 flex-1 truncate">{titleEl}</span>
+          <span className="min-w-0 max-w-full truncate">{titleEl}</span>
           {metaRight}
           {hasDetail &&
             (expanded ? (
@@ -216,7 +228,7 @@ export function ToolCallCard({
       </div>
 
       {expanded && (
-        <div className="space-y-1 border-t border-border px-3 pb-2 pt-1.5">
+        <div className={expandedDetailClass}>
           {hasStream ? <ToolOutputStream lines={message.toolStreamLines ?? []} /> : null}
           {message.content ? (
             <span className="break-all whitespace-pre-wrap">
@@ -228,13 +240,13 @@ export function ToolCallCard({
       )}
 
       {!expanded && shouldForceExpand && action && (
-        <div className="border-t border-border px-3 pb-2 pt-1.5">{action}</div>
+        <div className={forcedActionClass}>{action}</div>
       )}
     </div>
   );
 
-  if (variant === "nested") {
-    return <div className="min-w-0">{shell}</div>;
+  if (variant === "nested" || (variant === "flat" && omitLeadingSpacer)) {
+    return <div className="min-w-0 w-full">{shell}</div>;
   }
 
   return (
@@ -258,7 +270,7 @@ export function ToolCallCard({
 
       <div className="flex min-w-0 flex-1 justify-start gap-2">
         <div className="flex min-w-0 flex-1 flex-row gap-2">
-          <div className="flex h-8 w-8 shrink-0" aria-hidden />
+          {omitLeadingSpacer ? null : <div className="flex h-8 w-8 shrink-0" aria-hidden />}
           <div className="flex min-w-0 flex-1 flex-col items-start" style={{ maxWidth: "min(92%, 960px)" }}>
             {shell}
           </div>

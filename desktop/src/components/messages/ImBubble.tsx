@@ -20,6 +20,13 @@ type Props = {
   badge?: ReactNode;
   assistantName?: string;
   assistantAvatarUrl?: string;
+  /**
+   * IM assistant layout: compact row aligns with tool cards (spacer only, no avatar/name),
+   * used inside a parent ReAct block that renders the primary avatar column.
+   */
+  assistantVisual?: "default" | "compact-inline";
+  /** When true and compact, remove inner bubble border so parent container provides the single border. */
+  noBubbleBorder?: boolean;
   userName?: string;
   userAvatarUrl?: string;
   onCopyMessage?: (message: Message) => void;
@@ -48,7 +55,8 @@ function TypingDots() {
   );
 }
 
-function Avatar({ label, imageUrl }: { label: string; imageUrl?: string }) {
+/** Shared with ReAct block shell so top-of-stack avatar matches IM bubbles. */
+export function ChatImAvatar({ label, imageUrl }: { label: string; imageUrl?: string }) {
   const char = label.slice(0, 1) || "?";
   if (imageUrl) {
     return (
@@ -88,12 +96,16 @@ export function ImBubble({
   onRetryMessage,
   selectable,
   selected,
+  assistantVisual = "default",
+  noBubbleBorder = false,
 }: Props) {
   const isUser = message.role === "user";
   const displayName = isUser ? (userName || "我") : (assistantName || "AI");
   const avatarUrl = isUser ? userAvatarUrl : assistantAvatarUrl;
   const isStreaming = message.id === "__stream__";
   const isGroupTyping = !isUser && typeof message.id === "string" && message.id.startsWith("typing-");
+  const compactAssistant =
+    !isUser && assistantVisual === "compact-inline" && !isGroupTyping;
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
   const hasThinkTag = parsed?.hasReasoningTag ?? false;
   const bodyText = !isUser && hasThinkTag ? (parsed?.response ?? "") : message.content;
@@ -159,6 +171,7 @@ export function ImBubble({
   }, [highlightTerms, message.content, message.quotedContent, message.forwardedHistory, isStreaming, isGroupTyping, hasBody]);
 
   const openContextMenu = (ev: ReactMouseEvent) => {
+    if (compactAssistant) return;
     ev.preventDefault();
     setMenuPos({ x: ev.clientX, y: ev.clientY });
     setMenuOpen(true);
@@ -184,16 +197,29 @@ export function ImBubble({
       ) : null}
       <div className={`flex min-w-0 flex-1 gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
         <div className={`flex min-w-0 flex-1 gap-2 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
-          <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
-            <Avatar label={displayName} imageUrl={avatarUrl} />
-          </div>
-          <div className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}`} style={{ maxWidth: isUser ? "min(80%, 700px)" : "min(92%, 960px)" }}>
-            <span className="mb-0.5 max-w-full truncate px-1 text-[11px] text-text-faint">{displayName}</span>
+          {compactAssistant && noBubbleBorder ? null : (
+            <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
+              {compactAssistant ? (
+                <div className="h-8 w-8 shrink-0" aria-hidden />
+              ) : (
+                <ChatImAvatar label={displayName} imageUrl={avatarUrl} />
+              )}
+            </div>
+          )}
+          <div
+            className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}`}
+            style={compactAssistant && noBubbleBorder ? undefined : { maxWidth: isUser ? "min(80%, 700px)" : "min(92%, 960px)" }}
+          >
+            {compactAssistant ? null : (
+              <span className="mb-0.5 max-w-full truncate px-1 text-[11px] text-text-faint">{displayName}</span>
+            )}
             <div
-              className={`relative min-w-0 overflow-x-auto overflow-y-visible rounded-xl border px-3 py-2 text-sm ${
-                isUser ? "max-w-full rounded-tr-[4px]" : "w-full rounded-tl-[4px]"
-              }`}
-              style={bubbleStyle}
+              className={
+                compactAssistant && noBubbleBorder
+                  ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-2.5 text-sm"
+                  : `relative min-w-0 overflow-x-auto overflow-y-visible rounded-xl border px-3 py-2 text-sm ${isUser ? "max-w-full rounded-tr-[4px]" : "w-full rounded-tl-[4px]"}`
+              }
+              style={compactAssistant && noBubbleBorder ? undefined : bubbleStyle}
             >
               {isUser && displayAttachments.length > 0 ? (
                 <div className="mb-2 flex flex-wrap gap-2">
@@ -251,20 +277,22 @@ export function ImBubble({
                           {renderUserMessageInlineBody(bodyText, referenceAttachments)}
                         </div>
                       ) : (
-                        <ReactMarkdown
-                          remarkPlugins={chatRemarkPlugins}
-                          rehypePlugins={chatRehypePlugins}
-                          components={chatMarkdownComponents}
-                        >
-                          {normalizeChatMarkdownContent(bodyText)}
-                        </ReactMarkdown>
+                        <div className={!isUser && parsed?.reasoning ? "mt-3" : undefined}>
+                          <ReactMarkdown
+                            remarkPlugins={chatRemarkPlugins}
+                            rehypePlugins={chatRehypePlugins}
+                            components={chatMarkdownComponents}
+                          >
+                            {normalizeChatMarkdownContent(bodyText)}
+                          </ReactMarkdown>
+                        </div>
                       )
                     ) : null}
                   </>
                 )}
               </div>
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
+            {compactAssistant ? null : <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
               <button type="button" className="hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>复制</button>
               <button
                 type="button"
@@ -294,11 +322,11 @@ export function ImBubble({
                 <button type="button" className="hover:text-text-strong" onClick={() => onRetryMessage(message)}>重试</button>
               ) : null}
               <button type="button" className="hover:text-text-strong" onClick={() => onToggleSelectMessage?.(message)}>多选</button>
-            </div>
+            </div>}
           </div>
         </div>
       </div>
-      {menuOpen ? (
+      {menuOpen && !compactAssistant ? (
         <div
           ref={menuRef}
           className="fixed z-[80] w-36 rounded-lg border border-border bg-surface-panel p-1 shadow-2xl"

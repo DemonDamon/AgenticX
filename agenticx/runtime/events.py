@@ -11,6 +11,19 @@ from enum import Enum
 from typing import Any, Dict
 
 
+def normalize_tool_sse_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure tool_* SSE payloads expose both ``tool_call_id`` and ``id`` when either is set.
+
+    Desktop and adapters may read either key; mirror both for backward compatibility (P1-T1).
+    """
+    out = dict(data)
+    tid = str(out.get("tool_call_id") or out.get("id") or "").strip()
+    if tid:
+        out["tool_call_id"] = tid
+        out["id"] = tid
+    return out
+
+
 class EventType(str, Enum):
     """Event types emitted by AgentRuntime."""
 

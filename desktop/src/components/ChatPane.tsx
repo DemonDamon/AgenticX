@@ -16,10 +16,11 @@ import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { WorkspacePanel } from "./WorkspacePanel";
 import { SpawnsColumn } from "./SpawnsColumn";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
-import { groupConsecutiveToolMessages } from "./messages/group-tool-messages";
+import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/group-tool-messages";
+import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
-import { ImBubble } from "./messages/ImBubble";
+import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
 import { QueuedMessageBubble } from "./messages/QueuedMessageBubble";
@@ -1718,6 +1719,54 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     () => groupConsecutiveToolMessages(visibleMessages),
     [visibleMessages]
   );
+  const isStreamingCurrentSession =
+    streaming &&
+    !isGroupPane &&
+    !!streamingSessionId &&
+    streamingSessionId === (pane.sessionId || "").trim();
+  const streamTextForCurrentSession = isStreamingCurrentSession ? (streamedAssistantText || "") : "";
+  /** Mid-turn commit can persist assistant text while SSE keeps streaming the same body — hide __stream__ so we don't show two identical bubbles (store still has correct count). */
+  const hideStreamOverlayAsDuplicate = useMemo(() => {
+    if (!isStreamingCurrentSession) return false;
+    const t = streamTextForCurrentSession.trim();
+    if (!t) return false;
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      const m = visibleMessages[i];
+      if (m.role === "user") break;
+      if (m.role === "assistant" && (!m.agentId || m.agentId === "meta")) {
+        return String(m.content ?? "").trim() === t;
+      }
+    }
+    return false;
+  }, [isStreamingCurrentSession, streamTextForCurrentSession, visibleMessages]);
+  const useReActImLayout = !isGroupPane && chatStyle === "im";
+  const visibleMessagesWithStream = useMemo(() => {
+    if (useReActImLayout && isStreamingCurrentSession && !hideStreamOverlayAsDuplicate) {
+      return [
+        ...visibleMessages,
+        {
+          id: "__stream__",
+          role: "assistant",
+          content: streamTextForCurrentSession,
+          provider: streamingModel?.provider,
+          model: streamingModel?.model,
+        } as Message,
+      ];
+    }
+    return visibleMessages;
+  }, [
+    useReActImLayout,
+    visibleMessages,
+    isStreamingCurrentSession,
+    hideStreamOverlayAsDuplicate,
+    streamTextForCurrentSession,
+    streamingModel,
+  ]);
+
+  const topLevelRowsIm = useMemo(
+    () => (useReActImLayout ? expandMessagesToTopLevelRows(visibleMessagesWithStream) : null),
+    [useReActImLayout, visibleMessagesWithStream]
+  );
   const focusComposerOnly = focusMode && visibleMessages.length === 0;
 
   useEffect(() => {
@@ -2987,11 +3036,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     void sendChatRef.current(msg.content, { retryAttachments: msg.attachments ?? [] });
   }, []);
 
-  const isStreamingCurrentSession =
-    streaming &&
-    !isGroupPane &&
-    !!streamingSessionId &&
-    streamingSessionId === (pane.sessionId || "").trim();
   // Group chats also have a real streaming run in flight; only the
   // assistant-text overlay is gated by !isGroupPane (group chats render
   // per-member typing bubbles instead). The stop button + barge-in resend
@@ -3005,21 +3049,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     !canInterruptCurrentSession &&
     !!pane.sessionId &&
     runGuardSessionId === (pane.sessionId || "").trim();
-  const streamTextForCurrentSession = isStreamingCurrentSession ? (streamedAssistantText || "") : "";
-  /** Mid-turn commit can persist assistant text while SSE keeps streaming the same body — hide __stream__ so we don't show two identical bubbles (store still has correct count). */
-  const hideStreamOverlayAsDuplicate = useMemo(() => {
-    if (!isStreamingCurrentSession) return false;
-    const t = streamTextForCurrentSession.trim();
-    if (!t) return false;
-    for (let i = visibleMessages.length - 1; i >= 0; i--) {
-      const m = visibleMessages[i];
-      if (m.role === "user") break;
-      if (m.role === "assistant" && (!m.agentId || m.agentId === "meta")) {
-        return String(m.content ?? "").trim() === t;
-      }
-    }
-    return false;
-  }, [isStreamingCurrentSession, streamTextForCurrentSession, visibleMessages]);
 
   const syncStreamingUiForCurrentSession = useCallback(() => {
     const sid = (pane.sessionId || "").trim();
@@ -3131,84 +3160,140 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     void sendChatRef.current(prompt);
   }, [stallState]);
 
-  const renderedMessages = useMemo(() => (
-    <>
-      {groupedVisibleMessages.map((row, rowIdx) => {
-        if (row.kind === "message") {
-          const message = row.message;
-          const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
-          const isSelecting = selectedMessageIds.size > 0;
-          const isSelected = selectedMessageIds.has(message.id);
-          return (
-            <div key={message.id} className="group/sel relative">
-              {isSelecting && !isSelected && (
-                <button
-                  type="button"
-                  className="absolute -top-1 left-0 z-10 flex items-center gap-1 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[10px] text-text-muted shadow-sm opacity-0 transition-opacity group-hover/sel:opacity-100 hover:!opacity-100 hover:bg-surface-hover hover:text-text-strong"
-                  onClick={() => selectUpTo(message)}
-                >
-                  ↓ 选择到这里
-                </button>
-              )}
-              <MessageRenderer
-                message={message}
-                highlightTerms={pane.historySearchTerms}
-                assistantBadge={
-                  message.role === "assistant" ? (
-                    <ModelBadge provider={message.provider} model={message.model} />
-                  ) : undefined
-                }
-                onRevealPath={(path) => void revealFileInTaskspace(path)}
-                assistantName={paneAvatarMeta.name}
-                assistantAvatarUrl={paneAvatarMeta.url}
-                userName={userBubbleLabel}
-                userAvatarUrl={userAvatarUrl || undefined}
-                onCopyMessage={copyMessage}
-                onQuoteMessage={(msg, selectedText) =>
-                  setQuoteTarget({ message: msg, body: resolveQuoteBody(msg, selectedText) })
-                }
-                onFavoriteMessage={favoriteMessage}
-                onForwardMessage={forwardOneMessage}
-                onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
-                onToggleSelectMessage={toggleSelectMessage}
-                onResolveInlineConfirm={(confirm, approved) => void resolveGroupInlineConfirm(confirm, approved)}
-                selectable={isSelecting}
-                selected={isSelected}
-              />
-            </div>
-          );
-        }
-        const groupKey = `tg-${row.messages[0]?.id ?? rowIdx}`;
+  const renderedMessages = useMemo(() => {
+    const renderGroupedRow = (row: GroupedChatRow, rowIdx: number, opts: { reactWorkColumn?: boolean; reactFlat?: boolean; reactHideBadge?: boolean }) => {
+      const reactCol = opts.reactWorkColumn ?? false;
+      const reactFlat = opts.reactFlat ?? false;
+      const reactHideBadge = opts.reactHideBadge ?? false;
+      if (row.kind === "message") {
+        const message = row.message;
+        const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
         const isSelecting = selectedMessageIds.size > 0;
-        const anySelected = row.messages.some((m) => selectedMessageIds.has(m.id));
-        const anchorMessage = row.messages[row.messages.length - 1];
+        const isSelected = selectedMessageIds.has(message.id);
         return (
-          <div key={groupKey} className="group/sel relative">
-            {isSelecting && !anySelected && (
+          <div key={message.id} className="group/sel relative">
+            {isSelecting && !isSelected && (
               <button
                 type="button"
                 className="absolute -top-1 left-0 z-10 flex items-center gap-1 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[10px] text-text-muted shadow-sm opacity-0 transition-opacity group-hover/sel:opacity-100 hover:!opacity-100 hover:bg-surface-hover hover:text-text-strong"
-                onClick={() => selectUpTo(anchorMessage)}
+                onClick={() => selectUpTo(message)}
               >
                 ↓ 选择到这里
               </button>
             )}
-            <TurnToolGroupCard
-              messages={row.messages}
+            <MessageRenderer
+              message={message}
               highlightTerms={pane.historySearchTerms}
-              renderExtras={(m) =>
-                renderToolMessageExtras(m, {
-                  onRevealPath: (p) => void revealFileInTaskspace(p),
-                  onResolveInlineConfirm: (c, a) => void resolveGroupInlineConfirm(c, a),
-                })
+              assistantBadge={
+                message.role === "assistant" && !reactHideBadge ? (
+                  <ModelBadge provider={message.provider} model={message.model} />
+                ) : undefined
               }
-              selectable={isSelecting}
-              selectedIds={selectedMessageIds}
+              imAssistantVisual={
+                message.role === "assistant" && reactCol ? "compact-inline" : "default"
+              }
+              noBubbleBorder={reactFlat}
+              toolCardOmitLeadingSpacer={message.role === "tool" && reactCol}
+              onRevealPath={(path) => void revealFileInTaskspace(path)}
+              assistantName={paneAvatarMeta.name}
+              assistantAvatarUrl={paneAvatarMeta.url}
+              userName={userBubbleLabel}
+              userAvatarUrl={userAvatarUrl || undefined}
+              onCopyMessage={copyMessage}
+              onQuoteMessage={(msg, selectedText) =>
+                setQuoteTarget({ message: msg, body: resolveQuoteBody(msg, selectedText) })
+              }
+              onFavoriteMessage={favoriteMessage}
+              onForwardMessage={forwardOneMessage}
+              onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
               onToggleSelectMessage={toggleSelectMessage}
+              onResolveInlineConfirm={(confirm, approved) => void resolveGroupInlineConfirm(confirm, approved)}
+              selectable={isSelecting}
+              selected={isSelected}
             />
           </div>
         );
-      })}
+      }
+      const groupKey = `tg-${row.messages[0]?.id ?? rowIdx}`;
+      const isSelecting = selectedMessageIds.size > 0;
+      const anySelected = row.messages.some((m) => selectedMessageIds.has(m.id));
+      const anchorMessage = row.messages[row.messages.length - 1];
+      return (
+        <div key={groupKey} className="group/sel relative">
+          {isSelecting && !anySelected && (
+            <button
+              type="button"
+              className="absolute -top-1 left-0 z-10 flex items-center gap-1 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[10px] text-text-muted shadow-sm opacity-0 transition-opacity group-hover/sel:opacity-100 hover:!opacity-100 hover:bg-surface-hover hover:text-text-strong"
+              onClick={() => selectUpTo(anchorMessage)}
+            >
+              ↓ 选择到这里
+            </button>
+          )}
+          <TurnToolGroupCard
+            messages={row.messages}
+            highlightTerms={pane.historySearchTerms}
+            renderExtras={(m) =>
+              renderToolMessageExtras(m, {
+                onRevealPath: (p) => void revealFileInTaskspace(p),
+                onResolveInlineConfirm: (c, a) => void resolveGroupInlineConfirm(c, a),
+              })
+            }
+            selectable={isSelecting}
+            selectedIds={selectedMessageIds}
+            onToggleSelectMessage={toggleSelectMessage}
+            omitLeadingSpacer={reactCol}
+            flat={reactFlat}
+          />
+        </div>
+      );
+    };
+
+    const mainRows =
+      topLevelRowsIm !== null
+        ? topLevelRowsIm.map((seg, segIdx) => {
+            if (seg.kind === "user") {
+              return renderGroupedRow({ kind: "message", message: seg.message }, segIdx, {});
+            }
+            const { workMessages, finalAssistant } = seg.block;
+            const groupedWork = groupConsecutiveToolMessages(workMessages);
+            const blockKey = `react-${workMessages[0]?.id ?? segIdx}-${finalAssistant?.id ?? ""}`;
+            const hasTools = groupedWork.some(
+              (r) => r.kind === "tool_group" || (r.kind === "message" && r.message.role === "tool")
+            );
+            const hasStreamingRow = groupedWork.some(
+              (r) => r.kind === "message" && r.message.role === "assistant" && r.message.id === "__stream__"
+            );
+            const useUnifiedReActCard = hasTools || hasStreamingRow;
+            return (
+              <div key={blockKey} className="space-y-2">
+                <div className="flex min-w-0 items-start gap-2">
+                  <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
+                    <ChatImAvatar label={paneAvatarMeta.name} imageUrl={paneAvatarMeta.url} />
+                  </div>
+                  {useUnifiedReActCard ? (
+                    <div
+                      className="min-w-0 flex-1 overflow-hidden rounded-xl border border-border bg-surface-card"
+                      style={{ maxWidth: "min(92%, 960px)" }}
+                    >
+                      {groupedWork.map((r, i) => renderGroupedRow(r, i, { reactWorkColumn: true, reactFlat: true, reactHideBadge: i > 0 }))}
+                    </div>
+                  ) : (
+                    <div className="flex min-w-0 flex-1 flex-col gap-2" style={{ maxWidth: "min(92%, 960px)" }}>
+                      {groupedWork.map((r, i) => renderGroupedRow(r, i, { reactWorkColumn: true }))}
+                    </div>
+                  )}
+                </div>
+                {finalAssistant
+                  ? renderGroupedRow({ kind: "message", message: finalAssistant }, segIdx + 1000, {})
+                  : null}
+              </div>
+            );
+          })
+        : groupedVisibleMessages.map((row, rowIdx) => renderGroupedRow(row, rowIdx, {}));
+
+    return (
+    <>
+      {mainRows}
       {Object.entries(groupTyping).map(([agentId, name]) => (
         <ImBubble
           key={`typing-${agentId}`}
@@ -3216,7 +3301,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           assistantName={name}
         />
       ))}
-      {isStreamingCurrentSession && !hideStreamOverlayAsDuplicate ? (
+      {isStreamingCurrentSession && !hideStreamOverlayAsDuplicate && !useReActImLayout ? (
         chatStyle === "terminal" ? (
           <TerminalLine
             message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
@@ -3265,7 +3350,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         />
       )}
     </>
-  ), [chatStyle, copyMessage, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectMessage, userAvatarUrl, userBubbleLabel]);
+    );
+  }, [chatStyle, copyMessage, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {

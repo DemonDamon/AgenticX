@@ -58,7 +58,7 @@ from agenticx.cli.studio_mcp import (
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate
 from agenticx.runtime.auto_solve import AutoSolveMode
-from agenticx.runtime.events import EventType, RuntimeEvent
+from agenticx.runtime.events import EventType, RuntimeEvent, normalize_tool_sse_payload
 from agenticx.runtime.loop_controller import LoopController
 from agenticx.cli.agent_tools import META_TOOL_NAMES, STUDIO_TOOLS, merge_computer_use_tools_into
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS, META_LEADER_LABEL_SCRATCH_KEY
@@ -189,6 +189,12 @@ def _runtime_event_to_sse_lines(event: RuntimeEvent) -> list[str]:
     """Serialize RuntimeEvent to SSE data line(s); emit token_usage after final when usage present."""
     event_data = dict(event.data)
     event_data.setdefault("agent_id", event.agent_id)
+    if event.type in (
+        EventType.TOOL_CALL.value,
+        EventType.TOOL_RESULT.value,
+        EventType.TOOL_PROGRESS.value,
+    ):
+        event_data = normalize_tool_sse_payload(event_data)
     usage_meta = None
     if event.type == EventType.FINAL.value:
         usage_meta = event_data.pop("usage_metadata", None)

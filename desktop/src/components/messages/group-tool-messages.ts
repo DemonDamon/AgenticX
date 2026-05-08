@@ -1,5 +1,12 @@
 import type { Message } from "../../store";
 
+function isNoisyToolStatusMessage(message: Message): boolean {
+  if (message.role !== "tool") return false;
+  if ((message.toolName ?? "").trim()) return false;
+  const content = String(message.content ?? "").trim();
+  return content === "后台任务已完成" || content === "已发送中断请求";
+}
+
 export type GroupedChatRow =
   | { kind: "message"; message: Message }
   | { kind: "tool_group"; groupId: string; messages: Message[] };
@@ -10,17 +17,18 @@ export type GroupedChatRow =
  */
 export function groupConsecutiveToolMessages(messages: Message[]): GroupedChatRow[] {
   const out: GroupedChatRow[] = [];
+  const visibleMessages = messages.filter((m) => !isNoisyToolStatusMessage(m));
   let i = 0;
-  while (i < messages.length) {
-    const m = messages[i];
+  while (i < visibleMessages.length) {
+    const m = visibleMessages[i];
     if (m.role !== "tool") {
       out.push({ kind: "message", message: m });
       i += 1;
       continue;
     }
     const group: Message[] = [];
-    while (i < messages.length && messages[i].role === "tool") {
-      group.push(messages[i]);
+    while (i < visibleMessages.length && visibleMessages[i].role === "tool") {
+      group.push(visibleMessages[i]);
       i += 1;
     }
     if (group.length === 1) {
