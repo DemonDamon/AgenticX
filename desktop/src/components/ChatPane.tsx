@@ -2719,6 +2719,33 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
   }, []);
 
+  /** Copy the full content of a ReAct block: assistant text, reasoning, and tool call results. */
+  const copyReActBlock = useCallback(async (messages: Message[]) => {
+    const parts: string[] = [];
+    for (const msg of messages) {
+      if (msg.id === "__stream__") continue;
+      if (msg.role === "assistant") {
+        const text = messagePlainTextForClipboard(msg);
+        if (text.trim()) parts.push(text.trim());
+      } else if (msg.role === "tool") {
+        const name = msg.toolName || "tool";
+        const result = (msg.content || "").trim();
+        if (result) {
+          parts.push(`[${name}]\n${result}`);
+        } else if (name !== "tool") {
+          parts.push(`[${name}]`);
+        }
+      }
+    }
+    const textToCopy = parts.join("\n\n");
+    if (!textToCopy) return;
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+    } catch {
+      // ignore clipboard failures
+    }
+  }, []);
+
   const favoriteMessage = useCallback(async (message: Message, selectedText?: string) => {
     if (!apiBase || !pane.sessionId) return;
     const trimmedSel = selectedText?.trim() ?? "";
@@ -2752,8 +2779,41 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const toggleSelectMessage = useCallback((message: Message) => {
     setSelectedMessageIds((prev) => {
       const next = new Set(prev);
-      if (next.has(message.id)) next.delete(message.id);
-      else next.add(message.id);
+      const linkedIds = new Set<string>([message.id]);
+      // In IM ReAct layout, selecting a user message should also toggle its following assistant/tool block.
+      if (useReActImLayout && topLevelRowsIm && message.role === "user") {
+        for (let i = 0; i < topLevelRowsIm.length; i++) {
+          const row = topLevelRowsIm[i];
+          if (row.kind === "user" && row.message.id === message.id) {
+            const nextRow = topLevelRowsIm[i + 1];
+            if (nextRow && nextRow.kind === "react") {
+              for (const m of nextRow.block.workMessages) linkedIds.add(m.id);
+              if (nextRow.block.finalAssistant) linkedIds.add(nextRow.block.finalAssistant.id);
+            }
+            break;
+          }
+        }
+      }
+      const allSelected = Array.from(linkedIds).every((id) => next.has(id));
+      if (allSelected) {
+        for (const id of linkedIds) next.delete(id);
+      } else {
+        for (const id of linkedIds) next.add(id);
+      }
+      return next;
+    });
+  }, [topLevelRowsIm, useReActImLayout]);
+
+  /** Toggle the entire ReAct block: if any message in the block is selected, deselect all; otherwise select all. */
+  const toggleSelectBlock = useCallback((messages: Message[]) => {
+    setSelectedMessageIds((prev) => {
+      const anySelected = messages.some((m) => prev.has(m.id));
+      const next = new Set(prev);
+      if (anySelected) {
+        for (const m of messages) next.delete(m.id);
+      } else {
+        for (const m of messages) next.add(m.id);
+      }
       return next;
     });
   }, []);
@@ -3180,10 +3240,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         const message = row.message;
         const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
         const isSelecting = selectedMessageIds.size > 0;
+        const rowSelectable = isSelecting && !reactCol;
         const isSelected = selectedMessageIds.has(message.id);
         return (
           <div key={message.id} className="group/sel relative">
-            {isSelecting && !isSelected && (
+            {rowSelectable && !isSelected && (
               <button
                 type="button"
                 className="absolute -top-1 left-0 z-10 flex items-center gap-1 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[10px] text-text-muted shadow-sm opacity-0 transition-opacity group-hover/sel:opacity-100 hover:!opacity-100 hover:bg-surface-hover hover:text-text-strong"
@@ -3219,19 +3280,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
               onToggleSelectMessage={toggleSelectMessage}
               onResolveInlineConfirm={(confirm, approved) => void resolveGroupInlineConfirm(confirm, approved)}
-              selectable={isSelecting}
-              selected={isSelected}
+              selectable={rowSelectable}
+              selected={rowSelectable && isSelected}
             />
           </div>
         );
       }
       const groupKey = `tg-${row.messages[0]?.id ?? rowIdx}`;
       const isSelecting = selectedMessageIds.size > 0;
+      const groupSelectable = isSelecting && !reactCol;
       const anySelected = row.messages.some((m) => selectedMessageIds.has(m.id));
       const anchorMessage = row.messages[row.messages.length - 1];
       return (
         <div key={groupKey} className="group/sel relative">
-          {isSelecting && !anySelected && (
+          {groupSelectable && !anySelected && (
             <button
               type="button"
               className="absolute -top-1 left-0 z-10 flex items-center gap-1 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[10px] text-text-muted shadow-sm opacity-0 transition-opacity group-hover/sel:opacity-100 hover:!opacity-100 hover:bg-surface-hover hover:text-text-strong"
@@ -3249,7 +3311,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 onResolveInlineConfirm: (c, a) => void resolveGroupInlineConfirm(c, a),
               })
             }
-            selectable={isSelecting}
+            selectable={groupSelectable}
             selectedIds={selectedMessageIds}
             onToggleSelectMessage={toggleSelectMessage}
             omitLeadingSpacer={reactCol}
@@ -3275,9 +3337,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               (r) => r.kind === "message" && r.message.role === "assistant" && r.message.id === "__stream__"
             );
             const useUnifiedReActCard = hasTools || hasStreamingRow;
+            const isSelecting = selectedMessageIds.size > 0;
+            const blockAnySelected = workMessages.some((m) => selectedMessageIds.has(m.id));
+            const lastAssistantInBlock = [...workMessages].reverse().find(
+              (m) => m.role === "assistant" && m.id !== "__stream__"
+            ) ?? null;
             return (
               <div key={blockKey} className="space-y-2">
                 <div className="flex min-w-0 items-start gap-2">
+                  {isSelecting ? (
+                    <button
+                      type="button"
+                      className={`mt-2 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition ${
+                        blockAnySelected
+                          ? "border-cyan-500 bg-cyan-500 text-white"
+                          : "border-text-faint bg-transparent text-transparent"
+                      }`}
+                      onClick={() => toggleSelectBlock(workMessages)}
+                      aria-label={blockAnySelected ? "取消选择回复块" : "选择回复块"}
+                    >
+                      <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M3.5 8.5L6.5 11.5L12.5 4.5" />
+                      </svg>
+                    </button>
+                  ) : null}
                   <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
                     <ChatImAvatar label={paneAvatarMeta.name} imageUrl={paneAvatarMeta.url} />
                   </div>
@@ -3297,6 +3380,64 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 {finalAssistant
                   ? renderGroupedRow({ kind: "message", message: finalAssistant }, segIdx + 1000, {})
                   : null}
+                {/* Block-level action row: shown when not streaming, mirrors ImBubble action row */}
+                {!hasStreamingRow && workMessages.length > 0 ? (
+                  <div className="flex min-w-0 items-start gap-2">
+                    {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
+                    <div className="h-8 w-8 shrink-0" aria-hidden />
+                    <div className="min-w-0 flex-1" style={{ maxWidth: "min(92%, 960px)" }}>
+                      <div className="flex flex-wrap items-center justify-end gap-2 pr-1 text-[11px] text-text-faint">
+                        <button
+                          type="button"
+                          className="hover:text-text-strong"
+                          onClick={() => void copyReActBlock(workMessages)}
+                        >
+                          复制
+                        </button>
+                        {lastAssistantInBlock ? (
+                          <>
+                            <button
+                              type="button"
+                              className="hover:text-text-strong"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() =>
+                                setQuoteTarget({
+                                  message: lastAssistantInBlock,
+                                  body: resolveQuoteBody(lastAssistantInBlock, undefined),
+                                })
+                              }
+                            >
+                              引用
+                            </button>
+                            <button
+                              type="button"
+                              className="hover:text-text-strong"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => void favoriteMessage(lastAssistantInBlock, undefined)}
+                            >
+                              收藏
+                            </button>
+                            <button
+                              type="button"
+                              className="hover:text-text-strong"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => forwardOneMessage(lastAssistantInBlock, undefined)}
+                            >
+                              转发
+                            </button>
+                          </>
+                        ) : null}
+                        <button
+                          type="button"
+                          className={blockAnySelected ? "text-cyan-400 hover:text-cyan-300" : "hover:text-text-strong"}
+                          onClick={() => toggleSelectBlock(workMessages)}
+                        >
+                          多选
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             );
           })
@@ -3362,7 +3503,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       )}
     </>
     );
-  }, [chatStyle, copyMessage, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [chatStyle, copyMessage, copyReActBlock, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resolveQuoteBody, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, setQuoteTarget, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
