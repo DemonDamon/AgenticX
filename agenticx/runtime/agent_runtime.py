@@ -1445,10 +1445,8 @@ class AgentRuntime:
                 "tool_calls": tool_calls,
             }
             messages.append(assistant_tool_message)
-            tool_calls_summary = _summarize_tool_calls_for_history(tool_calls)
-            tool_call_text = f"工具调用:\n{json.dumps(tool_calls_summary, ensure_ascii=False)}"
-            if not _is_system_trigger:
-                session.chat_history.append({"role": "tool", "content": tool_call_text})
+            if not _is_system_trigger and str(response_text or "").strip():
+                session.chat_history.append({"role": "assistant", "content": response_text})
 
             _parallel_mode = _parallel_tools_enabled() and len(tool_calls) > 1
             if _parallel_mode:
@@ -1493,7 +1491,14 @@ class AgentRuntime:
                     synced_session_message_count = len(session.agent_messages)
                     if not _is_system_trigger:
                         session.chat_history.append(
-                            {"role": "tool", "content": f"工具结果({tool_name}):\n{invalid_message}"}
+                        {
+                            "role": "tool",
+                            "content": invalid_message,
+                            "tool_call_id": tool_call_id,
+                            "tool_name": tool_name,
+                            "tool_args": arguments,
+                            "tool_status": "error",
+                        }
                         )
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
@@ -1529,7 +1534,14 @@ class AgentRuntime:
                     synced_session_message_count = len(session.agent_messages)
                     if not _is_system_trigger:
                         session.chat_history.append(
-                            {"role": "assistant", "content": f"工具结果({tool_name}):\n{denied_message}"}
+                        {
+                            "role": "tool",
+                            "content": denied_message,
+                            "tool_call_id": tool_call_id,
+                            "tool_name": tool_name,
+                            "tool_args": arguments,
+                            "tool_status": "error",
+                        }
                         )
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
@@ -1563,7 +1575,14 @@ class AgentRuntime:
                     synced_session_message_count = len(session.agent_messages)
                     if not _is_system_trigger:
                         session.chat_history.append(
-                            {"role": "assistant", "content": f"工具结果({tool_name}):\n{denied_message}"}
+                            {
+                                "role": "tool",
+                                "content": denied_message,
+                                "tool_call_id": tool_call_id,
+                                "tool_name": tool_name,
+                                "tool_args": arguments,
+                                "tool_status": "error",
+                            }
                         )
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
@@ -2018,7 +2037,14 @@ class AgentRuntime:
                 synced_session_message_count = len(session.agent_messages)
                 if not _is_system_trigger:
                     session.chat_history.append(
-                        {"role": "tool", "content": f"工具结果({tool_name}):\n{result}"}
+                        {
+                            "role": "tool",
+                            "content": result,
+                            "tool_call_id": tool_call_id,
+                            "tool_name": tool_name,
+                            "tool_args": arguments,
+                            "tool_status": "error" if str(result).startswith("ERROR:") else "done",
+                        }
                     )
 
                 self._tools_since_persist += 1
