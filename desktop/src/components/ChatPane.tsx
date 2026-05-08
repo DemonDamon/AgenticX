@@ -3085,6 +3085,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     syncStreamingUiForCurrentSession();
   }, [syncStreamingUiForCurrentSession]);
 
+  /** 任一 SSE 帧视为仍有响应：刷新计时并在曾误判 stall 时立即收起提示 */
+  const recordSseActivity = useCallback(() => {
+    lastSseEventAtRef.current = Date.now();
+    setStallState((prev) => (prev === "stall" ? "none" : prev));
+  }, []);
+
   const stopCurrentRun = useCallback(() => {
     const sid = (streamingSessionId || pane.sessionId || "").trim();
     if (!sid) return;
@@ -3108,13 +3114,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       setStallState((prev) => prev === "stall" ? "stall" : "none");
       return;
     }
-    const STALL_THRESHOLD_MS = 20_000;
-    const timer = window.setInterval(() => {
+    /** 首 token / 工具进度前模型可能静默较久，阈值过短易误报 */
+    const STALL_THRESHOLD_MS = 60_000;
+    const tick = () => {
       const lastAt = lastSseEventAtRef.current;
       if (lastAt > 0 && Date.now() - lastAt > STALL_THRESHOLD_MS) {
         setStallState("stall");
+      } else {
+        setStallState((prev) => (prev === "stall" ? "none" : prev));
       }
-    }, 3000);
+    };
+    tick();
+    const timer = window.setInterval(tick, 3000);
     return () => window.clearInterval(timer);
   }, [isStreamingCurrentSession]);
 
@@ -3715,7 +3726,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       model: chatModel,
     };
     setRunGuardSessionId(requestSessionId);
-    lastSseEventAtRef.current = Date.now();
+    recordSseActivity();
     setStallState("none");
     setExhaustedRounds(null);
     if ((pane.sessionId || "").trim() === requestSessionId) {
@@ -3899,7 +3910,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           if (!line) continue;
           try {
             const payload = JSON.parse(line.slice(6));
-            lastSseEventAtRef.current = Date.now();
+            recordSseActivity();
             const eventAgentId = payload.data?.agent_id ?? "meta";
             if (payload.type === "group_typing") {
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
