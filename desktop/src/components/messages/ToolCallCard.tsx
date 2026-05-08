@@ -1,6 +1,6 @@
 import type { Message } from "../../store";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -10,7 +10,6 @@ import {
   Search,
   Terminal,
   Wrench,
-  Copy,
 } from "lucide-react";
 import { Shimmer } from "../ds/Shimmer";
 import { ToolOutputStream } from "./ToolOutputStream";
@@ -140,7 +139,6 @@ export function ToolCallCard({
   }, [message.content, normalizedTerms]);
   const shouldForceExpand = forceExpand || matchedByHighlight;
   const [expanded, setExpanded] = useState(shouldForceExpand);
-  const [copiedFlash, setCopiedFlash] = useState(false);
 
   const title = useMemo(() => buildToolCardTitle(message), [message]);
   const toolName = (message.toolName ?? "").trim();
@@ -173,24 +171,6 @@ export function ToolCallCard({
   const forcedActionClass =
     variant === "flat" ? "px-3 pb-2 pt-0.5" : "border-t border-border px-3 pb-2 pt-1.5";
 
-  const onCopyPayload = useCallback(async () => {
-    try {
-      const payload = {
-        toolCallId: message.toolCallId,
-        toolName: message.toolName,
-        toolArgs: message.toolArgs,
-        toolStatus: message.toolStatus,
-        toolElapsedSec: message.toolElapsedSec,
-        content: message.content?.slice(0, 12_000),
-      };
-      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-      setCopiedFlash(true);
-      window.setTimeout(() => setCopiedFlash(false), 1500);
-    } catch {
-      /* ignore */
-    }
-  }, [message]);
-
   const shell = (
     <div
       className={
@@ -202,7 +182,7 @@ export function ToolCallCard({
       <div className="flex w-full items-center gap-1.5 px-3 py-2 text-left">
         <button
           type="button"
-          className="inline-flex min-w-0 max-w-[calc(100%-2rem)] items-center gap-1.5 text-left transition-colors hover:opacity-90 disabled:cursor-default disabled:opacity-60"
+          className="inline-flex min-w-0 flex-1 items-center gap-1.5 text-left disabled:cursor-default disabled:opacity-60"
           onClick={() => hasDetail && setExpanded((v) => !v)}
           disabled={!hasDetail}
         >
@@ -216,15 +196,6 @@ export function ToolCallCard({
               <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" />
             ))}
         </button>
-        <button
-          type="button"
-          className="shrink-0 rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-muted"
-          onClick={() => void onCopyPayload()}
-          aria-label="复制工具详情"
-        >
-          <Copy className="h-3 w-3" />
-        </button>
-        {copiedFlash ? <span className="text-[10px] text-emerald-400">已复制</span> : null}
       </div>
 
       {expanded && (

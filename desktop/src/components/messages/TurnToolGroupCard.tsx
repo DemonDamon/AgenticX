@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Message } from "../../store";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { ToolCallCard } from "./ToolCallCard";
 import type { ReactNode } from "react";
 import { TodoUpdateCard } from "../TodoUpdateCard";
@@ -53,10 +53,16 @@ export function TurnToolGroupCard({
     <div className={flat ? "w-full min-w-0 text-xs text-text-muted" : "w-full min-w-0 overflow-hidden rounded-lg border border-border bg-surface-card text-xs text-text-muted transition"}>
       <button
         type="button"
-        className="inline-flex max-w-full items-center gap-1.5 px-3 py-2 text-left transition-colors hover:bg-surface-hover"
+        className="inline-flex w-full max-w-full items-center gap-2 px-3 py-2 text-left"
         onClick={() => setExpanded((v) => !v)}
       >
-        <span className="min-w-0 max-w-full truncate text-[11px] font-medium text-text-subtle">{summary}</span>
+        <span
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-zinc-600/40 ring-1 ring-zinc-500/30"
+          aria-hidden
+        >
+          <Check className="h-2.5 w-2.5 text-zinc-400" strokeWidth={2.5} />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-text-subtle">{summary}</span>
         {expanded ? (
           <ChevronDown className="h-3 w-3 shrink-0 text-text-muted" />
         ) : (
@@ -64,30 +70,43 @@ export function TurnToolGroupCard({
         )}
       </button>
       {expanded && (
-        <div className={flat ? "space-y-2 px-2 pb-2 pt-0.5" : "space-y-2 border-t border-border px-2 pb-2 pt-2"}>
-          {messages.map((m) =>
-            isTodoUpdateToolMessage(m.content) ? (
-              <div
-                key={m.id}
-                className="rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted"
-              >
-                <TodoUpdateCard content={m.content} />
-              </div>
-            ) : (
-              <ToolCallCard
-                key={m.id}
-                message={m}
-                highlightTerms={highlightTerms}
-                forceExpand={!!m.inlineConfirm}
-                selectable={selectable}
-                selected={selectedIds?.has(m.id)}
-                onToggleSelectMessage={onToggleSelectMessage}
-                action={renderExtras?.(m)}
-                variant={flat ? "flat" : "nested"}
-                omitLeadingSpacer={flat}
-              />
-            )
-          )}
+        <div
+          className={
+            flat
+              ? "relative px-3 pb-2 pt-0.5 text-[11px] text-text-muted"
+              : "relative border-t border-border px-3 pb-2 pt-2 text-[11px] text-text-muted"
+          }
+        >
+          {/* Vertical timeline: starts below summary row (does not pierce circle-check); X aligns with circle center. */}
+          <div
+            className="pointer-events-none absolute top-0 bottom-2 left-[calc(0.75rem+0.5rem)] z-0 w-0 -translate-x-1/2 border-l border-dashed border-zinc-500/45"
+            aria-hidden
+          />
+          <div className="relative z-[1] space-y-2">
+            {messages.map((m) =>
+              isTodoUpdateToolMessage(m.content) ? (
+                <div
+                  key={m.id}
+                  className="rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted"
+                >
+                  <TodoUpdateCard content={m.content} />
+                </div>
+              ) : (
+                <ToolCallCard
+                  key={m.id}
+                  message={m}
+                  highlightTerms={highlightTerms}
+                  forceExpand={!!m.inlineConfirm}
+                  selectable={selectable}
+                  selected={selectedIds?.has(m.id)}
+                  onToggleSelectMessage={onToggleSelectMessage}
+                  action={renderExtras?.(m)}
+                  variant={flat ? "flat" : "nested"}
+                  omitLeadingSpacer={flat}
+                />
+              )
+            )}
+          </div>
         </div>
       )}
     </div>
