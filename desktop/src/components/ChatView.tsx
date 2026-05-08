@@ -17,10 +17,11 @@ import {
 import { KeybindingsPanel } from "./KeybindingsPanel";
 import { attachmentsFromSessionRow } from "../utils/session-message-map";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
-import { groupConsecutiveToolMessages } from "./messages/group-tool-messages";
+import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/group-tool-messages";
+import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
-import { ImBubble } from "./messages/ImBubble";
+import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
 import { QueuedMessageBubble } from "./messages/QueuedMessageBubble";
@@ -429,6 +430,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const groupedVisibleMessages = useMemo(
     () => groupConsecutiveToolMessages(visibleMessages),
     [visibleMessages]
+  );
+  const topLevelRowsIm = useMemo(
+    () => (chatStyle === "im" ? expandMessagesToTopLevelRows(visibleMessages) : null),
+    [chatStyle, visibleMessages]
   );
   /** Avoid showing __stream__ on top of an already-committed assistant bubble with identical text. */
   const hideStreamOverlayAsDuplicate = useMemo(() => {
@@ -1508,35 +1513,67 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           </div>
         )}
         <div className={`mx-auto max-w-2xl space-y-3 ${isLite ? "text-[15px]" : ""}`}>
-          {groupedVisibleMessages.map((row) => {
-            if (row.kind === "message") {
-              const m = row.message;
-              return (
-                <div key={m.id} className={`${isLite ? "text-[15px]" : "text-sm"}`}>
-                  <MessageRenderer
-                    message={m}
-                    assistantBadge={!isLite && m.role === "assistant" ? <ModelBadge provider={m.provider} model={m.model} /> : undefined}
-                    assistantName="Machi"
-                  />
-                  {!isLite && (
-                    <MessageActions
-                      msg={m}
-                      onCopy={() => onCopyMessage(m)}
-                      onRetry={() => onRetryMessage(m)}
-                      onReanswer={() => onReanswerMessage(m.id)}
+          {(() => {
+            const renderGroupedChatRow = (row: GroupedChatRow, reactWorkCol: boolean) => {
+              if (row.kind === "message") {
+                const m = row.message;
+                return (
+                  <div key={m.id} className={`${isLite ? "text-[15px]" : "text-sm"}`}>
+                    <MessageRenderer
+                      message={m}
+                      assistantBadge={!isLite && m.role === "assistant" ? <ModelBadge provider={m.provider} model={m.model} /> : undefined}
+                      assistantName="Machi"
+                      imAssistantVisual={
+                        m.role === "assistant" && reactWorkCol ? "compact-inline" : "default"
+                      }
+                      toolCardOmitLeadingSpacer={m.role === "tool" && reactWorkCol}
                     />
-                  )}
-                </div>
+                    {!isLite && (
+                      <MessageActions
+                        msg={m}
+                        onCopy={() => onCopyMessage(m)}
+                        onRetry={() => onRetryMessage(m)}
+                        onReanswer={() => onReanswerMessage(m.id)}
+                      />
+                    )}
+                  </div>
+                );
+              }
+              return (
+                <TurnToolGroupCard
+                  key={`tg-${row.groupId}`}
+                  messages={row.messages}
+                  renderExtras={(msg) => renderToolMessageExtras(msg, {})}
+                  omitLeadingSpacer={reactWorkCol}
+                />
               );
+            };
+
+            if (topLevelRowsIm) {
+              return topLevelRowsIm.map((seg, segIdx) => {
+                if (seg.kind === "user") {
+                  return renderGroupedChatRow({ kind: "message", message: seg.message }, false);
+                }
+                const { workMessages, finalAssistant } = seg.block;
+                const groupedWork = groupConsecutiveToolMessages(workMessages);
+                const blockKey = `react-${workMessages[0]?.id ?? segIdx}-${finalAssistant?.id ?? ""}`;
+                return (
+                  <div key={blockKey} className="space-y-3">
+                    <div className="flex min-w-0 items-start gap-2">
+                      <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
+                        <ChatImAvatar label="Machi" />
+                      </div>
+                      <div className="flex min-w-0 flex-1 flex-col gap-3">
+                        {groupedWork.map((r) => renderGroupedChatRow(r, true))}
+                      </div>
+                    </div>
+                    {finalAssistant ? renderGroupedChatRow({ kind: "message", message: finalAssistant }, false) : null}
+                  </div>
+                );
+              });
             }
-            return (
-              <TurnToolGroupCard
-                key={`tg-${row.groupId}`}
-                messages={row.messages}
-                renderExtras={(msg) => renderToolMessageExtras(msg, {})}
-              />
-            );
-          })}
+            return groupedVisibleMessages.map((row) => renderGroupedChatRow(row, false));
+          })()}
           {streaming && !hideStreamOverlayAsDuplicate && (
             <div className={`${isLite ? "text-[15px]" : "text-sm"}`}>
               {chatStyle === "terminal" ? (
