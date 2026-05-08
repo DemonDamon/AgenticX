@@ -10,6 +10,7 @@ import {
   chatMarkdownComponents,
   chatRehypePlugins,
   chatRemarkPlugins,
+  chatUrlTransform,
   normalizeChatMarkdownContent,
 } from "./markdown-components";
 import { renderUserMessageInlineBody } from "./user-message-inline";
@@ -282,6 +283,7 @@ export function ImBubble({
                             remarkPlugins={chatRemarkPlugins}
                             rehypePlugins={chatRehypePlugins}
                             components={chatMarkdownComponents}
+                            urlTransform={chatUrlTransform}
                           >
                             {normalizeChatMarkdownContent(bodyText)}
                           </ReactMarkdown>

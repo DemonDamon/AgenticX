@@ -5,6 +5,7 @@ import {
   chatMarkdownComponents,
   chatRehypePlugins,
   chatRemarkPlugins,
+  chatUrlTransform,
   normalizeChatMarkdownContent,
 } from "./markdown-components";
 
@@ -21,6 +22,7 @@ export function AssistantBubble({ message, badge }: Props) {
         remarkPlugins={chatRemarkPlugins}
         rehypePlugins={chatRehypePlugins}
         components={chatMarkdownComponents}
+        urlTransform={chatUrlTransform}
       >
         {normalizeChatMarkdownContent(message.content)}
       </ReactMarkdown>
