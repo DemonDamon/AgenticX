@@ -1598,6 +1598,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [recording, setRecording] = useState(false);
   const [streamedAssistantText, setStreamedAssistantText] = useState("");
   const [streamingSessionId, setStreamingSessionId] = useState("");
+  const [runGuardSessionId, setRunGuardSessionId] = useState("");
   const [streamingModel, setStreamingModel] = useState<{ provider: string; model: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const sessionAbortControllersRef = useRef<Record<string, AbortController>>({});
@@ -2969,6 +2970,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     streamingSessionId,
     currentSessionId: pane.sessionId || "",
   });
+  const isRunGuardCurrentSession =
+    !canInterruptCurrentSession &&
+    !!pane.sessionId &&
+    runGuardSessionId === (pane.sessionId || "").trim();
   const streamTextForCurrentSession = isStreamingCurrentSession ? (streamedAssistantText || "") : "";
   /** Mid-turn commit can persist assistant text while SSE keeps streaming the same body — hide __stream__ so we don't show two identical bubbles (store still has correct count). */
   const hideStreamOverlayAsDuplicate = useMemo(() => {
@@ -3023,6 +3028,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const stopCurrentRun = useCallback(() => {
     const sid = (streamingSessionId || pane.sessionId || "").trim();
     if (!sid) return;
+    setRunGuardSessionId(sid);
     void window.agenticxDesktop.interruptSession?.(sid);
     const st = sessionStreamStateRef.current[sid];
     if (st) {
@@ -3054,18 +3060,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   useEffect(() => {
     if (isStreamingCurrentSession || !pane.sessionId) return;
-    if (stallState !== "stall" && stallState !== "exhausted") return;
+    const sid = (pane.sessionId || "").trim();
+    const shouldTrackExecutionState =
+      stallState === "stall" ||
+      stallState === "exhausted" ||
+      runGuardSessionId === sid;
+    if (!shouldTrackExecutionState) return;
     let cancelled = false;
     const poll = async () => {
       try {
         const r = await window.agenticxDesktop.listSessions(pane.avatarId ?? undefined);
         if (cancelled || !r.ok) return;
-        const row = (r.sessions ?? []).find((s) => s.session_id === pane.sessionId);
-        if (row && row.execution_state === "idle") {
+        const row = (r.sessions ?? []).find((s) => s.session_id === sid);
+        if (row?.execution_state === "idle") {
           setStallState("none");
+          if (runGuardSessionId === sid) {
+            setRunGuardSessionId("");
+          }
           addPaneMessage(pane.id, "tool", "后台任务已完成", "meta");
           try {
-            const msgs = await window.agenticxDesktop.loadSessionMessages(pane.sessionId);
+            const msgs = await window.agenticxDesktop.loadSessionMessages(sid);
             if (!cancelled && msgs.ok && Array.isArray(msgs.messages)) {
               // Do not overwrite - messages already in memory are richer than disk
             }
@@ -3074,9 +3088,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       } catch { /* ignore */ }
     };
     void poll();
-    const timer = window.setInterval(poll, 3000);
+    const timer = window.setInterval(poll, 2000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [isStreamingCurrentSession, stallState, pane.sessionId, pane.avatarId, pane.id, addPaneMessage]);
+  }, [isStreamingCurrentSession, stallState, pane.sessionId, pane.avatarId, pane.id, addPaneMessage, runGuardSessionId]);
 
   const resumeCurrentTask = useCallback(() => {
     setStallState("none");
@@ -3189,7 +3203,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         />
       )}
     </>
-  ), [chatStyle, copyMessage, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, hideStreamOverlayAsDuplicate, isGroupPane, isStreamingCurrentSession, pane.historySearchTerms, paneAvatarMeta, paneId, queuedMessages, removePendingMessage, resolveGroupInlineConfirm, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectMessage, toolOutputLines, userAvatarUrl, userBubbleLabel, visibleMessages]);
+  ), [chatStyle, copyMessage, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectMessage, toolOutputLines, userAvatarUrl, userBubbleLabel, visibleMessages]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -3552,6 +3566,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       provider: chatProvider,
       model: chatModel,
     };
+    setRunGuardSessionId(requestSessionId);
     lastSseEventAtRef.current = Date.now();
     setStallState("none");
     setExhaustedRounds(null);
@@ -5201,7 +5216,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               )}
               <ActionCircleButton
                 hasInput={!!pane.sessionId && (!!input.trim() || readyAttachments.length > 0)}
-                streaming={canInterruptCurrentSession}
+                streaming={canInterruptCurrentSession || isRunGuardCurrentSession}
                 recording={recording}
                 onSend={() => {
                   void sendChat(extractComposerText());
