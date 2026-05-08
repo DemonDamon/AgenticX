@@ -2,11 +2,13 @@ import type { Components } from "react-markdown";
 import type { Element as HastElement, ElementContent } from "hast";
 import type { HTMLAttributes, ReactElement, ReactNode } from "react";
 import { Children, isValidElement } from "react";
+import { useEffect, useMemo, useState } from "react";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { MermaidBlock } from "./MermaidBlock";
 import { highlightChatCode } from "./highlight-chat-code";
+import { Modal } from "../ds/Modal";
 
 const MERMAID_LANG = new Set(["mermaid", "mmd"]);
 /** 无语言或通用代码块：仅当正文明显为 Mermaid 时才接管 */
@@ -114,6 +116,139 @@ function normalizeLatexMathDelimitersInText(text: string): string {
   return next;
 }
 
+function normalizeMarkdownImageSrc(raw?: string): string {
+  const value = String(raw ?? "").trim();
+  if (!value) return "";
+  if (/^(https?:|data:|blob:|file:)/i.test(value)) return value;
+  // Keep bundled frontend assets unchanged.
+  if (value.startsWith("/assets/")) return value;
+  // Convert absolute local filesystem path to file:// URL.
+  if (value.startsWith("/")) return `file://${encodeURI(value)}`;
+  if (/^[a-zA-Z]:[\\/]/.test(value)) {
+    const normalized = value.replace(/\\/g, "/");
+    return `file:///${encodeURI(normalized)}`;
+  }
+  return value;
+}
+
+function isLocalMarkdownImageSrc(raw?: string): boolean {
+  const value = String(raw ?? "").trim();
+  if (!value) return false;
+  if (value.startsWith("file://")) return true;
+  if (value.startsWith("/")) return !value.startsWith("/assets/");
+  return /^[a-zA-Z]:[\\/]/.test(value);
+}
+
+function localPathFromMarkdownImageSrc(raw?: string): string {
+  const value = String(raw ?? "").trim();
+  if (value.startsWith("file://")) return value;
+  return value;
+}
+
+/**
+ * ReactMarkdown 默认会过滤 file:// 协议，导致本地图片 src 变成空字符串。
+ * 这里显式放行常见安全协议，并拒绝脚本协议。
+ */
+export function chatUrlTransform(raw?: string): string {
+  const value = String(raw ?? "").trim();
+  if (!value) return "";
+  if (value.startsWith("/") || value.startsWith("./") || value.startsWith("../") || value.startsWith("#")) {
+    return value;
+  }
+  const m = value.match(/^([a-zA-Z][a-zA-Z\d+\-.]*):/);
+  if (!m) return value;
+  const protocol = m[1].toLowerCase();
+  if (["http", "https", "mailto", "tel", "file", "data", "blob"].includes(protocol)) return value;
+  return "";
+}
+
+function MarkdownImage({
+  src,
+  alt,
+  title,
+}: {
+  src?: string;
+  alt?: string;
+  title?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [resolvedSrc, setResolvedSrc] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const normalizedSrc = useMemo(() => normalizeMarkdownImageSrc(src), [src]);
+  const displaySrc = resolvedSrc || normalizedSrc;
+
+  useEffect(() => {
+    let alive = true;
+    setLoadError("");
+
+    if (!normalizedSrc) {
+      setResolvedSrc("");
+      return () => {
+        alive = false;
+      };
+    }
+
+    if (!isLocalMarkdownImageSrc(src)) {
+      setResolvedSrc(normalizedSrc);
+      return () => {
+        alive = false;
+      };
+    }
+
+    const api = window.agenticxDesktop?.loadLocalImageDataUrl;
+    if (!api) {
+      setResolvedSrc(normalizedSrc);
+      setLoadError("当前运行环境无法读取本地图片");
+      return () => {
+        alive = false;
+      };
+    }
+
+    setResolvedSrc("");
+    void api(localPathFromMarkdownImageSrc(src)).then((res) => {
+      if (!alive) return;
+      if (res?.ok && res.dataUrl) {
+        setResolvedSrc(res.dataUrl);
+        return;
+      }
+      setResolvedSrc(normalizedSrc);
+      setLoadError(res?.error || "本地图片读取失败");
+    });
+
+    return () => {
+      alive = false;
+    };
+  }, [normalizedSrc, src]);
+
+  if (!normalizedSrc) return <span className="text-text-faint">[图片地址为空]</span>;
+
+  return (
+    <>
+      <button
+        type="button"
+        className="group my-1 block overflow-hidden rounded-xl border border-border bg-surface-panel text-left"
+        title={title || alt || "点击查看原图"}
+        onClick={() => setOpen(true)}
+      >
+        <img
+          src={displaySrc}
+          alt={alt || "image"}
+          className="max-h-[220px] w-auto max-w-[280px] object-cover transition group-hover:scale-[1.01]"
+          loading="lazy"
+        />
+        <div className="px-2 py-1 text-[11px] text-text-faint">
+          {loadError ? `图片预览失败：${loadError}` : alt || title || "图片预览"}
+        </div>
+      </button>
+      <Modal open={open} title={alt || title || "图片预览"} onClose={() => setOpen(false)}>
+        <div className="flex max-h-[72vh] items-center justify-center overflow-auto">
+          <img src={displaySrc} alt={alt || "image"} className="h-auto max-h-[68vh] w-auto max-w-full rounded-lg" />
+        </div>
+      </Modal>
+    </>
+  );
+}
+
 export function normalizeChatMarkdownContent(raw: string): string {
   if (!raw) return raw;
   // Keep fenced code blocks untouched to avoid rewriting code snippets.
@@ -165,5 +300,8 @@ export const chatMarkdownComponents: Partial<Components> = {
         <table {...rest}>{children}</table>
       </div>
     );
+  },
+  img({ src, alt, title }) {
+    return <MarkdownImage src={src} alt={alt} title={title} />;
   },
 };

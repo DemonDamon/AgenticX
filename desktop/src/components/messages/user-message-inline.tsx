@@ -7,6 +7,7 @@ import {
   chatMarkdownComponents,
   chatRehypePlugins,
   chatRemarkPlugins,
+  chatUrlTransform,
   normalizeChatMarkdownContent,
 } from "./markdown-components";
 
@@ -68,6 +69,7 @@ export function renderUserMessageInlineBody(
         remarkPlugins={chatRemarkPlugins}
         rehypePlugins={chatRehypePlugins}
         components={userInlineMarkdownComponents}
+        urlTransform={chatUrlTransform}
       >
         {normalizeChatMarkdownContent(raw)}
       </ReactMarkdown>
