@@ -1415,6 +1415,24 @@ def create_studio_app() -> FastAPI:
         session = managed.studio_session
         if payload.context_files:
             session.context_files.update(_normalize_context_files(payload.context_files))
+        if payload.skill_slugs:
+            try:
+                from agenticx.tools.skill_bundle import SkillBundleLoader
+
+                _skill_loader = SkillBundleLoader()
+                _skill_loader.scan()
+                for _slug in payload.skill_slugs:
+                    _slug = str(_slug).strip()
+                    if not _slug:
+                        continue
+                    _skill_key = f"skill:{_slug}"
+                    if _skill_key in session.context_files:
+                        continue
+                    _skill_content = _skill_loader.get_skill_content(_slug)
+                    if _skill_content:
+                        session.context_files[_skill_key] = _skill_content
+            except Exception as _skill_exc:
+                logger.warning("skill_slugs inject error: %s", _skill_exc)
         image_inputs = _normalize_image_inputs(payload.image_inputs)
         pending_subagent_summaries = session.scratchpad.pop("__pending_subagent_summaries__", [])
         if isinstance(pending_subagent_summaries, list):

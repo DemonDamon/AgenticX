@@ -45,6 +45,8 @@ class ChatRequest(BaseModel):
     skip_user_history: Optional[bool] = False
     # Internal: allow runtime to continue even if SSE client disconnects (IM confirm flow).
     keep_runtime_after_disconnect: Optional[bool] = False
+    # Skill slugs referenced via @skill:// tokens in the user message; content injected into context.
+    skill_slugs: Optional[List[str]] = None
 
 
 class ConfirmResponse(BaseModel):
