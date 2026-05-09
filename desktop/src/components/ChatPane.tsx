@@ -4,6 +4,7 @@ import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react"
 import {
   Check,
   ChevronDown,
+  GitBranch,
   GripVertical,
   Expand,
   Layers,
@@ -170,7 +171,7 @@ function NewTopicSplitControl({ onNewTopic }: { onNewTopic: (inherit: boolean) =
           <div
             ref={menuRef}
             style={{ bottom: menuPos.bottom, left: menuPos.left }}
-            className="fixed z-[9999] w-[130px] overflow-hidden rounded-lg border border-border bg-surface-panel py-1 shadow-xl backdrop-blur-md"
+            className="fixed z-[9999] w-[160px] overflow-hidden rounded-xl border border-border/40 bg-surface-panel/95 p-1.5 shadow-xl backdrop-blur-xl"
             role="listbox"
             aria-label="新建对话方式"
           >
@@ -178,36 +179,64 @@ function NewTopicSplitControl({ onNewTopic }: { onNewTopic: (inherit: boolean) =
               type="button"
               role="option"
               aria-selected={!inheritMode}
-              className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-[12px] transition hover:bg-surface-hover"
+              className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                !inheritMode ? "bg-surface-hover/80" : "hover:bg-surface-hover/50"
+              }`}
               onClick={() => {
                 setInheritMode(false);
                 setMenuOpen(false);
               }}
             >
-              <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-text-muted">
-                {!inheritMode ? <Check className="h-3 w-3" strokeWidth={2.2} /> : null}
+              <SquarePen
+                className={`h-[15px] w-[15px] shrink-0 ${
+                  !inheritMode ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
+                }`}
+                strokeWidth={2}
+              />
+              <span className="flex flex-1 flex-col gap-0.5">
+                <span
+                  className={`text-[13px] font-medium leading-none ${
+                    !inheritMode ? "text-text-strong" : "text-text-standard"
+                  }`}
+                >
+                  全新对话
+                </span>
+                <span className="text-[11px] leading-none text-text-faint">不继承上下文</span>
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="block font-medium text-text-strong">全新对话</span>
-                <span className="block text-[10px] text-text-faint">不继承上下文</span>
+              <span className="flex w-4 shrink-0 justify-end">
+                {!inheritMode && <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />}
               </span>
             </button>
             <button
               type="button"
               role="option"
               aria-selected={inheritMode}
-              className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-[12px] transition hover:bg-surface-hover"
+              className={`group mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                inheritMode ? "bg-surface-hover/80" : "hover:bg-surface-hover/50"
+              }`}
               onClick={() => {
                 setInheritMode(true);
                 setMenuOpen(false);
               }}
             >
-              <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-text-muted">
-                {inheritMode ? <Check className="h-3 w-3" strokeWidth={2.2} /> : null}
+              <GitBranch
+                className={`h-[15px] w-[15px] shrink-0 ${
+                  inheritMode ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
+                }`}
+                strokeWidth={2}
+              />
+              <span className="flex flex-1 flex-col gap-0.5">
+                <span
+                  className={`text-[13px] font-medium leading-none ${
+                    inheritMode ? "text-text-strong" : "text-text-standard"
+                  }`}
+                >
+                  继承上下文
+                </span>
+                <span className="text-[11px] leading-none text-text-faint">携带摘要接续</span>
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="block font-medium text-text-strong">继承上下文</span>
-                <span className="block text-[10px] text-text-faint">携带摘要接续</span>
+              <span className="flex w-4 shrink-0 justify-end">
+                {inheritMode && <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />}
               </span>
             </button>
           </div>,
@@ -219,28 +248,28 @@ function NewTopicSplitControl({ onNewTopic }: { onNewTopic: (inherit: boolean) =
 
   return (
     <>
-      <div ref={rootRef} className="flex h-7 shrink-0 items-stretch overflow-hidden rounded-lg bg-surface-card/30">
+      <div ref={rootRef} className="flex h-[26px] shrink-0 items-stretch overflow-hidden rounded-md bg-transparent transition-colors hover:bg-surface-hover/60">
         <HoverTip label={baseTip}>
           <button
             type="button"
-            className="flex h-full w-7 shrink-0 items-center justify-center text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+            className="flex h-full w-7 shrink-0 items-center justify-center text-text-muted transition-colors hover:text-text-strong"
             aria-label={inheritMode ? "新建对话：继承上下文" : "新建对话：全新对话"}
             onClick={() => onNewTopic(inheritMode)}
           >
-            <SquarePen className="h-[15px] w-[15px]" strokeWidth={1.85} aria-hidden />
+            <SquarePen className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden />
           </button>
         </HoverTip>
-        <div className="my-1.5 w-px shrink-0 self-stretch bg-border/50" aria-hidden />
+        <div className="my-1.5 w-[1px] shrink-0 self-stretch bg-border/40" aria-hidden />
         <HoverTip label="切换新建方式">
           <button
             ref={chevronRef}
             type="button"
-            className="flex h-full w-4 shrink-0 items-center justify-center text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+            className="flex h-full w-[18px] shrink-0 items-center justify-center text-text-muted transition-colors hover:text-text-strong"
             aria-label="展开新建对话选项"
             aria-expanded={menuOpen}
             onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
           >
-            <ChevronDown className={`h-3 w-3 transition ${menuOpen ? "rotate-180" : ""}`} aria-hidden />
+            <ChevronDown className={`h-3 w-3 transition-transform ${menuOpen ? "rotate-180" : ""}`} strokeWidth={2.5} aria-hidden />
           </button>
         </HoverTip>
       </div>
