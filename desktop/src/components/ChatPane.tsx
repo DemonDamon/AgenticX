@@ -252,9 +252,7 @@ function NewTopicSplitControl({ onNewTopic }: { onNewTopic: (inherit: boolean) =
         <HoverTip label={baseTip}>
           <button
             type="button"
-            className={`flex h-full w-7 shrink-0 items-center justify-center transition-colors ${
-              inheritMode ? "text-violet-400 hover:text-violet-300" : "text-text-muted hover:text-text-strong"
-            }`}
+            className="flex h-full w-7 shrink-0 items-center justify-center text-text-muted transition-colors hover:text-text-strong"
             aria-label={inheritMode ? "新建对话：继承上下文" : "新建对话：全新对话"}
             onClick={() => onNewTopic(inheritMode)}
           >
