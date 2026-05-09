@@ -1,7 +1,16 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
 import { createPortal } from "react-dom";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { GitBranch, GripVertical, Expand, Sparkles, Wrench } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  GripVertical,
+  Expand,
+  Layers,
+  SquarePen,
+  Wand2,
+  Wrench,
+} from "lucide-react";
 import {
   useAppStore,
   type Avatar,
@@ -123,32 +132,120 @@ const FALLBACK_PANE: ChatPaneState = {
   historySearchTerms: [],
 };
 
-function NewTopicIconButtons({ onNewTopic }: { onNewTopic: (inherit: boolean) => void }) {
-  const iconBtn =
-    "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-faint transition hover:bg-surface-hover hover:text-text-muted";
+/** Compose-style primary action (豆包式「撰写」语义) + 下拉切换「全新对话」/「继承上下文」，默认前者。 */
+function NewTopicSplitControl({ onNewTopic }: { onNewTopic: (inherit: boolean) => void }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [inheritMode, setInheritMode] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ bottom: number; left: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const chevronRef = useRef<HTMLButtonElement>(null);
+
+  const openMenu = () => {
+    if (rootRef.current) {
+      const rect = rootRef.current.getBoundingClientRect();
+      setMenuPos({
+        bottom: window.innerHeight - rect.top + 4,
+        left: rect.left,
+      });
+    }
+    setMenuOpen(true);
+  };
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (rootRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
+
+  const panel =
+    menuOpen && menuPos
+      ? createPortal(
+          <div
+            ref={menuRef}
+            style={{ bottom: menuPos.bottom, left: menuPos.left }}
+            className="fixed z-[9999] w-[130px] overflow-hidden rounded-lg border border-border bg-surface-panel py-1 shadow-xl backdrop-blur-md"
+            role="listbox"
+            aria-label="新建对话方式"
+          >
+            <button
+              type="button"
+              role="option"
+              aria-selected={!inheritMode}
+              className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-[12px] transition hover:bg-surface-hover"
+              onClick={() => {
+                setInheritMode(false);
+                setMenuOpen(false);
+              }}
+            >
+              <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-text-muted">
+                {!inheritMode ? <Check className="h-3 w-3" strokeWidth={2.2} /> : null}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium text-text-strong">全新对话</span>
+                <span className="block text-[10px] text-text-faint">不继承上下文</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="option"
+              aria-selected={inheritMode}
+              className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-[12px] transition hover:bg-surface-hover"
+              onClick={() => {
+                setInheritMode(true);
+                setMenuOpen(false);
+              }}
+            >
+              <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-text-muted">
+                {inheritMode ? <Check className="h-3 w-3" strokeWidth={2.2} /> : null}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium text-text-strong">继承上下文</span>
+                <span className="block text-[10px] text-text-faint">携带摘要接续</span>
+              </span>
+            </button>
+          </div>,
+          document.body
+        )
+      : null;
+
+  const baseTip = inheritMode ? "新对话 · 继承上下文（当前选项）" : "全新对话 · 不继承上下文（当前选项）";
+
   return (
-    <div className="flex shrink-0 items-center gap-0.5">
-      <HoverTip label="全新对话 · 不继承上下文">
-        <button
-          type="button"
-          className={iconBtn}
-          aria-label="全新对话，不继承上下文"
-          onClick={() => onNewTopic(false)}
-        >
-          <Sparkles className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
-        </button>
-      </HoverTip>
-      <HoverTip label="新对话 · 继承上下文（携带摘要）">
-        <button
-          type="button"
-          className={iconBtn}
-          aria-label="新对话，继承上下文"
-          onClick={() => onNewTopic(true)}
-        >
-          <GitBranch className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
-        </button>
-      </HoverTip>
-    </div>
+    <>
+      <div ref={rootRef} className="flex h-7 shrink-0 items-stretch overflow-hidden rounded-lg bg-surface-card/30">
+        <HoverTip label={baseTip}>
+          <button
+            type="button"
+            className="flex h-full w-7 shrink-0 items-center justify-center text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+            aria-label={inheritMode ? "新建对话：继承上下文" : "新建对话：全新对话"}
+            onClick={() => onNewTopic(inheritMode)}
+          >
+            <SquarePen className="h-[15px] w-[15px]" strokeWidth={1.85} aria-hidden />
+          </button>
+        </HoverTip>
+        <div className="my-1.5 w-px shrink-0 self-stretch bg-border/50" aria-hidden />
+        <HoverTip label="切换新建方式">
+          <button
+            ref={chevronRef}
+            type="button"
+            className="flex h-full w-4 shrink-0 items-center justify-center text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+            aria-label="展开新建对话选项"
+            aria-expanded={menuOpen}
+            onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
+          >
+            <ChevronDown className={`h-3 w-3 transition ${menuOpen ? "rotate-180" : ""}`} aria-hidden />
+          </button>
+        </HoverTip>
+      </div>
+      {panel}
+    </>
   );
 }
 
@@ -282,7 +379,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
                     }}
                   >
                     <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-violet-500/20 text-violet-400">
-                      <Sparkles className="h-3 w-3" />
+                      <Wand2 className="h-3 w-3" aria-hidden />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[12px] font-medium leading-tight text-text-strong">
@@ -313,7 +410,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
           aria-label="引用技能"
           onClick={open ? handleClose : handleOpen}
         >
-          <Sparkles className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
+          <Layers className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
         </button>
       </HoverTip>
       {dropdown}
@@ -3091,10 +3188,61 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
   }, [apiBase, apiToken, pane.id, pane.messages, pane.sessionId, selectedMessages, setPaneMessages]);
 
-  const retryUserMessage = useCallback((msg: Message) => {
-    if (msg.role !== "user") return;
-    void sendChatRef.current(msg.content, { retryAttachments: msg.attachments ?? [] });
-  }, []);
+  const retryUserMessage = useCallback(
+    async (msg: Message) => {
+      if (msg.role !== "user") return;
+      const sid = (pane.sessionId || "").trim();
+      if (!sid || !apiBase) return;
+      const msgs = pane.messages ?? [];
+      const idx = msgs.findIndex((m) => m.id === msg.id);
+      if (idx < 0) return;
+      let end = idx + 1;
+      while (end < msgs.length && msgs[end].role !== "user") {
+        end++;
+      }
+      const toRemove = msgs.slice(idx + 1, end);
+      if (toRemove.length > 0) {
+        try {
+          const resp = await fetch(`${apiBase}/api/session/messages/delete`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+            body: JSON.stringify({
+              session_id: sid,
+              messages: toRemove.map((m) => ({
+                role: m.role,
+                content: m.content,
+                timestamp: m.timestamp,
+                agent_id: m.agentId,
+              })),
+            }),
+          });
+          const data = (await resp.json()) as { ok?: boolean; removed?: number; requested?: number };
+          const removed = typeof data.removed === "number" ? data.removed : 0;
+          const requested = typeof data.requested === "number" ? data.requested : toRemove.length;
+          if (!resp.ok || !data.ok || removed < requested) {
+            const result = await window.agenticxDesktop.loadSessionMessages(sid);
+            if (result.ok && Array.isArray(result.messages)) {
+              const mapped = result.messages.map((item, midx) =>
+                mapLoadedSessionMessage(item as LoadedSessionMessage, sid, midx)
+              );
+              setPaneMessages(pane.id, mapped);
+            }
+            return;
+          }
+          setPaneMessages(pane.id, msgs.slice(0, idx + 1));
+        } catch (err) {
+          console.error("[ChatPane] retry trim messages failed:", err);
+          return;
+        }
+      }
+      await sendChatRef.current(msg.content, {
+        retryAttachments: msg.attachments ?? [],
+        suppressUserEcho: true,
+        skipUserHistory: true,
+      });
+    },
+    [apiBase, apiToken, pane.id, pane.messages, pane.sessionId, setPaneMessages]
+  );
 
   // Group chats also have a real streaming run in flight; only the
   // assistant-text overlay is gated by !isGroupPane (group chats render
@@ -5475,7 +5623,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
                   </svg>
                 </button>
-                <NewTopicIconButtons onNewTopic={createNewTopic} />
+                <NewTopicSplitControl onNewTopic={createNewTopic} />
                 <SkillPickerButton
                   apiBase={apiBase}
                   apiToken={apiToken}
