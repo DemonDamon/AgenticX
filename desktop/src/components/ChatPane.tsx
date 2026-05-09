@@ -171,7 +171,7 @@ function NewTopicSplitControl({ onNewTopic }: { onNewTopic: (inherit: boolean) =
           <div
             ref={menuRef}
             style={{ bottom: menuPos.bottom, left: menuPos.left }}
-            className="fixed z-[9999] w-[160px] overflow-hidden rounded-xl border border-border/40 bg-surface-panel/95 p-1.5 shadow-xl backdrop-blur-xl"
+            className="fixed z-[9999] w-[160px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
             role="listbox"
             aria-label="新建对话方式"
           >
@@ -180,7 +180,7 @@ function NewTopicSplitControl({ onNewTopic }: { onNewTopic: (inherit: boolean) =
               role="option"
               aria-selected={!inheritMode}
               className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                !inheritMode ? "bg-surface-hover/80" : "hover:bg-surface-hover/50"
+                !inheritMode ? "bg-surface-hover" : "hover:bg-surface-hover"
               }`}
               onClick={() => {
                 setInheritMode(false);
@@ -212,7 +212,7 @@ function NewTopicSplitControl({ onNewTopic }: { onNewTopic: (inherit: boolean) =
               role="option"
               aria-selected={inheritMode}
               className={`group mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                inheritMode ? "bg-surface-hover/80" : "hover:bg-surface-hover/50"
+                inheritMode ? "bg-surface-hover" : "hover:bg-surface-hover"
               }`}
               onClick={() => {
                 setInheritMode(true);
@@ -248,7 +248,7 @@ function NewTopicSplitControl({ onNewTopic }: { onNewTopic: (inherit: boolean) =
 
   return (
     <>
-      <div ref={rootRef} className="flex h-[26px] shrink-0 items-stretch overflow-hidden rounded-md bg-transparent transition-colors hover:bg-surface-hover/60">
+      <div ref={rootRef} className="flex h-[26px] shrink-0 items-stretch overflow-hidden rounded-md bg-transparent transition-colors hover:bg-surface-hover">
         <HoverTip label={baseTip}>
           <button
             type="button"
@@ -259,7 +259,7 @@ function NewTopicSplitControl({ onNewTopic }: { onNewTopic: (inherit: boolean) =
             <SquarePen className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden />
           </button>
         </HoverTip>
-        <div className="my-1.5 w-[1px] shrink-0 self-stretch bg-border/40" aria-hidden />
+        <div className="my-1.5 w-[1px] shrink-0 self-stretch bg-border" aria-hidden />
         <HoverTip label="切换新建方式">
           <button
             ref={chevronRef}
