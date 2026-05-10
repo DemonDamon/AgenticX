@@ -30,22 +30,23 @@ body {
 
 /* Markdown content styles */
 .msg-content p {
-  margin: 0.25em 0;
+  margin: 0.5em 0;
 }
 .msg-content pre {
-  @apply overflow-x-auto rounded p-2 text-xs;
+  @apply overflow-x-auto rounded p-3 text-sm;
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
 }
 .msg-content code {
-  @apply rounded px-1 py-0.5 text-xs;
+  @apply rounded px-1.5 py-0.5 text-[0.9em];
   background: var(--surface-card);
 }
 .msg-content pre code {
-  @apply bg-transparent p-0;
+  @apply bg-transparent p-0 text-[13px] leading-relaxed;
 }
 .msg-content ul, .msg-content ol {
-  @apply ml-4 list-inside;
+  @apply ml-5 list-inside;
+  margin: 0.5em 0;
 }
 .msg-content ul {
   @apply list-disc;
@@ -53,23 +54,27 @@ body {
 .msg-content ol {
   @apply list-decimal;
 }
+.msg-content li {
+  margin: 0.25em 0;
+}
 .msg-content strong {
   @apply font-semibold;
   color: var(--text-strong);
 }
 .msg-content h1, .msg-content h2, .msg-content h3 {
-  @apply font-semibold mt-2 mb-1;
+  @apply font-semibold mt-4 mb-2;
+  color: var(--text-strong);
 }
-.msg-content h1 { @apply text-base; }
-.msg-content h2 { @apply text-sm; }
-.msg-content h3 { @apply text-xs; }
+.msg-content h1 { @apply text-2xl; }
+.msg-content h2 { @apply text-xl; }
+.msg-content h3 { @apply text-lg; }
 
 /* GFM tables (react-markdown + remark-gfm) — default UA styles are invisible on dark bubbles */
 .msg-content table {
   border-collapse: collapse;
-  margin: 0.5em 0;
-  font-size: 0.8125rem;
-  line-height: 1.45;
+  margin: 0.75em 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 .msg-content th,
 .msg-content td {

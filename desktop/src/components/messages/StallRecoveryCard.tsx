@@ -35,7 +35,7 @@ export function StallRecoveryCard({
             style={{ maxWidth: "min(92%, 960px)" }}
           >
             <div
-              className={`w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-sm ${borderAccent[kind]}`}
+              className={`w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-[15px] leading-relaxed ${borderAccent[kind]}`}
             >
               <div className="flex items-start gap-3 px-4 py-3">
                 {isStall ? (
@@ -45,7 +45,7 @@ export function StallRecoveryCard({
                 )}
 
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-text-strong">
+                  <p className="text-[15px] font-medium text-text-strong">
                     {isStall
                       ? "该任务可能已中断（长时间无响应）"
                       : `已达到最大工具调用轮数（${rounds ?? "?"}/${maxRounds ?? "?"}）`}

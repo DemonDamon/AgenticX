@@ -15,23 +15,23 @@ function Spinner() {
 export function ReasoningBlock({ text, streaming = false }: Props) {
   if (streaming) {
     return (
-      <div className="mb-1 text-xs text-text-subtle">
-        <div className="flex items-center gap-1 text-[11px] font-medium tracking-wide text-text-faint">
+      <div className="mb-2 text-sm text-text-subtle">
+        <div className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-text-faint">
           <Spinner />
           <span>Thinking</span>
         </div>
         {text ? (
-          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-text-faint">{text}</pre>
+          <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap break-words text-[13px] leading-relaxed text-text-faint">{text}</pre>
         ) : null}
       </div>
     );
   }
   return (
-    <details className="mb-1 text-xs text-text-subtle">
-      <summary className="cursor-pointer select-none text-[11px] font-medium tracking-wide text-text-faint">
+    <details className="mb-2 text-sm text-text-subtle">
+      <summary className="cursor-pointer select-none text-xs font-medium tracking-wide text-text-faint">
         Thought
       </summary>
-      <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-text-faint">{text}</pre>
+      <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap break-words text-[13px] leading-relaxed text-text-faint">{text}</pre>
     </details>
   );
 }

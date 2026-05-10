@@ -23,10 +23,10 @@ export function ToolOutputStream({ lines, maxVisible = 30 }: Props) {
   return (
     <div
       ref={containerRef}
-      className="mt-1 max-h-[200px] overflow-y-auto rounded border border-border bg-surface-panel/60 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-text-muted"
+      className="mt-1 max-h-[200px] overflow-y-auto rounded border border-border bg-surface-panel/60 px-2 py-1.5 font-mono text-xs leading-relaxed text-text-muted"
     >
       {truncated > 0 && (
-        <div className="mb-1 text-[10px] text-text-faint">
+        <div className="mb-1 text-[11px] text-text-faint">
           ... {truncated} line{truncated > 1 ? "s" : ""} hidden
         </div>
       )}

@@ -149,15 +149,15 @@ export function ToolCallCard({
 
   const titleEl =
     status === "running" || status === "pending" ? (
-      <Shimmer text={title} className="text-[11px] font-medium" />
+      <Shimmer text={title} className="text-xs font-medium" />
     ) : (
-      <span className="text-[11px] font-medium text-text-subtle">{title}</span>
+      <span className="text-xs font-medium text-text-subtle">{title}</span>
     );
 
   const sec = message.toolElapsedSec;
   const metaRight =
     sec != null && Number.isFinite(sec) && (status === "running" || status === "pending") ? (
-      <span className="shrink-0 text-[10px] text-text-faint tabular-nums">{sec}s</span>
+      <span className="shrink-0 text-[11px] text-text-faint tabular-nums">{sec}s</span>
     ) : null;
 
   useEffect(() => {

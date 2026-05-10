@@ -13,7 +13,7 @@ export function ForwardedHistoryCard({ history, onOpen }: Props) {
       className="box-border w-full min-w-0 max-w-full rounded-lg border border-border bg-surface-panel/70 px-3 py-2 text-left transition hover:bg-surface-hover"
       onClick={onOpen}
     >
-      <div className="break-words text-sm font-medium text-text-strong [overflow-wrap:anywhere]">{history.title}</div>
+      <div className="break-words text-[15px] font-medium text-text-strong [overflow-wrap:anywhere]">{history.title}</div>
       {history.note ? (
         <div className="mt-1 break-words rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-xs text-cyan-200 [overflow-wrap:anywhere]">
           附加说明：{history.note}
