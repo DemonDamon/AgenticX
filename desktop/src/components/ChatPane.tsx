@@ -4,10 +4,12 @@ import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react"
 import {
   Check,
   ChevronDown,
+  Database,
   GitBranch,
   GripVertical,
   Expand,
   Layers,
+  Search,
   SquarePen,
   Wand2,
   Wrench,
@@ -105,10 +107,6 @@ const KB_RETRIEVAL_MODE_OPTIONS: { value: "auto" | "always"; label: string }[] =
   { value: "auto", label: "智能检索" },
   { value: "always", label: "始终检索" },
 ];
-const CHAT_PICKER_BUTTON_CLASS =
-  "flex h-7 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong";
-const CHAT_PICKER_PANEL_CLASS =
-  "absolute bottom-full left-0 z-40 mb-1 max-h-[220px] min-w-[170px] overflow-y-auto rounded-lg border border-border bg-surface-panel shadow-2xl backdrop-blur-xl";
 
 const FALLBACK_PANE: ChatPaneState = {
   id: "fallback-pane",
@@ -540,19 +538,17 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   return (
     <div className="relative">
       <button
-        className={CHAT_PICKER_BUTTON_CLASS}
+        className="flex h-7 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
         onClick={() => setOpen((v) => !v)}
         title="切换模型"
       >
         <span className="max-w-[180px] truncate">{currentLabel}</span>
-        <span className="text-[9px]">{open ? "▴" : "▾"}</span>
+        <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2.5} aria-hidden />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div
-            className={`${CHAT_PICKER_PANEL_CLASS} w-[240px]`}
-          >
+          <div className="absolute bottom-full left-0 z-40 mb-1 w-[240px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl">
             {options.length === 0 ? (
               <div className="px-3 py-3 text-center text-xs text-text-faint">
                 请先在设置中配置模型
@@ -564,17 +560,23 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                   <button
                     key={`${opt.provider}:${opt.model}`}
                     type="button"
-                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:font-bold ${
-                      isActive ? "text-text-strong" : "text-text-muted"
+                    className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                      isActive ? "bg-surface-hover" : "hover:bg-surface-hover"
                     }`}
                     onClick={() => handleSelect(opt.provider, opt.model)}
                   >
-                    <span
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                        isActive ? "bg-emerald-500" : "bg-surface-hover"
-                      }`}
-                    />
-                    <span className="truncate">{opt.label}</span>
+                    <span className="flex flex-1 flex-col gap-0.5">
+                      <span
+                        className={`text-[13px] font-medium leading-none ${
+                          isActive ? "text-text-strong" : "text-text-standard"
+                        }`}
+                      >
+                        {opt.label}
+                      </span>
+                    </span>
+                    <span className="flex w-4 shrink-0 justify-end">
+                      {isActive && <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />}
+                    </span>
                   </button>
                 );
               })
@@ -650,20 +652,18 @@ function PaneKnowledgeRetrievalModeSwitch({
     <div className="relative">
       <button
         type="button"
-        className={CHAT_PICKER_BUTTON_CLASS}
+        className="flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-[12px] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
         disabled={saving}
         onClick={() => setOpen((v) => !v)}
         title="知识库检索模式"
       >
-        <span>{KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "智能检索"}</span>
-        <span className="text-[9px]">{open ? "▴" : "▾"}</span>
+        <span className="shrink-0">{KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "智能检索"}</span>
+        <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2.5} aria-hidden />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div
-            className={CHAT_PICKER_PANEL_CLASS}
-          >
+          <div className="absolute bottom-full left-0 z-40 mb-1 w-[160px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl">
             {KB_RETRIEVAL_MODE_OPTIONS.map((opt) => {
               const isActive = mode === opt.value;
               return (
@@ -671,20 +671,44 @@ function PaneKnowledgeRetrievalModeSwitch({
                   key={opt.value}
                   type="button"
                   disabled={saving}
-                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:font-bold ${
-                    isActive ? "text-text-strong" : "text-text-muted"
-                  }`}
+                  className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                    isActive ? "bg-surface-hover" : "hover:bg-surface-hover"
+                  } ${opt.value === "always" ? "mt-0.5" : ""}`}
                   onClick={() => {
                     setOpen(false);
                     void saveMode(opt.value);
                   }}
                 >
-                  <span
-                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                      isActive ? "bg-emerald-500" : "bg-surface-hover"
-                    }`}
-                  />
-                  <span className="truncate">{opt.label}</span>
+                  {opt.value === "auto" ? (
+                    <Search
+                      className={`h-[15px] w-[15px] shrink-0 ${
+                        isActive ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
+                      }`}
+                      strokeWidth={2}
+                    />
+                  ) : (
+                    <Database
+                      className={`h-[15px] w-[15px] shrink-0 ${
+                        isActive ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
+                      }`}
+                      strokeWidth={2}
+                    />
+                  )}
+                  <span className="flex flex-1 flex-col gap-0.5">
+                    <span
+                      className={`text-[13px] font-medium leading-none ${
+                        isActive ? "text-text-strong" : "text-text-standard"
+                      }`}
+                    >
+                      {opt.label}
+                    </span>
+                    <span className="text-[11px] leading-none text-text-faint">
+                      {opt.value === "auto" ? "适用大部分情况" : "强制查阅知识库"}
+                    </span>
+                  </span>
+                  <span className="flex w-4 shrink-0 justify-end">
+                    {isActive && <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />}
+                  </span>
                 </button>
               );
             })}
@@ -5652,6 +5676,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     setInput(extractComposerText());
                   }}
                 />
+                <div className="flex items-center">
+                  <PaneKnowledgeRetrievalModeSwitch apiToken={apiToken} apiBase={apiBase} />
+                </div>
                 <button
                   type="button"
                   className="flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-[12px] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
@@ -5670,9 +5697,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   </svg>
                   <span className="shrink-0">更多</span>
                 </button>
-                <div className="ml-1 flex items-center">
-                  <PaneKnowledgeRetrievalModeSwitch apiToken={apiToken} apiBase={apiBase} />
-                </div>
               </div>
               {/* ── Team mode action bar (routing="team" only) ─────────── */}
               <div className="flex shrink-0 items-center gap-1.5">
