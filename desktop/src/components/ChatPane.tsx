@@ -5379,39 +5379,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         )}
 
         <div className="agx-pane-composer-shell shrink-0 border-t border-border px-4 py-2.5">
-          <div className="agx-pane-composer-meta mb-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-text-faint">
-            {(() => {
-              const tkIn = pane.sessionTokens?.input ?? 0;
-              const tkOut = pane.sessionTokens?.output ?? 0;
-              const tkTotal = tkIn + tkOut;
-              return (
-                <span
-                  className="shrink-0 rounded border border-border bg-surface-card px-2 py-0.5"
-                  title={tkTotal > 0
-                    ? `↑ ${tkIn.toLocaleString()} input  ↓ ${tkOut.toLocaleString()} output`
-                    : "本次会话累计 token 消耗"}
-                >
-                  {tkTotal > 0 ? `${(tkTotal / 1000).toFixed(1)}k tokens` : "0 tokens"}
-                </span>
-              );
-            })()}
-            <span className="shrink-0 truncate rounded border border-border bg-surface-card px-2 py-0.5" style={{ maxWidth: "45%" }}>
-              {pane.sessionId
-                ? `${pane.sessionId.slice(0, 8)}…`
-                : !isGroupPane && !isAutomationTaskPane
-                  ? "未创建"
-                  : "-"}
-            </span>
-            {chatProvider && chatModel ? (
-              <span
-                className="min-w-0 truncate rounded border border-border bg-surface-card px-2 py-0.5"
-                style={{ maxWidth: "55%" }}
-                title={`${chatProvider}/${chatModel}`}
-              >
-                {chatProviderDisplay}/{chatModel}
-              </span>
-            ) : null}
-          </div>
           {selectedSubAgent ? (
             <div className="mb-1 inline-flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-0.5 text-xs text-text-muted">
               对话目标: {selectedSubAgent}
@@ -5703,50 +5670,56 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   </svg>
                   <span className="shrink-0">更多</span>
                 </button>
+                <div className="ml-1 flex items-center">
+                  <PaneKnowledgeRetrievalModeSwitch apiToken={apiToken} apiBase={apiBase} />
+                </div>
               </div>
               {/* ── Team mode action bar (routing="team" only) ─────────── */}
-              {isGroupPane && activeGroup?.routing === "team" && (
-                <div className="flex items-center gap-1 mr-1">
-                  <button
-                    className="flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] text-text-faint transition hover:bg-indigo-500/10 hover:text-indigo-400"
-                    title="插入任务到队列"
-                    onClick={() => {
-                      const taskDesc = extractComposerText().trim();
-                      if (taskDesc) {
-                        void sendGroupTeamAction("add_task", { task_description: taskDesc });
-                      }
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                      <path d="M12 5v14M5 12h14" />
-                    </svg>
-                    <span className="hidden sm:inline">插入任务</span>
-                  </button>
-                  {isStreamingCurrentSession ? (
+              <div className="flex shrink-0 items-center gap-1.5">
+                {isGroupPane && activeGroup?.routing === "team" && (
+                  <div className="flex items-center gap-1 mr-1">
                     <button
-                      className="flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] text-amber-400 transition hover:bg-amber-500/10"
-                      title="暂停团队任务"
-                      onClick={() => void sendGroupTeamAction("pause")}
+                      className="flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] text-text-faint transition hover:bg-indigo-500/10 hover:text-indigo-400"
+                      title="插入任务到队列"
+                      onClick={() => {
+                        const taskDesc = extractComposerText().trim();
+                        if (taskDesc) {
+                          void sendGroupTeamAction("add_task", { task_description: taskDesc });
+                        }
+                      }}
                     >
-                      <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5">
-                        <rect x="6" y="4" width="4" height="16" />
-                        <rect x="14" y="4" width="4" height="16" />
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                        <path d="M12 5v14M5 12h14" />
                       </svg>
-                      <span className="hidden sm:inline">暂停</span>
+                      <span className="hidden sm:inline">插入任务</span>
                     </button>
-                  ) : null}
-                </div>
-              )}
-              <ActionCircleButton
-                hasInput={!!pane.sessionId && (!!input.trim() || readyAttachments.length > 0)}
-                streaming={canInterruptCurrentSession || isRunGuardCurrentSession}
-                recording={recording}
-                onSend={() => {
-                  void sendChat(extractComposerText());
-                }}
-                onMic={onMicClick}
-                onStop={stopCurrentRun}
-              />
+                    {isStreamingCurrentSession ? (
+                      <button
+                        className="flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] text-amber-400 transition hover:bg-amber-500/10"
+                        title="暂停团队任务"
+                        onClick={() => void sendGroupTeamAction("pause")}
+                      >
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5">
+                          <rect x="6" y="4" width="4" height="16" />
+                          <rect x="14" y="4" width="4" height="16" />
+                        </svg>
+                        <span className="hidden sm:inline">暂停</span>
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+                <PaneModelPicker paneId={pane.id} />
+                <ActionCircleButton
+                  hasInput={!!pane.sessionId && (!!input.trim() || readyAttachments.length > 0)}
+                  streaming={canInterruptCurrentSession || isRunGuardCurrentSession}
+                  recording={recording}
+                  onSend={() => {
+                    void sendChat(extractComposerText());
+                  }}
+                  onMic={onMicClick}
+                  onStop={stopCurrentRun}
+                />
+              </div>
             </div>
           </div>
           {atOpen ? (
@@ -5799,9 +5772,38 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               )}
             </div>
           ) : null}
-          <div className="agx-pane-composer-tail mt-1.5 flex items-center gap-2">
-            <PaneModelPicker paneId={pane.id} />
-            <PaneKnowledgeRetrievalModeSwitch apiToken={apiToken} apiBase={apiBase} />
+          <div className="agx-pane-composer-meta mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-text-faint">
+            {(() => {
+              const tkIn = pane.sessionTokens?.input ?? 0;
+              const tkOut = pane.sessionTokens?.output ?? 0;
+              const tkTotal = tkIn + tkOut;
+              return (
+                <span
+                  className="shrink-0 rounded border border-border bg-surface-card px-2 py-0.5"
+                  title={tkTotal > 0
+                    ? `↑ ${tkIn.toLocaleString()} input  ↓ ${tkOut.toLocaleString()} output`
+                    : "本次会话累计 token 消耗"}
+                >
+                  {tkTotal > 0 ? `${(tkTotal / 1000).toFixed(1)}k tokens` : "0 tokens"}
+                </span>
+              );
+            })()}
+            <span className="shrink-0 truncate rounded border border-border bg-surface-card px-2 py-0.5" style={{ maxWidth: "45%" }}>
+              {pane.sessionId
+                ? `${pane.sessionId.slice(0, 8)}…`
+                : !isGroupPane && !isAutomationTaskPane
+                  ? "未创建"
+                  : "-"}
+            </span>
+            {chatProvider && chatModel ? (
+              <span
+                className="min-w-0 truncate rounded border border-border bg-surface-card px-2 py-0.5"
+                style={{ maxWidth: "55%" }}
+                title={`${chatProvider}/${chatModel}`}
+              >
+                {chatProviderDisplay}/{chatModel}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
