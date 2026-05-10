@@ -16,7 +16,7 @@ type Props = {
 
 export function AssistantBubble({ message, badge }: Props) {
   return (
-    <div className="mr-8 min-w-0 overflow-hidden rounded-xl rounded-tl-sm border border-border bg-surface-bubble px-3 py-2 text-base leading-relaxed">
+    <div className="mr-8 min-w-0 overflow-hidden rounded-xl rounded-tl-sm border border-border bg-surface-bubble px-3 py-2 text-[16px] leading-relaxed">
       {badge}
       <ReactMarkdown
         remarkPlugins={chatRemarkPlugins}
