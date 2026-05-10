@@ -55,7 +55,7 @@ export function QueuedMessageBubble({ msg, index, total, onEdit, onRemove }: Pro
                   setEditing(false);
                 }
               }}
-              className="min-h-[48px] w-full resize-none rounded-lg border border-border bg-surface-panel px-2.5 py-1.5 text-sm text-text-primary outline-none focus:border-border-strong"
+              className="min-h-[48px] w-full resize-none rounded-lg border border-border bg-surface-panel px-2.5 py-1.5 text-[15px] leading-relaxed text-text-primary outline-none focus:border-border-strong"
             />
             <div className="flex gap-1.5">
               <button
@@ -73,7 +73,7 @@ export function QueuedMessageBubble({ msg, index, total, onEdit, onRemove }: Pro
             </div>
           </div>
         ) : (
-          <div className="min-w-0 overflow-hidden rounded-xl rounded-tr-sm border border-dashed border-border bg-surface-card/60 px-3 py-2 text-sm text-text-subtle">
+          <div className="min-w-0 overflow-hidden rounded-xl rounded-tr-sm border border-dashed border-border bg-surface-card/60 px-3 py-2 text-[15px] leading-relaxed text-text-subtle">
             <p className="whitespace-pre-wrap break-words">{msg.text}</p>
           </div>
         )}

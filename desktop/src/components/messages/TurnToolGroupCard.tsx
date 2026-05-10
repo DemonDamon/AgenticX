@@ -62,7 +62,7 @@ export function TurnToolGroupCard({
         >
           <Check className="h-2.5 w-2.5 text-zinc-400" strokeWidth={2.5} />
         </span>
-        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-text-subtle">{summary}</span>
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-text-subtle">{summary}</span>
         {expanded ? (
           <ChevronDown className="h-3 w-3 shrink-0 text-text-muted" />
         ) : (
@@ -73,8 +73,8 @@ export function TurnToolGroupCard({
         <div
           className={
             flat
-              ? "relative px-3 pb-2 pt-0.5 text-[11px] text-text-muted"
-              : "relative border-t border-border px-3 pb-2 pt-2 text-[11px] text-text-muted"
+              ? "relative px-3 pb-2 pt-0.5 text-xs text-text-muted"
+              : "relative border-t border-border px-3 pb-2 pt-2 text-xs text-text-muted"
           }
         >
           {/* Vertical timeline: starts below summary row (does not pierce circle-check); X aligns with circle center. */}
