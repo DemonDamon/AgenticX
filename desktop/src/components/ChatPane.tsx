@@ -650,16 +650,21 @@ function PaneKnowledgeRetrievalModeSwitch({
 
   return (
     <div className="relative">
-      <button
-        type="button"
-        className="flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-[12px] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
-        disabled={saving}
-        onClick={() => setOpen((v) => !v)}
-        title="知识库检索模式"
-      >
-        <span className="shrink-0">{KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "智能检索"}</span>
-        <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2.5} aria-hidden />
-      </button>
+      <HoverTip label={`知识库检索模式：${KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "智能检索"}`}>
+        <button
+          type="button"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+          disabled={saving}
+          onClick={() => setOpen((v) => !v)}
+          aria-label="知识库检索模式"
+        >
+          {mode === "auto" ? (
+            <Search className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
+          ) : (
+            <Database className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
+          )}
+        </button>
+      </HoverTip>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
