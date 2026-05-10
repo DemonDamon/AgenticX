@@ -5681,7 +5681,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 </div>
                 <button
                   type="button"
-                  className="flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-[12px] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
                   title="更多"
                 >
                   <svg
@@ -5695,7 +5695,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     <rect x="3" y="13" width="8" height="8" rx="1.5" />
                     <rect x="13" y="13" width="8" height="8" rx="1.5" />
                   </svg>
-                  <span className="shrink-0">更多</span>
                 </button>
               </div>
               {/* ── Team mode action bar (routing="team" only) ─────────── */}
