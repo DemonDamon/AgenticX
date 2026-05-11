@@ -651,6 +651,11 @@ export function AvatarSidebar() {
   const startResizeAvatars = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
+    // 避免分身增高时与「群聊+定时」两个 flex-1 子项均摊收缩：先固定群聊高度，仅由定时区让出空间
+    if (!groupsCollapsed && groupsHeight == null) {
+      const gh = groupsContainerRef.current?.getBoundingClientRect().height;
+      if (gh && gh > 0) setGroupsHeight(gh);
+    }
     const startY = event.clientY;
     const startHeight = avatarsContainerRef.current?.getBoundingClientRect().height || 100;
     const onMove = (moveEvent: MouseEvent) => {
@@ -669,6 +674,11 @@ export function AvatarSidebar() {
   const startResizeGroups = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
+    // 避免群聊增高时与分身区 flex-1 均摊收缩：先固定分身区高度，仅由定时区让出空间
+    if (!avatarsCollapsed && avatarsHeight == null) {
+      const ah = avatarsContainerRef.current?.getBoundingClientRect().height;
+      if (ah && ah > 0) setAvatarsHeight(ah);
+    }
     const startY = event.clientY;
     const startHeight = groupsContainerRef.current?.getBoundingClientRect().height || 100;
     const onMove = (moveEvent: MouseEvent) => {
