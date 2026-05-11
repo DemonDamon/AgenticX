@@ -674,26 +674,27 @@ export function AvatarSidebar() {
           </div>
         </button>
 
-        <div className="flex-1 overflow-y-auto py-1">
+        <div className="flex-1 flex flex-col py-1 min-h-0">
           {/* Avatar list */}
-          <div className="flex items-center justify-between px-4 py-1.5">
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-text-faint hover:text-text-subtle"
-              onClick={() => setAvatarsCollapsed((v) => !v)}
-            >
-              {avatarsCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              <span>分身 ({avatarsLoaded ? avatars.length : "…"})</span>
-            </button>
-            <button
-              className="rounded px-1.5 py-0.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-              onClick={() => setCreateOpen(true)}
-            >
-              + 新建
-            </button>
-          </div>
-          {!avatarsCollapsed && (
-            <div className="pb-1">
+          <div className={`flex flex-col ${avatarsCollapsed ? "shrink-0" : "flex-1 min-h-0"}`}>
+            <div className="flex shrink-0 items-center justify-between px-4 py-1.5">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-text-faint hover:text-text-subtle"
+                onClick={() => setAvatarsCollapsed((v) => !v)}
+              >
+                {avatarsCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                <span>分身 ({avatarsLoaded ? avatars.length : "…"})</span>
+              </button>
+              <button
+                className="rounded px-1.5 py-0.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                onClick={() => setCreateOpen(true)}
+              >
+                + 新建
+              </button>
+            </div>
+            {!avatarsCollapsed && (
+              <div className="flex-1 overflow-y-auto pb-1">
               {sortedAvatars.length === 0 && (
                 <div className="px-3 py-4 text-center text-xs text-text-faint">
                   {avatarsLoaded ? (
@@ -756,12 +757,13 @@ export function AvatarSidebar() {
                   </div>
                 );
               })}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
 
           {/* Group chats */}
-          <div className="mt-2">
-            <div className="flex items-center justify-between px-4 py-1.5">
+          <div className={`flex flex-col mt-2 ${groupsCollapsed ? "shrink-0" : "flex-1 min-h-0"}`}>
+            <div className="flex shrink-0 items-center justify-between px-4 py-1.5">
               <button
                 type="button"
                 className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-text-faint hover:text-text-subtle"
@@ -778,7 +780,7 @@ export function AvatarSidebar() {
               </button>
             </div>
             {!groupsCollapsed && (
-              <div className="pb-1">
+              <div className="flex-1 overflow-y-auto pb-1">
                 {groups.map((group, groupIndex) => {
                   const groupAvatarId = `group:${group.id}`;
                   const hasPane = panes.some((item) => item.avatarId === groupAvatarId);
@@ -830,8 +832,8 @@ export function AvatarSidebar() {
           </div>
 
           {/* Scheduled tasks */}
-          <div className="mt-2 pb-2">
-            <div className="flex items-center justify-between px-4 py-1.5">
+          <div className={`flex flex-col mt-2 pb-2 ${automationCollapsed ? "shrink-0" : "flex-1 min-h-0"}`}>
+            <div className="flex shrink-0 items-center justify-between px-4 py-1.5">
               <button
                 type="button"
                 className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-text-faint hover:text-text-subtle"
@@ -848,7 +850,7 @@ export function AvatarSidebar() {
               </button>
             </div>
             {!automationCollapsed && (
-              <div className="pb-1">
+              <div className="flex-1 overflow-y-auto pb-1">
                 {automationTasks.length === 0 && (
                   <div className="px-3 py-4 text-center text-xs text-text-faint">
                     暂无定时任务，可在「设置 - 自动化」创建
