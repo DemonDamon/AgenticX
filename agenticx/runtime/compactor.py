@@ -157,12 +157,59 @@ class ContextCompactor:
             f"{text[-tail_len:]}"
         )
 
+    def _extract_pending_user_question(
+        self, messages_to_compact: Sequence[Dict[str, Any]]
+    ) -> str:
+        """Extract the most recent user message that has not been fully answered (FR-5).
+
+        Reverse scan messages to find the most recent user message where:
+        - After the user message, there are only tool / assistant-with-tool_calls
+        - No final assistant text response (role=assistant without tool_calls)
+
+        Returns:
+            The user query text if found, empty string otherwise.
+            Result is capped at 4000 chars.
+        """
+        # Track if we've seen a "final" assistant response (without tool_calls)
+        # while scanning backwards. If we see one before finding a user,
+        # that means all users are answered.
+        seen_final_assistant = False
+        pending_question = ""
+
+        for idx in range(len(messages_to_compact) - 1, -1, -1):
+            msg = messages_to_compact[idx]
+            if not isinstance(msg, dict):
+                continue
+            role = str(msg.get("role", "")).strip()
+
+            if role == "assistant":
+                tcs = msg.get("tool_calls")
+                if not tcs:  # Final assistant text response - marks that previous user was answered
+                    seen_final_assistant = True
+                # If assistant has tool_calls, it doesn't answer the user - continue scanning
+                continue
+
+            if role == "user":
+                if not seen_final_assistant:
+                    # This user message has no final assistant response after it
+                    content = str(msg.get("content", "") or "").strip()
+                    if content:
+                        pending_question = content[:4000]  # Cap at 4000 chars per FR-5
+                        return pending_question  # Return the most recent unanswered user
+                else:
+                    # We found a user, but there was a final assistant after it
+                    # This user was answered, so we stop scanning
+                    return ""
+
+        return pending_question
+
     def _extract_session_memory(self, messages_to_compact: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         memory: Dict[str, Any] = {
             "files_modified": [],
             "errors_encountered": [],
             "key_decisions": [],
             "tools_used_summary": {},
+            "pending_user_question": "",  # FR-5: Track pending user question
         }
         decision_kw = re.compile(
             r"(决定|采用|选择|方案|结论|放弃|取消|优先|必须|不要)",
@@ -221,6 +268,8 @@ class ContextCompactor:
         memory["errors_encountered"] = errors[:20]
         memory["key_decisions"] = decisions[:15]
         memory["tools_used_summary"] = dict(sorted(tools_count.items(), key=lambda x: -x[1])[:40])
+        # FR-5: Extract pending user question
+        memory["pending_user_question"] = self._extract_pending_user_question(messages_to_compact)
         return memory
 
     def _build_compaction_prompt(
@@ -229,10 +278,12 @@ class ContextCompactor:
         *,
         memory_prefix: str = "",
     ) -> str:
+        # FR-6: Prioritize pending user question in compression instructions
         lines = [
             "请将以下对话压缩成用于后续推理的精炼上下文。",
-            "必须包含：关键决策、关键工具结果、关键文件改动、当前待办与风险。",
-            "输出中文，长度控制在 400 字以内，使用条目式。",
+            "最高优先级：必须在摘要的最顶部「一字不差」保留 `[pending_user_question]`（即用户最近一条尚未被回答的原始问题）；任何对该问题的偏离/降级回答都视为压缩失败。",
+            "其次必须包含：关键决策、关键工具结果、关键文件改动、当前待办与风险。",
+            "输出中文，长度控制在 400 字以内（不含 pending_user_question 原文），使用条目式。",
             "",
         ]
         if memory_prefix:
@@ -269,44 +320,64 @@ class ContextCompactor:
         *,
         force: bool = False,
         model: str = "",
-    ) -> Tuple[List[Dict[str, Any]], bool, str, int]:
+    ) -> Tuple[List[Dict[str, Any]], bool, str, int, str]:
         """Compact old messages and return compacted messages.
 
         Returns:
-            (new_messages, did_compact, summary, compacted_count)
+            (new_messages, did_compact, summary, compacted_count, pending_question)
         """
         copied = [m for m in messages if isinstance(m, dict)]
         if len(copied) <= self.retain_recent_messages:
-            return copied, False, "", 0
+            return copied, False, "", 0, ""
 
         should = force or self._should_compact(copied, model=model)
         if not should:
-            return copied, False, "", 0
+            return copied, False, "", 0, ""
 
         if not force and self._consecutive_failures >= _MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES:
             _log.warning(
                 "skipping auto compaction: %s consecutive failures",
                 self._consecutive_failures,
             )
-            return copied, False, "", 0
+            return copied, False, "", 0, ""
 
         compacted_count = len(copied) - self.retain_recent_messages
         to_compact = copied[:compacted_count]
         retained = copied[compacted_count:]
         memory = self._extract_session_memory(to_compact)
+
+        # FR-6: Extract pending user question (hard-coded at top of content)
+        pending_question = memory.get("pending_user_question", "")
+
+        # NFR-7: Structured logging for compactor pending question
+        if pending_question:
+            _log.info(
+                "compactor_pending_question_kept=true chars=%d",
+                len(pending_question),
+            )
+
+        # Avoid duplicating pending_user_question in [session_memory] block:
+        # it's already hard-coded at the top via [user-pending-question] line.
+        memory_for_prefix = {k: v for k, v in memory.items() if k != "pending_user_question"}
         try:
-            memory_json = json.dumps(memory, ensure_ascii=False)
+            memory_json = json.dumps(memory_for_prefix, ensure_ascii=False)
         except Exception:
-            memory_json = str(memory)
+            memory_json = str(memory_for_prefix)
         memory_prefix = f"[session_memory]{memory_json[:1800]}"
         summary = await self._summarize(to_compact, memory_prefix=memory_prefix)
 
+        # FR-6: Build compacted message with pending question hard-coded at top
+        content_parts = []
+        if pending_question:
+            content_parts.append(f"[user-pending-question] {pending_question}")
+            content_parts.append("")
+        content_parts.append(memory_prefix)
+        content_parts.append("")
+        content_parts.append(f"[compacted] 已压缩 {compacted_count} 条历史消息，以下为摘要：")
+        content_parts.append(summary)
+
         compacted_message = {
             "role": "system",
-            "content": (
-                f"{memory_prefix}\n\n"
-                f"[compacted] 已压缩 {compacted_count} 条历史消息，以下为摘要：\n"
-                f"{summary}"
-            ),
+            "content": "\n\n".join(content_parts),
         }
-        return [compacted_message, *retained], True, summary, compacted_count
+        return [compacted_message, *retained], True, summary, compacted_count, pending_question

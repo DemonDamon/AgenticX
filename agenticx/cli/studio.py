@@ -78,6 +78,8 @@ class StudioSession:
     file_state_tracker: FileStateTracker = field(default_factory=FileStateTracker)
     # Session-scoped providers blocked after hard LLM failures (billing/auth); see docs/adr/0001-*.md
     provider_hard_failure_providers: Set[str] = field(default_factory=set)
+    # Current user intent for this session (not persisted to messages.json)
+    current_user_intent: Optional[str] = None
 
     # ------------------------------------------------------------------
     # MCP read-through properties → GlobalMcpManager

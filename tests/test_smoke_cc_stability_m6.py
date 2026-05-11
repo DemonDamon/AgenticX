@@ -25,9 +25,9 @@ class _LLM:
 
 @pytest.mark.asyncio
 async def test_maybe_compact_force_true() -> None:
-    c = ContextCompactor(_LLM(), threshold_messages=999, retain_recent_messages=2)
-    messages = [{"role": "user", "content": f"x{i}"} for i in range(10)]
-    new_msgs, did, summary, count = await c.maybe_compact(messages, force=True, model="gpt-4o")
+    c = ContextCompactor(_LLM(), threshold_messages=999, retain_recent_messages=4)
+    messages = [{"role": "user", "content": f"x{i}"} for i in range(12)]
+    new_msgs, did, summary, count, _pending = await c.maybe_compact(messages, force=True, model="gpt-4o")
     assert did is True
     assert count == len(messages) - c.retain_recent_messages
     assert summary
