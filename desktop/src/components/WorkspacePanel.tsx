@@ -464,7 +464,7 @@ export function WorkspacePanel({
         return (
           <div key={item.path}>
             <button
-              className="flex w-full min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left text-xs text-text-muted hover:bg-surface-hover"
+              className="flex w-full min-w-0 items-center gap-1 rounded px-1 py-1 text-left text-[13px] text-text-muted hover:bg-surface-hover"
               style={{ paddingLeft }}
               onClick={() => void toggleDir(taskspaceId, item.path)}
               title={item.path}
@@ -479,7 +479,7 @@ export function WorkspacePanel({
       return (
         <div key={item.path} className="flex min-w-0 items-center gap-1">
           <button
-            className={`min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-xs transition hover:bg-surface-hover ${
+            className={`min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
               selectedFilePath === item.path ? "text-text-strong" : "text-text-subtle"
             }`}
             style={{ paddingLeft }}
@@ -489,7 +489,7 @@ export function WorkspacePanel({
             {item.name}
           </button>
           <button
-            className="rounded px-1 py-0.5 text-[10px] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+            className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
             onClick={() => onPickFileForReference?.(item.path)}
             title="引用到输入框"
           >
@@ -520,7 +520,7 @@ export function WorkspacePanel({
               {taskspaces.map((item) => (
                 <button
                   key={item.id}
-                  className={`shrink-0 rounded px-2 py-1 text-xs transition ${
+                  className={`shrink-0 rounded px-2 py-1.5 text-[13px] transition ${
                     item.id === activeTaskspace?.id
                       ? "text-text-strong"
                       : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
@@ -588,17 +588,17 @@ export function WorkspacePanel({
               className="border-t border-border px-3 py-2"
               style={tintColor ? { backgroundColor: tintColor } : undefined}
             >
-              <div className="mb-2 text-[11px] font-medium text-text-subtle">新增工作区</div>
+              <div className="mb-2 text-[13px] font-medium text-text-subtle">新增工作区</div>
               <input
                 value={newPath}
                 onChange={(e) => setNewPath(e.target.value)}
                 placeholder="目录绝对路径（可留空用默认）"
-                className="mb-1.5 w-full rounded border border-border bg-surface-hover px-2 py-1.5 text-[11px] text-text-primary outline-none focus:border-border-strong"
+                className="mb-1.5 w-full rounded border border-border bg-surface-hover px-2 py-1.5 text-[13px] text-text-primary outline-none focus:border-border-strong"
               />
               <div className="mb-1.5 flex justify-end">
                 <button
                   type="button"
-                  className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] text-text-muted hover:bg-surface-hover"
+                  className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[13px] text-text-muted hover:bg-surface-hover"
                   onClick={() => void chooseDirectoryForTaskspace()}
                   title="从系统目录中选择"
                 >
@@ -612,11 +612,11 @@ export function WorkspacePanel({
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
                 placeholder="显示名称（可选）"
-                className="mb-2 w-full rounded border border-border bg-surface-hover px-2 py-1.5 text-[11px] text-text-primary outline-none focus:border-border-strong"
+                className="mb-2 w-full rounded border border-border bg-surface-hover px-2 py-1.5 text-[13px] text-text-primary outline-none focus:border-border-strong"
               />
               <div className="flex items-center justify-end gap-1.5">
                 <button
-                  className="rounded px-2 py-1 text-[11px] text-text-subtle hover:bg-surface-hover"
+                  className="rounded px-2 py-1 text-[13px] text-text-subtle hover:bg-surface-hover"
                   onClick={() => {
                     setShowAddForm(false);
                     setNewPath("");
@@ -626,7 +626,7 @@ export function WorkspacePanel({
                   取消
                 </button>
                 <button
-                  className="rounded px-2 py-1 text-[11px] transition disabled:opacity-50"
+                  className="rounded px-2 py-1 text-[13px] transition disabled:opacity-50"
                   style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
                   disabled={adding}
                   onClick={() => void addTaskspace(newPath, newLabel)}
@@ -638,8 +638,8 @@ export function WorkspacePanel({
           ) : null}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto border-b border-border px-2 py-2">
-          {loading ? <div className="text-xs text-text-faint">加载中...</div> : null}
-          {!loading && !activeTaskspace ? <div className="text-xs text-text-faint">暂无工作区</div> : null}
+          {loading ? <div className="text-[13px] text-text-faint">加载中...</div> : null}
+          {!loading && !activeTaskspace ? <div className="text-[13px] text-text-faint">暂无工作区</div> : null}
           {!loading && activeTaskspace ? renderDir(activeTaskspace.id, ".", 0) : null}
         </div>
       </div>
@@ -661,13 +661,13 @@ export function WorkspacePanel({
 
       <div className="flex min-h-0 shrink-0 flex-col border-t border-border" style={{ height: safeTerminalHeight }}>
         <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
-          <span className="text-[10px] text-text-faint">终端</span>
+          <span className="text-xs text-text-faint">终端</span>
           <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
             {terminalTabs.map((tab) => (
               <div key={tab.id} className="flex shrink-0 items-center gap-0.5">
                 <button
                   type="button"
-                  className={`max-w-[120px] truncate rounded px-2 py-0.5 text-[11px] transition ${
+                  className={`max-w-[120px] truncate rounded px-2 py-1 text-[13px] transition ${
                     tab.id === activeTerminalTabId
                       ? "bg-surface-hover text-text-strong"
                       : "text-text-subtle hover:bg-surface-hover"
@@ -679,7 +679,7 @@ export function WorkspacePanel({
                 </button>
                 <button
                   type="button"
-                  className="rounded px-1 py-0.5 text-[10px] text-text-faint hover:bg-surface-hover hover:text-rose-300"
+                  className="rounded px-1.5 py-0.5 text-xs text-text-faint hover:bg-surface-hover hover:text-rose-300"
                   onClick={() => removePaneTerminalTab(paneId, tab.id)}
                   title="关闭终端"
                 >
@@ -690,7 +690,7 @@ export function WorkspacePanel({
           </div>
           <button
             type="button"
-            className="shrink-0 rounded bg-surface-hover px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
+            className="shrink-0 rounded bg-surface-hover px-2 py-1 text-[13px] text-text-muted hover:bg-surface-hover"
             onClick={addSameCwdTerminal}
             title="在当前工作区目录下新开终端"
           >
@@ -699,7 +699,7 @@ export function WorkspacePanel({
         </div>
         <div className="relative min-h-0 flex-1 bg-surface-card">
           {terminalTabs.length === 0 ? (
-            <div className="flex h-full items-center justify-center overflow-hidden px-3 text-center text-[11px] leading-relaxed text-text-faint">
+            <div className="flex h-full items-center justify-center overflow-hidden px-3 text-center text-[13px] leading-relaxed text-text-faint">
               <span className="break-words">右键工作区标签选择「在此目录下打开终端」，或点击 + 使用当前工作区目录</span>
             </div>
           ) : (
@@ -746,22 +746,22 @@ export function WorkspacePanel({
       {filePreview ? (
         <div className="absolute inset-2 z-30 flex min-h-0 flex-col rounded-lg border border-border-strong bg-surface-panel shadow-2xl backdrop-blur-xl">
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
-            <div className="truncate text-xs text-text-subtle">{filePreview.path}</div>
+            <div className="truncate text-[13px] text-text-subtle">{filePreview.path}</div>
             <button
-              className="rounded border border-border px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
+              className="rounded border border-border px-2 py-1 text-[13px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
               onClick={() => setFilePreview(null)}
             >
               关闭
             </button>
           </div>
-          <pre className="min-h-0 flex-1 overflow-auto px-3 py-2 text-[11px] leading-5">
+          <pre className="min-h-0 flex-1 overflow-auto px-3 py-2 text-[13px] leading-relaxed">
             <code
               className={`language-${detectLanguage(filePreview.path)}`}
               dangerouslySetInnerHTML={{ __html: highlightedCode }}
             />
           </pre>
           {filePreview.truncated ? (
-            <div className="border-t border-border px-3 py-1 text-[10px] text-amber-300">
+            <div className="border-t border-border px-3 py-1.5 text-xs text-amber-300">
               文件过大，已截断显示（{filePreview.size} bytes）。
             </div>
           ) : null}
@@ -769,7 +769,7 @@ export function WorkspacePanel({
       ) : null}
 
       {errorText ? (
-        <div className="border-t border-border px-2 py-1 text-[10px] text-rose-300">{errorText}</div>
+        <div className="border-t border-border px-3 py-1.5 text-xs text-rose-300">{errorText}</div>
       ) : null}
     </div>
   );

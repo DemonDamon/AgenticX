@@ -669,11 +669,11 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               if (e.key === "Enter") void saveRename(item.session_id);
               if (e.key === "Escape") setEditingId(null);
             }}
-            className="w-full rounded border border-border-strong bg-surface-hover px-2 py-1 text-xs text-text-primary outline-none"
+            className="w-full rounded border border-border-strong bg-surface-hover px-2 py-1 text-[13px] text-text-primary outline-none"
           />
         ) : (
           <button
-            className={`flex w-full flex-col items-start rounded px-2 py-1 text-left text-xs transition ${
+            className={`flex w-full flex-col items-start rounded px-2 py-1.5 text-left text-[13px] transition ${
               active ? "bg-surface-hover font-medium text-text-strong" : "text-text-muted hover:bg-surface-hover"
             }`}
             onClick={() => {
@@ -706,7 +706,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : null}
-              {item.pinned ? <span className="text-[10px] text-amber-300">pin</span> : null}
+              {item.pinned ? <span className="text-xs text-amber-300">pin</span> : null}
               {isRunning ? (
                 <span
                   className="inline-flex items-center justify-center rounded-sm px-0.5 py-px text-text-strong"
@@ -721,7 +721,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               ) : null}
               {isInterrupted ? (
                 <span
-                  className="inline-flex items-center rounded-sm px-1 py-px text-[9px] font-medium leading-tight text-amber-300"
+                  className="inline-flex items-center rounded-sm px-1 py-px text-[11px] font-medium leading-tight text-amber-300"
                   title="该会话已收到中断请求"
                 >
                   已中断
@@ -733,7 +733,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               ) : null}
               {showWechatChip ? (
                 <span
-                  className="inline-flex shrink-0 items-center rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
+                  className="inline-flex shrink-0 items-center rounded-sm px-1 py-px text-[11px] font-medium leading-tight"
                   style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
                 >
                   微信
@@ -742,11 +742,11 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               {unread ? <span className="inline-block h-1.5 w-1.5 rounded-full bg-text-muted" /> : null}
             </span>
             {contentSnippet ? (
-              <span className="mt-0.5 line-clamp-2 w-full text-[9px] leading-snug text-text-subtle" title={contentSnippet}>
+              <span className="mt-0.5 line-clamp-2 w-full text-[11px] leading-snug text-text-subtle" title={contentSnippet}>
                 {contentSnippet}
               </span>
             ) : null}
-            <span className="mt-0.5 truncate w-full text-[9px] text-text-faint">
+            <span className="mt-0.5 truncate w-full text-[11px] text-text-faint">
               {timeAgo(createdAt)}
             </span>
           </button>
@@ -759,7 +759,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     if (items.length === 0) return null;
     return (
       <div className="mb-2">
-        <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-text-faint">{groupTitle}</div>
+        <div className="px-2 py-1.5 text-xs font-medium uppercase tracking-wide text-text-faint">{groupTitle}</div>
         {items.map((item) =>
           renderSessionItem(
             item,
@@ -954,7 +954,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       className="flex h-full w-[220px] shrink-0 flex-col border-l border-border bg-surface-card"
       style={tintColor ? { backgroundColor: tintColor } : undefined}
     >
-      <div className="shrink-0 border-b border-border px-3 py-2 text-xs text-text-subtle">
+      <div className="shrink-0 border-b border-border px-3 py-2.5 text-[13px] text-text-subtle">
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5">
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0" title={title}>
@@ -981,7 +981,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             ) : (
               <>
                 <button
-                  className="rounded border border-border px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
+                  className="rounded border border-border px-2 py-0.5 text-xs text-text-muted hover:bg-surface-hover"
                   onClick={toggleSelectAll}
                   disabled={batchDeleting}
                   title="全选或取消全选"
@@ -991,7 +991,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                     : "全选"}
                 </button>
                 <button
-                  className="rounded border border-red-500/50 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                  className="rounded border border-red-500/50 px-2 py-0.5 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-50"
                   onClick={() => void deleteSelectedSessions()}
                   disabled={batchDeleting || selectedSessionIds.length === 0}
                   title={selectedSessionIds.length > 0 ? `删除 ${selectedSessionIds.length} 个会话` : "先勾选会话"}
@@ -999,7 +999,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                   {batchDeleting ? "删除中..." : `删除${selectedSessionIds.length > 0 ? ` (${selectedSessionIds.length})` : ""}`}
                 </button>
                 <button
-                  className="rounded border border-border px-2 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover"
+                  className="rounded border border-border px-2 py-0.5 text-xs text-text-muted hover:bg-surface-hover"
                   onClick={() => {
                     setSelectMode(false);
                     setSelectedSessionIds([]);
@@ -1012,7 +1012,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             )}
             {onClose ? (
               <button
-                className="rounded px-1.5 py-0.5 text-[11px] text-text-faint hover:bg-surface-hover hover:text-text-muted"
+                className="rounded px-1.5 py-0.5 text-xs text-text-faint hover:bg-surface-hover hover:text-text-muted"
                 onClick={onClose}
                 title="关闭历史会话"
               >
@@ -1033,26 +1033,26 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           autoComplete="off"
           spellCheck={false}
           aria-label="搜索历史会话"
-          className="w-full rounded-md border border-border bg-surface-hover px-2 py-1.5 text-[11px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
+          className="w-full rounded-md border border-border bg-surface-hover px-2.5 py-2 text-[13px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
         />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {sessions.length === 0 ? (
-          <div className="rounded border border-dashed border-border p-2 text-center text-xs text-text-faint">
+          <div className="rounded border border-dashed border-border p-3 text-center text-[13px] text-text-faint">
             暂无会话
           </div>
         ) : !searchHasAnyMatch ? (
-          <div className="rounded border border-dashed border-border p-2 text-center text-xs text-text-faint">
+          <div className="rounded border border-dashed border-border p-3 text-center text-[13px] text-text-faint">
             未找到匹配会话
           </div>
         ) : (
           <>
             {showFeishuBindSection && feishuSession ? (
               <div className="mb-2">
-                <div className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-[#3370FF]">
+                <div className="flex items-center gap-1 px-2 py-1 text-xs font-medium uppercase tracking-wide text-[#3370FF]">
                   <span>飞书绑定</span>
                   <span
-                    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
+                    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[11px] font-medium leading-tight"
                     style={{ backgroundColor: "rgba(51,112,255,0.15)", color: "#3370FF" }}
                   >
                     唯一
@@ -1075,10 +1075,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             ) : null}
             {showWechatBindSection && wechatSession ? (
               <div className="mb-2">
-                <div className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-[#25D366]">
+                <div className="flex items-center gap-1 px-2 py-1 text-xs font-medium uppercase tracking-wide text-[#25D366]">
                   <span>微信绑定</span>
                   <span
-                    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
+                    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[11px] font-medium leading-tight"
                     style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
                   >
                     唯一
@@ -1113,7 +1113,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           onClick={(e) => e.stopPropagation()}
         >
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("pin")}
           >
             {contextMenu.item.pinned ? "取消置顶" : "置顶"}
@@ -1121,13 +1121,13 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           {!isAutomationPaneAvatarId(pane.avatarId) && !isAutomationPaneAvatarId(contextMenu.item.avatar_id) ? (
             <>
               <button
-                className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+                className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
                 onClick={() => void runContextAction("toggle_feishu_binding")}
               >
                 {feishuBoundSessionId === contextMenu.item.session_id ? "取消绑定飞书会话" : "绑定为飞书会话"}
               </button>
               <button
-                className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+                className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
                 onClick={() => void runContextAction("toggle_wechat_binding")}
               >
                 {wechatBoundSessionId === contextMenu.item.session_id ? "取消绑定微信会话" : "绑定为微信会话"}
@@ -1135,38 +1135,38 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             </>
           ) : null}
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("fork")}
           >
             分叉会话
           </button>
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("open_new_tab")}
           >
             在新标签打开
           </button>
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("mark_unread")}
           >
             标记未读
           </button>
           <div className="my-1 border-t border-border" />
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("delete")}
           >
             删除
           </button>
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("rename")}
           >
             重命名
           </button>
           <button
-            className="w-full rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+            className="w-full rounded px-2 py-2 text-left text-[13px] text-text-primary hover:bg-surface-hover"
             onClick={() => void runContextAction("archive_prior")}
           >
             归档此前会话
