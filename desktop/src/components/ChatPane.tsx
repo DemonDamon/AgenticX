@@ -5244,22 +5244,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">
-                <span>
-                  session:{" "}
-                  {pane.sessionId
-                    ? pane.sessionId.slice(0, 8) + "…"
-                    : !isGroupPane && !isAutomationTaskPane
-                      ? "未创建（发送首条消息后建立）"
-                      : "-"}
-                </span>
-                {visibleMessages.length > 0 && (
-                  <span className="rounded bg-surface-card px-1 text-text-subtle">{visibleMessages.length} 条</span>
-                )}
-                {pane.contextInherited && (
-                  <span className="rounded bg-emerald-500/20 px-1 text-emerald-400">已继承</span>
-                )}
-              </div>
+              {visibleMessages.length > 0 || pane.contextInherited ? (
+                <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">
+                  {visibleMessages.length > 0 && (
+                    <span className="rounded bg-surface-card px-1 text-text-subtle">
+                      {visibleMessages.length} 条
+                    </span>
+                  )}
+                  {pane.contextInherited && (
+                    <span className="rounded bg-emerald-500/20 px-1 text-emerald-400">已继承</span>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
           <div className="no-drag flex shrink-0 items-center gap-1">
