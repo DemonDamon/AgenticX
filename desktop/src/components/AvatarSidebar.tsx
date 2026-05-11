@@ -669,8 +669,8 @@ export function AvatarSidebar() {
             className="h-8 w-8 shrink-0 rounded-full object-cover"
           />
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">Machi</div>
-            <div className="truncate text-[10px] text-text-faint">全局调度</div>
+            <div className="truncate text-[15px] font-medium">Machi</div>
+            <div className="truncate text-xs text-text-faint">全局调度</div>
           </div>
         </button>
 
@@ -679,14 +679,14 @@ export function AvatarSidebar() {
           <div className="flex items-center justify-between px-4 py-1.5">
             <button
               type="button"
-              className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-text-faint hover:text-text-subtle"
+              className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-text-faint hover:text-text-subtle"
               onClick={() => setAvatarsCollapsed((v) => !v)}
             >
               {avatarsCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               <span>分身 ({avatarsLoaded ? avatars.length : "…"})</span>
             </button>
             <button
-              className="rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+              className="rounded px-1.5 py-0.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
               onClick={() => setCreateOpen(true)}
             >
               + 新建
@@ -745,11 +745,11 @@ export function AvatarSidebar() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1">
-                          <span className="truncate text-sm">{avatar.name}</span>
-                          {avatar.pinned && <span className="text-[10px] text-amber-400">*</span>}
+                          <span className="truncate text-[15px]">{avatar.name}</span>
+                          {avatar.pinned && <span className="text-xs text-amber-400">*</span>}
                         </div>
                         {avatar.role && (
-                          <div className="truncate text-[10px] text-text-faint">{avatar.role}</div>
+                          <div className="truncate text-xs text-text-faint">{avatar.role}</div>
                         )}
                       </div>
                     </button>
@@ -764,14 +764,14 @@ export function AvatarSidebar() {
             <div className="flex items-center justify-between px-4 py-1.5">
               <button
                 type="button"
-                className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-text-faint hover:text-text-subtle"
+                className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-text-faint hover:text-text-subtle"
                 onClick={() => setGroupsCollapsed((v) => !v)}
               >
                 {groupsCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                 <span>群聊 ({groupsLoaded ? groups.length : "…"})</span>
               </button>
               <button
-                className="rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                className="rounded px-1.5 py-0.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
                 onClick={() => setGroupCreateOpen(true)}
               >
                 + 新建
@@ -814,8 +814,8 @@ export function AvatarSidebar() {
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-xs">{group.name}</div>
-                        <div className="truncate text-[10px] text-text-faint">
+                        <div className="truncate text-[15px]">{group.name}</div>
+                        <div className="truncate text-xs text-text-faint">
                           {group.avatarIds.length} avatars ·{" "}
                           {group.avatarIds
                             .map((id) => avatars.find((a) => a.id === id)?.name || id.slice(0, 4))
@@ -834,14 +834,14 @@ export function AvatarSidebar() {
             <div className="flex items-center justify-between px-4 py-1.5">
               <button
                 type="button"
-                className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-text-faint hover:text-text-subtle"
+                className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-text-faint hover:text-text-subtle"
                 onClick={() => setAutomationCollapsed((v) => !v)}
               >
                 {automationCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                 <span>定时 ({automationTasks.length})</span>
               </button>
               <button
-                className="rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                className="rounded px-1.5 py-0.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
                 onClick={() => openSettings()}
               >
                 管理
@@ -893,8 +893,8 @@ export function AvatarSidebar() {
                           )}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-xs">{task.name}</div>
-                          <div className="truncate text-[10px] text-text-faint">
+                          <div className="truncate text-[15px]">{task.name}</div>
+                          <div className="truncate text-xs text-text-faint">
                             {isRunning ? "运行中..." : task.enabled ? "已启用" : "已暂停"}
                             {task.lastRunStatus === "error" ? " · 最近失败" : ""}
                           </div>
@@ -949,7 +949,7 @@ export function AvatarSidebar() {
           ].map((item) => (
             <button
               key={item.id}
-              className={`w-full px-3 py-1.5 text-left text-xs transition ${
+              className={`w-full px-3 py-2 text-left text-[13px] transition ${
                 item.id === "delete"
                   ? "text-rose-400 hover:bg-rose-500/10"
                   : "text-text-muted hover:bg-surface-hover"
@@ -969,7 +969,7 @@ export function AvatarSidebar() {
           style={{ left: groupContextMenu.x, top: groupContextMenu.y }}
         >
           <button
-            className="w-full px-3 py-1.5 text-left text-xs text-text-muted transition hover:bg-surface-hover"
+            className="w-full px-3 py-2 text-left text-[13px] text-text-muted transition hover:bg-surface-hover"
             onClick={() => void handleGroupContextAction("view")}
           >
             查看群聊
@@ -985,7 +985,7 @@ export function AvatarSidebar() {
         >
           <button
             type="button"
-            className="w-full px-3 py-1.5 text-left text-xs text-text-muted transition hover:bg-surface-hover"
+            className="w-full px-3 py-2 text-left text-[13px] text-text-muted transition hover:bg-surface-hover"
             onClick={() => {
               const { taskId } = automationContextMenu;
               setAutomationContextMenu(null);
@@ -1198,26 +1198,26 @@ function GroupEditorInline({
         className="w-80 max-w-[95vw] rounded-xl border border-border bg-surface-panel p-4 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-3 text-sm font-semibold text-white">{initialGroup ? "编辑群聊" : "新建群聊"}</h3>
+        <h3 className="mb-3 text-[15px] font-semibold text-white">{initialGroup ? "编辑群聊" : "新建群聊"}</h3>
 
-        <label className="mb-1 block text-[11px] text-text-subtle">群名称</label>
+        <label className="mb-1 block text-xs text-text-subtle">群名称</label>
         <input
-          className="mb-3 w-full rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-strong"
+          className="mb-3 w-full rounded-md border border-border bg-surface-card px-2.5 py-2 text-[13px] text-text-primary outline-none focus:border-border-strong"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="输入群聊名称"
           autoFocus
         />
 
-        <label className="mb-1 block text-[11px] text-text-subtle">选择分身</label>
+        <label className="mb-1 block text-xs text-text-subtle">选择分身</label>
         <div className="mb-3 max-h-36 overflow-y-auto rounded-md border border-border bg-surface-card p-1.5">
           {avatars.length === 0 && (
-            <div className="py-2 text-center text-[11px] text-text-faint">暂无可用分身</div>
+            <div className="py-2 text-center text-xs text-text-faint">暂无可用分身</div>
           )}
           {avatars.map((a) => (
             <label
               key={a.id}
-              className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs text-text-muted hover:bg-surface-hover"
+              className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-[13px] text-text-muted hover:bg-surface-hover"
             >
               <input
                 type="checkbox"
@@ -1226,14 +1226,14 @@ function GroupEditorInline({
                 className="accent-cyan-500"
               />
               <span className="truncate">{a.name}</span>
-              {a.role && <span className="ml-auto truncate text-[10px] text-text-faint">{a.role}</span>}
+              {a.role && <span className="ml-auto truncate text-xs text-text-faint">{a.role}</span>}
             </label>
           ))}
         </div>
 
         {saveNotice ? (
           <div
-            className={`mb-3 rounded-md border px-2.5 py-2 text-[11px] ${
+            className={`mb-3 rounded-md border px-2.5 py-2 text-xs ${
               saveNotice.type === "success"
                 ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
                 : saveNotice.type === "warning"
@@ -1250,7 +1250,7 @@ function GroupEditorInline({
             {initialGroup ? (
               <button
                 type="button"
-                className="rounded-md px-3 py-1.5 text-xs text-rose-400 transition hover:bg-rose-500/10"
+                className="rounded-md px-3 py-1.5 text-[13px] text-rose-400 transition hover:bg-rose-500/10"
                 onClick={() => {
                   if (!onDelete || !initialGroup) return;
                   void onDelete(initialGroup.id);
@@ -1263,7 +1263,7 @@ function GroupEditorInline({
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
-              className="rounded-md px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+              className="rounded-md px-3 py-1.5 text-[13px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
               onClick={onClose}
             >
               取消
