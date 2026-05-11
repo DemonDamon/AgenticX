@@ -1859,6 +1859,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
     return 300;
   });
+  const [historyWidth, setHistoryWidth] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem("agx-history-width-v1");
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    } catch {
+      // ignore
+    }
+    return 220;
+  });
   const paneRef = useRef<HTMLDivElement | null>(null);
   const [paneWidth, setPaneWidth] = useState(0);
 
@@ -5008,6 +5018,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const minTaskspaceWidth = 220;
   const maxSpawnsWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.42)) : 420;
   const minSpawnsWidth = 220;
+  const maxHistoryWidth = paneWidth > 0 ? Math.max(220, Math.floor(paneWidth * 0.35)) : 360;
+  const minHistoryWidth = 200;
 
   useEffect(() => {
     setTaskspaceWidth((prev) => Math.min(maxTaskspaceWidth, Math.max(minTaskspaceWidth, prev)));
@@ -5017,6 +5029,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setSpawnsWidth((prev) => Math.min(maxSpawnsWidth, Math.max(minSpawnsWidth, prev)));
   }, [maxSpawnsWidth]);
 
+  useEffect(() => {
+    setHistoryWidth((prev) => Math.min(maxHistoryWidth, Math.max(minHistoryWidth, prev)));
+  }, [maxHistoryWidth]);
 
   useEffect(() => {
     try {
@@ -5033,6 +5048,31 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       // ignore storage access failures
     }
   }, [spawnsWidth]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("agx-history-width-v1", String(historyWidth));
+    } catch {
+      // ignore
+    }
+  }, [historyWidth]);
+
+  const startResizeHistory = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = historyWidth;
+    const onMove = (moveEvent: MouseEvent) => {
+      const delta = startX - moveEvent.clientX;
+      const next = Math.max(minHistoryWidth, Math.min(maxHistoryWidth, startWidth + delta));
+      setHistoryWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
 
 
   const startResizeTaskspace = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -5835,9 +5875,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           tintColor={paneTint}
         />
       ) : null}
-      <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}`}>
-        <SessionHistoryPanel pane={pane} onClose={() => togglePaneHistory(pane.id)} tintColor={paneTint} />
-      </HistoryPanelBoundary>
+      {pane.historyOpen ? (
+        <div className="relative h-full shrink-0 overflow-hidden border-l border-border" style={{ width: historyWidth }}>
+          <div
+            className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+            onMouseDown={startResizeHistory}
+            title="拖拽调整历史面板宽度"
+          >
+            <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
+            <div className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90" style={{ borderColor: "var(--ui-accent-divider-hover)" }} />
+          </div>
+          <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}`}>
+            <SessionHistoryPanel pane={pane} onClose={() => togglePaneHistory(pane.id)} tintColor={paneTint} />
+          </HistoryPanelBoundary>
+        </div>
+      ) : null}
       <ForwardPicker
         open={forwardPickerOpen}
         currentSessionId={pane.sessionId}
