@@ -19,7 +19,7 @@ import smtplib
 import subprocess
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from typing import AsyncGenerator
@@ -761,6 +761,8 @@ def create_studio_app() -> FastAPI:
             return
         if x_agx_desktop_token != desktop_token:
             raise HTTPException(status_code=401, detail="invalid desktop token")
+
+    _verify_desktop_token = _check_token
 
     def _check_mcp_admin_token(x_agx_desktop_token: str | None) -> None:
         if not desktop_token:
@@ -1549,6 +1551,7 @@ def create_studio_app() -> FastAPI:
         if is_group_session:
             manager.clear_interrupt(payload.session_id)
             manager.set_execution_state(payload.session_id, "running")
+            setattr(session, "_usage_owner_session_id", payload.session_id)
             async def _group_chat_stream() -> AsyncGenerator[str, None]:
                 try:
                     llm_factory = lambda provider, model: ProviderResolver.resolve(
@@ -1927,6 +1930,8 @@ def create_studio_app() -> FastAPI:
                         user_message_content=user_message_content,
                         history_user_attachments=history_user_attachments,
                         persist_user_message=not bool(getattr(payload, "skip_user_history", False)),
+                        usage_session_id=payload.session_id,
+                        usage_avatar_id=str(getattr(managed, "avatar_id", "") or ""),
                     ):
                         await event_queue.put(event)
                     await event_queue.put(None)
@@ -3950,6 +3955,142 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.warning("put_skill_settings error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # -- Usage dashboard ---------------------------------------------------------
+
+    def _usage_parse_range_ms(
+        range_key: str,
+        from_s: str | None,
+        to_s: str | None,
+    ) -> tuple[int, int]:
+        now_ms = int(time.time() * 1000)
+        rk = (range_key or "month").strip().lower()
+        if rk == "day":
+            return now_ms - 86400000, now_ms
+        if rk == "week":
+            return now_ms - 7 * 86400000, now_ms
+        if rk == "month":
+            return now_ms - 30 * 86400000, now_ms
+        if rk == "total":
+            return 0, now_ms
+        if rk == "custom":
+            fs = (from_s or "").strip()
+            ts = (to_s or "").strip()
+            if not fs or not ts:
+                raise HTTPException(
+                    status_code=400,
+                    detail="custom range requires from and to (YYYY-MM-DD)",
+                )
+            try:
+                d0 = datetime.strptime(fs, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                d1 = datetime.strptime(ts, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail="invalid date format, use YYYY-MM-DD",
+                ) from exc
+            start_ms = int(d0.timestamp() * 1000)
+            end_ms = int(d1.timestamp() * 1000) + 86400000 - 1
+            if start_ms > end_ms:
+                raise HTTPException(status_code=400, detail="from must be <= to")
+            if end_ms - start_ms > 366 * 86400000:
+                raise HTTPException(status_code=400, detail="range too large (max 366 days)")
+            return start_ms, end_ms
+        raise HTTPException(status_code=400, detail="invalid range")
+
+    @app.get("/api/usage/summary")
+    async def usage_summary(
+        range_key: str = Query("month", alias="range"),
+        from_date: str | None = Query(None, alias="from"),
+        to_date: str | None = Query(None, alias="to"),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _check_token(x_agx_desktop_token)
+        from agenticx.runtime.usage_store import get_usage_store
+
+        start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
+        return get_usage_store().summary_sync(start_ms, end_ms)
+
+    @app.get("/api/usage/breakdown")
+    async def usage_breakdown(
+        range_key: str = Query("month", alias="range"),
+        from_date: str | None = Query(None, alias="from"),
+        to_date: str | None = Query(None, alias="to"),
+        dimension: str = Query("provider"),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _check_token(x_agx_desktop_token)
+        from agenticx.runtime.usage_store import get_usage_store
+
+        start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
+        dim = (dimension or "provider").strip().lower()
+        if dim not in {"provider", "model"}:
+            raise HTTPException(status_code=400, detail="dimension must be provider or model")
+        rows = get_usage_store().breakdown_sync(start_ms, end_ms, dimension=dim)
+        return {"dimension": dim, "items": rows}
+
+    @app.get("/api/usage/daily")
+    async def usage_daily(
+        range_key: str = Query("month", alias="range"),
+        from_date: str | None = Query(None, alias="from"),
+        to_date: str | None = Query(None, alias="to"),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _check_token(x_agx_desktop_token)
+        from agenticx.runtime.usage_store import get_usage_store
+
+        start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
+        rows = get_usage_store().daily_sync(start_ms, end_ms)
+        return {"items": rows}
+
+    @app.get("/api/usage/heatmap")
+    async def usage_heatmap(
+        range_key: str = Query("month", alias="range"),
+        from_date: str | None = Query(None, alias="from"),
+        to_date: str | None = Query(None, alias="to"),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _check_token(x_agx_desktop_token)
+        from agenticx.runtime.usage_store import get_usage_store
+
+        start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
+        rows = get_usage_store().heatmap_sync(start_ms, end_ms)
+        return {"items": rows}
+
+    @app.get("/api/usage/top-models")
+    async def usage_top_models(
+        range_key: str = Query("month", alias="range"),
+        from_date: str | None = Query(None, alias="from"),
+        to_date: str | None = Query(None, alias="to"),
+        limit: int = Query(3, ge=1, le=20),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _check_token(x_agx_desktop_token)
+        from agenticx.runtime.usage_store import get_usage_store
+
+        start_ms, end_ms = _usage_parse_range_ms(range_key, from_date, to_date)
+        rows = get_usage_store().top_models_sync(start_ms, end_ms, limit=limit)
+        return {"items": rows}
+
+    @app.get("/api/usage/meta")
+    async def usage_meta(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _check_token(x_agx_desktop_token)
+        from agenticx.runtime.usage_store import get_usage_store
+
+        store = get_usage_store()
+        now_ms = int(time.time() * 1000)
+        started = store.started_at_sync()
+        active_30 = store.active_days_sync(now_ms - 30 * 86400000, now_ms)
+        now = datetime.now(timezone.utc)
+        month_start_ms = int(datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp() * 1000)
+        month_convs = store.month_conversations_sync(month_start_ms, now_ms)
+        return {
+            "started_at": started,
+            "active_days_30d": active_30,
+            "month_conversations": month_convs,
+        }
 
     # -- Health Probe & Recovery ------------------------------------------------
 

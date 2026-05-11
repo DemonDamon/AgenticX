@@ -57,7 +57,8 @@ class _AlwaysToolLLM:
 
 class _TextOnlyLLM:
     def invoke(self, *_args, **_kwargs):
-        return _FakeResponse("fallback", [])
+        # Empty invoke text forces the stream fallback path (TOKEN chunks then FINAL).
+        return _FakeResponse("", [])
 
     def stream(self, *_args, **_kwargs):
         yield "tok1"

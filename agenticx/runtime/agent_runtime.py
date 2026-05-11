@@ -807,6 +807,8 @@ class AgentRuntime:
         user_message_content: Optional[Any] = None,
         history_user_attachments: Optional[list[dict[str, Any]]] = None,
         persist_user_message: bool = True,
+        usage_session_id: Optional[str] = None,
+        usage_avatar_id: Optional[str] = None,
     ) -> AsyncGenerator[RuntimeEvent, None]:
         async def _check_should_stop() -> bool:
             if should_stop is None:
@@ -1272,6 +1274,32 @@ class AgentRuntime:
 
                 _round_usage = usage_metadata_from_llm_response(response)
                 self.token_budget.record(_round_usage)
+                if _round_usage:
+                    usage_snapshot = dict(_round_usage)
+
+                    async def _persist_usage_row() -> None:
+                        try:
+                            from agenticx.runtime.usage_store import get_usage_store
+
+                            sid_eff = (usage_session_id or "").strip() or str(
+                                getattr(session, "_usage_owner_session_id", "") or ""
+                            ).strip()
+                            aid_eff = (usage_avatar_id or "").strip()
+                            await get_usage_store().record_async(
+                                session_id=sid_eff,
+                                avatar_id=aid_eff,
+                                provider=provider_name,
+                                model=model_name,
+                                input_tokens=int(usage_snapshot.get("input_tokens", 0) or 0),
+                                output_tokens=int(usage_snapshot.get("output_tokens", 0) or 0),
+                                cached_tokens=int(usage_snapshot.get("cached_tokens", 0) or 0),
+                                reasoning_tokens=int(usage_snapshot.get("reasoning_tokens", 0) or 0),
+                                total_tokens=int(usage_snapshot.get("total_tokens", 0) or 0),
+                            )
+                        except Exception as exc:
+                            logger.debug("usage persist skipped: %s", exc)
+
+                    asyncio.create_task(_persist_usage_row())
                 budget_level, budget_source, budget_current, budget_max = self.token_budget.check_with_source()
                 if budget_level == BudgetLevel.EXCEEDED:
                     yield RuntimeEvent(
@@ -1435,7 +1463,11 @@ class AgentRuntime:
                 _um = usage_metadata_from_llm_response(response)
                 _final_data: dict[str, Any] = {"text": final_text}
                 if _um:
-                    _final_data["usage_metadata"] = _um
+                    _final_data["usage_metadata"] = {
+                        **_um,
+                        "model": model_name,
+                        "provider": provider_name,
+                    }
                 yield RuntimeEvent(type=EventType.FINAL.value, data=_final_data, agent_id=agent_id)
                 return
 

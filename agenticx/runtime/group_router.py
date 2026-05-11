@@ -926,6 +926,8 @@ class GroupChatRouter:
             agent_id=avatar_id,
             tools=_group_chat_tools(),
             system_prompt=system_prompt,
+            usage_session_id=str(getattr(base_session, "_usage_owner_session_id", "") or ""),
+            usage_avatar_id=str(avatar_id or ""),
         ):
             if progress_queue is not None:
                 progress_text = self._runtime_event_to_progress_text(event.type, event.data)

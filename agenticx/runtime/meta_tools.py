@@ -1657,6 +1657,8 @@ async def _run_delegation_in_avatar_session(
             agent_id=delegation_id,
             tools=[t for t in META_AGENT_TOOLS if t.get("function", {}).get("name") != "delegate_to_avatar"],
             system_prompt=delegation_system_prompt,
+            usage_session_id=avatar_managed.session_id,
+            usage_avatar_id=str(getattr(avatar_managed, "avatar_id", "") or ""),
         ):
             if event.type == EventType.FINAL.value:
                 final_text = str(event.data.get("text", "")).strip()
@@ -1796,6 +1798,8 @@ async def _run_delegation_followup_turn(
             agent_id=delegation_id,
             tools=[t for t in META_AGENT_TOOLS if t.get("function", {}).get("name") != "delegate_to_avatar"],
             system_prompt=delegation_system_prompt,
+            usage_session_id=avatar_managed.session_id,
+            usage_avatar_id=str(getattr(avatar_managed, "avatar_id", "") or ""),
         ):
             if event.type == EventType.FINAL.value:
                 final_text = str(event.data.get("text", "") or "").strip()

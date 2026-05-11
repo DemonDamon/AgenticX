@@ -1074,6 +1074,8 @@ class AgentTeamManager:
                 agent_id=context.agent_id,
                 tools=allowed_tools,
                 system_prompt=system_prompt,
+                usage_session_id=str(self.owner_session_id or ""),
+                usage_avatar_id=str(context.avatar_id or ""),
             ):
                 context.updated_at = time.time()
                 if event.type == EventType.TOKEN.value:
