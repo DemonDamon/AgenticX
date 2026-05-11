@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { LogIn, LogOut, Moon, PanelLeftOpen, Settings, Sun, User } from "lucide-react";
+import { Activity, LogIn, LogOut, Moon, PanelLeftOpen, Settings, Sun, User } from "lucide-react";
 import { useAppStore } from "../store";
 
 function FocusModeLogo({ className }: { className?: string }) {
@@ -30,6 +30,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
   const openSettings = useAppStore((s) => s.openSettings);
+  const openTokenDashboard = useAppStore((s) => s.openTokenDashboard);
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const agxAccount = useAppStore((s) => s.agxAccount);
   const setAgxAccount = useAppStore((s) => s.setAgxAccount);
@@ -129,6 +130,15 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
           aria-label="进入灵巧模式"
         >
           <FocusModeLogo className="h-[15px] w-[15px] opacity-80" />
+        </button>
+        <button
+          className="agx-topbar-btn"
+          type="button"
+          onClick={() => openTokenDashboard()}
+          title="Token 消耗看板"
+          aria-label="Token 消耗看板"
+        >
+          <Activity className="h-3.5 w-3.5" />
         </button>
         <button
           className="agx-topbar-btn"

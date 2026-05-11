@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AvatarSidebar } from "./components/AvatarSidebar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { TokenDashboardPanel } from "./components/TokenDashboardPanel";
 import { LiteChatView } from "./components/LiteChatView";
 import { PaneManager } from "./components/PaneManager";
 import { SidebarResizer } from "./components/SidebarResizer";
@@ -259,6 +260,8 @@ export function App() {
   const closeConfirm = useAppStore((s) => s.closeConfirm);
   const openSettings = useAppStore((s) => s.openSettings);
   const closeSettings = useAppStore((s) => s.closeSettings);
+  const tokenDashboardOpen = useAppStore((s) => s.tokenDashboard.open);
+  const closeTokenDashboard = useAppStore((s) => s.closeTokenDashboard);
   const updateSettings = useAppStore((s) => s.updateSettings);
   const setActiveModel = useAppStore((s) => s.setActiveModel);
   const setPaneModel = useAppStore((s) => s.setPaneModel);
@@ -1908,6 +1911,7 @@ export function App() {
         groups={groups}
         onForwardFavorite={handleForwardFavorite}
       />
+      <TokenDashboardPanel open={tokenDashboardOpen} onClose={() => closeTokenDashboard()} />
     </div>
   );
 }
