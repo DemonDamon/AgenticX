@@ -678,7 +678,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
         ) : (
           <button
             type="button"
-            className={`agx-session-history-row flex w-full items-center rounded-md px-2 py-1 text-left text-[12px] leading-[1.35] transition ${
+            className={`agx-session-history-row flex w-full items-center rounded-md px-2 py-1 text-left text-[11.5px] leading-[1.35] transition ${
               active
                 ? "bg-surface-card-strong font-medium text-text-strong"
                 : "text-text-primary hover:bg-surface-hover"
@@ -713,8 +713,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               />
             ) : (
               <MessageSquare
-                className="h-3.5 w-3.5 shrink-0 text-text-faint opacity-[0.85]"
-                strokeWidth={2}
+                className="h-3.5 w-3.5 shrink-0 text-text-faint opacity-70"
+                strokeWidth={1.8}
                 aria-hidden
               />
             )}
@@ -757,7 +757,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 ) : null}
                 {unread ? <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-text-muted" /> : null}
                 {!selectMode ? (
-                  <span className="shrink-0 whitespace-nowrap text-[10px] leading-tight text-text-faint">
+                  <span className="shrink-0 whitespace-nowrap text-[10px] leading-tight tabular-nums text-text-faint">
                     {timeAgo(createdAt)}
                   </span>
                 ) : null}
@@ -975,7 +975,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
 
   return (
     <div
-      className="agx-session-history-panel flex h-full w-[220px] shrink-0 flex-col border-l border-border bg-surface-card"
+      className="agx-session-history-panel flex h-full w-full shrink-0 flex-col bg-surface-card"
       style={tintColor ? { backgroundColor: tintColor } : undefined}
     >
       <div className="shrink-0 border-b border-border px-3 py-2.5 text-[12px] text-text-subtle">
