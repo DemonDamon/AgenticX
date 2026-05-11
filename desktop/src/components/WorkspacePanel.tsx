@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { PanelRightClose, Folder, RefreshCcw, Plus } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import Prism from "prismjs";
 import "prismjs/components/prism-bash";
@@ -541,9 +542,7 @@ export function WorkspacePanel({
                   title={item.id === "default" ? (item.path || item.label) : undefined}
                 >
                   <span className="flex items-center gap-1">
-                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0 opacity-70">
-                      <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6.38L7.88 4.5H12.5C13.33 4.5 14 5.17 14 6V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
-                    </svg>
+                    <Folder className="h-3 w-3 shrink-0 opacity-70" strokeWidth={1.8} />
                     {item.id !== "default" && item.label}
                   </span>
                 </button>
@@ -557,9 +556,7 @@ export function WorkspacePanel({
               }}
               title="刷新工作区列表与目录"
             >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5c1.6 0 3.04.68 4.06 1.76L14 2.5V6h-3.5l1.44-1.44A4 4 0 1 0 12 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+              <RefreshCcw className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
             <button
               className={`flex h-[26px] w-[26px] items-center justify-center rounded text-sm text-text-muted transition ${showAddForm ? "bg-surface-active" : "bg-surface-hover hover:bg-surface-hover"}`}
@@ -569,7 +566,7 @@ export function WorkspacePanel({
               }}
               title="新增工作区"
             >
-              +
+              <Plus className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
             {onClose ? (
               <button
@@ -577,9 +574,7 @@ export function WorkspacePanel({
                 onClick={onClose}
                 title="关闭工作区面板"
               >
-                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M3 8H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-                </svg>
+                <PanelRightClose className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             ) : null}
           </div>
@@ -602,9 +597,7 @@ export function WorkspacePanel({
                   onClick={() => void chooseDirectoryForTaskspace()}
                   title="从系统目录中选择"
                 >
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6.38L7.88 4.5H12.5C13.33 4.5 14 5.17 14 6V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
-                  </svg>
+                  <Folder className="h-3.5 w-3.5" strokeWidth={1.8} />
                   选择目录
                 </button>
               </div>

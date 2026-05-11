@@ -13,6 +13,12 @@ import {
   SquarePen,
   Wand2,
   Wrench,
+  Users,
+  Folder,
+  Bot,
+  MessageSquare,
+  X,
+  PanelRightClose,
 } from "lucide-react";
 import {
   useAppStore,
@@ -1413,9 +1419,7 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
               onClick={onClose}
               title="关闭成员面板"
             >
-              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M3 8H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-              </svg>
+              <PanelRightClose className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
           )}
         </div>
@@ -5261,7 +5265,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           <div className="no-drag flex shrink-0 items-center gap-1">
             {isGroupPane && (
               <button
-                className={`rounded px-2 py-0.5 text-[11px] transition ${
+                className={`rounded px-2.5 py-1.5 text-[11px] transition ${
                   pane.membersPanelOpen
                     ? "bg-surface-card-strong text-text-strong"
                     : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
@@ -5269,16 +5273,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 onClick={() => cycleSidePanel(pane.id, "members")}
                 title="切换群成员面板"
               >
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="6" cy="5" r="2.2" stroke="currentColor" strokeWidth="1.3"/>
-                  <path d="M2 13c0-2.21 1.79-4 4-4s4 1.79 4 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                  <circle cx="11.5" cy="5.5" r="1.7" stroke="currentColor" strokeWidth="1.2"/>
-                  <path d="M13.5 13c0-1.66-1-3-2.5-3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                </svg>
+                <Users className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             )}
             <button
-              className={`rounded px-2 py-0.5 text-[11px] transition ${
+              className={`rounded px-2.5 py-1.5 text-[11px] transition ${
                 workspacePanelOpen
                   ? "bg-surface-card-strong text-text-strong"
                   : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
@@ -5286,13 +5285,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onClick={() => cycleSidePanel(pane.id, "workspace")}
               title="切换工作区面板"
             >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6.38L7.88 4.5H12.5C13.33 4.5 14 5.17 14 6V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
-              </svg>
+              <Folder className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
             {paneSubAgents.length > 0 ? (
               <button
-                className={`rounded px-2 py-0.5 text-[11px] transition ${
+                className={`rounded px-2.5 py-1.5 text-[11px] transition ${
                   pane.spawnsColumnOpen
                     ? "bg-surface-card-strong text-text-strong"
                     : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
@@ -5309,18 +5306,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 }}
                 title={pane.spawnsColumnOpen ? "收起 Spawns 列" : "打开 Spawns 列"}
               >
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <rect x="3" y="6" width="10" height="7" rx="2" stroke="currentColor" strokeWidth="1.3"/>
-                  <path d="M6 6V4.5A2 2 0 0 1 10 4.5V6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                  <circle cx="5.5" cy="9.5" r="0.8" fill="currentColor"/>
-                  <circle cx="10.5" cy="9.5" r="0.8" fill="currentColor"/>
-                  <path d="M1.5 8.5V10.5M14.5 8.5V10.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                  <path d="M6 12h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                </svg>
+                <Bot className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             ) : null}
             <button
-              className={`rounded px-2 py-0.5 text-[11px] transition ${
+              className={`rounded px-2.5 py-1.5 text-[11px] transition ${
                 pane.historyOpen
                   ? "bg-surface-card-strong text-text-strong"
                   : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
@@ -5328,19 +5318,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onClick={() => togglePaneHistory(pane.id)}
               title="切换历史面板"
             >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M2.5 3C2.5 2.17 3.17 1.5 4 1.5H12C12.83 1.5 13.5 2.17 13.5 3V9C13.5 9.83 12.83 10.5 12 10.5H9L6.5 13V10.5H4C3.17 10.5 2.5 9.83 2.5 9V3Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
-                <path d="M5 5H11M5 7.5H9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-              </svg>
+              <MessageSquare className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
             <button
-              className="rounded px-2 py-0.5 text-[11px] text-text-faint transition hover:bg-surface-hover hover:text-status-error"
+              className="rounded px-2.5 py-1.5 text-[11px] text-text-faint transition hover:bg-surface-hover hover:text-status-error"
               onClick={closePaneAndCleanupEmptySession}
               title="关闭窗格"
             >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              </svg>
+              <X className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
           </div>
         </div>

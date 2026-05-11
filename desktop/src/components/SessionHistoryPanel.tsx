@@ -1,3 +1,4 @@
+import { PanelRightClose, MessageSquare, ListChecks } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, type ChatPane, type Message } from "../store";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
@@ -956,27 +957,20 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     >
       <div className="shrink-0 border-b border-border px-3 py-2.5 text-[13px] text-text-subtle">
         <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5">
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0" title={title}>
-              <path d="M2.5 3C2.5 2.17 3.17 1.5 4 1.5H12C12.83 1.5 13.5 2.17 13.5 3V9C13.5 9.83 12.83 10.5 12 10.5H9L6.5 13V10.5H4C3.17 10.5 2.5 9.83 2.5 9V3Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
-              <path d="M5 5H11M5 7.5H9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-            </svg>
+          <span className="flex items-center gap-1.5" title={title}>
+            <MessageSquare className="h-[18px] w-[18px] shrink-0" strokeWidth={1.8} />
           </span>
           <div className="flex items-center gap-1">
             {!selectMode ? (
               <button
-                className="rounded border border-border px-1.5 py-0.5 text-text-muted hover:bg-surface-hover"
+                className="rounded border border-border p-1 text-text-muted hover:bg-surface-hover"
                 onClick={() => {
                   setSelectMode(true);
                   setContextMenu(null);
                 }}
                 title="多选会话"
               >
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
-                  <rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
-                  <path d="M9 4.5H14M9 11.5H14" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                </svg>
+                <ListChecks className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             ) : (
               <>
@@ -1012,13 +1006,11 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             )}
             {onClose ? (
               <button
-                className="rounded px-1.5 py-0.5 text-xs text-text-faint hover:bg-surface-hover hover:text-text-muted"
+                className="rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-muted"
                 onClick={onClose}
                 title="关闭历史会话"
               >
-                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M3 8H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-                </svg>
+                <PanelRightClose className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             ) : null}
           </div>
