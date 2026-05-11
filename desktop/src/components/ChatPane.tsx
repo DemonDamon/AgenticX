@@ -1415,7 +1415,7 @@ const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
           {onClose && (
             <button
               type="button"
-              className="shrink-0 rounded px-1.5 py-1.5 text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
+              className="shrink-0 rounded p-1 text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
               onClick={onClose}
               title="关闭成员面板"
             >

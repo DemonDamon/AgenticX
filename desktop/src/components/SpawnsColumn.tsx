@@ -58,7 +58,7 @@ export function SpawnsColumn({
           </span>
           <button
             type="button"
-            className="rounded p-1 text-[11px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
+            className="rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-muted"
             onClick={onClose}
             title="收起 Spawns 列"
           >
