@@ -186,10 +186,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
                     className="h-[15px] w-[15px] shrink-0 text-text-muted group-hover:text-text-strong"
                     strokeWidth={2}
                   />
-                  <span className="flex flex-1 flex-col gap-0.5">
-                    <span className="text-[13px] font-medium leading-none text-text-strong">查看账号</span>
-                    <span className="text-[11px] leading-none text-text-faint">设置与用量</span>
-                  </span>
+                  <span className="flex-1 text-[13px] font-medium leading-none text-text-strong">查看账号</span>
                 </button>
                 <button
                   type="button"
@@ -197,10 +194,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
                   onClick={() => void onLogoutClick()}
                 >
                   <LogOut className="h-[15px] w-[15px] shrink-0 text-rose-400" strokeWidth={2} />
-                  <span className="flex flex-1 flex-col gap-0.5">
-                    <span className="text-[13px] font-medium leading-none text-rose-400">退出登录</span>
-                    <span className="text-[11px] leading-none text-rose-400/70">清除本机登录状态</span>
-                  </span>
+                  <span className="flex-1 text-[13px] font-medium leading-none text-rose-400">退出登录</span>
                 </button>
               </div>
             ) : null}
