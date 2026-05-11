@@ -963,7 +963,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           <div className="flex items-center gap-1">
             {!selectMode ? (
               <button
-                className="rounded border border-border p-1 text-text-muted hover:bg-surface-hover"
+                className="agx-topbar-btn !px-[5px]"
                 onClick={() => {
                   setSelectMode(true);
                   setContextMenu(null);
@@ -975,7 +975,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             ) : (
               <>
                 <button
-                  className="rounded border border-border px-2 py-0.5 text-xs text-text-muted hover:bg-surface-hover"
+                  className="agx-topbar-btn"
                   onClick={toggleSelectAll}
                   disabled={batchDeleting}
                   title="全选或取消全选"
@@ -985,7 +985,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                     : "全选"}
                 </button>
                 <button
-                  className="rounded border border-red-500/50 px-2 py-0.5 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                  className="agx-topbar-btn text-rose-400 hover:text-rose-500"
                   onClick={() => void deleteSelectedSessions()}
                   disabled={batchDeleting || selectedSessionIds.length === 0}
                   title={selectedSessionIds.length > 0 ? `删除 ${selectedSessionIds.length} 个会话` : "先勾选会话"}
@@ -993,7 +993,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                   {batchDeleting ? "删除中..." : `删除${selectedSessionIds.length > 0 ? ` (${selectedSessionIds.length})` : ""}`}
                 </button>
                 <button
-                  className="rounded border border-border px-2 py-0.5 text-xs text-text-muted hover:bg-surface-hover"
+                  className="agx-topbar-btn"
                   onClick={() => {
                     setSelectMode(false);
                     setSelectedSessionIds([]);
@@ -1006,7 +1006,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             )}
             {onClose ? (
               <button
-                className="rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-muted"
+                className="agx-topbar-btn !px-[5px]"
                 onClick={onClose}
                 title="关闭历史会话"
               >

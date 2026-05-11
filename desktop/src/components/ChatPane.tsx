@@ -5265,11 +5265,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           <div className="no-drag flex shrink-0 items-center gap-1">
             {isGroupPane && (
               <button
-                className={`rounded px-2.5 py-1.5 text-[11px] transition ${
-                  pane.membersPanelOpen
-                    ? "bg-surface-card-strong text-text-strong"
-                    : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
-                }`}
+                className={`agx-topbar-btn !px-[5px] ${pane.membersPanelOpen ? "agx-topbar-btn--active" : ""}`}
                 onClick={() => cycleSidePanel(pane.id, "members")}
                 title="切换群成员面板"
               >
@@ -5277,11 +5273,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               </button>
             )}
             <button
-              className={`rounded px-2.5 py-1.5 text-[11px] transition ${
-                workspacePanelOpen
-                  ? "bg-surface-card-strong text-text-strong"
-                  : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
-              }`}
+              className={`agx-topbar-btn !px-[5px] ${workspacePanelOpen ? "agx-topbar-btn--active" : ""}`}
               onClick={() => cycleSidePanel(pane.id, "workspace")}
               title="切换工作区面板"
             >
@@ -5289,11 +5281,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             </button>
             {paneSubAgents.length > 0 ? (
               <button
-                className={`rounded px-2.5 py-1.5 text-[11px] transition ${
-                  pane.spawnsColumnOpen
-                    ? "bg-surface-card-strong text-text-strong"
-                    : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
-                }`}
+                className={`agx-topbar-btn !px-[5px] ${pane.spawnsColumnOpen ? "agx-topbar-btn--active" : ""}`}
                 onClick={() => {
                   if (pane.spawnsColumnOpen) {
                     dismissSpawnsColumn(
@@ -5310,18 +5298,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               </button>
             ) : null}
             <button
-              className={`rounded px-2.5 py-1.5 text-[11px] transition ${
-                pane.historyOpen
-                  ? "bg-surface-card-strong text-text-strong"
-                  : "text-text-faint hover:bg-surface-hover hover:text-text-strong"
-              }`}
+              className={`agx-topbar-btn !px-[5px] ${pane.historyOpen ? "agx-topbar-btn--active" : ""}`}
               onClick={() => togglePaneHistory(pane.id)}
               title="切换历史面板"
             >
               <MessageSquare className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
             <button
-              className="rounded px-2.5 py-1.5 text-[11px] text-text-faint transition hover:bg-surface-hover hover:text-status-error"
+              className="agx-topbar-btn !px-[5px] hover:text-status-error"
               onClick={closePaneAndCleanupEmptySession}
               title="关闭窗格"
             >
