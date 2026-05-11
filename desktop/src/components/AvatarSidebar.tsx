@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { Ban, ChevronDown, ChevronRight, Clock3, Loader2 } from "lucide-react";
 import { useAppStore, type Avatar, type GroupChat } from "../store";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
@@ -105,6 +106,10 @@ export function AvatarSidebar() {
   // (issue #11).
   const [avatarsLoaded, setAvatarsLoaded] = useState(false);
   const [groupsLoaded, setGroupsLoaded] = useState(false);
+  const [avatarsHeight, setAvatarsHeight] = useState<number | null>(null);
+  const [groupsHeight, setGroupsHeight] = useState<number | null>(null);
+  const avatarsContainerRef = useRef<HTMLDivElement>(null);
+  const groupsContainerRef = useRef<HTMLDivElement>(null);
   const [settingsPanel, setSettingsPanel] = useState<
     | { mode: "avatar"; avatarId: string }
     | { mode: "machi" }
@@ -643,6 +648,42 @@ export function AvatarSidebar() {
     });
   }, [avatars]);
 
+  const startResizeAvatars = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startY = event.clientY;
+    const startHeight = avatarsContainerRef.current?.getBoundingClientRect().height || 100;
+    const onMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientY - startY;
+      const next = Math.max(36, startHeight + delta);
+      setAvatarsHeight(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const startResizeGroups = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startY = event.clientY;
+    const startHeight = groupsContainerRef.current?.getBoundingClientRect().height || 100;
+    const onMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientY - startY;
+      const next = Math.max(36, startHeight + delta);
+      setGroupsHeight(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
   return (
     <>
       <aside className="flex h-full w-full flex-col bg-surface-sidebar">
@@ -676,7 +717,11 @@ export function AvatarSidebar() {
 
         <div className="flex-1 flex flex-col py-1 min-h-0">
           {/* Avatar list */}
-          <div className={`flex flex-col ${avatarsCollapsed ? "shrink-0" : "flex-1 min-h-0"}`}>
+          <div
+            ref={avatarsContainerRef}
+            className={`flex flex-col ${avatarsCollapsed ? "shrink-0" : avatarsHeight ? "shrink-0" : "flex-1 min-h-0"}`}
+            style={!avatarsCollapsed && avatarsHeight ? { height: avatarsHeight } : undefined}
+          >
             <div className="flex shrink-0 items-center justify-between px-4 py-1.5">
               <button
                 type="button"
@@ -761,8 +806,23 @@ export function AvatarSidebar() {
             )}
           </div>
 
+          {!avatarsCollapsed && !groupsCollapsed && (
+            <div
+              className="group relative min-h-[14px] shrink-0 cursor-row-resize touch-none"
+              onMouseDown={startResizeAvatars}
+              title="拖拽调整分身区域高度"
+            >
+              <div className="pointer-events-none absolute left-2 right-2 top-1/2 h-px -translate-y-1/2 transition bg-[var(--ui-accent-divider)]" />
+              <div className="pointer-events-none absolute left-1/2 top-1/2 h-1.5 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90 border-[var(--ui-accent-divider-hover)]" />
+            </div>
+          )}
+
           {/* Group chats */}
-          <div className={`flex flex-col mt-2 ${groupsCollapsed ? "shrink-0" : "flex-1 min-h-0"}`}>
+          <div
+            ref={groupsContainerRef}
+            className={`flex flex-col mt-2 ${groupsCollapsed ? "shrink-0" : groupsHeight ? "shrink-0" : "flex-1 min-h-0"}`}
+            style={!groupsCollapsed && groupsHeight ? { height: groupsHeight } : undefined}
+          >
             <div className="flex shrink-0 items-center justify-between px-4 py-1.5">
               <button
                 type="button"
@@ -830,6 +890,17 @@ export function AvatarSidebar() {
               </div>
             )}
           </div>
+
+          {!groupsCollapsed && !automationCollapsed && (
+            <div
+              className="group relative min-h-[14px] shrink-0 cursor-row-resize touch-none"
+              onMouseDown={startResizeGroups}
+              title="拖拽调整群聊区域高度"
+            >
+              <div className="pointer-events-none absolute left-2 right-2 top-1/2 h-px -translate-y-1/2 transition bg-[var(--ui-accent-divider)]" />
+              <div className="pointer-events-none absolute left-1/2 top-1/2 h-1.5 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90 border-[var(--ui-accent-divider-hover)]" />
+            </div>
+          )}
 
           {/* Scheduled tasks */}
           <div className={`flex flex-col mt-2 pb-2 ${automationCollapsed ? "shrink-0" : "flex-1 min-h-0"}`}>
