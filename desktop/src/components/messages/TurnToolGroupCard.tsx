@@ -60,7 +60,10 @@ export function TurnToolGroupCard({
           className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-zinc-600/40 ring-1 ring-zinc-500/30"
           aria-hidden
         >
-          <Check className="h-2.5 w-2.5 text-zinc-400" strokeWidth={2.5} />
+          <Check
+            className="h-2.5 w-2.5 text-zinc-400 [html[data-theme=light]_&]:text-white"
+            strokeWidth={2.5}
+          />
         </span>
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-text-subtle">{summary}</span>
         {expanded ? (
