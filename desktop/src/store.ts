@@ -283,6 +283,15 @@ type SettingsState = {
   apiKey: string;
 };
 
+export type TokenDashboardRange = "day" | "week" | "month" | "total" | "custom";
+
+type TokenDashboardState = {
+  open: boolean;
+  range: TokenDashboardRange;
+  customFrom: string;
+  customTo: string;
+};
+
 type AppState = {
   apiBase: string;
   apiToken: string;
@@ -294,6 +303,7 @@ type AppState = {
   codePreview: string;
   confirm: ConfirmState;
   settings: SettingsState;
+  tokenDashboard: TokenDashboardState;
   activeProvider: string;
   activeModel: string;
   userMode: "pro" | "lite";
@@ -487,6 +497,10 @@ type AppState = {
       >
     >
   ) => void;
+  openTokenDashboard: () => void;
+  closeTokenDashboard: () => void;
+  setTokenDashboardRange: (range: TokenDashboardRange) => void;
+  setTokenDashboardCustomRange: (from: string, to: string) => void;
 };
 
 function uid(): string {
@@ -677,6 +691,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   codePreview: "",
   confirm: { open: false, requestId: "", question: "", agentId: "meta" },
   settings: { open: false, provider: "", model: "", apiKey: "", defaultProvider: "", providers: {} },
+  tokenDashboard: { open: false, range: "month", customFrom: "", customTo: "" },
   setApiBase: (apiBase) => set({ apiBase }),
   setApiToken: (apiToken) => set({ apiToken }),
   setSessionId: (sessionId) => set({ sessionId }),
@@ -1516,5 +1531,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       settings: { ...state.settings, open: false, openToTab: undefined },
     })),
   updateSettings: (patch) =>
-    set((state) => ({ settings: { ...state.settings, ...patch } }))
+    set((state) => ({ settings: { ...state.settings, ...patch } })),
+  openTokenDashboard: () =>
+    set((state) => ({
+      tokenDashboard: { ...state.tokenDashboard, open: true },
+    })),
+  closeTokenDashboard: () =>
+    set((state) => ({
+      tokenDashboard: { ...state.tokenDashboard, open: false },
+    })),
+  setTokenDashboardRange: (range) =>
+    set((state) => ({
+      tokenDashboard: { ...state.tokenDashboard, range },
+    })),
+  setTokenDashboardCustomRange: (customFrom, customTo) =>
+    set((state) => ({
+      tokenDashboard: { ...state.tokenDashboard, customFrom, customTo, range: "custom" },
+    })),
 }));
