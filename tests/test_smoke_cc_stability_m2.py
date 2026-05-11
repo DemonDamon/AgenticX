@@ -33,9 +33,9 @@ def test_micro_compact_truncates() -> None:
 
 @pytest.mark.asyncio
 async def test_maybe_compact_force_skips_threshold() -> None:
-    c = ContextCompactor(_LLM(), threshold_messages=100, retain_recent_messages=2)
-    messages = [{"role": "user", "content": f"m{i}"} for i in range(6)]
-    compacted, changed, _summary, _count = await c.maybe_compact(messages, force=True, model="")
+    c = ContextCompactor(_LLM(), threshold_messages=100, retain_recent_messages=4)
+    messages = [{"role": "user", "content": f"m{i}"} for i in range(10)]
+    compacted, changed, _summary, _count, _pending = await c.maybe_compact(messages, force=True, model="")
     assert changed is True
     assert compacted[0]["role"] == "system"
 
@@ -59,7 +59,7 @@ async def test_session_memory_injected() -> None:
         {"role": "tool", "tool_call_id": "t1", "name": "file_write", "content": "OK: wrote /tmp/a.txt"},
         *tail,
     ]
-    compacted, changed, summary, _count = await c.maybe_compact(messages, model="", force=True)
+    compacted, changed, summary, _count, _pending = await c.maybe_compact(messages, model="", force=True)
     assert changed is True
     assert "[session_memory]" in compacted[0]["content"]
     assert summary

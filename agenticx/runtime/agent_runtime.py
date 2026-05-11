@@ -62,6 +62,90 @@ def _env_int_runtime(key: str, default: int) -> int:
     return default
 
 
+def _build_user_goal_anchor(
+    session: "StudioSession",
+    round_idx: int,
+    max_rounds: int,
+    tools_used_so_far: int,
+    messages_total_chars: int,
+) -> Optional[Dict[str, Any]]:
+    """Build user goal anchor message for long-horizon task context management (FR-2/FR-3).
+
+    Returns ephemeral system message that reinforces user's original query
+    without being persisted to session history (NFR-3).
+    """
+    # NFR-6: Escape hatch to disable anchor injection
+    if os.environ.get("AGX_GOAL_ANCHOR_DISABLE", "").strip() == "1":
+        return None
+
+    user_intent_raw = getattr(session, "current_user_intent", None)
+    # NFR-4: Skip if None or whitespace-only (including empty string)
+    if not user_intent_raw or not str(user_intent_raw).strip():
+        return None
+
+    # FR-3: Read threshold environment variables
+    full_trigger_tools = _env_int_runtime("AGX_GOAL_ANCHOR_FULL_TRIGGER_TOOLS", 3)
+    full_trigger_chars = _env_int_runtime("AGX_GOAL_ANCHOR_FULL_TRIGGER_CHARS", 20000)
+    agent_msg_count = len(getattr(session, "agent_messages", []))
+
+    # Defensive intent length cap for compact/full modes (parity with compactor's 4000-char cap).
+    # full/compact modes embed the intent verbatim; cap to 2000 chars to prevent abnormally long
+    # inputs from blowing up the per-round anchor cost. Minimal mode caps independently below.
+    user_intent_full = str(user_intent_raw)[:2000]
+
+    is_first_round = round_idx == 1 and tools_used_so_far == 0
+    is_complex = (
+        tools_used_so_far >= full_trigger_tools
+        or messages_total_chars >= full_trigger_chars
+        or agent_msg_count >= 8
+    )
+
+    if is_first_round:
+        # First round: minimal anchor (≤80 chars as per FR-3)
+        # Prefix "[user-goal-anchor] " is 19 chars, so intent truncated to 60 chars
+        anchor_text = f"[user-goal-anchor] {str(user_intent_raw)[:60]}"
+        mode = "minimal"
+    elif is_complex:
+        # Complex scenario: full anchor with 4 execution disciplines (FR-2).
+        # Discipline #3 threshold is derived from full_trigger_tools so the anchor body stays
+        # consistent with the actual env-configurable trigger (no hard-coded "5").
+        stop_threshold = max(full_trigger_tools + 2, 5)
+        anchor_text = (
+            f"[user-goal-anchor] (round {round_idx}/{max_rounds}, tools_used_so_far={tools_used_so_far})\n"
+            f"==== 用户当前原始问题（一字不差，禁止改写）====\n"
+            f"{user_intent_full}\n"
+            f"==================================\n"
+            f"执行纪律：\n"
+            f"1. 本轮所有工具调用与最终答复必须直接服务于上述问题；\n"
+            f"2. 若发现自己正在重复上一轮已做过的对比/分析，立即停止并直接基于已有信息产出最终方案；\n"
+            f"3. 工具调用累计 >= {stop_threshold} 次仍未直接回答原始问题时，停止信息收集并产出方案；\n"
+            f"4. 最终回复必须明确对照原始问题的每个子问题逐点作答（若有 a/b/c 子问题，回复中需对应 a/b/c）。"
+        )
+        mode = "full"
+    else:
+        # Middle ground: compact anchor without discipline details (FR-3)
+        anchor_text = (
+            f"[user-goal-anchor] (round {round_idx}/{max_rounds})\n"
+            f"==== 用户当前原始问题 ====\n"
+            f"{user_intent_full}\n"
+            f"=================================="
+        )
+        mode = "compact"
+
+    # NFR-7: Structured logging for observability
+    logging.getLogger(__name__).info(
+        "goal_anchor_injected=true session=%s round=%d/%d tools_used=%d anchor_chars=%d mode=%s",
+        getattr(session, "session_id", "unknown") or getattr(session, "_session_id", "unknown"),
+        round_idx,
+        max_rounds,
+        tools_used_so_far,
+        len(anchor_text),
+        mode,
+    )
+
+    return {"role": "system", "content": anchor_text}
+
+
 def _maybe_persist_large_tool_result(
     session: Any,
     tool_call_id: str,
@@ -839,7 +923,7 @@ class AgentRuntime:
         }
         history = _sanitize_context_messages(session.agent_messages)
         compact_model = str(getattr(session, "model_name", "") or "")
-        compacted_history, did_compact, compact_summary, compacted_count = await self.compactor.maybe_compact(
+        compacted_history, did_compact, compact_summary, compacted_count, _pending_q = await self.compactor.maybe_compact(
             history,
             model=compact_model,
         )
@@ -867,6 +951,8 @@ class AgentRuntime:
             if history_user_attachments:
                 hist_user["attachments"] = list(history_user_attachments)
             session.chat_history.append(hist_user)
+            # Set current user intent for goal anchor injection (FR-1)
+            session.current_user_intent = user_input
         status_query_total = 0
         status_query_attempts_total = 0
         max_status_queries_per_turn = _resolve_status_query_budget_per_turn()
@@ -972,6 +1058,23 @@ class AgentRuntime:
                 messages = _sanitize_context_messages(messages)
                 if provider_name.strip().lower() == "minimax":
                     messages = _merge_consecutive_simple_roles_for_minimax(messages)
+                # P1-T4 (v2): Inject ephemeral user goal anchor as a temporary view for THIS LLM call only.
+                # Critical: do NOT mutate `messages` itself—anchor must not survive into the next round
+                # (NFR-3 ephemeral semantics). All downstream LLM calls in this round use messages_for_llm.
+                messages_total_chars = sum(
+                    len(str(m.get("content", ""))) for m in messages if isinstance(m, dict)
+                )
+                anchor_message = _build_user_goal_anchor(
+                    session=session,
+                    round_idx=round_idx,
+                    max_rounds=self.max_tool_rounds,
+                    tools_used_so_far=len(executed_tool_names),
+                    messages_total_chars=messages_total_chars,
+                )
+                if anchor_message:
+                    messages_for_llm = list(messages) + [anchor_message]
+                else:
+                    messages_for_llm = messages
                 response_text = ""
                 tool_calls: List[Dict[str, Any]] = []
                 response: Any
@@ -1002,7 +1105,7 @@ class AgentRuntime:
                                     stream_kwargs.pop("temperature", None)
                                     stream_kwargs["max_tokens"] = 4096
                                 for chunk in stream_with_tools(
-                                    messages,
+                                    messages_for_llm,
                                     **stream_kwargs,
                                 ):
                                     if stop_stream.is_set():
@@ -1189,7 +1292,7 @@ class AgentRuntime:
                     def _invoke_once_with_fallback() -> Any:
                         try:
                             return self.llm.invoke(
-                                messages,
+                                messages_for_llm,
                                 tools=active_tools,
                                 tool_choice="auto",
                                 temperature=0.2,
@@ -1219,7 +1322,7 @@ class AgentRuntime:
                                 last_exc: Exception = invoke_exc
                                 for retry_kwargs in minimax_retries:
                                     try:
-                                        return self.llm.invoke(messages, **retry_kwargs)
+                                        return self.llm.invoke(messages_for_llm, **retry_kwargs)
                                     except Exception as retry_exc:
                                         last_exc = retry_exc
                                         if not _is_minimax_chat_setting_error(retry_exc):
@@ -1317,7 +1420,7 @@ class AgentRuntime:
                     return
                 if budget_level == BudgetLevel.COMPRESS:
                     hist_compact = _sanitize_context_messages(session.agent_messages)
-                    react_hist, did_react, react_summary, react_count = await self.compactor.maybe_compact(
+                    react_hist, did_react, react_summary, react_count, _pending_q_react = await self.compactor.maybe_compact(
                         hist_compact,
                         force=True,
                         model=model_name,
