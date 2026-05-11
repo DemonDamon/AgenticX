@@ -51,7 +51,7 @@
   --border-subtle: rgba(255, 255, 255, 0.04);
   --border-muted: rgba(255, 255, 255, 0.03);
   --border-strong: rgba(255, 255, 255, 0.08);
-  --window-outline: rgba(255, 255, 255, 0.16);
+  --window-outline: rgba(255, 255, 255, 0.26);
   /* Focus mode glass layer: frosted whitish acrylic. Opacity must be high
      enough to look like glass without vibrancy underneath; otherwise it
      reads as a dark gray frame on top of whatever is behind the window. */
