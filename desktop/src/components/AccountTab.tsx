@@ -153,7 +153,7 @@ export function AccountTab() {
           <User className="size-4" />
         </div>
         <div>
-          <div className="text-base font-semibold">Machi 官网账号</div>
+          <div className="text-[16px] font-semibold text-text-primary">Machi 官网账号</div>
           <p className="mt-1 text-xs text-text-subtle leading-relaxed">
             与 <span className="font-mono text-[11px]">agxbuilder.com</span>{" "}
             使用同一套账号。点击登录后将在系统浏览器中完成验证，本应用自动同步登录状态。

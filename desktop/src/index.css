@@ -67,7 +67,7 @@ body {
 }
 .msg-content h1 { @apply text-xl; }
 .msg-content h2 { @apply text-lg; }
-.msg-content h3 { @apply text-base; }
+.msg-content h3 { @apply text-[16px] leading-6; }
 
 /* GFM tables (react-markdown + remark-gfm) — default UA styles are invisible on dark bubbles */
 .msg-content table {
