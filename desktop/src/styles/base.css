@@ -207,6 +207,21 @@ body,
   opacity: 1;
 }
 
+/* 历史会话面板：更小字号、紧凑行高；抗锯齿与字距优化，接近豆包式清晰列表 */
+.agx-session-history-panel {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.agx-session-history-panel .agx-session-history-group-title {
+  letter-spacing: 0.05em;
+}
+
+.agx-session-history-panel .agx-session-history-row {
+  font-feature-settings: "kern" 1, "liga" 1;
+}
+
 /* ============================================================
    Focus Mode — Perplexity-style floating capsule
    Main process resizes the window to 520x100, anchors it to the
