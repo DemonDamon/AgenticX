@@ -115,46 +115,50 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
     <div className="agx-topbar">
       <div className={`agx-topbar-left ${sidebarCollapsed ? "agx-topbar-left--collapsed" : ""}`}>
         <button
-          className="agx-topbar-btn"
+          className="agx-topbar-btn agx-topbar-btn--icon-only"
           onClick={onToggleSidebar}
           title={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
         >
-          <PanelLeftOpen className="h-3.5 w-3.5" />
+          <PanelLeftOpen className="h-[18px] w-[18px]" strokeWidth={1.8} />
         </button>
       </div>
       <div className="agx-topbar-right">
         <button
-          className="agx-topbar-btn"
+          className="agx-topbar-btn agx-topbar-btn--icon-only"
           onClick={toggleFocusMode}
           title="灵巧模式 (⇧⌘F)"
           aria-label="进入灵巧模式"
         >
-          <FocusModeLogo className="h-[15px] w-[15px] opacity-80" />
+          <FocusModeLogo className="h-[18px] w-[18px] opacity-80" />
         </button>
         <button
-          className="agx-topbar-btn"
+          className="agx-topbar-btn agx-topbar-btn--icon-only"
           type="button"
           onClick={() => openTokenDashboard()}
           title="Token 消耗看板"
           aria-label="Token 消耗看板"
         >
-          <Activity className="h-3.5 w-3.5" />
+          <Activity className="h-[18px] w-[18px]" strokeWidth={1.8} />
         </button>
         <button
-          className="agx-topbar-btn"
+          className="agx-topbar-btn agx-topbar-btn--icon-only"
           onClick={onThemeToggle}
           title={isDarkLike ? "切换到亮色" : "切换到暗色"}
           aria-label={isDarkLike ? "切换到亮色" : "切换到暗色"}
         >
-          {isDarkLike ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+          {isDarkLike ? (
+            <Sun className="h-[18px] w-[18px]" strokeWidth={1.8} />
+          ) : (
+            <Moon className="h-[18px] w-[18px]" strokeWidth={1.8} />
+          )}
         </button>
         <button
-          className="agx-topbar-btn"
+          className="agx-topbar-btn agx-topbar-btn--icon-only"
           onClick={() => openSettings()}
           title="设置"
           aria-label="设置"
         >
-          <Settings className="h-3.5 w-3.5" />
+          <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
         </button>
         {agxAccount.loggedIn ? (
           <div ref={userMenuRef} className="relative">
@@ -172,28 +176,31 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
               </span>
             </button>
             {userMenuOpen ? (
-              <div className="absolute right-0 top-[34px] z-50 min-w-[180px] rounded-md border border-border bg-surface-panel py-1 shadow-xl">
-                <div className="border-b border-border-muted px-3 py-2 text-[11px] text-text-faint">
-                  <div className="truncate font-medium text-text-strong">
-                    {agxAccount.displayName || "（无显示名）"}
-                  </div>
-                  {agxAccount.email ? (
-                    <div className="truncate font-mono text-[10px] text-text-subtle">{agxAccount.email}</div>
-                  ) : null}
-                </div>
+              <div className="absolute right-0 top-[34px] z-50 min-w-[200px] overflow-hidden rounded-xl bg-surface-base p-1.5 shadow-xl">
                 <button
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                  type="button"
+                  className="group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-hover"
                   onClick={onViewAccount}
                 >
-                  <User className="h-3.5 w-3.5" />
-                  查看账号
+                  <User
+                    className="h-[15px] w-[15px] shrink-0 text-text-muted group-hover:text-text-strong"
+                    strokeWidth={2}
+                  />
+                  <span className="flex flex-1 flex-col gap-0.5">
+                    <span className="text-[13px] font-medium leading-none text-text-strong">查看账号</span>
+                    <span className="text-[11px] leading-none text-text-faint">设置与用量</span>
+                  </span>
                 </button>
                 <button
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-rose-400 transition hover:bg-rose-500/10"
+                  type="button"
+                  className="group mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-rose-500/10"
                   onClick={() => void onLogoutClick()}
                 >
-                  <LogOut className="h-3.5 w-3.5" />
-                  退出登录
+                  <LogOut className="h-[15px] w-[15px] shrink-0 text-rose-400" strokeWidth={2} />
+                  <span className="flex flex-1 flex-col gap-0.5">
+                    <span className="text-[13px] font-medium leading-none text-rose-400">退出登录</span>
+                    <span className="text-[11px] leading-none text-rose-400/70">清除本机登录状态</span>
+                  </span>
                 </button>
               </div>
             ) : null}
@@ -206,7 +213,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
             title="登录 Machi 官网账号"
             aria-label="登录"
           >
-            <LogIn className="h-3.5 w-3.5" />
+            <LogIn className="h-[18px] w-[18px]" strokeWidth={1.8} />
             <span className="text-[12px]">{loginBusy ? "登录中..." : "登录"}</span>
           </button>
         )}
