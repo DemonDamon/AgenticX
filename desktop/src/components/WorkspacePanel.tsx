@@ -549,7 +549,7 @@ export function WorkspacePanel({
               ))}
             </div>
             <button
-              className="flex h-[26px] w-[26px] items-center justify-center rounded bg-surface-hover text-text-muted hover:bg-surface-hover"
+              className="rounded border border-border p-1 text-text-muted hover:bg-surface-hover"
               onClick={() => {
                 setErrorText("");
                 void refreshListAndActiveTaskspace();
@@ -559,7 +559,7 @@ export function WorkspacePanel({
               <RefreshCcw className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
             <button
-              className={`flex h-[26px] w-[26px] items-center justify-center rounded text-sm text-text-muted transition ${showAddForm ? "bg-surface-active" : "bg-surface-hover hover:bg-surface-hover"}`}
+              className={`rounded border border-border p-1 text-text-muted transition hover:bg-surface-hover ${showAddForm ? "bg-surface-active" : ""}`}
               onClick={() => {
                 setShowAddForm((prev) => !prev);
                 setErrorText("");
@@ -570,7 +570,7 @@ export function WorkspacePanel({
             </button>
             {onClose ? (
               <button
-                className="flex h-[26px] w-[26px] items-center justify-center rounded text-text-faint hover:bg-surface-hover hover:text-text-muted"
+                className="rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-muted"
                 onClick={onClose}
                 title="关闭工作区面板"
               >
