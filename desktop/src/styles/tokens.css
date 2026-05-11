@@ -1,4 +1,7 @@
 :root {
+  /* 与 macOS 无边框圆角窗口视觉对齐；透明窗体下用 box-shadow 画外沿细线（豆包式） */
+  --window-chrome-radius: 11px;
+
   --ds-layer-modal: 10000;
   --ds-layer-toast: 11000;
 
