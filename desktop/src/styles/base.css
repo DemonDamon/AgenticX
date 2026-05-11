@@ -169,6 +169,14 @@ body,
   color: var(--text-strong);
 }
 
+/* Icon-only Topbar hits：与 Pane 工具栏对齐 — 正方形热区 + 居中，避免图标相对底栏显得偏小 */
+.agx-topbar-btn.agx-topbar-btn--icon-only {
+  width: 30px;
+  min-width: 30px;
+  padding: 0;
+  justify-content: center;
+}
+
 .agx-content {
   min-width: 0;
   min-height: 0;
