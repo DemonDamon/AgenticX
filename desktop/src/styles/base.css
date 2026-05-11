@@ -26,6 +26,9 @@ body,
   color: var(--text-primary);
   /* Avoid transitioning grid tracks: during OS window resize it fights layout and feels "laggy". */
   overflow: hidden;
+  /* 透明 Electron 窗口：用圆角 + 1px 外描边勾勒出窗体轮廓（对齐豆包等产品的细边线） */
+  border-radius: var(--window-chrome-radius);
+  box-shadow: 0 0 0 1px var(--window-outline, rgba(255, 255, 255, 0.14));
 }
 
 .agx-app.sidebar-collapsed {
@@ -233,6 +236,7 @@ body,
 /* 关键：把整个窗口的渲染区裁剪成胶囊形状，让玻璃圆角外面那 4 个小三角
    区域完全"不存在"，而不是透出背后的 IDE 暗色内容。 */
 .agx-app.focus-mode {
+  border-radius: 0 !important;
   clip-path: inset(0 round 18px) !important;
   -webkit-clip-path: inset(0 round 18px) !important;
 }
