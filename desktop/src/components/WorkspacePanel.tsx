@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { PanelRightClose, Folder, RefreshCcw, Plus } from "lucide-react";
+import { PanelRightClose, Folder, RefreshCw, FolderPlus } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import Prism from "prismjs";
 import "prismjs/components/prism-bash";
@@ -556,7 +556,7 @@ export function WorkspacePanel({
               }}
               title="刷新工作区列表与目录"
             >
-              <RefreshCcw className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              <RefreshCw className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
             <button
               className={`agx-topbar-btn !px-[5px] ${showAddForm ? "agx-topbar-btn--active" : ""}`}
@@ -566,7 +566,7 @@ export function WorkspacePanel({
               }}
               title="新增工作区"
             >
-              <Plus className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              <FolderPlus className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
             {onClose ? (
               <button

@@ -1,4 +1,4 @@
-import { PanelRightClose, MessageSquare, ListChecks } from "lucide-react";
+import { PanelRightClose, History, ListChecks } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, type ChatPane, type Message } from "../store";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
@@ -958,7 +958,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       <div className="shrink-0 border-b border-border px-3 py-2.5 text-[13px] text-text-subtle">
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5" title={title}>
-            <MessageSquare className="h-[18px] w-[18px] shrink-0" strokeWidth={1.8} />
+            <History className="h-[18px] w-[18px] shrink-0" strokeWidth={1.8} />
           </span>
           <div className="flex items-center gap-1">
             {!selectMode ? (

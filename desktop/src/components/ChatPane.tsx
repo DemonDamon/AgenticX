@@ -14,9 +14,9 @@ import {
   Wand2,
   Wrench,
   Users,
-  Folder,
+  FolderOpen,
   Bot,
-  MessageSquare,
+  History,
   X,
   PanelRightClose,
 } from "lucide-react";
@@ -5277,7 +5277,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onClick={() => cycleSidePanel(pane.id, "workspace")}
               title="切换工作区面板"
             >
-              <Folder className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              <FolderOpen className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
             {paneSubAgents.length > 0 ? (
               <button
@@ -5302,7 +5302,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onClick={() => togglePaneHistory(pane.id)}
               title="切换历史面板"
             >
-              <MessageSquare className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              <History className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
             <button
               className="agx-topbar-btn !px-[5px] hover:text-status-error"
