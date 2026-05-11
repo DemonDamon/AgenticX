@@ -1731,13 +1731,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     if (pp && pm) return { chatProvider: pp, chatModel: pm };
     return { chatProvider: storeActiveProvider, chatModel: storeActiveModel };
   }, [pane?.modelProvider, pane?.modelName, storeActiveProvider, storeActiveModel]);
-  const providerEntryForModelChip = useAppStore((s) =>
-    chatProvider ? s.settings.providers[chatProvider] : undefined,
-  );
-  const chatProviderDisplay = useMemo(
-    () => getProviderDisplayName(chatProvider, providerEntryForModelChip),
-    [chatProvider, providerEntryForModelChip],
-  );
   const selectedSubAgent = useAppStore((s) => s.selectedSubAgent);
   const setSelectedSubAgent = useAppStore((s) => s.setSelectedSubAgent);
   const addSubAgent = useAppStore((s) => s.addSubAgent);
@@ -5765,39 +5758,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               )}
             </div>
           ) : null}
-          <div className="agx-pane-composer-meta mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-text-faint">
-            {(() => {
-              const tkIn = pane.sessionTokens?.input ?? 0;
-              const tkOut = pane.sessionTokens?.output ?? 0;
-              const tkTotal = tkIn + tkOut;
-              return (
-                <span
-                  className="shrink-0 rounded border border-border bg-surface-card px-2 py-0.5"
-                  title={tkTotal > 0
-                    ? `↑ ${tkIn.toLocaleString()} input  ↓ ${tkOut.toLocaleString()} output`
-                    : "本次会话累计 token 消耗"}
-                >
-                  {tkTotal > 0 ? `${(tkTotal / 1000).toFixed(1)}k tokens` : "0 tokens"}
-                </span>
-              );
-            })()}
-            <span className="shrink-0 truncate rounded border border-border bg-surface-card px-2 py-0.5" style={{ maxWidth: "45%" }}>
-              {pane.sessionId
-                ? `${pane.sessionId.slice(0, 8)}…`
-                : !isGroupPane && !isAutomationTaskPane
-                  ? "未创建"
-                  : "-"}
-            </span>
-            {chatProvider && chatModel ? (
-              <span
-                className="min-w-0 truncate rounded border border-border bg-surface-card px-2 py-0.5"
-                style={{ maxWidth: "55%" }}
-                title={`${chatProvider}/${chatModel}`}
-              >
-                {chatProviderDisplay}/{chatModel}
-              </span>
-            ) : null}
-          </div>
         </div>
       </div>
 
