@@ -48,10 +48,11 @@
   --chat-clean-assistant-bg: rgba(255, 255, 255, 0.04);
   --chat-clean-assistant-border: rgba(255, 255, 255, 0.08);
 
-  --border-subtle: rgba(255, 255, 255, 0.04);
-  --border-muted: rgba(255, 255, 255, 0.03);
-  --border-strong: rgba(255, 255, 255, 0.08);
-  --window-outline: rgba(255, 255, 255, 0.26);
+  /* Panel / 分割线：在 #050505 底上略高于旧值，贴近豆包式浅白边线的可辨度 */
+  --border-subtle: rgba(255, 255, 255, 0.11);
+  --border-muted: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --window-outline: rgba(255, 255, 255, 0.34);
   /* Focus mode glass layer: frosted whitish acrylic. Opacity must be high
      enough to look like glass without vibrancy underneath; otherwise it
      reads as a dark gray frame on top of whatever is behind the window. */
