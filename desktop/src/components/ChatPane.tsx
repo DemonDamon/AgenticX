@@ -5597,13 +5597,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   void sendChat(extractComposerText());
                 }
               }}
-              className={`agx-pane-composer-input block w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-0 pt-4 text-[16px] leading-relaxed text-text-primary outline-none ${
+              className={`agx-pane-composer-input block w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-0 pt-4 text-[14px] leading-relaxed text-text-primary outline-none ${
                 // 收起时右侧留白需覆盖「展开输入」角标（absolute right-3 + w-8），pr-4 会导致首行末字与按钮重叠
                 composerExpanded ? "max-h-[62vh] min-h-[260px] pr-40" : "max-h-[220px] min-h-[72px] pr-14"
               }`}
             />
             {input.trim().length === 0 ? (
-              <div className="agx-pane-composer-placeholder pointer-events-none absolute left-4 top-4 text-[16px] text-text-faint">
+              <div className="agx-pane-composer-placeholder pointer-events-none absolute left-4 top-4 text-[14px] text-text-faint">
                 {focusMode ? "开始任务..." : "发消息..."}
               </div>
             ) : null}
