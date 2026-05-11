@@ -33,16 +33,16 @@ body {
   margin: 0.5em 0;
 }
 .msg-content pre {
-  @apply overflow-x-auto rounded p-3 text-sm;
+  @apply overflow-x-auto rounded p-3 text-xs;
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
 }
 .msg-content code {
-  @apply rounded px-1.5 py-0.5 text-[0.9em];
+  @apply rounded px-1.5 py-0.5 text-[0.85em];
   background: var(--surface-card);
 }
 .msg-content pre code {
-  @apply bg-transparent p-0 text-[13px] leading-relaxed;
+  @apply bg-transparent p-0 text-[12px] leading-relaxed;
 }
 .msg-content ul, .msg-content ol {
   @apply ml-5 list-inside;
@@ -65,15 +65,15 @@ body {
   @apply font-semibold mt-4 mb-2;
   color: var(--text-strong);
 }
-.msg-content h1 { @apply text-2xl; }
-.msg-content h2 { @apply text-xl; }
-.msg-content h3 { @apply text-lg; }
+.msg-content h1 { @apply text-lg; }
+.msg-content h2 { @apply text-base; }
+.msg-content h3 { @apply text-sm; }
 
 /* GFM tables (react-markdown + remark-gfm) — default UA styles are invisible on dark bubbles */
 .msg-content table {
   border-collapse: collapse;
   margin: 0.75em 0;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   line-height: 1.5;
 }
 .msg-content th,
