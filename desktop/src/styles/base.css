@@ -26,10 +26,9 @@ body,
   color: var(--text-primary);
   /* Avoid transitioning grid tracks: during OS window resize it fights layout and feels "laggy". */
   overflow: hidden;
-  /* 透明 Electron 窗口：圆角 + 内沿描边。外扩 box-shadow 会被 #root overflow:hidden 裁掉，
-     使用略粗于 1px 的边框 + 更高对比的 --window-outline，黑底上更清晰、接近参考客户端的「实线感」。 */
+  /* 透明 Electron 窗口：圆角 + 内沿描边（2px + --window-outline，黑底上与豆包式浅边类似可辨）。 */
   border-radius: var(--window-chrome-radius);
-  border: 1.5px solid var(--window-outline, rgba(255, 255, 255, 0.26));
+  border: 2px solid var(--window-outline, rgba(255, 255, 255, 0.26));
 }
 
 .agx-app.sidebar-collapsed {
@@ -83,7 +82,7 @@ body,
   min-height: 0;
   overflow: hidden;
   position: relative;
-  /* 侧栏与主区之间常驻细分割线（对齐 Workbuddy 式 1px 低对比边界） */
+  /* 侧栏与主区分隔：浅色边线（dark 主题为 --border-strong） */
   border-right: 1px solid var(--border-strong);
 }
 
