@@ -33,14 +33,12 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function PaneDragOverlayPreview({ pane }: { pane: ChatPaneState }) {
-  const sessionSnippet = pane.sessionId ? `${pane.sessionId.slice(0, 8)}…` : "-";
   return (
     <div
       className="flex min-h-[40px] min-w-[200px] max-w-md cursor-grabbing flex-col justify-center rounded-lg border border-border bg-surface-card/95 px-4 py-2 shadow-lg shadow-black/40 backdrop-blur-sm"
       style={{ width: "min(100%, 360px)" }}
     >
       <div className="truncate text-sm font-medium text-text-strong">{pane.avatarName}</div>
-      <div className="truncate text-[10px] text-text-faint">session: {sessionSnippet}</div>
     </div>
   );
 }
