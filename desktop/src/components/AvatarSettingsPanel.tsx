@@ -38,13 +38,13 @@ function SettingsSwitch({
       onClick={() => {
         if (!disabled) onChange(!checked);
       }}
-      className={`relative h-7 w-12 shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/55 disabled:opacity-40 ${
+      className={`relative h-5 w-9 shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/55 disabled:opacity-40 ${
         checked ? "bg-emerald-500" : "bg-surface-hover"
       }`}
     >
       <span
-        className={`pointer-events-none absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${
-          checked ? "translate-x-5" : "translate-x-0"
+        className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+          checked ? "translate-x-4" : "translate-x-0"
         }`}
       />
     </button>

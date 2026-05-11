@@ -4197,9 +4197,9 @@ function SettingsSwitch({
   size?: "sm" | "md";
   "aria-label"?: string;
 }) {
-  const trackClass = size === "sm" ? "h-5 w-9" : "h-7 w-12";
-  const knobClass = size === "sm" ? "left-0.5 top-0.5 h-4 w-4" : "left-0.5 top-0.5 h-6 w-6";
-  const knobTranslate = size === "sm" ? "translate-x-4" : "translate-x-5";
+  const trackClass = size === "sm" ? "h-4 w-7" : "h-5 w-9";
+  const knobClass = size === "sm" ? "left-0.5 top-0.5 h-3 w-3" : "left-0.5 top-0.5 h-4 w-4";
+  const knobTranslate = size === "sm" ? "translate-x-3" : "translate-x-4";
   return (
     <button
       type="button"
