@@ -217,8 +217,8 @@ export function ImBubble({
             <div
               className={
                 compactAssistant && noBubbleBorder
-                  ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-2.5 text-[14px] leading-relaxed"
-                  : `relative min-w-0 overflow-x-auto overflow-y-visible rounded-xl border px-3 py-2 text-[14px] leading-relaxed ${isUser ? "max-w-full rounded-tr-[4px]" : "w-full rounded-tl-[4px]"}`
+                  ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-2.5 text-[15px] leading-relaxed"
+                  : `relative min-w-0 overflow-x-auto overflow-y-visible rounded-xl border px-3 py-2 text-[15px] leading-relaxed ${isUser ? "max-w-full rounded-tr-[4px]" : "w-full rounded-tl-[4px]"}`
               }
               style={compactAssistant && noBubbleBorder ? undefined : bubbleStyle}
             >
