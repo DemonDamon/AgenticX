@@ -167,7 +167,7 @@ export function QrConnectModal({
         >
           <X className="h-4 w-4" />
         </button>
-        <h2 id="qr-connect-title" className="pr-8 text-base font-medium text-text-strong">
+        <h2 id="qr-connect-title" className="pr-8 text-[16px] font-medium text-text-strong">
           扫码连接 IM
         </h2>
         <p className="mt-2 text-xs text-text-faint">

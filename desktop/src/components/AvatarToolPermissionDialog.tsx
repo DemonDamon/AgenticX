@@ -87,7 +87,7 @@ export function AvatarToolPermissionDialog({
         className="w-[520px] max-w-[96vw] rounded-xl border border-border bg-surface-panel p-4"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-base font-semibold text-text-primary">{title}</h3>
+        <h3 className="text-[16px] font-semibold text-text-primary">{title}</h3>
         <p className="mt-1 text-xs text-text-faint">
           {customizedCount > 0 ? `已自定义 ${customizedCount} 项` : "未自定义（使用默认）"} · {modeHint}
         </p>
