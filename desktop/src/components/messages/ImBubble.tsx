@@ -198,13 +198,9 @@ export function ImBubble({
       ) : null}
       <div className={`flex min-w-0 flex-1 gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
         <div className={`flex min-w-0 flex-1 gap-2 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
-          {compactAssistant && noBubbleBorder ? null : (
+          {compactAssistant ? null : (
             <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
-              {compactAssistant ? (
-                <div className="h-8 w-8 shrink-0" aria-hidden />
-              ) : (
-                <ChatImAvatar label={displayName} imageUrl={avatarUrl} />
-              )}
+              <ChatImAvatar label={displayName} imageUrl={avatarUrl} />
             </div>
           )}
           <div
