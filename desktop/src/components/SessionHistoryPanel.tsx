@@ -1,4 +1,4 @@
-import { PanelRightClose, History, ListChecks } from "lucide-react";
+import { PanelRightClose, History, ListChecks, MessageSquare } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, type ChatPane, type Message } from "../store";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
@@ -658,8 +658,11 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       imBadgeScope === "wechat-only" ? false : feishuMarked;
     const showWechatChip =
       imBadgeScope === "feishu-only" ? false : wechatMarked;
+    const rowTitle = selectMode
+      ? "点击勾选会话"
+      : `${label}\n${timeAgo(createdAt)} · 双击重命名 / 右键菜单`;
     return (
-      <div key={item.session_id} className="mb-1">
+      <div key={item.session_id} className="mb-0.5">
         {editingId === item.session_id ? (
           <input
             autoFocus
@@ -670,12 +673,15 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               if (e.key === "Enter") void saveRename(item.session_id);
               if (e.key === "Escape") setEditingId(null);
             }}
-            className="w-full rounded border border-border-strong bg-surface-hover px-2 py-1 text-[13px] text-text-primary outline-none"
+            className="agx-session-history-row-input w-full rounded border border-border-strong bg-surface-hover px-2 py-1 text-[12px] text-text-primary outline-none"
           />
         ) : (
           <button
-            className={`flex w-full flex-col items-start rounded px-2 py-1.5 text-left text-[13px] transition ${
-              active ? "bg-surface-hover font-medium text-text-strong" : "text-text-muted hover:bg-surface-hover"
+            type="button"
+            className={`agx-session-history-row flex w-full items-center rounded-md px-2 py-1 text-left text-[12px] leading-[1.35] transition ${
+              active
+                ? "bg-surface-card-strong font-medium text-text-strong"
+                : "text-text-primary hover:bg-surface-hover"
             }`}
             onClick={() => {
               if (selectMode) {
@@ -695,60 +701,75 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               e.preventDefault();
               setContextMenu({ x: e.clientX, y: e.clientY, item });
             }}
-            title={selectMode ? "点击勾选会话" : "双击重命名 / 右键打开菜单"}
+            title={rowTitle}
           >
-            <span className="flex w-full items-center gap-1.5 truncate">
-              {selectMode ? (
-                <input
-                  type="checkbox"
-                  checked={selectedSessionIds.includes(item.session_id)}
-                  onChange={() => toggleSelectSession(item.session_id)}
-                  className="h-3 w-3 accent-neutral-400"
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : null}
-              {item.pinned ? <span className="text-xs text-amber-300">pin</span> : null}
-              {isRunning ? (
-                <span
-                  className="inline-flex items-center justify-center rounded-sm px-0.5 py-px text-text-strong"
-                  title="该会话正在运行"
-                  aria-label="运行中"
-                >
+            {selectMode ? (
+              <input
+                type="checkbox"
+                checked={selectedSessionIds.includes(item.session_id)}
+                onChange={() => toggleSelectSession(item.session_id)}
+                className="h-3 w-3 shrink-0 accent-neutral-400"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <MessageSquare
+                className="h-3.5 w-3.5 shrink-0 text-text-faint opacity-[0.85]"
+                strokeWidth={2}
+                aria-hidden
+              />
+            )}
+            <span className="min-w-0 flex-1 pl-1.5">
+              <span className="flex w-full min-w-0 items-center gap-1">
+                {item.pinned ? <span className="shrink-0 text-[10px] text-amber-300">pin</span> : null}
+                {isRunning ? (
                   <span
-                    className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border border-current border-t-transparent"
-                    aria-hidden
-                  />
-                </span>
-              ) : null}
-              {isInterrupted ? (
-                <span
-                  className="inline-flex items-center rounded-sm px-1 py-px text-[11px] font-medium leading-tight text-amber-300"
-                  title="该会话已收到中断请求"
-                >
-                  已中断
-                </span>
-              ) : null}
-              <span className="truncate">{label}</span>
-              {showFeishuChip ? (
-                <FeishuBadge />
-              ) : null}
-              {showWechatChip ? (
-                <span
-                  className="inline-flex shrink-0 items-center rounded-sm px-1 py-px text-[11px] font-medium leading-tight"
-                  style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
-                >
-                  微信
-                </span>
-              ) : null}
-              {unread ? <span className="inline-block h-1.5 w-1.5 rounded-full bg-text-muted" /> : null}
-            </span>
-            {contentSnippet ? (
-              <span className="mt-0.5 line-clamp-2 w-full text-[11px] leading-snug text-text-subtle" title={contentSnippet}>
-                {contentSnippet}
+                    className="inline-flex shrink-0 items-center justify-center rounded-sm px-0.5 py-px text-text-strong"
+                    title="该会话正在运行"
+                    aria-label="运行中"
+                  >
+                    <span
+                      className="inline-block h-2.5 w-2.5 animate-spin rounded-full border border-current border-t-transparent"
+                      aria-hidden
+                    />
+                  </span>
+                ) : null}
+                {isInterrupted ? (
+                  <span
+                    className="inline-flex shrink-0 rounded-sm px-1 py-px text-[10px] font-medium leading-tight text-amber-300"
+                    title="该会话已收到中断请求"
+                  >
+                    已中断
+                  </span>
+                ) : null}
+                <span className="min-w-0 flex-1 truncate">{label}</span>
+                {showFeishuChip ? (
+                  <span className="shrink-0">
+                    <FeishuBadge />
+                  </span>
+                ) : null}
+                {showWechatChip ? (
+                  <span
+                    className="inline-flex shrink-0 items-center rounded-sm px-1 py-px text-[10px] font-medium leading-tight"
+                    style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
+                  >
+                    微信
+                  </span>
+                ) : null}
+                {unread ? <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-text-muted" /> : null}
+                {!selectMode ? (
+                  <span className="shrink-0 whitespace-nowrap text-[10px] leading-tight text-text-faint">
+                    {timeAgo(createdAt)}
+                  </span>
+                ) : null}
               </span>
-            ) : null}
-            <span className="mt-0.5 truncate w-full text-[11px] text-text-faint">
-              {timeAgo(createdAt)}
+              {contentSnippet ? (
+                <span
+                  className="mt-0.5 line-clamp-2 w-full text-[11px] leading-snug text-text-subtle"
+                  title={contentSnippet}
+                >
+                  {contentSnippet}
+                </span>
+              ) : null}
             </span>
           </button>
         )}
@@ -759,8 +780,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const renderGroup = (groupTitle: string, items: SessionRow[]) => {
     if (items.length === 0) return null;
     return (
-      <div className="mb-2">
-        <div className="px-2 py-1.5 text-xs font-medium uppercase tracking-wide text-text-faint">{groupTitle}</div>
+      <div className="mb-1.5">
+        <div className="agx-session-history-group-title px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-faint">
+          {groupTitle}
+        </div>
         {items.map((item) =>
           renderSessionItem(
             item,
@@ -952,10 +975,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
 
   return (
     <div
-      className="flex h-full w-[220px] shrink-0 flex-col border-l border-border bg-surface-card"
+      className="agx-session-history-panel flex h-full w-[220px] shrink-0 flex-col border-l border-border bg-surface-card"
       style={tintColor ? { backgroundColor: tintColor } : undefined}
     >
-      <div className="shrink-0 border-b border-border px-3 py-2.5 text-[13px] text-text-subtle">
+      <div className="shrink-0 border-b border-border px-3 py-2.5 text-[12px] text-text-subtle">
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5" title={title}>
             <History className="h-[18px] w-[18px] shrink-0" strokeWidth={1.8} />
@@ -1021,11 +1044,11 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           type="search"
           value={sessionSearchQuery}
           onChange={(e) => setSessionSearchQuery(e.target.value)}
-          placeholder="Search Sessions..."
+          placeholder="搜索会话…"
           autoComplete="off"
           spellCheck={false}
           aria-label="搜索历史会话"
-          className="w-full rounded-md border border-border bg-surface-hover px-2.5 py-2 text-[13px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
+          className="w-full rounded-md border border-border bg-surface-hover px-2 py-1.5 text-[12px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
         />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
@@ -1041,7 +1064,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           <>
             {showFeishuBindSection && feishuSession ? (
               <div className="mb-2">
-                <div className="flex items-center gap-1 px-2 py-1 text-xs font-medium uppercase tracking-wide text-[#3370FF]">
+                <div className="agx-session-history-group-title flex items-center gap-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#3370FF]">
                   <span>飞书绑定</span>
                   <span
                     className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[11px] font-medium leading-tight"
@@ -1067,7 +1090,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             ) : null}
             {showWechatBindSection && wechatSession ? (
               <div className="mb-2">
-                <div className="flex items-center gap-1 px-2 py-1 text-xs font-medium uppercase tracking-wide text-[#25D366]">
+                <div className="agx-session-history-group-title flex items-center gap-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#25D366]">
                   <span>微信绑定</span>
                   <span
                     className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[11px] font-medium leading-tight"
