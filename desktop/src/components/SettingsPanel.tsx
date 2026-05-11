@@ -374,7 +374,7 @@ function SkillRowButton({
           ? "border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)]"
           : skill.name === recentMarketSkillName
             ? "border-amber-500/35 bg-amber-500/5"
-            : "border-border bg-surface-card hover:bg-surface-hover"
+            : "border-transparent bg-surface-card hover:bg-surface-hover"
       } ${!globalSkillEnabled ? "opacity-60" : ""}`}
     >
       <div className="flex items-start gap-2">
@@ -543,7 +543,7 @@ function SkillsLocationSection({
         {shouldCollapse ? (
           <button
             type="button"
-            className="w-full rounded-md border border-border bg-surface-panel px-2.5 py-2 text-left text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+            className="w-full rounded-md border border-transparent bg-surface-panel px-2.5 py-2 text-left text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
             onClick={() => setExpanded((v) => !v)}
           >
             {expanded ? "Show less" : `Show all (${remaining} more)`}
@@ -2981,7 +2981,7 @@ function SkillsTab() {
       </div>
 
       {/* Skill scan roots (presets + custom paths) */}
-      <div className="space-y-3 rounded-md border border-border bg-surface-card p-3">
+      <div className="space-y-3 rounded-md bg-surface-card p-3">
         <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">扫描路径</div>
         <p className="text-xs text-text-faint">
           项目内 <code className="text-text-muted">.agents/skills</code>、<code className="text-text-muted">.claude/skills</code>、<code className="text-text-muted">~/.agenticx/skills</code>（含 ClawHub 安装、智能体创建）以及内置包始终参与扫描。以下第三方根目录可按开关启用；也可添加自定义文件夹。
@@ -2990,7 +2990,7 @@ function SkillsTab() {
           {skillScanPresets.map((p) => (
             <div
               key={p.id}
-              className="flex items-center gap-3 rounded-md border border-border/60 bg-surface-panel/50 px-3 py-2"
+              className="flex items-center gap-3 rounded-md bg-surface-panel/50 px-3 py-2"
             >
               <span className="min-w-0 flex-1">
                 <span className="text-sm text-text-primary">{p.label}</span>
@@ -3180,7 +3180,7 @@ function SkillsTab() {
         )}
 
         {builtinFiltered.length > 0 && (
-          <div className="rounded-md border border-border bg-surface-card">
+          <div className="rounded-md border border-transparent bg-surface-card">
             <button
               type="button"
               className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-text-subtle transition hover:bg-surface-hover"
@@ -3231,7 +3231,7 @@ function SkillsTab() {
           {RECOMMENDED_SKILLS.map((skill) => (
             <div
               key={skill.id}
-              className="flex flex-col rounded-md border border-border bg-surface-card px-3 py-2.5 transition hover:bg-surface-hover/40"
+              className="flex flex-col rounded-md border border-transparent bg-surface-card px-3 py-2.5 transition hover:bg-surface-hover/40"
             >
               <div className="flex items-start gap-2">
                 {recommendedIconBroken[skill.id] || !(recommendedIconData[skill.id] || skill.icon_src) ? (
@@ -3354,7 +3354,7 @@ function SkillsTab() {
             {marketResults.map((item) => (
               <div
                 key={`${item.source}:${item.name}`}
-                className="flex items-start gap-2 rounded-md border border-border bg-surface-card px-3 py-2"
+                className="flex items-start gap-2 rounded-md border border-transparent bg-surface-card px-3 py-2"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
@@ -3444,7 +3444,7 @@ function SkillsTab() {
             {skillhubResults.map((item) => (
               <div
                 key={item.slug}
-                className="flex items-start gap-2 rounded-md border border-border bg-surface-card px-3 py-2"
+                className="flex items-start gap-2 rounded-md border border-transparent bg-surface-card px-3 py-2"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -3575,7 +3575,7 @@ function SkillsTab() {
             {bundles.map((bundle) => (
               <div
                 key={bundle.name}
-                className="rounded-md border border-border bg-surface-card px-3 py-2"
+                className="rounded-md border border-transparent bg-surface-card px-3 py-2"
               >
                 <div className="flex items-center gap-2">
                   <span className="flex-1 truncate text-sm font-medium text-text-primary">
