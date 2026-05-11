@@ -1,4 +1,4 @@
-import { PanelRightClose, History, ListChecks, MessageSquare } from "lucide-react";
+import { PanelRightClose, History, ListChecks, MessageCircle, Smartphone } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, type ChatPane, type Message } from "../store";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
@@ -662,7 +662,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       ? "点击勾选会话"
       : `${label}\n${timeAgo(createdAt)} · 双击重命名 / 右键菜单`;
     return (
-      <div key={item.session_id} className="mb-0.5">
+      <div key={item.session_id} className="mb-1">
         {editingId === item.session_id ? (
           <input
             autoFocus
@@ -673,14 +673,14 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               if (e.key === "Enter") void saveRename(item.session_id);
               if (e.key === "Escape") setEditingId(null);
             }}
-            className="agx-session-history-row-input w-full rounded border border-border-strong bg-surface-hover px-2 py-1 text-[12px] text-text-primary outline-none"
+            className="agx-session-history-row-input w-full rounded border border-border-strong bg-surface-hover px-2 py-2 text-[14px] text-text-primary outline-none"
           />
         ) : (
           <button
             type="button"
-            className={`agx-session-history-row flex w-full items-center rounded-md px-2 py-1 text-left text-[11.5px] leading-[1.35] transition ${
+            className={`agx-session-history-row flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-[14px] leading-snug transition ${
               active
-                ? "bg-surface-card-strong font-medium text-text-strong"
+                ? "bg-surface-card-strong text-text-strong"
                 : "text-text-primary hover:bg-surface-hover"
             }`}
             onClick={() => {
@@ -708,19 +708,24 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 type="checkbox"
                 checked={selectedSessionIds.includes(item.session_id)}
                 onChange={() => toggleSelectSession(item.session_id)}
-                className="h-3 w-3 shrink-0 accent-neutral-400"
+                className="mt-1.5 h-4 w-4 shrink-0 self-center accent-neutral-400"
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <MessageSquare
-                className="h-3.5 w-3.5 shrink-0 text-text-faint opacity-70"
-                strokeWidth={1.8}
+              <span
+                className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/80 bg-surface-hover/90 text-text-muted"
                 aria-hidden
-              />
+              >
+                {showFeishuChip || showWechatChip ? (
+                  <Smartphone className="h-3.5 w-3.5" strokeWidth={2} />
+                ) : (
+                  <MessageCircle className="h-3.5 w-3.5" strokeWidth={2} />
+                )}
+              </span>
             )}
-            <span className="min-w-0 flex-1 pl-1.5">
-              <span className="flex w-full min-w-0 items-center gap-1">
-                {item.pinned ? <span className="shrink-0 text-[10px] text-amber-300">pin</span> : null}
+            <span className="min-w-0 flex-1">
+              <span className="flex w-full min-w-0 items-center gap-1.5">
+                {item.pinned ? <span className="shrink-0 text-[11px] font-medium text-amber-300">pin</span> : null}
                 {isRunning ? (
                   <span
                     className="inline-flex shrink-0 items-center justify-center rounded-sm px-0.5 py-px text-text-strong"
@@ -735,13 +740,17 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 ) : null}
                 {isInterrupted ? (
                   <span
-                    className="inline-flex shrink-0 rounded-sm px-1 py-px text-[10px] font-medium leading-tight text-amber-300"
+                    className="inline-flex shrink-0 rounded-sm px-1 py-px text-[11px] font-medium leading-tight text-amber-300"
                     title="该会话已收到中断请求"
                   >
                     已中断
                   </span>
                 ) : null}
-                <span className="min-w-0 flex-1 truncate">{label}</span>
+                <span
+                  className={`min-w-0 flex-1 truncate ${active ? "font-semibold" : "font-medium"}`}
+                >
+                  {label}
+                </span>
                 {showFeishuChip ? (
                   <span className="shrink-0">
                     <FeishuBadge />
@@ -749,25 +758,25 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                 ) : null}
                 {showWechatChip ? (
                   <span
-                    className="inline-flex shrink-0 items-center rounded-sm px-1 py-px text-[10px] font-medium leading-tight"
+                    className="inline-flex shrink-0 items-center rounded-sm px-1 py-px text-[11px] font-medium leading-tight"
                     style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
                   >
                     微信
                   </span>
                 ) : null}
-                {unread ? <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-text-muted" /> : null}
-                {!selectMode ? (
-                  <span className="shrink-0 whitespace-nowrap text-[10px] leading-tight tabular-nums text-text-faint">
-                    {timeAgo(createdAt)}
-                  </span>
-                ) : null}
+                {unread ? <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-text-muted" /> : null}
               </span>
-              {contentSnippet ? (
+              {!selectMode && contentSnippet ? (
                 <span
-                  className="mt-0.5 line-clamp-2 w-full text-[11px] leading-snug text-text-subtle"
+                  className="mt-1 line-clamp-2 w-full text-[12px] leading-snug text-text-subtle"
                   title={contentSnippet}
                 >
                   {contentSnippet}
+                </span>
+              ) : null}
+              {!selectMode ? (
+                <span className="mt-1 block text-[12px] font-normal tabular-nums leading-none text-text-faint">
+                  {timeAgo(createdAt)}
                 </span>
               ) : null}
             </span>
@@ -781,7 +790,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
     if (items.length === 0) return null;
     return (
       <div className="mb-1.5">
-        <div className="agx-session-history-group-title px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-faint">
+        <div className="agx-session-history-group-title px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-text-faint">
           {groupTitle}
         </div>
         {items.map((item) =>
@@ -1048,7 +1057,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           autoComplete="off"
           spellCheck={false}
           aria-label="搜索历史会话"
-          className="w-full rounded-md border border-border bg-surface-hover px-2 py-1.5 text-[12px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
+          className="w-full rounded-md border border-border bg-surface-hover px-2 py-2 text-[13px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
         />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
@@ -1064,7 +1073,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           <>
             {showFeishuBindSection && feishuSession ? (
               <div className="mb-2">
-                <div className="agx-session-history-group-title flex items-center gap-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#3370FF]">
+                <div className="agx-session-history-group-title flex items-center gap-1 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#3370FF]">
                   <span>飞书绑定</span>
                   <span
                     className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[11px] font-medium leading-tight"
@@ -1090,7 +1099,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             ) : null}
             {showWechatBindSection && wechatSession ? (
               <div className="mb-2">
-                <div className="agx-session-history-group-title flex items-center gap-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#25D366]">
+                <div className="agx-session-history-group-title flex items-center gap-1 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#25D366]">
                   <span>微信绑定</span>
                   <span
                     className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-px text-[11px] font-medium leading-tight"
