@@ -8,7 +8,7 @@ export async function GET() {
   return NextResponse.json({
     code: "00000",
     message: "ok",
-    data: { quota: getQuotaConfig(), file: quotaFilePath() },
+    data: { quota: await getQuotaConfig(), file: quotaFilePath() },
   });
 }
 
@@ -21,7 +21,7 @@ export async function PUT(request: Request) {
   } catch {
     return NextResponse.json({ code: "40001", message: "invalid json" }, { status: 400 });
   }
-  const quota = setQuotaConfig((body as Record<string, unknown>) ?? {});
+  const quota = await setQuotaConfig((body as Record<string, unknown>) ?? {});
   return NextResponse.json({
     code: "00000",
     message: "ok",

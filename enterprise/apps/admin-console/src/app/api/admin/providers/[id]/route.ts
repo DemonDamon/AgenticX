@@ -17,7 +17,7 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
   const auth = await requireAdminScope(["provider:read"]);
   if (!auth.ok) return auth.response;
   const { id } = await context.params;
-  const provider = getProvider(id);
+  const provider = await getProvider(id);
   if (!provider) {
     return NextResponse.json({ code: "40400", message: "provider not found" }, { status: 404 });
   }
@@ -40,7 +40,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const route = parseRoute(body.route);
     if (route) patch.route = route;
 
-    const updated = updateProvider(id, patch);
+    const updated = await updateProvider(id, patch);
     return NextResponse.json({ code: "00000", message: "ok", data: { provider: updated } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "invalid request";
@@ -56,7 +56,7 @@ export async function DELETE(_req: Request, context: { params: Promise<{ id: str
   const auth = await requireAdminScope(["provider:delete"]);
   if (!auth.ok) return auth.response;
   const { id } = await context.params;
-  const ok = deleteProvider(id);
+  const ok = await deleteProvider(id);
   if (!ok) {
     return NextResponse.json({ code: "40400", message: "provider not found" }, { status: 404 });
   }

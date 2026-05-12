@@ -1,5 +1,8 @@
+import { enterpriseRuntimeTokenQuotas as qTable } from "@agenticx/db-schema";
+import { getIamDb } from "@agenticx/iam-core";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { eq } from "drizzle-orm";
 
 export type QuotaAction = "block" | "warn" | "fallback";
 
@@ -20,7 +23,7 @@ export type QuotaConfig = {
 
 const ROOT = path.resolve(process.cwd(), "../..");
 const RUNTIME_DIR = process.env.ENTERPRISE_ADMIN_RUNTIME_DIR || path.join(ROOT, ".runtime/admin");
-const FILE_PATH = process.env.ENTERPRISE_QUOTA_CONFIG_FILE || path.join(RUNTIME_DIR, "quotas.json");
+const LEGACY_FILE = process.env.ENTERPRISE_QUOTA_CONFIG_FILE || path.join(RUNTIME_DIR, "quotas.json");
 
 const DEFAULT_CONFIG: QuotaConfig = {
   defaults: {
@@ -36,10 +39,12 @@ const DEFAULT_CONFIG: QuotaConfig = {
   updatedAt: new Date().toISOString(),
 };
 
-function ensureDir(): void {
-  if (!fs.existsSync(RUNTIME_DIR)) {
-    fs.mkdirSync(RUNTIME_DIR, { recursive: true, mode: 0o700 });
-  }
+let legacyRan = false;
+
+function tenant(): string {
+  const t = process.env.DEFAULT_TENANT_ID?.trim();
+  if (!t) throw new Error("DEFAULT_TENANT_ID is required for quota config.");
+  return t;
 }
 
 function normalizeRule(input: Partial<QuotaRule> | undefined): QuotaRule {
@@ -51,49 +56,95 @@ function normalizeRule(input: Partial<QuotaRule> | undefined): QuotaRule {
   };
 }
 
-function normalize(config: Partial<QuotaConfig> | undefined): QuotaConfig {
+function normalizeQuota(input: Partial<QuotaConfig> | undefined): QuotaConfig {
   const next: QuotaConfig = {
     defaults: { role: {}, model: {} },
     users: {},
     departments: {},
     updatedAt: new Date().toISOString(),
   };
-
-  const roles = config?.defaults?.role ?? {};
+  const roles = input?.defaults?.role ?? {};
   for (const [key, value] of Object.entries(roles)) next.defaults.role[key] = normalizeRule(value);
-  const models = config?.defaults?.model ?? {};
+  const models = input?.defaults?.model ?? {};
   for (const [key, value] of Object.entries(models)) next.defaults.model[key] = normalizeRule(value);
-  const users = config?.users ?? {};
+  const users = input?.users ?? {};
   for (const [key, value] of Object.entries(users)) next.users[key] = normalizeRule(value);
-  const depts = config?.departments ?? {};
+  const depts = input?.departments ?? {};
   for (const [key, value] of Object.entries(depts)) next.departments[key] = normalizeRule(value);
   return next;
 }
 
-export function getQuotaConfig(): QuotaConfig {
-  ensureDir();
-  if (!fs.existsSync(FILE_PATH)) {
-    fs.writeFileSync(FILE_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2), { mode: 0o600 });
-    return DEFAULT_CONFIG;
-  }
+function configFromRow(payload: Record<string, unknown> | undefined | null): QuotaConfig | null {
+  if (!payload || typeof payload !== "object") return null;
+  return normalizeQuota(payload as Partial<QuotaConfig>);
+}
+
+async function migrateLegacyQuotasOnce(tid: string): Promise<void> {
+  if (legacyRan) return;
+  legacyRan = true;
+  const db = getIamDb();
+  const row = await db.select().from(qTable).where(eq(qTable.tenantId, tid)).limit(1);
+  if (row.length > 0) return;
+  if (!fs.existsSync(LEGACY_FILE)) return;
   try {
-    const parsed = JSON.parse(fs.readFileSync(FILE_PATH, "utf-8")) as Partial<QuotaConfig>;
-    return normalize(parsed);
+    const parsed = JSON.parse(fs.readFileSync(LEGACY_FILE, "utf-8"));
+    const cfg = normalizeQuota(parsed as Partial<QuotaConfig>);
+    await db.insert(qTable).values({
+      tenantId: tid,
+      config: cfg as unknown as Record<string, unknown>,
+      updatedAt: new Date(cfg.updatedAt),
+    });
   } catch {
-    return DEFAULT_CONFIG;
+    /* ignore */
   }
 }
 
-export function setQuotaConfig(input: Partial<QuotaConfig>): QuotaConfig {
-  ensureDir();
-  const next = normalize(input);
+/** 租户 token 配额整包读取。 */
+export async function getQuotaConfig(): Promise<QuotaConfig> {
+  const tid = tenant();
+  await migrateLegacyQuotasOnce(tid);
+  const db = getIamDb();
+  const row = await db.select().from(qTable).where(eq(qTable.tenantId, tid)).limit(1);
+  if (!row.length) {
+    /** 尚无记录时写入默认模板并返回（等同旧 json 首次自动生成）。 */
+    const seed = normalizeQuota(DEFAULT_CONFIG);
+    await db
+      .insert(qTable)
+      .values({
+        tenantId: tid,
+        config: seed as unknown as Record<string, unknown>,
+        updatedAt: new Date(seed.updatedAt),
+      })
+      .onConflictDoNothing();
+    return seed;
+  }
+  const parsed = configFromRow(row[0]?.config as Record<string, unknown>);
+  return parsed ?? normalizeQuota(DEFAULT_CONFIG);
+}
+
+export async function setQuotaConfig(input: Partial<QuotaConfig>): Promise<QuotaConfig> {
+  const tid = tenant();
+  await migrateLegacyQuotasOnce(tid);
+  const next = normalizeQuota(input);
   next.updatedAt = new Date().toISOString();
-  const tmp = `${FILE_PATH}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(next, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, FILE_PATH);
+  const db = getIamDb();
+  await db
+    .insert(qTable)
+    .values({
+      tenantId: tid,
+      config: next as unknown as Record<string, unknown>,
+      updatedAt: new Date(next.updatedAt),
+    })
+    .onConflictDoUpdate({
+      target: qTable.tenantId,
+      set: {
+        config: next as unknown as Record<string, unknown>,
+        updatedAt: new Date(next.updatedAt),
+      },
+    });
   return next;
 }
 
 export function quotaFilePath(): string {
-  return FILE_PATH;
+  return LEGACY_FILE;
 }

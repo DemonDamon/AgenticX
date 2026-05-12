@@ -21,7 +21,7 @@ export async function GET() {
     code: "00000",
     message: "ok",
     data: {
-      providers: listProviders(),
+      providers: await listProviders(),
       templates: PROVIDER_TEMPLATES,
     },
   });
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     if (!input.id || !input.baseUrl) {
       return NextResponse.json({ code: "40000", message: "id and baseUrl are required" }, { status: 400 });
     }
-    const created = createProvider(input);
+    const created = await createProvider(input);
     return NextResponse.json({ code: "00000", message: "ok", data: { provider: created } });
   } catch (error) {
     return NextResponse.json(

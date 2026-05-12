@@ -35,7 +35,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "server-only": "^0.0.1",
-    "recharts": "^3.2.1"
+    "recharts": "^3.2.1",
+    "ulid": "^2.3.0"
   },
   "devDependencies": {
     "@types/papaparse": "^5.3.15",
