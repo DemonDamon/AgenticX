@@ -1,6 +1,11 @@
 import {
   auditEvents,
+  authRefreshSessions,
   departments,
+  enterpriseRuntimeModelProviders,
+  enterpriseRuntimePolicySnapshots,
+  enterpriseRuntimeTokenQuotas,
+  enterpriseRuntimeUserVisibleModels,
   gatewayAuditEvents,
   organizations,
   roles,
@@ -11,7 +16,21 @@ import {
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
-const schema = { users, departments, organizations, roles, userRoles, ssoProviders, auditEvents, gatewayAuditEvents };
+const schema = {
+  users,
+  departments,
+  organizations,
+  roles,
+  userRoles,
+  ssoProviders,
+  auditEvents,
+  gatewayAuditEvents,
+  enterpriseRuntimeModelProviders,
+  enterpriseRuntimeUserVisibleModels,
+  enterpriseRuntimeTokenQuotas,
+  enterpriseRuntimePolicySnapshots,
+  authRefreshSessions,
+};
 
 export type IamDbSchema = typeof schema;
 
