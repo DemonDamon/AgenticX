@@ -16,7 +16,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!auth.ok) return auth.response;
 
   const { id } = await context.params;
-  const provider = getProviderInternal(id);
+  const provider = await getProviderInternal(id);
   if (!provider) {
     return NextResponse.json({ code: "40400", message: "provider not found" }, { status: 404 });
   }

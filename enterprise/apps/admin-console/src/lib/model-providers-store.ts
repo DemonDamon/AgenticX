@@ -1,17 +1,18 @@
 /**
- * admin-console · 模型服务（厂商 + Key + 模型）持久化仓库
+ * admin-console · 模型服务（厂商 + Key + 模型）持久化：PostgreSQL
  *
- * 数据落盘到 enterprise/.runtime/admin/providers.json，gateway 通过同一份 JSON 消费配置。
- *
- * 接口对齐 Machi 桌面端「模型服务」面板，最小需要：
- *   - provider：基础信息 + apiKey + baseUrl + 启停 + 默认
- *   - model：name + label + 启停（保留 capabilities 字段以备后续视觉模型/工具调用扩展）
- *
- * 不做 BYOK：所有 Key 仅 admin 后台可读写；前台 portal 永远拿不到原文 Key。
+ * 原 enterprise/.runtime/admin/providers.json 由迁移逻辑一次性导入；
+ * Gateway 侧通过 HTTPS internal API 获取解密后的配置。
  */
 
+import { enterpriseRuntimeModelProviders as mpTable } from "@agenticx/db-schema";
+import { getIamDb } from "@agenticx/iam-core";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { and, eq } from "drizzle-orm";
+import { ulid } from "ulid";
+
+import { decryptProviderApiKey, encryptProviderApiKey } from "./provider-api-key-crypto";
 
 export type ProviderRoute = "local" | "private-cloud" | "third-party";
 
@@ -66,12 +67,16 @@ export interface UpdateProviderInput {
 }
 
 const RUNTIME_DIR = path.resolve(process.cwd(), "../../.runtime/admin");
-const PROVIDERS_FILE = path.join(RUNTIME_DIR, "providers.json");
+const LEGACY_FILE = path.join(RUNTIME_DIR, "providers.json");
 
-function ensureDir(): void {
-  if (!fs.existsSync(RUNTIME_DIR)) {
-    fs.mkdirSync(RUNTIME_DIR, { recursive: true, mode: 0o700 });
+let legacyMigrationRan = false;
+
+function requiredTenantId(): string {
+  const t = process.env.DEFAULT_TENANT_ID?.trim();
+  if (!t) {
+    throw new Error("DEFAULT_TENANT_ID is required for model provider persistence.");
   }
+  return t;
 }
 
 function nowIso(): string {
@@ -94,49 +99,71 @@ function toPublic(record: ProviderRecord): PublicProviderRecord {
   };
 }
 
-function readFile(): ProviderRecord[] {
-  ensureDir();
-  if (!fs.existsSync(PROVIDERS_FILE)) return [];
+function rowToRecord(row: typeof mpTable.$inferSelect): ProviderRecord {
+  const modelsRaw = Array.isArray(row.models) ? (row.models as ProviderModel[]) : [];
+  return {
+    id: row.providerId,
+    displayName: row.displayName,
+    baseUrl: row.baseUrl,
+    apiKey: decryptProviderApiKey(row.apiKeyCipher),
+    enabled: row.enabled,
+    isDefault: row.isDefault,
+    route: row.route as ProviderRoute,
+    envKey: row.envKey ?? undefined,
+    models: modelsRaw.map((m) => ({
+      name: m.name,
+      label: m.label,
+      capabilities: m.capabilities,
+      enabled: m.enabled,
+    })),
+    createdAt:
+      row.createdAt instanceof Date ? row.createdAt.toISOString() : new Date(row.createdAt!).toISOString(),
+    updatedAt:
+      row.updatedAt instanceof Date ? row.updatedAt.toISOString() : new Date(row.updatedAt!).toISOString(),
+  };
+}
+
+async function migrateLegacyProvidersIfNeeded(tenantId: string): Promise<void> {
+  if (legacyMigrationRan) return;
+  legacyMigrationRan = true;
+  const db = getIamDb();
+  const cnt = await db.select({ id: mpTable.id }).from(mpTable).where(eq(mpTable.tenantId, tenantId)).limit(1);
+  if (cnt.length > 0) return;
+  if (!fs.existsSync(LEGACY_FILE)) return;
   try {
-    const raw = fs.readFileSync(PROVIDERS_FILE, "utf-8");
-    if (!raw.trim()) return [];
+    const raw = fs.readFileSync(LEGACY_FILE, "utf-8");
+    if (!raw.trim()) return;
     const parsed = JSON.parse(raw) as { providers?: ProviderRecord[] };
-    return Array.isArray(parsed.providers) ? parsed.providers : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeFile(providers: ProviderRecord[]): void {
-  ensureDir();
-  const tmp = `${PROVIDERS_FILE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ providers }, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, PROVIDERS_FILE);
-}
-
-declare global {
-  // eslint-disable-next-line no-var
-  var __agenticxModelProvidersCache: ProviderRecord[] | undefined;
-}
-
-function defaultSeed(): ProviderRecord[] {
-  return [];
-}
-
-function load(): ProviderRecord[] {
-  if (!globalThis.__agenticxModelProvidersCache) {
-    const file = readFile();
-    globalThis.__agenticxModelProvidersCache = file.length > 0 ? file : defaultSeed();
-    if (file.length === 0 && globalThis.__agenticxModelProvidersCache.length > 0) {
-      writeFile(globalThis.__agenticxModelProvidersCache);
+    const providers = Array.isArray(parsed.providers) ? parsed.providers : [];
+    if (providers.length === 0) return;
+    const now = nowIso();
+    for (const p of providers) {
+      await db.insert(mpTable).values({
+        id: ulid(),
+        tenantId,
+        providerId: p.id,
+        displayName: p.displayName,
+        baseUrl: p.baseUrl,
+        apiKeyCipher: encryptProviderApiKey(p.apiKey ?? ""),
+        enabled: p.enabled ?? true,
+        isDefault: p.isDefault ?? false,
+        route: (p.route as string) ?? "third-party",
+        envKey: p.envKey ?? null,
+        models: p.models ?? [],
+        createdAt: new Date(p.createdAt || now),
+        updatedAt: new Date(p.updatedAt || now),
+      });
     }
+  } catch {
+    /* ignore malformed legacy */
   }
-  return globalThis.__agenticxModelProvidersCache;
 }
 
-function persist(): void {
-  if (!globalThis.__agenticxModelProvidersCache) return;
-  writeFile(globalThis.__agenticxModelProvidersCache);
+async function loadAll(tenantId: string): Promise<ProviderRecord[]> {
+  await migrateLegacyProvidersIfNeeded(tenantId);
+  const db = getIamDb();
+  const rows = await db.select().from(mpTable).where(eq(mpTable.tenantId, tenantId));
+  return rows.map(rowToRecord).sort((a, b) => a.id.localeCompare(b.id));
 }
 
 export interface ProviderTemplate {
@@ -198,9 +225,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     baseUrl: "https://open.bigmodel.cn/api/paas/v4",
     envKey: "ZHIPU_API_KEY",
     route: "third-party",
-    popularModels: [
-      { name: "glm-4-plus", label: "GLM-4 Plus", capabilities: ["text"], enabled: true },
-    ],
+    popularModels: [{ name: "glm-4-plus", label: "GLM-4 Plus", capabilities: ["text"], enabled: true }],
   },
   {
     id: "dashscope",
@@ -219,9 +244,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     baseUrl: "https://api.minimax.chat/v1",
     envKey: "MINIMAX_API_KEY",
     route: "third-party",
-    popularModels: [
-      { name: "abab6.5-chat", label: "MiniMax abab6.5", capabilities: ["text"], enabled: true },
-    ],
+    popularModels: [{ name: "abab6.5-chat", label: "MiniMax abab6.5", capabilities: ["text"], enabled: true }],
   },
   {
     id: "qianfan",
@@ -249,50 +272,54 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     baseUrl: "http://127.0.0.1:11434/v1",
     envKey: "OLLAMA_API_KEY",
     route: "local",
-    popularModels: [
-      { name: "llama3.1:8b", label: "Llama 3.1 8B", capabilities: ["text"], enabled: true },
-    ],
+    popularModels: [{ name: "llama3.1:8b", label: "Llama 3.1 8B", capabilities: ["text"], enabled: true }],
   },
 ];
-
-export function listProviders(): PublicProviderRecord[] {
-  return load()
-    .slice()
-    .sort((a, b) => a.id.localeCompare(b.id))
-    .map(toPublic);
-}
-
-export function getProvider(id: string): PublicProviderRecord | null {
-  const found = load().find((p) => p.id === id);
-  return found ? toPublic(found) : null;
-}
-
-/** Internal use only by gateway-config exporter / connectivity check; never sent to UI. */
-export function getProviderInternal(id: string): ProviderRecord | null {
-  return load().find((p) => p.id === id) ?? null;
-}
-
-export function listProvidersInternal(): ProviderRecord[] {
-  return load().slice();
-}
 
 function normalizeProviderId(id: string): string {
   return id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
 }
 
-export function createProvider(input: CreateProviderInput): PublicProviderRecord {
-  const records = load();
+export async function listProviders(): Promise<PublicProviderRecord[]> {
+  const tenantId = requiredTenantId();
+  const rows = await loadAll(tenantId);
+  return rows.map(toPublic);
+}
+
+export async function getProvider(id: string): Promise<PublicProviderRecord | null> {
+  const found = (await loadAll(requiredTenantId())).find((p) => p.id === id);
+  return found ? toPublic(found) : null;
+}
+
+/** Internal use only — 含明文 API Key（Gateway bootstrap）。 */
+export async function getProviderInternal(id: string): Promise<ProviderRecord | null> {
+  const found = (await loadAll(requiredTenantId())).find((p) => p.id === id);
+  return found ?? null;
+}
+
+export async function listProvidersInternal(): Promise<ProviderRecord[]> {
+  return loadAll(requiredTenantId());
+}
+
+export async function createProvider(input: CreateProviderInput): Promise<PublicProviderRecord> {
+  const tenantId = requiredTenantId();
+  await migrateLegacyProvidersIfNeeded(tenantId);
+  const db = getIamDb();
   const id = normalizeProviderId(input.id);
   if (!id) throw new Error("provider id is required");
-  if (records.some((p) => p.id === id)) {
-    throw new Error("provider already exists");
-  }
+  const dup = await db
+    .select({ id: mpTable.id })
+    .from(mpTable)
+    .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)))
+    .limit(1);
+  if (dup.length) throw new Error("provider already exists");
   const baseUrl = input.baseUrl.trim();
   if (!/^https?:\/\//.test(baseUrl)) {
     throw new Error("baseUrl must start with http(s)://");
   }
 
   const template = PROVIDER_TEMPLATES.find((t) => t.id === id);
+  const ts = nowIso();
   const next: ProviderRecord = {
     id,
     displayName: input.displayName?.trim() || template?.displayName || id,
@@ -302,23 +329,47 @@ export function createProvider(input: CreateProviderInput): PublicProviderRecord
     isDefault: input.isDefault ?? false,
     route: input.route ?? template?.route ?? "third-party",
     envKey: input.envKey || template?.envKey,
-    models: input.models && input.models.length > 0 ? input.models : (template?.popularModels ?? []),
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
+    models: input.models && input.models.length > 0 ? input.models : template?.popularModels ?? [],
+    createdAt: ts,
+    updatedAt: ts,
   };
 
   if (next.isDefault) {
-    for (const p of records) p.isDefault = false;
+    await db.update(mpTable).set({ isDefault: false, updatedAt: new Date() }).where(eq(mpTable.tenantId, tenantId));
   }
-  records.push(next);
-  persist();
+
+  await db.insert(mpTable).values({
+    id: ulid(),
+    tenantId,
+    providerId: next.id,
+    displayName: next.displayName,
+    baseUrl: next.baseUrl,
+    apiKeyCipher: encryptProviderApiKey(next.apiKey),
+    enabled: next.enabled,
+    isDefault: next.isDefault,
+    route: next.route,
+    envKey: next.envKey ?? null,
+    models: next.models as unknown[],
+    createdAt: new Date(ts),
+    updatedAt: new Date(ts),
+  });
+
   return toPublic(next);
 }
 
-export function updateProvider(id: string, patch: UpdateProviderInput): PublicProviderRecord {
-  const records = load();
-  const record = records.find((p) => p.id === id);
-  if (!record) throw new Error("provider not found");
+export async function updateProvider(id: string, patch: UpdateProviderInput): Promise<PublicProviderRecord> {
+  const tenantId = requiredTenantId();
+  await migrateLegacyProvidersIfNeeded(tenantId);
+  const db = getIamDb();
+  const rows = await db
+    .select()
+    .from(mpTable)
+    .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) throw new Error("provider not found");
+
+  let record = rowToRecord(row);
 
   if (patch.baseUrl !== undefined) {
     const trimmed = patch.baseUrl.trim();
@@ -333,29 +384,52 @@ export function updateProvider(id: string, patch: UpdateProviderInput): PublicPr
   if (patch.isDefault !== undefined) {
     record.isDefault = patch.isDefault;
     if (patch.isDefault) {
-      for (const p of records) {
-        if (p.id !== id) p.isDefault = false;
-      }
+      await db.update(mpTable).set({ isDefault: false, updatedAt: new Date() }).where(eq(mpTable.tenantId, tenantId));
     }
   }
   record.updatedAt = nowIso();
-  persist();
+
+  await db
+    .update(mpTable)
+    .set({
+      displayName: record.displayName,
+      baseUrl: record.baseUrl,
+      apiKeyCipher: encryptProviderApiKey(record.apiKey),
+      enabled: record.enabled,
+      isDefault: record.isDefault,
+      route: record.route,
+      envKey: record.envKey ?? null,
+      models: record.models as unknown[],
+      updatedAt: new Date(record.updatedAt),
+    })
+    .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)));
+
   return toPublic(record);
 }
 
-export function deleteProvider(id: string): boolean {
-  const records = load();
-  const idx = records.findIndex((p) => p.id === id);
-  if (idx < 0) return false;
-  records.splice(idx, 1);
-  persist();
-  return true;
+export async function deleteProvider(id: string): Promise<boolean> {
+  const tenantId = requiredTenantId();
+  const db = getIamDb();
+  const deleted = await db
+    .delete(mpTable)
+    .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)))
+    .returning({ id: mpTable.id });
+  return deleted.length > 0;
 }
 
-export function addProviderModel(id: string, model: ProviderModel): PublicProviderRecord {
-  const records = load();
-  const record = records.find((p) => p.id === id);
-  if (!record) throw new Error("provider not found");
+export async function addProviderModel(id: string, model: ProviderModel): Promise<PublicProviderRecord> {
+  const tenantId = requiredTenantId();
+  await migrateLegacyProvidersIfNeeded(tenantId);
+  const db = getIamDb();
+  const rows = await db
+    .select()
+    .from(mpTable)
+    .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) throw new Error("provider not found");
+
+  let record = rowToRecord(row);
   if (!model.name.trim()) throw new Error("model.name is required");
   if (record.models.some((m) => m.name === model.name)) {
     throw new Error("model already exists");
@@ -367,45 +441,88 @@ export function addProviderModel(id: string, model: ProviderModel): PublicProvid
     enabled: model.enabled ?? true,
   });
   record.updatedAt = nowIso();
-  persist();
+
+  await db
+    .update(mpTable)
+    .set({
+      models: record.models as unknown[],
+      updatedAt: new Date(record.updatedAt),
+    })
+    .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)));
+
   return toPublic(record);
 }
 
-export function updateProviderModel(
+export async function updateProviderModel(
   id: string,
   modelName: string,
   patch: Partial<ProviderModel>
-): PublicProviderRecord {
-  const records = load();
-  const record = records.find((p) => p.id === id);
-  if (!record) throw new Error("provider not found");
+): Promise<PublicProviderRecord> {
+  const tenantId = requiredTenantId();
+  await migrateLegacyProvidersIfNeeded(tenantId);
+  const db = getIamDb();
+  const rows = await db
+    .select()
+    .from(mpTable)
+    .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) throw new Error("provider not found");
+
+  let record = rowToRecord(row);
   const model = record.models.find((m) => m.name === modelName);
   if (!model) throw new Error("model not found");
   if (patch.label !== undefined) model.label = patch.label.trim();
   if (patch.capabilities !== undefined) model.capabilities = patch.capabilities;
   if (patch.enabled !== undefined) model.enabled = patch.enabled;
   record.updatedAt = nowIso();
-  persist();
+
+  await db
+    .update(mpTable)
+    .set({
+      models: record.models as unknown[],
+      updatedAt: new Date(record.updatedAt),
+    })
+    .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)));
+
   return toPublic(record);
 }
 
-export function deleteProviderModel(id: string, modelName: string): PublicProviderRecord {
-  const records = load();
-  const record = records.find((p) => p.id === id);
-  if (!record) throw new Error("provider not found");
+export async function deleteProviderModel(id: string, modelName: string): Promise<PublicProviderRecord> {
+  const tenantId = requiredTenantId();
+  await migrateLegacyProvidersIfNeeded(tenantId);
+  const db = getIamDb();
+  const rows = await db
+    .select()
+    .from(mpTable)
+    .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) throw new Error("provider not found");
+
+  let record = rowToRecord(row);
   const idx = record.models.findIndex((m) => m.name === modelName);
   if (idx < 0) throw new Error("model not found");
   record.models.splice(idx, 1);
   record.updatedAt = nowIso();
-  persist();
+
+  await db
+    .update(mpTable)
+    .set({
+      models: record.models as unknown[],
+      updatedAt: new Date(record.updatedAt),
+    })
+    .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)));
+
   return toPublic(record);
 }
 
-/** Reset cache (test only). */
+/** Reset migrate flag（test）。 */
 export function __resetProvidersCache(): void {
-  globalThis.__agenticxModelProvidersCache = undefined;
+  legacyMigrationRan = false;
 }
 
+/** 已不再使用文件路径；占位兼容旧 metering / health。 */
 export function providersFilePath(): string {
-  return PROVIDERS_FILE;
+  return LEGACY_FILE;
 }

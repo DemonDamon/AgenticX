@@ -1,93 +1,111 @@
 /**
- * admin-console · 用户 ↔ 模型可见性映射
- *
- * 数据落盘到 enterprise/.runtime/admin/user-models.json，与 providers.json 同目录。
- *
- * 模型 id 形如 "<providerId>/<modelName>"，必须与 providers.json 里的 model.name 对得上。
+ * admin-console · 用户 ↔ 模型可见性映射（PostgreSQL）。
+ * 原为 enterprise/.runtime/admin/user-models.json。
  */
 
+import { enterpriseRuntimeUserVisibleModels as uvmTable } from "@agenticx/db-schema";
+import { getIamDb } from "@agenticx/iam-core";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { sql, eq, and } from "drizzle-orm";
 
 const RUNTIME_DIR = path.resolve(process.cwd(), "../../.runtime/admin");
-const FILE_PATH = path.join(RUNTIME_DIR, "user-models.json");
+const LEGACY_PATH = path.join(RUNTIME_DIR, "user-models.json");
+
+let legacyMigrationRan = false;
+
+function requiredTenant(): string {
+  const t = process.env.DEFAULT_TENANT_ID?.trim();
+  if (!t) throw new Error("DEFAULT_TENANT_ID is required for user-visible model assignments.");
+  return t;
+}
 
 type Mapping = Record<string, string[]>;
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __agenticxUserModelsCache: Mapping | undefined;
-}
-
-function ensureDir(): void {
-  if (!fs.existsSync(RUNTIME_DIR)) {
-    fs.mkdirSync(RUNTIME_DIR, { recursive: true, mode: 0o700 });
-  }
-}
-
-function readFile(): Mapping {
-  ensureDir();
-  if (!fs.existsSync(FILE_PATH)) return {};
+async function migrateLegacyIfNeeded(tid: string): Promise<void> {
+  if (legacyMigrationRan) return;
+  legacyMigrationRan = true;
+  const db = getIamDb();
+  const existing = await db.select({ modelId: uvmTable.modelId }).from(uvmTable).where(eq(uvmTable.tenantId, tid)).limit(1);
+  if (existing.length > 0) return;
+  if (!fs.existsSync(LEGACY_PATH)) return;
   try {
-    const raw = fs.readFileSync(FILE_PATH, "utf-8");
-    if (!raw.trim()) return {};
-    const parsed = JSON.parse(raw) as { userModels?: Mapping };
-    return parsed.userModels ?? {};
+    const parsed = JSON.parse(fs.readFileSync(LEGACY_PATH, "utf-8")) as { userModels?: Mapping };
+    const userModels = parsed.userModels ?? {};
+    const rows = Object.entries(userModels).flatMap(([assignmentKey, modelIds]) =>
+      (modelIds ?? []).filter(Boolean).map((modelId) => ({
+        tenantId: tid,
+        assignmentKey,
+        modelId: modelId.trim(),
+      }))
+    );
+    if (rows.length === 0) return;
+    for (const chunk of chunked(rows, 200)) {
+      await db.insert(uvmTable).values(chunk).onConflictDoNothing();
+    }
   } catch {
-    return {};
+    /* ignore */
   }
 }
 
-function writeFile(mapping: Mapping): void {
-  ensureDir();
-  const tmp = `${FILE_PATH}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ userModels: mapping }, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, FILE_PATH);
+function chunked<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
 }
 
-function load(): Mapping {
-  if (!globalThis.__agenticxUserModelsCache) {
-    globalThis.__agenticxUserModelsCache = readFile();
-  }
-  return globalThis.__agenticxUserModelsCache;
+export async function getUserModels(userId: string): Promise<string[]> {
+  const tid = requiredTenant();
+  await migrateLegacyIfNeeded(tid);
+  const db = getIamDb();
+  const rows = await db
+    .select({ modelId: uvmTable.modelId })
+    .from(uvmTable)
+    .where(and(eq(uvmTable.tenantId, tid), eq(uvmTable.assignmentKey, userId)));
+  return [...new Set(rows.map((r) => r.modelId))];
 }
 
-function persist(): void {
-  if (!globalThis.__agenticxUserModelsCache) return;
-  writeFile(globalThis.__agenticxUserModelsCache);
-}
-
-export function getUserModels(userId: string): string[] {
-  const mapping = load();
-  return mapping[userId] ? [...mapping[userId]] : [];
-}
-
-export function setUserModels(userId: string, modelIds: string[]): string[] {
-  const mapping = load();
+export async function setUserModels(userId: string, modelIds: string[]): Promise<string[]> {
+  const tid = requiredTenant();
+  await migrateLegacyIfNeeded(tid);
+  const db = getIamDb();
   const unique = Array.from(new Set(modelIds.map((m) => m.trim()).filter(Boolean)));
-  mapping[userId] = unique;
-  persist();
+  await db.delete(uvmTable).where(and(eq(uvmTable.tenantId, tid), eq(uvmTable.assignmentKey, userId)));
+  if (unique.length === 0) return [];
+  const rows = unique.map((modelId) => ({ tenantId: tid, assignmentKey: userId, modelId }));
+  for (const chunk of chunked(rows, 100)) {
+    await db.insert(uvmTable).values(chunk).onConflictDoNothing();
+  }
   return [...unique];
 }
 
-export function listAllAssignments(): Mapping {
-  const mapping = load();
-  return Object.fromEntries(Object.entries(mapping).map(([k, v]) => [k, [...v]]));
+export async function listAllAssignments(): Promise<Mapping> {
+  const tid = requiredTenant();
+  await migrateLegacyIfNeeded(tid);
+  const db = getIamDb();
+  const rows = await db.select().from(uvmTable).where(eq(uvmTable.tenantId, tid));
+  const map: Mapping = {};
+  for (const r of rows) {
+    if (!map[r.assignmentKey]) map[r.assignmentKey] = [];
+    map[r.assignmentKey]!.push(r.modelId);
+  }
+  for (const k of Object.keys(map)) {
+    map[k] = [...new Set(map[k]!)];
+  }
+  return map;
 }
 
-export function deleteUserAssignment(userId: string): void {
-  const mapping = load();
-  if (mapping[userId]) {
-    delete mapping[userId];
-    persist();
-  }
+export async function deleteUserAssignment(userId: string): Promise<void> {
+  const tid = requiredTenant();
+  await migrateLegacyIfNeeded(tid);
+  const db = getIamDb();
+  await db.delete(uvmTable).where(and(eq(uvmTable.tenantId, tid), eq(uvmTable.assignmentKey, userId)));
 }
 
 export function userModelsFilePath(): string {
-  return FILE_PATH;
+  return LEGACY_PATH;
 }
 
-/** Reset cache (test only). */
 export function __resetUserModelsCache(): void {
-  globalThis.__agenticxUserModelsCache = undefined;
+  legacyMigrationRan = false;
 }

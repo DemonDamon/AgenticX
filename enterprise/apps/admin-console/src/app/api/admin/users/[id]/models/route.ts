@@ -14,7 +14,7 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
   return NextResponse.json({
     code: "00000",
     message: "ok",
-    data: { userId: id, modelIds: getUserModels(id) },
+    data: { userId: id, modelIds: await getUserModels(id) },
   });
 }
 
@@ -30,8 +30,8 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     const body = (await request.json()) as Record<string, unknown>;
     const raw = Array.isArray(body.modelIds) ? body.modelIds : [];
     const modelIds = raw.filter((x): x is string => typeof x === "string");
-    const saved = setUserModels(id, modelIds);
-    setUserModels(`email:${user.email.toLowerCase()}`, modelIds);
+    const saved = await setUserModels(id, modelIds);
+    await setUserModels(`email:${user.email.toLowerCase()}`, modelIds);
     return NextResponse.json({ code: "00000", message: "ok", data: { userId: id, modelIds: saved } });
   } catch (error) {
     return NextResponse.json(

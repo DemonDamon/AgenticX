@@ -17,7 +17,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           : ["text"],
       enabled: typeof body.enabled === "boolean" ? body.enabled : true,
     };
-    const updated = addProviderModel(id, model);
+    const updated = await addProviderModel(id, model);
     return NextResponse.json({ code: "00000", message: "ok", data: { provider: updated } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "invalid request";
