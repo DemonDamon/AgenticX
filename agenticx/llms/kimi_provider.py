@@ -1,7 +1,7 @@
 from typing import Any, Optional, Dict, List, AsyncGenerator, Generator, Union
 import openai  # type: ignore
 from pydantic import Field  # type: ignore
-from .base import BaseLLMProvider
+from .base import BaseLLMProvider, StreamChunk
 from .response import LLMResponse, TokenUsage, LLMChoice
 
 class KimiProvider(BaseLLMProvider):
@@ -37,6 +37,53 @@ class KimiProvider(BaseLLMProvider):
             return prompt
         else:
             raise ValueError("Prompt must be either a string or a list of messages")
+
+    def _is_k2_series_model(self) -> bool:
+        """Return True if current model is Kimi K2.5/K2.6 series."""
+        model_name = (self.model or "").lower().split("/")[-1]
+        return model_name.startswith("kimi-k2.6") or model_name.startswith("kimi-k2.5")
+
+    @staticmethod
+    def _extract_thinking_type(kwargs: Dict[str, Any]) -> Optional[str]:
+        """Extract thinking.type from direct params or extra_body."""
+        thinking = kwargs.get("thinking")
+        if isinstance(thinking, dict):
+            thinking_type = thinking.get("type")
+            if isinstance(thinking_type, str):
+                return thinking_type.lower()
+
+        extra_body = kwargs.get("extra_body")
+        if isinstance(extra_body, dict):
+            extra_thinking = extra_body.get("thinking")
+            if isinstance(extra_thinking, dict):
+                thinking_type = extra_thinking.get("type")
+                if isinstance(thinking_type, str):
+                    return thinking_type.lower()
+        return None
+
+    def _resolve_temperature(self, kwargs: Dict[str, Any]) -> Optional[float]:
+        """Resolve temperature with K2.x model constraints."""
+        user_temperature = kwargs.get("temperature", self.temperature)
+        if not self._is_k2_series_model():
+            return user_temperature
+
+        thinking_type = self._extract_thinking_type(kwargs)
+        if thinking_type == "disabled":
+            return 0.6
+        return 1.0
+
+    @staticmethod
+    def _compose_content_with_reasoning(
+        content: Optional[str], reasoning_content: Optional[str]
+    ) -> str:
+        """Compose content text with optional reasoning into think-tag format."""
+        reasoning_text = str(reasoning_content or "").strip()
+        response_text = str(content or "").strip()
+        if reasoning_text and response_text:
+            return f"<think>{reasoning_text}</think>\n{response_text}"
+        if reasoning_text:
+            return f"<think>{reasoning_text}</think>"
+        return response_text
     
     def _invoke_with_messages(
         self, messages: List[Dict], tools: Optional[List[Dict]] = None, **kwargs
@@ -56,7 +103,7 @@ class KimiProvider(BaseLLMProvider):
             request_params = {
                 "model": self.model,
                 "messages": messages,
-                "temperature": kwargs.get("temperature", self.temperature),
+                "temperature": self._resolve_temperature(kwargs),
                 "max_tokens": kwargs.get("max_tokens", self.max_tokens),
                 **{k: v for k, v in kwargs.items() if k not in ["temperature", "max_tokens"]}
             }
@@ -87,7 +134,7 @@ class KimiProvider(BaseLLMProvider):
             request_params = {
                 "model": self.model,
                 "messages": messages,
-                "temperature": kwargs.get("temperature", self.temperature),
+                "temperature": self._resolve_temperature(kwargs),
                 "max_tokens": kwargs.get("max_tokens", self.max_tokens),
                 **{k: v for k, v in kwargs.items() if k not in ["temperature", "max_tokens"]}
             }
@@ -116,7 +163,7 @@ class KimiProvider(BaseLLMProvider):
             request_params = {
                 "model": self.model,
                 "messages": messages,
-                "temperature": kwargs.get("temperature", self.temperature),
+                "temperature": self._resolve_temperature(kwargs),
                 "max_tokens": kwargs.get("max_tokens", self.max_tokens),
                 "stream": True,
                 **{k: v for k, v in kwargs.items() if k not in ["temperature", "max_tokens", "stream"]}
@@ -144,7 +191,7 @@ class KimiProvider(BaseLLMProvider):
             request_params = {
                 "model": self.model,
                 "messages": messages,
-                "temperature": kwargs.get("temperature", self.temperature),
+                "temperature": self._resolve_temperature(kwargs),
                 "max_tokens": kwargs.get("max_tokens", self.max_tokens),
                 "stream": True,
                 **{k: v for k, v in kwargs.items() if k not in ["temperature", "max_tokens", "stream"]}
@@ -157,6 +204,111 @@ class KimiProvider(BaseLLMProvider):
                     yield chunk.choices[0].delta.content
         except Exception as e:
             raise Exception(f"Kimi API异步流式调用失败: {str(e)}")
+
+    def stream_with_tools(
+        self,
+        prompt: Union[str, List[Dict]],
+        tools: Optional[List[Dict]] = None,
+        **kwargs: Any,
+    ) -> Generator[StreamChunk, None, None]:
+        """Stream content and tool-call deltas in normalized chunk format."""
+        messages = self._convert_prompt_to_messages(prompt)
+        if not self.client:
+            self.client = openai.OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                timeout=self.timeout,
+                max_retries=self.max_retries or 3,
+            )
+
+        request_params = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self._resolve_temperature(kwargs),
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "stream": True,
+            **{
+                k: v
+                for k, v in kwargs.items()
+                if k not in ["temperature", "max_tokens", "stream"]
+            },
+        }
+        if tools:
+            request_params["tools"] = tools
+
+        response_stream = self.client.chat.completions.create(**request_params)
+        reasoning_started = False
+        reasoning_closed = False
+        last_finish_reason = ""
+
+        for chunk in response_stream:
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+                completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+                total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+                if total_tokens == 0 and (prompt_tokens > 0 or completion_tokens > 0):
+                    total_tokens = prompt_tokens + completion_tokens
+                if prompt_tokens > 0 or completion_tokens > 0 or total_tokens > 0:
+                    yield {
+                        "type": "usage",
+                        "usage": {
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": total_tokens,
+                        },
+                    }
+
+            choices = getattr(chunk, "choices", None)
+            if not choices:
+                continue
+            choice0 = choices[0]
+            finish_reason = getattr(choice0, "finish_reason", None)
+            if isinstance(finish_reason, str) and finish_reason:
+                last_finish_reason = finish_reason
+            delta = getattr(choice0, "delta", None)
+            if delta is None:
+                continue
+
+            reasoning_delta = getattr(delta, "reasoning_content", None)
+            if isinstance(reasoning_delta, str) and reasoning_delta:
+                if not reasoning_started:
+                    reasoning_started = True
+                    yield {"type": "content", "text": "<think>"}
+                yield {"type": "content", "text": reasoning_delta}
+
+            content_delta = getattr(delta, "content", None)
+            if isinstance(content_delta, str) and content_delta:
+                if reasoning_started and not reasoning_closed:
+                    reasoning_closed = True
+                    yield {"type": "content", "text": "</think>\n"}
+                yield {"type": "content", "text": content_delta}
+
+            tool_calls = getattr(delta, "tool_calls", None)
+            if tool_calls:
+                for tc in tool_calls:
+                    raw_index = getattr(tc, "index", 0)
+                    tool_index = int(raw_index) if isinstance(raw_index, int) else 0
+                    tool_call_id = str(getattr(tc, "id", "") or "")
+                    fn = getattr(tc, "function", None)
+                    tool_name = ""
+                    arguments_delta = ""
+                    if fn is not None:
+                        tool_name = str(getattr(fn, "name", "") or "")
+                        arguments_delta = str(getattr(fn, "arguments", "") or "")
+                    if tool_name.lower() == "none":
+                        tool_name = ""
+                    yield {
+                        "type": "tool_call_delta",
+                        "tool_index": tool_index,
+                        "tool_call_id": tool_call_id,
+                        "tool_name": tool_name,
+                        "arguments_delta": arguments_delta,
+                    }
+
+        if reasoning_started and not reasoning_closed:
+            yield {"type": "content", "text": "</think>"}
+        yield {"type": "done", "finish_reason": last_finish_reason}
     
     # 基类要求的方法实现
     def invoke(self, prompt: Union[str, List[Dict]], **kwargs) -> LLMResponse:
@@ -196,7 +348,10 @@ class KimiProvider(BaseLLMProvider):
         choices = [
             LLMChoice(
                 index=choice.index,
-                content=choice.message.content or "",
+                content=self._compose_content_with_reasoning(
+                    getattr(choice.message, "content", ""),
+                    getattr(choice.message, "reasoning_content", ""),
+                ),
                 finish_reason=choice.finish_reason
             ) for choice in response.choices
         ]
