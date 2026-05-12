@@ -71,6 +71,13 @@
       "when": 1778135139422,
       "tag": "0009_eager_famine",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1778200000000,
+      "tag": "0010_runtime_config_pg",
+      "breakpoints": true
     }
   ]
 }

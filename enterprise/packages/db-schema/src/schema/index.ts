@@ -11,4 +11,5 @@ export * from "./policy";
 export * from "./sso-providers";
 export * from "./chat-sessions";
 export * from "./chat-messages";
+export * from "./runtime-config";
 
