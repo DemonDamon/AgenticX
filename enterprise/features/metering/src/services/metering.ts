@@ -103,7 +103,10 @@ export class MeteringService {
       });
       return { rows };
     } catch {
-      return this.queryFromUsageLog(input, groups);
+      if (process.env.GATEWAY_USAGE_JSONL_FALLBACK === "1") {
+        return this.queryFromUsageLog(input, groups);
+      }
+      return { rows: [] };
     }
   }
 
