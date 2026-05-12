@@ -70,7 +70,7 @@ rules:
 		t.Fatalf("write snapshot: %v", err)
 	}
 
-	engine, _, _, err := buildPolicyEngine(filepath.Join(dir, "moderation-*", "manifest.yaml"), snapshotPath, "")
+	engine, _, _, _, err := buildPolicyEngine(filepath.Join(dir, "moderation-*", "manifest.yaml"), snapshotPath, "")
 	if err != nil {
 		t.Fatalf("build engine: %v", err)
 	}

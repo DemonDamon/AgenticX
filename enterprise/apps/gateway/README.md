@@ -61,3 +61,24 @@ GATEWAY_CONFIG_PATH=./apps/gateway/config/gateway.local.yaml
 `bootstrap.sh` 启动的 `start-dev.sh` 会把 `.env.local` 自动注入到 gateway 进程，前台聊到 `deepseek-chat` 时即走真调；未配置 Key 时会回退到提示「mock 回复」的占位文案。
 
 > Key 切换是热重启级别的：改完 `.env.local` 后重启 `start-dev.sh` 即可。生产环境请通过 K8s Secret / Vault 等外部 Secret 管理注入，不要落盘到 `.env.local`。
+
+## 容器镜像（公网网关）
+
+在仓库 **`enterprise/`** 目录执行：
+
+```bash
+docker build -f apps/gateway/Dockerfile -t agenticx-gateway:latest .
+```
+
+## 远程拉取 admin internal 配置
+
+当 admin-console 在 **Vercel**、网关在自建/Fly 等侧时，可让网关周期性 HTTP GET 控制台暴露的 internal 路由（需与 admin 侧 `GATEWAY_INTERNAL_TOKEN` 一致）：
+
+| 变量 | 说明 |
+|---|---|
+| `GATEWAY_INTERNAL_TOKEN` | Bearer Token；附在 `Authorization: Bearer …` |
+| `GATEWAY_REMOTE_POLICY_SNAPSHOT_URL` | HTTPS URL，优先级高于 `GATEWAY_POLICY_SNAPSHOT_FILE`，body 更新时按内容 hash 触发热加载 |
+| `GATEWAY_REMOTE_PROVIDERS_URL` | HTTPS URL（JSON 等价于桌面态 `providers.json`），后台约 5s 轮询 |
+| `GATEWAY_REMOTE_QUOTA_CONFIG_URL` | HTTPS URL（JSON 等价于 `quotas.json`），约 **10 秒** 本地缓存 |
+
+未配置上述远程 URL 时，仍使用 `GATEWAY_ADMIN_PROVIDERS_FILE`、`GATEWAY_QUOTA_CONFIG_FILE`、`GATEWAY_POLICY_SNAPSHOT_FILE` 等本地路径逻辑。
