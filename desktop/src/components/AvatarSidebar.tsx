@@ -721,7 +721,7 @@ export function AvatarSidebar() {
           />
           <div className="min-w-0 flex-1">
             <div className="truncate text-[15px] font-medium">Machi</div>
-            <div className="truncate text-xs text-text-faint">全局调度</div>
+            {/* <div className="truncate text-xs text-text-faint">全局调度</div> */}
           </div>
         </button>
 
