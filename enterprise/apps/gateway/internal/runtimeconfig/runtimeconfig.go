@@ -11,12 +11,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 )
 
 const (
@@ -37,10 +41,10 @@ type ProviderRecord struct {
 	DisplayName string          `json:"displayName"`
 	BaseURL     string          `json:"baseUrl"`
 	APIKey      string          `json:"apiKey"`
-	Enabled     bool             `json:"enabled"`
-	IsDefault   bool             `json:"isDefault"`
-	Route       string           `json:"route"`
-	EnvKey      string           `json:"envKey,omitempty"`
+	Enabled     bool            `json:"enabled"`
+	IsDefault   bool            `json:"isDefault"`
+	Route       string          `json:"route"`
+	EnvKey      string          `json:"envKey,omitempty"`
 	Models      []ProviderModel `json:"models"`
 }
 
@@ -57,24 +61,31 @@ type snapshot struct {
 	providers []ProviderRecord
 }
 
-// Loader 负责后台异步刷新 providers.json，并对外提供原子快照查询。
+// Loader 负责后台异步刷新 providers.json（或远程 JSON），并对外提供原子快照查询。
 type Loader struct {
-	path     string
-	logger   *slog.Logger
-	current  atomic.Pointer[snapshot]
+	path    string // 本地路径或 https URL
+	logger  *slog.Logger
+	remote  bool
+	current atomic.Pointer[snapshot]
 }
 
 // New 创建一个 Loader 但不启动；调用方需 Start。
 //
-// 默认从 GATEWAY_ADMIN_PROVIDERS_FILE 读取；若未设置则回退到
-// `${cwd}/<defaultProvidersFile>`，与 admin-console 对齐。
+// 默认从 GATEWAY_REMOTE_PROVIDERS_URL（若配置）后台轮询；
+// 否则从 GATEWAY_ADMIN_PROVIDERS_FILE 读取；
+// 若均未设置则回退到 `${cwd}/<defaultProvidersFile>`。
 func New(logger *slog.Logger) *Loader {
+	url := strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_PROVIDERS_URL"))
 	path := strings.TrimSpace(os.Getenv("GATEWAY_ADMIN_PROVIDERS_FILE"))
-	if path == "" {
+	remote := false
+	if gatewayinternal.IsHTTPURL(url) {
+		path = url
+		remote = true
+	} else if path == "" {
 		cwd, _ := os.Getwd()
 		path = filepath.Clean(filepath.Join(cwd, defaultProvidersFile))
 	}
-	l := &Loader{path: path, logger: logger}
+	l := &Loader{path: path, remote: remote, logger: logger}
 	empty := &snapshot{}
 	l.current.Store(empty)
 	return l
@@ -111,14 +122,30 @@ func (l *Loader) snapshot() *snapshot {
 }
 
 func (l *Loader) reload() error {
-	bytes, err := os.ReadFile(l.path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			// 没有文件视为「未配置」，保留空快照
+	var bytes []byte
+	var err error
+	if l.remote {
+		var code int
+		bytes, code, err = gatewayinternal.HTTPGet(l.path)
+		if err != nil {
+			return err
+		}
+		if code == http.StatusNotFound {
 			l.current.Store(&snapshot{})
 			return nil
 		}
-		return err
+		if code < 200 || code >= 300 {
+			return fmt.Errorf("remote providers: http %d", code)
+		}
+	} else {
+		bytes, err = os.ReadFile(l.path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				l.current.Store(&snapshot{})
+				return nil
+			}
+			return err
+		}
 	}
 	var parsed struct {
 		Providers []ProviderRecord `json:"providers"`

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/agenticx/enterprise/gateway/internal/audit"
 	"github.com/agenticx/enterprise/gateway/internal/config"
+	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 	"github.com/agenticx/enterprise/gateway/internal/metering"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/provider"
@@ -32,21 +35,22 @@ import (
 )
 
 type Server struct {
-	cfg               config.Config
-	logger            *slog.Logger
-	provider          provider.ChatProvider
-	decider           *routing.Decider
-	policy            *policyengine.Engine
-	policyMu          sync.RWMutex
-	policyManifest    string
-	policySnapshot    string
-	policySnapshotMod time.Time
-	policyOverride    string
-	policyOverrideMod time.Time
-	audit             audit.EventWriter
-	metering          metering.Sink
-	adminLoader       *runtimeconfig.Loader
-	quotaTracker      *quota.Tracker
+	cfg                config.Config
+	logger             *slog.Logger
+	provider           provider.ChatProvider
+	decider            *routing.Decider
+	policy             *policyengine.Engine
+	policyMu           sync.RWMutex
+	policyManifest     string
+	policySnapshot     string
+	policySnapshotMod  time.Time
+	policyOverride     string
+	policyOverrideMod  time.Time
+	audit              audit.EventWriter
+	metering           metering.Sink
+	adminLoader        *runtimeconfig.Loader
+	quotaTracker       *quota.Tracker
+	policySnapBodyHash string
 }
 
 var (
@@ -100,12 +104,15 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	if policyOverridePath == "" {
 		policyOverridePath = filepath.Join(filepath.Dir(quotaCfgPath), "policy-overrides.json")
 	}
-	policySnapshotPath := strings.TrimSpace(os.Getenv("GATEWAY_POLICY_SNAPSHOT_FILE"))
+	policySnapshotPath := strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_POLICY_SNAPSHOT_URL"))
 	if policySnapshotPath == "" {
-		policySnapshotPath = filepath.Join(filepath.Dir(quotaCfgPath), "policy-snapshot.json")
+		policySnapshotPath = strings.TrimSpace(os.Getenv("GATEWAY_POLICY_SNAPSHOT_FILE"))
+		if policySnapshotPath == "" {
+			policySnapshotPath = filepath.Join(filepath.Dir(quotaCfgPath), "policy-snapshot.json")
+		}
 	}
 
-	engine, snapshotModTime, overrideModTime, err := buildPolicyEngine(cfg.PolicyManifest, policySnapshotPath, policyOverridePath)
+	engine, snapshotModTime, snapBodyHash, overrideModTime, err := buildPolicyEngine(cfg.PolicyManifest, policySnapshotPath, policyOverridePath)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +137,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		}
 	}
 
-	return &Server{
+	srv := &Server{
 		cfg:               cfg,
 		logger:            logger,
 		provider:          provider.NewOpenAICompatibleProvider(),
@@ -141,94 +148,28 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		policySnapshotMod: snapshotModTime,
 		policyOverride:    policyOverridePath,
 		policyOverrideMod: overrideModTime,
-		audit:             auditWriter,
-		metering:          sink,
-		adminLoader:       adminLoader,
-		quotaTracker:      quota.NewTracker(quotaCfgPath, quotaUsagePath),
-	}, nil
+
+		policySnapBodyHash: snapBodyHash,
+		audit:              auditWriter,
+		metering:           sink,
+		adminLoader:        adminLoader,
+		quotaTracker:       quota.NewTracker(quotaCfgPath, quotaUsagePath),
+	}
+	return srv, nil
 }
 
-type policyOverrideFile struct {
-	DisabledPacks []string `json:"disabledPacks"`
+func sha256Hex(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
-type policySnapshotStoreFile struct {
-	UpdatedAt string                          `json:"updatedAt"`
-	Tenants   map[string]tenantPolicySnapshot `json:"tenants"`
-}
-
-type tenantPolicySnapshot struct {
-	Version int                `json:"version"`
-	Packs   []snapshotPackItem `json:"packs"`
-}
-
-type snapshotPackItem struct {
-	Code      string                  `json:"code"`
-	Name      string                  `json:"name"`
-	Type      string                  `json:"type"`
-	Source    string                  `json:"source"`
-	AppliesTo *policyengine.AppliesTo `json:"appliesTo"`
-	Rules     []snapshotRuleItem      `json:"rules"`
-}
-
-type snapshotRuleItem struct {
-	ID        string                  `json:"id"`
-	Code      string                  `json:"code"`
-	Kind      policyengine.RuleKind   `json:"kind"`
-	Action    policyengine.Action     `json:"action"`
-	Severity  string                  `json:"severity"`
-	Message   string                  `json:"message"`
-	Payload   map[string]any          `json:"payload"`
-	AppliesTo *policyengine.AppliesTo `json:"appliesTo"`
-}
-
-func buildPolicyEngine(manifestGlob, snapshotPath, overridePath string) (*policyengine.Engine, time.Time, time.Time, error) {
-	if manifests, snapshotMod, err := loadPolicySnapshot(snapshotPath); err != nil {
-		return nil, time.Time{}, time.Time{}, err
-	} else if len(manifests) > 0 {
-		engine, buildErr := policyengine.NewEngine(manifests)
-		if buildErr != nil {
-			return nil, time.Time{}, time.Time{}, fmt.Errorf("build snapshot policy engine: %w", buildErr)
-		}
-		return engine, snapshotMod, time.Time{}, nil
-	}
-
-	disabled, modTime, err := readDisabledPolicyPacks(overridePath)
-	if err != nil {
-		return nil, time.Time{}, time.Time{}, err
-	}
-	manifests, err := policyengine.LoadRulePacksWithDisabled(manifestGlob, disabled)
-	if err != nil {
-		return nil, time.Time{}, time.Time{}, fmt.Errorf("load policy manifests: %w", err)
-	}
-	engine, err := policyengine.NewEngine(manifests)
-	if err != nil {
-		return nil, time.Time{}, time.Time{}, fmt.Errorf("build policy engine: %w", err)
-	}
-	return engine, time.Time{}, modTime, nil
-}
-
-func loadPolicySnapshot(snapshotPath string) ([]policyengine.RulePackManifest, time.Time, error) {
-	if strings.TrimSpace(snapshotPath) == "" {
-		return nil, time.Time{}, nil
-	}
-	info, statErr := os.Stat(snapshotPath)
-	if statErr != nil {
-		if os.IsNotExist(statErr) {
-			return nil, time.Time{}, nil
-		}
-		return nil, time.Time{}, fmt.Errorf("stat policy snapshot file: %w", statErr)
-	}
-	raw, err := os.ReadFile(snapshotPath)
-	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("read policy snapshot file: %w", err)
-	}
+func snapshotManifestsFromRaw(raw []byte, mod time.Time) ([]policyengine.RulePackManifest, time.Time, error) {
 	var parsed policySnapshotStoreFile
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, time.Time{}, fmt.Errorf("parse policy snapshot file: %w", err)
+		return nil, mod, fmt.Errorf("parse policy snapshot file: %w", err)
 	}
 	if len(parsed.Tenants) == 0 {
-		return nil, info.ModTime(), nil
+		return nil, mod, nil
 	}
 	manifests := make([]policyengine.RulePackManifest, 0)
 	for tenantID, tenantSnapshot := range parsed.Tenants {
@@ -280,7 +221,109 @@ func loadPolicySnapshot(snapshotPath string) ([]policyengine.RulePackManifest, t
 			manifests = append(manifests, manifest)
 		}
 	}
-	return manifests, info.ModTime(), nil
+	return manifests, mod, nil
+}
+
+type policyOverrideFile struct {
+	DisabledPacks []string `json:"disabledPacks"`
+}
+
+type policySnapshotStoreFile struct {
+	UpdatedAt string                          `json:"updatedAt"`
+	Tenants   map[string]tenantPolicySnapshot `json:"tenants"`
+}
+
+type tenantPolicySnapshot struct {
+	Version int                `json:"version"`
+	Packs   []snapshotPackItem `json:"packs"`
+}
+
+type snapshotPackItem struct {
+	Code      string                  `json:"code"`
+	Name      string                  `json:"name"`
+	Type      string                  `json:"type"`
+	Source    string                  `json:"source"`
+	AppliesTo *policyengine.AppliesTo `json:"appliesTo"`
+	Rules     []snapshotRuleItem      `json:"rules"`
+}
+
+type snapshotRuleItem struct {
+	ID        string                  `json:"id"`
+	Code      string                  `json:"code"`
+	Kind      policyengine.RuleKind   `json:"kind"`
+	Action    policyengine.Action     `json:"action"`
+	Severity  string                  `json:"severity"`
+	Message   string                  `json:"message"`
+	Payload   map[string]any          `json:"payload"`
+	AppliesTo *policyengine.AppliesTo `json:"appliesTo"`
+}
+
+func buildPolicyEngine(manifestGlob, snapshotPath, overridePath string) (*policyengine.Engine, time.Time, string, time.Time, error) {
+	manifests, snapshotMod, snapHash, err := loadPolicySnapshot(snapshotPath)
+	if err != nil {
+		return nil, time.Time{}, "", time.Time{}, err
+	}
+	if len(manifests) > 0 {
+		engine, buildErr := policyengine.NewEngine(manifests)
+		if buildErr != nil {
+			return nil, time.Time{}, "", time.Time{}, fmt.Errorf("build snapshot policy engine: %w", buildErr)
+		}
+		return engine, snapshotMod, snapHash, time.Time{}, nil
+	}
+
+	disabled, modTime, err := readDisabledPolicyPacks(overridePath)
+	if err != nil {
+		return nil, time.Time{}, "", time.Time{}, err
+	}
+	manifestsGlob, err := policyengine.LoadRulePacksWithDisabled(manifestGlob, disabled)
+	if err != nil {
+		return nil, time.Time{}, "", time.Time{}, fmt.Errorf("load policy manifests: %w", err)
+	}
+	engine, err := policyengine.NewEngine(manifestsGlob)
+	if err != nil {
+		return nil, time.Time{}, "", time.Time{}, fmt.Errorf("build policy engine: %w", err)
+	}
+	return engine, time.Time{}, snapHash, modTime, nil
+}
+
+func loadPolicySnapshot(snapshotPath string) ([]policyengine.RulePackManifest, time.Time, string, error) {
+	path := strings.TrimSpace(snapshotPath)
+	if path == "" {
+		return nil, time.Time{}, "", nil
+	}
+	if gatewayinternal.IsHTTPURL(path) {
+		raw, code, err := gatewayinternal.HTTPGet(path)
+		if err != nil {
+			return nil, time.Time{}, "", err
+		}
+		if code == http.StatusNotFound {
+			return nil, time.Time{}, "", nil
+		}
+		if code < 200 || code >= 300 {
+			return nil, time.Time{}, "", fmt.Errorf("policy snapshot fetch returned http %d", code)
+		}
+		mod := time.Now().UTC()
+		manifests, _, err := snapshotManifestsFromRaw(raw, mod)
+		if err != nil {
+			return nil, mod, "", err
+		}
+		return manifests, mod, sha256Hex(raw), nil
+	}
+
+	info, statErr := os.Stat(path)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return nil, time.Time{}, "", nil
+		}
+		return nil, time.Time{}, "", fmt.Errorf("stat policy snapshot file: %w", statErr)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, time.Time{}, "", fmt.Errorf("read policy snapshot file: %w", err)
+	}
+	mod := info.ModTime()
+	manifests, mod, err := snapshotManifestsFromRaw(raw, mod)
+	return manifests, mod, "", err
 }
 
 func readDisabledPolicyPacks(path string) (map[string]bool, time.Time, error) {
@@ -352,11 +395,11 @@ func (s *Server) reloadPolicyIfNeeded() {
 	}
 
 	var nextOverrideMod time.Time
-	if strings.TrimSpace(s.policyOverride) != "" {
-		info, err := os.Stat(s.policyOverride)
+	if ov := strings.TrimSpace(s.policyOverride); ov != "" {
+		info, err := os.Stat(ov)
 		if err != nil {
 			if !os.IsNotExist(err) {
-				s.logger.Warn("policy override stat failed", "path", s.policyOverride, "error", err)
+				s.logger.Warn("policy override stat failed", "path", ov, "error", err)
 				return
 			}
 		} else {
@@ -364,28 +407,57 @@ func (s *Server) reloadPolicyIfNeeded() {
 		}
 	}
 
-	var nextSnapshotMod time.Time
-	if strings.TrimSpace(s.policySnapshot) != "" {
-		info, err := os.Stat(s.policySnapshot)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				s.logger.Warn("policy snapshot stat failed", "path", s.policySnapshot, "error", err)
+	snap := strings.TrimSpace(s.policySnapshot)
+	snapChanged := false
+	if snap != "" {
+		if gatewayinternal.IsHTTPURL(snap) {
+			raw, code, err := gatewayinternal.HTTPGet(snap)
+			if err != nil {
+				s.logger.Warn("policy snapshot fetch failed", "url", snap, "error", err)
 				return
 			}
+			var sum string
+			switch {
+			case code == http.StatusNotFound:
+				sum = ""
+			case code >= 200 && code < 300:
+				sum = sha256Hex(raw)
+			default:
+				s.logger.Warn("policy snapshot bad status", "url", snap, "code", code)
+				return
+			}
+			s.policyMu.RLock()
+			snapChanged = sum != s.policySnapBodyHash
+			s.policyMu.RUnlock()
 		} else {
-			nextSnapshotMod = info.ModTime()
+			info, err := os.Stat(snap)
+			if err != nil {
+				if !os.IsNotExist(err) {
+					s.logger.Warn("policy snapshot stat failed", "path", snap, "error", err)
+					return
+				}
+			} else {
+				nextMod := info.ModTime()
+				s.policyMu.RLock()
+				snapChanged = !nextMod.Equal(s.policySnapshotMod)
+				s.policyMu.RUnlock()
+			}
 		}
 	}
 
+	overrideChanged := false
 	s.policyMu.RLock()
-	currentOverrideMod := s.policyOverrideMod
-	currentSnapshotMod := s.policySnapshotMod
+	curOverrideMod := s.policyOverrideMod
 	s.policyMu.RUnlock()
-	if nextOverrideMod.Equal(currentOverrideMod) && nextSnapshotMod.Equal(currentSnapshotMod) {
+	if !nextOverrideMod.Equal(curOverrideMod) {
+		overrideChanged = true
+	}
+
+	if !snapChanged && !overrideChanged {
 		return
 	}
 
-	engine, snapshotMod, overrideMod, buildErr := buildPolicyEngine(s.policyManifest, s.policySnapshot, s.policyOverride)
+	engine, snapshotMod, snapHash, overrideMod, buildErr := buildPolicyEngine(s.policyManifest, s.policySnapshot, s.policyOverride)
 	if buildErr != nil {
 		s.logger.Warn("policy reload failed", "snapshot", s.policySnapshot, "override", s.policyOverride, "error", buildErr)
 		return
@@ -394,8 +466,9 @@ func (s *Server) reloadPolicyIfNeeded() {
 	s.policy = engine
 	s.policySnapshotMod = snapshotMod
 	s.policyOverrideMod = overrideMod
+	s.policySnapBodyHash = snapHash
 	s.policyMu.Unlock()
-	s.logger.Info("policy engine reloaded", "snapshot_file", s.policySnapshot, "override_file", s.policyOverride)
+	s.logger.Info("policy engine reloaded", "snapshot", s.policySnapshot, "override_file", s.policyOverride)
 }
 
 func (s *Server) Router() http.Handler {

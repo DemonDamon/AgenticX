@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 )
 
 type Action string
@@ -50,16 +53,21 @@ type Decision struct {
 }
 
 type Tracker struct {
-	cfgPath    string
-	usagePath  string
-	mu         sync.Mutex
-	usageCache map[string]int64
+	cfgPath           string
+	usagePath         string
+	remoteURL         string
+	remoteFetched     time.Time
+	remoteCfgSnapshot Config
+	mu                sync.Mutex
+	remoteMu          sync.Mutex
+	usageCache        map[string]int64
 }
 
 func NewTracker(cfgPath, usagePath string) *Tracker {
 	return &Tracker{
 		cfgPath:    cfgPath,
 		usagePath:  usagePath,
+		remoteURL:  strings.TrimSpace(os.Getenv("GATEWAY_REMOTE_QUOTA_CONFIG_URL")),
 		usageCache: map[string]int64{},
 	}
 }
@@ -237,6 +245,36 @@ func (t *Tracker) AddUsage(userID string, tokens int64) (int64, bool) {
 }
 
 func (t *Tracker) loadConfig() Config {
+	if u := strings.TrimSpace(t.remoteURL); u != "" && gatewayinternal.IsHTTPURL(u) {
+		t.remoteMu.Lock()
+		defer t.remoteMu.Unlock()
+		if !t.remoteFetched.IsZero() && time.Since(t.remoteFetched) < 10*time.Second {
+			return t.normalizeConfig(t.remoteCfgSnapshot)
+		}
+		raw, code, err := gatewayinternal.HTTPGet(u)
+		if err != nil {
+			log.Printf("[quota] remote config fetch failed url=%s err=%v", u, err)
+			return t.normalizeConfig(t.remoteCfgSnapshot)
+		}
+		if code == http.StatusNotFound {
+			t.remoteCfgSnapshot = Config{}
+			t.remoteFetched = time.Now()
+			return Config{}
+		}
+		if code < 200 || code >= 300 {
+			log.Printf("[quota] remote config bad status url=%s code=%d", u, code)
+			return t.normalizeConfig(t.remoteCfgSnapshot)
+		}
+		var cfg Config
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			log.Printf("[quota] remote config parse failed err=%v", err)
+			return t.normalizeConfig(t.remoteCfgSnapshot)
+		}
+		t.remoteCfgSnapshot = cfg
+		t.remoteFetched = time.Now()
+		return t.normalizeConfig(cfg)
+	}
+
 	raw, err := os.ReadFile(t.cfgPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -249,6 +287,10 @@ func (t *Tracker) loadConfig() Config {
 		log.Printf("[quota] parse config failed path=%s err=%v", t.cfgPath, err)
 		return Config{}
 	}
+	return t.normalizeConfig(cfg)
+}
+
+func (t *Tracker) normalizeConfig(cfg Config) Config {
 	if cfg.Defaults.Role == nil {
 		cfg.Defaults.Role = map[string]Rule{}
 	}
