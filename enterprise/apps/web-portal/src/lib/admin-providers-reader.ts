@@ -1,19 +1,13 @@
 /**
- * web-portal · 只读共享 admin 落盘配置
- *
- * Portal 进程不写、不持有 Key，只读 admin-console 维护的两份 JSON：
- *   - enterprise/.runtime/admin/providers.json
- *   - enterprise/.runtime/admin/user-models.json
- *
- * 这样 admin 改完保存，下一次 portal 请求就能立刻看到新模型，不需要重启服务。
+ * web-portal · 只读：从 Postgres 读取 admin 配置的 provider 与用户可见模型。
  */
 
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { enterpriseRuntimeModelProviders as mpTable } from "@agenticx/db-schema";
+import { enterpriseRuntimeUserVisibleModels as uvmTable } from "@agenticx/db-schema";
+import { getIamDb } from "@agenticx/iam-core";
+import { eq } from "drizzle-orm";
 
-const RUNTIME_DIR = path.resolve(process.cwd(), "../../.runtime/admin");
-const PROVIDERS_FILE = path.join(RUNTIME_DIR, "providers.json");
-const USER_MODELS_FILE = path.join(RUNTIME_DIR, "user-models.json");
+import { decryptProviderApiKey } from "./provider-api-key-crypto";
 
 export type ProviderRoute = "local" | "private-cloud" | "third-party";
 
@@ -35,27 +29,6 @@ export interface ProviderRecord {
   models: ProviderModelRecord[];
 }
 
-function readJson<T>(file: string, fallback: T): T {
-  if (!fs.existsSync(file)) return fallback;
-  try {
-    const raw = fs.readFileSync(file, "utf-8");
-    if (!raw.trim()) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-export function readProviders(): ProviderRecord[] {
-  const json = readJson<{ providers?: ProviderRecord[] }>(PROVIDERS_FILE, {});
-  return Array.isArray(json.providers) ? json.providers : [];
-}
-
-export function readUserModels(): Record<string, string[]> {
-  const json = readJson<{ userModels?: Record<string, string[]> }>(USER_MODELS_FILE, {});
-  return json.userModels ?? {};
-}
-
 export interface PortalModelOption {
   id: string;
   provider: string;
@@ -64,6 +37,50 @@ export interface PortalModelOption {
   label: string;
   route: ProviderRoute;
   isDefault: boolean;
+}
+
+function requiredTenant(): string {
+  const t = process.env.DEFAULT_TENANT_ID?.trim();
+  if (!t) throw new Error("DEFAULT_TENANT_ID is required.");
+  return t;
+}
+
+function rowToProvider(row: typeof mpTable.$inferSelect): ProviderRecord {
+  const modelsRaw = Array.isArray(row.models) ? (row.models as ProviderModelRecord[]) : [];
+  return {
+    id: row.providerId,
+    displayName: row.displayName,
+    baseUrl: row.baseUrl,
+    apiKey: decryptProviderApiKey(row.apiKeyCipher),
+    enabled: row.enabled,
+    isDefault: row.isDefault,
+    route: row.route as ProviderRoute,
+    models: modelsRaw.map((m) => ({
+      name: m.name,
+      label: m.label ?? m.name,
+      enabled: m.enabled,
+      capabilities: m.capabilities,
+    })),
+  };
+}
+
+async function readProviders(): Promise<ProviderRecord[]> {
+  const tid = requiredTenant();
+  const db = getIamDb();
+  const rows = await db.select().from(mpTable).where(eq(mpTable.tenantId, tid));
+  return rows.map(rowToProvider);
+}
+
+async function readUserModels(): Promise<Record<string, string[]>> {
+  const tid = requiredTenant();
+  const db = getIamDb();
+  const rows = await db.select().from(uvmTable).where(eq(uvmTable.tenantId, tid));
+  const map: Record<string, string[]> = {};
+  for (const r of rows) {
+    if (!map[r.assignmentKey]) map[r.assignmentKey] = [];
+    map[r.assignmentKey]!.push(r.modelId);
+  }
+  return map;
 }
 
 const LEGACY_ADMIN_EMAIL_TO_USER_ID: Record<string, string> = {
@@ -80,23 +97,18 @@ function resolveAssignmentKeys(userId: string, email?: string): string[] {
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail) return Array.from(keys);
 
-  // 新链路：admin 分配会同时写入 email 别名 key。
   keys.add(`email:${normalizedEmail}`);
 
-  // 兼容旧数据：历史分配只按 admin-console 内存种子 id（u_001 等）存储。
   const legacyUserId = LEGACY_ADMIN_EMAIL_TO_USER_ID[normalizedEmail];
   if (legacyUserId) keys.add(legacyUserId);
 
   return Array.from(keys);
 }
 
-/**
- * 当前用户**最终可见**的模型 = （admin 启用的 provider × admin 启用的 model）∩ 用户分配集合。
- * 如果用户没有分配过任何模型（首次登录），返回空集合 → 前台展示「无可用模型，请联系管理员分配」。
- */
-export function listAvailableModelsForUser(userId: string, email?: string): PortalModelOption[] {
-  const providers = readProviders();
-  const userMap = readUserModels();
+/** 当前用户最终可见模型 = （启用的 provider × model）∩ 管理员分配集合。 */
+export async function listAvailableModelsForUser(userId: string, email?: string): Promise<PortalModelOption[]> {
+  const providers = await readProviders();
+  const userMap = await readUserModels();
   const allowed = new Set<string>();
   for (const key of resolveAssignmentKeys(userId, email)) {
     for (const modelId of userMap[key] ?? []) {

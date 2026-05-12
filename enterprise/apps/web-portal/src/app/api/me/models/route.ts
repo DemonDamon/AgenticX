@@ -10,7 +10,7 @@ export async function GET() {
       { status: 401 }
     );
   }
-  const models = listAvailableModelsForUser(session.userId, session.email);
+  const models = await listAvailableModelsForUser(session.userId, session.email);
   return NextResponse.json({
     code: "00000",
     message: "ok",
