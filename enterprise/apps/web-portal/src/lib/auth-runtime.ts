@@ -9,6 +9,7 @@ import {
 import {
   assignRolesIfNone,
   PgAuthUserRepository,
+  PgRefreshTokenStore,
   ensureSystemRoles,
   getDefaultOrgId,
   insertAuditEvent,
@@ -43,7 +44,7 @@ type AuthRuntime = {
   repo: PgAuthUserRepository;
   authService: AuthService;
   jwtService: JwtService;
-  refreshStore: InMemoryRefreshTokenStore;
+  refreshStore: InMemoryRefreshTokenStore | PgRefreshTokenStore;
   tenantId: string;
   bootstrapPromise: Promise<void>;
 };
@@ -55,7 +56,9 @@ declare global {
 function createRuntime(): AuthRuntime {
   const tenantId = DEFAULT_TENANT_ID ?? "";
   const repo = new PgAuthUserRepository(tenantId);
-  const refreshStore = new InMemoryRefreshTokenStore();
+  const refreshStore = process.env.DATABASE_URL?.trim()
+    ? new PgRefreshTokenStore()
+    : new InMemoryRefreshTokenStore();
   const jwtService = new JwtService({
     issuer: "agenticx-enterprise-web-portal",
     audience: "agenticx-web-users",
