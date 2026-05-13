@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
+import { Bookmark, Copy, LayoutList, Quote, RotateCcw, Share2 } from "lucide-react";
 import type { Message, MessageAttachment } from "../../store";
 import { AttachmentCard } from "./AttachmentCard";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { parseReasoningContent } from "./reasoning-parser";
 import { getContainedSelectionText } from "../../utils/favorite-selection";
+import { HoverTip } from "../ds/HoverTip";
 import {
   chatMarkdownComponents,
   chatRehypePlugins,
@@ -292,69 +294,75 @@ export function ImBubble({
               </div>
             </div>
             {hideActions ? null : isUser ? (
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
-                <button type="button" className="hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>复制</button>
-                <button
-                  type="button"
-                  className="hover:text-text-strong"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={runQuote}
-                >
-                  引用
-                </button>
-                <button
-                  type="button"
-                  className="hover:text-text-strong"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={runFavorite}
-                >
-                  收藏
-                </button>
-                <button
-                  type="button"
-                  className="hover:text-text-strong"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={runForward}
-                >
-                  转发
-                </button>
+              <div className="mt-1 flex flex-wrap items-center gap-0.5 text-text-faint">
+                <HoverTip label="复制">
+                  <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>
+                    <Copy size={13} />
+                  </button>
+                </HoverTip>
+                <HoverTip label="引用">
+                  <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
+                    <Quote size={13} />
+                  </button>
+                </HoverTip>
+                <HoverTip label="收藏">
+                  <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
+                    <Bookmark size={13} />
+                  </button>
+                </HoverTip>
+                <HoverTip label="转发">
+                  <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
+                    <Share2 size={13} />
+                  </button>
+                </HoverTip>
                 {onRetryMessage ? (
-                  <button type="button" className="hover:text-text-strong" onClick={() => onRetryMessage(message)}>重试</button>
+                  <HoverTip label="重试">
+                    <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onClick={() => onRetryMessage(message)}>
+                      <RotateCcw size={13} />
+                    </button>
+                  </HoverTip>
                 ) : null}
-                <button type="button" className="hover:text-text-strong" onClick={() => onToggleSelectMessage?.(message)}>多选</button>
+                <HoverTip label="多选">
+                  <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onClick={() => onToggleSelectMessage?.(message)}>
+                    <LayoutList size={13} />
+                  </button>
+                </HoverTip>
               </div>
             ) : (
               <div className="mt-1 min-w-0 self-stretch">
-                <div className="ml-auto flex w-fit max-w-full flex-wrap items-center gap-2 text-[11px] text-text-faint">
-                  <button type="button" className="hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>复制</button>
-                  <button
-                    type="button"
-                    className="hover:text-text-strong"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={runQuote}
-                  >
-                    引用
-                  </button>
-                  <button
-                    type="button"
-                    className="hover:text-text-strong"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={runFavorite}
-                  >
-                    收藏
-                  </button>
-                  <button
-                    type="button"
-                    className="hover:text-text-strong"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={runForward}
-                  >
-                    转发
-                  </button>
+                <div className="ml-auto flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint">
+                  <HoverTip label="复制">
+                    <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>
+                      <Copy size={13} />
+                    </button>
+                  </HoverTip>
+                  <HoverTip label="引用">
+                    <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
+                      <Quote size={13} />
+                    </button>
+                  </HoverTip>
+                  <HoverTip label="收藏">
+                    <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
+                      <Bookmark size={13} />
+                    </button>
+                  </HoverTip>
+                  <HoverTip label="转发">
+                    <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
+                      <Share2 size={13} />
+                    </button>
+                  </HoverTip>
                   {onRetryMessage ? (
-                    <button type="button" className="hover:text-text-strong" onClick={() => onRetryMessage(message)}>重试</button>
+                    <HoverTip label="重试">
+                      <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onClick={() => onRetryMessage(message)}>
+                        <RotateCcw size={13} />
+                      </button>
+                    </HoverTip>
                   ) : null}
-                  <button type="button" className="hover:text-text-strong" onClick={() => onToggleSelectMessage?.(message)}>多选</button>
+                  <HoverTip label="多选">
+                    <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onClick={() => onToggleSelectMessage?.(message)}>
+                      <LayoutList size={13} />
+                    </button>
+                  </HoverTip>
                 </div>
               </div>
             )}
@@ -367,41 +375,38 @@ export function ImBubble({
           className="fixed z-[80] w-36 rounded-lg border border-border bg-surface-panel p-1 shadow-2xl"
           style={{ left: menuPos.x, top: menuPos.y }}
         >
-          <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onCopyMessage?.(message); }}>复制</button>
-          <button
-            className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              setMenuOpen(false);
-              runQuote();
-            }}
-          >
-            引用
+          <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onCopyMessage?.(message); }}>
+            <Copy size={12} className="shrink-0 text-text-faint" />复制
           </button>
           <button
-            className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover"
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              setMenuOpen(false);
-              runFavorite();
-            }}
+            onClick={() => { setMenuOpen(false); runQuote(); }}
           >
-            收藏
+            <Quote size={12} className="shrink-0 text-text-faint" />引用
           </button>
           <button
-            className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover"
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              setMenuOpen(false);
-              runForward();
-            }}
+            onClick={() => { setMenuOpen(false); runFavorite(); }}
           >
-            转发
+            <Bookmark size={12} className="shrink-0 text-text-faint" />收藏
+          </button>
+          <button
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { setMenuOpen(false); runForward(); }}
+          >
+            <Share2 size={12} className="shrink-0 text-text-faint" />转发
           </button>
           {onRetryMessage ? (
-            <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onRetryMessage(message); }}>重试</button>
+            <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onRetryMessage(message); }}>
+              <RotateCcw size={12} className="shrink-0 text-text-faint" />重试
+            </button>
           ) : null}
-          <button className="w-full rounded px-2 py-1 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onToggleSelectMessage?.(message); }}>多选</button>
+          <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onToggleSelectMessage?.(message); }}>
+            <LayoutList size={12} className="shrink-0 text-text-faint" />多选
+          </button>
         </div>
       ) : null}
     </div>
