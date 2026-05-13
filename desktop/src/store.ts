@@ -15,6 +15,7 @@ export type SubAgentStatus =
   | "cancelled";
 export type ConfirmStrategy = "manual" | "semi-auto" | "auto";
 export type ThemeMode = "dark" | "light" | "dim";
+export type ThemeColor = "blue" | "green" | "pink" | "yellow";
 export type ChatStyle = "im" | "terminal" | "clean";
 /** MCP 列表展示态（与 Studio `/api/mcp/servers` 对齐，近似 Cursor 绿/红/灰语义） */
 export type McpServer = {
@@ -319,6 +320,7 @@ type AppState = {
   /** Machi 官网账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
   agxAccount: { loggedIn: boolean; email: string; displayName: string };
   chatStyle: ChatStyle;
+  themeColor: ThemeColor;
   /** Global user nickname shown on all bubbles and sent as context label (empty → 「我」). */
   userNickname: string;
   /** Custom avatar for current user. */
@@ -365,6 +367,7 @@ type AppState = {
   toggleFocusMode: () => void;
   setFocusModeTall: (v: boolean) => void;
   setTheme: (theme: ThemeMode) => void;
+  setThemeColor: (color: ThemeColor) => void;
   setAgxAccount: (acct: { loggedIn: boolean; email: string; displayName: string }) => void;
   setChatStyle: (style: ChatStyle) => void;
   setUserNickname: (name: string) => void;
@@ -533,6 +536,7 @@ function makeDefaultPane(): ChatPane {
 }
 
 const CHAT_STYLE_STORAGE_KEY = "agx-chat-style";
+const THEME_COLOR_STORAGE_KEY = "agx-theme-color";
 const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
 const USER_PREFERENCE_KEY = "agx-user-preference";
 const USER_AVATAR_URL_KEY = "agx-user-avatar-url";
@@ -547,6 +551,16 @@ function loadChatStyle(): ChatStyle {
     // ignore storage errors
   }
   return "im";
+}
+
+function loadThemeColor(): ThemeColor {
+  try {
+    const saved = window.localStorage.getItem(THEME_COLOR_STORAGE_KEY);
+    if (saved === "blue" || saved === "green" || saved === "pink" || saved === "yellow") return saved as ThemeColor;
+  } catch {
+    // ignore storage errors
+  }
+  return "pink";
 }
 
 function loadUserNickname(): string {
@@ -668,6 +682,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   focusModeTall: false,
   focusSnapshot: null,
   theme: "dark",
+  themeColor: loadThemeColor(),
   agxAccount: { loggedIn: false, email: "", displayName: "" },
   chatStyle: loadChatStyle(),
   userNickname: loadUserNickname(),
@@ -816,6 +831,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     state.enterFocusMode();
   },
   setTheme: (theme) => set({ theme }),
+  setThemeColor: (themeColor) =>
+    set(() => {
+      try {
+        window.localStorage.setItem(THEME_COLOR_STORAGE_KEY, themeColor);
+      } catch {
+        // ignore storage errors
+      }
+      return { themeColor };
+    }),
   setAgxAccount: (agxAccount) => set({ agxAccount }),
   setChatStyle: (chatStyle) =>
     set(() => {
