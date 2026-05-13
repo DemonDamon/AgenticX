@@ -25,7 +25,7 @@ type Props = {
    * IM assistant layout: compact row aligns with tool cards (spacer only, no avatar/name),
    * used inside a parent ReAct block that renders the primary avatar column.
    */
-  assistantVisual?: "default" | "compact-inline";
+  assistantVisual?: "default" | "compact-inline" | "compact-inline-with-actions";
   /** When true and compact, remove inner bubble border so parent container provides the single border. */
   noBubbleBorder?: boolean;
   userName?: string;
@@ -106,7 +106,8 @@ export function ImBubble({
   const isStreaming = message.id === "__stream__";
   const isGroupTyping = !isUser && typeof message.id === "string" && message.id.startsWith("typing-");
   const compactAssistant =
-    !isUser && assistantVisual === "compact-inline" && !isGroupTyping;
+    !isUser && (assistantVisual === "compact-inline" || assistantVisual === "compact-inline-with-actions") && !isGroupTyping;
+  const hideActions = compactAssistant && assistantVisual !== "compact-inline-with-actions";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
   const hasThinkTag = parsed?.hasReasoningTag ?? false;
   const bodyText = !isUser && hasThinkTag ? (parsed?.response ?? "") : message.content;
@@ -290,37 +291,73 @@ export function ImBubble({
                 )}
               </div>
             </div>
-            {compactAssistant ? null : <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
-              <button type="button" className="hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>复制</button>
-              <button
-                type="button"
-                className="hover:text-text-strong"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={runQuote}
-              >
-                引用
-              </button>
-              <button
-                type="button"
-                className="hover:text-text-strong"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={runFavorite}
-              >
-                收藏
-              </button>
-              <button
-                type="button"
-                className="hover:text-text-strong"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={runForward}
-              >
-                转发
-              </button>
-              {onRetryMessage ? (
-                <button type="button" className="hover:text-text-strong" onClick={() => onRetryMessage(message)}>重试</button>
-              ) : null}
-              <button type="button" className="hover:text-text-strong" onClick={() => onToggleSelectMessage?.(message)}>多选</button>
-            </div>}
+            {hideActions ? null : isUser ? (
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
+                <button type="button" className="hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>复制</button>
+                <button
+                  type="button"
+                  className="hover:text-text-strong"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={runQuote}
+                >
+                  引用
+                </button>
+                <button
+                  type="button"
+                  className="hover:text-text-strong"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={runFavorite}
+                >
+                  收藏
+                </button>
+                <button
+                  type="button"
+                  className="hover:text-text-strong"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={runForward}
+                >
+                  转发
+                </button>
+                {onRetryMessage ? (
+                  <button type="button" className="hover:text-text-strong" onClick={() => onRetryMessage(message)}>重试</button>
+                ) : null}
+                <button type="button" className="hover:text-text-strong" onClick={() => onToggleSelectMessage?.(message)}>多选</button>
+              </div>
+            ) : (
+              <div className="mt-1 min-w-0 self-stretch">
+                <div className="ml-auto flex w-fit max-w-full flex-wrap items-center gap-2 text-[11px] text-text-faint">
+                  <button type="button" className="hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>复制</button>
+                  <button
+                    type="button"
+                    className="hover:text-text-strong"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={runQuote}
+                  >
+                    引用
+                  </button>
+                  <button
+                    type="button"
+                    className="hover:text-text-strong"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={runFavorite}
+                  >
+                    收藏
+                  </button>
+                  <button
+                    type="button"
+                    className="hover:text-text-strong"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={runForward}
+                  >
+                    转发
+                  </button>
+                  {onRetryMessage ? (
+                    <button type="button" className="hover:text-text-strong" onClick={() => onRetryMessage(message)}>重试</button>
+                  ) : null}
+                  <button type="button" className="hover:text-text-strong" onClick={() => onToggleSelectMessage?.(message)}>多选</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

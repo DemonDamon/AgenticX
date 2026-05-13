@@ -3449,10 +3449,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, [stallState]);
 
   const renderedMessages = useMemo(() => {
-    const renderGroupedRow = (row: GroupedChatRow, rowIdx: number, opts: { reactWorkColumn?: boolean; reactFlat?: boolean; reactHideBadge?: boolean }) => {
+    const renderGroupedRow = (row: GroupedChatRow, rowIdx: number, opts: { reactWorkColumn?: boolean; reactFlat?: boolean; reactHideBadge?: boolean; reactShowActions?: boolean }) => {
       const reactCol = opts.reactWorkColumn ?? false;
       const reactFlat = opts.reactFlat ?? false;
       const reactHideBadge = opts.reactHideBadge ?? false;
+      const reactShowActions = opts.reactShowActions ?? false;
       if (row.kind === "message") {
         const message = row.message;
         const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
@@ -3479,7 +3480,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 ) : undefined
               }
               imAssistantVisual={
-                message.role === "assistant" && reactCol ? "compact-inline" : "default"
+                message.role === "assistant" && reactCol
+                  ? reactShowActions ? "compact-inline-with-actions" : "compact-inline"
+                  : "default"
               }
               noBubbleBorder={reactFlat}
               toolCardOmitLeadingSpacer={message.role === "tool" && reactCol}
@@ -3590,7 +3593,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     </div>
                   ) : (
                     <div className="flex min-w-0 flex-1 flex-col gap-2" style={{ maxWidth: "min(92%, 960px)" }}>
-                      {groupedWork.map((r, i) => renderGroupedRow(r, i, { reactWorkColumn: true }))}
+                      {groupedWork.map((r, i) => renderGroupedRow(r, i, { reactWorkColumn: true, reactShowActions: true }))}
                     </div>
                   )}
                 </div>
@@ -3598,12 +3601,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   ? renderGroupedRow({ kind: "message", message: finalAssistant }, segIdx + 1000, {})
                   : null}
                 {/* Block-level action row: shown when not streaming, mirrors ImBubble action row */}
-                {!hasStreamingRow && workMessages.length > 0 ? (
+                {!hasStreamingRow && workMessages.length > 0 && useUnifiedReActCard ? (
                   <div className="flex min-w-0 items-start gap-2">
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="h-8 w-8 shrink-0" aria-hidden />
                     <div className="min-w-0 flex-1" style={{ maxWidth: "min(92%, 960px)" }}>
-                      <div className="flex flex-wrap items-center justify-end gap-2 pr-1 text-[11px] text-text-faint">
+                      <div className="ml-auto flex w-fit max-w-full flex-wrap items-center gap-2 text-[11px] text-text-faint">
                         <button
                           type="button"
                           className="hover:text-text-strong"
