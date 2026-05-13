@@ -1,5 +1,6 @@
 import { Client } from "pg";
 import bcrypt from "bcryptjs";
+import { pgSeedClientOptions } from "./pg-seed-client-config.mjs";
 
 const databaseUrl = process.env.DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:5432/agenticx";
 
@@ -12,7 +13,7 @@ const ids = {
 };
 
 async function main() {
-  const client = new Client({ connectionString: databaseUrl });
+  const client = new Client(pgSeedClientOptions(databaseUrl));
   await client.connect();
   const seedPassword = process.env.AUTH_DEV_OWNER_PASSWORD?.trim() || "ChangeMe_Dev14!Aa";
   const passwordHash = await bcrypt.hash(seedPassword, 12);
