@@ -18,6 +18,9 @@ export function isPolicyErrorCode(code: string | undefined | null): boolean {
 }
 
 export function toComplianceMessage(code: string | undefined, fallback: string): string {
+  if (code === BUSINESS_ERROR_CODES.UNAUTHORIZED) {
+    return "登录态已失效或网关鉴权失败，请重新登录后再试。若持续失败，请联系管理员检查网关 JWT 配置。";
+  }
   if (code === BUSINESS_ERROR_CODES.FORBIDDEN) {
     return "当前账号未开通聊天权限（workspace:chat）。请重新登录，或联系管理员为账号分配聊天权限。";
   }
