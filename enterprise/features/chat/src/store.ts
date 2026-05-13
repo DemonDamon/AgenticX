@@ -628,8 +628,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         if (chunk.error) {
           const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
           set({
-            status: "error",
-            errorMessage: null,
+            status: "idle",
+            errorMessage: complianceMessage,
             activeRequestId: null,
           });
           set((prev) => ({
@@ -819,8 +819,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         if (chunk.error) {
           const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
           set({
-            status: "error",
-            errorMessage: null,
+            status: "idle",
+            errorMessage: complianceMessage,
             activeRequestId: null,
           });
           set((prev) => ({
@@ -991,8 +991,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         if (chunk.error) {
           const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
           set({
-            status: "error",
-            errorMessage: null,
+            status: "idle",
+            errorMessage: complianceMessage,
             activeRequestId: null,
           });
           set((prev) => ({

@@ -21,6 +21,7 @@ import {
 import { createHash } from "node:crypto";
 import { randomBytes } from "node:crypto";
 import { syncAuthUserToPostgres } from "./chat-history";
+import { getEffectiveUserScopes } from "./auth-scopes";
 import { ulid } from "ulid";
 
 const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID?.trim();
@@ -123,7 +124,7 @@ function createRuntime(): AuthRuntime {
       status: "active",
       failedLoginCount: 0,
       lockedUntil: null,
-      scopes: [],
+      scopes: getEffectiveUserScopes([]),
     };
     await upsertUserRowFromAuthUser(owner);
     const orgId = await getDefaultOrgId(tenantId);
@@ -198,7 +199,7 @@ export async function provisionUserFromAdmin(input: ProvisionInput): Promise<voi
     status: "active",
     failedLoginCount: 0,
     lockedUntil: null,
-    scopes: input.scopes?.length ? input.scopes : ["workspace:chat", "user:read"],
+    scopes: getEffectiveUserScopes(input.scopes),
   };
   await runtime.repo.upsertUser(authUser);
   if (!process.env.DATABASE_URL?.trim()) return;
@@ -276,12 +277,13 @@ function parseJitRoleAllowlist(): Set<string> {
 }
 
 async function issueTokensForUser(runtime: AuthRuntime, user: import("@agenticx/auth").AuthUser): Promise<AuthTokens> {
+  const effectiveScopes = getEffectiveUserScopes(user.scopes);
   const context: AuthContext = {
     userId: user.id,
     tenantId: user.tenantId,
     deptId: user.deptId ?? null,
     email: user.email,
-    scopes: user.scopes,
+    scopes: effectiveScopes,
     sessionId: `${user.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
   };
   const access = await runtime.jwtService.signAccessToken(context);
@@ -333,7 +335,7 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
       status: "active",
       failedLoginCount: 0,
       lockedUntil: null,
-      scopes: [],
+      scopes: getEffectiveUserScopes([]),
     };
     await runtime.repo.upsertUser(nextUser);
     const orgId = process.env.DATABASE_URL?.trim() ? await getDefaultOrgId(runtime.tenantId) : null;
