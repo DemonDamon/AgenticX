@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { PanelRightClose, Folder, RefreshCw, FolderPlus } from "lucide-react";
+import { PanelRightClose, Folder, RefreshCw, FolderPlus, Terminal } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import Prism from "prismjs";
 import "prismjs/components/prism-bash";
@@ -568,6 +568,17 @@ export function WorkspacePanel({
             >
               <FolderPlus className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
+            <button
+              type="button"
+              className="agx-topbar-btn !px-[5px]"
+              onClick={() => {
+                setErrorText("");
+                addSameCwdTerminal();
+              }}
+              title="打开内嵌终端（当前工作区目录）；也可右键工作区标签选「在此目录下打开终端」"
+            >
+              <Terminal className="h-[18px] w-[18px]" strokeWidth={1.8} />
+            </button>
             {onClose ? (
               <button
                 className="agx-topbar-btn !px-[5px]"
@@ -637,82 +648,80 @@ export function WorkspacePanel({
         </div>
       </div>
 
-      <div
-        className="group relative min-h-[14px] shrink-0 cursor-row-resize px-2 py-2 touch-none"
-        onMouseDown={startResizeTerminal}
-        title="拖拽调整终端区域高度"
-      >
-        <div
-          className="pointer-events-none absolute left-2 right-2 top-1/2 h-px -translate-y-1/2 transition"
-          style={{ background: "var(--ui-accent-divider)" }}
-        />
-        <div
-          className="pointer-events-none absolute left-1/2 top-1/2 h-2 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90"
-          style={{ borderColor: "var(--ui-accent-divider-hover)" }}
-        />
-      </div>
-
-      <div className="flex min-h-0 shrink-0 flex-col border-t border-border" style={{ height: safeTerminalHeight }}>
-        <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
-          <span className="text-xs text-text-faint">终端</span>
-          <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-            {terminalTabs.map((tab) => (
-              <div key={tab.id} className="flex shrink-0 items-center gap-0.5">
-                <button
-                  type="button"
-                  className={`max-w-[120px] truncate rounded px-2 py-1 text-[13px] transition ${
-                    tab.id === activeTerminalTabId
-                      ? "bg-surface-hover text-text-strong"
-                      : "text-text-subtle hover:bg-surface-hover"
-                  }`}
-                  onClick={() => setActivePaneTerminalTab(paneId, tab.id)}
-                  title={tab.cwd}
-                >
-                  {tab.label}
-                </button>
-                <button
-                  type="button"
-                  className="rounded px-1.5 py-0.5 text-xs text-text-faint hover:bg-surface-hover hover:text-rose-300"
-                  onClick={() => removePaneTerminalTab(paneId, tab.id)}
-                  title="关闭终端"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="shrink-0 rounded bg-surface-hover px-2 py-1 text-[13px] text-text-muted hover:bg-surface-hover"
-            onClick={addSameCwdTerminal}
-            title="在当前工作区目录下新开终端"
+      {terminalTabs.length > 0 ? (
+        <>
+          <div
+            className="group relative min-h-[14px] shrink-0 cursor-row-resize px-2 py-2 touch-none"
+            onMouseDown={startResizeTerminal}
+            title="拖拽调整终端区域高度"
           >
-            +
-          </button>
-        </div>
-        <div className="relative min-h-0 flex-1 bg-surface-card">
-          {terminalTabs.length === 0 ? (
-            <div className="flex h-full items-center justify-center overflow-hidden px-3 text-center text-[13px] leading-relaxed text-text-faint">
-              <span className="break-words">右键工作区标签选择「在此目录下打开终端」，或点击 + 使用当前工作区目录</span>
+            <div
+              className="pointer-events-none absolute left-2 right-2 top-1/2 h-px -translate-y-1/2 transition"
+              style={{ background: "var(--ui-accent-divider)" }}
+            />
+            <div
+              className="pointer-events-none absolute left-1/2 top-1/2 h-2 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90"
+              style={{ borderColor: "var(--ui-accent-divider-hover)" }}
+            />
+          </div>
+
+          <div className="flex min-h-0 shrink-0 flex-col border-t border-border" style={{ height: safeTerminalHeight }}>
+            <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
+              <span className="text-xs text-text-faint">终端</span>
+              <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+                {terminalTabs.map((tab) => (
+                  <div key={tab.id} className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      type="button"
+                      className={`max-w-[120px] truncate rounded px-2 py-1 text-[13px] transition ${
+                        tab.id === activeTerminalTabId
+                          ? "bg-surface-hover text-text-strong"
+                          : "text-text-subtle hover:bg-surface-hover"
+                      }`}
+                      onClick={() => setActivePaneTerminalTab(paneId, tab.id)}
+                      title={tab.cwd}
+                    >
+                      {tab.label}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded px-1.5 py-0.5 text-xs text-text-faint hover:bg-surface-hover hover:text-rose-300"
+                      onClick={() => removePaneTerminalTab(paneId, tab.id)}
+                      title="关闭终端"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="shrink-0 rounded bg-surface-hover px-2 py-1 text-[13px] text-text-muted hover:bg-surface-hover"
+                onClick={addSameCwdTerminal}
+                title="在当前工作区目录下新开终端"
+              >
+                +
+              </button>
             </div>
-          ) : (
-            terminalTabs.map((tab) => {
-              const isVisible = activeTab && tab.id === activeTab.id;
-              return (
-                <div
-                  key={tab.id}
-                  className={`absolute inset-0 flex min-h-0 flex-col ${
-                    isVisible ? "z-10" : "invisible pointer-events-none z-0"
-                  }`}
-                  aria-hidden={!isVisible}
-                >
-                  <TerminalEmbed tabId={tab.id} cwd={tab.cwd} ccBridgePty={tab.ccBridgePty} />
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
+            <div className="relative min-h-0 flex-1 bg-surface-card">
+              {terminalTabs.map((tab) => {
+                const isVisible = activeTab && tab.id === activeTab.id;
+                return (
+                  <div
+                    key={tab.id}
+                    className={`absolute inset-0 flex min-h-0 flex-col ${
+                      isVisible ? "z-10" : "invisible pointer-events-none z-0"
+                    }`}
+                    aria-hidden={!isVisible}
+                  >
+                    <TerminalEmbed tabId={tab.id} cwd={tab.cwd} ccBridgePty={tab.ccBridgePty} />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      ) : null}
 
       <ContextMenu
         open={!!ctxMenu}
