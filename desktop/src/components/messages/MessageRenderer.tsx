@@ -16,7 +16,7 @@ type Props = {
   assistantName?: string;
   assistantAvatarUrl?: string;
   /** IM assistant: align with ReAct block tool column (no duplicate avatar). */
-  imAssistantVisual?: "default" | "compact-inline";
+  imAssistantVisual?: "default" | "compact-inline" | "compact-inline-with-actions";
   /** Pass-through to ImBubble: remove inner bubble border when inside unified ReAct container. */
   noBubbleBorder?: boolean;
   /** IM default ToolCallCard: omit w-8 left spacer when inside ReAct work column */
