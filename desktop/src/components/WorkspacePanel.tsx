@@ -158,21 +158,25 @@ export function WorkspacePanel({
     return Prism.highlight(filePreview.content, grammar, language);
   }, [filePreview]);
 
-  const loadTaskspaces = async () => {
-    if (!sessionId) return;
+  const loadTaskspaces = async (): Promise<Taskspace[] | undefined> => {
+    if (!sessionId) return undefined;
     setLoading(true);
     const result = await window.agenticxDesktop.listTaskspaces(sessionId);
     if (!result.ok) {
       setErrorText(result.error ?? "加载工作区失败");
       setLoading(false);
-      return;
+      return undefined;
     }
     const workspaces = Array.isArray(result.workspaces) ? result.workspaces : [];
     setTaskspaces(workspaces);
-    if (workspaces.length > 0 && !workspaces.some((item) => item.id === activeTaskspaceId)) {
-      onActiveTaskspaceChange(workspaces[0].id);
+    if (workspaces.length > 0) {
+      const active = workspaces.find((item) => item.id === activeTaskspaceId) ?? workspaces[0];
+      if (!workspaces.some((item) => item.id === activeTaskspaceId)) {
+        onActiveTaskspaceChange(active.id);
+      }
     }
     setLoading(false);
+    return workspaces;
   };
 
   const loadDir = async (taskspaceId: string, relPath = ".", force = false) => {
@@ -198,15 +202,17 @@ export function WorkspacePanel({
   };
 
   const refreshListAndActiveTaskspace = async () => {
-    await loadTaskspaces();
-    const latest = await window.agenticxDesktop.listTaskspaces(sessionId);
-    if (!latest.ok || !Array.isArray(latest.workspaces)) return;
-    const refreshedActive =
-      latest.workspaces.find((item) => item.id === activeTaskspaceId) ?? latest.workspaces[0] ?? null;
-    if (refreshedActive) {
-      onActiveTaskspaceChange(refreshedActive.id);
-      await refreshTaskspace(refreshedActive.id);
-    }
+    const workspaces = await loadTaskspaces();
+    if (!workspaces?.length) return;
+    await Promise.all(
+      workspaces.map((ts) => {
+        const key = nodeKey(ts.id, ".");
+        if (expandedDirs.has(key)) {
+          return refreshTaskspace(ts.id);
+        }
+        return Promise.resolve();
+      })
+    );
   };
 
   useEffect(() => {
@@ -259,20 +265,20 @@ export function WorkspacePanel({
     };
   }, [sessionId, paneAvatarId, paneId, setPaneSessionId]);
 
-  useEffect(() => {
-    if (!activeTaskspace) return;
-    void loadDir(activeTaskspace.id, ".");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTaskspace?.id]);
 
   useEffect(() => {
-    if (!sessionId || !activeTaskspace) return;
+    if (!sessionId) return;
     const timer = window.setInterval(() => {
-      void refreshTaskspace(activeTaskspace.id);
+      taskspaces.forEach((ts) => {
+        const key = nodeKey(ts.id, ".");
+        if (expandedDirs.has(key)) {
+          void refreshTaskspace(ts.id);
+        }
+      });
     }, 3000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, activeTaskspace?.id, expandedDirs]);
+  }, [sessionId, taskspaces, expandedDirs]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -405,6 +411,9 @@ export function WorkspacePanel({
 
   const openFile = async (taskspaceId: string, relPath: string) => {
     if (!sessionId) return;
+    if (activeTaskspaceId !== taskspaceId) {
+      onActiveTaskspaceChange(taskspaceId);
+    }
     const result = await window.agenticxDesktop.readTaskspaceFile({ sessionId, taskspaceId, path: relPath });
     if (!result.ok) {
       if ((result.error ?? "").includes("session not found")) return;
@@ -421,6 +430,9 @@ export function WorkspacePanel({
   };
 
   const toggleDir = async (taskspaceId: string, relPath: string) => {
+    if (activeTaskspaceId !== taskspaceId) {
+      onActiveTaskspaceChange(taskspaceId);
+    }
     const key = nodeKey(taskspaceId, relPath);
     if (expandedDirs.has(key)) {
       const next = new Set(expandedDirs);
@@ -483,7 +495,7 @@ export function WorkspacePanel({
             className={`min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
               selectedFilePath === item.path ? "text-text-strong" : "text-text-subtle"
             }`}
-            style={{ paddingLeft }}
+            style={{ paddingLeft: paddingLeft + 16 }}
             title={item.path}
             onClick={() => void openFile(taskspaceId, item.path)}
           >
@@ -515,83 +527,57 @@ export function WorkspacePanel({
   return (
     <div ref={panelRef} className="relative flex h-full min-h-0 w-full flex-col bg-surface-card" style={tintColor ? { backgroundColor: tintColor } : undefined}>
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex flex-col border-b border-border">
-          <div className="flex items-center gap-1 px-2 py-2">
-            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-              {taskspaces.map((item) => (
-                <button
-                  key={item.id}
-                  className={`shrink-0 rounded px-2 py-1.5 text-[13px] transition ${
-                    item.id === activeTaskspace?.id
-                      ? "text-text-strong"
-                      : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
-                  }`}
-                  style={
-                    item.id === activeTaskspace?.id
-                      ? {
-                          background: "var(--ui-accent-surface)",
-                          color: "var(--ui-accent-text)",
-                        }
-                      : {}
-                  }
-                  onClick={() => onActiveTaskspaceChange(item.id)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setCtxMenu({ x: e.clientX, y: e.clientY, taskspace: item });
-                  }}
-                  title={item.id === "default" ? (item.path || item.label) : undefined}
-                >
-                  <span className="flex items-center gap-1">
-                    <Folder className="h-3 w-3 shrink-0 opacity-70" strokeWidth={1.8} />
-                    {item.id !== "default" && item.label}
-                  </span>
-                </button>
-              ))}
+        <div className="flex flex-col">
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+            <div className="flex items-center gap-1.5 text-[13px] font-medium text-text-strong">
+              工作区
             </div>
-            <button
-              className="agx-topbar-btn !px-[5px]"
-              onClick={() => {
-                setErrorText("");
-                void refreshListAndActiveTaskspace();
-              }}
-              title="刷新工作区列表与目录"
-            >
-              <RefreshCw className="h-[18px] w-[18px]" strokeWidth={1.8} />
-            </button>
-            <button
-              className={`agx-topbar-btn !px-[5px] ${showAddForm ? "agx-topbar-btn--active" : ""}`}
-              onClick={() => {
-                setShowAddForm((prev) => !prev);
-                setErrorText("");
-              }}
-              title="新增工作区"
-            >
-              <FolderPlus className="h-[18px] w-[18px]" strokeWidth={1.8} />
-            </button>
-            <button
-              type="button"
-              className="agx-topbar-btn !px-[5px]"
-              onClick={() => {
-                setErrorText("");
-                addSameCwdTerminal();
-              }}
-              title="打开内嵌终端（当前工作区目录）；也可右键工作区标签选「在此目录下打开终端」"
-            >
-              <Terminal className="h-[18px] w-[18px]" strokeWidth={1.8} />
-            </button>
-            {onClose ? (
+            <div className="flex items-center gap-0.5">
               <button
                 className="agx-topbar-btn !px-[5px]"
-                onClick={onClose}
-                title="关闭工作区面板"
+                onClick={() => {
+                  setErrorText("");
+                  void refreshListAndActiveTaskspace();
+                }}
+                title="刷新工作区列表与目录"
               >
-                <PanelRightClose className="h-[18px] w-[18px]" strokeWidth={1.8} />
+                <RefreshCw className="h-4 w-4" strokeWidth={1.8} />
               </button>
-            ) : null}
+              <button
+                className={`agx-topbar-btn !px-[5px] ${showAddForm ? "agx-topbar-btn--active" : ""}`}
+                onClick={() => {
+                  setShowAddForm((prev) => !prev);
+                  setErrorText("");
+                }}
+                title="新增工作区"
+              >
+                <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
+              </button>
+              <button
+                type="button"
+                className="agx-topbar-btn !px-[5px]"
+                onClick={() => {
+                  setErrorText("");
+                  addSameCwdTerminal();
+                }}
+                title="打开内嵌终端（当前选中的工作区目录）；也可右键工作区节点选「在此目录下打开终端」"
+              >
+                <Terminal className="h-4 w-4" strokeWidth={1.8} />
+              </button>
+              {onClose ? (
+                <button
+                  className="agx-topbar-btn !px-[5px]"
+                  onClick={onClose}
+                  title="关闭工作区面板"
+                >
+                  <PanelRightClose className="h-4 w-4" strokeWidth={1.8} />
+                </button>
+              ) : null}
+            </div>
           </div>
           {showAddForm ? (
             <div
-              className="border-t border-border px-3 py-2"
+              className="border-b border-border px-3 py-2"
               style={tintColor ? { backgroundColor: tintColor } : undefined}
             >
               <div className="mb-2 text-[13px] font-medium text-text-subtle">新增工作区</div>
@@ -641,10 +627,45 @@ export function WorkspacePanel({
             </div>
           ) : null}
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto border-b border-border px-2 py-2">
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
           {loading ? <div className="text-[13px] text-text-faint">加载中...</div> : null}
-          {!loading && !activeTaskspace ? <div className="text-[13px] text-text-faint">暂无工作区</div> : null}
-          {!loading && activeTaskspace ? renderDir(activeTaskspace.id, ".", 0) : null}
+          {!loading && taskspaces.length === 0 ? <div className="text-[13px] text-text-faint">暂无工作区</div> : null}
+          {!loading && taskspaces.map((ts) => {
+            const key = nodeKey(ts.id, ".");
+            const isExpanded = expandedDirs.has(key);
+            const isActive = activeTaskspaceId === ts.id;
+            
+            return (
+              <div key={ts.id} className="mb-0.5">
+                <button
+                  className={`flex w-full min-w-0 items-center gap-1.5 rounded px-1 py-1.5 text-left text-[13px] font-medium transition ${
+                    isActive ? "bg-surface-hover text-text-strong" : "text-text-subtle hover:bg-surface-hover hover:text-text-primary"
+                  }`}
+                  onClick={() => {
+                    onActiveTaskspaceChange(ts.id);
+                    const next = new Set(expandedDirs);
+                    if (next.has(key)) {
+                      next.delete(key);
+                    } else {
+                      next.add(key);
+                      void loadDir(ts.id, ".");
+                    }
+                    setExpandedDirs(next);
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setCtxMenu({ x: e.clientX, y: e.clientY, taskspace: ts });
+                  }}
+                  title={ts.id === "default" ? (ts.path || ts.label) : ts.path}
+                >
+                  <span className="inline-block w-3 shrink-0 text-center text-text-faint">{isExpanded ? "▾" : "▸"}</span>
+                  <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" strokeWidth={1.8} />
+                  <span className="min-w-0 flex-1 truncate">{ts.id !== "default" ? ts.label : (ts.path || ts.label || "默认工作区")}</span>
+                </button>
+                {isExpanded ? renderDir(ts.id, ".", 1) : null}
+              </div>
+            );
+          })}
         </div>
       </div>
 
