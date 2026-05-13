@@ -4770,6 +4770,8 @@ export function SettingsPanel({
   const setUserAvatarUrl = useAppStore((s) => s.setUserAvatarUrl);
   const userPreference = useAppStore((s) => s.userPreference);
   const setUserPreference = useAppStore((s) => s.setUserPreference);
+  const themeColor = useAppStore((s) => s.themeColor);
+  const setThemeColor = useAppStore((s) => s.setThemeColor);
   const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
   const effectiveMetaAvatarUrl = metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL;
   const setMetaAvatarUrl = useAppStore((s) => s.setMetaAvatarUrl);
@@ -6101,6 +6103,27 @@ export function SettingsPanel({
                       <option value="clean">Clean 风格（极简分隔块）</option>
                     </select>
                   </label>
+                  <div className="mt-3 block text-sm text-text-muted">
+                    主题色系
+                    <div className="mt-2 flex items-center gap-3">
+                      {[
+                        { id: "blue", color: "bg-blue-500", label: "蓝色" },
+                        { id: "green", color: "bg-emerald-500", label: "绿色" },
+                        { id: "pink", color: "bg-pink-500", label: "粉红色" },
+                        { id: "yellow", color: "bg-amber-500", label: "黄色" },
+                      ].map((tc) => (
+                        <button
+                          key={tc.id}
+                          type="button"
+                          className={`group relative flex h-6 w-6 items-center justify-center rounded-full transition-all hover:scale-110 ${themeColor === tc.id ? "ring-2 ring-text-primary ring-offset-2 ring-offset-surface-base" : ""}`}
+                          onClick={() => setThemeColor(tc.id as any)}
+                          title={tc.label}
+                        >
+                          <span className={`h-full w-full rounded-full ${tc.color}`} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </Panel>
                 <Panel title="用户档案">
                   <p className="mb-3 text-[11px] leading-relaxed text-text-subtle">
@@ -6130,7 +6153,7 @@ export function SettingsPanel({
                           className="h-12 w-12 rounded-full border border-border object-cover"
                         />
                       ) : (
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-surface-card text-sm font-semibold text-text-primary">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-sm font-semibold text-black">
                           {(userNickname.trim().slice(0, 1) || "我").toUpperCase()}
                         </div>
                       )}

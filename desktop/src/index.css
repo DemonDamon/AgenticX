@@ -129,6 +129,30 @@ body {
   background: color-mix(in srgb, var(--text-subtle) 80%, transparent);
 }
 
+/* Token 消耗看板左侧栏：与主区留出间距；悬停时再显示滚动条，减少「常显灰条」观感 */
+.agx-token-dash-aside {
+  padding-right: 10px;
+  margin-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.agx-token-dash-aside:hover {
+  scrollbar-color: color-mix(in srgb, var(--text-faint) 70%, transparent) transparent;
+}
+.agx-token-dash-aside::-webkit-scrollbar {
+  width: 5px;
+}
+.agx-token-dash-aside::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 999px;
+}
+.agx-token-dash-aside:hover::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--text-faint) 70%, transparent);
+}
+.agx-token-dash-aside:hover::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--text-subtle) 75%, transparent);
+}
+
 .agx-code-stream {
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--surface-card-strong) 90%, transparent), color-mix(in srgb, var(--surface-card) 90%, transparent));
@@ -159,3 +183,38 @@ body {
 :root[data-theme="light"] .agx-settings-panel select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' viewBox='0 0 24 24'%3E%3Cpath stroke='%23475569' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
 }
+
+/* Theme Colors */
+:root[data-theme-color="blue"] {
+  --theme-color-rgb: 59, 130, 246;
+}
+:root[data-theme-color="green"] {
+  --theme-color-rgb: 16, 185, 129;
+}
+:root[data-theme-color="pink"] {
+  --theme-color-rgb: 236, 72, 153;
+}
+:root[data-theme-color="yellow"] {
+  --theme-color-rgb: 245, 158, 11;
+}
+
+:root[data-theme-color] {
+  --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.42);
+  --chat-im-user-border: rgba(var(--theme-color-rgb), 0.55);
+  --chat-im-avatar-bg: rgba(var(--theme-color-rgb), 0.9);
+}
+:root[data-theme="light"][data-theme-color] {
+  --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.28);
+}
+:root[data-theme="dim"][data-theme-color] {
+  --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.4);
+}
+
+.agx-theme-focus-ring:focus-within {
+  border-color: rgba(var(--theme-color-rgb), 0.4);
+  box-shadow: 0 0 24px rgba(var(--theme-color-rgb), 0.15);
+}
+:root[data-theme="dark"] .agx-theme-focus-ring:focus-within {
+  box-shadow: 0 0 24px rgba(var(--theme-color-rgb), 0.2);
+}
+

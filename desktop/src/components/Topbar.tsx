@@ -168,7 +168,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
               title={agxAccount.displayName || agxAccount.email || "已登录"}
               aria-label="账号菜单"
             >
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400/90 text-[10px] font-semibold text-black">
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-[10px] font-semibold text-black">
                 {userInitial}
               </span>
               <span className="max-w-[120px] truncate text-[12px]">

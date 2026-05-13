@@ -246,6 +246,7 @@ export function App() {
   const focusModeTall = useAppStore((s) => s.focusModeTall);
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const theme = useAppStore((s) => s.theme);
+  const themeColor = useAppStore((s) => s.themeColor);
   const setTheme = useAppStore((s) => s.setTheme);
   const setAgxAccount = useAppStore((s) => s.setAgxAccount);
   const chatStyle = useAppStore((s) => s.chatStyle);
@@ -1204,12 +1205,13 @@ export function App() {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
+    document.documentElement.setAttribute("data-theme-color", themeColor);
     try {
       window.localStorage.setItem("agx-theme", theme);
     } catch {
       // ignore storage failures
     }
-  }, [theme]);
+  }, [theme, themeColor]);
 
   useEffect(() => {
     // Initial account hydration and subscription to device-flow OAuth events.

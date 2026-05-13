@@ -5380,7 +5380,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               ) : null}
             </div>
           ) : (
-            <div className="mx-auto min-w-0 max-w-4xl space-y-2">
+            <div className="mx-auto min-w-0 w-full max-w-4xl space-y-2">
               {renderedMessages}
             </div>
           )}
@@ -5403,7 +5403,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           </div>
         )}
 
-        <div className="agx-pane-composer-shell mx-auto w-full max-w-4xl shrink-0 px-4 py-2.5">
+        {/* 外层 px 与列表 agx-pane-message-list 一致，内层 max-w-4xl 单独一层，避免「padding 吃进 max-width」导致输入框比气泡窄一截 */}
+        <div className="shrink-0 px-4 py-2.5">
+          <div className="agx-pane-composer-shell mx-auto min-w-0 w-full max-w-4xl">
           {selectedSubAgent ? (
             <div className="mb-1 inline-flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-0.5 text-xs text-text-muted">
               对话目标: {selectedSubAgent}
@@ -5458,7 +5460,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               <button className="rounded px-1 hover:bg-surface-hover" onClick={() => setSelectedMessageIds(new Set())}>取消</button>
             </div>
           ) : null}
-          <div className="agx-pane-composer-body relative rounded-2xl border border-border bg-surface-card transition-all duration-300 ease-out focus-within:border-pink-500/40 focus-within:shadow-[0_0_24px_rgba(236,72,153,0.15)] dark:focus-within:shadow-[0_0_24px_rgba(244,114,182,0.2)]">
+          <div className="agx-pane-composer-body agx-theme-focus-ring relative rounded-2xl border border-border bg-surface-card transition-all duration-300 ease-out">
             {visibleAttachmentEntries.length > 0 ? (
               <div className="flex flex-wrap gap-1.5 px-3 pt-3">
                 {visibleAttachmentEntries.map(([key, file]) => (
@@ -5796,6 +5798,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               )}
             </div>
           ) : null}
+          </div>
         </div>
       </div>
 
