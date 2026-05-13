@@ -3581,18 +3581,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                       </svg>
                     </button>
                   ) : null}
-                  <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
-                    <ChatImAvatar label={paneAvatarMeta.name} imageUrl={paneAvatarMeta.url} />
-                  </div>
                   {useUnifiedReActCard ? (
                     <div
                       className="min-w-0 flex-1 overflow-hidden rounded-xl border border-border bg-surface-card"
-                      style={{ maxWidth: "min(92%, 960px)" }}
                     >
                       {groupedWork.map((r, i) => renderGroupedRow(r, i, { reactWorkColumn: true, reactFlat: true, reactHideBadge: i > 0 }))}
                     </div>
                   ) : (
-                    <div className="flex min-w-0 flex-1 flex-col gap-2" style={{ maxWidth: "min(92%, 960px)" }}>
+                    <div className="flex min-w-0 flex-1 flex-col gap-2">
                       {groupedWork.map((r, i) => renderGroupedRow(r, i, { reactWorkColumn: true, reactShowActions: true }))}
                     </div>
                   )}
@@ -3604,8 +3600,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 {!hasStreamingRow && workMessages.length > 0 && useUnifiedReActCard ? (
                   <div className="flex min-w-0 items-start gap-2">
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
-                    <div className="h-8 w-8 shrink-0" aria-hidden />
-                    <div className="min-w-0 flex-1" style={{ maxWidth: "min(92%, 960px)" }}>
+                    <div className="min-w-0 flex-1">
                       <div className="ml-auto flex w-fit max-w-full flex-wrap items-center gap-2 text-[11px] text-text-faint">
                         <button
                           type="button"
@@ -5250,7 +5245,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         }`}
         style={{ minWidth: 280 }}
       >
-        <div className="agx-pane-toolbar flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
+        <div className="agx-pane-toolbar flex h-10 shrink-0 items-center justify-between px-4">
           <div
             className={`flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden ${
               paneSortableListeners ? "cursor-grab touch-none active:cursor-grabbing" : ""
@@ -5348,7 +5343,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
         <div
           ref={listRef}
-          className="agx-pane-message-list relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-3"
+          className="agx-pane-message-list relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3"
         >
           {focusComposerOnly ? null : !pane.sessionId && (isGroupPane || isAutomationTaskPane) ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-xs text-text-faint">
@@ -5385,7 +5380,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               ) : null}
             </div>
           ) : (
-            <div className="min-w-0 space-y-2">
+            <div className="mx-auto min-w-0 max-w-4xl space-y-2">
               {renderedMessages}
             </div>
           )}
@@ -5408,7 +5403,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           </div>
         )}
 
-        <div className="agx-pane-composer-shell shrink-0 px-4 py-2.5">
+        <div className="agx-pane-composer-shell mx-auto w-full max-w-4xl shrink-0 px-4 py-2.5">
           {selectedSubAgent ? (
             <div className="mb-1 inline-flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-0.5 text-xs text-text-muted">
               对话目标: {selectedSubAgent}

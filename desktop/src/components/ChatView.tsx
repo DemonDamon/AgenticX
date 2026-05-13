@@ -1512,7 +1512,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             </div>
           </div>
         )}
-        <div className={`mx-auto max-w-2xl space-y-3 ${isLite ? "text-[15px]" : ""}`}>
+        <div className={`mx-auto max-w-3xl space-y-3 ${isLite ? "text-[15px]" : ""}`}>
           {(() => {
             const renderGroupedChatRow = (row: GroupedChatRow, reactWorkCol: boolean) => {
               if (row.kind === "message") {
@@ -1560,9 +1560,6 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                 return (
                   <div key={blockKey} className="space-y-3">
                     <div className="flex min-w-0 items-start gap-2">
-                      <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
-                        <ChatImAvatar label="Machi" />
-                      </div>
                       <div className="flex min-w-0 flex-1 flex-col gap-3">
                         {groupedWork.map((r) => renderGroupedChatRow(r, true))}
                       </div>
