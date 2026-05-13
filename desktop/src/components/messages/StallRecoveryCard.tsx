@@ -28,11 +28,8 @@ export function StallRecoveryCard({
     <div className="flex min-w-0 items-start gap-2">
       <div className="flex min-w-0 flex-1 justify-start gap-2">
         <div className="flex min-w-0 flex-1 flex-row gap-2">
-          {/* Spacer aligned with ImBubble / ToolCallCard avatar column */}
-          <div className="flex h-8 w-8 shrink-0" aria-hidden />
           <div
             className="flex min-w-0 flex-1 flex-col items-start"
-            style={{ maxWidth: "min(92%, 960px)" }}
           >
             <div
               className={`w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-[15px] leading-relaxed ${borderAccent[kind]}`}

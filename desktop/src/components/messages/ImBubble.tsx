@@ -199,20 +199,10 @@ export function ImBubble({
           </svg>
         </button>
       ) : null}
-      <div className={`flex min-w-0 flex-1 gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
-        <div className={`flex min-w-0 flex-1 gap-2 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
-          {compactAssistant ? null : (
-            <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
-              <ChatImAvatar label={displayName} imageUrl={avatarUrl} />
-            </div>
-          )}
-          <div
-            className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}`}
-            style={compactAssistant && noBubbleBorder ? undefined : { maxWidth: isUser ? "min(80%, 700px)" : "min(92%, 960px)" }}
-          >
-            {compactAssistant ? null : (
-              <span className="mb-0.5 max-w-full truncate px-1 text-[11px] text-text-faint">{displayName}</span>
-            )}
+      <div
+        className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}`}
+      >
+
             <div
               className={
                 compactAssistant && noBubbleBorder
@@ -397,8 +387,6 @@ export function ImBubble({
               </div>
             )}
           </div>
-        </div>
-      </div>
       {menuOpen && !compactAssistant ? (
         <div
           ref={menuRef}

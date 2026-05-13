@@ -122,8 +122,7 @@ export function TurnToolGroupCard({
   return (
     <div className="flex min-w-0 items-start gap-2">
       <div className="flex min-w-0 flex-1 flex-row gap-2">
-        {omitLeadingSpacer ? null : <div className="flex h-8 w-8 shrink-0" aria-hidden />}
-        <div className="flex min-w-0 flex-1 flex-col items-start" style={{ maxWidth: "min(92%, 960px)" }}>
+        <div className="flex min-w-0 flex-1 flex-col items-start">
           {cardContent}
         </div>
       </div>
