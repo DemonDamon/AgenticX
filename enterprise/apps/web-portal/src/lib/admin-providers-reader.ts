@@ -46,7 +46,7 @@ function requiredTenant(): string {
 }
 
 function rowToProvider(row: typeof mpTable.$inferSelect): ProviderRecord {
-  const modelsRaw = Array.isArray(row.models) ? (row.models as ProviderModelRecord[]) : [];
+  const modelsRaw = Array.isArray(row.models) ? (row.models as unknown as ProviderModelRecord[]) : [];
   return {
     id: row.providerId,
     displayName: row.displayName,

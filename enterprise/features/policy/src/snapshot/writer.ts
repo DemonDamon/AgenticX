@@ -94,7 +94,7 @@ export async function replaceTenantSnapshot(
   } else {
     await db.delete(snapTable).where(eq(snapTable.tenantId, tenantId));
   }
-  return `pg:${snapTable.name}:${tenantId}`;
+  return `pg:enterprise_runtime_policy_snapshots:${tenantId}`;
 }
 
 export async function writeSnapshot(snapshot: PolicySnapshot): Promise<string> {

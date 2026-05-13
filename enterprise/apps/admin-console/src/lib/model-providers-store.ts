@@ -100,7 +100,7 @@ function toPublic(record: ProviderRecord): PublicProviderRecord {
 }
 
 function rowToRecord(row: typeof mpTable.$inferSelect): ProviderRecord {
-  const modelsRaw = Array.isArray(row.models) ? (row.models as ProviderModel[]) : [];
+  const modelsRaw = Array.isArray(row.models) ? (row.models as unknown as ProviderModel[]) : [];
   return {
     id: row.providerId,
     displayName: row.displayName,
@@ -149,7 +149,7 @@ async function migrateLegacyProvidersIfNeeded(tenantId: string): Promise<void> {
         isDefault: p.isDefault ?? false,
         route: (p.route as string) ?? "third-party",
         envKey: p.envKey ?? null,
-        models: p.models ?? [],
+        models: (p.models ?? []) as unknown as Record<string, unknown>[],
         createdAt: new Date(p.createdAt || now),
         updatedAt: new Date(p.updatedAt || now),
       });
@@ -349,7 +349,7 @@ export async function createProvider(input: CreateProviderInput): Promise<Public
     isDefault: next.isDefault,
     route: next.route,
     envKey: next.envKey ?? null,
-    models: next.models as unknown[],
+    models: next.models as unknown as Record<string, unknown>[],
     createdAt: new Date(ts),
     updatedAt: new Date(ts),
   });
@@ -399,7 +399,7 @@ export async function updateProvider(id: string, patch: UpdateProviderInput): Pr
       isDefault: record.isDefault,
       route: record.route,
       envKey: record.envKey ?? null,
-      models: record.models as unknown[],
+      models: record.models as unknown as Record<string, unknown>[],
       updatedAt: new Date(record.updatedAt),
     })
     .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)));
@@ -445,7 +445,7 @@ export async function addProviderModel(id: string, model: ProviderModel): Promis
   await db
     .update(mpTable)
     .set({
-      models: record.models as unknown[],
+      models: record.models as unknown as Record<string, unknown>[],
       updatedAt: new Date(record.updatedAt),
     })
     .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)));
@@ -480,7 +480,7 @@ export async function updateProviderModel(
   await db
     .update(mpTable)
     .set({
-      models: record.models as unknown[],
+      models: record.models as unknown as Record<string, unknown>[],
       updatedAt: new Date(record.updatedAt),
     })
     .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)));
@@ -509,7 +509,7 @@ export async function deleteProviderModel(id: string, modelName: string): Promis
   await db
     .update(mpTable)
     .set({
-      models: record.models as unknown[],
+      models: record.models as unknown as Record<string, unknown>[],
       updatedAt: new Date(record.updatedAt),
     })
     .where(and(eq(mpTable.tenantId, tenantId), eq(mpTable.providerId, id)));
