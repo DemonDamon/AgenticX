@@ -296,7 +296,12 @@ export function ImBubble({
             {hideActions ? null : isUser ? (
               <div className="mt-1 flex flex-wrap items-center gap-0.5 text-text-faint">
                 <HoverTip label="复制">
-                  <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>
+                  <button
+                    type="button"
+                    className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => onCopyMessage?.(message)}
+                  >
                     <Copy size={13} />
                   </button>
                 </HoverTip>
@@ -317,13 +322,23 @@ export function ImBubble({
                 </HoverTip>
                 {onRetryMessage ? (
                   <HoverTip label="重试">
-                    <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onClick={() => onRetryMessage(message)}>
+                    <button
+                      type="button"
+                      className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => onRetryMessage(message)}
+                    >
                       <RotateCcw size={13} />
                     </button>
                   </HoverTip>
                 ) : null}
                 <HoverTip label="多选">
-                  <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onClick={() => onToggleSelectMessage?.(message)}>
+                  <button
+                    type="button"
+                    className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => onToggleSelectMessage?.(message)}
+                  >
                     <LayoutList size={13} />
                   </button>
                 </HoverTip>
@@ -332,7 +347,12 @@ export function ImBubble({
               <div className="mt-1 min-w-0 self-stretch">
                 <div className="ml-auto flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint">
                   <HoverTip label="复制">
-                    <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onClick={() => onCopyMessage?.(message)}>
+                    <button
+                      type="button"
+                      className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => onCopyMessage?.(message)}
+                    >
                       <Copy size={13} />
                     </button>
                   </HoverTip>
@@ -353,13 +373,23 @@ export function ImBubble({
                   </HoverTip>
                   {onRetryMessage ? (
                     <HoverTip label="重试">
-                      <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onClick={() => onRetryMessage(message)}>
+                      <button
+                        type="button"
+                        className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => onRetryMessage(message)}
+                      >
                         <RotateCcw size={13} />
                       </button>
                     </HoverTip>
                   ) : null}
                   <HoverTip label="多选">
-                    <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onClick={() => onToggleSelectMessage?.(message)}>
+                    <button
+                      type="button"
+                      className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => onToggleSelectMessage?.(message)}
+                    >
                       <LayoutList size={13} />
                     </button>
                   </HoverTip>
@@ -375,7 +405,11 @@ export function ImBubble({
           className="fixed z-[80] w-36 rounded-lg border border-border bg-surface-panel p-1 shadow-2xl"
           style={{ left: menuPos.x, top: menuPos.y }}
         >
-          <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onCopyMessage?.(message); }}>
+          <button
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { setMenuOpen(false); onCopyMessage?.(message); }}
+          >
             <Copy size={12} className="shrink-0 text-text-faint" />复制
           </button>
           <button
@@ -400,11 +434,19 @@ export function ImBubble({
             <Share2 size={12} className="shrink-0 text-text-faint" />转发
           </button>
           {onRetryMessage ? (
-            <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onRetryMessage(message); }}>
+            <button
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setMenuOpen(false); onRetryMessage(message); }}
+            >
               <RotateCcw size={12} className="shrink-0 text-text-faint" />重试
             </button>
           ) : null}
-          <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover" onClick={() => { setMenuOpen(false); onToggleSelectMessage?.(message); }}>
+          <button
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { setMenuOpen(false); onToggleSelectMessage?.(message); }}
+          >
             <LayoutList size={12} className="shrink-0 text-text-faint" />多选
           </button>
         </div>
