@@ -35,3 +35,4 @@ packages/sdk-py/.pytest_cache/
 *.log
 *.tsbuildinfo
 .DS_Store
+.vercel
