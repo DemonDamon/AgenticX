@@ -3313,6 +3313,56 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     [apiBase, apiToken, pane.id, pane.messages, pane.sessionId, setPaneMessages]
   );
 
+  const editUserMessage = useCallback(
+    async (msg: Message, newContent: string) => {
+      if (msg.role !== "user") return;
+      const sid = (pane.sessionId || "").trim();
+      if (!sid || !apiBase) return;
+      const msgs = pane.messages ?? [];
+      const idx = msgs.findIndex((m) => m.id === msg.id);
+      if (idx < 0) return;
+      const toRemove = msgs.slice(idx);
+      if (toRemove.length > 0) {
+        try {
+          const resp = await fetch(`${apiBase}/api/session/messages/delete`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+            body: JSON.stringify({
+              session_id: sid,
+              messages: toRemove.map((m) => ({
+                role: m.role,
+                content: m.content,
+                timestamp: m.timestamp,
+                agent_id: m.agentId,
+              })),
+            }),
+          });
+          const data = (await resp.json()) as { ok?: boolean; removed?: number; requested?: number };
+          const removed = typeof data.removed === "number" ? data.removed : 0;
+          const requested = typeof data.requested === "number" ? data.requested : toRemove.length;
+          if (!resp.ok || !data.ok || removed < requested) {
+            const result = await window.agenticxDesktop.loadSessionMessages(sid);
+            if (result.ok && Array.isArray(result.messages)) {
+              const mapped = result.messages.map((item, midx) =>
+                mapLoadedSessionMessage(item as LoadedSessionMessage, sid, midx)
+              );
+              setPaneMessages(pane.id, mapped);
+            }
+            return;
+          }
+          setPaneMessages(pane.id, msgs.slice(0, idx));
+        } catch (err) {
+          console.error("[ChatPane] edit trim messages failed:", err);
+          return;
+        }
+      }
+      await sendChatRef.current(newContent, {
+        retryAttachments: msg.attachments ?? [],
+      });
+    },
+    [apiBase, apiToken, pane.id, pane.messages, pane.sessionId, setPaneMessages]
+  );
+
   // Group chats also have a real streaming run in flight; only the
   // assistant-text overlay is gated by !isGroupPane (group chats render
   // per-member typing bubbles instead). The stop button + barge-in resend
@@ -3498,6 +3548,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onFavoriteMessage={favoriteMessage}
               onForwardMessage={forwardOneMessage}
               onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
+              onEditMessage={canRetryThisUserMessage ? editUserMessage : undefined}
               onToggleSelectMessage={toggleSelectMessage}
               onResolveInlineConfirm={(confirm, approved) => void resolveGroupInlineConfirm(confirm, approved)}
               selectable={rowSelectable}
@@ -3880,6 +3931,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   ) => {
     if (focusMode) {
       try {
+        // @ts-expect-error - focusModeExpand is added in a newer IPC version
         const expandFn = window.agenticxDesktop?.focusModeExpand;
         if (expandFn) {
           const res = await expandFn();

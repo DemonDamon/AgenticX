@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
-import { Bookmark, Copy, LayoutList, Quote, RotateCcw, Share2 } from "lucide-react";
+import { Bookmark, Copy, LayoutList, Quote, RotateCcw, Share2, Pencil, X, ArrowUp } from "lucide-react";
 import type { Message, MessageAttachment } from "../../store";
 import { AttachmentCard } from "./AttachmentCard";
 import { ReasoningBlock } from "./ReasoningBlock";
@@ -38,6 +38,7 @@ type Props = {
   onToggleSelectMessage?: (message: Message) => void;
   onForwardMessage?: (message: Message, selectedText?: string) => void;
   onRetryMessage?: (message: Message) => void;
+  onEditMessage?: (message: Message, newContent: string) => void;
   selectable?: boolean;
   selected?: boolean;
 };
@@ -97,6 +98,7 @@ export function ImBubble({
   onToggleSelectMessage,
   onForwardMessage,
   onRetryMessage,
+  onEditMessage,
   selectable,
   selected,
   assistantVisual = "default",
@@ -135,6 +137,20 @@ export function ImBubble({
   const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement | null>(null);
   const msgContentRef = useRef<HTMLDivElement | null>(null);
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState("");
+  const editInputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (isEditing && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.setSelectionRange(editInputRef.current.value.length, editInputRef.current.value.length);
+      // Auto-resize initially
+      editInputRef.current.style.height = "auto";
+      editInputRef.current.style.height = `${Math.min(editInputRef.current.scrollHeight, 200)}px`;
+    }
+  }, [isEditing]);
 
   const runFavorite = () => {
     const picked = getContainedSelectionText(msgContentRef.current);
@@ -202,7 +218,56 @@ export function ImBubble({
       <div
         className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}`}
       >
-
+        {isEditing ? (
+          <div className="flex w-full max-w-3xl items-end gap-2">
+            <button
+              type="button"
+              className="mb-1 p-1.5 text-text-faint hover:text-text-strong transition"
+              onClick={() => setIsEditing(false)}
+            >
+              <X size={16} />
+            </button>
+            <div className="flex-1 rounded-xl border border-[rgb(var(--theme-color-rgb,6,182,212))] bg-surface-card flex items-end p-1">
+              <textarea
+                ref={editInputRef}
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                className="w-full resize-none bg-transparent px-2 py-1.5 text-[15px] text-text-strong outline-none"
+                rows={1}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    if (editContent.trim() && onEditMessage) {
+                      onEditMessage(message, editContent);
+                      setIsEditing(false);
+                    }
+                  } else if (e.key === "Escape") {
+                    setIsEditing(false);
+                  }
+                }}
+                onInput={(e) => {
+                  const target = e.target as HTMLTextAreaElement;
+                  target.style.height = "auto";
+                  target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
+                }}
+              />
+              <button
+                type="button"
+                className="m-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--theme-color-rgb,6,182,212))] text-white transition hover:opacity-90 disabled:opacity-50"
+                disabled={!editContent.trim()}
+                onClick={() => {
+                  if (editContent.trim() && onEditMessage) {
+                    onEditMessage(message, editContent);
+                    setIsEditing(false);
+                  }
+                }}
+              >
+                <ArrowUp size={16} strokeWidth={2.5} />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
             <div
               className={
                 compactAssistant && noBubbleBorder
@@ -310,6 +375,21 @@ export function ImBubble({
                     <Share2 size={13} />
                   </button>
                 </HoverTip>
+                {onEditMessage ? (
+                  <HoverTip label="修改">
+                    <button
+                      type="button"
+                      className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setEditContent(message.content);
+                        setIsEditing(true);
+                      }}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  </HoverTip>
+                ) : null}
                 {onRetryMessage ? (
                   <HoverTip label="重试">
                     <button
@@ -386,7 +466,9 @@ export function ImBubble({
                 </div>
               </div>
             )}
-          </div>
+          </>
+        )}
+      </div>
       {menuOpen && !compactAssistant ? (
         <div
           ref={menuRef}
@@ -421,6 +503,19 @@ export function ImBubble({
           >
             <Share2 size={12} className="shrink-0 text-text-faint" />转发
           </button>
+          {onEditMessage ? (
+            <button
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setMenuOpen(false);
+                setEditContent(message.content);
+                setIsEditing(true);
+              }}
+            >
+              <Pencil size={12} className="shrink-0 text-text-faint" />修改
+            </button>
+          ) : null}
           {onRetryMessage ? (
             <button
               className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
