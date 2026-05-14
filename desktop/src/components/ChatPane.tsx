@@ -1825,8 +1825,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   /** Last resolved bridge session mode (cc_bridge_start), not global Settings radio. */
   const ccBridgeLastSessionModeRef = useRef<CcBridgeSessionModeHint>("");
   const [wechatDesktopBound, setWechatDesktopBound] = useState(false);
-  /** Meta/分身窗格「新对话 · 继承上下文」时，首条发送前再 createSession 并带上此 id。 */
-  const pendingInheritFromSessionIdRef = useRef<string | null>(null);
   const [automationTaskErrorHint, setAutomationTaskErrorHint] = useState<string | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
@@ -4012,11 +4010,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       try {
         const avatarId =
           pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
-        const inheritFrom = pendingInheritFromSessionIdRef.current;
-        pendingInheritFromSessionIdRef.current = null;
         const created = await window.agenticxDesktop.createSession({
           avatar_id: avatarId,
-          ...(inheritFrom ? { inherit_from_session_id: inheritFrom } : {}),
         });
         if (!created.ok || !created.session_id) {
           addPaneMessage(
@@ -4037,9 +4032,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         pollSessionSidRef.current = requestSessionId;
         setPaneSessionId(pane.id, requestSessionId);
         clearPaneAwaitingFreshSession(pane.id);
-        if (created.inherited) {
-          setPaneContextInherited(pane.id, true);
-        }
         useAppStore.getState().bumpSessionCatalogRevision();
         window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
       } catch (err) {
@@ -5104,13 +5096,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     // previously-running session (which would trap new messages in the
     // running session's queue).
     markPaneAwaitingFreshSession(pane.id);
-    if (isGroupPane || isAutomationTaskPane) {
-      setPaneSessionId(pane.id, "");
-      void initSession(inherit, prevSessionId || undefined);
-      return;
-    }
-    pendingInheritFromSessionIdRef.current = inherit && prevSessionId ? prevSessionId : null;
     setPaneSessionId(pane.id, "");
+    // Eager createSession (same as group/automation): WorkspacePanel and IPC
+    // taskspace APIs require a server-backed session_id; lazy Meta-only flow
+    // left sessionId empty until first send, so workspaces stayed blank.
+    void initSession(inherit, prevSessionId || undefined);
   };
 
   const maxTaskspaceWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.4)) : 480;
