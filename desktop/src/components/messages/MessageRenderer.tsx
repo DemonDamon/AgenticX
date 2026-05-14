@@ -35,6 +35,8 @@ type Props = {
   selected?: boolean;
   onResolveInlineConfirm?: (confirm: NonNullable<Message["inlineConfirm"]>, approved: boolean) => void;
   onFollowupClick?: (text: string) => void;
+  /** When true, assistant suggested-question chips are not rendered here (parent renders them outside unified ReAct card). */
+  omitSuggestedQuestions?: boolean;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -121,6 +123,7 @@ export function MessageRenderer({
   toolCardOmitLeadingSpacer = false,
   noBubbleBorder = false,
   onFollowupClick,
+  omitSuggestedQuestions = false,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   if (message.role === "user" || message.role === "assistant") {
@@ -154,6 +157,7 @@ export function MessageRenderer({
         selectable={selectable}
         selected={selected}
         onFollowupClick={onFollowupClick}
+        omitSuggestedQuestions={omitSuggestedQuestions}
       />
     );
   }

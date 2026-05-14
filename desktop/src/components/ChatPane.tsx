@@ -2,14 +2,19 @@ import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, us
 import { createPortal } from "react-dom";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react";
 import {
+  Bookmark,
   Check,
   ChevronDown,
+  Copy,
   Database,
   GitBranch,
   GripVertical,
   Expand,
   Layers,
+  LayoutList,
+  Quote,
   Search,
+  Share2,
   SquarePen,
   Wand2,
   Wrench,
@@ -3524,11 +3529,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, []);
 
   const renderedMessages = useMemo(() => {
-    const renderGroupedRow = (row: GroupedChatRow, rowIdx: number, opts: { reactWorkColumn?: boolean; reactFlat?: boolean; reactHideBadge?: boolean; reactShowActions?: boolean }) => {
+    const renderGroupedRow = (
+      row: GroupedChatRow,
+      rowIdx: number,
+      opts: {
+        reactWorkColumn?: boolean;
+        reactFlat?: boolean;
+        reactHideBadge?: boolean;
+        reactShowActions?: boolean;
+        omitSuggestedQuestions?: boolean;
+      }
+    ) => {
       const reactCol = opts.reactWorkColumn ?? false;
       const reactFlat = opts.reactFlat ?? false;
       const reactHideBadge = opts.reactHideBadge ?? false;
       const reactShowActions = opts.reactShowActions ?? false;
+      const omitSuggestedQuestions = opts.omitSuggestedQuestions ?? false;
       if (row.kind === "message") {
         const message = row.message;
         const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
@@ -3579,6 +3595,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               selectable={rowSelectable}
               selected={rowSelectable && isSelected}
               onFollowupClick={sendFollowupChip}
+              omitSuggestedQuestions={omitSuggestedQuestions}
             />
           </div>
         );
@@ -3639,6 +3656,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             const lastAssistantInBlock = [...workMessages].reverse().find(
               (m) => m.role === "assistant" && m.id !== "__stream__"
             ) ?? null;
+            let peeledFollowupAssistant: Message | null = null;
+            if (useUnifiedReActCard) {
+              for (const m of workMessages) {
+                if (
+                  m.role === "assistant" &&
+                  m.id !== "__stream__" &&
+                  m.suggestedQuestions &&
+                  m.suggestedQuestions.length > 0
+                ) {
+                  peeledFollowupAssistant = m;
+                }
+              }
+            }
             return (
               <div key={blockKey} className="space-y-2">
                 <div className="flex min-w-0 items-start gap-2">
@@ -3662,7 +3692,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     <div
                       className="min-w-0 flex-1 overflow-hidden rounded-xl border border-border bg-surface-card"
                     >
-                      {groupedWork.map((r, i) => renderGroupedRow(r, i, { reactWorkColumn: true, reactFlat: true, reactHideBadge: i > 0 }))}
+                      {groupedWork.map((r, i) => {
+                        const omitSq =
+                          Boolean(
+                            peeledFollowupAssistant &&
+                              r.kind === "message" &&
+                              r.message.role === "assistant" &&
+                              r.message.id === peeledFollowupAssistant.id
+                          );
+                        return renderGroupedRow(r, i, {
+                          reactWorkColumn: true,
+                          reactFlat: true,
+                          reactHideBadge: i > 0,
+                          omitSuggestedQuestions: omitSq,
+                        });
+                      })}
                     </div>
                   ) : (
                     <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -3670,6 +3714,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     </div>
                   )}
                 </div>
+                {useUnifiedReActCard &&
+                peeledFollowupAssistant?.suggestedQuestions &&
+                peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
+                  <div className="flex min-w-0 items-start gap-2">
+                    {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 flex-wrap gap-1.5">
+                        {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
+                          <button
+                            key={`${qi}-${q}`}
+                            type="button"
+                            className="max-w-full rounded-full border border-border bg-surface-hover/80 px-2.5 py-1 text-left text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => sendFollowupChip(q)}
+                          >
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 {finalAssistant
                   ? renderGroupedRow({ kind: "message", message: finalAssistant }, segIdx + 1000, {})
                   : null}
@@ -3678,54 +3744,68 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   <div className="flex min-w-0 items-start gap-2">
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
-                      <div className="ml-auto flex w-fit max-w-full flex-wrap items-center gap-2 text-[11px] text-text-faint">
-                        <button
-                          type="button"
-                          className="hover:text-text-strong"
-                          onClick={() => void copyReActBlock(workMessages)}
-                        >
-                          复制
-                        </button>
+                      <div className="ml-auto flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint">
+                        <HoverTip label="复制">
+                          <button
+                            type="button"
+                            className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => void copyReActBlock(workMessages)}
+                          >
+                            <Copy size={13} />
+                          </button>
+                        </HoverTip>
                         {lastAssistantInBlock ? (
                           <>
-                            <button
-                              type="button"
-                              className="hover:text-text-strong"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() =>
-                                setQuoteTarget({
-                                  message: lastAssistantInBlock,
-                                  body: resolveQuoteBody(lastAssistantInBlock, undefined),
-                                })
-                              }
-                            >
-                              引用
-                            </button>
-                            <button
-                              type="button"
-                              className="hover:text-text-strong"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => void favoriteMessage(lastAssistantInBlock, undefined)}
-                            >
-                              收藏
-                            </button>
-                            <button
-                              type="button"
-                              className="hover:text-text-strong"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => forwardOneMessage(lastAssistantInBlock, undefined)}
-                            >
-                              转发
-                            </button>
+                            <HoverTip label="引用">
+                              <button
+                                type="button"
+                                className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() =>
+                                  setQuoteTarget({
+                                    message: lastAssistantInBlock,
+                                    body: resolveQuoteBody(lastAssistantInBlock, undefined),
+                                  })
+                                }
+                              >
+                                <Quote size={13} />
+                              </button>
+                            </HoverTip>
+                            <HoverTip label="收藏">
+                              <button
+                                type="button"
+                                className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => void favoriteMessage(lastAssistantInBlock, undefined)}
+                              >
+                                <Bookmark size={13} />
+                              </button>
+                            </HoverTip>
+                            <HoverTip label="转发">
+                              <button
+                                type="button"
+                                className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => forwardOneMessage(lastAssistantInBlock, undefined)}
+                              >
+                                <Share2 size={13} />
+                              </button>
+                            </HoverTip>
                           </>
                         ) : null}
-                        <button
-                          type="button"
-                          className={blockAnySelected ? "text-cyan-400 hover:text-cyan-300" : "hover:text-text-strong"}
-                          onClick={() => toggleSelectBlock(workMessages)}
-                        >
-                          多选
-                        </button>
+                        <HoverTip label="多选">
+                          <button
+                            type="button"
+                            className={`rounded p-1 hover:bg-surface-hover ${
+                              blockAnySelected ? "text-cyan-400 hover:text-cyan-300" : "hover:text-text-strong"
+                            }`}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => toggleSelectBlock(workMessages)}
+                          >
+                            <LayoutList size={13} />
+                          </button>
+                        </HoverTip>
                       </div>
                     </div>
                   </div>
