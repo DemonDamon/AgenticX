@@ -2,13 +2,20 @@ import type { Components } from "react-markdown";
 import type { Element as HastElement, ElementContent } from "hast";
 import type { HTMLAttributes, ReactElement, ReactNode } from "react";
 import { Children, isValidElement } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, createContext, useContext } from "react";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import { Copy, Check, Quote, Maximize2, ChevronDown, ChevronUp } from "lucide-react";
 import { MermaidBlock } from "./MermaidBlock";
 import { highlightChatCode } from "./highlight-chat-code";
 import { Modal } from "../ds/Modal";
+import { HoverTip } from "../ds/HoverTip";
+
+export const MarkdownContext = createContext<{
+  isStreaming?: boolean;
+  onQuoteText?: (text: string) => void;
+}>({});
 
 const MERMAID_LANG = new Set(["mermaid", "mmd"]);
 /** 无语言或通用代码块：仅当正文明显为 Mermaid 时才接管 */
@@ -249,6 +256,115 @@ function MarkdownImage({
   );
 }
 
+function CodeBlockComponent({
+  text,
+  lang,
+  html,
+  children,
+  codeCls,
+  wrapClass,
+  rest,
+}: {
+  text: string;
+  lang: string | null;
+  html?: string;
+  children?: ReactNode;
+  codeCls?: string;
+  wrapClass: string;
+  rest: any;
+}) {
+  const { isStreaming, onQuoteText } = useContext(MarkdownContext);
+  const [expanded, setExpanded] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (isStreaming && !expanded) {
+      setExpanded(true);
+    }
+  }, [isStreaming]);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="group my-2 flex flex-col overflow-hidden rounded-xl border border-border bg-surface-panel">
+      <div className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-surface-hover/50 px-3 text-xs text-text-faint transition">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[11px] uppercase tracking-wider">{lang || "text"}</span>
+          <HoverTip label={expanded ? "收起" : "展开"}>
+            <button
+              type="button"
+              className="flex items-center justify-center rounded p-0.5 hover:bg-surface-hover hover:text-text-strong"
+              onClick={() => setExpanded(!expanded)}
+            >
+              {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+          </HoverTip>
+        </div>
+        {!isStreaming && (
+          <div className="flex items-center gap-1 text-text-faint transition-opacity">
+            <HoverTip label="复制">
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="flex items-center justify-center rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+              >
+                {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
+              </button>
+            </HoverTip>
+            {onQuoteText && (
+              <HoverTip label="引用">
+                <button
+                  type="button"
+                  onClick={() => onQuoteText(text)}
+                  className="flex items-center justify-center rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                >
+                  <Quote size={12} />
+                </button>
+              </HoverTip>
+            )}
+            <HoverTip label="放大查看">
+              <button
+                type="button"
+                onClick={() => setFullscreen(true)}
+                className="flex items-center justify-center rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+              >
+                <Maximize2 size={12} />
+              </button>
+            </HoverTip>
+          </div>
+        )}
+      </div>
+      {expanded && (
+        <div className="overflow-x-auto p-3 text-[13px]">
+          <pre {...rest} className={wrapClass} style={{ margin: 0, padding: 0, background: "transparent", border: "none" }}>
+            {html ? (
+              <code className={codeCls} dangerouslySetInnerHTML={{ __html: html }} />
+            ) : (
+              <code className={codeCls}>{children}</code>
+            )}
+          </pre>
+        </div>
+      )}
+      <Modal open={fullscreen} title={`查看代码 (${lang || "text"})`} onClose={() => setFullscreen(false)} panelClassName="max-w-4xl w-[90vw] bg-surface-panel">
+        <div className="max-h-[75vh] overflow-auto rounded-lg text-[14px]">
+          <pre {...rest} className={wrapClass} style={{ margin: 0, padding: 0, background: "transparent", border: "none" }}>
+            {html ? (
+              <code className={codeCls} dangerouslySetInnerHTML={{ __html: html }} />
+            ) : (
+              <code className={codeCls}>{children}</code>
+            )}
+          </pre>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
 export function normalizeChatMarkdownContent(raw: string): string {
   if (!raw) return raw;
   // Keep fenced code blocks untouched to avoid rewriting code snippets.
@@ -272,6 +388,8 @@ export const chatMarkdownComponents: Partial<Components> = {
       return <MermaidBlock code={mermaidSrc} />;
     }
     const preHast = node as HastElement | undefined;
+    const wrapClass = ["agx-chat-prism", className].filter(Boolean).join(" ");
+    
     if (preHast?.tagName === "pre") {
       const codeEl = codeElementFromPreHast(preHast);
       if (codeEl) {
@@ -279,19 +397,28 @@ export const chatMarkdownComponents: Partial<Components> = {
         const text = hastTextContent(codeEl).replace(/\n$/, "");
         const html = highlightChatCode(text, lang);
         const codeCls = classNameFromHastProperty(codeEl.properties?.className);
-        const wrapClass = ["agx-chat-prism", className].filter(Boolean).join(" ");
         return (
-          <pre {...(rest as HTMLAttributes<HTMLPreElement>)} className={wrapClass}>
-            <code className={codeCls} dangerouslySetInnerHTML={{ __html: html }} />
-          </pre>
+          <CodeBlockComponent
+            text={text}
+            lang={lang}
+            html={html}
+            codeCls={codeCls}
+            wrapClass={wrapClass}
+            rest={rest}
+          />
         );
       }
     }
-    const wrapClass = ["agx-chat-prism", className].filter(Boolean).join(" ");
+    
+    const fallbackText = reactNodeToPlainText(children).replace(/\n$/, "");
     return (
-      <pre {...(rest as HTMLAttributes<HTMLPreElement>)} className={wrapClass}>
-        {children}
-      </pre>
+      <CodeBlockComponent
+        text={fallbackText}
+        lang={null}
+        children={children}
+        wrapClass={wrapClass}
+        rest={rest}
+      />
     );
   },
   table({ children, ...rest }) {
