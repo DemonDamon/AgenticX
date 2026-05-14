@@ -281,7 +281,7 @@ body,
      的 clip-path 负责。这样玻璃不会留角落三角区露出背后的 IDE 暗色。
      blur 和 saturate 都加强，让磨砂感更明显。 —— */
 .agx-app.focus-mode .agx-chatpane {
-  padding: 4px 7px 2px;
+  padding: 4px 7px 7px;
   margin: 0;
   min-height: 0 !important;
   background: var(--focus-glass-bg) !important;

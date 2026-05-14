@@ -1621,7 +1621,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       </div>
 
       {/* Input area */}
-      <div className="relative shrink-0 border-t border-border bg-surface-panel/80 px-4 py-3">
+      <div className="relative shrink-0 border-t border-border bg-surface-panel/80 px-4 pt-3 pb-4">
         {!isLite && (
           <CommandPalette
             open={commandOpen}

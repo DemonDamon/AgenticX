@@ -167,54 +167,98 @@ export function ToolCallCard({
   const expandedDetailClass =
     variant === "flat"
       ? "space-y-1 px-3 pb-2 pt-0.5"
-      : "space-y-1 border-t border-border px-3 pb-2 pt-1.5";
+      : variant === "nested"
+        ? "mt-1.5 space-y-1 border-l border-border/50 pl-3 text-[11px] leading-relaxed"
+        : "space-y-1 border-t border-border px-3 pb-2 pt-1.5";
   const forcedActionClass =
-    variant === "flat" ? "px-3 pb-2 pt-0.5" : "border-t border-border px-3 pb-2 pt-1.5";
+    variant === "flat"
+      ? "px-3 pb-2 pt-0.5"
+      : variant === "nested"
+        ? "mt-1.5 border-l border-border/50 pl-3"
+        : "border-t border-border px-3 pb-2 pt-1.5";
 
-  const shell = (
-    <div
-      className={
-        variant === "flat"
-          ? "w-full min-w-0 overflow-hidden text-xs text-text-muted"
-          : `w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-xs text-text-muted transition ${selected ? "border-[rgba(var(--theme-color-rgb,6,182,212),0.6)]" : "border-border"}`
-      }
-    >
-      <div className="flex w-full items-center gap-1.5 px-3 py-2 text-left">
-        <button
-          type="button"
-          className="inline-flex min-w-0 flex-1 items-center gap-1.5 text-left disabled:cursor-default disabled:opacity-60"
-          onClick={() => hasDetail && setExpanded((v) => !v)}
-          disabled={!hasDetail}
-        >
-          <Icon className={`h-3.5 w-3.5 shrink-0 ${iconTone(status)}`} />
-          <span className="min-w-0 max-w-full truncate">{titleEl}</span>
-          {metaRight}
-          {hasDetail &&
-            (expanded ? (
-              <ChevronDown className="h-3 w-3 shrink-0 text-text-muted" />
-            ) : (
-              <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" />
-            ))}
-        </button>
-      </div>
-
-      {expanded && (
-        <div className={expandedDetailClass}>
-          {hasStream ? <ToolOutputStream lines={message.toolStreamLines ?? []} /> : null}
-          {message.content ? (
-            <span className="break-all whitespace-pre-wrap">
-              {renderHighlightedText(message.content, normalizedTerms)}
-            </span>
-          ) : null}
-          {action}
-        </div>
-      )}
-
-      {!expanded && shouldForceExpand && action && (
-        <div className={forcedActionClass}>{action}</div>
-      )}
-    </div>
+  const detailBody = (
+    <>
+      {hasStream ? <ToolOutputStream lines={message.toolStreamLines ?? []} /> : null}
+      {message.content ? (
+        <span className="break-all whitespace-pre-wrap">
+          {renderHighlightedText(message.content, normalizedTerms)}
+        </span>
+      ) : null}
+      {action}
+    </>
   );
+
+  const shellOuterClass =
+    variant === "nested"
+      ? "relative w-full min-w-0 text-xs text-text-muted"
+      : variant === "flat"
+        ? "w-full min-w-0 overflow-hidden text-xs text-text-muted"
+        : `w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-xs text-text-muted transition ${
+            selected ? "border-[rgba(var(--theme-color-rgb,6,182,212),0.6)]" : "border-border"
+          }`;
+
+  const shell =
+    variant === "nested" ? (
+      <div className={shellOuterClass}>
+        {/* 与 TurnToolGroupCard 左侧虚线对齐（父容器 px-3 12px + 8px = 20px） */}
+        <div
+          className="pointer-events-none absolute left-[8px] top-[15px] z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2 border-surface-card bg-zinc-300 dark:bg-zinc-600"
+          aria-hidden
+        />
+        <div className="ml-6 min-w-0">
+          <button
+            type="button"
+            className={`group inline-flex max-w-full items-center gap-2 rounded-full border border-border/70 bg-surface-hover/80 px-3 py-1.5 text-left shadow-sm transition hover:bg-surface-hover disabled:cursor-default disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.06] ${
+              selected ? "ring-1 ring-[rgba(var(--theme-color-rgb,6,182,212),0.55)]" : ""
+            }`}
+            onClick={() => hasDetail && setExpanded((v) => !v)}
+            disabled={!hasDetail}
+          >
+            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded bg-surface-card border border-border/50 shadow-sm">
+              <Icon className={`h-3 w-3 ${iconTone(status)}`} aria-hidden />
+            </span>
+            <span className="min-w-0 shrink truncate text-left">{titleEl}</span>
+            {metaRight}
+            {hasDetail ? (
+              expanded ? (
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+              )
+            ) : null}
+          </button>
+
+          {expanded && <div className={expandedDetailClass}>{detailBody}</div>}
+          {!expanded && shouldForceExpand && action && <div className={forcedActionClass}>{action}</div>}
+        </div>
+      </div>
+    ) : (
+      <div className={shellOuterClass}>
+        <div className="flex w-full items-center gap-1.5 px-3 py-2 text-left">
+          <button
+            type="button"
+            className="inline-flex min-w-0 flex-1 items-center gap-1.5 text-left disabled:cursor-default disabled:opacity-60"
+            onClick={() => hasDetail && setExpanded((v) => !v)}
+            disabled={!hasDetail}
+          >
+            {hasDetail &&
+              (expanded ? (
+                <ChevronDown className="h-3 w-3 shrink-0 text-text-muted" aria-hidden />
+              ) : (
+                <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" aria-hidden />
+              ))}
+            <Icon className={`h-3.5 w-3.5 shrink-0 ${iconTone(status)}`} />
+            <span className="min-w-0 flex-1 truncate">{titleEl}</span>
+            {metaRight}
+          </button>
+        </div>
+
+        {expanded && <div className={expandedDetailClass}>{detailBody}</div>}
+
+        {!expanded && shouldForceExpand && action && <div className={forcedActionClass}>{action}</div>}
+      </div>
+    );
 
   if (variant === "nested" || (variant === "flat" && omitLeadingSpacer)) {
     return <div className="min-w-0 w-full">{shell}</div>;

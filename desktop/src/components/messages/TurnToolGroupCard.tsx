@@ -50,11 +50,17 @@ export function TurnToolGroupCard({
   }, [messages]);
 
   const cardContent = (
-    <div className={flat ? "w-full min-w-0 text-xs text-text-muted" : "w-full min-w-0 overflow-hidden rounded-lg border border-border bg-surface-card text-xs text-text-muted transition"}>
+    <div
+      className={
+        flat
+          ? "w-full min-w-0 text-xs text-text-muted"
+          : "w-full min-w-0 overflow-hidden rounded-lg border border-border bg-surface-card text-xs text-text-muted transition"
+      }
+    >
       <button
         type="button"
-        className={`inline-flex w-full max-w-full items-center gap-2 px-3 text-left ${
-          flat ? "pt-3 pb-1" : "py-2"
+        className={`relative z-[1] inline-flex w-full max-w-full items-center gap-2 text-left ${
+          flat ? "px-3 pt-3 pb-1" : "px-3 py-2.5"
         }`}
         onClick={() => setExpanded((v) => !v)}
       >
@@ -62,39 +68,41 @@ export function TurnToolGroupCard({
           className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.5)]"
           aria-hidden
         >
-          <Check
-            className="h-2.5 w-2.5 text-white"
-            strokeWidth={2.5}
-          />
+          <Check className="h-2.5 w-2.5 text-white" strokeWidth={2.5} />
         </span>
-        <span className="min-w-0 flex-1 truncate text-xs font-medium text-text-subtle">{summary}</span>
-        {expanded ? (
-          <ChevronDown className="h-3 w-3 shrink-0 text-text-muted" />
-        ) : (
-          <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" />
-        )}
+        <span className="flex min-w-0 shrink items-center gap-1.5">
+          <span className="truncate text-xs font-medium text-text-subtle">{summary}</span>
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+          )}
+        </span>
       </button>
       {expanded && (
         <div
           className={
             flat
-              ? "relative pl-6 pr-3 pb-2 pt-0.5 text-xs text-text-muted"
-              : "relative border-t border-border pl-6 pr-3 pb-2 pt-2 text-xs text-text-muted"
+              ? "relative px-3 pb-2 pt-0.5 text-xs text-text-muted"
+              : "relative z-[0] border-t border-border px-3 pb-2 pt-1 text-xs text-text-muted"
           }
         >
-          {/* Vertical timeline: starts below summary row (does not pierce circle-check); X aligns with circle center. */}
+          {/* 时间线仅在展开列表区，与 nested ToolCallCard 节点同一 X（px-3 12px + half Check 8px = 20px） */}
           <div
-            className="pointer-events-none absolute top-0 bottom-2 left-[calc(0.75rem+0.5rem)] z-0 w-0 -translate-x-1/2 border-l border-dashed border-zinc-500/45"
+            className="pointer-events-none absolute left-[20px] top-0 bottom-2 z-0 w-0 border-l border-dashed border-zinc-300 dark:border-zinc-600"
             aria-hidden
           />
-          <div className="relative z-[1] space-y-2">
+          <div className="relative z-[1] space-y-2.5">
             {messages.map((m) =>
               isTodoUpdateToolMessage(m.content) ? (
-                <div
-                  key={m.id}
-                  className="rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted"
-                >
-                  <TodoUpdateCard content={m.content} />
+                <div key={m.id} className="relative w-full min-w-0 text-xs text-text-muted">
+                  <div
+                    className="pointer-events-none absolute left-[8px] top-[15px] z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2 border-surface-card bg-zinc-300 dark:bg-zinc-600"
+                    aria-hidden
+                  />
+                  <div className="ml-6 w-fit max-w-full rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted">
+                    <TodoUpdateCard content={m.content} />
+                  </div>
                 </div>
               ) : (
                 <ToolCallCard
@@ -106,7 +114,7 @@ export function TurnToolGroupCard({
                   selected={selectedIds?.has(m.id)}
                   onToggleSelectMessage={onToggleSelectMessage}
                   action={renderExtras?.(m)}
-                  variant={flat ? "flat" : "nested"}
+                  variant="nested"
                   omitLeadingSpacer={flat}
                 />
               )
