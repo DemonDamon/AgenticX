@@ -772,11 +772,6 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                   {contentSnippet}
                 </span>
               ) : null}
-              {!selectMode ? (
-                <span className="mt-1 block text-[12px] font-normal tabular-nums leading-none text-text-faint">
-                  {timeAgo(createdAt)}
-                </span>
-              ) : null}
             </span>
           </button>
         )}
