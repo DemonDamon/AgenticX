@@ -168,13 +168,13 @@ export function ToolCallCard({
     variant === "flat"
       ? "space-y-1 px-3 pb-2 pt-0.5"
       : variant === "nested"
-        ? "mt-1.5 space-y-1 border-l border-border/50 pl-3 text-[11px] leading-relaxed"
+        ? "mt-1.5 space-y-1 pl-3 text-[11px] leading-relaxed"
         : "space-y-1 border-t border-border px-3 pb-2 pt-1.5";
   const forcedActionClass =
     variant === "flat"
       ? "px-3 pb-2 pt-0.5"
       : variant === "nested"
-        ? "mt-1.5 border-l border-border/50 pl-3"
+        ? "mt-1.5 pl-3"
         : "border-t border-border px-3 pb-2 pt-1.5";
 
   const detailBody = (
@@ -203,19 +203,19 @@ export function ToolCallCard({
       <div className={shellOuterClass}>
         {/* 与 TurnToolGroupCard 左侧虚线对齐（父容器 px-3 12px + 8px = 20px） */}
         <div
-          className="pointer-events-none absolute left-[8px] top-[15px] z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2 border-surface-card bg-zinc-300 dark:bg-zinc-600"
+          className="pointer-events-none absolute left-[8px] top-[15px] z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2 border-surface-card bg-border"
           aria-hidden
         />
         <div className="ml-6 min-w-0">
           <button
             type="button"
-            className={`group inline-flex max-w-full items-center gap-2 rounded-full border border-border/70 bg-surface-hover/80 px-3 py-1.5 text-left shadow-sm transition hover:bg-surface-hover disabled:cursor-default disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.06] ${
+            className={`group inline-flex max-w-full items-center gap-2 rounded-full border border-border/70 bg-zinc-100/60 px-3 py-1.5 text-left shadow-sm transition hover:bg-zinc-200/60 disabled:cursor-default disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.05] ${
               selected ? "ring-1 ring-[rgba(var(--theme-color-rgb,6,182,212),0.55)]" : ""
             }`}
             onClick={() => hasDetail && setExpanded((v) => !v)}
             disabled={!hasDetail}
           >
-            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded bg-surface-card border border-border/50 shadow-sm">
+            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded bg-transparent">
               <Icon className={`h-3 w-3 ${iconTone(status)}`} aria-hidden />
             </span>
             <span className="min-w-0 shrink truncate text-left">{titleEl}</span>

@@ -41,12 +41,8 @@ export function groupConsecutiveToolMessages(messages: Message[]): GroupedChatRo
       group.push(visibleMessages[i]);
       i += 1;
     }
-    if (group.length === 1) {
-      out.push({ kind: "message", message: group[0] });
-    } else {
-      const gid = group[0].toolGroupId ?? `legacy-group:${group[0].id}`;
-      out.push({ kind: "tool_group", groupId: gid, messages: group });
-    }
+    const gid = group[0].toolGroupId ?? `legacy-group:${group[0].id}`;
+    out.push({ kind: "tool_group", groupId: gid, messages: group });
   }
   return out;
 }
