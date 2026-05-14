@@ -1,4 +1,4 @@
-import { PanelRightClose, History, ListChecks, MessageCircle, Smartphone } from "lucide-react";
+import { PanelRightClose, History, ListChecks, MessageSquareMore, Smartphone } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, type ChatPane, type Message } from "../store";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
@@ -662,7 +662,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       ? "点击勾选会话"
       : `${label}\n${timeAgo(createdAt)} · 双击重命名 / 右键菜单`;
     return (
-      <div key={item.session_id} className="mb-1">
+      <div key={item.session_id} className="mb-1 px-1.5">
         {editingId === item.session_id ? (
           <input
             autoFocus
@@ -678,9 +678,9 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
         ) : (
           <button
             type="button"
-            className={`agx-session-history-row flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-[14px] leading-snug transition ${
+            className={`agx-session-history-row flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left text-[14px] leading-snug transition ${
               active
-                ? "bg-surface-card-strong text-text-strong"
+                ? "agx-session-history-row--active text-text-strong"
                 : "text-text-primary hover:bg-surface-hover"
             }`}
             onClick={() => {
@@ -713,13 +713,13 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               />
             ) : (
               <span
-                className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/80 bg-surface-hover/90 text-text-muted"
+                className={`mt-[1px] flex shrink-0 items-center justify-center ${active ? "text-text-strong" : "text-text-muted"}`}
                 aria-hidden
               >
                 {showFeishuChip || showWechatChip ? (
-                  <Smartphone className="h-3.5 w-3.5" strokeWidth={2} />
+                  <Smartphone className="h-[18px] w-[18px]" strokeWidth={1.8} />
                 ) : (
-                  <MessageCircle className="h-3.5 w-3.5" strokeWidth={2} />
+                  <MessageSquareMore className="h-[18px] w-[18px]" strokeWidth={1.8} />
                 )}
               </span>
             )}
@@ -987,8 +987,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       className="agx-session-history-panel flex h-full w-full shrink-0 flex-col bg-surface-card"
       style={tintColor ? { backgroundColor: tintColor } : undefined}
     >
-      <div className="shrink-0 border-b border-border px-3 py-2.5 text-[12px] text-text-subtle">
-        <div className="flex items-center justify-between gap-2">
+      <div className="shrink-0 space-y-1 px-2 pb-1.5 pt-1 text-[12px] text-text-subtle">
+        <div className="flex items-center justify-between gap-2 leading-none">
           <span className="flex items-center gap-1.5" title={title}>
             <History className="h-[18px] w-[18px] shrink-0" strokeWidth={1.8} />
           </span>
@@ -1047,8 +1047,6 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             ) : null}
           </div>
         </div>
-      </div>
-      <div className="shrink-0 px-2 pt-2">
         <input
           type="search"
           value={sessionSearchQuery}
@@ -1060,7 +1058,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           className="w-full rounded-md border border-border bg-surface-hover px-2 py-2 text-[13px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
         />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2 pt-0.5">
         {sessions.length === 0 ? (
           <div className="rounded border border-dashed border-border p-3 text-center text-[13px] text-text-faint">
             暂无会话
