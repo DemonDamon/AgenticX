@@ -203,15 +203,27 @@ body {
 /* Theme Colors */
 :root[data-theme-color="blue"] {
   --theme-color-rgb: 59, 130, 246;
+  --theme-color-text: #ffffff;
 }
 :root[data-theme-color="green"] {
   --theme-color-rgb: 16, 185, 129;
+  --theme-color-text: #ffffff;
 }
 :root[data-theme-color="pink"] {
   --theme-color-rgb: 236, 72, 153;
+  --theme-color-text: #ffffff;
 }
 :root[data-theme-color="yellow"] {
   --theme-color-rgb: 245, 158, 11;
+  --theme-color-text: #ffffff;
+}
+:root[data-theme-color="white"] {
+  --theme-color-rgb: 255, 255, 255;
+  --theme-color-text: #0f172a;
+}
+:root[data-theme="light"][data-theme-color="white"] {
+  --theme-color-rgb: 15, 23, 42;
+  --theme-color-text: #ffffff;
 }
 
 :root[data-theme-color] {
@@ -220,6 +232,11 @@ body {
   --chat-im-avatar-bg: rgba(var(--theme-color-rgb), 0.9);
   --settings-accent-focus: rgba(var(--theme-color-rgb), 0.5);
   --ui-btn-primary-border: rgba(var(--theme-color-rgb), 0.5);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: rgb(var(--theme-color-rgb));
 }
 :root[data-theme="light"][data-theme-color] {
   --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.28);

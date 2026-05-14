@@ -32,9 +32,9 @@
   --settings-accent-fg-muted: #4b5563;
   --settings-accent-border-muted: rgba(0, 0, 0, 0.15);
   --settings-accent-border-strong: rgba(0, 0, 0, 0.25);
-  --settings-accent-solid: #111827;
-  --settings-accent-solid-hover: #030712;
-  --settings-accent-solid-text: #f9fafb;
+  --settings-accent-solid: rgba(var(--theme-color-rgb), 1);
+  --settings-accent-solid-hover: rgba(var(--theme-color-rgb), 0.9);
+  --settings-accent-solid-text: var(--theme-color-text);
   --settings-accent-badge-bg: rgba(0, 0, 0, 0.06);
   --settings-accent-focus: rgba(0, 0, 0, 0.25);
   --settings-accent-progress: #9ca3af;
@@ -63,9 +63,9 @@
   --status-warning: #d97706;
   --status-error: #dc2626;
 
-  --ui-btn-primary-bg: #111827;
-  --ui-btn-primary-bg-hover: #030712;
-  --ui-btn-primary-text: #f9fafb;
+  --ui-btn-primary-bg: rgba(var(--theme-color-rgb), 1);
+  --ui-btn-primary-bg-hover: rgba(var(--theme-color-rgb), 0.9);
+  --ui-btn-primary-text: var(--theme-color-text);
   --ui-accent-surface: rgba(0, 0, 0, 0.05);
   --ui-accent-surface-hover: rgba(0, 0, 0, 0.08);
   --ui-accent-text: #111827;

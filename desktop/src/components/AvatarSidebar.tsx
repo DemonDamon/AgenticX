@@ -1353,7 +1353,7 @@ function GroupEditorInline({
             </button>
             <button
               type="button"
-              className="rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-cyan-500 disabled:opacity-40"
+              className="rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
               disabled={!name.trim() || selectedIds.size === 0 || loading}
               onClick={() => void handleSave()}
             >
