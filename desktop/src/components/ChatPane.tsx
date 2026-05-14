@@ -5795,7 +5795,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 {focusMode ? "开始任务..." : "发消息..."}
               </div>
             ) : null}
-            <div className="agx-pane-composer-actions flex min-w-0 items-center justify-between gap-1 px-2 pb-2 pt-1">
+            <div className="agx-pane-composer-actions flex min-w-0 items-center justify-between gap-1 px-2.5 pb-2.5 pt-1">
               <div className="flex shrink-0 items-center gap-0.5">
                 {focusMode ? (
                   <button
