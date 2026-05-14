@@ -57,6 +57,7 @@ import type { SettingsTab } from "../settings-tab";
 import type { MCPDiscoveryHit } from "./settings/mcp/MCPDiscoveryPanel";
 import { MCPMarketplacePanel } from "./settings/mcp/MCPMarketplacePanel";
 import { MCPJsonEditorModal } from "./settings/mcp/MCPJsonEditorModal";
+import { WebSearchSettingsPanel, SuggestedQuestionsSettingsPanel } from "./settings/WebSearchSettingsPanel";
 export type { SettingsTab } from "../settings-tab";
 
 export type FavoriteForwardContext = {
@@ -6307,6 +6308,8 @@ export function SettingsPanel({
                   </p>
                 </Panel>
                 <PermissionsAdvancedPanel ref={permissionsPanelRef} />
+                <WebSearchSettingsPanel />
+                <SuggestedQuestionsSettingsPanel />
                 <ComputerUseGeneralPanel />
                 <SessionMemoryPanel />
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">

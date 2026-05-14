@@ -152,6 +152,8 @@ export type Message = {
   toolGroupId?: string;
   /** Live stdout/stderr lines for long-running tools (e.g. bash_exec). */
   toolStreamLines?: string[];
+  /** Parsed from model `<followups>` block; shown as chips after reply completes. */
+  suggestedQuestions?: string[];
 };
 
 /** Extras allowed on tool messages from `addPaneMessage` / `addMessage`. */
@@ -166,6 +168,7 @@ export type MessageToolExtras = Pick<
   | "toolGroupId"
   | "toolStreamLines"
   | "inlineConfirm"
+  | "suggestedQuestions"
 >;
 
 export type ForwardedHistoryItem = {
@@ -405,10 +408,13 @@ type AppState = {
         | "timestamp"
         | "forwardedHistory"
         | "inlineConfirm"
+        | "suggestedQuestions"
       >
     > &
       Partial<MessageToolExtras>
   ) => void;
+  /** Merge *patch* into the last pane message with the given *role* (search from end). */
+  mergeLastPaneMessageByRole: (paneId: string, role: MsgRole, patch: Partial<Message>) => boolean;
   /** Merge fields into an existing pane `tool` message by `toolCallId`. */
   updatePaneMessageByToolCallId: (
     paneId: string,
@@ -474,6 +480,8 @@ type AppState = {
     > &
       Partial<MessageToolExtras>
   ) => void;
+  /** Lite/global list: merge *patch* into the last message with *role* (by id sync to active pane). */
+  mergeLastMessageByRole: (role: MsgRole, patch: Partial<Message>) => boolean;
   insertMessageAfter: (afterId: string, msg: Omit<Message, "id">) => string;
   clearMessages: () => void;
   addSubAgent: (item: Pick<SubAgent, "id" | "name" | "role" | "task" | "provider" | "model"> & { sessionId?: string }) => void;
@@ -1190,6 +1198,24 @@ export const useAppStore = create<AppState>((set, get) => ({
         return { ...pane, messages: msgs };
       }),
     })),
+  mergeLastPaneMessageByRole: (paneId, role, patch) => {
+    let found = false;
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const msgs = [...pane.messages];
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i].role === role) {
+            msgs[i] = { ...msgs[i], ...patch };
+            found = true;
+            break;
+          }
+        }
+        return { ...pane, messages: msgs };
+      }),
+    }));
+    return found;
+  },
   clearPaneMessages: (paneId) =>
     set((state) => ({
       panes: state.panes.map((pane) =>
@@ -1458,6 +1484,32 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
       };
     }),
+  mergeLastMessageByRole: (role, patch) => {
+    let found = false;
+    set((state) => {
+      const msgs = [...state.messages];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role !== role) continue;
+        const updated = { ...msgs[i], ...patch };
+        msgs[i] = updated;
+        found = true;
+        const mid = updated.id;
+        return {
+          messages: msgs,
+          panes: state.panes.map((pane) =>
+            pane.id === state.activePaneId
+              ? {
+                  ...pane,
+                  messages: pane.messages.map((m) => (m.id === mid ? { ...m, ...patch } : m)),
+                }
+              : pane
+          ),
+        };
+      }
+      return state;
+    });
+    return found;
+  },
   insertMessageAfter: (afterId, msg) => {
     const newId = uid();
     set((state) => {

@@ -52,6 +52,8 @@ export type LoadedSessionMessage = {
   tool_result_preview?: string;
   tool_group_id?: string;
   tool_stream_lines?: string[];
+  /** From `<followups>` / FINAL payload */
+  suggested_questions?: string[];
 };
 
 export function mapLoadedSessionMessage(item: LoadedSessionMessage, idPrefix: string, index: number): Message {
@@ -92,6 +94,12 @@ export function mapLoadedSessionMessage(item: LoadedSessionMessage, idPrefix: st
         : undefined,
     attachments: attachmentsFromSessionRow(item.attachments),
   };
+  if (item.role === "assistant") {
+    const sq = item.suggested_questions;
+    if (Array.isArray(sq) && sq.length > 0) {
+      mapped.suggestedQuestions = sq.map((x) => String(x).trim()).filter(Boolean).slice(0, 3);
+    }
+  }
   if (item.role === "tool") {
     const toolCallId = String(item.tool_call_id ?? "").trim();
     const toolName = String(item.tool_name ?? "").trim();

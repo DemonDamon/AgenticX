@@ -328,3 +328,11 @@ class CategoryPolicy:
         """Mark a tool as approved (no longer triggers first-access)."""
         self._approved_tools.add(tool_name)
 
+
+# Preset category tags for lightweight HTTP discovery tools (Studio/Desktop).
+# ``network`` is non-destructive fetch/search — default permission UX aligns with auto / 免确认.
+STUDIO_NETWORK_TOOL_CATEGORY_MAP: Dict[str, str] = {
+    "web_search": "network",
+    "web_fetch": "network",
+}
+

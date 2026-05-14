@@ -479,6 +479,51 @@ def _build_kb_retrieval_policy_block() -> str:
     )
 
 
+def _build_web_search_capability_block() -> str:
+    """Describe built-in web_search when enabled in config."""
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        raw = ConfigManager.get_value("web_search") or {}
+        if not isinstance(raw, dict):
+            raw = {}
+        enabled = raw.get("enabled", True)
+        if isinstance(enabled, str):
+            enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
+        if not bool(enabled):
+            return (
+                "## 联网搜索\n"
+                "- 内置 `web_search` 已由用户在设置中关闭：不要调用该工具；若用户需要联网，请引导其在「设置 → 通用 → 联网搜索」中开启。\n\n"
+            )
+    except Exception:
+        pass
+    return (
+        "## 联网搜索\n"
+        "- 你 **内置** `web_search` 工具，可检索公开网页，获取最新资讯、实时数据、以及超出你知识截止日期的信息。\n"
+        "- 当用户问题明显依赖时效性、当前事实或外部网页时，应 **主动** 调用 `web_search`，无需用户额外开启开关。\n"
+        "- 需要登录态、复杂页面交互或深度正文提取时，仍可依据 MCP 章节使用已连接的 browser-use / firecrawl 等能力。\n\n"
+    )
+
+
+def _build_followup_questions_block() -> str:
+    """Ask the model for <followups> lines consumed by Desktop chips."""
+    try:
+        from agenticx.runtime.followup_stream import suggested_questions_enabled_from_config
+
+        if not suggested_questions_enabled_from_config():
+            return ""
+    except Exception:
+        return ""
+    return (
+        "## 推荐追问（客户端渲染）\n"
+        "- 在每次对用户可见正文之后，**必须**追加且仅追加一个 `<followups>...</followups>` 块：块内**恰好三行**，"
+        "每行一条用户最可能继续追问的短句；不要编号、不要前缀词、不要在块内使用 Markdown。\n"
+        "- 格式严格如下（示例仅供展示结构，你需按当轮对话替换为真实内容）：\n"
+        "<followups>问题1\n问题2\n问题3</followups>\n"
+        "- 该块仅用于客户端按钮；正文叙述中不要重复这三条。\n\n"
+    )
+
+
 def build_meta_agent_system_prompt(
     session: StudioSession,
     *,
@@ -651,6 +696,8 @@ def build_meta_agent_system_prompt(
         "- 会话结束前，若本轮产生了重要结论或用户偏好变更，主动调用 `memory_append(target='daily', content='...')` 记录。\n"
         "- 需要回忆历史信息时，调用 `memory_search(query='...')` 查询。\n\n"
         f"{kb_retrieval_block}"
+        f"{_build_web_search_capability_block()}"
+        f"{_build_followup_questions_block()}"
         "## 子智能体完成后的主动汇报（关键）\n"
         "- 当「当前子智能体状态」或「历史子智能体结果」中出现 completed 或 failed 的子智能体，你 **必须在本轮回复中主动汇报**，包括：\n"
         "  1) 子智能体名称和任务概述。\n"

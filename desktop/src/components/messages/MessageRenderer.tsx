@@ -34,6 +34,7 @@ type Props = {
   selectable?: boolean;
   selected?: boolean;
   onResolveInlineConfirm?: (confirm: NonNullable<Message["inlineConfirm"]>, approved: boolean) => void;
+  onFollowupClick?: (text: string) => void;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -119,6 +120,7 @@ export function MessageRenderer({
   imAssistantVisual = "default",
   toolCardOmitLeadingSpacer = false,
   noBubbleBorder = false,
+  onFollowupClick,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   if (message.role === "user" || message.role === "assistant") {
@@ -151,6 +153,7 @@ export function MessageRenderer({
         onEditMessage={onEditMessage}
         selectable={selectable}
         selected={selected}
+        onFollowupClick={onFollowupClick}
       />
     );
   }

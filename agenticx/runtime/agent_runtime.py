@@ -32,6 +32,11 @@ from agenticx.runtime.loop_detector import LoopDetector
 from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
 from agenticx.runtime.usage_metadata import usage_metadata_from_llm_response
+from agenticx.runtime.followup_stream import (
+    FollowupStreamEmitter,
+    split_final_answer_and_followups,
+    suggested_questions_enabled_from_config,
+)
 from agenticx.llms.provider_fault import classify_provider_fault, record_session_provider_hard_failure
 
 if TYPE_CHECKING:
@@ -1001,6 +1006,8 @@ class AgentRuntime:
                 data={"round": round_idx, "max_rounds": self.max_tool_rounds},
                 agent_id=agent_id,
             )
+            _followups_enabled = suggested_questions_enabled_from_config()
+            followup_emitter = FollowupStreamEmitter(_followups_enabled)
             if agent_id != "meta" and round_idx > 1 and (round_idx - 1) % 8 == 0:
                 checkpoint = {
                     "agent_id": agent_id,
@@ -1199,11 +1206,13 @@ class AgentRuntime:
                                 tok = str(stream_chunk.get("text", ""))
                                 if tok:
                                     response_text += tok
-                                    yield RuntimeEvent(
-                                        type=EventType.TOKEN.value,
-                                        data={"text": tok},
-                                        agent_id=agent_id,
-                                    )
+                                    _vis = followup_emitter.feed_append(tok)
+                                    if _vis:
+                                        yield RuntimeEvent(
+                                            type=EventType.TOKEN.value,
+                                            data={"text": _vis},
+                                            agent_id=agent_id,
+                                        )
                             elif chunk_type == "usage":
                                 usage_raw = stream_chunk.get("usage", {})
                                 if isinstance(usage_raw, dict):
@@ -1502,7 +1511,12 @@ class AgentRuntime:
                             },
                         }
                     ]
-            assistant_message: Dict[str, Any] = {"role": "assistant", "content": response_text}
+            ac_clean, _ac_suggestions = (
+                split_final_answer_and_followups(response_text)
+                if _followups_enabled
+                else (response_text, [])
+            )
+            assistant_message: Dict[str, Any] = {"role": "assistant", "content": ac_clean}
             if tool_calls:
                 assistant_message["tool_calls"] = tool_calls
             session.agent_messages.append(assistant_message)
@@ -1512,9 +1526,14 @@ class AgentRuntime:
                 if response_text.strip():
                     # Tokens were already streamed to the client during the
                     # invoke/stream phase above; do NOT re-send them here.
-                    final_text = response_text.strip()
+                    final_text, sug_list = (
+                        split_final_answer_and_followups(response_text)
+                        if _followups_enabled
+                        else (response_text.strip(), [])
+                    )
                 else:
                     streamed_text = ""
+                    sug_list = []
                     try:
                         token_queue: asyncio.Queue[str | None] = asyncio.Queue()
                         stream_loop = asyncio.get_running_loop()
@@ -1547,12 +1566,23 @@ class AgentRuntime:
                             if tok is None:
                                 break
                             streamed_text += tok
-                            yield RuntimeEvent(type=EventType.TOKEN.value, data={"text": tok}, agent_id=agent_id)
+                            _vis2 = followup_emitter.feed_append(tok)
+                            if _vis2:
+                                yield RuntimeEvent(
+                                    type=EventType.TOKEN.value,
+                                    data={"text": _vis2},
+                                    agent_id=agent_id,
+                                )
 
                         await stream_task
                     except Exception:
                         streamed_text = response_text
-                    final_text = streamed_text.strip() if streamed_text.strip() else response_text
+                    raw_tail = streamed_text.strip() if streamed_text.strip() else response_text
+                    final_text, sug_list = (
+                        split_final_answer_and_followups(raw_tail)
+                        if _followups_enabled
+                        else (str(raw_tail).strip(), [])
+                    )
                 if not str(final_text).strip() and executed_tool_names:
                     unique_tools = ", ".join(dict.fromkeys(executed_tool_names))
                     final_text = (
@@ -1560,11 +1590,17 @@ class AgentRuntime:
                         f"{unique_tools}）。\n"
                         "当前模型未返回进一步正文，请继续给我下一步指令。"
                     )
+                    sug_list = []
                 if not _is_system_trigger:
-                    session.chat_history.append({"role": "assistant", "content": final_text})
+                    _hist_assistant: Dict[str, Any] = {"role": "assistant", "content": final_text}
+                    if sug_list:
+                        _hist_assistant["suggested_questions"] = list(sug_list)
+                    session.chat_history.append(_hist_assistant)
                 await self.hooks.run_on_agent_end(final_text, session)
                 _um = usage_metadata_from_llm_response(response)
                 _final_data: dict[str, Any] = {"text": final_text}
+                if sug_list:
+                    _final_data["suggested_questions"] = list(sug_list)
                 if _um:
                     _final_data["usage_metadata"] = {
                         **_um,
@@ -1576,12 +1612,12 @@ class AgentRuntime:
 
             assistant_tool_message = {
                 "role": "assistant",
-                "content": response_text,
+                "content": ac_clean,
                 "tool_calls": tool_calls,
             }
             messages.append(assistant_tool_message)
-            if not _is_system_trigger and str(response_text or "").strip():
-                session.chat_history.append({"role": "assistant", "content": response_text})
+            if not _is_system_trigger and str(ac_clean or "").strip():
+                session.chat_history.append({"role": "assistant", "content": ac_clean})
 
             _parallel_mode = _parallel_tools_enabled() and len(tool_calls) > 1
             if _parallel_mode:
