@@ -173,13 +173,13 @@ export function WebSearchSettingsPanel() {
           role="switch"
           aria-checked={draft.enabled}
           onClick={() => setDraft((d) => ({ ...d, enabled: !d.enabled }))}
-          className={`relative h-7 w-12 shrink-0 rounded-full transition ${
+          className={`relative h-5 w-9 shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--theme-color-rgb,16,185,129),0.55)] ${
             draft.enabled ? "bg-[rgb(var(--theme-color-rgb,16,185,129))]" : "bg-surface-hover"
           }`}
         >
           <span
-            className={`pointer-events-none absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform ${
-              draft.enabled ? "translate-x-5" : "translate-x-0.5"
+            className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+              draft.enabled ? "translate-x-4" : "translate-x-0"
             }`}
           />
         </button>
@@ -342,13 +342,13 @@ export function SuggestedQuestionsSettingsPanel() {
           aria-checked={enabled}
           disabled={saving}
           onClick={() => void persist(!enabled)}
-          className={`relative h-7 w-12 shrink-0 rounded-full transition disabled:opacity-50 ${
+          className={`relative h-5 w-9 shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--theme-color-rgb,16,185,129),0.55)] disabled:opacity-40 ${
             enabled ? "bg-[rgb(var(--theme-color-rgb,16,185,129))]" : "bg-surface-hover"
           }`}
         >
           <span
-            className={`pointer-events-none absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform ${
-              enabled ? "translate-x-5" : "translate-x-0.5"
+            className={`pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+              enabled ? "translate-x-4" : "translate-x-0"
             }`}
           />
         </button>
