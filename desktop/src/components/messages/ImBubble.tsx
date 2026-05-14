@@ -188,7 +188,7 @@ export function ImBubble({
           type="button"
           className={`mt-8 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition ${
             selected
-              ? "border-cyan-500 bg-cyan-500 text-white"
+              ? "border-[rgb(var(--theme-color-rgb,6,182,212))] bg-[rgb(var(--theme-color-rgb,6,182,212))] text-white"
               : "border-text-faint bg-transparent text-transparent"
           }`}
           onClick={() => onToggleSelectMessage?.(message)}

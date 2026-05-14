@@ -176,7 +176,7 @@ export function ToolCallCard({
       className={
         variant === "flat"
           ? "w-full min-w-0 overflow-hidden text-xs text-text-muted"
-          : `w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-xs text-text-muted transition ${selected ? "border-cyan-500/60" : "border-border"}`
+          : `w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-xs text-text-muted transition ${selected ? "border-[rgba(var(--theme-color-rgb,6,182,212),0.6)]" : "border-border"}`
       }
     >
       <div className="flex w-full items-center gap-1.5 px-3 py-2 text-left">
@@ -227,7 +227,7 @@ export function ToolCallCard({
           type="button"
           className={`mt-2 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition ${
             selected
-              ? "border-cyan-500 bg-cyan-500 text-white"
+              ? "border-[rgb(var(--theme-color-rgb,6,182,212))] bg-[rgb(var(--theme-color-rgb,6,182,212))] text-white"
               : "border-text-faint bg-transparent text-transparent"
           }`}
           onClick={() => onToggleSelectMessage?.(message)}
