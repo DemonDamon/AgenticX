@@ -2982,21 +2982,20 @@ function SkillsTab() {
       </div>
 
       {/* Skill scan roots (presets + custom paths) */}
-      <div className="space-y-3 rounded-md bg-surface-card p-3">
-        <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">扫描路径</div>
-        <p className="text-xs text-text-faint">
+      <Panel title="扫描路径">
+        <p className="mb-3 text-xs leading-relaxed text-text-faint">
           项目内 <code className="text-text-muted">.agents/skills</code>、<code className="text-text-muted">.claude/skills</code>、<code className="text-text-muted">~/.agenticx/skills</code>（含 ClawHub 安装、智能体创建）以及内置包始终参与扫描。以下第三方根目录可按开关启用；也可添加自定义文件夹。
         </p>
-        <div className="space-y-2">
+        <div className="space-y-3">
           {skillScanPresets.map((p) => (
             <div
               key={p.id}
-              className="flex items-center gap-3 rounded-md bg-surface-panel/50 px-3 py-2"
+              className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3.5"
             >
-              <span className="min-w-0 flex-1">
-                <span className="text-sm text-text-primary">{p.label}</span>
-                <span className="mt-0.5 block font-mono text-[10px] text-text-faint">{p.path}</span>
-              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-text-strong">{p.label}</div>
+                <p className="mt-1 font-mono text-[11px] text-text-muted">{p.path}</p>
+              </div>
               <SettingsSwitch
                 checked={p.enabled}
                 disabled={skillScanBusy}
@@ -3011,60 +3010,73 @@ function SkillsTab() {
               />
             </div>
           ))}
-        </div>
-        <div className="text-xs font-medium text-text-subtle">自定义路径</div>
-        <div className="space-y-2">
-          {skillScanCustomPaths.map((row, i) => (
-            <div key={`skill-custom-${i}`} className="flex gap-2">
-              <input
-                className="min-w-0 flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 font-mono text-xs text-text-primary placeholder:text-text-faint"
-                placeholder="例如 ~/my-skills 或绝对路径"
-                value={row}
-                disabled={skillScanBusy}
-                onChange={(e) => {
-                  const next = [...skillScanCustomPaths];
-                  next[i] = e.target.value;
-                  setSkillScanCustomPaths(next);
-                }}
-                onBlur={(e) => {
-                  const next = [...skillScanCustomPaths];
-                  next[i] = e.target.value;
-                  void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
-                }}
-              />
+
+          {/* Custom paths */}
+          <div className="mt-4 border-t border-border pt-4">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-sm font-semibold text-text-strong">自定义路径</div>
               <button
                 type="button"
-                className="shrink-0 rounded-md border border-border p-2 text-text-faint transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-panel px-2.5 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
                 disabled={skillScanBusy}
-                title="移除"
-                onClick={() => {
-                  const next = skillScanCustomPaths.filter((_, j) => j !== i);
-                  setSkillScanCustomPaths(next);
-                  void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
-                }}
+                onClick={() => setSkillScanCustomPaths((prev) => [...prev, ""])}
               >
-                <Trash2 className="h-4 w-4" />
+                <Plus className="h-3.5 w-3.5" />
+                添加路径
               </button>
             </div>
-          ))}
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-            disabled={skillScanBusy}
-            onClick={() => setSkillScanCustomPaths((prev) => [...prev, ""])}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            添加路径
-          </button>
-        </div>
-        {skillScanMsg ? (
-          <div
-            className={`text-xs ${skillScanMsg.includes("失败") ? "text-amber-400" : "text-emerald-400"}`}
-          >
-            {skillScanMsg}
+            
+            {skillScanCustomPaths.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-text-faint">
+                暂无自定义路径
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {skillScanCustomPaths.map((row, i) => (
+                  <div key={`skill-custom-${i}`} className="flex items-center gap-2">
+                    <input
+                      className="min-w-0 flex-1 rounded-md border border-border bg-surface-panel px-3 py-2 font-mono text-xs text-text-primary placeholder:text-text-faint"
+                      placeholder="例如 ~/my-skills 或绝对路径"
+                      value={row}
+                      disabled={skillScanBusy}
+                      onChange={(e) => {
+                        const next = [...skillScanCustomPaths];
+                        next[i] = e.target.value;
+                        setSkillScanCustomPaths(next);
+                      }}
+                      onBlur={(e) => {
+                        const next = [...skillScanCustomPaths];
+                        next[i] = e.target.value;
+                        void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-md border border-border p-2 text-text-faint transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40"
+                      disabled={skillScanBusy}
+                      title="移除"
+                      onClick={() => {
+                        const next = skillScanCustomPaths.filter((_, j) => j !== i);
+                        setSkillScanCustomPaths(next);
+                        void persistSkillScanSettings(skillScanPresets, next, preferredSkillSources, disabledSkillNames);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        ) : null}
-      </div>
+          {skillScanMsg ? (
+            <div
+              className={`text-xs ${skillScanMsg.includes("失败") ? "text-amber-400" : "text-emerald-400"}`}
+            >
+              {skillScanMsg}
+            </div>
+          ) : null}
+        </div>
+      </Panel>
 
       {/* Search + Refresh */}
       <div className="flex gap-2">
