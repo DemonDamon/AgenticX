@@ -89,7 +89,7 @@ export function TurnToolGroupCard({
         >
           {/* 时间线仅在展开列表区，与 nested ToolCallCard 节点同一 X（px-3 12px + half Check 8px = 20px） */}
           <div
-            className="pointer-events-none absolute left-[20px] top-0 bottom-2 z-0 w-0 border-l border-dashed border-zinc-300 dark:border-zinc-600"
+            className="pointer-events-none absolute left-[20px] top-0 bottom-2 z-0 w-0 border-l border-dashed border-border"
             aria-hidden
           />
           <div className="relative z-[1] space-y-2.5">
@@ -97,7 +97,7 @@ export function TurnToolGroupCard({
               isTodoUpdateToolMessage(m.content) ? (
                 <div key={m.id} className="relative w-full min-w-0 text-xs text-text-muted">
                   <div
-                    className="pointer-events-none absolute left-[8px] top-[15px] z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2 border-surface-card bg-zinc-300 dark:bg-zinc-600"
+                    className="pointer-events-none absolute left-[8px] top-[15px] z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2 border-surface-card bg-border"
                     aria-hidden
                   />
                   <div className="ml-6 w-fit max-w-full rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted">
