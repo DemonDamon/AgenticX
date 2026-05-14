@@ -1021,33 +1021,62 @@ class SessionManager:
             raw_atts = item.get("attachments")
             if isinstance(raw_atts, list) and raw_atts:
                 clean_atts: list[dict[str, Any]] = []
-                for a in raw_atts[:8]:
+                image_n = 0
+                file_n = 0
+                for a in raw_atts[:24]:
                     if not isinstance(a, dict):
                         continue
                     du = str(a.get("data_url", "")).strip()
-                    if not du.startswith("data:image/") or len(du) > max_data_url:
+                    kind = str(a.get("kind", "") or "").strip()
+                    is_context = kind == "context_file"
+                    if du.startswith("data:image/") and len(du) <= max_data_url:
+                        if image_n >= 4:
+                            continue
+                        mime = str(a.get("mime_type", "") or "").strip()
+                        if not mime and du.startswith("data:"):
+                            semi = du.find(";")
+                            if semi > 5:
+                                mime = du[5:semi]
+                        if not mime:
+                            mime = "image/png"
+                        try:
+                            sz = int(a.get("size", 0) or 0)
+                        except (TypeError, ValueError):
+                            sz = 0
+                        clean_atts.append(
+                            {
+                                "name": str(a.get("name", "") or "").strip() or "image",
+                                "mime_type": mime,
+                                "size": sz,
+                                "data_url": du,
+                            }
+                        )
+                        image_n += 1
                         continue
-                    mime = str(a.get("mime_type", "") or "").strip()
-                    if not mime and du.startswith("data:"):
-                        semi = du.find(";")
-                        if semi > 5:
-                            mime = du[5:semi]
-                    if not mime:
-                        mime = "image/png"
-                    try:
-                        sz = int(a.get("size", 0) or 0)
-                    except (TypeError, ValueError):
-                        sz = 0
-                    clean_atts.append(
-                        {
-                            "name": str(a.get("name", "") or "").strip() or "image",
-                            "mime_type": mime,
-                            "size": sz,
-                            "data_url": du,
-                        }
-                    )
-                    if len(clean_atts) >= 4:
-                        break
+                    if is_context or (not du and str(a.get("name", "") or "").strip()):
+                        name = str(a.get("name", "") or "").strip()
+                        if not name:
+                            continue
+                        if file_n >= 8:
+                            continue
+                        sp = str(a.get("source_path", "") or "").strip()
+                        rt = bool(a.get("reference_token", False))
+                        mime = str(a.get("mime_type", "") or "").strip() or "application/octet-stream"
+                        try:
+                            sz = int(a.get("size", 0) or 0)
+                        except (TypeError, ValueError):
+                            sz = 0
+                        clean_atts.append(
+                            {
+                                "name": name,
+                                "mime_type": mime,
+                                "size": sz,
+                                "source_path": sp,
+                                "reference_token": rt,
+                                "kind": "context_file",
+                            }
+                        )
+                        file_n += 1
                 if clean_atts:
                     row["attachments"] = clean_atts
             if role == "assistant":

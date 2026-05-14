@@ -1183,6 +1183,86 @@ def create_studio_app() -> FastAPI:
             )
         return out
 
+    def _looks_like_filesystem_path(key: str) -> bool:
+        text = str(key or "").strip()
+        if not text:
+            return False
+        if text.startswith("file:"):
+            return True
+        if "/" in text or "\\" in text:
+            return True
+        if len(text) > 2 and text[1] == ":" and text[2] in {"/", "\\"}:
+            return True
+        return False
+
+    def _guess_mime_from_filename(name: str) -> str:
+        lower = str(name or "").lower()
+        if lower.endswith(".py"):
+            return "text/x-python"
+        if lower.endswith(".ts") or lower.endswith(".tsx"):
+            return "text/typescript"
+        if lower.endswith(".js") or lower.endswith(".jsx"):
+            return "text/javascript"
+        if lower.endswith(".md"):
+            return "text/markdown"
+        if lower.endswith(".json"):
+            return "application/json"
+        if lower.endswith(".yaml") or lower.endswith(".yml"):
+            return "text/yaml"
+        if lower.endswith(".txt"):
+            return "text/plain"
+        return "application/octet-stream"
+
+    def _history_attachments_from_context_files(context_files: dict[str, str]) -> list[dict[str, Any]]:
+        """Metadata-only rows so Desktop can replay file cards after session reload (no file body)."""
+        out: list[dict[str, Any]] = []
+        if not context_files:
+            return out
+        seen: set[str] = set()
+        for raw_key, raw_body in context_files.items():
+            key = str(raw_key or "").strip()
+            if not key:
+                continue
+            body = str(raw_body or "")
+            if body.strip() == "[图片文件]" or body.startswith("[图片:"):
+                continue
+            parts = key.split(":")
+            display_name = key
+            size_val = len(body.encode("utf-8")) if body else 0
+            reference_token = False
+            source_path = ""
+            if len(parts) >= 3 and parts[-1].isdigit() and parts[-2].isdigit():
+                display_name = str(parts[0] or "").strip() or key
+                try:
+                    size_val = int(parts[-2])
+                except ValueError:
+                    size_val = len(body.encode("utf-8")) if body else 0
+            elif _looks_like_filesystem_path(key):
+                display_name = os.path.basename(str(key).replace("\\", "/")) or key
+                source_path = key
+                reference_token = False
+                size_val = len(body.encode("utf-8")) if body else 0
+            else:
+                display_name = os.path.basename(str(key).replace("\\", "/")) or key
+                source_path = key if _looks_like_filesystem_path(key) else ""
+
+            dedupe_key = key.casefold()
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            mime = _guess_mime_from_filename(display_name)
+            out.append(
+                {
+                    "name": display_name,
+                    "mime_type": mime,
+                    "size": int(max(0, size_val)),
+                    "source_path": str(source_path or "").strip(),
+                    "reference_token": bool(reference_token),
+                    "kind": "context_file",
+                }
+            )
+        return out
+
     @app.get("/api/session", response_model=SessionState)
     async def get_or_create_session(
         session_id: str | None = Query(default=None),
@@ -1945,6 +2025,16 @@ def create_studio_app() -> FastAPI:
                             )
                         user_message_content = content_blocks
                         history_user_attachments = _history_attachments_from_image_inputs(image_inputs)
+                    _turn_cf = (
+                        _normalize_context_files(payload.context_files)
+                        if getattr(payload, "context_files", None)
+                        else {}
+                    )
+                    _cf_hist = _history_attachments_from_context_files(_turn_cf)
+                    if _cf_hist:
+                        if history_user_attachments is None:
+                            history_user_attachments = []
+                        history_user_attachments.extend(_cf_hist)
                     async for event in runtime.run_turn(
                         effective_input,
                         session,
