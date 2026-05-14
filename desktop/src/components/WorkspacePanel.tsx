@@ -15,6 +15,7 @@ import { ContextMenu } from "./ContextMenu";
 import { TerminalEmbed } from "./TerminalEmbed";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { isPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
+import { shouldKeepWorkspaceVisibleWhenSessionMissing } from "../utils/workspace-session-visibility";
 
 type TaskspaceFile = {
   name: string;
@@ -217,6 +218,9 @@ export function WorkspacePanel({
 
   useEffect(() => {
     if (!sessionId) {
+      if (shouldKeepWorkspaceVisibleWhenSessionMissing(sessionId, isPaneAwaitingFreshSession(paneId))) {
+        return;
+      }
       setTaskspaces([]);
       setExpandedDirs(new Set());
       setEntriesByDir({});
