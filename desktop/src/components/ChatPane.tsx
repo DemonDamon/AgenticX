@@ -1220,6 +1220,34 @@ function formatFileSize(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)}MB`;
 }
 
+/** Match composer attachment to parsed contextFiles row for /api/chat context_files body. */
+function resolveReadyAttachment(
+  file: MessageAttachment,
+  readyTuples: [string, AttachedFile][]
+): AttachedFile | undefined {
+  const byAlias = new Map<string, AttachedFile>();
+  for (const [stateKey, rec] of readyTuples) {
+    byAlias.set(stateKey, rec);
+    const sp = String(rec.sourcePath || "").trim();
+    if (sp) byAlias.set(sp, rec);
+    const nm = String(rec.name || "").trim();
+    if (nm) byAlias.set(nm, rec);
+  }
+  const keys = [file.sourcePath, file.name].map((k) => String(k || "").trim()).filter(Boolean);
+  for (const k of keys) {
+    const hit = byAlias.get(k);
+    if (hit) return hit;
+  }
+  for (const [, rec] of readyTuples) {
+    if (file.sourcePath && rec.sourcePath === file.sourcePath) return rec;
+    if (file.name && rec.name === file.name && file.size === rec.size) return rec;
+  }
+  for (const [, rec] of readyTuples) {
+    if (file.name && rec.name === file.name) return rec;
+  }
+  return undefined;
+}
+
 type AtCandidate =
   | {
       kind: "avatar";
@@ -4106,7 +4134,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     const suppressUserEcho = !!options?.suppressUserEcho;
     const skipUserHistory = !!options?.skipUserHistory;
     const readyEntries = attachmentEntries.filter(([, file]) => file.status === "ready");
-    const readyEntryMap = new Map(readyEntries);
     const composerAttachments: MessageAttachment[] = readyAttachments.map((file) => ({
       name: file.name,
       mimeType: file.mimeType,
@@ -4119,12 +4146,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       retryAttachments && retryAttachments.length > 0
         ? retryAttachments.map((item) => ({ ...item }))
         : composerAttachments;
-    const userAttachments: MessageAttachment[] = rawUserAttachments.filter((item) => {
-      if (!item.referenceToken) return true;
-      const name = String(item.name || "").trim();
-      if (!name) return true;
-      return messageText.includes(`@${name}`);
-    });
+    // Do not drop reference/workspace attachments when the user asks a short follow-up without @文件名;
+    // otherwise context_files never reaches the model and the file looks "invisible".
+    const userAttachments: MessageAttachment[] = rawUserAttachments;
     const hasReadyAttachments = userAttachments.length > 0;
     if ((!text && !hasReadyAttachments) || !apiBase) return;
 
@@ -4380,7 +4404,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         for (const file of userAttachments) {
           const key = String(file.sourcePath || file.name || "").trim();
           if (!key) continue;
-          const ready = readyEntryMap.get(key);
+          const ready = resolveReadyAttachment(file, readyEntries);
           const isImage = !!file.dataUrl || file.mimeType.startsWith("image/") || !!ready?.dataUrl || ready?.mimeType.startsWith("image/");
           if (isImage) {
             contextFilePayload[key] = "[图片文件]";
