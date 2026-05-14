@@ -18,6 +18,9 @@ const DEFAULT_CONFIG: WebSearchConfig = {
   providers: {},
 };
 
+/** Keep in sync with `WEB_SEARCH_MAX_RESULTS_CAP` in `agenticx/studio/web_search/contracts.py`. */
+const WEB_SEARCH_MAX_RESULTS_CAP = 50;
+
 const PROVIDERS: { id: string; label: string; needsKey: boolean }[] = [
   { id: "duckduckgo", label: "DuckDuckGo（免密钥）", needsKey: false },
   { id: "bocha", label: "Bocha AI", needsKey: true },
@@ -199,17 +202,20 @@ export function WebSearchSettingsPanel() {
         </select>
       </label>
       <label className="mt-3 block text-sm text-text-muted">
-        单次最大返回结果数（1–20）
+        单次最大返回结果数
         <input
           type="number"
           min={1}
-          max={20}
+          max={WEB_SEARCH_MAX_RESULTS_CAP}
           className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
           value={draft.max_results}
           onChange={(e) =>
             setDraft((d) => ({
               ...d,
-              max_results: Math.min(20, Math.max(1, Number(e.target.value) || 5)),
+              max_results: Math.min(
+                WEB_SEARCH_MAX_RESULTS_CAP,
+                Math.max(1, Number(e.target.value) || 5),
+              ),
             }))
           }
         />

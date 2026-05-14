@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from agenticx.cli.config_manager import ConfigManager
-from agenticx.studio.web_search.contracts import WebSearchResult, WebSearchRuntimeConfig
+from agenticx.studio.web_search.contracts import WEB_SEARCH_MAX_RESULTS_CAP, WebSearchResult, WebSearchRuntimeConfig
 from agenticx.studio.web_search import providers
 
 
@@ -39,7 +39,7 @@ class WebSearchService:
         if not q:
             return []
         n = int(max_results if max_results is not None else self._cfg.max_results)
-        n = max(1, min(20, n))
+        n = max(1, min(WEB_SEARCH_MAX_RESULTS_CAP, n))
         snip = self._cfg.fetch_snippet_chars
         prov = (provider_override or self._cfg.default_provider or "duckduckgo").lower().strip()
         pconf = self._cfg.providers if isinstance(self._cfg.providers, dict) else {}
