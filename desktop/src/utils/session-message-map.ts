@@ -6,14 +6,37 @@ export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | u
   const out: MessageAttachment[] = [];
   for (const a of raw) {
     if (!a || typeof a !== "object") continue;
-    const o = a as { name?: unknown; mime_type?: unknown; size?: unknown; data_url?: unknown };
+    const o = a as {
+      name?: unknown;
+      mime_type?: unknown;
+      size?: unknown;
+      data_url?: unknown;
+      source_path?: unknown;
+      reference_token?: unknown;
+      kind?: unknown;
+    };
     const dataUrl = String(o.data_url ?? "").trim();
-    if (!dataUrl.startsWith("data:image/")) continue;
-    const name = String(o.name ?? "").trim() || "image";
-    const mimeType = String(o.mime_type ?? "").trim() || "image/png";
+    const name = String(o.name ?? "").trim() || "file";
     const sizeRaw = o.size;
     const size = typeof sizeRaw === "number" && Number.isFinite(sizeRaw) ? sizeRaw : Number(sizeRaw) || 0;
-    out.push({ name, mimeType, size, dataUrl });
+    if (dataUrl.startsWith("data:image/")) {
+      const mimeType = String(o.mime_type ?? "").trim() || "image/png";
+      out.push({ name, mimeType, size, dataUrl });
+      continue;
+    }
+    const kind = String(o.kind ?? "").trim();
+    const sourcePath = String(o.source_path ?? "").trim();
+    const referenceToken = Boolean(o.reference_token);
+    if (kind === "context_file" || (!dataUrl && name)) {
+      const mimeType = String(o.mime_type ?? "").trim() || "application/octet-stream";
+      out.push({
+        name,
+        mimeType,
+        size,
+        ...(sourcePath ? { sourcePath } : {}),
+        ...(referenceToken ? { referenceToken: true } : {}),
+      });
+    }
   }
   return out.length ? out : undefined;
 }

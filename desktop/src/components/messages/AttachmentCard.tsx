@@ -19,6 +19,16 @@ function fileBadgeColor(name: string): string {
   return "var(--text-faint)";
 }
 
+function fileKindLabel(att: MessageAttachment): string {
+  const lower = att.name.toLowerCase();
+  const mime = att.mimeType.toLowerCase();
+  if (mime.includes("python") || lower.endsWith(".py")) return "代码";
+  if (/\.(ts|tsx|js|jsx|mjs|cjs|go|rs|java|kt|swift|c|cpp|h|hpp|cs|rb|php)$/.test(lower)) return "代码";
+  if (/\.(md|txt|log|yaml|yml|json|toml|xml|html|css|sql|sh)$/.test(lower)) return "文本";
+  if (/\.(pdf|doc|docx|ppt|pptx|xls|xlsx)$/.test(lower)) return "文档";
+  return "文件";
+}
+
 function isImage(att: MessageAttachment): boolean {
   return att.mimeType.startsWith("image/") && !!att.dataUrl;
 }
@@ -72,7 +82,9 @@ export function AttachmentCard({ attachment }: { attachment: MessageAttachment }
       </div>
       <div className="min-w-0">
         <div className="truncate text-xs text-text-muted">{attachment.name}</div>
-        <div className="text-[10px] text-text-faint">File · {formatFileSize(attachment.size)}</div>
+        <div className="text-[10px] text-text-faint">
+          {fileKindLabel(attachment)} · {formatFileSize(attachment.size)}
+        </div>
       </div>
     </div>
   );
