@@ -73,8 +73,8 @@ function PreventSleepToggle() {
         aria-label={enabled ? "已开启抑制系统睡眠" : "已关闭抑制系统睡眠"}
         disabled={saving || loading}
         onClick={() => { if (!saving && !loading) void persist(!enabled); }}
-        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/55 ${
-          enabled ? "bg-emerald-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]" : "bg-text-muted/35"
+        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--settings-accent-focus,rgba(59,130,246,0.5))] ${
+          enabled ? "bg-[var(--ui-btn-primary-bg)] shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]" : "bg-text-muted/35"
         } ${saving || loading ? "cursor-not-allowed opacity-50" : ""}`}
       >
         <span
