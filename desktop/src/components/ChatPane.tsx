@@ -843,41 +843,54 @@ function AttachmentChip({ file, onRemove }: { file: AttachedFile; onRemove: () =
   const isReferenceToken = !!file.referenceToken;
   return (
     <div
-      className={`inline-flex max-w-[360px] items-center gap-2 rounded-lg border px-2 py-1 text-xs ${
+      className={`group relative inline-flex items-center gap-3 rounded-xl border px-3 py-2 text-sm transition-colors ${
         isReferenceToken
-          ? "border-sky-500/40 bg-sky-500/15 text-sky-100"
-          : "border-border bg-surface-panel text-text-muted"
+          ? "border-sky-500/40 bg-sky-500/10 text-sky-100"
+          : "border-border bg-surface-card hover:bg-surface-hover"
       }`}
+      style={{ maxWidth: "240px" }}
     >
       {isImage && file.dataUrl ? (
-        <img src={file.dataUrl} alt={file.name} className="h-8 w-8 shrink-0 rounded object-cover" />
+        <img src={file.dataUrl} alt={file.name} className="h-10 w-10 shrink-0 rounded-lg object-cover" />
       ) : isReferenceToken ? (
-        <span className="text-sm">↘</span>
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-500/20 text-sky-400">
+          <span className="text-lg">↘</span>
+        </div>
       ) : (
-        <span className="text-sm text-text-faint">{file.status === "error" ? "⚠️" : "📄"}</span>
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#3b82f6] text-white">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+          </svg>
+        </div>
       )}
-      <div className="min-w-0">
-        <div className={`truncate ${isReferenceToken ? "text-sky-100" : "text-text-muted"}`}>{file.name}</div>
+      <div className="flex min-w-0 flex-col justify-center">
+        <div className={`truncate font-medium leading-tight ${isReferenceToken ? "text-sky-100" : "text-text-primary"}`}>
+          {file.name}
+        </div>
         {isReferenceToken ? (
-          <div className="text-[10px] text-sky-200/80">@ 文件引用</div>
+          <div className="text-xs text-sky-200/80 mt-0.5">@ 文件引用</div>
         ) : file.status === "parsing" ? (
-          <div className="text-[10px] text-text-faint animate-pulse">解析中...</div>
+          <div className="text-xs text-text-faint animate-pulse mt-0.5">解析中...</div>
         ) : file.status === "error" ? (
-          <div className="text-[10px] text-status-error">{file.errorText || "解析失败"}</div>
+          <div className="truncate text-xs text-status-error mt-0.5">{file.errorText || "解析失败"}</div>
         ) : (
-          <div className="text-[10px] text-text-faint">{formatFileSize(file.size)}</div>
+          <div className="text-xs text-text-faint mt-0.5">
+            {file.name.includes('.') ? file.name.split('.').pop()?.toUpperCase() : '文件'} · {formatFileSize(file.size)}
+          </div>
         )}
       </div>
       <button
-        className={`shrink-0 rounded px-1 transition ${
+        className={`absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full opacity-0 transition-opacity group-hover:opacity-100 ${
           isReferenceToken
-            ? "text-sky-200/80 hover:bg-sky-500/20 hover:text-sky-100"
-            : "text-text-faint hover:bg-surface-hover hover:text-text-muted"
+            ? "bg-sky-500/20 text-sky-200 hover:bg-sky-500/40 hover:text-sky-100"
+            : "bg-surface-panel text-text-muted hover:bg-surface-hover hover:text-text-primary"
         }`}
         onClick={onRemove}
         title="移除附件"
       >
-        ✕
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3 w-3">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
       </button>
     </div>
   );
@@ -1754,6 +1767,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const exitFocusMode = useAppStore((s) => s.exitFocusMode);
   const userBubbleLabel = useMemo(() => userNickname.trim() || "我", [userNickname]);
   const isGroupPane = Boolean(pane?.avatarId?.startsWith("group:"));
+  /** 元智能体窗格：顶栏已展示当前模型，气泡内不再重复展示模型徽章 */
+  const isMachiMetaPane = pane.avatarId === null;
   const isAutomationTaskPane = isAutomationPaneAvatarId(pane?.avatarId);
   const groupChatId = isGroupPane && pane?.avatarId ? pane.avatarId.slice("group:".length) : "";
   const activeGroup = useMemo(
@@ -3566,7 +3581,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               message={message}
               highlightTerms={pane.historySearchTerms}
               assistantBadge={
-                message.role === "assistant" && !reactHideBadge ? (
+                message.role === "assistant" && !reactHideBadge && !isMachiMetaPane ? (
                   <ModelBadge provider={message.provider} model={message.model} />
                 ) : undefined
               }
@@ -3848,18 +3863,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         chatStyle === "terminal" ? (
           <TerminalLine
             message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
-            badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+            badge={
+              !isMachiMetaPane && streamingModel ? (
+                <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />
+              ) : undefined
+            }
           />
         ) : chatStyle === "clean" ? (
           <CleanBlock
             message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
-            badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+            badge={
+              !isMachiMetaPane && streamingModel ? (
+                <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />
+              ) : undefined
+            }
           />
         ) : (
           <ImBubble
             message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
             highlightTerms={pane.historySearchTerms}
-            badge={streamingModel ? <ModelBadge provider={streamingModel.provider} model={streamingModel.model} /> : undefined}
+            badge={
+              !isMachiMetaPane && streamingModel ? (
+                <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />
+              ) : undefined
+            }
             assistantName={paneAvatarMeta.name}
             assistantAvatarUrl={paneAvatarMeta.url}
           />
@@ -3894,7 +3921,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       )}
     </>
     );
-  }, [chatStyle, copyMessage, copyReActBlock, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resolveQuoteBody, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, setQuoteTarget, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [chatStyle, copyMessage, copyReActBlock, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isMachiMetaPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resolveQuoteBody, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, setQuoteTarget, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -5652,36 +5679,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           ) : null}
           <div className="agx-pane-composer-body agx-theme-focus-ring relative rounded-2xl border border-border bg-surface-card transition-all duration-300 ease-out">
             {visibleAttachmentEntries.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+              <div className="flex flex-wrap gap-2 px-3 pt-3">
                 {visibleAttachmentEntries.map(([key, file]) => (
                   <AttachmentChip key={key} file={file} onRemove={() => removeAttachment(key)} />
                 ))}
               </div>
             ) : null}
-            <div className="pointer-events-none absolute right-3 top-2 z-10 flex items-center gap-2">
-              {composerExpanded ? (
-                <span className="text-xs text-text-faint">↩ 键可用于换行</span>
-              ) : null}
-              <button
-                type="button"
-                className="pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-xl text-text-faint/55 outline-none transition hover:bg-surface-hover hover:text-text-strong focus:outline-none focus-visible:bg-surface-hover focus-visible:text-text-strong"
-                aria-label={composerExpanded ? "收起输入区" : "展开输入区"}
-                title={composerExpanded ? "收起输入区（Enter 发送）" : "展开输入区（Enter 换行）"}
-                onClick={() => setComposerExpanded((prev) => !prev)}
-              >
+            <div className="relative">
+              <div className="pointer-events-none absolute right-3 top-2 z-10 flex items-center gap-2">
                 {composerExpanded ? (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]">
-                    <path d="M9 5H5v4M15 5h4v4M5 15v4h4M19 15v4h-4" />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]">
-                    <path d="M15 5h4v4M9 5H5v4M5 15v4h4M19 15v4h-4" />
-                  </svg>
-                )}
-              </button>
-            </div>
-            <div
-              ref={composerRef}
+                  <span className="text-xs text-text-faint">↩ 键可用于换行</span>
+                ) : null}
+                <button
+                  type="button"
+                  className="pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-xl text-text-faint/55 outline-none transition hover:bg-surface-hover hover:text-text-strong focus:outline-none focus-visible:bg-surface-hover focus-visible:text-text-strong"
+                  aria-label={composerExpanded ? "收起输入区" : "展开输入区"}
+                  title={composerExpanded ? "收起输入区（Enter 发送）" : "展开输入区（Enter 换行）"}
+                  onClick={() => setComposerExpanded((prev) => !prev)}
+                >
+                  {composerExpanded ? (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]">
+                      <path d="M9 5H5v4M15 5h4v4M5 15v4h4M19 15v4h-4" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]">
+                      <path d="M15 5h4v4M9 5H5v4M5 15v4h4M19 15v4h-4" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+              <div
+                ref={composerRef}
               contentEditable
               suppressContentEditableWarning
               onInput={() => {
@@ -5795,6 +5823,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 {focusMode ? "开始任务..." : "发消息..."}
               </div>
             ) : null}
+            </div>
             <div className="agx-pane-composer-actions flex min-w-0 items-center justify-between gap-1 px-2.5 pb-2.5 pt-1">
               <div className="flex shrink-0 items-center gap-0.5">
                 {focusMode ? (
