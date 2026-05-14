@@ -204,6 +204,84 @@ export function ImBubble({
     setMenuOpen(true);
   };
 
+  const showAssistantFollowups =
+    !isUser &&
+    !isStreaming &&
+    !isGroupTyping &&
+    !omitSuggestedQuestions &&
+    Boolean(message.suggestedQuestions?.length) &&
+    !!onFollowupClick;
+
+  const assistantIconButtons =
+    !hideActions && !isUser ? (
+      <>
+        <HoverTip label="复制">
+          <button
+            type="button"
+            className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onCopyMessage?.(message)}
+          >
+            <Copy size={13} />
+          </button>
+        </HoverTip>
+        <HoverTip label="引用">
+          <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
+            <Quote size={13} />
+          </button>
+        </HoverTip>
+        <HoverTip label="收藏">
+          <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
+            <Bookmark size={13} />
+          </button>
+        </HoverTip>
+        <HoverTip label="转发">
+          <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
+            <Share2 size={13} />
+          </button>
+        </HoverTip>
+        {onRetryMessage ? (
+          <HoverTip label="重试">
+            <button
+              type="button"
+              className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onRetryMessage(message)}
+            >
+              <RotateCcw size={13} />
+            </button>
+          </HoverTip>
+        ) : null}
+        <HoverTip label="多选">
+          <button
+            type="button"
+            className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onToggleSelectMessage?.(message)}
+          >
+            <LayoutList size={13} />
+          </button>
+        </HoverTip>
+      </>
+    ) : null;
+
+  const assistantFollowupChipButtons =
+    showAssistantFollowups && message.suggestedQuestions ? (
+      <>
+        {message.suggestedQuestions.slice(0, 3).map((q, qi) => (
+          <button
+            key={`${qi}-${q}`}
+            type="button"
+            className="max-w-full rounded-full border border-border bg-surface-hover/80 px-2.5 py-1 text-left text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onFollowupClick?.(q)}
+          >
+            {q}
+          </button>
+        ))}
+      </>
+    ) : null;
+
   return (
     <div className="group relative flex min-w-0 items-start gap-2" onContextMenu={openContextMenu}>
       {selectable ? (
@@ -368,26 +446,15 @@ export function ImBubble({
                 )}
               </div>
             </div>
-            {!isUser &&
-            !isStreaming &&
-            !isGroupTyping &&
-            !omitSuggestedQuestions &&
-            message.suggestedQuestions &&
-            message.suggestedQuestions.length > 0 &&
-            onFollowupClick ? (
-              <div className="mt-2 flex min-w-0 flex-wrap gap-1.5 self-stretch">
-                {message.suggestedQuestions.slice(0, 3).map((q, qi) => (
-                  <button
-                    key={`${qi}-${q}`}
-                    type="button"
-                    className="max-w-full rounded-full border border-border bg-surface-hover/80 px-2.5 py-1 text-left text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => onFollowupClick(q)}
-                  >
-                    {q}
-                  </button>
-                ))}
+            {showAssistantFollowups && assistantIconButtons ? (
+              <div className="mt-2 flex min-w-0 flex-col gap-2 self-stretch">
+                <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint">
+                  {assistantIconButtons}
+                </div>
+                <div className="flex min-w-0 flex-wrap gap-1.5">{assistantFollowupChipButtons}</div>
               </div>
+            ) : showAssistantFollowups ? (
+              <div className="mt-2 flex min-w-0 flex-wrap gap-1.5 self-stretch">{assistantFollowupChipButtons}</div>
             ) : null}
             {hideActions ? null : isUser ? (
               <div className="mt-1 flex flex-wrap items-center gap-0.5 text-text-faint">
@@ -454,57 +521,9 @@ export function ImBubble({
                   </button>
                 </HoverTip>
               </div>
-            ) : (
+            ) : showAssistantFollowups ? null : (
               <div className="mt-1 min-w-0 self-stretch">
-                <div className="ml-auto flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint">
-                  <HoverTip label="复制">
-                    <button
-                      type="button"
-                      className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => onCopyMessage?.(message)}
-                    >
-                      <Copy size={13} />
-                    </button>
-                  </HoverTip>
-                  <HoverTip label="引用">
-                    <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
-                      <Quote size={13} />
-                    </button>
-                  </HoverTip>
-                  <HoverTip label="收藏">
-                    <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
-                      <Bookmark size={13} />
-                    </button>
-                  </HoverTip>
-                  <HoverTip label="转发">
-                    <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
-                      <Share2 size={13} />
-                    </button>
-                  </HoverTip>
-                  {onRetryMessage ? (
-                    <HoverTip label="重试">
-                      <button
-                        type="button"
-                        className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => onRetryMessage(message)}
-                      >
-                        <RotateCcw size={13} />
-                      </button>
-                    </HoverTip>
-                  ) : null}
-                  <HoverTip label="多选">
-                    <button
-                      type="button"
-                      className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => onToggleSelectMessage?.(message)}
-                    >
-                      <LayoutList size={13} />
-                    </button>
-                  </HoverTip>
-                </div>
+                <div className="flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint">{assistantIconButtons}</div>
               </div>
             )}
           </>

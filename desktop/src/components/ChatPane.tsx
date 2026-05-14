@@ -3715,6 +3715,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   )}
                 </div>
                 {useUnifiedReActCard &&
+                hasStreamingRow &&
                 peeledFollowupAssistant?.suggestedQuestions &&
                 peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
                   <div className="flex min-w-0 items-start gap-2">
@@ -3739,73 +3740,91 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 {finalAssistant
                   ? renderGroupedRow({ kind: "message", message: finalAssistant }, segIdx + 1000, {})
                   : null}
-                {/* Block-level action row: shown when not streaming, mirrors ImBubble action row */}
+                {/* Block-level actions; peeled follow-ups on the next line below icons */}
                 {!hasStreamingRow && workMessages.length > 0 && useUnifiedReActCard ? (
                   <div className="flex min-w-0 items-start gap-2">
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
-                      <div className="ml-auto flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint">
-                        <HoverTip label="复制">
-                          <button
-                            type="button"
-                            className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => void copyReActBlock(workMessages)}
-                          >
-                            <Copy size={13} />
-                          </button>
-                        </HoverTip>
-                        {lastAssistantInBlock ? (
-                          <>
-                            <HoverTip label="引用">
+                      <div className="flex min-w-0 flex-col gap-2">
+                        <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint">
+                          <HoverTip label="复制">
+                            <button
+                              type="button"
+                              className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => void copyReActBlock(workMessages)}
+                            >
+                              <Copy size={13} />
+                            </button>
+                          </HoverTip>
+                          {lastAssistantInBlock ? (
+                            <>
+                              <HoverTip label="引用">
+                                <button
+                                  type="button"
+                                  className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() =>
+                                    setQuoteTarget({
+                                      message: lastAssistantInBlock,
+                                      body: resolveQuoteBody(lastAssistantInBlock, undefined),
+                                    })
+                                  }
+                                >
+                                  <Quote size={13} />
+                                </button>
+                              </HoverTip>
+                              <HoverTip label="收藏">
+                                <button
+                                  type="button"
+                                  className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => void favoriteMessage(lastAssistantInBlock, undefined)}
+                                >
+                                  <Bookmark size={13} />
+                                </button>
+                              </HoverTip>
+                              <HoverTip label="转发">
+                                <button
+                                  type="button"
+                                  className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => forwardOneMessage(lastAssistantInBlock, undefined)}
+                                >
+                                  <Share2 size={13} />
+                                </button>
+                              </HoverTip>
+                            </>
+                          ) : null}
+                          <HoverTip label="多选">
+                            <button
+                              type="button"
+                              className={`rounded p-1 hover:bg-surface-hover ${
+                                blockAnySelected ? "text-cyan-400 hover:text-cyan-300" : "hover:text-text-strong"
+                              }`}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => toggleSelectBlock(workMessages)}
+                            >
+                              <LayoutList size={13} />
+                            </button>
+                          </HoverTip>
+                        </div>
+                        {peeledFollowupAssistant?.suggestedQuestions &&
+                        peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
+                          <div className="flex min-w-0 flex-wrap gap-1.5">
+                            {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
                               <button
+                                key={`${qi}-${q}`}
                                 type="button"
-                                className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+                                className="max-w-full rounded-full border border-border bg-surface-hover/80 px-2.5 py-1 text-left text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
                                 onMouseDown={(e) => e.preventDefault()}
-                                onClick={() =>
-                                  setQuoteTarget({
-                                    message: lastAssistantInBlock,
-                                    body: resolveQuoteBody(lastAssistantInBlock, undefined),
-                                  })
-                                }
+                                onClick={() => sendFollowupChip(q)}
                               >
-                                <Quote size={13} />
+                                {q}
                               </button>
-                            </HoverTip>
-                            <HoverTip label="收藏">
-                              <button
-                                type="button"
-                                className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => void favoriteMessage(lastAssistantInBlock, undefined)}
-                              >
-                                <Bookmark size={13} />
-                              </button>
-                            </HoverTip>
-                            <HoverTip label="转发">
-                              <button
-                                type="button"
-                                className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => forwardOneMessage(lastAssistantInBlock, undefined)}
-                              >
-                                <Share2 size={13} />
-                              </button>
-                            </HoverTip>
-                          </>
+                            ))}
+                          </div>
                         ) : null}
-                        <HoverTip label="多选">
-                          <button
-                            type="button"
-                            className={`rounded p-1 hover:bg-surface-hover ${
-                              blockAnySelected ? "text-cyan-400 hover:text-cyan-300" : "hover:text-text-strong"
-                            }`}
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => toggleSelectBlock(workMessages)}
-                          >
-                            <LayoutList size={13} />
-                          </button>
-                        </HoverTip>
                       </div>
                     </div>
                   </div>
