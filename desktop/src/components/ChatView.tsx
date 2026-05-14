@@ -1688,7 +1688,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           {streaming ? (
             <div className="flex items-center gap-2">
               <button className="flex h-10 shrink-0 items-center rounded-xl bg-rose-500 px-4 text-sm font-medium text-white transition hover:bg-rose-400" onClick={stopStreaming}>中断</button>
-              <button className="flex h-10 shrink-0 items-center rounded-xl bg-cyan-500 px-4 text-sm font-medium text-black transition hover:bg-cyan-400 disabled:opacity-40 disabled:hover:bg-cyan-500" disabled={!canSend || !input.trim()} onClick={() => void send()}>追问</button>
+              <button className="flex h-10 shrink-0 items-center rounded-xl bg-btnPrimary px-4 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40 disabled:hover:bg-btnPrimary" disabled={!canSend || !input.trim()} onClick={() => void send()}>追问</button>
               <button
                 className="flex h-10 shrink-0 items-center rounded-xl border border-border px-4 text-sm font-medium text-text-subtle transition hover:bg-surface-hover disabled:opacity-40"
                 disabled={!canSend || !input.trim()}
@@ -1708,7 +1708,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               >排队</button>
             </div>
           ) : (
-            <button className="flex h-10 shrink-0 items-center rounded-xl bg-cyan-500 px-4 text-sm font-medium text-black transition hover:bg-cyan-400 disabled:opacity-40 disabled:hover:bg-cyan-500" disabled={!canSend || !input.trim()} onClick={() => void send()}>发送</button>
+            <button className="flex h-10 shrink-0 items-center rounded-xl bg-btnPrimary px-4 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40 disabled:hover:bg-btnPrimary" disabled={!canSend || !input.trim()} onClick={() => void send()}>发送</button>
           )}
         </div>
         {!isLite && <ShortcutHints />}

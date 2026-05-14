@@ -6055,7 +6055,7 @@ export function SettingsPanel({
                   key={t.id}
                   className={`flex w-full items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left text-[13px] font-semibold transition-all ${
                     isActive
-                      ? "border-border-strong bg-surface-card text-text-strong"
+                      ? "border-transparent bg-btnPrimary text-btnPrimary-text"
                       : "border-transparent text-text-subtle hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
                   }`}
                   onClick={() => setTab(t.id)}
@@ -6124,6 +6124,7 @@ export function SettingsPanel({
                         { id: "green", color: "bg-emerald-500", label: "绿色" },
                         { id: "pink", color: "bg-pink-500", label: "粉红色" },
                         { id: "yellow", color: "bg-amber-500", label: "黄色" },
+                        { id: "white", color: "bg-slate-900 dark:bg-white", label: "白色/单色" },
                       ].map((tc) => (
                         <button
                           key={tc.id}

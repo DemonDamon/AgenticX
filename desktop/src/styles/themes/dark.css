@@ -34,9 +34,9 @@
   --settings-accent-fg-muted: rgba(255, 255, 255, 0.8);
   --settings-accent-border-muted: rgba(255, 255, 255, 0.32);
   --settings-accent-border-strong: rgba(255, 255, 255, 0.42);
-  --settings-accent-solid: rgba(248, 250, 252, 0.9);
-  --settings-accent-solid-hover: rgba(255, 255, 255, 0.98);
-  --settings-accent-solid-text: #0f172a;
+  --settings-accent-solid: rgba(var(--theme-color-rgb), 1);
+  --settings-accent-solid-hover: rgba(var(--theme-color-rgb), 0.9);
+  --settings-accent-solid-text: var(--theme-color-text);
   --settings-accent-badge-bg: rgba(255, 255, 255, 0.12);
   --settings-accent-focus: rgba(255, 255, 255, 0.45);
   --settings-accent-progress: #94a3b8;
@@ -70,9 +70,9 @@
   --status-warning: rgba(255, 175, 85, 0.95);
   --status-error: rgba(255, 110, 110, 0.95);
 
-  --ui-btn-primary-bg: rgba(248, 250, 252, 0.90);
-  --ui-btn-primary-bg-hover: rgba(255, 255, 255, 0.98);
-  --ui-btn-primary-text: #0f172a;
+  --ui-btn-primary-bg: rgba(var(--theme-color-rgb), 1);
+  --ui-btn-primary-bg-hover: rgba(var(--theme-color-rgb), 0.9);
+  --ui-btn-primary-text: var(--theme-color-text);
   --ui-accent-surface: rgba(255, 255, 255, 0.08);
   --ui-accent-surface-hover: rgba(255, 255, 255, 0.13);
   --ui-accent-text: rgba(255, 255, 255, 0.82);

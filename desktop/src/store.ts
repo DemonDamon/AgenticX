@@ -15,7 +15,7 @@ export type SubAgentStatus =
   | "cancelled";
 export type ConfirmStrategy = "manual" | "semi-auto" | "auto";
 export type ThemeMode = "dark" | "light" | "dim";
-export type ThemeColor = "blue" | "green" | "pink" | "yellow";
+export type ThemeColor = "blue" | "green" | "pink" | "yellow" | "white";
 export type ChatStyle = "im" | "terminal" | "clean";
 /** MCP 列表展示态（与 Studio `/api/mcp/servers` 对齐，近似 Cursor 绿/红/灰语义） */
 export type McpServer = {
@@ -564,7 +564,7 @@ function loadChatStyle(): ChatStyle {
 function loadThemeColor(): ThemeColor {
   try {
     const saved = window.localStorage.getItem(THEME_COLOR_STORAGE_KEY);
-    if (saved === "blue" || saved === "green" || saved === "pink" || saved === "yellow") return saved as ThemeColor;
+    if (saved === "blue" || saved === "green" || saved === "pink" || saved === "yellow" || saved === "white") return saved as ThemeColor;
   } catch {
     // ignore storage errors
   }

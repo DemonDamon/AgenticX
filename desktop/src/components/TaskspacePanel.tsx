@@ -434,7 +434,8 @@ export function TaskspacePanel({
                 取消
               </button>
               <button
-                className="rounded bg-cyan-600 px-2 py-1 text-[11px] text-white hover:bg-cyan-500 disabled:opacity-50"
+                className="rounded px-2 py-1 text-[11px] transition-colors disabled:opacity-50"
+                style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
                 disabled={adding}
                 onClick={() => void addTaskspace(newPath, newLabel)}
               >

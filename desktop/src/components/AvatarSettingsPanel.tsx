@@ -358,7 +358,7 @@ export function AvatarSettingsPanel(props: Props) {
               key={t.id}
               className={`mb-1 rounded-[10px] border px-3 py-1.5 text-xs font-medium transition ${
                 activeTab === t.id
-                  ? "border-border-strong bg-surface-card text-text-strong"
+                  ? "border-transparent bg-btnPrimary text-btnPrimary-text"
                   : "border-transparent text-text-subtle hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
               }`}
               onClick={() => {

@@ -52,7 +52,7 @@ export function StallRecoveryCard({
                     <button
                       type="button"
                       onClick={onResume}
-                      className="rounded-md bg-cyan-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-cyan-500"
+                      className="rounded-md bg-btnPrimary px-3 py-1 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
                     >
                       {isStall ? "恢复执行" : "继续执行"}
                     </button>
