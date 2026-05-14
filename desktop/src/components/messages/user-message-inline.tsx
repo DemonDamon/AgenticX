@@ -33,7 +33,7 @@ function tryConsumeSkillRef(text: string, at: number): { slug: string; len: numb
 export function UserSkillRefChip({ name }: { name: string }) {
   return (
     <span
-      className="mx-0.5 inline-flex max-w-[min(100%,280px)] items-center gap-0.5 rounded-full border border-[#a78bfa60] bg-[#3b1f6acc] px-2 py-0.5 align-middle text-[12px] font-medium leading-snug text-[#ddd6fe]"
+      className="agx-composer-inline-chip mx-0.5 inline-flex max-w-[min(100%,280px)] items-center gap-0.5 rounded-md px-2 py-0.5 align-middle text-[12px] font-medium leading-snug"
       title={`@skill://${name}`}
     >
       <Sparkles className="h-3 w-3 shrink-0 opacity-90" strokeWidth={2} aria-hidden />
@@ -105,7 +105,7 @@ export function renderUserMessageInlineBody(
       chunks.push(
         <span
           key={`ref-${chipKey++}`}
-          className="mx-0.5 inline-flex items-center rounded-md border border-[#6a9dff90] bg-[#244766cc] px-1.5 py-0.5 align-middle text-[12px] font-medium leading-[1.2] text-[#e6f0ff]"
+          className="agx-composer-inline-chip mx-0.5 inline-flex items-center rounded-md px-1.5 py-0.5 align-middle text-[12px] font-medium leading-[1.2]"
         >
           {matched}
         </span>

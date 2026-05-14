@@ -399,7 +399,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
               <input
                 ref={searchRef}
                 type="text"
-                className="w-full rounded-lg border border-border bg-surface-card px-2.5 py-1.5 text-[12px] text-text-strong outline-none placeholder:text-text-faint focus:border-[var(--ui-accent-border,#6a9dff)]"
+                className="w-full rounded-lg border border-border bg-surface-card px-2.5 py-1.5 text-[12px] text-text-strong outline-none placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb,59,130,246),0.55)]"
                 placeholder="搜索技能…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -426,7 +426,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
                       handleClose();
                     }}
                   >
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-violet-500/20 text-violet-400">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[rgba(var(--theme-color-rgb,59,130,246),0.22)] text-[rgb(var(--theme-color-rgb,59,130,246))]">
                       <Wand2 className="h-3 w-3" aria-hidden />
                     </span>
                     <div className="min-w-0 flex-1">
@@ -2737,7 +2737,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     token.setAttribute("data-ref-token", "1");
     token.setAttribute("data-ref-name", name);
     token.className =
-      "mx-0.5 inline-flex items-center rounded-md border border-[#6a9dff90] bg-[#244766cc] px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2] text-[#e6f0ff]";
+      "agx-composer-inline-chip mx-0.5 inline-flex items-center rounded-md px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2]";
     token.textContent = name;
     return token;
   }, []);
@@ -2748,7 +2748,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     token.setAttribute("data-skill-token", "1");
     token.setAttribute("data-skill-name", name);
     token.className =
-      "mx-0.5 inline-flex items-center gap-1 rounded-md border border-[#a78bfa60] bg-[#3b1f6acc] px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2] text-[#ddd6fe]";
+      "agx-composer-inline-chip mx-0.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2]";
     // wrench SVG icon + name
     const icon = document.createElement("span");
     icon.innerHTML =
