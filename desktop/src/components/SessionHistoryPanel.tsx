@@ -1,5 +1,6 @@
 import { PanelRightClose, History, ListChecks, MessageSquareMore, Smartphone } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useAppStore, type ChatPane, type Message } from "../store";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../utils/session-message-map";
@@ -219,6 +220,22 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
   const [sessionSearchQuery, setSessionSearchQuery] = useState("");
   const [messageSearchSnippets, setMessageSearchSnippets] = useState<Record<string, string>>({});
   const messageSearchReq = useRef(0);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu || !contextMenuRef.current) return;
+    const el = contextMenuRef.current;
+    const pad = 8;
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = contextMenu.x;
+    let top = contextMenu.y;
+    if (left + rect.width > vw - pad) left = Math.max(pad, vw - rect.width - pad);
+    if (top + rect.height > vh - pad) top = Math.max(pad, vh - rect.height - pad);
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+  }, [contextMenu]);
 
   const title = useMemo(() => (pane.avatarName || "Machi").trim(), [pane.avatarName]);
 
@@ -1121,9 +1138,10 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           </>
         )}
       </div>
-      {contextMenu ? (
+      {contextMenu ? createPortal(
         <div
-          className="fixed z-50 min-w-[180px] rounded-md border border-border bg-surface-panel p-1 shadow-2xl"
+          ref={contextMenuRef}
+          className="fixed z-[200] w-[180px] rounded-md border border-border bg-surface-base p-1 shadow-2xl"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -1186,7 +1204,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           >
             归档此前会话
           </button>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </div>
   );
