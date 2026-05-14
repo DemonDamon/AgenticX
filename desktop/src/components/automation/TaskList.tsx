@@ -26,8 +26,8 @@ function SettingsSwitch({
       aria-checked={checked}
       disabled={disabled}
       onClick={() => { if (!disabled) onChange(!checked); }}
-      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${
-        checked ? "bg-emerald-500" : "bg-surface-hover"
+      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--settings-accent-focus,rgba(59,130,246,0.5))] ${
+        checked ? "bg-[var(--ui-btn-primary-bg)] shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]" : "bg-surface-hover"
       } ${disabled ? "opacity-50" : ""}`}
     >
       <span
