@@ -9,6 +9,7 @@ import {
   chatRemarkPlugins,
   chatUrlTransform,
   normalizeChatMarkdownContent,
+  MarkdownContext,
 } from "./markdown-components";
 import { renderUserMessageInlineBody } from "./user-message-inline";
 
@@ -53,14 +54,16 @@ export function CleanBlock({ message, badge }: Props) {
               (message.attachments ?? []).filter((a) => !!a.referenceToken)
             )
           ) : (
-            <ReactMarkdown
-              remarkPlugins={chatRemarkPlugins}
-              rehypePlugins={chatRehypePlugins}
-              components={chatMarkdownComponents}
-              urlTransform={chatUrlTransform}
-            >
-              {normalizeChatMarkdownContent(bodyText)}
-            </ReactMarkdown>
+            <MarkdownContext.Provider value={{ isStreaming }}>
+              <ReactMarkdown
+                remarkPlugins={chatRemarkPlugins}
+                rehypePlugins={chatRehypePlugins}
+                components={chatMarkdownComponents}
+                urlTransform={chatUrlTransform}
+              >
+                {normalizeChatMarkdownContent(bodyText)}
+              </ReactMarkdown>
+            </MarkdownContext.Provider>
           )
         ) : null}
       </div>

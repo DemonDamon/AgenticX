@@ -14,6 +14,7 @@ import {
   chatRemarkPlugins,
   chatUrlTransform,
   normalizeChatMarkdownContent,
+  MarkdownContext,
 } from "./markdown-components";
 import { renderUserMessageInlineBody } from "./user-message-inline";
 
@@ -235,13 +236,19 @@ export function ImBubble({
                 className="w-full resize-none bg-transparent px-2 py-1.5 text-[15px] text-text-strong outline-none"
                 rows={1}
                 onKeyDown={(e) => {
+                  const isImeComposing = e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229;
+                  if (isImeComposing) return;
+                  
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
+                    e.stopPropagation();
                     if (editContent.trim() && onEditMessage) {
                       onEditMessage(message, editContent);
                       setIsEditing(false);
                     }
                   } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
                     setIsEditing(false);
                   }
                 }}
@@ -333,14 +340,21 @@ export function ImBubble({
                         </div>
                       ) : (
                         <div className={!isUser && parsed?.reasoning ? "mt-3" : undefined}>
-                          <ReactMarkdown
-                            remarkPlugins={chatRemarkPlugins}
-                            rehypePlugins={chatRehypePlugins}
-                            components={chatMarkdownComponents}
-                            urlTransform={chatUrlTransform}
+                          <MarkdownContext.Provider
+                            value={{
+                              isStreaming,
+                              onQuoteText: (text) => onQuoteMessage?.(message, text),
+                            }}
                           >
-                            {normalizeChatMarkdownContent(bodyText)}
-                          </ReactMarkdown>
+                            <ReactMarkdown
+                              remarkPlugins={chatRemarkPlugins}
+                              rehypePlugins={chatRehypePlugins}
+                              components={chatMarkdownComponents}
+                              urlTransform={chatUrlTransform}
+                            >
+                              {normalizeChatMarkdownContent(bodyText)}
+                            </ReactMarkdown>
+                          </MarkdownContext.Provider>
                         </div>
                       )
                     ) : null}
