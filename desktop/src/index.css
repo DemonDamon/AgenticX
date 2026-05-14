@@ -232,6 +232,17 @@ body {
   --chat-im-avatar-bg: rgba(var(--theme-color-rgb), 0.9);
   --settings-accent-focus: rgba(var(--theme-color-rgb), 0.5);
   --ui-btn-primary-border: rgba(var(--theme-color-rgb), 0.5);
+  /* 输入框内 @file / skill 占位胶囊：与「主题色」同系，避免蓝/紫与焦点环割裂 */
+  --chat-composer-chip-border: rgba(var(--theme-color-rgb), 0.48);
+  --chat-composer-chip-bg: rgba(var(--theme-color-rgb), 0.2);
+  --chat-composer-chip-fg: color-mix(in srgb, rgb(var(--theme-color-rgb)) 34%, var(--text-primary) 66%);
+}
+
+/* contenteditable 输入区与历史消息内联：@file 与 skill 占位胶囊（随 data-theme-color 变化） */
+.agx-composer-inline-chip {
+  border: 1px solid var(--chat-composer-chip-border);
+  background-color: var(--chat-composer-chip-bg);
+  color: var(--chat-composer-chip-fg);
 }
 
 input[type="checkbox"],
@@ -240,6 +251,8 @@ input[type="radio"] {
 }
 :root[data-theme="light"][data-theme-color] {
   --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.28);
+  --chat-composer-chip-bg: rgba(var(--theme-color-rgb), 0.14);
+  --chat-composer-chip-border: rgba(var(--theme-color-rgb), 0.4);
 }
 :root[data-theme="dim"][data-theme-color] {
   --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.4);
