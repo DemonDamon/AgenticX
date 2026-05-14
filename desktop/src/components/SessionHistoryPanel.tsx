@@ -662,7 +662,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       ? "点击勾选会话"
       : `${label}\n${timeAgo(createdAt)} · 双击重命名 / 右键菜单`;
     return (
-      <div key={item.session_id} className="mb-1 px-1.5">
+      <div key={item.session_id} className="mb-1 px-2">
         {editingId === item.session_id ? (
           <input
             autoFocus
@@ -1051,7 +1051,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           className="w-full rounded-md border border-border bg-surface-hover px-2 py-2 text-[13px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
         />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2 pt-0.5">
+      <div className="agx-session-history-scroll min-h-0 flex-1 overflow-y-auto pl-2 pr-[2px] pb-2 pt-0.5">
         {sessions.length === 0 ? (
           <div className="rounded border border-dashed border-border p-3 text-center text-[13px] text-text-faint">
             暂无会话
