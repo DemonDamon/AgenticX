@@ -673,12 +673,12 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
               if (e.key === "Enter") void saveRename(item.session_id);
               if (e.key === "Escape") setEditingId(null);
             }}
-            className="agx-session-history-row-input w-full rounded border border-border-strong bg-surface-hover px-2 py-2 text-[14px] text-text-primary outline-none"
+            className="agx-session-history-row-input w-full rounded border border-border-strong bg-surface-hover px-2 py-2 text-[13px] font-normal text-text-primary outline-none"
           />
         ) : (
           <button
             type="button"
-            className={`agx-session-history-row flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left text-[14px] leading-snug transition ${
+            className={`agx-session-history-row flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left text-[13px] font-normal leading-snug transition ${
               active
                 ? "agx-session-history-row--active text-text-strong"
                 : "text-text-primary hover:bg-surface-hover"
@@ -746,9 +746,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
                     已中断
                   </span>
                 ) : null}
-                <span
-                  className={`min-w-0 flex-1 truncate ${active ? "font-semibold" : "font-medium"}`}
-                >
+                <span className="min-w-0 flex-1 truncate font-normal">
                   {label}
                 </span>
                 {showFeishuChip ? (
