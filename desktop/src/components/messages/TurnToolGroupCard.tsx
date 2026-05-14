@@ -76,8 +76,8 @@ export function TurnToolGroupCard({
         <div
           className={
             flat
-              ? "relative px-3 pb-2 pt-0.5 text-xs text-text-muted"
-              : "relative border-t border-border px-3 pb-2 pt-2 text-xs text-text-muted"
+              ? "relative pl-9 pr-3 pb-2 pt-0.5 text-xs text-text-muted"
+              : "relative border-t border-border pl-9 pr-3 pb-2 pt-2 text-xs text-text-muted"
           }
         >
           {/* Vertical timeline: starts below summary row (does not pierce circle-check); X aligns with circle center. */}

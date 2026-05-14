@@ -1,8 +1,16 @@
+import re
 from typing import Any, Optional, Dict, List, AsyncGenerator, Generator, Union
+
 import openai  # type: ignore
 from pydantic import Field  # type: ignore
-from .base import BaseLLMProvider, StreamChunk
-from .response import LLMResponse, TokenUsage, LLMChoice
+
+from agenticx.llms.base import BaseLLMProvider, StreamChunk
+from agenticx.llms.response import LLMResponse, TokenUsage, LLMChoice
+
+_REDACTED_THINKING_BLOCK = re.compile(
+    r"<think>\s*(.*?)\s*</think>",
+    re.DOTALL | re.IGNORECASE,
+)
 
 class KimiProvider(BaseLLMProvider):
     """
@@ -84,6 +92,59 @@ class KimiProvider(BaseLLMProvider):
         if reasoning_text:
             return f"<think>{reasoning_text}</think>"
         return response_text
+
+    def _should_patch_reasoning_content_for_tool_calls(self, kwargs: Dict[str, Any]) -> bool:
+        """Kimi K2.x with thinking enabled requires reasoning_content on assistant tool_calls rows."""
+        if self._extract_thinking_type(kwargs) == "disabled":
+            return False
+        return self._is_k2_series_model()
+
+    @staticmethod
+    def _fill_reasoning_content_for_tool_call_messages(
+        messages: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Ensure each assistant+tool_calls message has reasoning_content for Moonshot validation."""
+        out: List[Dict[str, Any]] = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                out.append(msg)
+                continue
+            if str(msg.get("role")) != "assistant":
+                out.append(msg)
+                continue
+            tool_calls = msg.get("tool_calls")
+            if not tool_calls:
+                out.append(msg)
+                continue
+
+            rc_existing = msg.get("reasoning_content")
+            if rc_existing is not None and str(rc_existing).strip():
+                out.append(msg)
+                continue
+
+            patched = dict(msg)
+            content = patched.get("content")
+            content_str = content if isinstance(content, str) else ""
+            if content_str:
+                match = _REDACTED_THINKING_BLOCK.search(content_str)
+                if match:
+                    reasoning = (match.group(1) or "").strip()
+                    stripped = _REDACTED_THINKING_BLOCK.sub("", content_str).strip()
+                    patched["reasoning_content"] = reasoning if reasoning else " "
+                    patched["content"] = stripped if stripped else None
+                else:
+                    patched["reasoning_content"] = " "
+            else:
+                patched["reasoning_content"] = " "
+            out.append(patched)
+        return out
+
+    def _prepare_request_messages(
+        self, messages: List[Dict[str, Any]], kwargs: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        if not self._should_patch_reasoning_content_for_tool_calls(kwargs):
+            return messages
+        return self._fill_reasoning_content_for_tool_call_messages(messages)
     
     def _invoke_with_messages(
         self, messages: List[Dict], tools: Optional[List[Dict]] = None, **kwargs
@@ -98,6 +159,8 @@ class KimiProvider(BaseLLMProvider):
                     timeout=self.timeout,
                     max_retries=self.max_retries or 3
                 )
+
+            messages = self._prepare_request_messages(messages, kwargs)
             
             # 准备请求参数
             request_params = {
@@ -129,6 +192,8 @@ class KimiProvider(BaseLLMProvider):
                 timeout=self.timeout,
                 max_retries=self.max_retries or 3
             )
+
+            messages = self._prepare_request_messages(messages, kwargs)
             
             # 准备请求参数
             request_params = {
@@ -159,6 +224,8 @@ class KimiProvider(BaseLLMProvider):
                     timeout=self.timeout,
                     max_retries=self.max_retries or 3
                 )
+
+            messages = self._prepare_request_messages(messages, kwargs)
             
             request_params = {
                 "model": self.model,
@@ -187,6 +254,8 @@ class KimiProvider(BaseLLMProvider):
                 timeout=self.timeout,
                 max_retries=self.max_retries or 3
             )
+
+            messages = self._prepare_request_messages(messages, kwargs)
             
             request_params = {
                 "model": self.model,
@@ -220,6 +289,8 @@ class KimiProvider(BaseLLMProvider):
                 timeout=self.timeout,
                 max_retries=self.max_retries or 3,
             )
+
+        messages = self._prepare_request_messages(messages, kwargs)
 
         request_params = {
             "model": self.model,
