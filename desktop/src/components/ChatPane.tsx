@@ -58,6 +58,7 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
+import { filterPersistedMessagesForDeletion } from "../utils/retry-trim-policy";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
@@ -3272,31 +3273,41 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const toRemove = msgs.slice(idx + 1, end);
       if (toRemove.length > 0) {
         try {
-          const resp = await fetch(`${apiBase}/api/session/messages/delete`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-            body: JSON.stringify({
-              session_id: sid,
-              messages: toRemove.map((m) => ({
-                role: m.role,
-                content: m.content,
-                timestamp: m.timestamp,
-                agent_id: m.agentId,
-              })),
-            }),
-          });
-          const data = (await resp.json()) as { ok?: boolean; removed?: number; requested?: number };
-          const removed = typeof data.removed === "number" ? data.removed : 0;
-          const requested = typeof data.requested === "number" ? data.requested : toRemove.length;
-          if (!resp.ok || !data.ok || removed < requested) {
-            const result = await window.agenticxDesktop.loadSessionMessages(sid);
-            if (result.ok && Array.isArray(result.messages)) {
-              const mapped = result.messages.map((item, midx) =>
-                mapLoadedSessionMessage(item as LoadedSessionMessage, sid, midx)
-              );
-              setPaneMessages(pane.id, mapped);
+          let deletable: Array<Pick<Message, "role" | "content" | "timestamp" | "agentId">> = toRemove;
+          const persisted = await window.agenticxDesktop.loadSessionMessages(sid);
+          if (persisted.ok && Array.isArray(persisted.messages)) {
+            deletable = filterPersistedMessagesForDeletion(
+              toRemove,
+              persisted.messages as LoadedSessionMessage[]
+            );
+          }
+          if (deletable.length > 0) {
+            const resp = await fetch(`${apiBase}/api/session/messages/delete`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+              body: JSON.stringify({
+                session_id: sid,
+                messages: deletable.map((m) => ({
+                  role: m.role,
+                  content: m.content,
+                  timestamp: m.timestamp,
+                  agent_id: m.agentId,
+                })),
+              }),
+            });
+            const data = (await resp.json()) as { ok?: boolean; removed?: number; requested?: number };
+            const removed = typeof data.removed === "number" ? data.removed : 0;
+            const requested = typeof data.requested === "number" ? data.requested : deletable.length;
+            if (!resp.ok || !data.ok || removed < requested) {
+              const result = await window.agenticxDesktop.loadSessionMessages(sid);
+              if (result.ok && Array.isArray(result.messages)) {
+                const mapped = result.messages.map((item, midx) =>
+                  mapLoadedSessionMessage(item as LoadedSessionMessage, sid, midx)
+                );
+                setPaneMessages(pane.id, mapped);
+              }
+              return;
             }
-            return;
           }
           setPaneMessages(pane.id, msgs.slice(0, idx + 1));
         } catch (err) {
