@@ -62,8 +62,10 @@ export function ContextMenu({ open, x, y, items, onClose }: Props) {
           key={i}
           type="button"
           role="menuitem"
-          className={`flex w-full px-3 py-2 text-left text-xs transition hover:bg-surface-hover ${
-            item.danger ? "text-rose-300 hover:text-rose-200" : "text-text-primary"
+          className={`flex w-full px-3 py-2 text-left text-[13px] transition ${
+            item.danger 
+              ? "text-rose-500 hover:bg-transparent hover:text-rose-400" 
+              : "text-text-primary hover:bg-surface-hover"
           }`}
           onClick={() => {
             item.onSelect();
