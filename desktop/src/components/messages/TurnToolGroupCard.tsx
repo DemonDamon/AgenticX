@@ -53,7 +53,9 @@ export function TurnToolGroupCard({
     <div className={flat ? "w-full min-w-0 text-xs text-text-muted" : "w-full min-w-0 overflow-hidden rounded-lg border border-border bg-surface-card text-xs text-text-muted transition"}>
       <button
         type="button"
-        className="inline-flex w-full max-w-full items-center gap-2 px-3 py-2 text-left"
+        className={`inline-flex w-full max-w-full items-center gap-2 px-3 text-left ${
+          flat ? "pt-3 pb-1" : "py-2"
+        }`}
         onClick={() => setExpanded((v) => !v)}
       >
         <span
