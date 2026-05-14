@@ -128,6 +128,7 @@ export function WorkspacePanel({
   const [newLabel, setNewLabel] = useState("");
   const [adding, setAdding] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<CtxTarget | null>(null);
+  const [fileSearchQuery, setFileSearchQuery] = useState("");
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [panelHeight, setPanelHeight] = useState(0);
   const [terminalAreaHeight, setTerminalAreaHeight] = useState(0);
@@ -137,6 +138,21 @@ export function WorkspacePanel({
     () => taskspaces.find((item) => item.id === activeTaskspaceId) ?? taskspaces[0] ?? null,
     [taskspaces, activeTaskspaceId]
   );
+
+  const filteredFiles = useMemo(() => {
+    const q = fileSearchQuery.trim().toLowerCase();
+    if (!q) return null;
+    const results: { taskspaceId: string; file: TaskspaceFile }[] = [];
+    for (const [key, entries] of Object.entries(entriesByDir)) {
+      const taskspaceId = key.split(":")[0];
+      for (const entry of entries) {
+        if (entry.type === "file" && entry.name.toLowerCase().includes(q)) {
+          results.push({ taskspaceId, file: entry });
+        }
+      }
+    }
+    return results;
+  }, [fileSearchQuery, entriesByDir]);
 
   const maxTerminalHeight = panelHeight > 0 ? Math.floor(panelHeight * 0.7) : 520;
   const minTerminalHeight = 140;
@@ -537,7 +553,7 @@ export function WorkspacePanel({
     <div ref={panelRef} className="relative flex h-full min-h-0 w-full flex-col bg-surface-card" style={tintColor ? { backgroundColor: tintColor } : undefined}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex flex-col">
-          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+          <div className="flex items-center justify-between px-3 py-2">
             <div className="flex items-center gap-1.5 text-[13px] font-medium text-text-strong">
               工作区
             </div>
@@ -583,6 +599,18 @@ export function WorkspacePanel({
                 </button>
               ) : null}
             </div>
+          </div>
+          <div className="px-2 pb-1.5">
+            <input
+              type="search"
+              value={fileSearchQuery}
+              onChange={(e) => setFileSearchQuery(e.target.value)}
+              placeholder="搜索文件…"
+              autoComplete="off"
+              spellCheck={false}
+              aria-label="搜索工作区文件"
+              className="w-full rounded-md border border-border bg-surface-hover px-2 py-2 text-[13px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
+            />
           </div>
           {showAddForm ? (
             <div
@@ -639,7 +667,34 @@ export function WorkspacePanel({
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
           {loading ? <div className="text-[13px] text-text-faint">加载中...</div> : null}
           {!loading && taskspaces.length === 0 ? <div className="text-[13px] text-text-faint">暂无工作区</div> : null}
-          {!loading && taskspaces.map((ts) => {
+          {!loading && filteredFiles !== null ? (
+            filteredFiles.length === 0 ? (
+              <div className="text-[13px] text-text-faint">无匹配文件</div>
+            ) : (
+              filteredFiles.map(({ taskspaceId, file }) => (
+                <div key={`${taskspaceId}:${file.path}`} className="flex min-w-0 items-center gap-1">
+                  <button
+                    className={`min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
+                      selectedFilePath === file.path ? "text-text-strong" : "text-text-subtle"
+                    }`}
+                    title={file.path}
+                    onClick={() => void openFile(taskspaceId, file.path)}
+                  >
+                    {file.name}
+                    <span className="ml-1 text-[11px] text-text-faint">{file.path}</span>
+                  </button>
+                  <button
+                    className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+                    onClick={() => onPickFileForReference?.(file.path)}
+                    title="引用到输入框"
+                  >
+                    @
+                  </button>
+                </div>
+              ))
+            )
+          ) : null}
+          {!loading && filteredFiles === null && taskspaces.map((ts) => {
             const key = nodeKey(ts.id, ".");
             const isExpanded = expandedDirs.has(key);
             const isActive = activeTaskspaceId === ts.id;
