@@ -15,6 +15,8 @@ import {
   Quote,
   Search,
   Share2,
+  Sparkles,
+  Radar,
   SquarePen,
   Wand2,
   Wrench,
@@ -674,16 +676,16 @@ function PaneKnowledgeRetrievalModeSwitch({
           aria-label="知识库检索模式"
         >
           {mode === "auto" ? (
-            <Search className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
+            <Sparkles className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
           ) : (
-            <Database className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
+            <Radar className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
           )}
         </button>
       </HoverTip>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 z-40 mb-1 w-[160px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl">
+          <div className="absolute bottom-full left-0 z-40 mb-1 w-[120px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl">
             {KB_RETRIEVAL_MODE_OPTIONS.map((opt) => {
               const isActive = mode === opt.value;
               return (
@@ -691,7 +693,7 @@ function PaneKnowledgeRetrievalModeSwitch({
                   key={opt.value}
                   type="button"
                   disabled={saving}
-                  className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                  className={`group flex w-full items-center justify-between rounded-lg px-2 py-2 text-left transition-colors ${
                     isActive ? "bg-surface-hover" : "hover:bg-surface-hover"
                   } ${opt.value === "always" ? "mt-0.5" : ""}`}
                   onClick={() => {
@@ -699,36 +701,35 @@ function PaneKnowledgeRetrievalModeSwitch({
                     void saveMode(opt.value);
                   }}
                 >
-                  {opt.value === "auto" ? (
-                    <Search
-                      className={`h-[15px] w-[15px] shrink-0 ${
-                        isActive ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
-                      }`}
-                      strokeWidth={2}
-                    />
-                  ) : (
-                    <Database
-                      className={`h-[15px] w-[15px] shrink-0 ${
-                        isActive ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
-                      }`}
-                      strokeWidth={2}
-                    />
-                  )}
-                  <span className="flex flex-1 flex-col gap-0.5">
+                  <div className="flex items-center gap-2">
+                    {opt.value === "auto" ? (
+                      <Sparkles
+                        className={`h-[15px] w-[15px] shrink-0 ${
+                          isActive ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
+                        }`}
+                        strokeWidth={2}
+                      />
+                    ) : (
+                      <Radar
+                        className={`h-[15px] w-[15px] shrink-0 ${
+                          isActive ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
+                        }`}
+                        strokeWidth={2}
+                      />
+                    )}
                     <span
-                      className={`text-[13px] font-medium leading-none ${
+                      className={`whitespace-nowrap text-[13px] font-medium leading-none ${
                         isActive ? "text-text-strong" : "text-text-standard"
                       }`}
                     >
                       {opt.label}
                     </span>
-                    <span className="text-[11px] leading-none text-text-faint">
-                      {opt.value === "auto" ? "适用大部分情况" : "强制查阅知识库"}
-                    </span>
-                  </span>
-                  <span className="flex w-4 shrink-0 justify-end">
-                    {isActive && <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />}
-                  </span>
+                  </div>
+                  {isActive ? (
+                    <Check className="h-3.5 w-3.5 shrink-0 text-text-strong" strokeWidth={2.5} />
+                  ) : (
+                    <div className="h-3.5 w-3.5 shrink-0" />
+                  )}
                 </button>
               );
             })}
