@@ -272,7 +272,7 @@ export function ImBubble({
           <button
             key={`${qi}-${q}`}
             type="button"
-            className="max-w-full rounded-full border border-border bg-surface-hover/80 px-2.5 py-1 text-left text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+            className="max-w-full w-fit rounded-full border border-border bg-surface-hover/80 px-2.5 py-1 text-left text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onFollowupClick?.(q)}
           >
@@ -451,10 +451,10 @@ export function ImBubble({
                 <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint">
                   {assistantIconButtons}
                 </div>
-                <div className="flex min-w-0 flex-wrap gap-1.5">{assistantFollowupChipButtons}</div>
+                <div className="flex min-w-0 flex-col items-start gap-1.5 self-stretch">{assistantFollowupChipButtons}</div>
               </div>
             ) : showAssistantFollowups ? (
-              <div className="mt-2 flex min-w-0 flex-wrap gap-1.5 self-stretch">{assistantFollowupChipButtons}</div>
+              <div className="mt-2 flex min-w-0 flex-col items-start gap-1.5 self-stretch">{assistantFollowupChipButtons}</div>
             ) : null}
             {hideActions ? null : isUser ? (
               <div className="mt-1 flex flex-wrap items-center gap-0.5 text-text-faint">

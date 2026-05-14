@@ -3767,12 +3767,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   <div className="flex min-w-0 items-start gap-2">
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 flex-wrap gap-1.5">
+                      <div className="flex min-w-0 flex-col items-start gap-1.5">
                         {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
                           <button
                             key={`${qi}-${q}`}
                             type="button"
-                            className="max-w-full rounded-full border border-border bg-surface-hover/80 px-2.5 py-1 text-left text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                            className="max-w-full w-fit rounded-full border border-border bg-surface-hover/80 px-2.5 py-1 text-left text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => sendFollowupChip(q)}
                           >
@@ -3857,12 +3857,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                         </div>
                         {peeledFollowupAssistant?.suggestedQuestions &&
                         peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
-                          <div className="flex min-w-0 flex-wrap gap-1.5">
+                          <div className="flex min-w-0 flex-col items-start gap-1.5">
                             {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
                               <button
                                 key={`${qi}-${q}`}
                                 type="button"
-                                className="max-w-full rounded-full border border-border bg-surface-hover/80 px-2.5 py-1 text-left text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+                                className="max-w-full w-fit rounded-full border border-border bg-surface-hover/80 px-2.5 py-1 text-left text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => sendFollowupChip(q)}
                               >
