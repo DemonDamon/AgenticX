@@ -84,7 +84,10 @@ import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { createKbApi } from "./settings/knowledge/api";
 import {
   clearPaneAwaitingFreshSession,
+  clearPaneLazyInheritParent,
   markPaneAwaitingFreshSession,
+  peekPaneLazyInheritParent,
+  setPaneLazyInheritParent,
 } from "../utils/pane-fresh-session";
 
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
@@ -4160,8 +4163,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       try {
         const avatarId =
           pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
+        const inheritFrom = peekPaneLazyInheritParent(pane.id);
         const created = await window.agenticxDesktop.createSession({
           avatar_id: avatarId,
+          ...(inheritFrom ? { inherit_from_session_id: inheritFrom } : {}),
         });
         if (!created.ok || !created.session_id) {
           addPaneMessage(
@@ -4173,6 +4178,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           return;
         }
         requestSessionId = created.session_id;
+        clearPaneLazyInheritParent(pane.id);
+        if (created.inherited) {
+          setPaneContextInherited(pane.id, true);
+        }
         // Defensive reset: a brand-new lazy session must never display any
         // residual messages from the previously-running session (which may
         // have been racily restored by poll/sync effects while sessionId
@@ -5247,10 +5256,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     // running session's queue).
     markPaneAwaitingFreshSession(pane.id);
     setPaneSessionId(pane.id, "");
-    // Eager createSession (same as group/automation): WorkspacePanel and IPC
-    // taskspace APIs require a server-backed session_id; lazy Meta-only flow
-    // left sessionId empty until first send, so workspaces stayed blank.
-    void initSession(inherit, prevSessionId || undefined);
+    setPaneLazyInheritParent(pane.id, inherit && prevSessionId ? prevSessionId : undefined);
+    // Defer server createSession until the user sends the first message so an
+    // empty session never appears in the history sidebar with an id-only title.
   };
 
   const maxTaskspaceWidth = paneWidth > 0 ? Math.max(240, Math.floor(paneWidth * 0.4)) : 480;

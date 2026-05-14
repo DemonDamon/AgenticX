@@ -312,6 +312,11 @@ export function WorkspacePanel({
         setErrorText("会话正在初始化，请稍候再试");
         return;
       }
+      if (isPaneAwaitingFreshSession(paneId)) {
+        setAdding(false);
+        setErrorText("请先发送一条消息，再添加工作区目录");
+        return;
+      }
       try {
         const createPayload: { avatar_id?: string; name?: string } = {};
         if (paneAvatarId) createPayload.avatar_id = paneAvatarId;

@@ -5,6 +5,7 @@ import { useAppStore, type ChatPane, type Message } from "../store";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../utils/session-message-map";
 import { getVisibleBoundSession, isSessionVisibleInPane } from "../utils/session-history-logic";
+import { clearPaneLazyInheritParent, markPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
 import { FeishuBadge } from "./FeishuBadge";
 
 function timeAgo(ts: number): string {
@@ -631,22 +632,11 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
         if (next) {
           await switchSession(next.session_id);
         } else {
-          try {
-            const avatarId =
-              pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
-            const created = await window.agenticxDesktop.createSession({ avatar_id: avatarId });
-            if (created.ok && created.session_id) {
-              setPaneSessionId(pane.id, created.session_id);
-              setPaneMessages(pane.id, []);
-              await loadSessions();
-            } else {
-              setPaneSessionId(pane.id, "");
-              setPaneMessages(pane.id, []);
-            }
-          } catch {
-            setPaneSessionId(pane.id, "");
-            setPaneMessages(pane.id, []);
-          }
+          markPaneAwaitingFreshSession(pane.id);
+          clearPaneLazyInheritParent(pane.id);
+          setPaneSessionId(pane.id, "");
+          setPaneMessages(pane.id, []);
+          await loadSessions();
         }
       }
       setSelectMode(false);
@@ -925,22 +915,11 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
           if (next) {
             await switchSession(next.session_id);
           } else {
-            try {
-              const avatarId =
-                pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
-              const created = await window.agenticxDesktop.createSession({ avatar_id: avatarId });
-              if (created.ok && created.session_id) {
-                setPaneSessionId(pane.id, created.session_id);
-                setPaneMessages(pane.id, []);
-                await loadSessions();
-              } else {
-                setPaneSessionId(pane.id, "");
-                setPaneMessages(pane.id, []);
-              }
-            } catch {
-              setPaneSessionId(pane.id, "");
-              setPaneMessages(pane.id, []);
-            }
+            markPaneAwaitingFreshSession(pane.id);
+            clearPaneLazyInheritParent(pane.id);
+            setPaneSessionId(pane.id, "");
+            setPaneMessages(pane.id, []);
+            await loadSessions();
           }
         }
       }
