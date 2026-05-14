@@ -218,6 +218,8 @@ body {
   --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.42);
   --chat-im-user-border: rgba(var(--theme-color-rgb), 0.55);
   --chat-im-avatar-bg: rgba(var(--theme-color-rgb), 0.9);
+  --settings-accent-focus: rgba(var(--theme-color-rgb), 0.5);
+  --ui-btn-primary-border: rgba(var(--theme-color-rgb), 0.5);
 }
 :root[data-theme="light"][data-theme-color] {
   --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.28);
@@ -232,5 +234,24 @@ body {
 }
 :root[data-theme="dark"] .agx-theme-focus-ring:focus-within {
   box-shadow: 0 0 24px rgba(var(--theme-color-rgb), 0.2);
+}
+
+/* Theme-aware focus styles for form inputs in Settings and Panels */
+.agx-settings-panel input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+.agx-settings-panel select:focus,
+.agx-settings-panel textarea:focus,
+.agx-avatar-settings-panel input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+.agx-avatar-settings-panel select:focus,
+.agx-avatar-settings-panel textarea:focus,
+.agx-avatar-create-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+.agx-avatar-create-dialog select:focus,
+.agx-avatar-create-dialog textarea:focus,
+.agx-task-form-panel input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+.agx-task-form-panel select:focus,
+.agx-task-form-panel textarea:focus,
+.agx-session-history-panel input[type="search"]:focus {
+  outline: none !important;
+  border-color: rgba(var(--theme-color-rgb, 59, 130, 246), 0.5) !important;
+  box-shadow: 0 0 0 1px rgba(var(--theme-color-rgb, 59, 130, 246), 0.5) !important;
 }
 

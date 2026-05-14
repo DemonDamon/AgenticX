@@ -38,8 +38,8 @@ function SettingsSwitch({
       onClick={() => {
         if (!disabled) onChange(!checked);
       }}
-      className={`relative h-5 w-9 shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/55 disabled:opacity-40 ${
-        checked ? "bg-emerald-500" : "bg-surface-hover"
+      className={`relative h-5 w-9 shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--theme-color-rgb,16,185,129),0.55)] disabled:opacity-40 ${
+        checked ? "bg-[rgb(var(--theme-color-rgb,16,185,129))]" : "bg-surface-hover"
       }`}
     >
       <span
