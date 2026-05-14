@@ -1070,7 +1070,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "query": {"type": "string", "description": "Search keywords or question."},
                     "max_results": {
                         "type": "integer",
-                        "description": "Number of results (1-20). Omit to use workspace default.",
+                        "description": (
+                            "Number of results (>=1). Omit to use workspace default; "
+                            "values are capped by the configured maximum."
+                        ),
                     },
                 },
                 "required": ["query"],

@@ -11,6 +11,9 @@ from typing import Any, Dict, List, Literal, Optional
 
 ProviderName = Literal["duckduckgo", "bocha", "tavily", "serper", "google", "bing"]
 
+# Upper bound for configured/tool-requested result counts (providers may return fewer).
+WEB_SEARCH_MAX_RESULTS_CAP = 50
+
 
 @dataclass
 class WebSearchResult:
@@ -44,7 +47,7 @@ class WebSearchRuntimeConfig:
         if dp not in {"duckduckgo", "bocha", "tavily", "serper", "google", "bing"}:
             dp = "duckduckgo"
         mr = int(data.get("max_results", 5) or 5)
-        mr = max(1, min(20, mr))
+        mr = max(1, min(WEB_SEARCH_MAX_RESULTS_CAP, mr))
         fsc = int(data.get("fetch_snippet_chars", 600) or 600)
         fsc = max(80, min(4000, fsc))
         return cls(
