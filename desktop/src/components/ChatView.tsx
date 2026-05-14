@@ -297,6 +297,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const messages = useAppStore((s) => s.messages);
   const status = useAppStore((s) => s.status);
   const addMessage = useAppStore((s) => s.addMessage);
+  const mergeLastMessageByRole = useAppStore((s) => s.mergeLastMessageByRole);
   const updateMessageByToolCallId = useAppStore((s) => s.updateMessageByToolCallId);
   const insertMessageAfter = useAppStore((s) => s.insertMessageAfter);
   const setStatus = useAppStore((s) => s.setStatus);
@@ -772,7 +773,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     activeRequestIdRef.current = requestId;
     const isCurrentRequest = () => activeRequestIdRef.current === requestId;
     let insertAfterCursor = opts?.insertAfterId;
-    const appendAssistantMessage = (content: string) => {
+    const appendAssistantMessage = (content: string, extras?: Partial<Pick<Message, "suggestedQuestions">>) => {
       if (insertAfterCursor) {
         insertAfterCursor = insertMessageAfter(insertAfterCursor, {
           role: "assistant",
@@ -780,10 +781,11 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           agentId: "meta",
           provider: reqProvider,
           model: reqModel,
+          ...extras,
         });
         return;
       }
-      addMessage("assistant", content, "meta", reqProvider, reqModel);
+      addMessage("assistant", content, "meta", reqProvider, reqModel, undefined, extras);
     };
     const commitCurrentStreamIfNeeded = () => {
       const raw = streamTextRef.current.trim();
@@ -851,6 +853,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
 
       let full = "";
       let cumulativeFull = "";
+      let pendingSuggestedQuestions: string[] = [];
       let buffer = "";
       while (true) {
         if (!isCurrentRequest()) return;
@@ -1054,6 +1057,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             }
             if (payload.type === "final") {
               if (eventAgentId !== "meta") { updateSubAgent(eventAgentId, { status: "completed", currentAction: "已完成" }); addSubAgentEvent(eventAgentId, { type: "final", content: payload.data?.text ?? "" }); continue; }
+              const sqRaw = payload.data?.suggested_questions;
+              pendingSuggestedQuestions = Array.isArray(sqRaw)
+                ? sqRaw.map((x: unknown) => String(x).trim()).filter(Boolean).slice(0, 3)
+                : [];
               const finalText = String(payload.data?.text ?? "");
               if (finalText) {
                 if (finalText.startsWith(cumulativeFull)) {
@@ -1162,12 +1169,19 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       }
 
       const trimmedFull = full.trim();
+      const sugExtras =
+        pendingSuggestedQuestions.length > 0
+          ? { suggestedQuestions: pendingSuggestedQuestions.slice(0, 3) }
+          : undefined;
       if (isCurrentRequest() && trimmedFull && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
         const mid = lastMidStreamAssistantCommitRef.current;
         if (mid !== null && trimmedFull === mid) {
           streamCommittedRef.current = true;
+          if (sugExtras) {
+            mergeLastMessageByRole("assistant", sugExtras);
+          }
         } else {
-          appendAssistantMessage(full);
+          appendAssistantMessage(full, sugExtras);
           streamCommittedRef.current = true;
         }
         void speak(full);
@@ -1527,6 +1541,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                         m.role === "assistant" && reactWorkCol ? "compact-inline" : "default"
                       }
                       toolCardOmitLeadingSpacer={m.role === "tool" && reactWorkCol}
+                      onFollowupClick={(t) => void send(t)}
                     />
                     {!isLite && (
                       <MessageActions

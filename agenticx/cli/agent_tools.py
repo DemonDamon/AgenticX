@@ -127,6 +127,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "get_automation_task_logs",
         "cc_bridge_list",
         "knowledge_search",  # Plan-Id: machi-kb-stage1-local-mvp — read-only vector search.
+        "web_search",
     }
 )
 
@@ -1047,6 +1048,29 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "top_k": {
                         "type": "integer",
                         "description": "Maximum number of chunks to return (1-20). Omit to use KB setting default Top-K.",
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": (
+                "Search the public web for up-to-date information (news, live data, documentation "
+                "beyond knowledge cutoff). Prefer this for time-sensitive or externally verifiable "
+                "facts before answering."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search keywords or question."},
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Number of results (1-20). Omit to use workspace default.",
                     },
                 },
                 "required": ["query"],
@@ -3373,6 +3397,24 @@ def _tool_knowledge_search(arguments: Dict[str, Any]) -> str:
     )
 
 
+def _tool_web_search(arguments: Dict[str, Any]) -> str:
+    query = str(arguments.get("query", "")).strip()
+    if not query:
+        return "ERROR: web_search requires a non-empty query"
+    raw_mr = arguments.get("max_results")
+    try:
+        from agenticx.studio.web_search.service import WebSearchService
+
+        svc = WebSearchService.from_config()
+        mr: int | None = None
+        if raw_mr is not None and str(raw_mr).strip() != "":
+            mr = int(raw_mr)
+        hits = svc.search(query, max_results=mr)
+        return WebSearchService.format_results(hits)
+    except Exception as exc:
+        return f"ERROR: web_search failed: {exc}"
+
+
 def _tool_memory_search(arguments: Dict[str, Any]) -> str:
     query = str(arguments.get("query", "")).strip()
     if not query:
@@ -4022,6 +4064,8 @@ async def dispatch_tool_async(
             # Plan-Id: machi-kb-stage1-local-mvp — offloaded to a thread so the
             # underlying chromadb + litellm calls don't block the event loop.
             return await asyncio.to_thread(_tool_knowledge_search, arguments)
+        if name == "web_search":
+            return await asyncio.to_thread(_tool_web_search, arguments)
         if name == "session_search":
             return _tool_session_search(arguments, session)
         if name == "ask_user":

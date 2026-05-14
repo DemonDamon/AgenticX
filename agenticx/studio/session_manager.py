@@ -1050,6 +1050,12 @@ class SessionManager:
                         break
                 if clean_atts:
                     row["attachments"] = clean_atts
+            if role == "assistant":
+                raw_sq = item.get("suggested_questions")
+                if isinstance(raw_sq, list) and raw_sq:
+                    row["suggested_questions"] = [
+                        str(x).strip() for x in raw_sq[:5] if str(x).strip()
+                    ]
             normalized.append(row)
         return normalized
 

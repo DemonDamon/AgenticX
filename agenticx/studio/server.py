@@ -1060,6 +1060,20 @@ def create_studio_app() -> FastAPI:
                 filtered.append(tool)
         return filtered
 
+    def _strip_disabled_web_search_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        try:
+            raw = ConfigManager.get_value("web_search") or {}
+            if not isinstance(raw, dict):
+                return tools
+            en = raw.get("enabled", True)
+            if isinstance(en, str):
+                en = en.strip().lower() in ("1", "true", "yes", "on")
+            if bool(en):
+                return tools
+        except Exception:
+            return tools
+        return [t for t in tools if str((t.get("function") or {}).get("name", "")).strip() != "web_search"]
+
     def _sse_event(event: str, data: dict[str, Any]) -> str:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -1798,6 +1812,16 @@ def create_studio_app() -> FastAPI:
             )
             if ws:
                 prompt += f"\n## 工作目录\n- {ws}\n"
+            try:
+                from agenticx.runtime.prompts.meta_agent import (
+                    _build_followup_questions_block,
+                    _build_web_search_capability_block,
+                )
+
+                prompt += "\n" + _build_web_search_capability_block()
+                prompt += _build_followup_questions_block()
+            except Exception:
+                pass
             return prompt
 
         if is_automation_session:
@@ -1817,6 +1841,7 @@ def create_studio_app() -> FastAPI:
         else:
             effective_tools_source = list(META_AGENT_TOOLS)
         effective_tools_source = merge_computer_use_tools_into(effective_tools_source)
+        effective_tools_source = _strip_disabled_web_search_tools(effective_tools_source)
         effective_tools: list = _filter_tools_by_policy(
             effective_tools_source,
             avatar_tools_enabled=avatar_tools_enabled,
@@ -2060,6 +2085,7 @@ def create_studio_app() -> FastAPI:
                 loop_avatar_tools_enabled = _sanitize_tools_enabled(loop_avatar_cfg.tools_enabled)
         loop_tools_source: list = list(STUDIO_TOOLS) if loop_is_avatar else list(META_AGENT_TOOLS)
         loop_tools_source = merge_computer_use_tools_into(loop_tools_source)
+        loop_tools_source = _strip_disabled_web_search_tools(loop_tools_source)
         loop_tools: list = _filter_tools_by_policy(
             loop_tools_source,
             avatar_tools_enabled=loop_avatar_tools_enabled,
@@ -4783,5 +4809,8 @@ def create_studio_app() -> FastAPI:
 
     # Machi knowledge base — Stage-1 MVP (Plan-Id: machi-kb-stage1-local-mvp)
     register_kb_routes(app)
+    from agenticx.studio.web_search.routes import register_web_search_routes
+
+    register_web_search_routes(app)
 
     return app

@@ -3519,6 +3519,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     void sendChatRef.current(prompt);
   }, [stallState]);
 
+  const sendFollowupChip = useCallback((text: string) => {
+    const t = String(text || "").trim();
+    if (!t) return;
+    void sendChatRef.current(t);
+  }, []);
+
   const renderedMessages = useMemo(() => {
     const renderGroupedRow = (row: GroupedChatRow, rowIdx: number, opts: { reactWorkColumn?: boolean; reactFlat?: boolean; reactHideBadge?: boolean; reactShowActions?: boolean }) => {
       const reactCol = opts.reactWorkColumn ?? false;
@@ -3574,6 +3580,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               onResolveInlineConfirm={(confirm, approved) => void resolveGroupInlineConfirm(confirm, approved)}
               selectable={rowSelectable}
               selected={rowSelectable && isSelected}
+              onFollowupClick={sendFollowupChip}
             />
           </div>
         );
@@ -3790,7 +3797,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       )}
     </>
     );
-  }, [chatStyle, copyMessage, copyReActBlock, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resolveQuoteBody, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, setQuoteTarget, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [chatStyle, copyMessage, copyReActBlock, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resolveQuoteBody, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, setQuoteTarget, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -4327,6 +4334,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
       let full = "";
       let cumulativeFull = "";
+      let pendingSuggestedQuestions: string[] = [];
       let buffer = "";
       while (true) {
         const { value: chunk, done } = await reader.read();
@@ -4941,6 +4949,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             if (payload.type === "final") {
               if (eventAgentId === "meta") {
                 const finalText = String(payload.data?.text ?? "");
+                const sqRaw = payload.data?.suggested_questions;
+                pendingSuggestedQuestions = Array.isArray(sqRaw)
+                  ? sqRaw.map((x: unknown) => String(x).trim()).filter(Boolean).slice(0, 3)
+                  : [];
                 // Final payload is authoritative. Replacing (instead of merging) avoids
                 // duplicate concatenation when token stream shape differs from final text.
                 if (finalText.trim() && !isThinkingPlaceholderText(finalText)) {
@@ -4979,12 +4991,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       }
 
       const trimmedFull = full.trim();
+      const sugExtras =
+        pendingSuggestedQuestions.length > 0
+          ? { suggestedQuestions: pendingSuggestedQuestions.slice(0, 3) }
+          : undefined;
       if (trimmedFull && !isThinkingPlaceholderText(full) && !streamCommittedRef.current) {
         const mid = lastMidStreamAssistantCommitRef.current;
         if (mid !== null && trimmedFull === mid) {
           streamCommittedRef.current = true;
+          if (sugExtras) {
+            useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", sugExtras);
+          }
         } else {
-          addPaneMessageIfSessionActive(pane.id, "assistant", full, "meta", chatProvider, chatModel);
+          addPaneMessageIfSessionActive(
+            pane.id,
+            "assistant",
+            full,
+            "meta",
+            chatProvider,
+            chatModel,
+            undefined,
+            sugExtras,
+          );
           streamCommittedRef.current = true;
         }
       }
