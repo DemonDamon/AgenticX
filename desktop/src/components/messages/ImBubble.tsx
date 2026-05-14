@@ -44,6 +44,8 @@ type Props = {
   selected?: boolean;
   /** Clicking a follow-up chip sends this text as the next user message (assistant only). */
   onFollowupClick?: (text: string) => void;
+  /** Suppress in-bubble chips; used when parent renders them outside a unified ReAct container. */
+  omitSuggestedQuestions?: boolean;
 };
 
 /** Cycling 1→3 dots for group-chat typing rows (name shown in header only). */
@@ -107,6 +109,7 @@ export function ImBubble({
   assistantVisual = "default",
   noBubbleBorder = false,
   onFollowupClick,
+  omitSuggestedQuestions = false,
 }: Props) {
   const isUser = message.role === "user";
   const displayName = isUser ? (userName || "我") : (assistantName || "AI");
@@ -368,6 +371,7 @@ export function ImBubble({
             {!isUser &&
             !isStreaming &&
             !isGroupTyping &&
+            !omitSuggestedQuestions &&
             message.suggestedQuestions &&
             message.suggestedQuestions.length > 0 &&
             onFollowupClick ? (
