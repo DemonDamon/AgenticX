@@ -227,6 +227,9 @@ export function ImBubble({
     ? getAssistantTextStyle({ hasReasoning: Boolean(parsed?.reasoning), inReActRow: compactAssistant })
     : undefined;
   const assistantActionStyle = getAssistantActionStyle({ inReActRow: compactAssistant });
+  const userBubbleStyle = isUser
+    ? { ...bubbleStyle, ...getAssistantActionStyle({}), marginRight: 12 }
+    : bubbleStyle;
 
   const assistantIconButtons =
     !hideActions && !isUser ? (
@@ -318,7 +321,7 @@ export function ImBubble({
         </button>
       ) : null}
       <div
-        className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}`}
+        className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-stretch" : "items-start"}`}
       >
         {isEditing ? (
           <div className="flex w-full max-w-3xl items-end gap-2">
@@ -381,10 +384,10 @@ export function ImBubble({
                 compactAssistant && noBubbleBorder
                   ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[15px] leading-relaxed"
                   : isUser
-                    ? "agx-im-user-bubble relative min-w-0 overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[15px] leading-relaxed max-w-full rounded-tr-[4px]"
+                    ? "agx-im-user-bubble relative min-w-0 self-stretch overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[15px] leading-relaxed max-w-full rounded-tr-[4px]"
                     : "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-3 text-[15px] leading-relaxed"
               }
-              style={compactAssistant && noBubbleBorder ? undefined : bubbleStyle}
+              style={compactAssistant && noBubbleBorder ? undefined : userBubbleStyle}
             >
               {isUser && displayAttachments.length > 0 ? (
                 <div className="mb-2 flex flex-wrap gap-2">
@@ -476,7 +479,7 @@ export function ImBubble({
               <div className="mt-2 flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
             ) : null}
             {hideActions ? null : isUser ? (
-              <div className="mt-1 flex flex-wrap items-center gap-0.5 text-text-faint">
+              <div className="mt-1 flex flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>
                 <HoverTip label="复制">
                   <button
                     type="button"
