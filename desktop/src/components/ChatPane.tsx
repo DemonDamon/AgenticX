@@ -1861,6 +1861,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const streamRafRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const autoScrollPinnedRef = useRef(true);
+  const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const imeComposingRef = useRef(false);
   const [atOpen, setAtOpen] = useState(false);
   const [atQuery, setAtQuery] = useState("");
@@ -1992,6 +1993,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     [useReActImLayout, visibleMessagesWithStream]
   );
   const focusComposerOnly = focusMode && visibleMessages.length === 0;
+
+  const flushJumpToBottomFab = useCallback(() => {
+    const el = listRef.current;
+    if (!el || focusComposerOnly) {
+      setShowJumpToBottomFab(false);
+      return;
+    }
+    autoScrollPinnedRef.current = isNearBottom(el);
+    const overflow = el.scrollHeight > el.clientHeight + 4;
+    setShowJumpToBottomFab(overflow && !isNearBottom(el));
+  }, [focusComposerOnly]);
 
   useEffect(() => {
     if (!isAutomationTaskPane || !pane?.avatarId?.startsWith("automation:")) {
@@ -2337,21 +2349,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    const updatePinned = () => {
-      autoScrollPinnedRef.current = isNearBottom(el);
+    const onScrollOrResize = () => flushJumpToBottomFab();
+    flushJumpToBottomFab();
+    el.addEventListener("scroll", onScrollOrResize, { passive: true });
+    const ro = new ResizeObserver(onScrollOrResize);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", onScrollOrResize);
+      ro.disconnect();
     };
-    updatePinned();
-    el.addEventListener("scroll", updatePinned, { passive: true });
-    return () => el.removeEventListener("scroll", updatePinned);
-  }, [paneId]);
+  }, [paneId, flushJumpToBottomFab]);
 
   useEffect(() => {
     requestAnimationFrame(() => {
       if (listRef.current && autoScrollPinnedRef.current) {
         listRef.current.scrollTop = listRef.current.scrollHeight;
       }
+      flushJumpToBottomFab();
     });
-  }, [visibleMessages, streamedAssistantText]);
+  }, [visibleMessages, streamedAssistantText, flushJumpToBottomFab]);
 
   const highlightJumpKeyRef = useRef<string>("");
   useEffect(() => {
@@ -5630,10 +5646,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           </div>
         </div>
 
-        <div
-          ref={listRef}
-          className="agx-pane-message-list relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3"
-        >
+        <div className="relative min-h-0 min-w-0 flex-1">
+          <div
+            ref={listRef}
+            className="agx-pane-message-list relative h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-3"
+          >
           {focusComposerOnly ? null : !pane.sessionId && (isGroupPane || isAutomationTaskPane) ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-xs text-text-faint">
               <span className="animate-pulse">正在初始化会话...</span>
@@ -5681,6 +5698,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             onClose={() => setAttachToastOpen(false)}
             timeoutMs={3200}
           />
+          </div>
+
+          {!focusComposerOnly && showJumpToBottomFab ? (
+            <div className="pointer-events-none absolute bottom-3 left-0 right-0 z-30 flex justify-center">
+              <button
+                type="button"
+                className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface-card-strong/95 text-text-strong shadow-lg backdrop-blur-sm transition hover:bg-surface-hover"
+                aria-label="回到底部"
+                title="回到底部"
+                onClick={() => {
+                  const el = listRef.current;
+                  if (!el) return;
+                  autoScrollPinnedRef.current = true;
+                  el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                  flushJumpToBottomFab();
+                }}
+              >
+                <ChevronDown className="h-5 w-5" strokeWidth={2.25} aria-hidden />
+              </button>
+            </div>
+          ) : null}
         </div>
 
         {/* 收藏 Toast：位于消息列表与输入框之间，水平居中 */}
