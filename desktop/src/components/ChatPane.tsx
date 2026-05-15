@@ -3799,7 +3799,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 hasStreamingRow &&
                 peeledFollowupAssistant?.suggestedQuestions &&
                 peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
-                  <div className="flex min-w-0 items-start gap-2">
+                  <div className="mb-4 flex min-w-0 items-start gap-2">
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 flex-col items-start gap-1.5" style={reactActionStyle}>
@@ -3824,7 +3824,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   : null}
                 {/* Block-level actions; peeled follow-ups on the next line below icons */}
                 {!hasStreamingRow && workMessages.length > 0 && useUnifiedReActCard ? (
-                  <div className="flex min-w-0 items-start gap-2">
+                  <div
+                    className={`flex min-w-0 items-start gap-2${peeledFollowupAssistant?.suggestedQuestions?.length ? " mb-4" : ""}`}
+                  >
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 flex-col gap-2">

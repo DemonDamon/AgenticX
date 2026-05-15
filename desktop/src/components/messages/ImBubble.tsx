@@ -309,7 +309,10 @@ export function ImBubble({
     ) : null;
 
   return (
-    <div className="group relative flex min-w-0 items-start gap-2" onContextMenu={openContextMenu}>
+    <div
+      className={`group relative flex min-w-0 items-start gap-2${isStreaming ? " !mt-1" : ""}`}
+      onContextMenu={openContextMenu}
+    >
       {selectable ? (
         <button
           type="button"
@@ -475,14 +478,14 @@ export function ImBubble({
               </div>
             </div>
             {showAssistantFollowups && assistantIconButtons ? (
-              <div className="mt-2 flex min-w-0 flex-col gap-2 self-stretch">
+              <div className="mb-4 mt-2 flex min-w-0 flex-col gap-2 self-stretch">
                 <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>
                   {assistantIconButtons}
                 </div>
                 <div className="flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
               </div>
             ) : showAssistantFollowups ? (
-              <div className="mt-2 flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
+              <div className="mb-4 mt-2 flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
             ) : null}
             {hideActions ? null : isUser ? (
               <div className="mt-1 flex w-full flex-wrap items-center justify-end gap-0.5 pr-2 text-text-faint">
