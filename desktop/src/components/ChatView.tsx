@@ -1540,6 +1540,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                       imAssistantVisual={
                         m.role === "assistant" && reactWorkCol ? "compact-inline" : "default"
                       }
+                      noBubbleBorder={reactWorkCol}
                       toolCardOmitLeadingSpacer={m.role === "tool" && reactWorkCol}
                       onFollowupClick={(t) => void send(t)}
                     />
@@ -1560,6 +1561,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                   messages={row.messages}
                   renderExtras={(msg) => renderToolMessageExtras(msg, {})}
                   omitLeadingSpacer={reactWorkCol}
+                  flat={reactWorkCol}
                 />
               );
             };

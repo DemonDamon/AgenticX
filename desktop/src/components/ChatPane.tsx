@@ -47,6 +47,7 @@ import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
+import { getAssistantActionStyle } from "./messages/im-layout";
 import { TerminalLine } from "./messages/TerminalLine";
 import { ProviderIcon } from "./ProviderIcon";
 import { CleanBlock } from "./messages/CleanBlock";
@@ -3608,6 +3609,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   }, []);
 
   const renderedMessages = useMemo(() => {
+    const reactActionStyle = getAssistantActionStyle({ inReActRow: true });
     const renderGroupedRow = (
       row: GroupedChatRow,
       rowIdx: number,
@@ -3800,7 +3802,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   <div className="flex min-w-0 items-start gap-2">
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
-                      <div className="ml-[16px] flex min-w-0 flex-col items-start gap-1.5">
+                      <div className="flex min-w-0 flex-col items-start gap-1.5" style={reactActionStyle}>
                         {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
                           <button
                             key={`${qi}-${q}`}
@@ -3826,7 +3828,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 flex-col gap-2">
-                        <div className="ml-[16px] flex w-fit flex-wrap items-center gap-0.5 text-text-faint">
+                        <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint" style={reactActionStyle}>
                           <HoverTip label="复制">
                             <button
                               type="button"
@@ -3891,7 +3893,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                         </div>
                         {peeledFollowupAssistant?.suggestedQuestions &&
                         peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
-                          <div className="ml-[16px] flex min-w-0 flex-col items-start gap-1.5">
+                          <div className="flex min-w-0 flex-col items-start gap-1.5" style={reactActionStyle}>
                             {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
                               <button
                                 key={`${qi}-${q}`}
