@@ -5787,7 +5787,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               <button className="rounded px-1 hover:bg-surface-hover" onClick={() => setSelectedMessageIds(new Set())}>取消</button>
             </div>
           ) : null}
-          <div className="agx-pane-composer-body agx-theme-focus-ring relative rounded-2xl border border-border bg-surface-card transition-all duration-300 ease-out">
+          <div className="agx-pane-composer-body agx-theme-focus-ring relative rounded-2xl border border-transparent bg-surface-card transition-all duration-300 ease-out">
             {visibleAttachmentEntries.length > 0 ? (
               <div className="flex flex-wrap gap-2 px-3 pt-3">
                 {visibleAttachmentEntries.map(([key, file]) => (
