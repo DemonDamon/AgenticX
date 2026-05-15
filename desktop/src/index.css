@@ -245,6 +245,20 @@ body {
   color: var(--chat-composer-chip-fg);
 }
 
+/* 在用户气泡内时，利用 text-primary 混合透明度产生色差，并增加微渐变和阴影使其更立体 */
+.agx-im-user-bubble .agx-composer-inline-chip {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--text-primary) 2%, rgba(var(--theme-color-rgb), 0.15)),
+    color-mix(in srgb, var(--text-primary) 10%, rgba(var(--theme-color-rgb), 0.15))
+  );
+  border-color: color-mix(in srgb, var(--text-primary) 12%, rgba(var(--theme-color-rgb), 0.3));
+  border-bottom-color: color-mix(in srgb, var(--text-primary) 22%, rgba(var(--theme-color-rgb), 0.35));
+  box-shadow: 
+    0 1px 2px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
 input[type="checkbox"],
 input[type="radio"] {
   accent-color: rgb(var(--theme-color-rgb));
