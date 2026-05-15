@@ -276,6 +276,11 @@ export function App() {
   const [startupOptimizing, setStartupOptimizing] = useState(true);
   const [configLoaded, setConfigLoaded] = useState(false);
   const windowResizeTimerRef = useRef<number | null>(null);
+  const responsiveStageRef = useRef<0 | 1 | 2>(0);
+  const responsiveSnapshotRef = useRef<{
+    sidebarOpen?: boolean;
+    panes?: Record<string, { taskspace: boolean; history: boolean; members: boolean }>;
+  } | null>(null);
   const subAgentsRef = useRef(subAgents);
   const subAgentSessionRef = useRef<Record<string, string>>({});
   const staleMissCountRef = useRef<Record<string, number>>({});
@@ -1269,6 +1274,110 @@ export function App() {
         window.clearTimeout(windowResizeTimerRef.current);
         windowResizeTimerRef.current = null;
       }
+    };
+  }, []);
+
+  // Responsive auto-collapse: 窗口越窄越先收侧栏面板，最后才收主导航
+  // Stage 0: 全展开 (>= STAGE1_BREAK)
+  // Stage 1: 自动收起每个 pane 的「工作区 / 历史对话 / 群成员」面板 (< STAGE1_BREAK)
+  // Stage 2: 进一步收起左侧主导航栏 (< STAGE2_BREAK)
+  // 当窗口重新拉宽并跨回阈值时，恢复进入窄屏前用户原本展开的面板/导航。
+  useEffect(() => {
+    const STAGE1_BREAK = 1180;
+    const STAGE2_BREAK = 820;
+
+    const computeStage = (w: number): 0 | 1 | 2 => {
+      if (w < STAGE2_BREAK) return 2;
+      if (w < STAGE1_BREAK) return 1;
+      return 0;
+    };
+
+    const applyStage = (newStage: 0 | 1 | 2) => {
+      const prev = responsiveStageRef.current;
+      if (prev === newStage) return;
+      const state = useAppStore.getState();
+      // Focus 模式下完全交给浮窗自身布局，不参与响应式折叠
+      if (state.focusMode) {
+        responsiveStageRef.current = newStage;
+        return;
+      }
+
+      if (newStage > prev) {
+        const snap = responsiveSnapshotRef.current ?? {};
+        if (prev < 1 && newStage >= 1) {
+          const panesMap: Record<
+            string,
+            { taskspace: boolean; history: boolean; members: boolean }
+          > = {};
+          state.panes.forEach((p) => {
+            panesMap[p.id] = {
+              taskspace: !!p.taskspacePanelOpen,
+              history: !!p.historyOpen,
+              members: !!p.membersPanelOpen,
+            };
+          });
+          snap.panes = panesMap;
+        }
+        if (prev < 2 && newStage === 2) {
+          snap.sidebarOpen = !state.sidebarCollapsed;
+        }
+        responsiveSnapshotRef.current = snap;
+
+        useAppStore.setState((s) => {
+          const patch: Partial<typeof s> = {};
+          if (newStage >= 1) {
+            patch.panes = s.panes.map((p) => ({
+              ...p,
+              taskspacePanelOpen: false,
+              historyOpen: false,
+              membersPanelOpen: false,
+            }));
+          }
+          if (newStage === 2 && !s.sidebarCollapsed) {
+            patch.sidebarCollapsed = true;
+          }
+          return patch as typeof s;
+        });
+      } else {
+        const snap = responsiveSnapshotRef.current;
+        useAppStore.setState((s) => {
+          const patch: Partial<typeof s> = {};
+          if (prev === 2 && newStage < 2 && snap?.sidebarOpen !== undefined) {
+            patch.sidebarCollapsed = !snap.sidebarOpen;
+          }
+          if (newStage === 0 && snap?.panes) {
+            const map = snap.panes;
+            patch.panes = s.panes.map((p) => {
+              const rec = map[p.id];
+              if (!rec) return p;
+              return {
+                ...p,
+                taskspacePanelOpen: rec.taskspace,
+                historyOpen: rec.history,
+                membersPanelOpen: rec.members,
+              };
+            });
+          }
+          return patch as typeof s;
+        });
+        if (newStage === 0) {
+          responsiveSnapshotRef.current = null;
+        } else if (newStage < 2 && responsiveSnapshotRef.current) {
+          delete responsiveSnapshotRef.current.sidebarOpen;
+        }
+      }
+      responsiveStageRef.current = newStage;
+    };
+
+    const handle = () => applyStage(computeStage(window.innerWidth));
+    // 首次挂载与可能的工作区状态恢复后各跑一次，保证窄屏启动也能收起
+    handle();
+    const settleTimer = window.setTimeout(handle, 250);
+
+    window.addEventListener("resize", handle, { passive: true });
+    return () => {
+      window.removeEventListener("resize", handle);
+      window.clearTimeout(settleTimer);
     };
   }, []);
 
