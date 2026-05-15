@@ -1190,6 +1190,8 @@ type AttachedFile = {
   errorText?: string;
   sourcePath?: string;
   referenceToken?: boolean;
+  /** @工作区别名：输入框 @提及文案与 chip 用短名，附件标题仍用 `name`（如 @dir:…） */
+  composerRefLabel?: string;
 };
 
 function isImageFile(file: File): boolean {
@@ -2738,8 +2740,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     token.setAttribute("data-ref-token", "1");
     token.setAttribute("data-ref-name", name);
     token.className =
-      "agx-composer-inline-chip mx-0.5 inline-flex items-center rounded-md px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2]";
-    token.textContent = name;
+      "agx-composer-inline-chip mx-0.5 inline-flex max-w-[min(100%,280px)] items-center gap-1 rounded-md px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2]";
+    const icon = document.createElement("span");
+    icon.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;display:inline-block;vertical-align:middle;opacity:0.8"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>';
+    token.appendChild(icon);
+    const label = document.createElement("span");
+    label.className = "min-w-0 truncate";
+    label.textContent = name;
+    token.appendChild(label);
     return token;
   }, []);
 
@@ -2749,13 +2758,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     token.setAttribute("data-skill-token", "1");
     token.setAttribute("data-skill-name", name);
     token.className =
-      "agx-composer-inline-chip mx-0.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2]";
+      "agx-composer-inline-chip mx-0.5 inline-flex max-w-[min(100%,280px)] items-center gap-1 rounded-md px-1.5 py-0.5 align-baseline text-[12px] font-medium leading-[1.2]";
     // wrench SVG icon + name
     const icon = document.createElement("span");
     icon.innerHTML =
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;display:inline-block;vertical-align:middle"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>';
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;display:inline-block;vertical-align:middle;opacity:0.8"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>';
     token.appendChild(icon);
     const label = document.createElement("span");
+    label.className = "min-w-0 truncate";
     label.textContent = name;
     token.appendChild(label);
     return token;
@@ -2772,6 +2782,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const tokenNames = new Set<string>();
       for (const [, file] of Object.entries(contextFiles)) {
         if (file.referenceToken && file.name) tokenNames.add(file.name);
+        if (file.composerRefLabel) tokenNames.add(file.composerRefLabel);
       }
       for (const name of options?.tokenNames ?? []) {
         if (name) tokenNames.add(name);
@@ -2787,6 +2798,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           continue;
         }
         const rest = value.slice(cursor + 1);
+        // 与 extractComposerText 序列化一致：重建 skill 胶囊，避免仅重建 @file 时把 skill 降级成纯文本
+        if (rest.startsWith("skill://")) {
+          const afterPrefix = rest.slice("skill://".length);
+          const skillMatch = afterPrefix.match(/^([^\s@,，。！？\n]+)/);
+          if (skillMatch) {
+            const slug = skillMatch[1];
+            if (textBuffer) {
+              el.appendChild(document.createTextNode(textBuffer));
+              textBuffer = "";
+            }
+            el.appendChild(createSkillRefToken(slug));
+            cursor += 1 + "skill://".length + slug.length;
+            continue;
+          }
+        }
         const matched = tokenNamesByLength.find((name) => {
           if (!rest.startsWith(name)) return false;
           const tail = rest.slice(name.length, name.length + 1);
@@ -2811,7 +2837,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       updateAtStateFromText(value);
       focusComposerEnd();
     },
-    [contextFiles, createFileRefToken, focusComposerEnd, updateAtStateFromText]
+    [contextFiles, createFileRefToken, createSkillRefToken, focusComposerEnd, updateAtStateFromText]
   );
 
   const addContextFile = async (
@@ -2890,6 +2916,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         mimeType: "text/plain",
         status: "ready",
         content,
+        composerRefLabel: alias,
+        referenceToken: true,
       },
     }));
   };
@@ -4148,6 +4176,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       dataUrl: file.dataUrl,
       sourcePath: file.sourcePath,
       referenceToken: file.referenceToken,
+      composerRefLabel: file.composerRefLabel,
     }));
     const rawUserAttachments: MessageAttachment[] =
       retryAttachments && retryAttachments.length > 0
@@ -5827,13 +5856,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                       const mention = `@${first.label} `;
                       const base = extractComposerText();
                       const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
-                      setComposerText(next);
+                      setComposerText(next, { tokenNames: [first.alias || first.label] });
                       void addTaskspaceAliasReference(first.taskspaceId, first.alias, first.path);
                     } else {
                       const mention = `@${first.label} `;
                       const base = extractComposerText();
                       const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
-                      setComposerText(next, { tokenNames: [first.label] });
+                      setComposerText(next, { tokenNames: [first.alias || first.label] });
                       void addContextFile(first.taskspaceId, first.path, { referenceToken: true });
                     }
                     return;
@@ -6032,7 +6061,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                         const mention = `@${item.label} `;
                         const base = extractComposerText();
                         const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
-                        setComposerText(next);
+                        setComposerText(next, { tokenNames: [item.alias || item.label] });
                         void addTaskspaceAliasReference(item.taskspaceId, item.alias, item.path);
                       } else {
                         const mention = `@${item.label} `;

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Paperclip } from "lucide-react";
 import type { Components } from "react-markdown";
 import type { MessageAttachment } from "../../store";
 import {
@@ -33,10 +33,22 @@ function tryConsumeSkillRef(text: string, at: number): { slug: string; len: numb
 export function UserSkillRefChip({ name }: { name: string }) {
   return (
     <span
-      className="agx-composer-inline-chip mx-0.5 inline-flex max-w-[min(100%,280px)] items-center gap-0.5 rounded-md px-2 py-0.5 align-middle text-[12px] font-medium leading-snug"
+      className="agx-composer-inline-chip mx-0.5 inline-flex max-w-[min(100%,280px)] items-center gap-1 rounded-md px-1.5 py-0.5 align-middle text-[12px] font-medium leading-[1.2]"
       title={`@skill://${name}`}
     >
-      <Sparkles className="h-3 w-3 shrink-0 opacity-90" strokeWidth={2} aria-hidden />
+      <Sparkles className="h-3 w-3 shrink-0 opacity-80" strokeWidth={2} aria-hidden />
+      <span className="min-w-0 truncate">{name}</span>
+    </span>
+  );
+}
+
+export function UserFileRefChip({ name }: { name: string }) {
+  return (
+    <span
+      className="agx-composer-inline-chip mx-0.5 inline-flex max-w-[min(100%,280px)] items-center gap-1 rounded-md px-1.5 py-0.5 align-middle text-[12px] font-medium leading-[1.2]"
+      title={`@${name}`}
+    >
+      <Paperclip className="h-3 w-3 shrink-0 opacity-80" strokeWidth={2} aria-hidden />
       <span className="min-w-0 truncate">{name}</span>
     </span>
   );
@@ -52,7 +64,7 @@ export function renderUserMessageInlineBody(
   const names = Array.from(
     new Set(
       referenceAttachments
-        .map((att) => String(att.name || "").trim())
+        .flatMap((att) => [String(att.name || "").trim(), String(att.composerRefLabel || "").trim()])
         .filter((name) => name.length > 0)
     )
   ).sort((a, b) => b.length - a.length);
@@ -102,14 +114,7 @@ export function renderUserMessageInlineBody(
       return tail.length === 0 || /\s/.test(tail);
     });
     if (matched) {
-      chunks.push(
-        <span
-          key={`ref-${chipKey++}`}
-          className="agx-composer-inline-chip mx-0.5 inline-flex items-center rounded-md px-1.5 py-0.5 align-middle text-[12px] font-medium leading-[1.2]"
-        >
-          {matched}
-        </span>
-      );
+      chunks.push(<UserFileRefChip key={`ref-${chipKey++}`} name={matched} />);
       cursor += matched.length + 1;
       continue;
     }

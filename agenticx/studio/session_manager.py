@@ -1061,21 +1061,23 @@ class SessionManager:
                             continue
                         sp = str(a.get("source_path", "") or "").strip()
                         rt = bool(a.get("reference_token", False))
+                        crl = str(a.get("composer_ref_label", "") or "").strip()
                         mime = str(a.get("mime_type", "") or "").strip() or "application/octet-stream"
                         try:
                             sz = int(a.get("size", 0) or 0)
                         except (TypeError, ValueError):
                             sz = 0
-                        clean_atts.append(
-                            {
-                                "name": name,
-                                "mime_type": mime,
-                                "size": sz,
-                                "source_path": sp,
-                                "reference_token": rt,
-                                "kind": "context_file",
-                            }
-                        )
+                        att_dict = {
+                            "name": name,
+                            "mime_type": mime,
+                            "size": sz,
+                            "source_path": sp,
+                            "reference_token": rt,
+                            "kind": "context_file",
+                        }
+                        if crl:
+                            att_dict["composer_ref_label"] = crl
+                        clean_atts.append(att_dict)
                         file_n += 1
                 if clean_atts:
                     row["attachments"] = clean_atts

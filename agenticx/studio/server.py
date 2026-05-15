@@ -1231,7 +1231,15 @@ def create_studio_app() -> FastAPI:
             size_val = len(body.encode("utf-8")) if body else 0
             reference_token = False
             source_path = ""
-            if len(parts) >= 3 and parts[-1].isdigit() and parts[-2].isdigit():
+            composer_ref_label = ""
+            if key.startswith("@dir:"):
+                dir_parts = key.split(":", 2)
+                if len(dir_parts) == 3:
+                    display_name = key
+                    source_path = dir_parts[2]
+                    composer_ref_label = dir_parts[1]
+                    reference_token = True
+            elif len(parts) >= 3 and parts[-1].isdigit() and parts[-2].isdigit():
                 display_name = str(parts[0] or "").strip() or key
                 try:
                     size_val = int(parts[-2])
@@ -1258,6 +1266,7 @@ def create_studio_app() -> FastAPI:
                     "size": int(max(0, size_val)),
                     "source_path": str(source_path or "").strip(),
                     "reference_token": bool(reference_token),
+                    "composer_ref_label": composer_ref_label,
                     "kind": "context_file",
                 }
             )
