@@ -212,6 +212,13 @@ export function ImBubble({
     !omitSuggestedQuestions &&
     Boolean(message.suggestedQuestions?.length) &&
     !!onFollowupClick;
+  const alignInlineAssistantToReactIcon = compactAssistant && noBubbleBorder;
+  const assistantTextClassName = [
+    !isUser && parsed?.reasoning ? "mt-2" : "",
+    alignInlineAssistantToReactIcon ? "pl-1.5" : "",
+  ].filter(Boolean).join(" ") || undefined;
+  const assistantActionOffsetClass = alignInlineAssistantToReactIcon ? "ml-[16px]" : "ml-2";
+  const assistantFollowupOffsetClass = alignInlineAssistantToReactIcon ? "ml-[16px]" : "ml-3";
 
   const assistantIconButtons =
     !hideActions && !isUser ? (
@@ -366,7 +373,7 @@ export function ImBubble({
                 compactAssistant && noBubbleBorder
                   ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[15px] leading-relaxed"
                   : isUser
-                    ? "relative min-w-0 overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[15px] leading-relaxed max-w-full rounded-tr-[4px]"
+                    ? "agx-im-user-bubble relative min-w-0 overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[15px] leading-relaxed max-w-full rounded-tr-[4px]"
                     : "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-3 text-[15px] leading-relaxed"
               }
               style={compactAssistant && noBubbleBorder ? undefined : bubbleStyle}
@@ -427,7 +434,7 @@ export function ImBubble({
                           {renderUserMessageInlineBody(bodyText, referenceAttachments)}
                         </div>
                       ) : (
-                        <div className={!isUser && parsed?.reasoning ? "mt-2" : undefined}>
+                        <div className={assistantTextClassName}>
                           <MarkdownContext.Provider
                             value={{
                               isStreaming,
@@ -452,13 +459,13 @@ export function ImBubble({
             </div>
             {showAssistantFollowups && assistantIconButtons ? (
               <div className="mt-2 flex min-w-0 flex-col gap-2 self-stretch">
-                <div className="ml-2 flex w-fit flex-wrap items-center gap-0.5 text-text-faint">
+                <div className={`${assistantActionOffsetClass} flex w-fit flex-wrap items-center gap-0.5 text-text-faint`}>
                   {assistantIconButtons}
                 </div>
-                <div className="ml-3 flex min-w-0 flex-col items-start gap-1.5 self-stretch">{assistantFollowupChipButtons}</div>
+                <div className={`${assistantFollowupOffsetClass} flex min-w-0 flex-col items-start gap-1.5 self-stretch`}>{assistantFollowupChipButtons}</div>
               </div>
             ) : showAssistantFollowups ? (
-              <div className="ml-3 mt-2 flex min-w-0 flex-col items-start gap-1.5 self-stretch">{assistantFollowupChipButtons}</div>
+              <div className={`${assistantFollowupOffsetClass} mt-2 flex min-w-0 flex-col items-start gap-1.5 self-stretch`}>{assistantFollowupChipButtons}</div>
             ) : null}
             {hideActions ? null : isUser ? (
               <div className="mt-1 flex flex-wrap items-center gap-0.5 text-text-faint">
@@ -527,7 +534,7 @@ export function ImBubble({
               </div>
             ) : showAssistantFollowups ? null : (
               <div className="mt-1 min-w-0 self-stretch">
-                <div className="ml-2 flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint">{assistantIconButtons}</div>
+                <div className={`${assistantActionOffsetClass} flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint`}>{assistantIconButtons}</div>
               </div>
             )}
           </>
