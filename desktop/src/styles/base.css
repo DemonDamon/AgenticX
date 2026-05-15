@@ -35,6 +35,33 @@ body,
   grid-template-columns: 1fr;
 }
 
+/* 窄屏 overlay 模式：导航栏浮在主区之上，不挤压聊天宽度；点击遮罩自动收起。 */
+.agx-app.sidebar-overlay {
+  grid-template-columns: 1fr;
+  position: relative;
+}
+
+.agx-app.sidebar-overlay .agx-sidebar-shell {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-width, 260px);
+  max-width: 80vw;
+  z-index: 60;
+  background: var(--surface-base);
+  box-shadow: 6px 0 24px rgba(0, 0, 0, 0.32);
+  border-right: 1px solid var(--border-strong);
+}
+
+.agx-sidebar-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 55;
+  background: rgba(0, 0, 0, 0.32);
+  -webkit-app-region: no-drag;
+}
+
 .agx-app.reduced-transparency {
   background: rgba(8, 10, 16, 0.96);
 }
