@@ -167,7 +167,7 @@ export function MessageRenderer({
     }
     if (isTodoUpdateToolMessage(message.content)) {
       return (
-        <div className="rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted">
+        <div className="rounded-lg border border-border bg-surface-card px-3 py-3 text-[13px] text-text-muted">
           <TodoUpdateCard content={message.content} />
         </div>
       );

@@ -54,16 +54,18 @@ export function CleanBlock({ message, badge }: Props) {
               (message.attachments ?? []).filter((a) => !!a.referenceToken)
             )
           ) : (
-            <MarkdownContext.Provider value={{ isStreaming }}>
-              <ReactMarkdown
-                remarkPlugins={chatRemarkPlugins}
-                rehypePlugins={chatRehypePlugins}
-                components={chatMarkdownComponents}
-                urlTransform={chatUrlTransform}
-              >
-                {normalizeChatMarkdownContent(bodyText)}
-              </ReactMarkdown>
-            </MarkdownContext.Provider>
+            <div className={!isUser && parsed?.reasoning ? "mt-2" : undefined}>
+              <MarkdownContext.Provider value={{ isStreaming }}>
+                <ReactMarkdown
+                  remarkPlugins={chatRemarkPlugins}
+                  rehypePlugins={chatRehypePlugins}
+                  components={chatMarkdownComponents}
+                  urlTransform={chatUrlTransform}
+                >
+                  {normalizeChatMarkdownContent(bodyText)}
+                </ReactMarkdown>
+              </MarkdownContext.Provider>
+            </div>
           )
         ) : null}
       </div>
