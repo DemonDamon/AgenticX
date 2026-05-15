@@ -1589,7 +1589,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             return groupedVisibleMessages.map((row) => renderGroupedChatRow(row, false));
           })()}
           {streaming && !hideStreamOverlayAsDuplicate && (
-            <div className={`${isLite ? "text-[15px]" : "text-sm"}`}>
+            <div className={["!mt-1.5", isLite ? "text-[15px]" : "text-sm"].join(" ")}>
               {chatStyle === "terminal" ? (
                 <TerminalLine
                   message={{ id: "__stream__", role: "assistant", content: streamedAssistantText || "" }}
