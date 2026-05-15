@@ -48,6 +48,7 @@ import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
+import { ProviderIcon } from "./ProviderIcon";
 import { CleanBlock } from "./messages/CleanBlock";
 import { QueuedMessageBubble } from "./messages/QueuedMessageBubble";
 import { StallRecoveryCard } from "./messages/StallRecoveryCard";
@@ -323,7 +324,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
   const btnRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const iconBtn =
-    "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-faint transition hover:bg-surface-hover hover:text-text-muted";
+    "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong";
 
   const fetchSkills = async () => {
     if (!apiBase) return;
@@ -459,7 +460,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
           aria-label="引用技能"
           onClick={open ? handleClose : handleOpen}
         >
-          <Layers className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
+          <Layers className="h-[15px] w-[15px]" strokeWidth={2} aria-hidden />
         </button>
       </HoverTip>
       {dropdown}
@@ -556,10 +557,11 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   return (
     <div className="relative">
       <button
-        className="flex h-7 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+        className="flex h-7 items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px] text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
         onClick={() => setOpen((v) => !v)}
         title="切换模型"
       >
+        <ProviderIcon provider={currentProvider} className="h-3 w-3 shrink-0" />
         <span className="max-w-[180px] truncate">{currentLabel}</span>
         <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2.5} aria-hidden />
       </button>
@@ -583,7 +585,8 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                     }`}
                     onClick={() => handleSelect(opt.provider, opt.model)}
                   >
-                    <span className="flex flex-1 flex-col gap-0.5">
+                    <span className="flex flex-1 items-center gap-2">
+                      <ProviderIcon provider={opt.provider} className="h-3.5 w-3.5 shrink-0" />
                       <span
                         className={`text-[13px] font-medium leading-none ${
                           isActive ? "text-text-strong" : "text-text-standard"
@@ -671,15 +674,15 @@ function PaneKnowledgeRetrievalModeSwitch({
       <HoverTip label={`知识库检索模式：${KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "智能检索"}`}>
         <button
           type="button"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
           disabled={saving}
           onClick={() => setOpen((v) => !v)}
           aria-label="知识库检索模式"
         >
           {mode === "auto" ? (
-            <Sparkles className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
+            <Sparkles className="h-[15px] w-[15px]" strokeWidth={2} aria-hidden />
           ) : (
-            <Radar className="h-[15px] w-[15px]" strokeWidth={1.8} aria-hidden />
+            <Radar className="h-[15px] w-[15px]" strokeWidth={2} aria-hidden />
           )}
         </button>
       </HoverTip>
@@ -828,7 +831,7 @@ function ActionCircleButton({ hasInput, streaming, recording, onSend, onMic, onS
   return (
     <button
       className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-all duration-150 active:scale-95 ${
-        filled ? "" : "text-text-faint hover:text-text-muted"
+        filled ? "" : "text-text-muted hover:text-text-strong"
       }`}
       style={
         filled
@@ -5926,11 +5929,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   }}
                 />
                 <button
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
                   title="上传附件"
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]">
                     <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
                   </svg>
                 </button>
@@ -5968,7 +5971,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 </div>
                 <button
                   type="button"
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
                   title="更多"
                 >
                   <svg
