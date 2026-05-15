@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
-import { Bookmark, Copy, LayoutList, Quote, RotateCcw, Share2, Pencil, X, ArrowUp } from "lucide-react";
+import { Bookmark, Copy, LayoutList, Quote, RotateCcw, Share2, Pencil, X, ArrowUp, ArrowRight } from "lucide-react";
 import type { Message, MessageAttachment } from "../../store";
 import { AttachmentCard } from "./AttachmentCard";
 import { ReasoningBlock } from "./ReasoningBlock";
@@ -273,11 +273,12 @@ export function ImBubble({
           <button
             key={`${qi}-${q}`}
             type="button"
-            className="max-w-full w-fit rounded-full border border-border bg-surface-hover/80 px-2.5 py-1 text-left text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
+            className="group flex max-w-full w-fit items-center gap-2 rounded-full border border-border bg-surface-hover/80 px-3.5 py-1.5 text-left text-[14px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onFollowupClick?.(q)}
           >
-            {q}
+            <span>{q}</span>
+            <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-60 transition group-hover:opacity-100" />
           </button>
         ))}
       </>
@@ -451,13 +452,13 @@ export function ImBubble({
             </div>
             {showAssistantFollowups && assistantIconButtons ? (
               <div className="mt-2 flex min-w-0 flex-col gap-2 self-stretch">
-                <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint">
+                <div className="ml-2 flex w-fit flex-wrap items-center gap-0.5 text-text-faint">
                   {assistantIconButtons}
                 </div>
-                <div className="flex min-w-0 flex-col items-start gap-1.5 self-stretch">{assistantFollowupChipButtons}</div>
+                <div className="ml-3 flex min-w-0 flex-col items-start gap-1.5 self-stretch">{assistantFollowupChipButtons}</div>
               </div>
             ) : showAssistantFollowups ? (
-              <div className="mt-2 flex min-w-0 flex-col items-start gap-1.5 self-stretch">{assistantFollowupChipButtons}</div>
+              <div className="ml-3 mt-2 flex min-w-0 flex-col items-start gap-1.5 self-stretch">{assistantFollowupChipButtons}</div>
             ) : null}
             {hideActions ? null : isUser ? (
               <div className="mt-1 flex flex-wrap items-center gap-0.5 text-text-faint">
@@ -526,7 +527,7 @@ export function ImBubble({
               </div>
             ) : showAssistantFollowups ? null : (
               <div className="mt-1 min-w-0 self-stretch">
-                <div className="flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint">{assistantIconButtons}</div>
+                <div className="ml-2 flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint">{assistantIconButtons}</div>
               </div>
             )}
           </>

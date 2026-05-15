@@ -26,6 +26,7 @@ import {
   History,
   X,
   PanelRightClose,
+  ArrowRight,
 } from "lucide-react";
 import {
   useAppStore,
@@ -3768,16 +3769,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   <div className="flex min-w-0 items-start gap-2">
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 flex-col items-start gap-1.5">
+                      <div className="ml-3 flex min-w-0 flex-col items-start gap-1.5">
                         {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
                           <button
                             key={`${qi}-${q}`}
                             type="button"
-                            className="max-w-full w-fit rounded-full border border-border bg-surface-hover/80 px-2.5 py-1 text-left text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
+                            className="group flex max-w-full w-fit items-center gap-2 rounded-full border border-border bg-surface-hover/80 px-3.5 py-1.5 text-left text-[14px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => sendFollowupChip(q)}
                           >
-                            {q}
+                            <span>{q}</span>
+                            <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-60 transition group-hover:opacity-100" />
                           </button>
                         ))}
                       </div>
@@ -3793,7 +3795,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 flex-col gap-2">
-                        <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint">
+                        <div className="ml-2 flex w-fit flex-wrap items-center gap-0.5 text-text-faint">
                           <HoverTip label="复制">
                             <button
                               type="button"
@@ -3858,16 +3860,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                         </div>
                         {peeledFollowupAssistant?.suggestedQuestions &&
                         peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
-                          <div className="flex min-w-0 flex-col items-start gap-1.5">
+                          <div className="ml-3 flex min-w-0 flex-col items-start gap-1.5">
                             {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
                               <button
                                 key={`${qi}-${q}`}
                                 type="button"
-                                className="max-w-full w-fit rounded-full border border-border bg-surface-hover/80 px-2.5 py-1 text-left text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
+                                className="group flex max-w-full w-fit items-center gap-2 rounded-full border border-border bg-surface-hover/80 px-3.5 py-1.5 text-left text-[14px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong whitespace-normal"
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => sendFollowupChip(q)}
                               >
-                                {q}
+                                <span>{q}</span>
+                                <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-60 transition group-hover:opacity-100" />
                               </button>
                             ))}
                           </div>
