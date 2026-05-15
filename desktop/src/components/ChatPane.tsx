@@ -3800,7 +3800,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   <div className="flex min-w-0 items-start gap-2">
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
-                      <div className="ml-3 flex min-w-0 flex-col items-start gap-1.5">
+                      <div className="ml-[16px] flex min-w-0 flex-col items-start gap-1.5">
                         {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
                           <button
                             key={`${qi}-${q}`}
@@ -3826,7 +3826,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 flex-col gap-2">
-                        <div className="ml-2 flex w-fit flex-wrap items-center gap-0.5 text-text-faint">
+                        <div className="ml-[16px] flex w-fit flex-wrap items-center gap-0.5 text-text-faint">
                           <HoverTip label="复制">
                             <button
                               type="button"
@@ -3891,7 +3891,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                         </div>
                         {peeledFollowupAssistant?.suggestedQuestions &&
                         peeledFollowupAssistant.suggestedQuestions.length > 0 ? (
-                          <div className="ml-3 flex min-w-0 flex-col items-start gap-1.5">
+                          <div className="ml-[16px] flex min-w-0 flex-col items-start gap-1.5">
                             {peeledFollowupAssistant.suggestedQuestions.slice(0, 3).map((q, qi) => (
                               <button
                                 key={`${qi}-${q}`}
