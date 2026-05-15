@@ -26,9 +26,9 @@ body,
   color: var(--text-primary);
   /* Avoid transitioning grid tracks: during OS window resize it fights layout and feels "laggy". */
   overflow: hidden;
-  /* 透明 Electron 窗口：圆角 + 内沿描边（2px + --window-outline，黑底上与豆包式浅边类似可辨）。 */
+  /* 透明 Electron 窗口：圆角 + 1px 极轻内沿描边，对齐豆包/系统原生窗口的纤细窗框观感。 */
   border-radius: var(--window-chrome-radius);
-  border: 2px solid var(--window-outline, rgba(255, 255, 255, 0.26));
+  border: 1px solid var(--window-outline, rgba(255, 255, 255, 0.12));
 }
 
 .agx-app.sidebar-collapsed {
