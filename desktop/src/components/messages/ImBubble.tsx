@@ -227,8 +227,14 @@ export function ImBubble({
     ? getAssistantTextStyle({ hasReasoning: Boolean(parsed?.reasoning), inReActRow: compactAssistant })
     : undefined;
   const assistantActionStyle = getAssistantActionStyle({ inReActRow: compactAssistant });
+  const USER_BUBBLE_GUTTER_PX = 14;
   const userBubbleStyle = isUser
-    ? { ...bubbleStyle, ...getAssistantActionStyle({}), marginRight: 12 }
+    ? {
+        ...bubbleStyle,
+        marginLeft: USER_BUBBLE_GUTTER_PX,
+        marginRight: USER_BUBBLE_GUTTER_PX,
+        width: `calc(100% - ${USER_BUBBLE_GUTTER_PX * 2}px)`,
+      }
     : bubbleStyle;
 
   const assistantIconButtons =
@@ -479,7 +485,7 @@ export function ImBubble({
               <div className="mt-2 flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
             ) : null}
             {hideActions ? null : isUser ? (
-              <div className="mt-1 flex flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>
+              <div className="mt-1 flex w-full flex-wrap items-center justify-end gap-0.5 pr-2 text-text-faint">
                 <HoverTip label="复制">
                   <button
                     type="button"
