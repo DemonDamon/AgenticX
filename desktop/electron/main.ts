@@ -4393,6 +4393,17 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("shell-show-item-in-folder", async (_event, fullPath: string) => {
+    const fsPath = path.normalize(String(fullPath || "").trim());
+    if (!fsPath) return { ok: false, error: "path is required" };
+    try {
+      shell.showItemInFolder(fsPath);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+
   ipcMain.handle("get-skill-settings", async () => {
     try {
       const resp = await fetch(`${getStudioUrl()}/api/skills/settings`, {

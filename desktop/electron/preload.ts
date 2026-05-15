@@ -365,6 +365,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   mcpMarketplaceInstall: async (payload: { serverId: string; env?: Record<string, string> }) =>
     ipcRenderer.invoke("mcp-marketplace-install", payload),
   shellOpenPath: async (path: string) => ipcRenderer.invoke("shell-open-path", path),
+  shellShowItemInFolder: async (path: string) => ipcRenderer.invoke("shell-show-item-in-folder", path),
   connectMcp: async (payload: { sessionId: string; name: string }) =>
     ipcRenderer.invoke("connect-mcp", payload),
   disconnectMcp: async (payload: { sessionId: string; name: string }) =>

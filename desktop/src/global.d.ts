@@ -639,6 +639,7 @@ declare global {
         error?: string;
       }>;
       shellOpenPath: (path: string) => Promise<{ ok: boolean; error?: string }>;
+      shellShowItemInFolder: (path: string) => Promise<{ ok: boolean; error?: string }>;
       connectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       disconnectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       saveUserMode: (mode: "pro" | "lite") => Promise<{ ok: boolean }>;

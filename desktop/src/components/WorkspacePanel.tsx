@@ -43,7 +43,9 @@ type Props = {
   tintColor?: string;
 };
 
-type CtxTarget = { x: number; y: number; taskspace: Taskspace };
+type CtxMenuState =
+  | { kind: "taskspace"; x: number; y: number; taskspace: Taskspace }
+  | { kind: "entry"; x: number; y: number; taskspace: Taskspace; entry: TaskspaceFile };
 type SessionListItem = {
   session_id: string;
   avatar_id: string | null;
@@ -97,6 +99,30 @@ function nodeKey(taskspaceId: string, relPath: string): string {
   return `${taskspaceId}:${relPath || "."}`;
 }
 
+/** Join taskspace root (absolute) with a relative path from the Studio API (POSIX segments). */
+function absoluteTaskspacePath(root: string, relPath: string): string {
+  const r = String(root || "").trim().replace(/[/\\]+$/, "");
+  if (!r) return "";
+  const norm = String(relPath || ".").replace(/\\/g, "/");
+  const parts = norm.split("/").filter((p) => p && p !== ".");
+  if (parts.length === 0) return r;
+  const isWin = /^[a-zA-Z]:/.test(r) || r.startsWith("\\\\");
+  const sep = isWin ? "\\" : "/";
+  return `${r}${sep}${parts.join(sep)}`;
+}
+
+function terminalCwdForEntry(taskspace: Taskspace, entry: TaskspaceFile): string {
+  const root = (taskspace.path || "").trim();
+  if (!root) return "";
+  if (entry.type === "dir") {
+    return absoluteTaskspacePath(root, entry.path);
+  }
+  const rel = entry.path.replace(/\\/g, "/");
+  const idx = rel.lastIndexOf("/");
+  const parent = idx === -1 ? "." : rel.slice(0, idx);
+  return absoluteTaskspacePath(root, parent);
+}
+
 export function WorkspacePanel({
   paneId,
   sessionId,
@@ -127,7 +153,8 @@ export function WorkspacePanel({
   const [newPath, setNewPath] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [adding, setAdding] = useState(false);
-  const [ctxMenu, setCtxMenu] = useState<CtxTarget | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
+  const [hostPlatform, setHostPlatform] = useState<string | null>(null);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [panelHeight, setPanelHeight] = useState(0);
@@ -138,6 +165,12 @@ export function WorkspacePanel({
     () => taskspaces.find((item) => item.id === activeTaskspaceId) ?? taskspaces[0] ?? null,
     [taskspaces, activeTaskspaceId]
   );
+
+  const revealInFileManagerLabel = useMemo(() => {
+    if (hostPlatform === "darwin") return "在访达中显示";
+    if (hostPlatform === "win32") return "在文件资源管理器中显示";
+    return "打开所在文件夹";
+  }, [hostPlatform]);
 
   const filteredFiles = useMemo(() => {
     const q = fileSearchQuery.trim().toLowerCase();
@@ -231,6 +264,13 @@ export function WorkspacePanel({
       })
     );
   };
+
+  useEffect(() => {
+    void window.agenticxDesktop
+      .platform()
+      .then((p) => setHostPlatform(p))
+      .catch(() => setHostPlatform(null));
+  }, []);
 
   useEffect(() => {
     if (!sessionId) {
@@ -405,6 +445,24 @@ export function WorkspacePanel({
     addPaneTerminalTab(paneId, p, labelHint);
   };
 
+  const revealInFileManager = async (absPath: string) => {
+    const p = (absPath || "").trim();
+    if (!p) {
+      setErrorText("无法在文件管理器中显示：路径无效");
+      return;
+    }
+    setErrorText("");
+    const api = window.agenticxDesktop;
+    if (typeof api.shellShowItemInFolder !== "function") {
+      setErrorText("当前客户端不支持在文件管理器中显示");
+      return;
+    }
+    const res = await api.shellShowItemInFolder(p);
+    if (!res.ok) {
+      setErrorText(res.error ?? "无法在文件管理器中显示");
+    }
+  };
+
   const chooseDirectoryForTaskspace = async () => {
     try {
       const picker = window.agenticxDesktop.chooseDirectory;
@@ -506,6 +564,12 @@ export function WorkspacePanel({
               style={{ paddingLeft }}
               onClick={() => void toggleDir(taskspaceId, item.path)}
               title={item.path}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                const ts = taskspaces.find((t) => t.id === taskspaceId);
+                if (!ts) return;
+                setCtxMenu({ kind: "entry", x: e.clientX, y: e.clientY, taskspace: ts, entry: item });
+              }}
             >
               <span className="inline-block w-3 shrink-0 text-center">{isExpanded ? "▾" : "▸"}</span>
               <span className="min-w-0 truncate">{item.name}/</span>
@@ -515,7 +579,16 @@ export function WorkspacePanel({
         );
       }
       return (
-        <div key={item.path} className="flex min-w-0 items-center gap-1">
+        <div
+          key={item.path}
+          className="flex min-w-0 items-center gap-1"
+          onContextMenu={(e) => {
+            e.preventDefault();
+            const ts = taskspaces.find((t) => t.id === taskspaceId);
+            if (!ts) return;
+            setCtxMenu({ kind: "entry", x: e.clientX, y: e.clientY, taskspace: ts, entry: item });
+          }}
+        >
           <button
             className={`min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
               selectedFilePath === item.path ? "text-text-strong" : "text-text-subtle"
@@ -671,8 +744,18 @@ export function WorkspacePanel({
             filteredFiles.length === 0 ? (
               <div className="text-[13px] text-text-faint">无匹配文件</div>
             ) : (
-              filteredFiles.map(({ taskspaceId, file }) => (
-                <div key={`${taskspaceId}:${file.path}`} className="flex min-w-0 items-center gap-1">
+              filteredFiles.map(({ taskspaceId, file }) => {
+                const ts = taskspaces.find((t) => t.id === taskspaceId);
+                return (
+                <div
+                  key={`${taskspaceId}:${file.path}`}
+                  className="flex min-w-0 items-center gap-1"
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    if (!ts) return;
+                    setCtxMenu({ kind: "entry", x: e.clientX, y: e.clientY, taskspace: ts, entry: file });
+                  }}
+                >
                   <button
                     className={`min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
                       selectedFilePath === file.path ? "text-text-strong" : "text-text-subtle"
@@ -691,7 +774,8 @@ export function WorkspacePanel({
                     @
                   </button>
                 </div>
-              ))
+              );
+              })
             )
           ) : null}
           {!loading && filteredFiles === null && taskspaces.map((ts) => {
@@ -718,7 +802,7 @@ export function WorkspacePanel({
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
-                    setCtxMenu({ x: e.clientX, y: e.clientY, taskspace: ts });
+                    setCtxMenu({ kind: "taskspace", x: e.clientX, y: e.clientY, taskspace: ts });
                   }}
                   title={ts.id === "default" ? (ts.path || ts.label) : ts.path}
                 >
@@ -815,17 +899,45 @@ export function WorkspacePanel({
         onClose={() => setCtxMenu(null)}
         items={
           ctxMenu
-            ? [
-                {
-                  label: "在此目录下打开终端",
-                  onSelect: () => openTerminalForPath(ctxMenu.taskspace.path, ctxMenu.taskspace.label),
-                },
-                {
-                  label: "移除工作区",
-                  danger: true,
-                  onSelect: () => void removeTaskspace(ctxMenu.taskspace.id),
-                },
-              ]
+            ? ctxMenu.kind === "taskspace"
+              ? [
+                  {
+                    label: revealInFileManagerLabel,
+                    onSelect: () => {
+                      const rootPath = (ctxMenu.taskspace.path || "").trim();
+                      if (!rootPath) {
+                        setErrorText("该工作区没有可打开的磁盘路径");
+                        return;
+                      }
+                      void revealInFileManager(rootPath);
+                    },
+                  },
+                  {
+                    label: "在此目录下打开终端",
+                    onSelect: () => openTerminalForPath(ctxMenu.taskspace.path, ctxMenu.taskspace.label),
+                  },
+                  {
+                    label: "移除工作区",
+                    danger: true,
+                    onSelect: () => void removeTaskspace(ctxMenu.taskspace.id),
+                  },
+                ]
+              : [
+                  {
+                    label: revealInFileManagerLabel,
+                    onSelect: () => {
+                      const abs = absoluteTaskspacePath(ctxMenu.taskspace.path, ctxMenu.entry.path);
+                      void revealInFileManager(abs);
+                    },
+                  },
+                  {
+                    label: "在此目录下打开终端",
+                    onSelect: () => {
+                      const cwd = terminalCwdForEntry(ctxMenu.taskspace, ctxMenu.entry);
+                      openTerminalForPath(cwd, ctxMenu.entry.name);
+                    },
+                  },
+                ]
             : []
         }
       />
