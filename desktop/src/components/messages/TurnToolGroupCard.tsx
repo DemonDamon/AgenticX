@@ -53,29 +53,28 @@ export function TurnToolGroupCard({
     <div
       className={
         flat
-          ? "w-full min-w-0 text-xs text-text-muted"
-          : "w-full min-w-0 overflow-hidden rounded-lg border border-border bg-surface-card text-xs text-text-muted transition"
+          ? "w-full min-w-0 text-[13px] text-text-muted"
+          : "w-full min-w-0 overflow-hidden rounded-lg border border-border bg-surface-card text-[13px] text-text-muted transition"
       }
     >
       <button
         type="button"
         className={`relative z-[1] inline-flex w-full max-w-full items-center gap-2 text-left ${
-          flat ? "px-3 pt-3 pb-1" : "px-3 py-2.5"
+          flat ? "px-3 py-1" : "px-3 py-3"
         }`}
         onClick={() => setExpanded((v) => !v)}
       >
-        <span
-          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.5)]"
-          aria-hidden
-        >
-          <Check className="h-2.5 w-2.5 text-white" strokeWidth={2.5} />
+        <span className="flex h-[20px] w-[20px] shrink-0 items-center justify-center" aria-hidden>
+          <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.35)]">
+            <Check className="h-3 w-3 text-white" strokeWidth={2.4} />
+          </span>
         </span>
         <span className="flex min-w-0 shrink items-center gap-1.5">
-          <span className="truncate text-xs font-medium text-text-subtle">{summary}</span>
+          <span className="truncate text-[13px] font-medium text-text-subtle">{summary}</span>
           {expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
           ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
           )}
         </span>
       </button>
@@ -83,24 +82,24 @@ export function TurnToolGroupCard({
         <div
           className={
             flat
-              ? "relative px-3 pb-2 pt-0.5 text-xs text-text-muted"
-              : "relative z-[0] border-t border-border px-3 pb-2 pt-1 text-xs text-text-muted"
+              ? "relative px-3 pb-2 pt-0.5 text-[13px] text-text-muted"
+              : "relative z-[0] border-t border-border px-3 pb-2 pt-1 text-[13px] text-text-muted"
           }
         >
-          {/* 时间线仅在展开列表区，与 nested ToolCallCard 节点同一 X（px-3 12px + half Check 8px = 20px） */}
+          {/* 时间线仅在展开列表区，与 nested ToolCallCard 节点同一 X（px-3 12px + half Check 10px = 22px） */}
           <div
-            className="pointer-events-none absolute left-[20px] top-0 bottom-2 z-0 w-0 border-l border-dashed border-border"
+            className="pointer-events-none absolute left-[22px] top-0 bottom-2 z-0 w-0 border-l border-dashed border-border"
             aria-hidden
           />
           <div className="relative z-[1] space-y-2.5">
             {messages.map((m) =>
               isTodoUpdateToolMessage(m.content) ? (
-                <div key={m.id} className="relative w-full min-w-0 text-xs text-text-muted">
+                <div key={m.id} className="relative w-full min-w-0 text-[13px] text-text-muted">
                   <div
-                    className="pointer-events-none absolute left-[8px] top-[15px] z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2 border-surface-card bg-border"
+                    className="pointer-events-none absolute left-[10px] top-[15px] z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2 border-surface-card bg-border"
                     aria-hidden
                   />
-                  <div className="ml-6 w-fit max-w-full rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted">
+                  <div className="ml-[28px] w-fit max-w-full rounded-lg border border-border bg-surface-card px-3 py-2 text-[13px] text-text-muted">
                     <TodoUpdateCard content={m.content} />
                   </div>
                 </div>

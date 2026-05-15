@@ -149,15 +149,15 @@ export function ToolCallCard({
 
   const titleEl =
     status === "running" || status === "pending" ? (
-      <Shimmer text={title} className="text-xs font-medium" />
+      <Shimmer text={title} className="text-[13px] font-medium" />
     ) : (
-      <span className="text-xs font-medium text-text-subtle">{title}</span>
+      <span className="text-[13px] font-medium text-text-subtle">{title}</span>
     );
 
   const sec = message.toolElapsedSec;
   const metaRight =
     sec != null && Number.isFinite(sec) && (status === "running" || status === "pending") ? (
-      <span className="shrink-0 text-[11px] text-text-faint tabular-nums">{sec}s</span>
+      <span className="shrink-0 text-[12px] text-text-faint tabular-nums">{sec}s</span>
     ) : null;
 
   useEffect(() => {
@@ -166,10 +166,10 @@ export function ToolCallCard({
 
   const expandedDetailClass =
     variant === "flat"
-      ? "space-y-1 px-3 pb-2 pt-0.5"
+      ? "space-y-1 px-3 pb-2 pt-0.5 text-[13px] leading-[1.7]"
       : variant === "nested"
-        ? "mt-1.5 space-y-1 pl-3 text-[11px] leading-relaxed"
-        : "space-y-1 border-t border-border px-3 pb-2 pt-1.5";
+        ? "mt-1.5 space-y-1 pl-3 text-[13px] leading-[1.7]"
+        : "space-y-1 border-t border-border px-3 pb-2 pt-1.5 text-[13px] leading-[1.7]";
   const forcedActionClass =
     variant === "flat"
       ? "px-3 pb-2 pt-0.5"
@@ -191,22 +191,22 @@ export function ToolCallCard({
 
   const shellOuterClass =
     variant === "nested"
-      ? "relative w-full min-w-0 text-xs text-text-muted"
+      ? "relative w-full min-w-0 text-[13px] text-text-muted"
       : variant === "flat"
-        ? "w-full min-w-0 overflow-hidden text-xs text-text-muted"
-        : `w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-xs text-text-muted transition ${
+        ? "w-full min-w-0 overflow-hidden text-[13px] text-text-muted"
+        : `w-full min-w-0 overflow-hidden rounded-lg border bg-surface-card text-[13px] text-text-muted transition ${
             selected ? "border-[rgba(var(--theme-color-rgb,6,182,212),0.6)]" : "border-border"
           }`;
 
   const shell =
     variant === "nested" ? (
       <div className={shellOuterClass}>
-        {/* 与 TurnToolGroupCard 左侧虚线对齐（父容器 px-3 12px + 8px = 20px） */}
+        {/* 与 TurnToolGroupCard 左侧虚线对齐（父容器 px-3 12px + 10px = 22px） */}
         <div
-          className="pointer-events-none absolute left-[8px] top-[15px] z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2 border-surface-card bg-border"
+          className="pointer-events-none absolute left-[10px] top-[15px] z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2 border-surface-card bg-border"
           aria-hidden
         />
-        <div className="ml-6 min-w-0">
+        <div className="ml-[28px] min-w-0">
           <button
             type="button"
             className={`group inline-flex max-w-full items-center gap-2 rounded-full border border-border/70 bg-zinc-100/60 px-3 py-1.5 text-left shadow-sm transition hover:bg-zinc-200/60 disabled:cursor-default disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.05] ${
@@ -222,9 +222,9 @@ export function ToolCallCard({
             {metaRight}
             {hasDetail ? (
               expanded ? (
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
               ) : (
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
               )
             ) : null}
           </button>
@@ -235,7 +235,7 @@ export function ToolCallCard({
       </div>
     ) : (
       <div className={shellOuterClass}>
-        <div className="flex w-full items-center gap-1.5 px-3 py-2 text-left">
+        <div className={`flex w-full items-center gap-1.5 px-3 ${variant === "flat" ? "py-1" : "py-3"} text-left`}>
           <button
             type="button"
             className="inline-flex min-w-0 flex-1 items-center gap-1.5 text-left disabled:cursor-default disabled:opacity-60"
@@ -244,9 +244,9 @@ export function ToolCallCard({
           >
             {hasDetail &&
               (expanded ? (
-                <ChevronDown className="h-3 w-3 shrink-0 text-text-muted" aria-hidden />
+                <ChevronDown className="h-3 w-3 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
               ) : (
-                <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" aria-hidden />
+                <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
               ))}
             <Icon className={`h-3.5 w-3.5 shrink-0 ${iconTone(status)}`} />
             <span className="min-w-0 flex-1 truncate">{titleEl}</span>
