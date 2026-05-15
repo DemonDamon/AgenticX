@@ -273,6 +273,7 @@ export function App() {
   const sessionInitDoneRef = useRef(false);
   const workspaceHydratedRef = useRef(false);
   const [windowResizing, setWindowResizing] = useState(false);
+  const [responsiveStage, setResponsiveStage] = useState<0 | 1 | 2>(0);
   const [startupOptimizing, setStartupOptimizing] = useState(true);
   const [configLoaded, setConfigLoaded] = useState(false);
   const windowResizeTimerRef = useRef<number | null>(null);
@@ -1299,6 +1300,7 @@ export function App() {
       // Focus 模式下完全交给浮窗自身布局，不参与响应式折叠
       if (state.focusMode) {
         responsiveStageRef.current = newStage;
+        setResponsiveStage(newStage);
         return;
       }
 
@@ -1367,6 +1369,7 @@ export function App() {
         }
       }
       responsiveStageRef.current = newStage;
+      setResponsiveStage(newStage);
     };
 
     const handle = () => applyStage(computeStage(window.innerWidth));
@@ -1926,13 +1929,20 @@ export function App() {
     };
   }, [apiBase, addPane, setActivePaneId, setActiveAvatarId, setPaneMessages, setPaneSessionId]);
 
+  const sidebarOverlayMode =
+    userMode === "pro" &&
+    !!apiBase &&
+    !focusMode &&
+    responsiveStage === 2 &&
+    !sidebarCollapsed;
+
   return (
     <div
       className={`agx-app ${
         sidebarCollapsed || userMode !== "pro" || !apiBase ? "sidebar-collapsed" : ""
       } ${windowResizing ? "window-resizing" : ""} ${startupOptimizing ? "startup-optimizing" : ""} ${
         focusMode ? "focus-mode" : ""
-      } ${focusModeTall ? "focus-mode-tall" : ""}`}
+      } ${focusModeTall ? "focus-mode-tall" : ""} ${sidebarOverlayMode ? "sidebar-overlay" : ""}`}
     >
       {!configLoaded ? (
         <div className="flex h-full min-h-0 w-full items-center justify-center text-sm text-text-faint">
@@ -1945,6 +1955,14 @@ export function App() {
               <AvatarSidebar />
               <SidebarResizer />
             </div>
+          ) : null}
+          {sidebarOverlayMode ? (
+            <div
+              className="agx-sidebar-overlay-backdrop"
+              onClick={() => setSidebarCollapsed(true)}
+              role="presentation"
+              aria-hidden
+            />
           ) : null}
           <div className="agx-main-shell">
             {userMode === "pro" && !focusMode ? (
