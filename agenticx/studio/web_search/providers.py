@@ -19,6 +19,23 @@ from agenticx.studio.web_search.contracts import WebSearchResult
 logger = logging.getLogger(__name__)
 
 _TAG_RE = re.compile(r"<[^>]+>")
+_DDG_HTML_LINK_RE = re.compile(
+    r"""(<a[^>]*class=['"][^'"]*result__a[^'"]*['"][^>]*>)(.*?)</a>""",
+    re.I | re.DOTALL,
+)
+_DDG_HTML_SNIPPET_RE = re.compile(
+    r"""<a[^>]*class=['"][^'"]*result__snippet[^'"]*['"][^>]*>(.*?)</a>""",
+    re.I | re.DOTALL,
+)
+_DDG_LITE_LINK_RE = re.compile(
+    r"""(<a[^>]*class=['"]result-link['"][^>]*>)(.*?)</a>""",
+    re.I | re.DOTALL,
+)
+_DDG_LITE_SNIPPET_RE = re.compile(
+    r"""<td[^>]*class=['"]result-snippet['"][^>]*>(.*?)</td>""",
+    re.I | re.DOTALL,
+)
+_HREF_RE = re.compile(r"""href=['"]([^'"]+)['"]""", re.I)
 
 
 def _strip_html_fragment(raw: str, *, max_len: int) -> str:
@@ -41,6 +58,60 @@ def _unwrap_ddg_redirect(href: str) -> str:
     return href
 
 
+def _looks_like_ddg_challenge(status_code: int, html: str) -> bool:
+    t = (html or "").lower()
+    if status_code == 202:
+        return True
+    return (
+        "anomaly.js" in t
+        or "automated requests" in t
+        or "unusual traffic" in t
+        or "challenge" in t
+        or "unfortunately" in t
+    )
+
+
+def _href_from_anchor_tag(tag_open: str) -> str:
+    m = _HREF_RE.search(tag_open or "")
+    return (m.group(1).strip() if m else "")
+
+
+def search_duckduckgo_lite(query: str, max_results: int, snippet_chars: int) -> List[WebSearchResult]:
+    """Fallback for DDG anti-bot page on html endpoint."""
+    results: List[WebSearchResult] = []
+    try:
+        with httpx.Client(timeout=25.0, follow_redirects=True) as client:
+            resp = client.get(
+                "https://lite.duckduckgo.com/lite/",
+                params={"q": query},
+                headers={"User-Agent": "Mozilla/5.0 (compatible; MachiWebSearch/1.0)"},
+            )
+            resp.raise_for_status()
+            html = resp.text
+    except Exception as exc:
+        logger.warning("DuckDuckGo Lite search failed: %s", exc)
+        return results
+
+    snippets = _DDG_LITE_SNIPPET_RE.findall(html)
+    idx_snip = 0
+    for tag_open, title_html in _DDG_LITE_LINK_RE.findall(html):
+        if len(results) >= max_results:
+            break
+        href = _href_from_anchor_tag(tag_open)
+        url = _unwrap_ddg_redirect(href.strip())
+        title = _strip_html_fragment(title_html, max_len=min(200, snippet_chars))
+        snippet = ""
+        if idx_snip < len(snippets):
+            snippet = _strip_html_fragment(snippets[idx_snip], max_len=snippet_chars)
+            idx_snip += 1
+        if not url or url.startswith("#"):
+            continue
+        if url.startswith("//"):
+            url = f"https:{url}"
+        results.append(WebSearchResult(title=title or url, url=url, snippet=snippet))
+    return results
+
+
 def search_duckduckgo_html(query: str, max_results: int, snippet_chars: int) -> List[WebSearchResult]:
     """Free HTML search (no API key)."""
     results: List[WebSearchResult] = []
@@ -54,25 +125,23 @@ def search_duckduckgo_html(query: str, max_results: int, snippet_chars: int) -> 
                     "Content-Type": "application/x-www-form-urlencoded",
                 },
             )
+            status_code = resp.status_code
             resp.raise_for_status()
             html = resp.text
     except Exception as exc:
         logger.warning("DuckDuckGo HTML search failed: %s", exc)
-        return results
+        return search_duckduckgo_lite(query, max_results, snippet_chars)
 
-    link_re = re.compile(
-        r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-        re.I | re.DOTALL,
-    )
-    snip_re = re.compile(
-        r'<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>',
-        re.I | re.DOTALL,
-    )
-    snippets = snip_re.findall(html)
+    if _looks_like_ddg_challenge(status_code, html):
+        logger.info("DuckDuckGo HTML returned challenge page, falling back to Lite endpoint")
+        return search_duckduckgo_lite(query, max_results, snippet_chars)
+
+    snippets = _DDG_HTML_SNIPPET_RE.findall(html)
     idx_snip = 0
-    for href, title_html in link_re.findall(html):
+    for tag_open, title_html in _DDG_HTML_LINK_RE.findall(html):
         if len(results) >= max_results:
             break
+        href = _href_from_anchor_tag(tag_open)
         url = _unwrap_ddg_redirect(href.strip())
         title = _strip_html_fragment(title_html, max_len=min(200, snippet_chars))
         snippet = ""
