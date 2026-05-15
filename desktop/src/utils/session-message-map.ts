@@ -13,6 +13,7 @@ export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | u
       data_url?: unknown;
       source_path?: unknown;
       reference_token?: unknown;
+      composer_ref_label?: unknown;
       kind?: unknown;
     };
     const dataUrl = String(o.data_url ?? "").trim();
@@ -27,6 +28,7 @@ export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | u
     const kind = String(o.kind ?? "").trim();
     const sourcePath = String(o.source_path ?? "").trim();
     const referenceToken = Boolean(o.reference_token);
+    const composerRefLabel = String(o.composer_ref_label ?? "").trim();
     if (kind === "context_file" || (!dataUrl && name)) {
       const mimeType = String(o.mime_type ?? "").trim() || "application/octet-stream";
       out.push({
@@ -35,6 +37,7 @@ export function attachmentsFromSessionRow(raw: unknown): MessageAttachment[] | u
         size,
         ...(sourcePath ? { sourcePath } : {}),
         ...(referenceToken ? { referenceToken: true } : {}),
+        ...(composerRefLabel ? { composerRefLabel } : {}),
       });
     }
   }

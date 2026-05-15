@@ -193,6 +193,7 @@ export type MessageAttachment = {
   dataUrl?: string;
   sourcePath?: string;
   referenceToken?: boolean;
+  composerRefLabel?: string;
 };
 
 export type QueuedMessage = {
