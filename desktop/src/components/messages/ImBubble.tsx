@@ -136,8 +136,9 @@ export function ImBubble({
         color: "var(--chat-im-user-text)",
       }
     : {
-        background: "var(--chat-im-assistant-bg)",
-        borderColor: "var(--chat-im-assistant-border)",
+        // Frameless assistant text (e.g. Doubao-style): sit on chat surface; keep semantic text color.
+        background: "transparent",
+        borderColor: "transparent",
         color: "var(--chat-im-assistant-text)",
       };
   const [menuOpen, setMenuOpen] = useState(false);
@@ -363,7 +364,9 @@ export function ImBubble({
               className={
                 compactAssistant && noBubbleBorder
                   ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[15px] leading-relaxed"
-                  : `relative min-w-0 overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[15px] leading-relaxed ${isUser ? "max-w-full rounded-tr-[4px]" : "w-full rounded-tl-[4px]"}`
+                  : isUser
+                    ? "relative min-w-0 overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[15px] leading-relaxed max-w-full rounded-tr-[4px]"
+                    : "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-3 text-[15px] leading-relaxed"
               }
               style={compactAssistant && noBubbleBorder ? undefined : bubbleStyle}
             >

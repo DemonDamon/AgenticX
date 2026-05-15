@@ -3737,7 +3737,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   ) : null}
                   {useUnifiedReActCard ? (
                     <div
-                      className="min-w-0 flex-1 overflow-hidden rounded-xl border border-border bg-surface-card"
+                      className="min-w-0 flex-1 overflow-hidden"
                     >
                       {groupedWork.map((r, i) => {
                         const omitSq =
