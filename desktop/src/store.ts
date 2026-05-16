@@ -303,6 +303,16 @@ type AppState = {
   planMode: boolean;
   sidebarCollapsed: boolean;
   focusMode: boolean;
+  /**
+   * 灵巧模式（语音）当前绑定的 pane id。
+   *
+   * 由 `toggleFocusMode(paneId)` / `enterFocusMode(paneId)` 写入；
+   * VoiceFocusMode 读取它解析 sessionId/avatarId，从而：
+   *   1. 把对应 session 最近 ~20 轮历史作为上下文注入 realtime provider；
+   *   2. 把电话中的 user/assistant final 文本追加回该 session（而非硬编码 pane-meta）。
+   * 退出灵巧模式时清空。
+   */
+  focusModePaneId: string | null;
   theme: ThemeMode;
   /** Machi 官网账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
   agxAccount: { loggedIn: boolean; email: string; displayName: string };
@@ -349,9 +359,9 @@ type AppState = {
   setKeybindingsPanelOpen: (v: boolean) => void;
   setPlanMode: (v: boolean) => void;
   setSidebarCollapsed: (v: boolean | ((prev: boolean) => boolean)) => void;
-  enterFocusMode: () => void;
+  enterFocusMode: (paneId?: string) => void;
   exitFocusMode: () => void;
-  toggleFocusMode: () => void;
+  toggleFocusMode: (paneId?: string) => void;
   setTheme: (theme: ThemeMode) => void;
   setThemeColor: (color: ThemeColor) => void;
   setAgxAccount: (acct: { loggedIn: boolean; email: string; displayName: string }) => void;
@@ -670,6 +680,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   planMode: false,
   sidebarCollapsed: false,
   focusMode: false,
+  focusModePaneId: null,
   theme: "dark",
   themeColor: loadThemeColor(),
   agxAccount: { loggedIn: false, email: "", displayName: "" },
@@ -731,20 +742,29 @@ export const useAppStore = create<AppState>((set, get) => ({
       sidebarCollapsed:
         typeof next === "function" ? next(state.sidebarCollapsed) : next,
     })),
-  enterFocusMode: () => {
-    const already = get().focusMode;
-    if (!already) set({ focusMode: true });
+  enterFocusMode: (paneId?: string) => {
+    const state = get();
+    // 解析触发 pane：显式入参 > 当前 activePaneId > 默认 pane-meta。
+    // 群聊 pane 的语音多路由场景暂未支持，统一回落到 pane-meta（与 ChatPane 顶栏按钮的可见性策略保持一致）。
+    const candidate = (paneId || state.activePaneId || "pane-meta").trim();
+    const targetPane = state.panes.find((p) => p.id === candidate);
+    const isGroup = Boolean(targetPane?.avatarId && targetPane.avatarId.startsWith("group:"));
+    const resolved = !targetPane || isGroup ? "pane-meta" : targetPane.id;
+    const already = state.focusMode;
     if (!already) {
+      set({ focusMode: true, focusModePaneId: resolved });
       try {
         void window.agenticxDesktop?.focusModeEnter?.();
       } catch {
         /* ignore IPC errors */
       }
+    } else if (state.focusModePaneId !== resolved) {
+      set({ focusModePaneId: resolved });
     }
   },
   exitFocusMode: () => {
     const wasActive = get().focusMode;
-    if (wasActive) set({ focusMode: false });
+    if (wasActive) set({ focusMode: false, focusModePaneId: null });
     if (wasActive) {
       try {
         void window.agenticxDesktop?.focusModeExit?.();
@@ -753,13 +773,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
   },
-  toggleFocusMode: () => {
+  toggleFocusMode: (paneId?: string) => {
     const state = get();
     if (state.focusMode) {
       state.exitFocusMode();
       return;
     }
-    state.enterFocusMode();
+    state.enterFocusMode(paneId);
   },
   setTheme: (theme) => set({ theme }),
   setThemeColor: (themeColor) =>

@@ -5595,15 +5595,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 <Users className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             )}
-            <button
-              type="button"
-              className="agx-topbar-btn !px-[5px]"
-              onClick={() => toggleFocusMode()}
-              title="灵巧模式 · 实时语音 (⇧⌘F)"
-              aria-label="进入灵巧模式"
-            >
-              <PhoneCall className="h-[18px] w-[18px]" strokeWidth={1.8} />
-            </button>
+            {!isGroupPane && (
+              <button
+                type="button"
+                className="agx-topbar-btn !px-[5px]"
+                onClick={() => toggleFocusMode(pane.id)}
+                title="灵巧模式 · 实时语音 (⇧⌘F)"
+                aria-label="进入灵巧模式"
+              >
+                <PhoneCall className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              </button>
+            )}
             <button
               className={`agx-topbar-btn !px-[5px] ${workspacePanelOpen ? "agx-topbar-btn--active" : ""}`}
               onClick={() => cycleSidePanel(pane.id, "workspace")}

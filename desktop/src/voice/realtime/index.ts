@@ -13,5 +13,6 @@ export type {
   VoiceConnectOptions,
   VoiceRealtimeEmit,
   VoiceRingPhase,
+  VoiceHistoryTurn,
   RealtimeVoiceSession,
 } from "./types";

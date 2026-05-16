@@ -26,6 +26,69 @@ DOUBAO_REALTIME_WS = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
 DEFAULT_DOUBAO_APP_KEY = "PlgvMymc7f3tQnJ6"
 
 
+def _read_u32_be(buf: bytes, offset: int) -> int:
+    return int.from_bytes(buf[offset : offset + 4], "big", signed=False)
+
+
+def _decode_doubao_event_for_log(data: bytes) -> tuple[int | None, dict[str, Any] | None]:
+    """Best-effort decode for server-side observability only.
+
+    The browser has the authoritative decoder. This helper is intentionally
+    tolerant because some upstream events may omit the session id field even
+    when they are listed as session events.
+    """
+
+    if len(data) < 8:
+        return None, None
+    header_size = (data[0] & 0x0F) * 4 or 4
+    message_type = (data[1] >> 4) & 0x0F
+    flags = data[1] & 0x0F
+    serialization = (data[2] >> 4) & 0x0F
+    offset = header_size
+
+    if message_type == 0b1111:
+        offset += 4
+    if flags & 0b0001 or flags & 0b0010:
+        offset += 4
+    event: int | None = None
+    if flags & 0b0100:
+        if offset + 4 > len(data):
+            return None, None
+        event = _read_u32_be(data, offset)
+        offset += 4
+
+    candidate_offsets = [offset]
+    if event is not None and offset + 8 <= len(data):
+        size = _read_u32_be(data, offset)
+        start = offset + 4
+        end = start + size
+        if 0 < size <= 128 and end + 4 <= len(data):
+            try:
+                marker = data[start:end].decode("utf-8")
+            except UnicodeDecodeError:
+                marker = ""
+            if marker and all(ch.isalnum() or ch in "._:-" for ch in marker):
+                candidate_offsets.insert(0, end)
+
+    if serialization != 0b0001:
+        return event, None
+    for payload_offset in candidate_offsets:
+        if payload_offset + 4 > len(data):
+            continue
+        payload_size = _read_u32_be(data, payload_offset)
+        start = payload_offset + 4
+        end = start + payload_size
+        if payload_size < 0 or end > len(data):
+            continue
+        try:
+            parsed = json.loads(data[start:end].decode("utf-8")) if payload_size else {}
+        except Exception:
+            continue
+        if isinstance(parsed, dict):
+            return event, parsed
+    return event, None
+
+
 def _looks_like_masked_secret(val: Any) -> bool:
     """True if value looks like ``ConfigManager._mask`` output or legacy ``***`` placeholder."""
     if not isinstance(val, str):
@@ -196,10 +259,17 @@ def register_voice_endpoints(
         spk = str(oa.get("voice") or "alloy").strip()
         instructions = str(oa.get("instructions") or "").strip()
 
+        # input.transcription is REQUIRED for the client DataChannel to receive
+        # `conversation.item.input_audio_transcription.completed` events; without it
+        # OpenAI Realtime never emits the user-side transcript, so voice turns can
+        # not be persisted back to chat history.
         sess: dict[str, Any] = {
             "type": "realtime",
             "model": model,
-            "audio": {"output": {"voice": spk}},
+            "audio": {
+                "input": {"transcription": {"model": "whisper-1"}},
+                "output": {"voice": spk},
+            },
             "turn_detection": {"type": "server_vad"},
         }
         if instructions:
@@ -253,7 +323,13 @@ def register_voice_endpoints(
             content = str(raw.get("content") or "")
             meta = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else None
             agent_id_s = str(raw.get("agent_id") or "").strip()
-            agent_id_final = agent_id_s or ("meta" if role == "assistant" else "desktop-voice")
+            # Voice user/assistant turns must both default to ``meta`` so that
+            # ChatPane's visibility filter (which keeps only agentId in {"", "meta"})
+            # renders them in the conversation. The voice-focus provenance is kept
+            # in ``metadata.source = "voice-focus"`` and is not encoded into
+            # agent_id. Tagging user turns with ``desktop-voice`` previously hid
+            # every voice user message in the UI even though it was persisted.
+            agent_id_final = agent_id_s or "meta"
 
             ok_role = role in {"user", "assistant"}
             if not ok_role or not content.strip():
@@ -275,7 +351,19 @@ def register_voice_endpoints(
 
         if appended:
             managed.updated_at = time.time()
-            manager.persist(session_id)
+            persisted = manager.persist(session_id)
+            logger.warning(
+                "[voice-focus] appended %s message(s) to session=%s persisted=%s chat_history=%s",
+                appended,
+                session_id,
+                persisted,
+                len(session.chat_history),
+            )
+        else:
+            logger.warning(
+                "[voice-focus] append requested for session=%s but no valid messages were accepted",
+                session_id,
+            )
         return {"ok": True, "appended": appended}
 
     @app.post("/api/voice/realtime/probe")
@@ -419,7 +507,15 @@ def register_voice_endpoints(
             try:
                 async for msg in upstream:
                     if isinstance(msg, (bytes, bytearray)):
-                        await websocket.send_bytes(bytes(msg))
+                        raw = bytes(msg)
+                        event, payload = _decode_doubao_event_for_log(raw)
+                        if event in {451, 459, 550, 559, 350, 359}:
+                            logger.warning(
+                                "[voice-focus:doubao] upstream event=%s payload=%s",
+                                event,
+                                json.dumps(payload, ensure_ascii=False)[:800] if payload is not None else None,
+                            )
+                        await websocket.send_bytes(raw)
             except Exception:
                 pass
 

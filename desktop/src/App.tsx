@@ -1412,7 +1412,9 @@ export function App() {
       } else if (action === "toggle-plan-mode") {
         setPlanMode(!planMode);
       } else if (action === "toggle-focus-mode") {
-        toggleFocusMode();
+        // 快捷键场景：把当前 activePaneId 作为目标 pane 传给灵巧模式，
+        // 让历史继承 / 写回都对齐用户正在聊的那个会话（非硬编码 pane-meta）。
+        toggleFocusMode(useAppStore.getState().activePaneId);
       } else if (action === "open-keybindings") {
         setKeybindingsPanelOpen(true);
       }

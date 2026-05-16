@@ -226,12 +226,24 @@ export function decodeServerFrame(data: Uint8Array): DoubaoServerFrame | null {
     connectId = new TextDecoder().decode(data.subarray(off, off + cidSize));
     off += cidSize;
   } else if (event !== null) {
-    if (off + 4 > data.byteLength) return null;
-    const sidSize = readU32BE(data, off);
-    off += 4;
-    if (off + sidSize > data.byteLength) return null;
-    sessionId = new TextDecoder().decode(data.subarray(off, off + sidSize));
-    off += sidSize;
+    // Some upstream events are documented as Session-class but may omit the
+    // session_id field in practice. Do not blindly treat the next u32 as
+    // session_id length: for no-session-id frames it is actually payload_size,
+    // which previously caused ASRResponse frames to be dropped before payload
+    // parsing. Only consume a plausible textual session id.
+    if (off + 8 <= data.byteLength) {
+      const sidSize = readU32BE(data, off);
+      const sidStart = off + 4;
+      const sidEnd = sidStart + sidSize;
+      const leavesPayloadSize = sidEnd + 4 <= data.byteLength;
+      if (sidSize > 0 && sidSize <= 128 && leavesPayloadSize) {
+        const candidate = new TextDecoder().decode(data.subarray(sidStart, sidEnd));
+        if (/^[A-Za-z0-9._:-]+$/.test(candidate)) {
+          sessionId = candidate;
+          off = sidEnd;
+        }
+      }
+    }
   }
 
   if (off + 4 > data.byteLength) return null;
