@@ -9,6 +9,7 @@ export const SETTINGS_TAB_IDS = [
   "knowledge",
   "hooks",
   "automation",
+  "voice",
   "email",
   "workspace",
   "favorites",

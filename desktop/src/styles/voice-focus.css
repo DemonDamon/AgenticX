@@ -1,0 +1,164 @@
+/* Voice focus capsule — tokenized; root lives in transparent Electron window. */
+
+.agx-voice-focus-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(
+    circle at 50% 45%,
+    color-mix(in srgb, var(--ui-surface-elevated, var(--surface-panel, #1a1d24)) 92%, transparent),
+    color-mix(in srgb, var(--ui-surface-panel, #13151a) 96%, transparent)
+  );
+  border-radius: 9999px;
+  box-shadow:
+    0 12px 42px color-mix(in srgb, black 45%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--ui-border-subtle, rgba(255, 255, 255, 0.08)) 100%, transparent);
+  -webkit-mask-image: radial-gradient(circle, black 62%, transparent 63%);
+  mask-image: radial-gradient(circle, black 62%, transparent 63%);
+}
+
+.agx-voice-focus-inner {
+  position: relative;
+  width: 216px;
+  height: 216px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.agx-voice-focus-halo {
+  position: absolute;
+  inset: -8px;
+  border-radius: 9999px;
+  pointer-events: none;
+  border: 2px solid color-mix(in srgb, var(--ui-accent, #6366f1) 55%, transparent);
+  opacity: 0.9;
+  animation: agx-vf-halo-spin 8s linear infinite;
+}
+
+.agx-voice-focus-root[data-phase="idle"] .agx-voice-focus-halo {
+  animation-duration: 22s;
+  opacity: 0.45;
+}
+
+.agx-voice-focus-root[data-phase="listening"] .agx-voice-focus-halo {
+  animation-duration: 14s;
+}
+
+.agx-voice-focus-root[data-phase="thinking"] .agx-voice-focus-halo {
+  animation-duration: 4s;
+}
+
+.agx-voice-focus-root[data-phase="speaking"] .agx-voice-focus-halo {
+  animation-duration: 6s;
+}
+
+.agx-voice-focus-root[data-phase="error"] .agx-voice-focus-halo {
+  border-color: color-mix(in srgb, var(--ui-danger, #ef4444) 65%, transparent);
+  animation: none;
+}
+
+@keyframes agx-vf-halo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.agx-voice-focus-avatar {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  border-radius: 9999px;
+  border: 3px solid color-mix(in srgb, var(--ui-fg-subtle, rgba(255, 255, 255, 0.12)) 100%, transparent);
+  background: var(--ui-surface-strong, #181b22);
+  overflow: hidden;
+}
+
+.agx-voice-focus-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.agx-voice-focus-bars {
+  margin-top: 10px;
+  display: flex;
+  gap: 3px;
+  height: 28px;
+  align-items: flex-end;
+}
+
+.agx-voice-focus-bar {
+  width: 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ui-accent, #6366f1) 35%, var(--ui-fg-muted, #6b7280));
+  transform-origin: bottom;
+  transition: height 60ms linear, opacity 120ms linear;
+}
+
+.agx-voice-focus-hangup {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--ui-danger, #ef4444) 92%, black);
+  box-shadow: 0 4px 14px color-mix(in srgb, black 45%, transparent);
+  color: white;
+}
+
+.agx-voice-focus-hangup:hover {
+  filter: brightness(1.05);
+}
+
+.agx-voice-focus-error {
+  position: absolute;
+  inset: 36px 28px auto 28px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--ui-danger, #ef4444) 70%, var(--ui-fg-strong, #fff));
+}
+
+.agx-voice-focus-caption {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 14px;
+  max-height: 36px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--ui-fg-muted, #9ca3af) 78%, var(--ui-fg-strong, #fff));
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.agx-voice-focus-caption[data-role="user"] {
+  color: color-mix(in srgb, var(--ui-accent, #6366f1) 70%, var(--ui-fg-strong, #fff));
+}
+
+.agx-voice-focus-caption-prefix {
+  opacity: 0.7;
+  margin-right: 2px;
+}
+
+.agx-app.agx-voice-focus-app {
+  border-radius: 0;
+  background: transparent;
+}
