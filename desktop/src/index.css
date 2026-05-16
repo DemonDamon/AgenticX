@@ -227,8 +227,8 @@ body {
 }
 
 :root[data-theme-color] {
-  --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.42);
-  --chat-im-user-border: rgba(var(--theme-color-rgb), 0.55);
+  --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.15);
+  --chat-im-user-border: rgba(var(--theme-color-rgb), 0.35);
   --chat-im-avatar-bg: rgba(var(--theme-color-rgb), 0.9);
   --settings-accent-focus: rgba(var(--theme-color-rgb), 0.5);
   --ui-btn-primary-border: rgba(var(--theme-color-rgb), 0.5);
