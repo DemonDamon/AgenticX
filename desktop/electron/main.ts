@@ -2418,7 +2418,9 @@ function registerEarlyIpc(): void {
         // unmaximize() emits resize which we skip via focusModeActive guard
         mainWindow.unmaximize();
       }
-      mainWindow.setMinimumSize(260, 260);
+      mainWindow.setResizable(true);
+      mainWindow.setMinimumSize(160, 40);
+      mainWindow.setMaximumSize(2000, 200);
       mainWindow.setResizable(false);
       // macOS 专属：隐藏红绿黄；关闭系统阴影，让 CSS 自己绘制圆角+阴影。
       if (process.platform === "darwin") {
@@ -2446,8 +2448,8 @@ function registerEarlyIpc(): void {
       mainWindow.setHasShadow(false);
       mainWindow.setMovable(true);
       mainWindow.setAlwaysOnTop(true, "floating");
-      const capsuleWidth = 280;
-      const capsuleHeight = 280;
+      const capsuleWidth = 176;
+      const capsuleHeight = 60;
       const { screen } = await import("electron");
       const display = screen.getDisplayMatching(baseBounds) ?? screen.getPrimaryDisplay();
       const area = display.workArea;
@@ -2460,6 +2462,13 @@ function registerEarlyIpc(): void {
         width: capsuleWidth,
         height: capsuleHeight,
       });
+      // Belt + suspenders: some macOS builds clamp setBounds height to the
+      // previous minimum; explicitly setSize after also seems to win.
+      try {
+        mainWindow.setSize(capsuleWidth, capsuleHeight, false);
+      } catch {
+        /* ignore */
+      }
       return { ok: true };
     } catch (error) {
       // Best-effort rollback to avoid leaving focus-mode state half-applied.

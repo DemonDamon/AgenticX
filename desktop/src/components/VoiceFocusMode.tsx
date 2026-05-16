@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PhoneOff } from "lucide-react";
-import machiEmptyFallback from "../assets/machi-empty-state.svg";
 import { useAppStore } from "../store";
 import type { VoiceProviderKind, VoiceRealtimeEmit } from "../voice/realtime";
 import { createRealtimeVoiceSession } from "../voice/realtime";
@@ -54,14 +52,11 @@ async function appendVoiceTurn(
 
 /** 圆形语音胶囊 UI + Realtime/OpenSpeech 链路（不写 plan 所述「假波形」占位，柱状条由 mic/out 音量驱动）。 */
 export function VoiceFocusMode() {
-  const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
   const panes = useAppStore((s) => s.panes);
   const exitFocusMode = useAppStore((s) => s.exitFocusMode);
   const openSettings = useAppStore((s) => s.openSettings);
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
-
-  const avatarSrc = metaAvatarUrl.trim() || machiEmptyFallback;
 
   const metaSessionId = useMemo(
     () => String(panes.find((p) => p.id === "pane-meta")?.sessionId ?? "").trim(),
@@ -74,6 +69,23 @@ export function VoiceFocusMode() {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [partial, setPartial] = useState<{ role: "user" | "assistant"; text: string } | null>(null);
   const partialClearTimerRef = useRef<number | null>(null);
+
+  const [tick, setTick] = useState(0);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let running = true;
+    const loop = () => {
+      if (!running) return;
+      setTick((t) => t + 1);
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
+    return () => {
+      running = false;
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
 
   const sessionRef = useRef<ReturnType<typeof createRealtimeVoiceSession> | null>(null);
   const meterRef = useRef({ mic: 0, out: 0 });
@@ -162,23 +174,39 @@ export function VoiceFocusMode() {
             errorExitTimerRef.current = window.setTimeout(() => void hangup(), 5000);
           }
           if (ev.kind === "user_partial" && ev.text.trim()) {
+            if (partialClearTimerRef.current != null) {
+              window.clearTimeout(partialClearTimerRef.current);
+              partialClearTimerRef.current = null;
+            }
             setPartial({ role: "user", text: ev.text.trim() });
           }
           if (ev.kind === "assistant_partial" && ev.text.trim()) {
+            if (partialClearTimerRef.current != null) {
+              window.clearTimeout(partialClearTimerRef.current);
+              partialClearTimerRef.current = null;
+            }
             setPartial({ role: "assistant", text: ev.text.trim() });
           }
           if (ev.kind === "user_final" && ev.text.trim()) {
             const text = ev.text.trim();
             setPartial({ role: "user", text });
-            if (partialClearTimerRef.current != null) window.clearTimeout(partialClearTimerRef.current);
-            partialClearTimerRef.current = window.setTimeout(() => setPartial(null), 2400);
+            // Keep on-screen until next turn starts; do NOT auto-clear.
+            if (partialClearTimerRef.current != null) {
+              window.clearTimeout(partialClearTimerRef.current);
+              partialClearTimerRef.current = null;
+            }
             void appendVoiceTurn(apiBase, apiToken, metaSessionId, [{ role: "user", content: text }]).catch(() => {});
           }
           if (ev.kind === "assistant_final" && ev.text.trim()) {
             const text = ev.text.trim();
             setPartial({ role: "assistant", text });
-            if (partialClearTimerRef.current != null) window.clearTimeout(partialClearTimerRef.current);
-            partialClearTimerRef.current = window.setTimeout(() => setPartial(null), 3200);
+            // Keep Machi's full final text on screen until the next turn
+            // begins (user_partial / assistant_partial). No auto-clear timer:
+            // long answers must not vanish mid-read.
+            if (partialClearTimerRef.current != null) {
+              window.clearTimeout(partialClearTimerRef.current);
+              partialClearTimerRef.current = null;
+            }
             void appendVoiceTurn(apiBase, apiToken, metaSessionId, [{ role: "assistant", content: text }]).catch(
               () => {}
             );
@@ -226,75 +254,65 @@ export function VoiceFocusMode() {
     return () => window.removeEventListener("keydown", esc, { capture: true });
   }, [hangup]);
 
-  const barHeights = [0.08, 0.16, 0.28, 0.42, 0.55, 0.72, 0.5, 0.32, 0.2, 0.14, 0.1];
-
   const displayPhase = phase === "listening" ? "listening" : phase;
-
   const driveMix = phase === "speaking" ? outLevel : micLevel;
+
+  // Wide Perplexity-like dot grid. Text is intentionally hidden in focus mode;
+  // the voice state is expressed through the waveform.
+  const COLS = 11;
+  const ROWS = 3;
 
   return (
     <div
-      className="agx-voice-focus-root no-drag drag-region cursor-grab active:cursor-grabbing"
-      data-phase={
-        displayPhase === "thinking"
-          ? "thinking"
-          : displayPhase === "speaking"
-            ? "speaking"
-            : displayPhase === "listening"
-              ? "listening"
-              : displayPhase === "error"
-                ? "error"
-                : "idle"
-      }
+      className="agx-voice-focus-root drag-region"
+      data-phase={displayPhase}
     >
-      <button
-        type="button"
-        className="agx-voice-focus-hangup no-drag"
-        aria-label="挂断灵巧模式并恢复窗口"
-        onClick={() => void hangup()}
-      >
-        <PhoneOff className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden />
-      </button>
-
-      <div className="agx-voice-focus-inner no-drag">
-        <div className="agx-voice-focus-halo" aria-hidden />
-
-        <div className="agx-voice-focus-avatar mt-6">
-          <img src={avatarSrc} alt="Machi" />
-        </div>
-
-        <div className="agx-voice-focus-bars" aria-hidden>
-          {barHeights.map((base, i) => {
-            const h = `${Math.min(1, Math.max(base, base + driveMix * 1.4)) * 100}%`;
-            return (
-              <span
-                // eslint-disable-next-line react/no-array-index-key — static visualization only
-                key={i}
-                className="agx-voice-focus-bar"
-                style={{ height: h, opacity: 0.25 + Math.min(driveMix + base, 0.75) }}
-              />
-            );
-          })}
-        </div>
+      {/* Animated dot grid waveform */}
+      <div className="agx-voice-focus-dots" aria-hidden>
+        {Array.from({ length: COLS }, (_, col) => (
+          <div key={col} className="agx-voice-focus-dot-col">
+            {Array.from({ length: ROWS }, (_, row) => {
+              const t = tick / 60; // seconds at ~60fps
+              const volume = Math.min(1, Math.max(driveMix, 0.12));
+              // Perplexity-like travelling wave: several bright peaks move
+              // across a wider grid, with row offsets so it feels organic.
+              const forward = Math.sin(t * 5.0 - col * 0.92 + row * 0.55) * 0.5 + 0.5;
+              const counter = Math.sin(t * 3.4 + col * 0.62 + row * 1.15) * 0.5 + 0.5;
+              const crest = Math.max(forward, counter * 0.72);
+              const centerLift = 1 - Math.abs(row - (ROWS - 1) / 2) * 0.16;
+              const energy = Math.max(0, Math.min(1, crest * centerLift));
+              const opacity = Math.max(0.12, Math.min(1, 0.1 + energy * (0.35 + volume * 0.68)));
+              const scale = 0.72 + energy * (0.18 + volume * 0.95);
+              return (
+                <span
+                  key={row}
+                  className="agx-voice-focus-dot"
+                  style={{ opacity, transform: `scale(${scale})` }}
+                />
+              );
+            })}
+          </div>
+        ))}
       </div>
 
+      {/* Center: marquee transcript window removed as requested. */}
+
+      {/* Error line */}
       {errorText ? (
         <div className="agx-voice-focus-error no-drag" role="alert">
           {errorText}
         </div>
-      ) : partial ? (
-        <div
-          className="agx-voice-focus-caption no-drag"
-          data-role={partial.role}
-          aria-live="polite"
-          title={partial.text}
-        >
-          <span className="agx-voice-focus-caption-prefix">
-            {partial.role === "user" ? "你：" : "Machi："}
-          </span>
-          <span className="agx-voice-focus-caption-text">{partial.text}</span>
-        </div>
       ) : null}
+
+      {/* Right: stop button */}
+      <button
+        type="button"
+        className="agx-voice-focus-stop no-drag"
+        aria-label="停止并退出灵巧模式"
+        onClick={() => void hangup()}
+      >
+        <span className="agx-voice-focus-stop-square" />
+      </button>
     </div>
   );
 }
