@@ -76,6 +76,7 @@ from agenticx.studio.session_manager import (
 )
 from agenticx.tools.mcp_hub import MCPHub
 from agenticx.studio.kb.routes import register_kb_routes
+from agenticx.studio.voice_endpoints import register_voice_endpoints
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.workspace.loader import (
     append_long_term_memory,
@@ -763,6 +764,8 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=401, detail="invalid desktop token")
 
     _verify_desktop_token = _check_token
+
+    register_voice_endpoints(app, manager=manager, check_token=_check_token)
 
     def _check_mcp_admin_token(x_agx_desktop_token: str | None) -> None:
         if not desktop_token:
