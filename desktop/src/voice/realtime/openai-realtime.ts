@@ -26,6 +26,13 @@ export class OpenAIRealtimeRtcSession implements RealtimeVoiceSession {
   private emit: ((e: VoiceRealtimeEmit) => void) | null = null;
   private assistantBuf = "";
   private phase: VoiceRingPhase = "idle";
+  /** Track if audio is still streaming. Phase stays in "speaking" while audio
+   * energy is detected, regardless of transcript completion. */
+  private audioActive = false;
+  private audioSilenceFrames = 0;
+  /** Set true once transcript .done arrived; we then only return to listening
+   * after audio playback has actually drained. */
+  private transcriptDone = false;
 
   private setPhase(next: VoiceRingPhase) {
     if (this.phase === next) return;
@@ -47,26 +54,46 @@ export class OpenAIRealtimeRtcSession implements RealtimeVoiceSession {
     }
     if (t === "response.created" || t === "response.in_progress") {
       this.setPhase("thinking");
+      // New response cycle: clear any pending transcript-done flag so the
+      // audio watchdog won't prematurely flip to listening on the FIRST
+      // silence gap (between thinking and speaking).
+      this.transcriptDone = false;
+      this.audioActive = false;
+      this.audioSilenceFrames = 0;
     }
     if (t.startsWith("response.output_audio") || t.startsWith("response.audio")) {
       this.setPhase("speaking");
     }
     if (t === "response.output_audio_transcript.delta" || t === "response.audio_transcript.delta") {
-      const delta = (data.delta as { text?: string } | undefined)?.text;
-      if (delta) this.assistantBuf += delta;
+      // OpenAI Realtime sends delta as either string or {text}; normalize both.
+      const rawDelta = data.delta as string | { text?: string } | undefined;
+      const delta = typeof rawDelta === "string" ? rawDelta : rawDelta?.text;
+      if (delta) {
+        this.assistantBuf += delta;
+        this.emit?.({ kind: "assistant_partial", text: this.assistantBuf });
+      }
     }
     if (t === "response.output_audio_transcript.done" || t === "response.audio_transcript.done") {
       const text = String((data as { transcript?: string }).transcript ?? "").trim() || this.assistantBuf.trim();
       this.assistantBuf = "";
       if (text) this.emit?.({ kind: "assistant_final", text });
-      this.setPhase("listening");
+      // IMPORTANT: do NOT switch to listening here. OpenAI Realtime emits
+      // transcript.done well before the audio finishes streaming/playing,
+      // so flipping the phase now would prematurely show "收听..." while
+      // Machi is still speaking out loud. Let the audio-energy watchdog
+      // (rafOut) flip back to "listening" once playback truly drained.
+      this.transcriptDone = true;
     }
     if (t === "conversation.item.input_audio_transcription.completed") {
       const text = String((data as { transcript?: string }).transcript ?? "").trim();
       if (text) this.emit?.({ kind: "user_final", text });
     }
     if (t === "response.done" || t === "response.completed" || t === "response.canceled") {
-      this.setPhase("listening");
+      // Same reasoning: transcript-level "done" can fire while audio buffer
+      // still has tail samples to play. Mark transcript done and let the
+      // playback watchdog handle phase transition.
+      this.transcriptDone = true;
+      if (t === "response.canceled") this.setPhase("listening");
     }
     if (t === "error") {
       const msg = String((data.error as { message?: string } | undefined)?.message ?? data.message ?? "Realtime error");
@@ -113,11 +140,39 @@ export class OpenAIRealtimeRtcSession implements RealtimeVoiceSession {
       src.connect(an);
       const bins = new Uint8Array(an.frequencyBinCount);
       let last = 0;
+      // Audio-energy watchdog: a sustained run of near-silent frames signals
+      // that the assistant has truly stopped speaking (audio buffer drained).
+      // Only then do we transition back to "listening", so the UI text and
+      // phase stay in sync with what users actually hear.
+      const SILENCE_THRESHOLD = 0.02;
+      const SILENCE_FRAMES_REQUIRED = 30; // ≈ 500ms at 60fps
       const tick = () => {
         if (!this.outAnalyserCtx) return;
         an.getByteTimeDomainData(bins);
         last = timeDomainAnalyserPeak(bins);
         this.emit?.({ kind: "out_level", value: last });
+
+        if (last > SILENCE_THRESHOLD) {
+          this.audioActive = true;
+          this.audioSilenceFrames = 0;
+          if (this.phase !== "speaking" && this.phase !== "thinking") {
+            // Audio has started; ensure we're showing speaking phase.
+            this.setPhase("speaking");
+          }
+        } else if (this.audioActive) {
+          this.audioSilenceFrames += 1;
+          if (this.audioSilenceFrames >= SILENCE_FRAMES_REQUIRED) {
+            // Playback truly drained. If transcript also completed, return to
+            // listening. Otherwise keep current phase until transcript.done.
+            this.audioActive = false;
+            this.audioSilenceFrames = 0;
+            if (this.transcriptDone) {
+              this.transcriptDone = false;
+              this.setPhase("listening");
+            }
+          }
+        }
+
         this.rafOut = requestAnimationFrame(tick);
       };
       this.rafOut = requestAnimationFrame(tick);
@@ -238,5 +293,8 @@ export class OpenAIRealtimeRtcSession implements RealtimeVoiceSession {
     this.emit = null;
     this.assistantBuf = "";
     this.phase = "idle";
+    this.audioActive = false;
+    this.audioSilenceFrames = 0;
+    this.transcriptDone = false;
   }
 }
