@@ -313,6 +313,12 @@ type AppState = {
    * 退出灵巧模式时清空。
    */
   focusModePaneId: string | null;
+  /**
+   * 退出灵巧语音模式后，对应 ChatPane 需强制滚到底部一次（绕过 remount 时 flushJumpToBottomFab 误判 unpinned）。
+   * 由 ChatPane 消费后立即清空。
+   */
+  focusExitScrollBottomPaneId: string | null;
+  clearFocusExitScrollBottomPaneId: () => void;
   theme: ThemeMode;
   /** Machi 官网账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
   agxAccount: { loggedIn: boolean; email: string; displayName: string };
@@ -681,6 +687,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sidebarCollapsed: false,
   focusMode: false,
   focusModePaneId: null,
+  focusExitScrollBottomPaneId: null,
   theme: "dark",
   themeColor: loadThemeColor(),
   agxAccount: { loggedIn: false, email: "", displayName: "" },
@@ -763,16 +770,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
   exitFocusMode: () => {
-    const wasActive = get().focusMode;
-    if (wasActive) set({ focusMode: false, focusModePaneId: null });
-    if (wasActive) {
-      try {
-        void window.agenticxDesktop?.focusModeExit?.();
-      } catch {
-        /* ignore IPC errors */
-      }
+    const state = get();
+    const wasActive = state.focusMode;
+    if (!wasActive) return;
+    const paneForScroll = (state.focusModePaneId ?? state.activePaneId ?? "").trim();
+    set({
+      focusMode: false,
+      focusModePaneId: null,
+      focusExitScrollBottomPaneId: paneForScroll || null,
+    });
+    try {
+      void window.agenticxDesktop?.focusModeExit?.();
+    } catch {
+      /* ignore IPC errors */
     }
   },
+  clearFocusExitScrollBottomPaneId: () => set({ focusExitScrollBottomPaneId: null }),
   toggleFocusMode: (paneId?: string) => {
     const state = get();
     if (state.focusMode) {
