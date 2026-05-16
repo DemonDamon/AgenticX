@@ -3877,7 +3877,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 {/* Block-level actions; peeled follow-ups on the next line below icons */}
                 {!hasStreamingRow && workMessages.length > 0 && useUnifiedReActCard ? (
                   <div
-                    className={`flex min-w-0 items-start gap-2${peeledFollowupAssistant?.suggestedQuestions?.length ? " mb-4" : ""}`}
+                    className={`flex min-w-0 items-start gap-2${peeledFollowupAssistant?.suggestedQuestions?.length ? " mb-12" : ""}`}
                   >
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">

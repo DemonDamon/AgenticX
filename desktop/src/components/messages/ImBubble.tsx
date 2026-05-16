@@ -395,7 +395,7 @@ export function ImBubble({
                   ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[15px] leading-relaxed"
                   : isUser
                     ? "agx-im-user-bubble relative min-w-0 w-fit max-w-full overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[15px] leading-relaxed rounded-tr-[4px]"
-                    : "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-3 text-[15px] leading-relaxed"
+                    : "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-3 pb-0 text-[15px] leading-relaxed"
               }
               style={compactAssistant && noBubbleBorder ? undefined : userBubbleStyle}
             >
@@ -479,17 +479,17 @@ export function ImBubble({
               </div>
             </div>
             {showAssistantFollowups && assistantIconButtons ? (
-              <div className="mb-4 mt-2 flex min-w-0 flex-col gap-2 self-stretch">
+              <div className="mb-12 -mt-0.5 flex min-w-0 flex-col gap-2 self-stretch">
                 <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>
                   {assistantIconButtons}
                 </div>
                 <div className="flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
               </div>
             ) : showAssistantFollowups ? (
-              <div className="mb-4 mt-2 flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
+              <div className="mb-12 -mt-0.5 flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
             ) : null}
             {hideActions ? null : isUser ? (
-              <div className="mt-1 flex w-full flex-wrap items-center justify-end gap-0.5 pr-2 text-text-faint">
+              <div className="mt-0.5 flex w-full flex-wrap items-center justify-end gap-0.5 pb-0 leading-none pr-2 text-text-faint">
                 <HoverTip label="复制">
                   <button
                     type="button"
@@ -554,7 +554,7 @@ export function ImBubble({
                 </HoverTip>
               </div>
             ) : showAssistantFollowups ? null : (
-              <div className="mt-1 min-w-0 self-stretch">
+              <div className="-mt-0.5 min-w-0 self-stretch">
                 <div className="flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>{assistantIconButtons}</div>
               </div>
             )}
