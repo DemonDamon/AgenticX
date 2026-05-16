@@ -1197,8 +1197,11 @@ export function App() {
   useEffect(() => {
     try {
       const savedTheme = window.localStorage.getItem("agx-theme");
-      if (savedTheme === "dark" || savedTheme === "light" || savedTheme === "dim") {
+      if (savedTheme === "dark" || savedTheme === "light") {
         setTheme(savedTheme);
+      } else if (savedTheme === "dim") {
+        // Legacy migration: dim theme is removed from UI, fallback to dark.
+        setTheme("dark");
       }
       const savedSidebarWidth = window.localStorage.getItem("agx-sidebar-width");
       if (savedSidebarWidth) {

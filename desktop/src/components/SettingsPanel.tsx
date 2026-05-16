@@ -6100,7 +6100,6 @@ export function SettingsPanel({
                       onChange={(e) => onThemeChange(e.target.value as "dark" | "light" | "dim")}
                     >
                       <option value="dark">深色</option>
-                      <option value="dim">暗灰</option>
                       <option value="light">浅色</option>
                     </select>
                   </label>
