@@ -233,7 +233,8 @@ export function ImBubble({
         ...bubbleStyle,
         marginLeft: USER_BUBBLE_GUTTER_PX,
         marginRight: USER_BUBBLE_GUTTER_PX,
-        width: `calc(100% - ${USER_BUBBLE_GUTTER_PX * 2}px)`,
+        width: "fit-content",
+        maxWidth: `calc(100% - ${USER_BUBBLE_GUTTER_PX * 2}px)`,
       }
     : bubbleStyle;
 
@@ -330,7 +331,7 @@ export function ImBubble({
         </button>
       ) : null}
       <div
-        className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-stretch" : "items-start"}`}
+        className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}`}
       >
         {isEditing ? (
           <div className="flex w-full max-w-3xl items-end gap-2">
@@ -393,7 +394,7 @@ export function ImBubble({
                 compactAssistant && noBubbleBorder
                   ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[15px] leading-relaxed"
                   : isUser
-                    ? "agx-im-user-bubble relative min-w-0 self-stretch overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[15px] leading-relaxed max-w-full rounded-tr-[4px]"
+                    ? "agx-im-user-bubble relative min-w-0 w-fit max-w-full overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[15px] leading-relaxed rounded-tr-[4px]"
                     : "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-3 text-[15px] leading-relaxed"
               }
               style={compactAssistant && noBubbleBorder ? undefined : userBubbleStyle}
