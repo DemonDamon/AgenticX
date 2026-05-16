@@ -2003,6 +2003,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     setShowJumpToBottomFab(overflow && !isNearBottom(el));
   }, []);
 
+  /** 灵巧模式退出后主界面 ChatPane remount，`flushJumpToBottomFab` 会在 scrollTop=0 时误判 unpinned；此处强制滚底一次。 */
+  const focusExitScrollTarget = useAppStore((s) =>
+    s.focusExitScrollBottomPaneId === paneId ? paneId : null
+  );
+  useLayoutEffect(() => {
+    if (!focusExitScrollTarget) return;
+    autoScrollPinnedRef.current = true;
+    const el = listRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+    useAppStore.getState().clearFocusExitScrollBottomPaneId();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        autoScrollPinnedRef.current = true;
+        const inner = listRef.current;
+        if (inner) {
+          inner.scrollTop = inner.scrollHeight;
+        }
+        flushJumpToBottomFab();
+      });
+    });
+  }, [focusExitScrollTarget, flushJumpToBottomFab]);
+
   useEffect(() => {
     if (!isAutomationTaskPane || !pane?.avatarId?.startsWith("automation:")) {
       setAutomationTaskErrorHint(null);
