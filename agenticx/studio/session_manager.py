@@ -981,6 +981,9 @@ class SessionManager:
                 "timestamp": parsed_timestamp,
                 "forwarded_history": item.get("forwarded_history"),
             }
+            raw_meta = item.get("metadata")
+            if isinstance(raw_meta, dict) and raw_meta:
+                row["metadata"] = dict(raw_meta)
             if role == "tool":
                 tool_call_id = str(
                     item.get("tool_call_id", item.get("toolCallId", "")) or ""
