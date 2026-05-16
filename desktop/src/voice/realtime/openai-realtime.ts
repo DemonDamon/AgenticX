@@ -115,6 +115,33 @@ export class OpenAIRealtimeRtcSession implements RealtimeVoiceSession {
     dc.onmessage = (ev) => {
       if (typeof ev.data === "string") this.handleDcMessage(ev.data);
     };
+    // 历史注入：DataChannel open 后立即灌入此前对话作为
+    // `conversation.item.create` 事件，让模型「记得」之前聊过什么。
+    // 不调用 response.create —— 等用户开口后 server_vad 自然触发首轮回答，
+    // 避免一进电话模型主动播报无关历史摘要。
+    const turns = (opts.historyTurns ?? []).filter((t) => t.content && t.content.trim());
+    if (turns.length) {
+      const sendHistory = () => {
+        for (const t of turns) {
+          try {
+            dc.send(
+              JSON.stringify({
+                type: "conversation.item.create",
+                item: {
+                  type: "message",
+                  role: t.role,
+                  content: [{ type: t.role === "assistant" ? "output_text" : "input_text", text: t.content }],
+                },
+              })
+            );
+          } catch {
+            // ignore — 单条注入失败不阻断后续
+          }
+        }
+      };
+      if (dc.readyState === "open") sendHistory();
+      else dc.addEventListener("open", sendHistory, { once: true });
+    }
 
     pc.ontrack = (ev) => {
       const [stream] = ev.streams;

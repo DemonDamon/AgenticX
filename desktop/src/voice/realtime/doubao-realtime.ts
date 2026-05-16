@@ -82,6 +82,10 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
   private emit: ((e: VoiceRealtimeEmit) => void) | null = null;
   private outMeter = 0;
   private rafMeter: number | null = null;
+  private userTextBuf = "";
+  private lastUserFinal = "";
+  private assistantTextBuf = "";
+  private lastAssistantFinal = "";
 
   private readonly micRate = 16000;
   private readonly outRate = 24000;
@@ -97,6 +101,52 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
 
   private setPhase(next: VoiceRingPhase) {
     this.emit?.({ kind: "phase", phase: next });
+  }
+
+  private mergeUserText(next: string) {
+    const text = next.trim();
+    if (!text) return;
+    const prev = this.userTextBuf.trim();
+    if (!prev) {
+      this.userTextBuf = text;
+    } else if (prev === text || prev.endsWith(text)) {
+      this.userTextBuf = prev;
+    } else if (text.startsWith(prev)) {
+      this.userTextBuf = text;
+    } else {
+      this.userTextBuf = `${prev}${text}`;
+    }
+    this.emit?.({ kind: "user_partial", text: this.userTextBuf });
+  }
+
+  private emitUserFinal() {
+    const text = this.userTextBuf.trim();
+    if (!text || text === this.lastUserFinal) return;
+    this.lastUserFinal = text;
+    this.emit?.({ kind: "user_final", text });
+  }
+
+  private mergeAssistantText(next: string) {
+    const text = next.trim();
+    if (!text) return;
+    const prev = this.assistantTextBuf.trim();
+    if (!prev) {
+      this.assistantTextBuf = text;
+    } else if (prev === text || prev.endsWith(text)) {
+      this.assistantTextBuf = prev;
+    } else if (text.startsWith(prev)) {
+      this.assistantTextBuf = text;
+    } else {
+      this.assistantTextBuf = `${prev}${text}`;
+    }
+    this.emit?.({ kind: "assistant_partial", text: this.assistantTextBuf });
+  }
+
+  private emitAssistantFinal() {
+    const text = this.assistantTextBuf.trim();
+    if (!text || text === this.lastAssistantFinal) return;
+    this.lastAssistantFinal = text;
+    this.emit?.({ kind: "assistant_final", text });
   }
 
   private startMeterDecay() {
@@ -166,9 +216,21 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
     const speaker = String(db.voice_type || db.speaker || "zh_female_vv_jupiter_bigtts").trim();
     const model = String(db.model || "1.2.1.1").trim() || "1.2.1.1";
     const botName = String(db.bot_name || "Machi").trim();
-    const systemRole = typeof db.system_role === "string" ? (db.system_role as string) : "";
+    const baseSystemRole = typeof db.system_role === "string" ? (db.system_role as string) : "";
     const speakingStyle = typeof db.speaking_style === "string" ? (db.speaking_style as string) : "";
     const inputMod = String(db.input_mod || "").trim(); // 留空走默认麦克风模式
+
+    // 豆包实时语音协议未暴露独立的「历史消息」字段，只能把上下文拼到
+    // `dialog.system_role`：把最近 N 轮对话作为参考资料告知模型，
+    // 使其在电话里能延续之前的话题。注入文本若过长会增加首响时延，
+    // 上游已在 VoiceFocusMode 截断到 ~20 轮。
+    const turns = (opts.historyTurns ?? []).filter((t) => t.content && t.content.trim());
+    let systemRole = baseSystemRole;
+    if (turns.length) {
+      const lines = turns.map((t) => `${t.role === "user" ? "用户" : "Machi"}：${t.content.trim()}`);
+      const block = `\n\n## 此前对话上下文（仅供参考，电话里可自然延续）\n${lines.join("\n")}`;
+      systemRole = (baseSystemRole + block).trim();
+    }
 
     const dialogExtra: Record<string, unknown> = {
       strict_audit: false,
@@ -209,6 +271,10 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
     this.sessionId = uuid();
     this.sessionStarted = false;
     this.connectionStarted = false;
+    this.userTextBuf = "";
+    this.lastUserFinal = "";
+    this.assistantTextBuf = "";
+    this.lastAssistantFinal = "";
 
     const baseWs = `${httpToWs(opts.apiBase)}/ws/voice/doubao?x_agx_desktop_token=${encodeURIComponent(opts.desktopToken)}`;
 
@@ -296,33 +362,47 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
         case DOUBAO_SERVER_EVENT.ASRInfo:
           // 用户开口；本地立即停掉模型播报，避免抢话
           this.flushPlayback();
+          this.userTextBuf = "";
           this.setPhase("listening");
           break;
         case DOUBAO_SERVER_EVENT.ASRResponse: {
-          const results = (frame.jsonPayload?.results as Array<{ text?: string; is_interim?: boolean }> | undefined) ?? [];
+          const payload = frame.jsonPayload ?? {};
+          const results =
+            (payload.results as Array<{ text?: string; content?: string; is_interim?: boolean | string }> | undefined) ??
+            [];
+          const topLevelText = String(payload.text ?? payload.content ?? "").trim();
+          if (topLevelText && results.length === 0) {
+            this.mergeUserText(topLevelText);
+          }
           for (const r of results) {
-            const t = (r.text || "").trim();
+            const t = String(r.text ?? r.content ?? "").trim();
             if (!t) continue;
-            if (r.is_interim) this.emit?.({ kind: "user_partial", text: t });
-            else this.emit?.({ kind: "user_final", text: t });
+            this.mergeUserText(t);
+            const interim = r.is_interim === true || String(r.is_interim).toLowerCase() === "true";
+            if (!interim) this.emitUserFinal();
           }
           break;
         }
         case DOUBAO_SERVER_EVENT.ASREnded:
+          this.emitUserFinal();
+          this.assistantTextBuf = "";
           this.setPhase("thinking");
           break;
         case DOUBAO_SERVER_EVENT.ChatResponse: {
           const t = String(frame.jsonPayload?.content ?? "").trim();
-          if (t) this.emit?.({ kind: "assistant_partial", text: t });
+          if (t) this.mergeAssistantText(t);
           break;
         }
         case DOUBAO_SERVER_EVENT.ChatEnded: {
-          // 没有 final content 字段，复用最近的 partial 由 UI 自行收尾即可
+          this.emitAssistantFinal();
           break;
         }
         case DOUBAO_SERVER_EVENT.TTSSentenceStart: {
           const t = String(frame.jsonPayload?.text ?? "").trim();
-          if (t) this.emit?.({ kind: "assistant_final", text: t });
+          // This is a TTS sentence boundary, not the whole model answer.
+          // Treat it as a fallback partial only; final is emitted on ChatEnded
+          // (or TTSEnded if ChatEnded was not observed).
+          if (t) this.mergeAssistantText(t);
           this.setPhase("speaking");
           break;
         }
@@ -333,6 +413,7 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
           break;
         }
         case DOUBAO_SERVER_EVENT.TTSEnded:
+          this.emitAssistantFinal();
           this.setPhase("listening");
           break;
         case DOUBAO_SERVER_EVENT.DialogCommonError: {
@@ -406,5 +487,9 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
     }
     this.ws = null;
     this.emit = null;
+    this.userTextBuf = "";
+    this.lastUserFinal = "";
+    this.assistantTextBuf = "";
+    this.lastAssistantFinal = "";
   }
 }
