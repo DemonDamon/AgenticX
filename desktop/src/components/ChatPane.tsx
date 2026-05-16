@@ -21,6 +21,7 @@ import {
   Wrench,
   Users,
   FolderOpen,
+  PhoneCall,
   Bot,
   History,
   X,
@@ -1763,6 +1764,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const togglePaneHistory = useAppStore((s) => s.togglePaneHistory);
   const cycleSidePanel = useAppStore((s) => s.cycleSidePanel);
+  const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const openSidePanel = useAppStore((s) => s.openSidePanel);
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
@@ -5593,6 +5595,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 <Users className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             )}
+            <button
+              type="button"
+              className="agx-topbar-btn !px-[5px]"
+              onClick={() => toggleFocusMode()}
+              title="灵巧模式 · 实时语音 (⇧⌘F)"
+              aria-label="进入灵巧模式"
+            >
+              <PhoneCall className="h-[18px] w-[18px]" strokeWidth={1.8} />
+            </button>
             <button
               className={`agx-topbar-btn !px-[5px] ${workspacePanelOpen ? "agx-topbar-btn--active" : ""}`}
               onClick={() => cycleSidePanel(pane.id, "workspace")}
