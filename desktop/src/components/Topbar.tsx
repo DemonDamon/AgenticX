@@ -126,7 +126,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
         <button
           className="agx-topbar-btn agx-topbar-btn--icon-only"
           onClick={toggleFocusMode}
-          title="灵巧模式 (⇧⌘F)"
+          title="灵巧模式 · 实时语音 (⇧⌘F)"
           aria-label="进入灵巧模式"
         >
           <FocusModeLogo className="h-[18px] w-[18px] opacity-80" />

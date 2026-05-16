@@ -32,6 +32,7 @@ import {
   Eye,
   EyeOff,
   Library,
+  Mic,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import { Modal } from "./ds/Modal";
@@ -58,6 +59,10 @@ import type { MCPDiscoveryHit } from "./settings/mcp/MCPDiscoveryPanel";
 import { MCPMarketplacePanel } from "./settings/mcp/MCPMarketplacePanel";
 import { MCPJsonEditorModal } from "./settings/mcp/MCPJsonEditorModal";
 import { WebSearchSettingsPanel, SuggestedQuestionsSettingsPanel } from "./settings/WebSearchSettingsPanel";
+import {
+  VoiceSettingsPanel,
+  type VoiceSettingsPanelHandle,
+} from "./settings/voice/VoiceSettingsPanel";
 export type { SettingsTab } from "../settings-tab";
 
 export type FavoriteForwardContext = {
@@ -662,6 +667,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "knowledge", label: "知识库", icon: Library },
   { id: "hooks", label: "钩子", icon: Anchor },
   { id: "automation", label: "自动化", icon: Clock },
+  { id: "voice", label: "语音", icon: Mic },
   { id: "email", label: "邮件通知", icon: Mail },
   { id: "workspace", label: "工作区", icon: FolderOpen },
   { id: "favorites", label: "收藏", icon: Bookmark },
@@ -4793,6 +4799,7 @@ export function SettingsPanel({
   const initializedForOpenRef = useRef(false);
   const toolsTabRef = useRef<ToolsTabHandle>(null);
   const knowledgeRef = useRef<KnowledgeSettingsHandle>(null);
+  const voiceSettingsRef = useRef<VoiceSettingsPanelHandle>(null);
   const permissionsPanelRef = useRef<PermissionsAdvancedPanelHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
   useEffect(() => {
@@ -5453,6 +5460,11 @@ export function SettingsPanel({
         `知识库配置保存失败：\n${kbRes.error ?? "未知错误"}\n\n是否仍继续保存其它设置？`,
       );
       if (!cont) return;
+    }
+    const voiceRes = await voiceSettingsRef.current?.persist();
+    if (voiceRes && !voiceRes.ok) {
+      window.alert(voiceRes.error || "语音设置保存失败");
+      return;
     }
     const normalized: Record<string, ProviderEntry> = {};
     for (const [name, entry] of Object.entries(draft)) {
@@ -7261,6 +7273,8 @@ export function SettingsPanel({
             {tab === "hooks" && <HooksTab />}
 
             {tab === "automation" && <AutomationTab />}
+
+            {tab === "voice" && <VoiceSettingsPanel ref={voiceSettingsRef} />}
 
             {/* === EMAIL TAB === */}
             {tab === "email" && <EmailSettingsTab />}

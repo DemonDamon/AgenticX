@@ -2396,14 +2396,8 @@ function registerEarlyIpc(): void {
   ipcMain.handle("get-connection-mode", async () => remoteConfig ? "remote" : "local");
 
   /**
-   * Focus Mode window shrink/restore.
-   * Enter: snapshot current normal bounds, drop window minimums, resize to a
-   *   compact Perplexity-style capsule (560x132), center horizontally on the
-   *   same display the window currently lives on, keep vertical anchor near
-   *   the top third so it feels like a HUD bar. No on-disk persistence.
-   * Exit: restore the snapshot (or re-maximize if it was maximized), put the
-   *   minimum sizes back, re-enable resizing. After this returns the debounced
-   *   scheduleBoundsSave can resume persisting user-driven resizes.
+   * 「灵巧模式」胶囊窗口：右上角圆形语音 HUD（VoiceFocus）。Enter 会快照 bounds、无边框置顶透明背景；
+   * Exit 恢复最小尺寸 / 缩放 / vibrancy / 红黄绿按钮。
    */
   ipcMain.handle("focus-mode-enter", async () => {
     if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
@@ -2424,7 +2418,7 @@ function registerEarlyIpc(): void {
         // unmaximize() emits resize which we skip via focusModeActive guard
         mainWindow.unmaximize();
       }
-      mainWindow.setMinimumSize(240, 80);
+      mainWindow.setMinimumSize(260, 260);
       mainWindow.setResizable(false);
       // macOS 专属：隐藏红绿黄；关闭系统阴影，让 CSS 自己绘制圆角+阴影。
       if (process.platform === "darwin") {
@@ -2451,10 +2445,9 @@ function registerEarlyIpc(): void {
       }
       mainWindow.setHasShadow(false);
       mainWindow.setMovable(true);
-      // Perplexity 式浮动胶囊：置顶在所有普通窗口之上。
       mainWindow.setAlwaysOnTop(true, "floating");
-      const capsuleWidth = 300;
-      const capsuleHeight = 110;
+      const capsuleWidth = 280;
+      const capsuleHeight = 280;
       const { screen } = await import("electron");
       const display = screen.getDisplayMatching(baseBounds) ?? screen.getPrimaryDisplay();
       const area = display.workArea;
@@ -2504,34 +2497,6 @@ function registerEarlyIpc(): void {
       }
       focusModePreviousBounds = null;
       focusModeWasMaximized = false;
-      return { ok: false, error: String(error) };
-    }
-  });
-
-  ipcMain.handle("focus-mode-expand", async () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false };
-    if (!focusModeActive) return { ok: true, alreadyInactive: true };
-    try {
-      const bounds = mainWindow.getBounds();
-      const expandedHeight = 600; // 高度撑开容纳消息流
-      // 如果当前高度已经达到或超过，就不做处理
-      if (bounds.height >= expandedHeight) return { ok: true };
-      
-      try {
-        // Keep transparent background so acrylic/vibrancy can show through.
-        mainWindow.setBackgroundColor("#00000000");
-      } catch {
-        // ignore
-      }
-
-      mainWindow.setBounds({
-        x: bounds.x,
-        y: bounds.y,
-        width: bounds.width,
-        height: expandedHeight,
-      });
-      return { ok: true };
-    } catch (error) {
       return { ok: false, error: String(error) };
     }
   });

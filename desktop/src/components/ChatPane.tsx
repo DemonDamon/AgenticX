@@ -9,7 +9,6 @@ import {
   Database,
   GitBranch,
   GripVertical,
-  Expand,
   Layers,
   LayoutList,
   Quote,
@@ -94,6 +93,7 @@ import {
   peekPaneLazyInheritParent,
   setPaneLazyInheritParent,
 } from "../utils/pane-fresh-session";
+import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
 const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
@@ -1802,8 +1802,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   const userNickname = useAppStore((s) => s.userNickname);
   const userPreference = useAppStore((s) => s.userPreference);
-  const focusMode = useAppStore((s) => s.focusMode);
-  const exitFocusMode = useAppStore((s) => s.exitFocusMode);
   const userBubbleLabel = useMemo(() => userNickname.trim() || "我", [userNickname]);
   const isGroupPane = Boolean(pane?.avatarId?.startsWith("group:"));
   /** 元智能体窗格：顶栏已展示当前模型，气泡内不再重复展示模型徽章 */
@@ -1992,18 +1990,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     () => (useReActImLayout ? expandMessagesToTopLevelRows(visibleMessagesWithStream) : null),
     [useReActImLayout, visibleMessagesWithStream]
   );
-  const focusComposerOnly = focusMode && visibleMessages.length === 0;
-
   const flushJumpToBottomFab = useCallback(() => {
     const el = listRef.current;
-    if (!el || focusComposerOnly) {
+    if (!el) {
       setShowJumpToBottomFab(false);
       return;
     }
     autoScrollPinnedRef.current = isNearBottom(el);
     const overflow = el.scrollHeight > el.clientHeight + 4;
     setShowJumpToBottomFab(overflow && !isNearBottom(el));
-  }, [focusComposerOnly]);
+  }, []);
 
   useEffect(() => {
     if (!isAutomationTaskPane || !pane?.avatarId?.startsWith("automation:")) {
@@ -2065,7 +2061,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     wechatDesktopBound && primaryPaneForSessionId === pane.id && !isAutomationTaskPane;
 
   useEffect(() => {
-    if (focusMode) return;
     if (paneSubAgents.length === 0) {
       if (pane.spawnsColumnOpen) setSpawnsColumnOpen(pane.id, false);
       return;
@@ -2089,7 +2084,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     pane.spawnsColumnBaselineIds,
     paneSubAgentIdsKey,
     paneSubAgents.length,
-    focusMode,
     clearSpawnsColumnSuppress,
     setSpawnsColumnOpen,
   ]);
@@ -2460,6 +2454,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
   };
 
+  /** Studio taskspace APIs require an existing session_id; lazy new-topic clears pane.sessionId until first send.
+   * For read-only browsing (e.g. `@` mentions, file preview), fall back to the most recently
+   * remembered session for this avatar so the user can still browse the same content the
+   * WorkspacePanel keeps showing while awaiting a fresh session. */
+  const resolveTaskspaceApiSessionId = (): string => {
+    const sid = (pane.sessionId || "").trim();
+    if (sid) return sid;
+    if (!isGroupPane && !isAutomationTaskPane) {
+      const lazy = String(peekPaneLazyInheritParent(pane.id) ?? "").trim();
+      if (lazy) return lazy;
+      const remembered = String(getRememberedSessionForAvatar(pane.avatarId) ?? "").trim();
+      if (remembered) return remembered;
+    }
+    return "";
+  };
+
   const searchAtCandidates = async (queryText: string) => {
     const lowered = queryText.trim().toLowerCase();
     const avatarCandidates: AtCandidate[] = isGroupPane
@@ -2474,11 +2484,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           }))
       : [];
 
-    if (!pane.sessionId) {
+    const apiSessionId = resolveTaskspaceApiSessionId();
+    if (!apiSessionId) {
       setAtCandidates(avatarCandidates.slice(0, 24));
       return;
     }
-    const wsResp = await window.agenticxDesktop.listTaskspaces(pane.sessionId);
+    const wsResp = await window.agenticxDesktop.listTaskspaces(apiSessionId);
     if (!wsResp.ok || !Array.isArray(wsResp.workspaces) || wsResp.workspaces.length === 0) {
       setAtCandidates(avatarCandidates.slice(0, 24));
       return;
@@ -2488,7 +2499,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       : wsResp.workspaces[0].id;
     if (!pane.activeTaskspaceId) setActiveTaskspace(pane.id, activeId);
     const rootResp = await window.agenticxDesktop.listTaskspaceFiles({
-      sessionId: pane.sessionId,
+      sessionId: apiSessionId,
       taskspaceId: activeId,
       path: ".",
     });
@@ -2514,7 +2525,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         current === "."
           ? rootResp
           : await window.agenticxDesktop.listTaskspaceFiles({
-              sessionId: pane.sessionId,
+              sessionId: apiSessionId,
               taskspaceId: activeId,
               path: current,
             });
@@ -2546,7 +2557,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const triggerCcBridgeVisibleTerminal = useCallback(
     async (toolCallKey: string) => {
-      if (focusMode) return;
       if (!pane.sessionId) return;
       const now = Date.now();
       const last = ccBridgeVisibleLaunchGuardRef.current.get(toolCallKey) ?? 0;
@@ -2630,7 +2640,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       pane.activeTaskspaceId,
       apiBase,
       apiToken,
-      focusMode,
       setActiveTaskspace,
       openSidePanel,
       addPaneTerminalTab,
@@ -2639,7 +2648,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const triggerCcBridgeTailTerminal = useCallback(
     async (sessionId: string) => {
-      if (focusMode) return;
       const sid = sessionId.trim();
       if (!/^[0-9a-fA-F-]{36}$/.test(sid) || !pane.sessionId) return;
       const now = Date.now();
@@ -2703,7 +2711,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         await sleep(180);
       }
     },
-    [pane.id, pane.sessionId, pane.activeTaskspaceId, apiBase, apiToken, focusMode, openSidePanel, addPaneTerminalTab]
+    [pane.id, pane.sessionId, pane.activeTaskspaceId, apiBase, apiToken, openSidePanel, addPaneTerminalTab]
   );
 
   const updateAtStateFromText = useCallback(
@@ -2865,9 +2873,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     relPath: string,
     options?: { referenceToken?: boolean }
   ): Promise<string | null> => {
-    if (!pane.sessionId || !relPath) return null;
+    const apiSessionId = resolveTaskspaceApiSessionId();
+    if (!apiSessionId || !relPath) return null;
     const fileResp = await window.agenticxDesktop.readTaskspaceFile({
-      sessionId: pane.sessionId,
+      sessionId: apiSessionId,
       taskspaceId,
       path: relPath,
     });
@@ -2890,7 +2899,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   };
 
   const addTaskspaceAliasReference = async (taskspaceId: string, alias: string, absolutePath: string) => {
-    if (!pane.sessionId) return;
+    const apiSessionId = resolveTaskspaceApiSessionId();
+    if (!apiSessionId) return;
     const queue: string[] = ["."];
     const visited = new Set<string>();
     const lines: string[] = [];
@@ -2901,7 +2911,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (visited.has(current)) continue;
       visited.add(current);
       const listResp = await window.agenticxDesktop.listTaskspaceFiles({
-        sessionId: pane.sessionId,
+        sessionId: apiSessionId,
         taskspaceId,
         path: current,
       });
@@ -4167,25 +4177,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       skipUserHistory?: boolean;
     }
   ) => {
-    if (focusMode) {
-      try {
-        // @ts-expect-error - focusModeExpand is added in a newer IPC version
-        const expandFn = window.agenticxDesktop?.focusModeExpand;
-        if (expandFn) {
-          const res = await expandFn();
-          if (res?.ok) {
-            useAppStore.getState().setFocusModeTall(true);
-          } else {
-            useAppStore.getState().exitFocusMode();
-          }
-        } else {
-          // Fallback if main process hasn't been restarted and IPC is missing
-          useAppStore.getState().exitFocusMode();
-        }
-      } catch {
-        useAppStore.getState().exitFocusMode();
-      }
-    }
     const text = userText.trim();
     const messageText = text || ATTACHMENT_ONLY_USER_PROMPT;
     const retryAttachments = options?.retryAttachments;
@@ -5540,14 +5531,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   return (
     <div
       ref={paneRef}
-      className={`agx-chatpane flex h-full min-w-0 flex-1 ${focusMode ? "agx-chatpane--focus" : ""}`}
-      style={!focusMode && paneTint ? { backgroundColor: paneTint } : undefined}
+      className="agx-chatpane flex h-full min-w-0 flex-1"
+      style={paneTint ? { backgroundColor: paneTint } : undefined}
       onMouseDown={onFocus}
     >
       <div
-        className={`agx-chatpane-main-column flex h-full min-w-0 flex-1 flex-col ${
-          focusComposerOnly ? "agx-chatpane-main-column--focus-empty" : ""
-        }`}
+        className="agx-chatpane-main-column flex h-full min-w-0 flex-1 flex-col"
         style={{ minWidth: 280 }}
       >
         <div className="agx-pane-toolbar flex h-10 shrink-0 items-center justify-between px-4">
@@ -5651,7 +5640,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             ref={listRef}
             className="agx-pane-message-list relative h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-3"
           >
-          {focusComposerOnly ? null : !pane.sessionId && (isGroupPane || isAutomationTaskPane) ? (
+          {!pane.sessionId && (isGroupPane || isAutomationTaskPane) ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-xs text-text-faint">
               <span className="animate-pulse">正在初始化会话...</span>
               <button
@@ -5700,7 +5689,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           />
           </div>
 
-          {!focusComposerOnly && showJumpToBottomFab ? (
+          {showJumpToBottomFab ? (
             <div className="pointer-events-none absolute bottom-3 left-0 right-0 z-30 flex justify-center">
               <button
                 type="button"
@@ -5930,23 +5919,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             />
             {input.trim().length === 0 ? (
               <div className="agx-pane-composer-placeholder pointer-events-none absolute left-4 top-4 text-[15px] text-text-faint">
-                {focusMode ? "开始任务..." : "发消息..."}
+                发消息...
               </div>
             ) : null}
             </div>
             <div className="agx-pane-composer-actions flex min-w-0 items-center justify-between gap-1 px-2.5 pb-2.5 pt-1">
               <div className="flex shrink-0 items-center gap-0.5">
-                {focusMode ? (
-                  <button
-                    type="button"
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
-                    onClick={exitFocusMode}
-                    title="展开回主界面 (⇧⌘F)"
-                    aria-label="展开回主界面"
-                  >
-                    <Expand className="h-[15px] w-[15px]" strokeWidth={1.8} />
-                  </button>
-                ) : null}
                 <input
                   ref={fileInputRef}
                   type="file"

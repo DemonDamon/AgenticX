@@ -7,6 +7,7 @@ import { LiteChatView } from "./components/LiteChatView";
 import { PaneManager } from "./components/PaneManager";
 import { SidebarResizer } from "./components/SidebarResizer";
 import { Topbar } from "./components/Topbar";
+import { VoiceFocusMode } from "./components/VoiceFocusMode";
 import type { ForwardConfirmPayload } from "./components/ForwardPicker";
 import { rememberSessionForAvatar } from "./utils/avatar-last-session";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/session-message-map";
@@ -243,7 +244,6 @@ export function App() {
   const planMode = useAppStore((s) => s.planMode);
   const setPlanMode = useAppStore((s) => s.setPlanMode);
   const focusMode = useAppStore((s) => s.focusMode);
-  const focusModeTall = useAppStore((s) => s.focusModeTall);
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const theme = useAppStore((s) => s.theme);
   const themeColor = useAppStore((s) => s.themeColor);
@@ -1943,13 +1943,19 @@ export function App() {
     <div
       className={`agx-app ${
         sidebarCollapsed || userMode !== "pro" || !apiBase ? "sidebar-collapsed" : ""
-      } ${windowResizing ? "window-resizing" : ""} ${startupOptimizing ? "startup-optimizing" : ""} ${
-        focusMode ? "focus-mode" : ""
-      } ${focusModeTall ? "focus-mode-tall" : ""} ${sidebarOverlayMode ? "sidebar-overlay" : ""}`}
+      } ${windowResizing ? "window-resizing" : ""} ${startupOptimizing ? "startup-optimizing" : ""} ${focusMode ? "agx-voice-focus-app" : ""} ${
+        sidebarOverlayMode ? "sidebar-overlay" : ""
+      }`}
     >
       {!configLoaded ? (
         <div className="flex h-full min-h-0 w-full items-center justify-center text-sm text-text-faint">
           正在加载配置…
+        </div>
+      ) : focusMode && apiBase ? (
+        <VoiceFocusMode />
+      ) : focusMode ? (
+        <div className="flex h-full min-h-0 w-full items-center justify-center px-6 text-center text-sm text-[var(--text-danger,var(--destructive,#ef4444))]">
+          AgenticX 后端未就绪，无法进入灵巧语音模式。
         </div>
       ) : apiBase ? (
         <>
