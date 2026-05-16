@@ -2475,6 +2475,9 @@ function registerEarlyIpc(): void {
       focusModeActive = false;
       try {
         mainWindow.setMinimumSize(680, 480);
+        // Enter focus-mode sets setMaximumSize(2000, 200) for the capsule; must reset
+        // or the main window stays vertically capped after exit / rollback.
+        mainWindow.setMaximumSize(0, 0);
         mainWindow.setResizable(true);
         mainWindow.setAlwaysOnTop(false);
         mainWindow.setHasShadow(true);
@@ -2515,6 +2518,8 @@ function registerEarlyIpc(): void {
     if (!focusModeActive) return { ok: true, alreadyInactive: true };
     try {
       mainWindow.setMinimumSize(680, 480);
+      // Clears focus-mode capsule cap (setMaximumSize(2000, 200)); otherwise height stays locked ~200.
+      mainWindow.setMaximumSize(0, 0);
       mainWindow.setResizable(true);
       if (process.platform === "darwin") {
         try {
