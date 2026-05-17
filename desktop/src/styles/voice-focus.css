@@ -13,14 +13,14 @@
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 20px;
+  gap: 18px;
   /* 与灵巧窗口底板同色（由 .agx-app.agx-voice-focus-app 注入 --agx-voice-focus-shell-bg） */
   background: var(--agx-voice-focus-shell-bg, var(--ui-surface-elevated, #1a1d24));
   border-radius: 12px;
   border: 1px solid var(--agx-voice-focus-rim);
   box-shadow: 0 6px 28px rgba(0, 0, 0, 0.42);
   /* 左右略不对称：左侧弧形内收视觉上更「顶」，多给 2px；整体留出呼吸感 */
-  padding: 8px 20px;
+  padding: 8px 18px;
   cursor: grab;
   margin: 0;
 }
