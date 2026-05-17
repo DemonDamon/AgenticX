@@ -3,6 +3,7 @@ import {
   DOUBAO_SERVER_EVENT,
   decodeServerFrame,
   encodeAudioTask,
+  encodeChatTtsText,
   encodeFinishConnection,
   encodeFinishSession,
   encodeStartConnection,
@@ -97,7 +98,15 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
   private currentSessionId = "";
   /** When true, drop Doubao model text/TTS locally (Meta tool bridge owns output). */
   private outputPaused = false;
+  /** True while ChatTTSText is playing Meta-bridge text via Doubao realtime TTS. */
+  private bridgeTtsActive = false;
+  private inputMuted = false;
+  private ignoreAsrUntil = 0;
+  private bridgeTtsResolve: (() => void) | null = null;
+  private bridgeTtsReject: ((error: Error) => void) | null = null;
+  private bridgeTtsTimer: number | null = null;
   private userFinalOnce: ((text: string) => void) | null = null;
+  private userFinalSubs = new Set<(text: string) => void>();
 
   private bumpOutMeter(pcm: Uint8Array) {
     const p = pcm16PeakLe(pcm);
@@ -150,6 +159,10 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
   }
 
   private emitUserFinal() {
+    if (Date.now() < this.ignoreAsrUntil) {
+      this.userTextBuf = "";
+      return;
+    }
     const text = this.userTextBuf.trim();
     if (!text) return;
     const once = this.userFinalOnce;
@@ -165,6 +178,16 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
         once(text);
       } catch {
         // handler errors are caller responsibility
+      }
+    }
+    if (this.userFinalSubs.size) {
+      const snapshot = Array.from(this.userFinalSubs);
+      for (const fn of snapshot) {
+        try {
+          fn(text);
+        } catch {
+          // handler errors are caller responsibility
+        }
       }
     }
   }
@@ -242,6 +265,22 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
     this.playCtx = null;
     this.playHead = 0;
     this.outMeter = 0;
+  }
+
+  private finishBridgeTts(error?: Error) {
+    if (this.bridgeTtsTimer != null) {
+      window.clearTimeout(this.bridgeTtsTimer);
+      this.bridgeTtsTimer = null;
+    }
+    const resolve = this.bridgeTtsResolve;
+    const reject = this.bridgeTtsReject;
+    this.bridgeTtsResolve = null;
+    this.bridgeTtsReject = null;
+    this.bridgeTtsActive = false;
+    this.inputMuted = false;
+    this.ignoreAsrUntil = Date.now() + 900;
+    if (error) reject?.(error);
+    else resolve?.();
   }
 
   private buildStartSessionPayload(opts: VoiceConnectOptions): Record<string, unknown> {
@@ -351,6 +390,10 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
       const ib = event.inputBuffer.getChannelData(0);
       const pcmDown = floatFrameToTargetPcm16(ib, sr, this.micRate);
       if (!pcmDown.byteLength) return;
+      if (this.inputMuted) {
+        this.emit?.({ kind: "mic_level", value: 0 });
+        return;
+      }
       try {
         this.ws.send(encodeAudioTask(this.sessionId, pcmDown));
       } catch {
@@ -397,12 +440,14 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
           this.emit?.({ kind: "error", message: `豆包会话失败: ${String(frame.jsonPayload?.error ?? "")}` });
           break;
         case DOUBAO_SERVER_EVENT.ASRInfo:
+          if (Date.now() < this.ignoreAsrUntil) break;
           // 用户开口；本地立即停掉模型播报，避免抢话
           this.flushPlayback();
           this.userTextBuf = "";
           this.setPhase("listening");
           break;
         case DOUBAO_SERVER_EVENT.ASRResponse: {
+          if (Date.now() < this.ignoreAsrUntil) break;
           const payload = frame.jsonPayload ?? {};
           const results =
             (payload.results as Array<{ text?: string; content?: string; is_interim?: boolean | string }> | undefined) ??
@@ -421,6 +466,10 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
           break;
         }
         case DOUBAO_SERVER_EVENT.ASREnded:
+          if (Date.now() < this.ignoreAsrUntil) {
+            this.userTextBuf = "";
+            break;
+          }
           this.emitUserFinal();
           this.assistantTextBuf = "";
           if (!this.outputPaused) this.setPhase("thinking");
@@ -437,8 +486,12 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
           break;
         }
         case DOUBAO_SERVER_EVENT.TTSSentenceStart: {
-          if (this.outputPaused) break;
+          if (this.outputPaused && !this.bridgeTtsActive) break;
           const t = String(frame.jsonPayload?.text ?? "").trim();
+          if (this.bridgeTtsActive) {
+            this.setPhase("speaking");
+            break;
+          }
           // This is a TTS sentence boundary, not the whole model answer.
           // Treat it as a fallback partial only; final is emitted on ChatEnded
           // (or TTSEnded if ChatEnded was not observed).
@@ -447,15 +500,16 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
           break;
         }
         case DOUBAO_SERVER_EVENT.TTSResponse: {
-          if (this.outputPaused) break;
+          if (this.outputPaused && !this.bridgeTtsActive) break;
           if (frame.binaryPayload && frame.binaryPayload.byteLength) {
             this.enqueuePcmOut(frame.binaryPayload);
           }
           break;
         }
         case DOUBAO_SERVER_EVENT.TTSEnded:
-          if (this.outputPaused) break;
-          this.emitAssistantFinal();
+          if (this.outputPaused && !this.bridgeTtsActive) break;
+          if (!this.outputPaused) this.emitAssistantFinal();
+          if (this.bridgeTtsActive) this.finishBridgeTts();
           this.setPhase("listening");
           break;
         case DOUBAO_SERVER_EVENT.DialogCommonError: {
@@ -495,10 +549,51 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
     this.outputPaused = false;
   }
 
+  async speakText(text: string): Promise<void> {
+    const content = text.trim();
+    if (!content || !this.ws || this.ws.readyState !== WebSocket.OPEN || !this.sessionStarted) return;
+
+    if (this.bridgeTtsActive) {
+      this.finishBridgeTts(new Error("Doubao TTS interrupted by a newer bridge utterance"));
+    }
+
+    this.flushPlayback();
+    this.assistantTextBuf = "";
+    this.lastAssistantFinal = "";
+    this.bridgeTtsActive = true;
+    this.inputMuted = true;
+    this.ignoreAsrUntil = Date.now() + 60_000;
+    this.setPhase("speaking");
+
+    const done = new Promise<void>((resolve, reject) => {
+      this.bridgeTtsResolve = resolve;
+      this.bridgeTtsReject = reject;
+      this.bridgeTtsTimer = window.setTimeout(() => {
+        this.finishBridgeTts(new Error("Doubao TTS timeout"));
+      }, 45_000);
+    });
+
+    try {
+      this.ws.send(encodeChatTtsText(this.sessionId, { start: true, content, end: false }));
+      this.ws.send(encodeChatTtsText(this.sessionId, { start: false, content: "", end: true }));
+    } catch (error) {
+      this.finishBridgeTts(error instanceof Error ? error : new Error(String(error)));
+    }
+
+    await done;
+  }
+
   requestUserFinalOnce(handler: (text: string) => void): () => void {
     this.userFinalOnce = handler;
     return () => {
       if (this.userFinalOnce === handler) this.userFinalOnce = null;
+    };
+  }
+
+  subscribeUserFinal(handler: (text: string) => void): () => void {
+    this.userFinalSubs.add(handler);
+    return () => {
+      this.userFinalSubs.delete(handler);
     };
   }
 
@@ -541,6 +636,9 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
       // ignore
     }
     this.proc = null;
+    this.inputMuted = false;
+    this.ignoreAsrUntil = 0;
+    this.finishBridgeTts(new Error("Doubao session disposed"));
     try {
       await this.audioCtx?.close();
     } catch {
@@ -561,7 +659,9 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
     this.ws = null;
     this.emit = null;
     this.userFinalOnce = null;
+    this.userFinalSubs.clear();
     this.outputPaused = false;
+    this.bridgeTtsActive = false;
     this.userTextBuf = "";
     this.lastUserFinal = "";
     this.assistantTextBuf = "";

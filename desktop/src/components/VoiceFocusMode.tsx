@@ -172,12 +172,39 @@ export function VoiceFocusMode() {
   }, [targetSessionId]);
 
   const [voiceKind, setVoiceKind] = useState<VoiceProviderKind | null>(null);
-  const [bridgeArmed, setBridgeArmed] = useState(false);
-  const [bridgeHint, setBridgeHint] = useState<string | null>(null);
+  /** 默认 ON：进电话即工具桥接武装。Wrench 用来关掉它退回纯豆包对话。 */
+  const [bridgeArmed, setBridgeArmed] = useState(true);
+  const [bridgeHint, setBridgeHint] = useState<{
+    text: string;
+    isError: boolean;
+    fullText?: string;
+  } | null>(null);
+
+  const bridgeArmedRef = useRef(bridgeArmed);
+  useEffect(() => {
+    bridgeArmedRef.current = bridgeArmed;
+  }, [bridgeArmed]);
 
   const bridgeAbortRef = useRef<AbortController | null>(null);
   const unsubUserFinalRef = useRef<(() => void) | null>(null);
   const bridgeHintTimerRef = useRef<number | null>(null);
+  /** Stable refs for callbacks used inside bootstrap useEffect.
+   * 直接把 callback 列进 deps 会因 targetSessionId 等变化而触发 bootstrap 重启，
+   * 进而 dispose 当前 voice session 与中断 in-flight SSE，外观就是「工具调用失败：network error」。 */
+  const armDoubaoBridgeRef = useRef<() => void>(() => {});
+  const enqueueVoiceTurnRef = useRef<
+    (turn: {
+      role: "user" | "assistant" | "tool";
+      content: string;
+      metadata?: Record<string, unknown>;
+      tool_call_id?: string;
+      tool_name?: string;
+      tool_args?: Record<string, unknown>;
+      tool_status?: "ok" | "error";
+      tool_result_preview?: string;
+    }) => void
+  >(() => {});
+  const scheduleDraftFlushRef = useRef<() => void>(() => {});
 
   const clearBridgeHintTimer = useCallback(() => {
     if (bridgeHintTimerRef.current != null) {
@@ -185,6 +212,46 @@ export function VoiceFocusMode() {
       bridgeHintTimerRef.current = null;
     }
   }, []);
+
+  const resolveBridgeAuth = useCallback(async () => {
+    let base = String(apiBase ?? "").trim();
+    let token = String(apiToken ?? "").trim();
+    if (!base) {
+      base = String((await window.agenticxDesktop.getApiBase()) || "").trim();
+    }
+    if (!token) {
+      token = String((await window.agenticxDesktop.getApiAuthToken()) || "").trim();
+    }
+    return {
+      apiBase: base.replace(/\/+$/, ""),
+      apiToken: token,
+    };
+  }, [apiBase, apiToken]);
+
+  const resolveBridgeModelHint = useCallback(async () => {
+    const pane = panes.find((p) => p.id === targetPaneId);
+    const paneProvider = String(pane?.modelProvider ?? "").trim();
+    const paneModel = String(pane?.modelName ?? "").trim();
+    if (paneProvider && paneModel) {
+      return { provider: paneProvider, model: paneModel };
+    }
+    try {
+      const cfg = await window.agenticxDesktop.loadConfig();
+      const activeProvider = String(cfg.activeProvider ?? "").trim();
+      const activeModel = String(cfg.activeModel ?? "").trim();
+      if (activeProvider && activeModel) {
+        return { provider: activeProvider, model: activeModel };
+      }
+      const defaultProvider = String(cfg.defaultProvider ?? "").trim();
+      const defaultModel = String(cfg.providers?.[defaultProvider]?.model ?? "").trim();
+      if (defaultProvider && defaultModel) {
+        return { provider: defaultProvider, model: defaultModel };
+      }
+    } catch {
+      // ignore
+    }
+    return { provider: "", model: "" };
+  }, [panes, targetPaneId]);
 
   const [phase, setPhase] = useState<"idle" | "listening" | "thinking" | "speaking" | "tool_running" | "error">("idle");
   const [micLevel, setMicLevel] = useState(0);
@@ -313,6 +380,13 @@ export function VoiceFocusMode() {
     }, 250);
   }, [enqueueDraftTurns]);
 
+  useEffect(() => {
+    enqueueVoiceTurnRef.current = enqueueVoiceTurn;
+  }, [enqueueVoiceTurn]);
+  useEffect(() => {
+    scheduleDraftFlushRef.current = scheduleDraftFlush;
+  }, [scheduleDraftFlush]);
+
   const executeDoubaoMetaBridge = useCallback(
     async (userText: string) => {
       const sid = String(targetSessionIdRef.current ?? "").trim();
@@ -325,7 +399,7 @@ export function VoiceFocusMode() {
         sessionRef.current?.resumeDoubaoOutput?.();
         setBridgeArmed(false);
         clearBridgeHintTimer();
-        setBridgeHint("未检测到内容或会话，已回到普通对话");
+        setBridgeHint({ text: "未检测到内容或会话", isError: true, fullText: "未检测到内容或会话" });
         bridgeHintTimerRef.current = window.setTimeout(() => {
           setBridgeHint(null);
           bridgeHintTimerRef.current = null;
@@ -335,23 +409,84 @@ export function VoiceFocusMode() {
       const ac = new AbortController();
       bridgeAbortRef.current = ac;
       clearBridgeHintTimer();
-      setBridgeHint("正在为你调用 Meta…");
+      setBridgeHint({ text: "正在为你调用 Meta…", isError: false, fullText: "正在为你调用 Meta…" });
       setPhase("thinking");
       setPartial(null);
+      const auth = await resolveBridgeAuth();
+      if (!auth.apiBase) {
+        setBridgeHint({
+          text: "工具调用失败：后端地址为空（apiBase 未初始化）",
+          isError: true,
+          fullText: `工具调用失败：后端地址为空（apiBase 未初始化）\napiBase="${auth.apiBase}"`,
+        });
+        bridgeHintTimerRef.current = window.setTimeout(() => {
+          setBridgeHint(null);
+          bridgeHintTimerRef.current = null;
+        }, 6000);
+        setPhase("listening");
+        return;
+      }
+      // 诊断：先打印当前 session 连了哪些 MCP / 工具数。这一步只是写日志，失败不影响后续 chat。
       try {
-        const { finalText, toolCalls } = await runMetaTurnViaChat({
-          apiBase,
-          desktopToken: apiToken,
+        const probeResp = await fetch(
+          `${auth.apiBase}/api/mcp/servers?session_id=${encodeURIComponent(sid)}&reload=false`,
+          { headers: { "x-agx-desktop-token": auth.apiToken }, signal: ac.signal }
+        );
+        if (probeResp.ok) {
+          const body = (await probeResp.json()) as { servers?: Array<Record<string, unknown>> };
+          const list = Array.isArray(body.servers) ? body.servers : [];
+          // eslint-disable-next-line no-console
+          console.info(
+            "[voice-focus][bridge] mcp_status",
+            list.map((s) => ({
+              name: s.name,
+              connected: s.connected,
+              tools: s.tool_count,
+              state: s.connection_state,
+            }))
+          );
+        } else {
+          // eslint-disable-next-line no-console
+          console.warn("[voice-focus][bridge] mcp_status probe failed", probeResp.status);
+        }
+      } catch (probeErr) {
+        if (!ac.signal.aborted) {
+          // eslint-disable-next-line no-console
+          console.warn("[voice-focus][bridge] mcp_status probe error", probeErr);
+        }
+      }
+      const initialHint = await resolveBridgeModelHint();
+      try {
+        let result = await runMetaTurnViaChat({
+          apiBase: auth.apiBase,
+          desktopToken: auth.apiToken,
           sessionId: sid,
           query: ut,
+          provider: initialHint.provider || undefined,
+          model: initialHint.model || undefined,
           signal: ac.signal,
         });
+        if (ac.signal.aborted) return;
+        const usedHint = initialHint;
+        if (!result.finalText.trim() && result.toolCalls.length === 0) {
+          // No-op response with empty payload is usually not useful in voice mode.
+          // Keep current result; do not auto-retry on empty success.
+        }
+        // When current session/model points to an unavailable distributor (e.g. deepseek-r1 route down),
+        // retry once with active/default model from desktop config.
+        // We only retry on known provider availability errors.
+        //
+        // Implementation note: this block runs from catch path below by rethrowing; here we keep the
+        // happy path minimal.
+        const { finalText, toolCalls } = result;
         if (ac.signal.aborted) return;
         // eslint-disable-next-line no-console
         console.info("[voice-focus][bridge] done", {
           finalLen: finalText.length,
           toolCount: toolCalls.length,
           toolNames: toolCalls.map((t) => t.name),
+          provider: usedHint.provider || "<session-default>",
+          model: usedHint.model || "<session-default>",
         });
         delete draftTurnsRef.current.user;
         enqueueVoiceTurn({ role: "user", content: ut });
@@ -403,12 +538,118 @@ export function VoiceFocusMode() {
         }
       } catch (e) {
         if (ac.signal.aborted) return;
-        const msg = e instanceof Error ? e.message : String(e);
+        const errName = e instanceof Error ? e.name : "";
+        if (errName === "AbortError") return;
+        let err = e;
+        let msg = e instanceof Error ? e.message : String(e);
+        const isDistributorUnavailable = /无可用渠道|ServiceUnavailableError|missing model configuration/i.test(msg);
+        if (isDistributorUnavailable) {
+          try {
+            const cfg = await window.agenticxDesktop.loadConfig();
+            const activeProvider = String(cfg.activeProvider ?? "").trim();
+            const activeModel = String(cfg.activeModel ?? "").trim();
+            const defaultProvider = String(cfg.defaultProvider ?? "").trim();
+            const defaultModel = String(cfg.providers?.[defaultProvider]?.model ?? "").trim();
+            const fallbackHint =
+              activeProvider && activeModel && (activeProvider !== initialHint.provider || activeModel !== initialHint.model)
+                ? { provider: activeProvider, model: activeModel }
+                : defaultProvider &&
+                    defaultModel &&
+                    (defaultProvider !== initialHint.provider || defaultModel !== initialHint.model)
+                  ? { provider: defaultProvider, model: defaultModel }
+                  : { provider: "", model: "" };
+            if (fallbackHint.provider && fallbackHint.model) {
+              clearBridgeHintTimer();
+              setBridgeHint({
+                text: "模型不可用，正在切换备用模型重试…",
+                isError: false,
+                fullText: `模型不可用，正在切换备用模型重试：${fallbackHint.provider}/${fallbackHint.model}`,
+              });
+              const retried = await runMetaTurnViaChat({
+                apiBase: auth.apiBase,
+                desktopToken: auth.apiToken,
+                sessionId: sid,
+                query: ut,
+                provider: fallbackHint.provider,
+                model: fallbackHint.model,
+                signal: ac.signal,
+              });
+              if (!ac.signal.aborted) {
+                // Retry succeeded: continue with normal success flow by replaying minimal state.
+                delete draftTurnsRef.current.user;
+                enqueueVoiceTurn({ role: "user", content: ut });
+                for (const tc of retried.toolCalls) {
+                  const argsText = JSON.stringify(tc.args ?? {});
+                  enqueueVoiceTurn({
+                    role: "assistant",
+                    content: `[调用工具] ${tc.name}(${argsText.slice(0, 200)})`,
+                    metadata: {
+                      source: "voice-focus",
+                      tool_call_id: tc.callId,
+                      tool_name: tc.name,
+                      tool_args: tc.args,
+                    },
+                  });
+                  enqueueVoiceTurn({
+                    role: "tool",
+                    content: tc.result.slice(0, 4000),
+                    tool_call_id: tc.callId,
+                    tool_name: tc.name,
+                    tool_args: tc.args,
+                    tool_status: "ok",
+                    tool_result_preview: tc.result.slice(0, 240),
+                    metadata: { source: "voice-focus" },
+                  });
+                }
+                const retryReply = retried.finalText.trim() || (retried.toolCalls.length ? "已完成工具调用。" : "");
+                if (retryReply) {
+                  enqueueVoiceTurn({ role: "assistant", content: retryReply });
+                  setPartial({ role: "assistant", text: retryReply });
+                  try {
+                    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+                      window.speechSynthesis.cancel();
+                      const utter = new SpeechSynthesisUtterance(retryReply);
+                      utter.lang = "zh-CN";
+                      utter.onstart = () => setPhase("speaking");
+                      utter.onend = () => setPhase("listening");
+                      utter.onerror = () => setPhase("listening");
+                      window.speechSynthesis.speak(utter);
+                    } else {
+                      setPhase("listening");
+                    }
+                  } catch {
+                    setPhase("listening");
+                  }
+                } else {
+                  setPartial(null);
+                  setPhase("listening");
+                }
+                return;
+              }
+            }
+          } catch (retryErr) {
+            err = retryErr;
+            msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          }
+        }
+        const fullMsg = [
+          `工具调用失败：${msg}`,
+          `error_name=${err instanceof Error ? err.name : "unknown"}`,
+          `apiBase=${auth.apiBase || "<empty>"}`,
+          `sessionId=${sid || "<empty>"}`,
+          err instanceof Error && err.stack ? `stack=${err.stack}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
         // eslint-disable-next-line no-console
-        console.error("[voice-focus][bridge] failed", e);
+        console.error("[voice-focus][bridge] failed", err);
         clearBridgeHintTimer();
         setPartial(null);
-        setBridgeHint(`工具调用失败：${msg.slice(0, 120)}`);
+        setBridgeHint({
+          text: `工具调用失败：${msg.slice(0, 120)}`,
+          isError: true,
+          fullText: fullMsg,
+        });
         bridgeHintTimerRef.current = window.setTimeout(() => {
           setBridgeHint(null);
           bridgeHintTimerRef.current = null;
@@ -416,36 +657,45 @@ export function VoiceFocusMode() {
         setPhase("listening");
       } finally {
         if (bridgeAbortRef.current === ac) bridgeAbortRef.current = null;
-        sessionRef.current?.resumeDoubaoOutput?.();
-        setBridgeArmed(false);
-        unsubUserFinalRef.current = null;
+        // 默认开启模式下：豆包输出保持暂停、订阅保持挂着，等下一轮 user_final。
+        // 仅在用户手动 disarm 或 hangup 时才 resume + 退订。
       }
     },
-    [apiBase, apiToken, enqueueVoiceTurn, clearBridgeHintTimer]
+    [enqueueVoiceTurn, clearBridgeHintTimer, resolveBridgeAuth]
   );
 
-  const toggleDoubaoToolAsk = useCallback(() => {
+  const disarmDoubaoBridge = useCallback(() => {
     const s = sessionRef.current;
-    if (!s?.requestUserFinalOnce || !s.pauseDoubaoOutput || !s.resumeDoubaoOutput) return;
+    bridgeAbortRef.current?.abort();
+    bridgeAbortRef.current = null;
+    unsubUserFinalRef.current?.();
+    unsubUserFinalRef.current = null;
+    try {
+      s?.resumeDoubaoOutput?.();
+    } catch {
+      /* ignore */
+    }
+    setBridgeArmed(false);
+    setBridgeHint(null);
+    clearBridgeHintTimer();
+    // eslint-disable-next-line no-console
+    console.info("[voice-focus][bridge] disarmed");
+  }, [clearBridgeHintTimer]);
 
-    if (bridgeArmed) {
-      bridgeAbortRef.current?.abort();
-      bridgeAbortRef.current = null;
-      unsubUserFinalRef.current?.();
-      unsubUserFinalRef.current = null;
-      s.resumeDoubaoOutput();
-      setBridgeArmed(false);
-      setBridgeHint(null);
-      clearBridgeHintTimer();
+  const armDoubaoBridge = useCallback(() => {
+    const s = sessionRef.current;
+    if (!s?.subscribeUserFinal || !s.pauseDoubaoOutput) {
+      // eslint-disable-next-line no-console
+      console.warn("[voice-focus][bridge] arm skipped: provider lacks bridge hooks");
       return;
     }
-
+    if (unsubUserFinalRef.current) return; // already armed
     // eslint-disable-next-line no-console
-    console.info("[voice-focus][bridge] armed");
+    console.info("[voice-focus][bridge] armed (default-on)");
     s.pauseDoubaoOutput();
     setBridgeArmed(true);
-    setBridgeHint("工具一问，请讲…");
-    unsubUserFinalRef.current = s.requestUserFinalOnce((text) => {
+    unsubUserFinalRef.current = s.subscribeUserFinal((text) => {
+      if (!bridgeArmedRef.current) return;
       // eslint-disable-next-line no-console
       console.info("[voice-focus][bridge] user_final captured", {
         len: text.length,
@@ -453,7 +703,19 @@ export function VoiceFocusMode() {
       });
       void executeDoubaoMetaBridge(text);
     });
-  }, [bridgeArmed, clearBridgeHintTimer, executeDoubaoMetaBridge]);
+  }, [executeDoubaoMetaBridge]);
+
+  useEffect(() => {
+    armDoubaoBridgeRef.current = armDoubaoBridge;
+  }, [armDoubaoBridge]);
+
+  const toggleDoubaoToolAsk = useCallback(() => {
+    if (bridgeArmed) {
+      disarmDoubaoBridge();
+    } else {
+      armDoubaoBridge();
+    }
+  }, [bridgeArmed, armDoubaoBridge, disarmDoubaoBridge]);
 
   const hangup = useCallback(async () => {
     clearErrorExit();
@@ -618,7 +880,7 @@ export function VoiceFocusMode() {
           }
           if (ev.kind === "tool_result") {
             const argsText = JSON.stringify(ev.toolArgs ?? {});
-            enqueueVoiceTurn({
+            enqueueVoiceTurnRef.current({
               role: "assistant",
               content: `[调用工具] ${ev.toolName}(${argsText.slice(0, 200)})`,
               metadata: {
@@ -628,7 +890,7 @@ export function VoiceFocusMode() {
                 tool_args: ev.toolArgs ?? {},
               },
             });
-            enqueueVoiceTurn({
+            enqueueVoiceTurnRef.current({
               role: "tool",
               content: ev.output.slice(0, 4000),
               tool_call_id: ev.callId,
@@ -687,7 +949,7 @@ export function VoiceFocusMode() {
               len: text.length,
               preview: text.slice(0, 60),
             });
-            scheduleDraftFlush();
+            scheduleDraftFlushRef.current();
           }
         };
 
@@ -701,6 +963,11 @@ export function VoiceFocusMode() {
           toolScope,
           emit: onVoiceEvent,
         });
+
+        // 默认开启工具桥接：豆包用作 ASR/兜底 TTS，每轮 user_final 走 Meta 工具链。
+        if (!cancelled && kind === "doubao_realtime" && sessionRef.current) {
+          armDoubaoBridgeRef.current();
+        }
       } catch (e) {
         if (cancelled) return;
         setPhase("error");
@@ -738,7 +1005,12 @@ export function VoiceFocusMode() {
       void sessionRef.current?.dispose();
       sessionRef.current = null;
     };
-  }, [apiBase, apiToken, targetPaneId, targetSessionId, targetAvatarId, hangup, openSettings, bumpLevels, enqueueVoiceTurn, scheduleDraftFlush, setPaneSessionId, clearBridgeHintTimer]);
+    // NOTE: enqueueVoiceTurn / scheduleDraftFlush / armDoubaoBridge 通过 ref 调用，
+    // 故意不放进 deps —— 否则 targetSessionId 一变就会触发整个 voice session 重启，
+    // 中断进行中的 SSE 桥接，从而把「fetch 流被中断」的 Chromium 报错 `TypeError: network error`
+    // 直接抛到用户面前。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiBase, apiToken, targetPaneId, targetSessionId, targetAvatarId, hangup, openSettings, bumpLevels, setPaneSessionId, clearBridgeHintTimer]);
 
   useEffect(() => {
     const esc = (e: KeyboardEvent) => {
@@ -811,8 +1083,33 @@ export function VoiceFocusMode() {
       ) : null}
 
       {bridgeHint && !errorText ? (
-        <div className="agx-voice-focus-hint no-drag" role="status">
-          {bridgeHint}
+        <div
+          className={`agx-voice-focus-hint no-drag${bridgeHint.isError ? " agx-voice-focus-hint--error" : ""}${bridgeHint.isError ? " agx-voice-focus-hint--clickable" : ""}`}
+          role={bridgeHint.isError ? "alert" : "status"}
+          title={
+            bridgeHint.isError
+              ? `${bridgeHint.fullText || bridgeHint.text}\n（点击复制完整错误）`
+              : bridgeHint.text
+          }
+          onClick={
+            bridgeHint.isError
+              ? () => {
+                  try {
+                    void navigator.clipboard?.writeText(bridgeHint.fullText || bridgeHint.text);
+                    setBridgeHint({ text: "错误已复制到剪贴板", isError: false });
+                    clearBridgeHintTimer();
+                    bridgeHintTimerRef.current = window.setTimeout(() => {
+                      setBridgeHint(null);
+                      bridgeHintTimerRef.current = null;
+                    }, 2500);
+                  } catch {
+                    /* ignore */
+                  }
+                }
+              : undefined
+          }
+        >
+          {bridgeHint.isError ? `❌ ${bridgeHint.text.replace(/^工具调用失败：/, "")}` : bridgeHint.text}
         </div>
       ) : null}
 
@@ -820,12 +1117,14 @@ export function VoiceFocusMode() {
       {voiceKind === "doubao_realtime" ? (
         <button
           type="button"
-          className={`agx-voice-focus-tool no-drag${bridgeArmed ? " agx-voice-focus-tool--armed" : ""}`}
-          aria-label={bridgeArmed ? "取消工具一问" : "工具一问，使用 Meta 工具链"}
+          className={`agx-voice-focus-tool no-drag${bridgeArmed ? " agx-voice-focus-tool--on" : " agx-voice-focus-tool--off"}`}
+          aria-label={bridgeArmed ? "工具调用已开启，点击关闭（回到纯豆包对话）" : "工具调用已关闭，点击开启"}
           aria-pressed={bridgeArmed}
+          title={bridgeArmed ? "工具调用：开（点击关闭）" : "工具调用：关（点击开启）"}
           onClick={() => toggleDoubaoToolAsk()}
         >
           <Wrench className="agx-voice-focus-tool-icon" strokeWidth={2} aria-hidden />
+          <span className="agx-voice-focus-tool-dot" aria-hidden />
         </button>
       ) : null}
 

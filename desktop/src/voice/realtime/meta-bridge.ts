@@ -24,11 +24,15 @@ export async function runMetaTurnViaChat(args: {
   desktopToken: string;
   sessionId: string;
   query: string;
+  provider?: string;
+  model?: string;
   signal?: AbortSignal;
 }): Promise<MetaBridgeResult> {
-  const { apiBase, desktopToken, sessionId, query, signal } = args;
+  const { apiBase, desktopToken, sessionId, query, provider, model, signal } = args;
   const q = query.trim();
   if (!q) return { finalText: "", toolCalls: [] };
+  const providerName = String(provider ?? "").trim();
+  const modelName = String(model ?? "").trim();
 
   const resp = await fetch(withBase(apiBase, "/api/chat"), {
     method: "POST",
@@ -36,7 +40,12 @@ export async function runMetaTurnViaChat(args: {
       "Content-Type": "application/json",
       "x-agx-desktop-token": desktopToken,
     },
-    body: JSON.stringify({ user_input: q, session_id: sessionId }),
+    body: JSON.stringify({
+      user_input: q,
+      session_id: sessionId,
+      ...(providerName ? { provider: providerName } : {}),
+      ...(modelName ? { model: modelName } : {}),
+    }),
     signal,
   });
 
