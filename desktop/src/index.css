@@ -30,6 +30,10 @@ body {
 }
 
 /* Markdown content styles */
+.msg-content {
+  font-size: var(--agx-chat-im-body-font-size);
+  line-height: 1.625;
+}
 .msg-content p {
   margin: 0.5em 0;
 }
