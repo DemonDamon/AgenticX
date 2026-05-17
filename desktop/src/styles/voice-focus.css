@@ -1,6 +1,10 @@
-/* Voice focus capsule — Perplexity-style horizontal pill, themed */
+/* Voice focus capsule — themed accent via --theme-color-rgb */
 
 .agx-voice-focus-root {
+  --agx-voice-focus-accent: rgb(var(--theme-color-rgb, 59, 130, 246));
+  --agx-voice-focus-accent-dim: rgba(var(--theme-color-rgb, 59, 130, 246), 0.45);
+  --agx-voice-focus-rim: rgba(255, 255, 255, 0.22);
+
   position: relative;
   width: 100%;
   height: 100%;
@@ -9,30 +13,57 @@
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  background: var(--ui-surface-elevated, #1a1d24);
-  border-radius: 16px;
-  box-shadow: none;
-  padding: 8px 10px 8px 12px;
+  gap: 6px;
+  /* 与灵巧窗口底板同色（由 .agx-app.agx-voice-focus-app 注入 --agx-voice-focus-shell-bg） */
+  background: var(--agx-voice-focus-shell-bg, var(--ui-surface-elevated, #1a1d24));
+  border-radius: 9999px;
+  border: 1px solid var(--agx-voice-focus-rim);
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.42);
+  /* 左右略不对称：左侧弧形内收视觉上更「顶」，多给 2px；整体留出呼吸感 */
+  padding: 10px 10px;
   cursor: grab;
+  margin: 0;
 }
 
 .agx-voice-focus-root:active {
   cursor: grabbing;
 }
 
-/* ─── Dot-grid waveform (center/left) ─── */
+/* ─── 左侧麦克风（无文案） ─── */
+.agx-voice-focus-mic-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  pointer-events: none;
+  width: 24px;
+  margin-inline-end: 0;
+}
+
+.agx-voice-focus-mic {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--agx-voice-focus-accent);
+  opacity: 0.92;
+}
+
+/* ─── Dot-grid waveform ─── */
 .agx-voice-focus-dots {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 3px;
   pointer-events: none;
+  flex: 0 0 92px;
+  min-width: 92px;
+  margin-inline: 0;
 }
 
 .agx-voice-focus-dot-col {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
   align-items: center;
 }
 
@@ -40,36 +71,39 @@
   width: 5px;
   height: 5px;
   border-radius: 9999px;
-  background: rgb(var(--theme-color-rgb, 99, 102, 241));
-  transition: opacity 60ms linear, transform 60ms linear;
+  background: var(--agx-voice-focus-accent);
+  transition: opacity 50ms linear, transform 50ms linear, box-shadow 50ms linear;
+  will-change: transform, opacity;
 }
 
-/* ─── Stop button (right) ─── */
+/* ─── Stop：外圈留白命中区 + 内嵌实心方钮（参考 Perplexity） ─── */
 .agx-voice-focus-stop {
-  width: 22px;
-  height: 22px;
-  border-radius: 7px;
+  width: 26px;
+  height: 26px;
+  border-radius: 0;
   border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgb(var(--theme-color-rgb, 99, 102, 241));
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
-  color: var(--ui-on-accent, #fff);
+  background: transparent;
   pointer-events: all;
   flex-shrink: 0;
+  padding: 0;
+  margin-inline-start: 0;
 }
 
-.agx-voice-focus-stop:hover {
-  filter: brightness(1.1);
+.agx-voice-focus-stop:hover .agx-voice-focus-stop-square {
+  filter: brightness(1.12);
+  box-shadow: 0 0 14px var(--agx-voice-focus-dim);
 }
 
 .agx-voice-focus-stop-square {
-  width: 7px;
-  height: 7px;
+  width: 11px;
+  height: 11px;
   border-radius: 2px;
-  background: var(--ui-on-accent, #fff);
+  background: var(--agx-voice-focus-accent);
+  box-shadow: 0 0 10px var(--agx-voice-focus-dim);
 }
 
 /* ─── Error (absolute positioning) ─── */
@@ -84,7 +118,12 @@
 }
 
 .agx-app.agx-voice-focus-app {
-  display: block;
+  /* 与胶囊填充一致：圆角药丸铺在矩形窗口内时，四角楔区若透明会露出 surface-base（浅灰）或桌面，看起来像「双层底」 */
+  --agx-voice-focus-shell-bg: var(--ui-surface-elevated, #1a1d24);
+
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
   width: 100vw;
   height: 100vh;
   padding: 0;
@@ -92,5 +131,11 @@
   border: none;
   outline: none;
   box-shadow: none;
-  background: transparent;
+  background: transparent !important;
+}
+
+html:has(.agx-voice-focus-app),
+body:has(.agx-voice-focus-app),
+#root:has(.agx-voice-focus-app) {
+  background: var(--ui-surface-elevated, #1a1d24) !important;
 }

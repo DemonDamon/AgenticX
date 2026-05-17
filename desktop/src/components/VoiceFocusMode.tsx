@@ -1,6 +1,7 @@
+import { Mic } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "../store";
-import type { VoiceProviderKind, VoiceRealtimeEmit, VoiceHistoryTurn } from "../voice/realtime";
+import type { VoiceProviderKind, VoiceRealtimeEmit, VoiceHistoryTurn, VoiceToolScope } from "../voice/realtime";
 import { createRealtimeVoiceSession } from "../voice/realtime";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../utils/session-message-map";
 
@@ -34,12 +35,20 @@ async function appendVoiceTurn(
   apiBase: string,
   apiToken: string,
   sessionId: string,
-  items: Array<{ role: "user" | "assistant"; content: string }>
+  items: Array<{
+    role: "user" | "assistant" | "tool";
+    content: string;
+    metadata?: Record<string, unknown>;
+    tool_call_id?: string;
+    tool_name?: string;
+    tool_args?: Record<string, unknown>;
+    tool_status?: "ok" | "error";
+    tool_result_preview?: string;
+  }>
 ): Promise<void> {
   if (!items.length) return;
   const base = apiBase.replace(/\/+$/, "");
-  const md = { source: "voice-focus" };
-  const wrapped = items.map((r) => ({ ...r, metadata: md }));
+  const wrapped = items.map((r) => ({ ...r, metadata: { source: "voice-focus", ...(r.metadata ?? {}) } }));
   const resp = await fetch(`${base}/api/session/messages/append`, {
     method: "POST",
     headers: {
@@ -103,6 +112,31 @@ async function fetchSessionHistory(
 }
 
 /** 圆形语音胶囊 UI + Realtime/OpenSpeech 链路（不写 plan 所述「假波形」占位，柱状条由 mic/out 音量驱动）。 */
+function readVoiceToolScope(voice: Record<string, unknown>): VoiceToolScope {
+  const raw = String(voice.tool_scope ?? "").trim().toLowerCase();
+  return raw === "advanced" ? "advanced" : "default";
+}
+
+/** 仅用于读屏：界面不展示状态文案 */
+function voiceFocusPhaseAria(phase: string): string {
+  switch (phase) {
+    case "listening":
+      return "正在收听";
+    case "thinking":
+      return "思考中";
+    case "speaking":
+      return "正在播报回复";
+    case "tool_running":
+      return "正在执行工具";
+    case "idle":
+      return "连接中";
+    case "error":
+      return "出现异常";
+    default:
+      return "语音会话";
+  }
+}
+
 export function VoiceFocusMode() {
   const panes = useAppStore((s) => s.panes);
   const focusModePaneId = useAppStore((s) => s.focusModePaneId);
@@ -132,7 +166,7 @@ export function VoiceFocusMode() {
   const [runtimeTargetSessionId, setRuntimeTargetSessionId] = useState<string>("");
   const targetSessionId = runtimeTargetSessionId || storeTargetSessionId;
 
-  const [phase, setPhase] = useState<"idle" | "listening" | "thinking" | "speaking" | "error">("idle");
+  const [phase, setPhase] = useState<"idle" | "listening" | "thinking" | "speaking" | "tool_running" | "error">("idle");
   const [micLevel, setMicLevel] = useState(0);
   const [outLevel, setOutLevel] = useState(0);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -159,7 +193,18 @@ export function VoiceFocusMode() {
   const sessionRef = useRef<ReturnType<typeof createRealtimeVoiceSession> | null>(null);
   const meterRef = useRef({ mic: 0, out: 0 });
   const errorExitTimerRef = useRef<number | null>(null);
-  const pendingVoiceTurnsRef = useRef<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const pendingVoiceTurnsRef = useRef<
+    Array<{
+      role: "user" | "assistant" | "tool";
+      content: string;
+      metadata?: Record<string, unknown>;
+      tool_call_id?: string;
+      tool_name?: string;
+      tool_args?: Record<string, unknown>;
+      tool_status?: "ok" | "error";
+      tool_result_preview?: string;
+    }>
+  >([]);
   const appendQueueRef = useRef<Promise<void>>(Promise.resolve());
   const draftTurnsRef = useRef<Partial<Record<"user" | "assistant", string>>>({});
   const enqueuedTurnKeysRef = useRef<Set<string>>(new Set());
@@ -194,13 +239,22 @@ export function VoiceFocusMode() {
   }, [apiBase, apiToken, targetSessionId]);
 
   const enqueueVoiceTurn = useCallback(
-    (turn: { role: "user" | "assistant"; content: string }) => {
+    (turn: {
+      role: "user" | "assistant" | "tool";
+      content: string;
+      metadata?: Record<string, unknown>;
+      tool_call_id?: string;
+      tool_name?: string;
+      tool_args?: Record<string, unknown>;
+      tool_status?: "ok" | "error";
+      tool_result_preview?: string;
+    }) => {
       const content = turn.content.trim();
       if (!content) return;
       const key = `${turn.role}::${content}`;
       if (enqueuedTurnKeysRef.current.has(key)) return;
       enqueuedTurnKeysRef.current.add(key);
-      pendingVoiceTurnsRef.current.push({ role: turn.role, content });
+      pendingVoiceTurnsRef.current.push({ ...turn, content });
       appendQueueRef.current = appendQueueRef.current
         .catch(() => undefined)
         .then(async () => {
@@ -344,6 +398,7 @@ export function VoiceFocusMode() {
         kind = resolved;
 
         const inputDeviceId = String((pack.voice.input_device_id as string) || "").trim();
+        const toolScope = readVoiceToolScope(pack.voice);
 
         if (cancelled) return;
 
@@ -367,6 +422,40 @@ export function VoiceFocusMode() {
             setErrorText(ev.message);
             clearErrorExit();
             errorExitTimerRef.current = window.setTimeout(() => void hangup(), 5000);
+          }
+          if (ev.kind === "tool_running") {
+            if (ev.toolName) {
+              setPartial({ role: "assistant", text: `正在调用：${ev.toolName.slice(0, 16)}` });
+              setPhase("tool_running");
+            } else {
+              setPartial(null);
+              setPhase("thinking");
+            }
+          }
+          if (ev.kind === "tool_result") {
+            const argsText = JSON.stringify(ev.toolArgs ?? {});
+            enqueueVoiceTurn({
+              role: "assistant",
+              content: `[调用工具] ${ev.toolName}(${argsText.slice(0, 200)})`,
+              metadata: {
+                source: "voice-focus",
+                tool_call_id: ev.callId,
+                tool_name: ev.toolName,
+                tool_args: ev.toolArgs ?? {},
+              },
+            });
+            enqueueVoiceTurn({
+              role: "tool",
+              content: ev.output.slice(0, 4000),
+              tool_call_id: ev.callId,
+              tool_name: ev.toolName,
+              tool_args: ev.toolArgs ?? {},
+              tool_status: "ok",
+              tool_result_preview: ev.output.slice(0, 240),
+              metadata: {
+                source: "voice-focus",
+              },
+            });
           }
           if (ev.kind === "user_partial" && ev.text.trim()) {
             if (partialClearTimerRef.current != null) {
@@ -424,6 +513,8 @@ export function VoiceFocusMode() {
           inputDeviceId: inputDeviceId ? inputDeviceId : undefined,
           voiceYaml: pack.voice,
           historyTurns,
+          currentSessionId: resolvedSessionId,
+          toolScope,
           emit: onVoiceEvent,
         });
       } catch (e) {
@@ -467,9 +558,8 @@ export function VoiceFocusMode() {
   const displayPhase = phase === "listening" ? "listening" : phase;
   const driveMix = phase === "speaking" ? outLevel : micLevel;
 
-  // Wide Perplexity-like dot grid. Text is intentionally hidden in focus mode;
-  // the voice state is expressed through the waveform.
-  const COLS = 11;
+  // Perplexity-like dot grid：强弱点对比更明显（尺度 + 不透明度 + 少量光晕）。
+  const COLS = 12;
   const ROWS = 3;
 
   return (
@@ -477,27 +567,37 @@ export function VoiceFocusMode() {
       className="agx-voice-focus-root drag-region"
       data-phase={displayPhase}
     >
+      <div
+        className="agx-voice-focus-mic-wrap no-drag"
+        aria-label={voiceFocusPhaseAria(displayPhase)}
+      >
+        <Mic className="agx-voice-focus-mic" strokeWidth={2} aria-hidden />
+      </div>
+
       {/* Animated dot grid waveform */}
       <div className="agx-voice-focus-dots" aria-hidden>
         {Array.from({ length: COLS }, (_, col) => (
           <div key={col} className="agx-voice-focus-dot-col">
             {Array.from({ length: ROWS }, (_, row) => {
               const t = tick / 60; // seconds at ~60fps
-              const volume = Math.min(1, Math.max(driveMix, 0.12));
-              // Perplexity-like travelling wave: several bright peaks move
-              // across a wider grid, with row offsets so it feels organic.
-              const forward = Math.sin(t * 5.0 - col * 0.92 + row * 0.55) * 0.5 + 0.5;
-              const counter = Math.sin(t * 3.4 + col * 0.62 + row * 1.15) * 0.5 + 0.5;
-              const crest = Math.max(forward, counter * 0.72);
-              const centerLift = 1 - Math.abs(row - (ROWS - 1) / 2) * 0.16;
+              const volume = Math.min(1, Math.max(driveMix, 0.08));
+              const forward = Math.sin(t * 5.2 - col * 0.95 + row * 0.58) * 0.5 + 0.5;
+              const counter = Math.sin(t * 3.55 + col * 0.65 + row * 1.18) * 0.5 + 0.5;
+              const crest = Math.max(forward, counter * 0.68);
+              const centerLift = 1 - Math.abs(row - (ROWS - 1) / 2) * 0.2;
               const energy = Math.max(0, Math.min(1, crest * centerLift));
-              const opacity = Math.max(0.12, Math.min(1, 0.1 + energy * (0.35 + volume * 0.68)));
-              const scale = 0.72 + energy * (0.18 + volume * 0.95);
+              const opacity = Math.max(0.05, Math.min(1, 0.04 + energy * (0.22 + volume * 1.2)));
+              const scale = 0.42 + energy * (0.28 + volume * 1.45);
+              const glow = energy * volume > 0.52;
               return (
                 <span
                   key={row}
                   className="agx-voice-focus-dot"
-                  style={{ opacity, transform: `scale(${scale})` }}
+                  style={{
+                    opacity,
+                    transform: `scale(${scale})`,
+                    boxShadow: glow ? "0 0 6px rgba(var(--theme-color-rgb), 0.55)" : "none",
+                  }}
                 />
               );
             })}
