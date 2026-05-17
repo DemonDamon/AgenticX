@@ -1,3 +1,10 @@
+---
+name: ""
+overview: ""
+todos: []
+isProject: false
+---
+
 # MCP 设置：多路径 + 自动重连
 
 ## 目标
