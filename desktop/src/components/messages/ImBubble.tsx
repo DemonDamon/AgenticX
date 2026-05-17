@@ -347,7 +347,7 @@ export function ImBubble({
                 ref={editInputRef}
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
-                className="w-full resize-none bg-transparent px-2 py-1.5 text-[15px] text-text-strong outline-none"
+                className="w-full resize-none bg-transparent px-2 py-1.5 text-[var(--agx-chat-im-body-font-size)] text-text-strong outline-none"
                 rows={1}
                 onKeyDown={(e) => {
                   const isImeComposing = e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229;
@@ -392,10 +392,10 @@ export function ImBubble({
             <div
               className={
                 compactAssistant && noBubbleBorder
-                  ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[15px] leading-relaxed"
+                  ? "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 py-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
                   : isUser
-                    ? "agx-im-user-bubble relative min-w-0 w-fit max-w-full overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[15px] leading-relaxed rounded-tr-[4px]"
-                    : "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-3 pb-0 text-[15px] leading-relaxed"
+                    ? "agx-im-user-bubble relative min-w-0 w-fit max-w-full overflow-x-auto overflow-y-visible rounded-xl border px-3 py-3 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
+                    : "relative min-w-0 w-full overflow-x-auto overflow-y-visible px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] leading-relaxed"
               }
               style={compactAssistant && noBubbleBorder ? undefined : userBubbleStyle}
             >

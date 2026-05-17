@@ -656,13 +656,13 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   return (
     <div className="relative" ref={anchorRef}>
       <button
-        className="flex h-7 items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px] text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+        className="flex h-8 min-h-8 items-center gap-1.5 rounded px-1.5 py-0.5 text-[13px] font-normal leading-relaxed text-[color:var(--chat-im-assistant-text)] transition hover:bg-surface-hover"
         onClick={() => setOpen((v) => !v)}
         title="切换模型"
       >
-        <ProviderIcon provider={currentProvider} className="h-3 w-3 shrink-0" />
+        <ProviderIcon provider={currentProvider} className="h-[13px] w-[13px] shrink-0" />
         <span className="max-w-[180px] truncate">{currentLabel}</span>
-        <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2.5} aria-hidden />
+        <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2} aria-hidden />
       </button>
       {open &&
         createPortal(
@@ -673,7 +673,9 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
               style={panelStyle}
             >
               {options.length === 0 ? (
-                <div className="px-3 py-3 text-center text-xs text-text-faint">请先在设置中配置模型</div>
+                <div className="px-3 py-3 text-center text-[13px] font-normal leading-relaxed text-[color:var(--chat-im-assistant-text)]">
+                  请先在设置中配置模型
+                </div>
               ) : (
                 options.map((opt) => {
                   const isActive = opt.provider === currentProvider && opt.model === currentModel;
@@ -681,23 +683,17 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                     <button
                       key={`${opt.provider}:${opt.model}`}
                       type="button"
-                      className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                      className={`group flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] font-normal leading-relaxed text-[color:var(--chat-im-assistant-text)] transition-colors ${
                         isActive ? "bg-surface-hover" : "hover:bg-surface-hover"
                       }`}
                       onClick={() => handleSelect(opt.provider, opt.model)}
                     >
                       <span className="flex flex-1 items-center gap-2">
-                        <ProviderIcon provider={opt.provider} className="h-3.5 w-3.5 shrink-0" />
-                        <span
-                          className={`text-[13px] font-medium leading-none ${
-                            isActive ? "text-text-strong" : "text-text-standard"
-                          }`}
-                        >
-                          {opt.label}
-                        </span>
+                        <ProviderIcon provider={opt.provider} className="h-[13px] w-[13px] shrink-0" />
+                        <span className="min-w-0 flex-1 truncate">{opt.label}</span>
                       </span>
                       <span className="flex w-4 shrink-0 justify-end">
-                        {isActive && <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />}
+                        {isActive && <Check className="h-[13px] w-[13px] text-[color:var(--chat-im-assistant-text)]" strokeWidth={2} />}
                       </span>
                     </button>
                   );

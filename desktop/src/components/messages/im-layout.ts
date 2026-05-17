@@ -28,7 +28,7 @@ type AssistantActionOffsetOptions = {
  * px from the assistant text wrapper's left to where the first character
  * should sit. The wrapper lives inside the ImBubble's `px-3` padding, so
  * `paddingLeft: 2.5` puts the first CJK character center close to
- * `12 + 10 = 22px` (icon-center column) for the 15px body font.
+ * `12 + 10 = 22px` (icon-center column) for the IM body font (--agx-chat-im-body-font-size).
  */
 const ASSISTANT_TEXT_PADDING_LEFT_PX = 2.5;
 

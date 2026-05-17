@@ -13,4 +13,7 @@
   --ds-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
   --ds-spinner-dur: 0.7s;
+
+  /* IM 会话：助手/用户 Markdown 正文与窗格底栏模型选择器共用的字号，避免模型名大于气泡正文 */
+  --agx-chat-im-body-font-size: 14px;
 }
