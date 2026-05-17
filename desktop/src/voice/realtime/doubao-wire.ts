@@ -33,6 +33,7 @@ export const DOUBAO_EVENT = {
   StartSession: 100,
   FinishSession: 102,
   TaskRequest: 200,
+  ChatTTSText: 500,
   ClientInterrupt: 515,
 } as const;
 
@@ -162,6 +163,19 @@ export function encodeAudioTask(sessionId: string, pcmS16le16k: Uint8Array): Uin
     event: DOUBAO_EVENT.TaskRequest,
     sessionId,
     payload: pcmS16le16k,
+  });
+}
+
+export function encodeChatTtsText(
+  sessionId: string,
+  payload: { start: boolean; content: string; end: boolean },
+): Uint8Array {
+  return buildClientFrame({
+    messageType: DOUBAO_MSG_TYPE.FULL_CLIENT_REQUEST,
+    serialization: SER_JSON,
+    event: DOUBAO_EVENT.ChatTTSText,
+    sessionId,
+    payload: new TextEncoder().encode(JSON.stringify(payload)),
   });
 }
 

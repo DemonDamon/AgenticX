@@ -54,8 +54,19 @@ export interface RealtimeVoiceSession {
   pauseDoubaoOutput?(): void;
   resumeDoubaoOutput?(): void;
   /**
+   * Doubao-only: use the existing realtime TTS session to speak text produced by
+   * the Meta tool bridge. Implementations should suppress mic upload / ASR echo
+   * while the synthesized audio is playing.
+   */
+  speakText?(text: string): Promise<void>;
+  /**
    * Doubao-only: invoke handler once on next `user_final`, then clear.
    * Returns unsubscribe if user cancels before speaking.
    */
   requestUserFinalOnce?(handler: (text: string) => void): () => void;
+  /**
+   * Doubao-only: persistent multi-shot subscription for every `user_final`.
+   * Used by VoiceFocusMode's default-on tool bridge mode.
+   */
+  subscribeUserFinal?(handler: (text: string) => void): () => void;
 }

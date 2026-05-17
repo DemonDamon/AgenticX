@@ -1574,10 +1574,63 @@ def create_studio_app() -> FastAPI:
             image_inputs = []
 
         def _resolve_llm():
-            return ProviderResolver.resolve(
-                provider_name=session.provider_name,
-                model=session.model_name,
-            )
+            try:
+                return ProviderResolver.resolve(
+                    provider_name=session.provider_name,
+                    model=session.model_name,
+                )
+            except ValueError as exc:
+                # 自愈：历史会话可能绑定了 custom_openai_* 且未保存 model。
+                # 这类会触发 "missing model configuration"，若直接抛错会让 SSE
+                # 在某些 Python 版本下进入异常断流路径，前端只能看到 network error。
+                if "missing model configuration" not in str(exc):
+                    raise
+                cfg = ConfigManager.load()
+                preferred = str(cfg.default_provider or "").strip().lower()
+                fallback_candidates: list[str] = []
+                if preferred:
+                    fallback_candidates.append(preferred)
+                fallback_candidates.extend(
+                    [
+                        "openai",
+                        "anthropic",
+                        "zhipu",
+                        "volcengine",
+                        "bailian",
+                        "qianfan",
+                        "kimi",
+                        "minimax",
+                        "ollama",
+                    ]
+                )
+                seen: set[str] = set()
+                for provider_name in fallback_candidates:
+                    key = str(provider_name or "").strip().lower()
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    provider_cfg = cfg.get_provider(key)
+                    fallback_model = str(provider_cfg.model or "").strip()
+                    if not fallback_model:
+                        continue
+                    try:
+                        llm = ProviderResolver.resolve(
+                            provider_name=key,
+                            model=fallback_model,
+                        )
+                    except Exception:
+                        continue
+                    # 回写当前会话，避免后续每轮都走降级逻辑。
+                    session.provider_name = key
+                    session.model_name = fallback_model
+                    logger.warning(
+                        "[chat] auto-fallback model due to missing session model: sid=%s provider=%s model=%s",
+                        payload.session_id,
+                        key,
+                        fallback_model,
+                    )
+                    return llm
+                raise
 
         target_agent_id = (payload.agent_id or "meta").strip() or "meta"
         if target_agent_id != "meta":
@@ -1766,8 +1819,11 @@ def create_studio_app() -> FastAPI:
         try:
             llm = _resolve_llm()
         except Exception as exc:
+            llm_init_err_text = f"LLM init failed: {exc}"
             async def _error_stream() -> AsyncGenerator[str, None]:
-                err = SseEvent(type="error", data={"text": f"LLM init failed: {exc}"})
+                # Python 3.13 no longer allows closing over `exc` from except scope.
+                # Copy the message into a normal local before defining the generator.
+                err = SseEvent(type="error", data={"text": llm_init_err_text})
                 yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
                 yield 'data: {"type":"done","data":{}}\n\n'
             return StreamingResponse(_error_stream(), media_type="text/event-stream")
