@@ -69,6 +69,30 @@ function TypingDots() {
   );
 }
 
+/** Doubao-style 3-dot bouncing indicator for streaming gaps (reasoning done → tool call → first body token). */
+function StreamingDots() {
+  return (
+    <div
+      className="inline-flex items-center gap-1.5 py-1.5"
+      aria-live="polite"
+      aria-label="正在处理"
+    >
+      <span
+        className="h-1.5 w-1.5 rounded-full agx-dot-pulse"
+        style={{ background: "var(--text-faint)" }}
+      />
+      <span
+        className="h-1.5 w-1.5 rounded-full agx-dot-pulse"
+        style={{ background: "var(--text-faint)", animationDelay: "0.2s" }}
+      />
+      <span
+        className="h-1.5 w-1.5 rounded-full agx-dot-pulse"
+        style={{ background: "var(--text-faint)", animationDelay: "0.4s" }}
+      />
+    </div>
+  );
+}
+
 /** Shared with ReAct block shell so top-of-stack avatar matches IM bubbles. */
 export function ChatImAvatar({ label, imageUrl }: { label: string; imageUrl?: string }) {
   const char = label.slice(0, 1) || "?";
@@ -126,6 +150,9 @@ export function ImBubble({
   const hideActions = compactAssistant && assistantVisual !== "compact-inline-with-actions";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
   const hasThinkTag = parsed?.hasReasoningTag ?? false;
+  /** True once </think> has arrived in the stream; lets us collapse reasoning and show waiting dots while a tool call runs. */
+  const reasoningClosed =
+    hasThinkTag && /<\/redacted_thinking>/i.test(String(message.content ?? ""));
   const bodyText = !isUser && hasThinkTag ? (parsed?.response ?? "") : message.content;
   const referenceAttachments = isUser
     ? (message.attachments ?? []).filter((attachment) => !!attachment.referenceToken)
@@ -444,10 +471,16 @@ export function ImBubble({
                   </span>
                 ) : (
                   <>
-                    {!isUser && isStreaming && (hasThinkTag || !hasBody) ? (
-                      <ReasoningBlock text={parsed?.reasoning ?? ""} streaming />
+                    {!isUser && isStreaming && hasThinkTag ? (
+                      <ReasoningBlock
+                        text={parsed?.reasoning ?? ""}
+                        streaming={!reasoningClosed}
+                      />
                     ) : !isUser && !isStreaming && parsed?.reasoning ? (
                       <ReasoningBlock text={parsed.reasoning} />
+                    ) : null}
+                    {!isUser && isStreaming && !hasBody && (!hasThinkTag || reasoningClosed) ? (
+                      <StreamingDots />
                     ) : null}
                     {hasBody ? (
                       isUser ? (
