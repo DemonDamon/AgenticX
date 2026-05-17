@@ -543,11 +543,59 @@ class HistoryPanelBoundary extends Component<
   }
 }
 
+/** Viewport-safe fixed positioning for pane bottom model pill dropdown (portal). */
+const PANE_MODEL_PICKER_MARGIN = 8;
+const PANE_MODEL_PICKER_GAP = 4;
+const PANE_MODEL_PICKER_MIN_MAX_HEIGHT = 64;
+const PANE_MODEL_PICKER_PANEL_WIDTH = 240;
+
+function paneModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const panelWidth = Math.min(PANE_MODEL_PICKER_PANEL_WIDTH, vw - PANE_MODEL_PICKER_MARGIN * 2);
+
+  let left = anchor.left;
+  if (left + panelWidth > vw - PANE_MODEL_PICKER_MARGIN) {
+    left = vw - PANE_MODEL_PICKER_MARGIN - panelWidth;
+  }
+  if (left < PANE_MODEL_PICKER_MARGIN) {
+    left = PANE_MODEL_PICKER_MARGIN;
+  }
+
+  const spaceAbove = anchor.top - PANE_MODEL_PICKER_MARGIN - PANE_MODEL_PICKER_GAP;
+  const spaceBelow = vh - anchor.bottom - PANE_MODEL_PICKER_MARGIN - PANE_MODEL_PICKER_GAP;
+  const preferAbove = spaceAbove >= 120 || spaceAbove >= spaceBelow;
+
+  if (preferAbove) {
+    const maxHeight = Math.max(PANE_MODEL_PICKER_MIN_MAX_HEIGHT, Math.floor(spaceAbove));
+    return {
+      left,
+      width: panelWidth,
+      maxHeight,
+      bottom: vh - anchor.top + PANE_MODEL_PICKER_GAP,
+      top: "auto",
+      right: "auto",
+    };
+  }
+
+  const maxHeight = Math.max(PANE_MODEL_PICKER_MIN_MAX_HEIGHT, Math.floor(spaceBelow));
+  return {
+    left,
+    width: panelWidth,
+    maxHeight,
+    top: anchor.bottom + PANE_MODEL_PICKER_GAP,
+    bottom: "auto",
+    right: "auto",
+  };
+}
+
 function PaneModelPicker({ paneId }: { paneId: string }) {
   const settings = useAppStore((s) => s.settings);
   const setPaneModel = useAppStore((s) => s.setPaneModel);
   const paneModel = useAppStore((s) => s.panes.find((pane) => pane.id === paneId));
   const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
 
   const handleSelect = (provider: string, model: string) => {
     setPaneModel(paneId, provider, model);
@@ -587,8 +635,26 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     return `${provLabel}/${currentModel}`;
   }, [currentModel, currentProvider, settings.providers]);
 
+  const syncPanelPosition = useCallback(() => {
+    const el = anchorRef.current;
+    if (!el) return;
+    setPanelStyle(paneModelPickerPanelStyle(el.getBoundingClientRect()));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    syncPanelPosition();
+    const onReflow = () => syncPanelPosition();
+    window.addEventListener("resize", onReflow);
+    window.addEventListener("scroll", onReflow, true);
+    return () => {
+      window.removeEventListener("resize", onReflow);
+      window.removeEventListener("scroll", onReflow, true);
+    };
+  }, [open, syncPanelPosition, options.length]);
+
   return (
-    <div className="relative">
+    <div className="relative" ref={anchorRef}>
       <button
         className="flex h-7 items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px] text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
         onClick={() => setOpen((v) => !v)}
@@ -598,46 +664,49 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
         <span className="max-w-[180px] truncate">{currentLabel}</span>
         <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2.5} aria-hidden />
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 z-40 mb-1 w-[240px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl">
-            {options.length === 0 ? (
-              <div className="px-3 py-3 text-center text-xs text-text-faint">
-                请先在设置中配置模型
-              </div>
-            ) : (
-              options.map((opt) => {
-                const isActive = opt.provider === currentProvider && opt.model === currentModel;
-                return (
-                  <button
-                    key={`${opt.provider}:${opt.model}`}
-                    type="button"
-                    className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                      isActive ? "bg-surface-hover" : "hover:bg-surface-hover"
-                    }`}
-                    onClick={() => handleSelect(opt.provider, opt.model)}
-                  >
-                    <span className="flex flex-1 items-center gap-2">
-                      <ProviderIcon provider={opt.provider} className="h-3.5 w-3.5 shrink-0" />
-                      <span
-                        className={`text-[13px] font-medium leading-none ${
-                          isActive ? "text-text-strong" : "text-text-standard"
-                        }`}
-                      >
-                        {opt.label}
+      {open &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+            <div
+              className="fixed z-40 overflow-y-auto rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
+              style={panelStyle}
+            >
+              {options.length === 0 ? (
+                <div className="px-3 py-3 text-center text-xs text-text-faint">请先在设置中配置模型</div>
+              ) : (
+                options.map((opt) => {
+                  const isActive = opt.provider === currentProvider && opt.model === currentModel;
+                  return (
+                    <button
+                      key={`${opt.provider}:${opt.model}`}
+                      type="button"
+                      className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                        isActive ? "bg-surface-hover" : "hover:bg-surface-hover"
+                      }`}
+                      onClick={() => handleSelect(opt.provider, opt.model)}
+                    >
+                      <span className="flex flex-1 items-center gap-2">
+                        <ProviderIcon provider={opt.provider} className="h-3.5 w-3.5 shrink-0" />
+                        <span
+                          className={`text-[13px] font-medium leading-none ${
+                            isActive ? "text-text-strong" : "text-text-standard"
+                          }`}
+                        >
+                          {opt.label}
+                        </span>
                       </span>
-                    </span>
-                    <span className="flex w-4 shrink-0 justify-end">
-                      {isActive && <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />}
-                    </span>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </>
-      )}
+                      <span className="flex w-4 shrink-0 justify-end">
+                        {isActive && <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   );
 }
