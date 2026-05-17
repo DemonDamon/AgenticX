@@ -2448,7 +2448,7 @@ function registerEarlyIpc(): void {
       mainWindow.setHasShadow(false);
       mainWindow.setMovable(true);
       mainWindow.setAlwaysOnTop(true, "floating");
-      const capsuleWidth = 176;
+      const capsuleWidth = 218;
       const capsuleHeight = 60;
       const { screen } = await import("electron");
       const display = screen.getDisplayMatching(baseBounds) ?? screen.getPrimaryDisplay();
