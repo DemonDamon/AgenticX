@@ -111,6 +111,7 @@ export function VoiceFocusMode() {
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
+  const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
 
   /**
    * 解析「目标会话」：
@@ -119,14 +120,17 @@ export function VoiceFocusMode() {
    * 该 sessionId 同时作为：(a) 历史拉取入参，(b) user_final / assistant_final 写回目标，
    * targetPaneId 则用于挂断后向该 pane 主动 push 一次磁盘消息刷新。
    */
-  const { targetPaneId, targetSessionId } = useMemo(() => {
+  const { targetPaneId, targetSessionId: storeTargetSessionId, targetAvatarId } = useMemo(() => {
     const targetPane =
       panes.find((p) => p.id === focusModePaneId) ?? panes.find((p) => p.id === "pane-meta");
     return {
       targetPaneId: targetPane?.id ?? "pane-meta",
       targetSessionId: String(targetPane?.sessionId ?? "").trim(),
+      targetAvatarId: String(targetPane?.avatarId ?? "").trim() || null,
     };
   }, [panes, focusModePaneId]);
+  const [runtimeTargetSessionId, setRuntimeTargetSessionId] = useState<string>("");
+  const targetSessionId = runtimeTargetSessionId || storeTargetSessionId;
 
   const [phase, setPhase] = useState<"idle" | "listening" | "thinking" | "speaking" | "error">("idle");
   const [micLevel, setMicLevel] = useState(0);
@@ -283,22 +287,36 @@ export function VoiceFocusMode() {
     let cancelled = false;
 
     async function bootstrap() {
-      if (!targetSessionId) {
-        setPhase("error");
-        setErrorText("未找到目标会话，无法写入语音归档。");
-        errorExitTimerRef.current = window.setTimeout(() => void hangup(), 5000);
-        return;
+      let resolvedSessionId = targetSessionId;
+      if (!resolvedSessionId) {
+        // 与文字聊天一致：空 session 时先懒创建，电话模式不应直接失败退出。
+        const avatarId =
+          targetAvatarId && !targetAvatarId.startsWith("group:") ? targetAvatarId : undefined;
+        const created = await window.agenticxDesktop.createSession({
+          ...(avatarId ? { avatar_id: avatarId } : {}),
+        });
+        if (!created.ok || !created.session_id) {
+          setPhase("error");
+          setErrorText(`未找到目标会话且创建失败：${created.error || "未知错误"}`);
+          errorExitTimerRef.current = window.setTimeout(() => void hangup(), 5000);
+          return;
+        }
+        resolvedSessionId = String(created.session_id).trim();
+        setRuntimeTargetSessionId(resolvedSessionId);
+        if (targetPaneId) {
+          setPaneSessionId(targetPaneId, resolvedSessionId);
+        }
       }
       try {
         // voice pack 与历史并行拉取：历史拉取内部捕获异常返回空数组，不阻断进入电话。
         const [pack, historyTurns] = await Promise.all([
           fetchVoicePack(apiBase, apiToken),
-          fetchSessionHistory(apiBase, apiToken, targetSessionId, FOCUS_MODE_HISTORY_TURNS),
+          fetchSessionHistory(apiBase, apiToken, resolvedSessionId, FOCUS_MODE_HISTORY_TURNS),
         ]);
         // eslint-disable-next-line no-console
         console.info("[voice-focus] bootstrap", {
           targetPaneId,
-          targetSessionId,
+          targetSessionId: resolvedSessionId,
           historyTurns: historyTurns.length,
           flags: pack.flags,
         });
@@ -433,7 +451,7 @@ export function VoiceFocusMode() {
       void sessionRef.current?.dispose();
       sessionRef.current = null;
     };
-  }, [apiBase, apiToken, targetPaneId, targetSessionId, hangup, openSettings, bumpLevels, enqueueVoiceTurn, scheduleDraftFlush]);
+  }, [apiBase, apiToken, targetPaneId, targetSessionId, targetAvatarId, hangup, openSettings, bumpLevels, enqueueVoiceTurn, scheduleDraftFlush, setPaneSessionId]);
 
   useEffect(() => {
     const esc = (e: KeyboardEvent) => {
