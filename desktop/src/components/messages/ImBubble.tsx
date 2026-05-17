@@ -152,7 +152,7 @@ export function ImBubble({
   const hasThinkTag = parsed?.hasReasoningTag ?? false;
   /** True once </think> has arrived in the stream; lets us collapse reasoning and show waiting dots while a tool call runs. */
   const reasoningClosed =
-    hasThinkTag && /<\/redacted_thinking>/i.test(String(message.content ?? ""));
+    hasThinkTag && /<\/think>/i.test(String(message.content ?? ""));
   const bodyText = !isUser && hasThinkTag ? (parsed?.response ?? "") : message.content;
   const referenceAttachments = isUser
     ? (message.attachments ?? []).filter((attachment) => !!attachment.referenceToken)
