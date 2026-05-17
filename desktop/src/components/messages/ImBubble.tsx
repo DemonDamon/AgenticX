@@ -479,14 +479,14 @@ export function ImBubble({
               </div>
             </div>
             {showAssistantFollowups && assistantIconButtons ? (
-              <div className="mb-12 -mt-0.5 flex min-w-0 flex-col gap-2 self-stretch">
+              <div className="mb-6 -mt-0.5 flex min-w-0 flex-col gap-2 self-stretch">
                 <div className="flex w-fit flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>
                   {assistantIconButtons}
                 </div>
                 <div className="flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
               </div>
             ) : showAssistantFollowups ? (
-              <div className="mb-12 -mt-0.5 flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
+              <div className="mb-6 -mt-0.5 flex min-w-0 flex-col items-start gap-1.5 self-stretch" style={assistantActionStyle}>{assistantFollowupChipButtons}</div>
             ) : null}
             {hideActions ? null : isUser ? (
               <div className="mt-0.5 flex w-full flex-wrap items-center justify-end gap-0.5 pb-0 leading-none pr-2 text-text-faint">
@@ -554,7 +554,7 @@ export function ImBubble({
                 </HoverTip>
               </div>
             ) : showAssistantFollowups ? null : (
-              <div className="-mt-0.5 min-w-0 self-stretch">
+              <div className="-mt-0.5 mb-6 min-w-0 self-stretch">
                 <div className="flex w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint" style={assistantActionStyle}>{assistantIconButtons}</div>
               </div>
             )}

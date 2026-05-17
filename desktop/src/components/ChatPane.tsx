@@ -3877,7 +3877,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 {/* Block-level actions; peeled follow-ups on the next line below icons */}
                 {!hasStreamingRow && workMessages.length > 0 && useUnifiedReActCard ? (
                   <div
-                    className={`!-mt-0.5 flex min-w-0 items-start gap-2${peeledFollowupAssistant?.suggestedQuestions?.length ? " mb-12" : ""}`}
+                    className={`!-mt-0.5 flex min-w-0 items-start gap-2 mb-6`}
                   >
                     {isSelecting ? <div className="h-5 w-5 shrink-0" aria-hidden /> : null}
                     <div className="min-w-0 flex-1">
@@ -5712,7 +5712,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               ) : null}
             </div>
           ) : (
-            <div className="mx-auto min-w-0 w-full max-w-4xl space-y-2">
+            <div className="mx-auto min-w-0 w-full max-w-4xl space-y-1">
               {renderedMessages}
             </div>
           )}
