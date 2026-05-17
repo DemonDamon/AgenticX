@@ -103,19 +103,43 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
     this.emit?.({ kind: "phase", phase: next });
   }
 
+  private normalizeTranscriptForMerge(text: string): string {
+    return text.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
+  }
+
+  private mergeIncrementalText(prevRaw: string, nextRaw: string): string {
+    const prev = prevRaw.trim();
+    const next = nextRaw.trim();
+    if (!prev) return next;
+    if (!next) return prev;
+    if (prev === next || prev.endsWith(next)) return prev;
+    if (next.startsWith(prev)) return next;
+    if (prev.includes(next)) return prev;
+    if (next.includes(prev)) return next;
+
+    // ASR often sends "same sentence with tiny punctuation/case drift".
+    // Normalize punctuation/symbols first to avoid runaway duplication.
+    const prevNorm = this.normalizeTranscriptForMerge(prev);
+    const nextNorm = this.normalizeTranscriptForMerge(next);
+    if (prevNorm && nextNorm) {
+      if (prevNorm === nextNorm) return next.length >= prev.length ? next : prev;
+      if (prevNorm.includes(nextNorm)) return prev;
+      if (nextNorm.includes(prevNorm)) return next;
+    }
+
+    const maxOverlap = Math.min(prev.length, next.length);
+    for (let len = maxOverlap; len > 0; len -= 1) {
+      if (prev.slice(-len) === next.slice(0, len)) {
+        return `${prev}${next.slice(len)}`;
+      }
+    }
+    return `${prev}${next}`;
+  }
+
   private mergeUserText(next: string) {
     const text = next.trim();
     if (!text) return;
-    const prev = this.userTextBuf.trim();
-    if (!prev) {
-      this.userTextBuf = text;
-    } else if (prev === text || prev.endsWith(text)) {
-      this.userTextBuf = prev;
-    } else if (text.startsWith(prev)) {
-      this.userTextBuf = text;
-    } else {
-      this.userTextBuf = `${prev}${text}`;
-    }
+    this.userTextBuf = this.mergeIncrementalText(this.userTextBuf, text);
     this.emit?.({ kind: "user_partial", text: this.userTextBuf });
   }
 
@@ -129,16 +153,7 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
   private mergeAssistantText(next: string) {
     const text = next.trim();
     if (!text) return;
-    const prev = this.assistantTextBuf.trim();
-    if (!prev) {
-      this.assistantTextBuf = text;
-    } else if (prev === text || prev.endsWith(text)) {
-      this.assistantTextBuf = prev;
-    } else if (text.startsWith(prev)) {
-      this.assistantTextBuf = text;
-    } else {
-      this.assistantTextBuf = `${prev}${text}`;
-    }
+    this.assistantTextBuf = this.mergeIncrementalText(this.assistantTextBuf, text);
     this.emit?.({ kind: "assistant_partial", text: this.assistantTextBuf });
   }
 
