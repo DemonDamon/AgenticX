@@ -1905,6 +1905,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   /** 元智能体窗格：顶栏已展示当前模型，气泡内不再重复展示模型徽章 */
   const isMachiMetaPane = pane.avatarId === null;
   const isAutomationTaskPane = isAutomationPaneAvatarId(pane?.avatarId);
+  /** 单聊分身：对话区不展示「厂商/模型」徽章（人设对话而非调试底层模型）；群聊与定时自动化保留 */
+  const isDedicatedAvatarPane =
+    Boolean(pane?.avatarId) && !isGroupPane && !isAutomationTaskPane;
+  const showInlineAssistantModelBadge = !isMachiMetaPane && !isDedicatedAvatarPane;
   const groupChatId = isGroupPane && pane?.avatarId ? pane.avatarId.slice("group:".length) : "";
   const activeGroup = useMemo(
     () => (isGroupPane ? groups.find((g) => g.id === groupChatId) : undefined),
@@ -3805,7 +3809,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               message={message}
               highlightTerms={pane.historySearchTerms}
               assistantBadge={
-                message.role === "assistant" && !reactHideBadge && !isMachiMetaPane ? (
+                message.role === "assistant" && !reactHideBadge && showInlineAssistantModelBadge ? (
                   <ModelBadge provider={message.provider} model={message.model} />
                 ) : undefined
               }
@@ -4092,7 +4096,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           <TerminalLine
             message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
             badge={
-              !isMachiMetaPane && streamingModel ? (
+              showInlineAssistantModelBadge && streamingModel ? (
                 <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />
               ) : undefined
             }
@@ -4101,7 +4105,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           <CleanBlock
             message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
             badge={
-              !isMachiMetaPane && streamingModel ? (
+              showInlineAssistantModelBadge && streamingModel ? (
                 <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />
               ) : undefined
             }
@@ -4111,7 +4115,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             message={{ id: "__stream__", role: "assistant", content: streamTextForCurrentSession }}
             highlightTerms={pane.historySearchTerms}
             badge={
-              !isMachiMetaPane && streamingModel ? (
+              showInlineAssistantModelBadge && streamingModel ? (
                 <ModelBadge provider={streamingModel.provider} model={streamingModel.model} />
               ) : undefined
             }
@@ -4149,7 +4153,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       )}
     </>
     );
-  }, [chatStyle, copyMessage, copyReActBlock, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isMachiMetaPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resolveQuoteBody, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, setQuoteTarget, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [chatStyle, copyMessage, copyReActBlock, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resolveQuoteBody, resumeCurrentTask, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, setQuoteTarget, showInlineAssistantModelBadge, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
