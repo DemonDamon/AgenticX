@@ -50,6 +50,24 @@ VPIP="$VENV/bin/pip"
 # readers and numpy (issue #10: "Document ingestion fails for PDF files").
 "$VPIP" uninstall -y agenticx 2>/dev/null || true
 "$VPIP" install -q "${PROJECT_ROOT}[desktop-runtime]"
+"$VPY" - <<'PY'
+import importlib
+import sys
+
+required = ("chromadb", "onnxruntime", "numpy")
+missing = []
+for name in required:
+    try:
+        importlib.import_module(name)
+    except Exception:
+        missing.append(name)
+
+if missing:
+    print(f"✗ Missing desktop-runtime deps in packaging venv: {', '.join(missing)}")
+    sys.exit(1)
+
+print("✓ desktop-runtime dependency import check passed")
+PY
 
 cd "$PY_DIR"
 
@@ -66,6 +84,9 @@ if [[ ! -x "$BINARY" ]]; then
 fi
 
 echo "=== Built: $BINARY ($(du -sh "$BINARY" | cut -f1)) ==="
+
+echo "=== Bundled runtime dependency check ==="
+"$BINARY" --check-desktop-runtime
 
 echo "=== Smoke test ==="
 FREE_PORT="$("$VPY" -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); p=s.getsockname()[1]; s.close(); print(p)")"

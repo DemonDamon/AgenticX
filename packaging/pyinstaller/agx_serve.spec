@@ -44,16 +44,25 @@ _DESKTOP_RUNTIME_PACKAGES = (
     "numpy",
 )
 
+_CRITICAL_DESKTOP_RUNTIME_PACKAGES = (
+    "chromadb",
+    "onnxruntime",
+    "numpy",
+)
+
 desktop_runtime_datas: list = []
 desktop_runtime_binaries: list = []
 desktop_runtime_hiddenimports: list = []
 for _pkg in _DESKTOP_RUNTIME_PACKAGES:
     try:
         _d, _b, _h = collect_all(_pkg)
-    except Exception:
-        # 单个 extras 包缺失（例如本地 dev 环境没装 PyMuPDF）不应该让
-        # 整个打包流程失败；packaging/build_*.sh 已经强制安装
-        # `[desktop-runtime]`，CI 中这里不会落入 except。
+    except Exception as exc:
+        # Critical runtime dependencies must never be skipped; otherwise
+        # the shipped desktop bundle can boot but fail when KB is used.
+        if _pkg in _CRITICAL_DESKTOP_RUNTIME_PACKAGES:
+            raise RuntimeError(
+                f"Missing critical desktop runtime dependency during PyInstaller collect_all: {_pkg}"
+            ) from exc
         continue
     desktop_runtime_datas += _d
     desktop_runtime_binaries += _b
@@ -64,6 +73,7 @@ hiddenimports = (
     + litellm_hiddenimports
     + uvicorn_hiddenimports
     + desktop_runtime_hiddenimports
+    + list(_CRITICAL_DESKTOP_RUNTIME_PACKAGES)
     + ["tiktoken_ext.openai_public", "tiktoken_ext"]
 )
 

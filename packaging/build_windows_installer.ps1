@@ -54,6 +54,37 @@ if (-not (Test-Path $VenvPython)) {
 & $VenvPip install -q -U pip
 & $VenvPip install -q pyinstaller
 
+function Test-DesktopRuntimeImports {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PythonExe
+    )
+
+    $script = @'
+import importlib
+import sys
+
+required = ("chromadb", "onnxruntime", "numpy")
+missing = []
+for name in required:
+    try:
+        importlib.import_module(name)
+    except Exception:
+        missing.append(name)
+
+if missing:
+    print(f"Missing desktop-runtime deps in packaging venv: {', '.join(missing)}")
+    sys.exit(1)
+
+print("desktop-runtime dependency import check passed")
+'@
+
+    & $PythonExe '-c' $script
+    if ($LASTEXITCODE -ne 0) {
+        throw 'desktop-runtime dependency import check failed.'
+    }
+}
+
 $ExePath = Join-Path $DistArchDir 'agx-server.exe'
 $HaveCachedBackend = Test-Path $ExePath
 
@@ -64,6 +95,7 @@ if (-not $SkipPyInstaller) {
     # Office readers and numpy (GitHub issue #10: "Document ingestion fails for
     # PDF files (missing PDF reader libs / missing numpy)" on Windows).
     & $VenvPip install -q "$ProjectRoot[desktop-runtime]"
+    Test-DesktopRuntimeImports -PythonExe $VenvPython
 
     New-Item -ItemType Directory -Force -Path $DistArchDir | Out-Null
     New-Item -ItemType Directory -Force -Path $WorkArchDir | Out-Null
@@ -88,6 +120,12 @@ else {
         Write-Error "SKIP_BACKEND=1 but missing cached binary: $ExePath"
     }
     Write-Host '--- Step 1: Skipping PyInstaller (SKIP_BACKEND=1) ---'
+}
+
+Write-Host '--- Bundled runtime dependency check ---'
+& $ExePath '--check-desktop-runtime'
+if ($LASTEXITCODE -ne 0) {
+    throw 'Bundled agx-server.exe is missing desktop runtime dependencies.'
 }
 
 Write-Host '--- Smoke test (agx-server.exe) ---'
