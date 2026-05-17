@@ -156,7 +156,18 @@ export function WorkspacePanel({
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
   const [hostPlatform, setHostPlatform] = useState<string | null>(null);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
+  const fallbackBrowseSessionIdRef = useRef<string>("");
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const awaitingFreshSession = isPaneAwaitingFreshSession(paneId);
+  const getBrowseSessionId = () => {
+    const direct = String(sessionId ?? "").trim();
+    if (direct) return direct;
+    if (awaitingFreshSession) {
+      return String(fallbackBrowseSessionIdRef.current ?? "").trim();
+    }
+    return "";
+  };
+
   const [panelHeight, setPanelHeight] = useState(0);
   const [terminalAreaHeight, setTerminalAreaHeight] = useState(0);
   const terminalUserResized = useRef(false);
@@ -209,9 +220,10 @@ export function WorkspacePanel({
   }, [filePreview]);
 
   const loadTaskspaces = async (): Promise<Taskspace[] | undefined> => {
-    if (!sessionId) return undefined;
+    const browseSessionId = getBrowseSessionId();
+    if (!browseSessionId) return undefined;
     setLoading(true);
-    const result = await window.agenticxDesktop.listTaskspaces(sessionId);
+    const result = await window.agenticxDesktop.listTaskspaces(browseSessionId);
     if (!result.ok) {
       setErrorText(result.error ?? "加载工作区失败");
       setLoading(false);
@@ -230,10 +242,11 @@ export function WorkspacePanel({
   };
 
   const loadDir = async (taskspaceId: string, relPath = ".", force = false) => {
-    if (!sessionId) return;
+    const browseSessionId = getBrowseSessionId();
+    if (!browseSessionId) return;
     const key = nodeKey(taskspaceId, relPath);
     if (!force && entriesByDir[key]) return;
-    const result = await window.agenticxDesktop.listTaskspaceFiles({ sessionId, taskspaceId, path: relPath });
+    const result = await window.agenticxDesktop.listTaskspaceFiles({ sessionId: browseSessionId, taskspaceId, path: relPath });
     if (!result.ok) {
       if ((result.error ?? "").includes("session not found")) return;
       setErrorText(result.error ?? "读取目录失败");
@@ -271,6 +284,46 @@ export function WorkspacePanel({
       .then((p) => setHostPlatform(p))
       .catch(() => setHostPlatform(null));
   }, []);
+
+  useEffect(() => {
+    const sid = String(sessionId ?? "").trim();
+    if (sid) {
+      fallbackBrowseSessionIdRef.current = sid;
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (sessionId) return;
+    if (!awaitingFreshSession) return;
+    if (fallbackBrowseSessionIdRef.current) {
+      void loadTaskspaces();
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const listed = await window.agenticxDesktop
+        .listSessions(paneAvatarId ?? undefined)
+        .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
+      if (!listed.ok || !Array.isArray(listed.sessions) || cancelled) return;
+      const rememberedSid = getRememberedSessionForAvatar(paneAvatarId);
+      const rememberedValid =
+        !!rememberedSid &&
+        listed.sessions.some(
+          (item) =>
+            String(item.session_id ?? "").trim() === rememberedSid &&
+            isSessionAvatarMatch(item, paneAvatarId)
+        );
+      const recentSid = pickMostRecentSessionId(listed.sessions, paneAvatarId);
+      const preferredSid = rememberedValid ? rememberedSid ?? undefined : recentSid;
+      if (!preferredSid || cancelled) return;
+      fallbackBrowseSessionIdRef.current = preferredSid;
+      await loadTaskspaces();
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, awaitingFreshSession, paneAvatarId]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -327,7 +380,8 @@ export function WorkspacePanel({
 
 
   useEffect(() => {
-    if (!sessionId) return;
+    const browseSessionId = getBrowseSessionId();
+    if (!browseSessionId) return;
     const timer = window.setInterval(() => {
       taskspaces.forEach((ts) => {
         const key = nodeKey(ts.id, ".");
@@ -338,14 +392,15 @@ export function WorkspacePanel({
     }, 3000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, taskspaces, expandedDirs]);
+  }, [sessionId, awaitingFreshSession, taskspaces, expandedDirs]);
 
   useEffect(() => {
-    if (!sessionId) return;
+    const browseSessionId = getBrowseSessionId();
+    if (!browseSessionId) return;
     if (typeof autoRefreshKey !== "number" || autoRefreshKey <= 0) return;
     void refreshListAndActiveTaskspace();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoRefreshKey, sessionId]);
+  }, [autoRefreshKey, sessionId, awaitingFreshSession]);
 
   useLayoutEffect(() => {
     const element = panelRef.current;
@@ -493,11 +548,12 @@ export function WorkspacePanel({
   };
 
   const openFile = async (taskspaceId: string, relPath: string) => {
-    if (!sessionId) return;
+    const browseSessionId = getBrowseSessionId();
+    if (!browseSessionId) return;
     if (activeTaskspaceId !== taskspaceId) {
       onActiveTaskspaceChange(taskspaceId);
     }
-    const result = await window.agenticxDesktop.readTaskspaceFile({ sessionId, taskspaceId, path: relPath });
+    const result = await window.agenticxDesktop.readTaskspaceFile({ sessionId: browseSessionId, taskspaceId, path: relPath });
     if (!result.ok) {
       if ((result.error ?? "").includes("session not found")) return;
       setErrorText(result.error ?? "读取文件失败");
