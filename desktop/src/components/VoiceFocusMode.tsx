@@ -1,8 +1,9 @@
-import { Mic } from "lucide-react";
+import { Mic, Wrench } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "../store";
 import type { VoiceProviderKind, VoiceRealtimeEmit, VoiceHistoryTurn, VoiceToolScope } from "../voice/realtime";
 import { createRealtimeVoiceSession } from "../voice/realtime";
+import { runMetaTurnViaChat } from "../voice/realtime/meta-bridge";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../utils/session-message-map";
 
 /** 历史注入上限：与 AGENTS.md 中和用户确认的「最近 20 轮」一致（≈40 条 user/assistant）。 */
@@ -165,6 +166,25 @@ export function VoiceFocusMode() {
   }, [panes, focusModePaneId]);
   const [runtimeTargetSessionId, setRuntimeTargetSessionId] = useState<string>("");
   const targetSessionId = runtimeTargetSessionId || storeTargetSessionId;
+  const targetSessionIdRef = useRef(targetSessionId);
+  useEffect(() => {
+    targetSessionIdRef.current = targetSessionId;
+  }, [targetSessionId]);
+
+  const [voiceKind, setVoiceKind] = useState<VoiceProviderKind | null>(null);
+  const [bridgeArmed, setBridgeArmed] = useState(false);
+  const [bridgeHint, setBridgeHint] = useState<string | null>(null);
+
+  const bridgeAbortRef = useRef<AbortController | null>(null);
+  const unsubUserFinalRef = useRef<(() => void) | null>(null);
+  const bridgeHintTimerRef = useRef<number | null>(null);
+
+  const clearBridgeHintTimer = useCallback(() => {
+    if (bridgeHintTimerRef.current != null) {
+      window.clearTimeout(bridgeHintTimerRef.current);
+      bridgeHintTimerRef.current = null;
+    }
+  }, []);
 
   const [phase, setPhase] = useState<"idle" | "listening" | "thinking" | "speaking" | "tool_running" | "error">("idle");
   const [micLevel, setMicLevel] = useState(0);
@@ -293,8 +313,162 @@ export function VoiceFocusMode() {
     }, 250);
   }, [enqueueDraftTurns]);
 
+  const executeDoubaoMetaBridge = useCallback(
+    async (userText: string) => {
+      const sid = String(targetSessionIdRef.current ?? "").trim();
+      const ut = userText.trim();
+      // eslint-disable-next-line no-console
+      console.info("[voice-focus][bridge] start", { sid, len: ut.length, preview: ut.slice(0, 80) });
+      if (!sid || !ut) {
+        // eslint-disable-next-line no-console
+        console.warn("[voice-focus][bridge] missing sid or text, abort", { sid, hasText: !!ut });
+        sessionRef.current?.resumeDoubaoOutput?.();
+        setBridgeArmed(false);
+        clearBridgeHintTimer();
+        setBridgeHint("未检测到内容或会话，已回到普通对话");
+        bridgeHintTimerRef.current = window.setTimeout(() => {
+          setBridgeHint(null);
+          bridgeHintTimerRef.current = null;
+        }, 3000);
+        return;
+      }
+      const ac = new AbortController();
+      bridgeAbortRef.current = ac;
+      clearBridgeHintTimer();
+      setBridgeHint("正在为你调用 Meta…");
+      setPhase("thinking");
+      setPartial(null);
+      try {
+        const { finalText, toolCalls } = await runMetaTurnViaChat({
+          apiBase,
+          desktopToken: apiToken,
+          sessionId: sid,
+          query: ut,
+          signal: ac.signal,
+        });
+        if (ac.signal.aborted) return;
+        // eslint-disable-next-line no-console
+        console.info("[voice-focus][bridge] done", {
+          finalLen: finalText.length,
+          toolCount: toolCalls.length,
+          toolNames: toolCalls.map((t) => t.name),
+        });
+        delete draftTurnsRef.current.user;
+        enqueueVoiceTurn({ role: "user", content: ut });
+        for (const tc of toolCalls) {
+          const argsText = JSON.stringify(tc.args ?? {});
+          enqueueVoiceTurn({
+            role: "assistant",
+            content: `[调用工具] ${tc.name}(${argsText.slice(0, 200)})`,
+            metadata: {
+              source: "voice-focus",
+              tool_call_id: tc.callId,
+              tool_name: tc.name,
+              tool_args: tc.args,
+            },
+          });
+          enqueueVoiceTurn({
+            role: "tool",
+            content: tc.result.slice(0, 4000),
+            tool_call_id: tc.callId,
+            tool_name: tc.name,
+            tool_args: tc.args,
+            tool_status: "ok",
+            tool_result_preview: tc.result.slice(0, 240),
+            metadata: { source: "voice-focus" },
+          });
+        }
+        const reply = finalText.trim() || (toolCalls.length ? "已完成工具调用。" : "");
+        if (reply) {
+          enqueueVoiceTurn({ role: "assistant", content: reply });
+          setPartial({ role: "assistant", text: reply });
+          try {
+            if (typeof window !== "undefined" && "speechSynthesis" in window) {
+              window.speechSynthesis.cancel();
+              const utter = new SpeechSynthesisUtterance(reply);
+              utter.lang = "zh-CN";
+              utter.onstart = () => setPhase("speaking");
+              utter.onend = () => setPhase("listening");
+              utter.onerror = () => setPhase("listening");
+              window.speechSynthesis.speak(utter);
+            } else {
+              setPhase("listening");
+            }
+          } catch {
+            setPhase("listening");
+          }
+        } else {
+          setPartial(null);
+          setPhase("listening");
+        }
+      } catch (e) {
+        if (ac.signal.aborted) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        // eslint-disable-next-line no-console
+        console.error("[voice-focus][bridge] failed", e);
+        clearBridgeHintTimer();
+        setPartial(null);
+        setBridgeHint(`工具调用失败：${msg.slice(0, 120)}`);
+        bridgeHintTimerRef.current = window.setTimeout(() => {
+          setBridgeHint(null);
+          bridgeHintTimerRef.current = null;
+        }, 6000);
+        setPhase("listening");
+      } finally {
+        if (bridgeAbortRef.current === ac) bridgeAbortRef.current = null;
+        sessionRef.current?.resumeDoubaoOutput?.();
+        setBridgeArmed(false);
+        unsubUserFinalRef.current = null;
+      }
+    },
+    [apiBase, apiToken, enqueueVoiceTurn, clearBridgeHintTimer]
+  );
+
+  const toggleDoubaoToolAsk = useCallback(() => {
+    const s = sessionRef.current;
+    if (!s?.requestUserFinalOnce || !s.pauseDoubaoOutput || !s.resumeDoubaoOutput) return;
+
+    if (bridgeArmed) {
+      bridgeAbortRef.current?.abort();
+      bridgeAbortRef.current = null;
+      unsubUserFinalRef.current?.();
+      unsubUserFinalRef.current = null;
+      s.resumeDoubaoOutput();
+      setBridgeArmed(false);
+      setBridgeHint(null);
+      clearBridgeHintTimer();
+      return;
+    }
+
+    // eslint-disable-next-line no-console
+    console.info("[voice-focus][bridge] armed");
+    s.pauseDoubaoOutput();
+    setBridgeArmed(true);
+    setBridgeHint("工具一问，请讲…");
+    unsubUserFinalRef.current = s.requestUserFinalOnce((text) => {
+      // eslint-disable-next-line no-console
+      console.info("[voice-focus][bridge] user_final captured", {
+        len: text.length,
+        preview: text.slice(0, 80),
+      });
+      void executeDoubaoMetaBridge(text);
+    });
+  }, [bridgeArmed, clearBridgeHintTimer, executeDoubaoMetaBridge]);
+
   const hangup = useCallback(async () => {
     clearErrorExit();
+    bridgeAbortRef.current?.abort();
+    bridgeAbortRef.current = null;
+    unsubUserFinalRef.current?.();
+    unsubUserFinalRef.current = null;
+    clearBridgeHintTimer();
+    try {
+      sessionRef.current?.resumeDoubaoOutput?.();
+    } catch {
+      /* ignore */
+    }
+    setBridgeArmed(false);
+    setBridgeHint(null);
     setErrorText(null);
     enqueueDraftTurns();
     try {
@@ -335,7 +509,15 @@ export function VoiceFocusMode() {
       }
     }
     exitFocusMode();
-  }, [enqueueDraftTurns, exitFocusMode, flushPendingVoiceTurns, setPaneMessages, targetPaneId, targetSessionId]);
+  }, [
+    enqueueDraftTurns,
+    exitFocusMode,
+    flushPendingVoiceTurns,
+    setPaneMessages,
+    clearBridgeHintTimer,
+    targetPaneId,
+    targetSessionId,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -399,6 +581,8 @@ export function VoiceFocusMode() {
 
         const inputDeviceId = String((pack.voice.input_device_id as string) || "").trim();
         const toolScope = readVoiceToolScope(pack.voice);
+
+        if (!cancelled) setVoiceKind(kind);
 
         if (cancelled) return;
 
@@ -531,6 +715,18 @@ export function VoiceFocusMode() {
     return () => {
       cancelled = true;
       clearErrorExit();
+      bridgeAbortRef.current?.abort();
+      bridgeAbortRef.current = null;
+      unsubUserFinalRef.current?.();
+      unsubUserFinalRef.current = null;
+      clearBridgeHintTimer();
+      try {
+        void sessionRef.current?.resumeDoubaoOutput?.();
+      } catch {
+        /* ignore */
+      }
+      setBridgeArmed(false);
+      setBridgeHint(null);
       if (partialClearTimerRef.current != null) {
         window.clearTimeout(partialClearTimerRef.current);
         partialClearTimerRef.current = null;
@@ -542,7 +738,7 @@ export function VoiceFocusMode() {
       void sessionRef.current?.dispose();
       sessionRef.current = null;
     };
-  }, [apiBase, apiToken, targetPaneId, targetSessionId, targetAvatarId, hangup, openSettings, bumpLevels, enqueueVoiceTurn, scheduleDraftFlush, setPaneSessionId]);
+  }, [apiBase, apiToken, targetPaneId, targetSessionId, targetAvatarId, hangup, openSettings, bumpLevels, enqueueVoiceTurn, scheduleDraftFlush, setPaneSessionId, clearBridgeHintTimer]);
 
   useEffect(() => {
     const esc = (e: KeyboardEvent) => {
@@ -559,7 +755,7 @@ export function VoiceFocusMode() {
   const driveMix = phase === "speaking" ? outLevel : micLevel;
 
   // Perplexity-like dot grid：强弱点对比更明显（尺度 + 不透明度 + 少量光晕）。
-  const COLS = 12;
+  const COLS = 8;
   const ROWS = 3;
 
   return (
@@ -612,6 +808,25 @@ export function VoiceFocusMode() {
         <div className="agx-voice-focus-error no-drag" role="alert">
           {errorText}
         </div>
+      ) : null}
+
+      {bridgeHint && !errorText ? (
+        <div className="agx-voice-focus-hint no-drag" role="status">
+          {bridgeHint}
+        </div>
+      ) : null}
+
+      {/* Doubao: Meta tool bridge (工具一问) */}
+      {voiceKind === "doubao_realtime" ? (
+        <button
+          type="button"
+          className={`agx-voice-focus-tool no-drag${bridgeArmed ? " agx-voice-focus-tool--armed" : ""}`}
+          aria-label={bridgeArmed ? "取消工具一问" : "工具一问，使用 Meta 工具链"}
+          aria-pressed={bridgeArmed}
+          onClick={() => toggleDoubaoToolAsk()}
+        >
+          <Wrench className="agx-voice-focus-tool-icon" strokeWidth={2} aria-hidden />
+        </button>
       ) : null}
 
       {/* Right: stop button */}
