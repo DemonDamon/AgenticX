@@ -317,7 +317,9 @@ class _ChromaBackend:
             import chromadb
         except ImportError as exc:  # pragma: no cover - exercised via install docs
             raise KBError(
-                "chromadb is required for the knowledge base. Install with `pip install chromadb`."
+                "chromadb is required for the knowledge base. "
+                "For source installs, run `pip install chromadb`. "
+                "For packaged desktop builds, this indicates a broken bundle and requires reinstalling the app."
             ) from exc
 
         with self._lock:
