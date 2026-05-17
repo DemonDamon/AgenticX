@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
 import { createPortal } from "react-dom";
-import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent } from "react";
+import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent, CSSProperties } from "react";
 import {
   Bookmark,
   Check,
@@ -128,6 +128,37 @@ const KB_RETRIEVAL_MODE_OPTIONS: { value: "auto" | "always"; label: string }[] =
   { value: "auto", label: "智能检索" },
   { value: "always", label: "始终检索" },
 ];
+
+/** 多分窗下仅看窗口宽度不可靠：按单窗格可视宽度切换到「侧栏抽屉」模式（对齐左侧主导航 overlay，不并排挤压会话区）。 */
+const CHATPANE_SIDE_OVERLAY_BREAK = 760;
+
+/** 程序化展开工作区：窄窗格时与其它侧栏互斥，避免并排挤压。 */
+function openWorkspaceSidebarForPane(
+  paneId: string,
+  paneOuterWidthPx: number,
+  openSidePanel: (paneId: string, tab: "workspace" | "members") => void,
+) {
+  const compact =
+    paneOuterWidthPx > 0 && paneOuterWidthPx < CHATPANE_SIDE_OVERLAY_BREAK;
+  if (!compact) {
+    openSidePanel(paneId, "workspace");
+    return;
+  }
+  useAppStore.setState((s) => ({
+    panes: s.panes.map((row) =>
+      row.id !== paneId
+        ? row
+        : {
+            ...row,
+            taskspacePanelOpen: true,
+            sidePanelTab: "workspace",
+            historyOpen: false,
+            membersPanelOpen: false,
+            spawnsColumnOpen: false,
+          },
+    ),
+  }));
+}
 
 const FALLBACK_PANE: ChatPaneState = {
   id: "fallback-pane",
@@ -2607,7 +2638,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         setActiveTaskspace(pane.id, activeWorkspace.id);
       }
 
-      openSidePanel(pane.id, "workspace");
+      openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
       addPaneTerminalTab(pane.id, activeWorkspace.path, "cc-bridge");
 
       let bridgeUrl = "http://127.0.0.1:9742";
@@ -2669,6 +2700,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       setActiveTaskspace,
       openSidePanel,
       addPaneTerminalTab,
+      paneWidth,
     ]
   );
 
@@ -2688,7 +2720,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           ? wsResp.workspaces.find((item) => item.id === pane.activeTaskspaceId)
           : undefined) ?? wsResp.workspaces[0];
       if (!activeWorkspace?.path) return;
-      openSidePanel(pane.id, "workspace");
+      openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
 
       let bridgeUrl = "http://127.0.0.1:9742";
       let bridgeToken = "";
@@ -2737,7 +2769,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         await sleep(180);
       }
     },
-    [pane.id, pane.sessionId, pane.activeTaskspaceId, apiBase, apiToken, openSidePanel, addPaneTerminalTab]
+    [pane.id, pane.sessionId, pane.activeTaskspaceId, apiBase, apiToken, openSidePanel, addPaneTerminalTab, paneWidth]
   );
 
   const updateAtStateFromText = useCallback(
@@ -2990,9 +3022,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     });
     if (result.ok && result.workspace?.id) {
       setActiveTaskspace(pane.id, result.workspace.id);
-      if (!pane.taskspacePanelOpen) openSidePanel(pane.id, "workspace");
+      if (!pane.taskspacePanelOpen) {
+        openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
+      }
     }
-  }, [pane.id, pane.sessionId, pane.taskspacePanelOpen, setActiveTaskspace, openSidePanel]);
+  }, [
+    pane.id,
+    pane.sessionId,
+    pane.taskspacePanelOpen,
+    setActiveTaskspace,
+    openSidePanel,
+    paneWidth,
+  ]);
 
   const copyMessage = useCallback(async (message: Message) => {
     const textToCopy = messagePlainTextForClipboard(message);
@@ -5341,6 +5382,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const maxHistoryWidth = paneWidth > 0 ? Math.max(220, Math.floor(paneWidth * 0.35)) : 360;
   const minHistoryWidth = 200;
 
+  const compactSidePanels = paneWidth > 0 && paneWidth < CHATPANE_SIDE_OVERLAY_BREAK;
+  const clampOverlayAside = (preferred: number, minPx: number) =>
+    paneWidth > 0
+      ? Math.min(Math.max(preferred, minPx), Math.max(Math.floor(paneWidth * 0.94), minPx))
+      : preferred;
+  const overlayTaskspaceWidth = clampOverlayAside(taskspaceWidth, minTaskspaceWidth);
+  const overlayHistoryWidth = clampOverlayAside(historyWidth, minHistoryWidth);
+  const overlaySpawnsWidth = clampOverlayAside(spawnsWidth, minSpawnsWidth);
+
   useEffect(() => {
     setTaskspaceWidth((prev) => Math.min(maxTaskspaceWidth, Math.max(minTaskspaceWidth, prev)));
   }, [maxTaskspaceWidth]);
@@ -5554,10 +5604,176 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     return avatarTintBg(pane.avatarId);
   })();
 
+  useEffect(() => {
+    if (!compactSidePanels) return;
+    const p = pane;
+    const stacked =
+      Number(!!p.taskspacePanelOpen) +
+      Number(!!p.historyOpen) +
+      Number(!!p.membersPanelOpen) +
+      Number(!!p.spawnsColumnOpen);
+    if (stacked <= 1) return;
+    let keep: "workspace" | "history" | "members" | "spawns" = "workspace";
+    if (p.taskspacePanelOpen) keep = "workspace";
+    else if (p.historyOpen) keep = "history";
+    else if (p.membersPanelOpen) keep = "members";
+    else keep = "spawns";
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((row) =>
+        row.id !== p.id
+          ? row
+          : {
+              ...row,
+              taskspacePanelOpen: keep === "workspace",
+              historyOpen: keep === "history",
+              membersPanelOpen: keep === "members",
+              spawnsColumnOpen: keep === "spawns",
+            }
+      ),
+    }));
+  }, [
+    compactSidePanels,
+    pane.id,
+    pane.taskspacePanelOpen,
+    pane.historyOpen,
+    pane.membersPanelOpen,
+    pane.spawnsColumnOpen,
+  ]);
+
+  const dismissAuxiliaryOverlays = () => {
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((row) =>
+        row.id !== pane.id
+          ? row
+          : {
+              ...row,
+              taskspacePanelOpen: false,
+              historyOpen: false,
+              membersPanelOpen: false,
+              spawnsColumnOpen: false,
+            }
+      ),
+    }));
+  };
+
+  const closeWorkspacePanelOnly = () => {
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((row) => (row.id !== pane.id ? row : { ...row, taskspacePanelOpen: false })),
+    }));
+  };
+
+  const closeMembersPanelOnly = () => {
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((row) => (row.id !== pane.id ? row : { ...row, membersPanelOpen: false })),
+    }));
+  };
+
+  const closeHistoryPanelOnly = () => {
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((row) => (row.id !== pane.id ? row : { ...row, historyOpen: false })),
+    }));
+  };
+
+  const toggleWorkspaceSidePanel = () => {
+    if (!compactSidePanels) {
+      cycleSidePanel(pane.id, "workspace");
+      return;
+    }
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((p) => {
+        if (p.id !== pane.id) return p;
+        const opening = !p.taskspacePanelOpen;
+        return opening
+          ? {
+              ...p,
+              taskspacePanelOpen: true,
+              sidePanelTab: "workspace",
+              historyOpen: false,
+              membersPanelOpen: false,
+              spawnsColumnOpen: false,
+            }
+          : { ...p, taskspacePanelOpen: false };
+      }),
+    }));
+  };
+
+  const toggleHistorySidePanel = () => {
+    if (!compactSidePanels) {
+      togglePaneHistory(pane.id);
+      return;
+    }
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((p) => {
+        if (p.id !== pane.id) return p;
+        const opening = !p.historyOpen;
+        return opening
+          ? {
+              ...p,
+              historyOpen: true,
+              taskspacePanelOpen: false,
+              membersPanelOpen: false,
+              spawnsColumnOpen: false,
+            }
+          : { ...p, historyOpen: false };
+      }),
+    }));
+  };
+
+  const toggleMembersSidePanel = () => {
+    if (!compactSidePanels) {
+      cycleSidePanel(pane.id, "members");
+      return;
+    }
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((p) => {
+        if (p.id !== pane.id) return p;
+        const opening = !p.membersPanelOpen;
+        return opening
+          ? {
+              ...p,
+              membersPanelOpen: true,
+              sidePanelTab: "members",
+              taskspacePanelOpen: false,
+              historyOpen: false,
+              spawnsColumnOpen: false,
+            }
+          : { ...p, membersPanelOpen: false };
+      }),
+    }));
+  };
+
+  const toggleSpawnsSideColumn = () => {
+    if (pane.spawnsColumnOpen) {
+      dismissSpawnsColumn(
+        pane.id,
+        paneSubAgents.map((s) => s.id)
+      );
+      return;
+    }
+    if (!compactSidePanels) {
+      setSpawnsColumnOpen(pane.id, true);
+      return;
+    }
+    useAppStore.setState((s) => ({
+      panes: s.panes.map((p) => {
+        if (p.id !== pane.id) return p;
+        return {
+          ...p,
+          spawnsColumnOpen: true,
+          spawnsColumnSuppressAuto: false,
+          spawnsColumnBaselineIds: [],
+          taskspacePanelOpen: false,
+          historyOpen: false,
+          membersPanelOpen: false,
+        };
+      }),
+    }));
+  };
+
   return (
     <div
       ref={paneRef}
-      className="agx-chatpane flex h-full min-w-0 flex-1"
+      className="relative agx-chatpane flex h-full min-w-0 flex-1"
       style={paneTint ? { backgroundColor: paneTint } : undefined}
       onMouseDown={onFocus}
     >
@@ -5613,7 +5829,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             {isGroupPane && (
               <button
                 className={`agx-topbar-btn !px-[5px] ${pane.membersPanelOpen ? "agx-topbar-btn--active" : ""}`}
-                onClick={() => cycleSidePanel(pane.id, "members")}
+                onClick={toggleMembersSidePanel}
                 title="切换群成员面板"
               >
                 <Users className="h-[18px] w-[18px]" strokeWidth={1.8} />
@@ -5632,7 +5848,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             )}
             <button
               className={`agx-topbar-btn !px-[5px] ${workspacePanelOpen ? "agx-topbar-btn--active" : ""}`}
-              onClick={() => cycleSidePanel(pane.id, "workspace")}
+              onClick={toggleWorkspaceSidePanel}
               title="切换工作区面板"
             >
               <FolderOpen className="h-[18px] w-[18px]" strokeWidth={1.8} />
@@ -5640,16 +5856,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             {paneSubAgents.length > 0 ? (
               <button
                 className={`agx-topbar-btn !px-[5px] ${pane.spawnsColumnOpen ? "agx-topbar-btn--active" : ""}`}
-                onClick={() => {
-                  if (pane.spawnsColumnOpen) {
-                    dismissSpawnsColumn(
-                      pane.id,
-                      paneSubAgents.map((s) => s.id)
-                    );
-                  } else {
-                    setSpawnsColumnOpen(pane.id, true);
-                  }
-                }}
+                onClick={toggleSpawnsSideColumn}
                 title={pane.spawnsColumnOpen ? "收起 Spawns 列" : "打开 Spawns 列"}
               >
                 <Bot className="h-[18px] w-[18px]" strokeWidth={1.8} />
@@ -5657,7 +5864,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             ) : null}
             <button
               className={`agx-topbar-btn !px-[5px] ${pane.historyOpen ? "agx-topbar-btn--active" : ""}`}
-              onClick={() => togglePaneHistory(pane.id)}
+              onClick={toggleHistorySidePanel}
               title="切换历史面板"
             >
               <History className="h-[18px] w-[18px]" strokeWidth={1.8} />
@@ -6146,7 +6353,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         </div>
       </div>
 
-      {isGroupPane && pane.membersPanelOpen ? (
+      {!compactSidePanels && isGroupPane && pane.membersPanelOpen ? (
         <div className="relative h-full shrink-0 overflow-hidden border-l border-border" style={{ width: taskspaceWidth }}>
           <div
             className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
@@ -6160,11 +6367,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             groupId={groupChatId}
             avatarList={avatars}
             metaLeaderLabel={metaLeaderDisplayName}
-            onClose={() => cycleSidePanel(pane.id, "members")}
+            onClose={closeMembersPanelOnly}
           />
         </div>
       ) : null}
-      {workspacePanelOpen ? (
+      {!compactSidePanels && workspacePanelOpen ? (
         <div className="relative h-full shrink-0 overflow-hidden border-l border-border" style={{ width: taskspaceWidth }}>
           <div
             className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
@@ -6180,7 +6387,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             activeTaskspaceId={pane.activeTaskspaceId}
             onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
             autoRefreshKey={taskspaceAutoRefreshKey}
-            onClose={() => cycleSidePanel(pane.id, "workspace")}
+            onClose={closeWorkspacePanelOnly}
             tintColor={paneTint}
             onPickFileForReference={(path) => {
               if (!pane.activeTaskspaceId) return;
@@ -6196,7 +6403,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           />
         </div>
       ) : null}
-      {pane.spawnsColumnOpen ? (
+      {!compactSidePanels && pane.spawnsColumnOpen ? (
         <SpawnsColumn
           width={spawnsWidth}
           sessionId={pane.sessionId || undefined}
@@ -6220,7 +6427,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           tintColor={paneTint}
         />
       ) : null}
-      {pane.historyOpen ? (
+      {!compactSidePanels && pane.historyOpen ? (
         <div className="relative h-full shrink-0 overflow-hidden border-l border-border" style={{ width: historyWidth }}>
           <div
             className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
@@ -6230,10 +6437,140 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
             <div className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90" style={{ borderColor: "var(--ui-accent-divider-hover)" }} />
           </div>
-          <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}`}>
-            <SessionHistoryPanel pane={pane} onClose={() => togglePaneHistory(pane.id)} tintColor={paneTint} />
+          <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}-inline`}>
+            <SessionHistoryPanel pane={pane} onClose={closeHistoryPanelOnly} tintColor={paneTint} />
           </HistoryPanelBoundary>
         </div>
+      ) : null}
+
+      {compactSidePanels &&
+      (workspacePanelOpen ||
+        pane.historyOpen ||
+        (isGroupPane && pane.membersPanelOpen) ||
+        pane.spawnsColumnOpen) ? (
+        <>
+          <div
+            aria-hidden
+            role="presentation"
+            className="pointer-events-auto absolute inset-x-0 bottom-0 top-10 z-[45] bg-black/35 backdrop-blur-[1px]"
+            style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
+            onClick={dismissAuxiliaryOverlays}
+          />
+          {isGroupPane && pane.membersPanelOpen ? (
+            <div
+              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden border-l border-border bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+              style={{ width: overlayTaskspaceWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
+            >
+              <div
+                className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+                onMouseDown={startResizeTaskspace}
+                title="拖拽调整面板宽度"
+              >
+                <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
+                <div
+                  className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90"
+                  style={{ borderColor: "var(--ui-accent-divider-hover)" }}
+                />
+              </div>
+              <GroupMembersSidePanel
+                groupId={groupChatId}
+                avatarList={avatars}
+                metaLeaderLabel={metaLeaderDisplayName}
+                onClose={closeMembersPanelOnly}
+              />
+            </div>
+          ) : null}
+          {workspacePanelOpen ? (
+            <div
+              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden border-l border-border bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+              style={{ width: overlayTaskspaceWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
+            >
+              <div
+                className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+                onMouseDown={startResizeTaskspace}
+                title="拖拽调整工作区面板宽度"
+              >
+                <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
+                <div
+                  className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90"
+                  style={{ borderColor: "var(--ui-accent-divider-hover)" }}
+                />
+              </div>
+              <WorkspacePanel
+                paneId={pane.id}
+                sessionId={pane.sessionId}
+                activeTaskspaceId={pane.activeTaskspaceId}
+                onActiveTaskspaceChange={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
+                autoRefreshKey={taskspaceAutoRefreshKey}
+                onClose={closeWorkspacePanelOnly}
+                tintColor={paneTint}
+                onPickFileForReference={(path) => {
+                  if (!pane.activeTaskspaceId) return;
+                  void addContextFile(pane.activeTaskspaceId, path, { referenceToken: true });
+                  const fileName = path.split(/[\\/]/).pop() || path;
+                  const mention = `@${fileName}`;
+                  const base = extractComposerText();
+                  const trimmed = base.trimEnd();
+                  const sep = !trimmed || /\s$/.test(base) ? "" : " ";
+                  const next = `${base}${sep}${mention} `;
+                  setComposerText(next, { tokenNames: [fileName] });
+                }}
+              />
+            </div>
+          ) : null}
+          {pane.spawnsColumnOpen ? (
+            <div
+              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+              style={{ width: overlaySpawnsWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
+            >
+              <SpawnsColumn
+                width={overlaySpawnsWidth}
+                sessionId={pane.sessionId || undefined}
+                subAgents={paneSubAgents}
+                selectedSubAgent={selectedSubAgent}
+                onResizeStart={startResizeSpawns}
+                onClose={() => dismissSpawnsColumn(pane.id, paneSubAgents.map((s) => s.id))}
+                onCancel={(agentId) => void cancelPaneSubAgent(agentId)}
+                onRetry={(agentId) => void retryPaneSubAgent(agentId)}
+                onChat={(agentId) => {
+                  const sub = paneSubAgents.find((item) => item.id === agentId);
+                  const isDelegation =
+                    agentId.startsWith("dlg-") ||
+                    !!(sub?.events?.some((evt) => evt.type.startsWith("delegation")));
+                  if (isDelegation) {
+                    void openDelegatedAvatarSession(agentId);
+                    return;
+                  }
+                  setSelectedSubAgent(agentId);
+                }}
+                onSelect={(agentId) => setSelectedSubAgent(agentId)}
+                onConfirmResolve={(agentId, approved) => void resolvePaneSubAgentConfirm(agentId, approved)}
+                tintColor={paneTint}
+              />
+            </div>
+          ) : null}
+          {pane.historyOpen ? (
+            <div
+              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden border-l border-border bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+              style={{ width: overlayHistoryWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
+            >
+              <div
+                className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
+                onMouseDown={startResizeHistory}
+                title="拖拽调整历史面板宽度"
+              >
+                <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
+                <div
+                  className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90"
+                  style={{ borderColor: "var(--ui-accent-divider-hover)" }}
+                />
+              </div>
+              <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}-overlay`}>
+                <SessionHistoryPanel pane={pane} onClose={closeHistoryPanelOnly} tintColor={paneTint} />
+              </HistoryPanelBoundary>
+            </div>
+          ) : null}
+        </>
       ) : null}
       <ForwardPicker
         open={forwardPickerOpen}
