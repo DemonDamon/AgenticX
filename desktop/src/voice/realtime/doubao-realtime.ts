@@ -92,6 +92,12 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
   private sessionId = uuid();
   private sessionStarted = false;
   private connectionStarted = false;
+  private apiBase = "";
+  private desktopToken = "";
+  private currentSessionId = "";
+  /** When true, drop Doubao model text/TTS locally (Meta tool bridge owns output). */
+  private outputPaused = false;
+  private userFinalOnce: ((text: string) => void) | null = null;
 
   private bumpOutMeter(pcm: Uint8Array) {
     const p = pcm16PeakLe(pcm);
@@ -145,9 +151,22 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
 
   private emitUserFinal() {
     const text = this.userTextBuf.trim();
-    if (!text || text === this.lastUserFinal) return;
-    this.lastUserFinal = text;
-    this.emit?.({ kind: "user_final", text });
+    if (!text) return;
+    const once = this.userFinalOnce;
+    if (text !== this.lastUserFinal) {
+      this.lastUserFinal = text;
+      this.emit?.({ kind: "user_final", text });
+    }
+    // 即使文本与上一轮去重命中，只要扳手按钮注册了一次性 handler，
+    // 仍要触发桥接调用，避免「按了扳手却没反应」。
+    if (once) {
+      this.userFinalOnce = null;
+      try {
+        once(text);
+      } catch {
+        // handler errors are caller responsibility
+      }
+    }
   }
 
   private mergeAssistantText(next: string) {
@@ -290,6 +309,9 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
     this.lastUserFinal = "";
     this.assistantTextBuf = "";
     this.lastAssistantFinal = "";
+    this.apiBase = opts.apiBase;
+    this.desktopToken = opts.desktopToken;
+    this.currentSessionId = String(opts.currentSessionId || "");
 
     const baseWs = `${httpToWs(opts.apiBase)}/ws/voice/doubao?x_agx_desktop_token=${encodeURIComponent(opts.desktopToken)}`;
 
@@ -401,18 +423,21 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
         case DOUBAO_SERVER_EVENT.ASREnded:
           this.emitUserFinal();
           this.assistantTextBuf = "";
-          this.setPhase("thinking");
+          if (!this.outputPaused) this.setPhase("thinking");
           break;
         case DOUBAO_SERVER_EVENT.ChatResponse: {
+          if (this.outputPaused) break;
           const t = String(frame.jsonPayload?.content ?? "").trim();
           if (t) this.mergeAssistantText(t);
           break;
         }
         case DOUBAO_SERVER_EVENT.ChatEnded: {
+          if (this.outputPaused) break;
           this.emitAssistantFinal();
           break;
         }
         case DOUBAO_SERVER_EVENT.TTSSentenceStart: {
+          if (this.outputPaused) break;
           const t = String(frame.jsonPayload?.text ?? "").trim();
           // This is a TTS sentence boundary, not the whole model answer.
           // Treat it as a fallback partial only; final is emitted on ChatEnded
@@ -422,12 +447,14 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
           break;
         }
         case DOUBAO_SERVER_EVENT.TTSResponse: {
+          if (this.outputPaused) break;
           if (frame.binaryPayload && frame.binaryPayload.byteLength) {
             this.enqueuePcmOut(frame.binaryPayload);
           }
           break;
         }
         case DOUBAO_SERVER_EVENT.TTSEnded:
+          if (this.outputPaused) break;
           this.emitAssistantFinal();
           this.setPhase("listening");
           break;
@@ -447,14 +474,45 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
   interrupt(): void {
     // server_vad 模式下豆包会自动检测打断；这里只清本地缓冲，避免按钮点击时还在播旧音
     this.flushPlayback();
+    try {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    } catch {
+      // ignore speech cancel failure
+    }
     this.setPhase("listening");
+  }
+
+  pauseDoubaoOutput(): void {
+    this.outputPaused = true;
+    this.flushPlayback();
+    this.assistantTextBuf = "";
+    this.lastAssistantFinal = "";
+  }
+
+  resumeDoubaoOutput(): void {
+    this.outputPaused = false;
+  }
+
+  requestUserFinalOnce(handler: (text: string) => void): () => void {
+    this.userFinalOnce = handler;
+    return () => {
+      if (this.userFinalOnce === handler) this.userFinalOnce = null;
+    };
   }
 
   async dispose(): Promise<void> {
     if (this.rafMeter != null) cancelAnimationFrame(this.rafMeter);
     this.rafMeter = null;
     this.flushPlayback();
-
+    try {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    } catch {
+      // ignore
+    }
     // 优雅关闭：FinishSession → FinishConnection → close
     try {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -502,9 +560,14 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
     }
     this.ws = null;
     this.emit = null;
+    this.userFinalOnce = null;
+    this.outputPaused = false;
     this.userTextBuf = "";
     this.lastUserFinal = "";
     this.assistantTextBuf = "";
     this.lastAssistantFinal = "";
+    this.apiBase = "";
+    this.desktopToken = "";
+    this.currentSessionId = "";
   }
 }

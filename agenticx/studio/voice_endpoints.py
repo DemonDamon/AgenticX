@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Voice focus mode endpoints: provider settings, OpenAI Realtime SDP proxy, Doubao WS bridge."""
+"""Voice focus mode endpoints: settings, realtime bridges, and tool-call proxy.
+
+Author: Damon Li
+"""
 
 from __future__ import annotations
 
@@ -17,13 +20,32 @@ import websockets
 from fastapi import FastAPI, Header, HTTPException, WebSocket
 from fastapi.responses import Response
 
+from agenticx.cli.agent_tools import STUDIO_TOOLS, dispatch_tool_async
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.runtime.confirm import ConfirmGate
 from agenticx.studio.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
 DOUBAO_REALTIME_WS = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
 DEFAULT_DOUBAO_APP_KEY = "PlgvMymc7f3tQnJ6"
+VOICE_DEFAULT_TOOL_ALLOWLIST = {
+    "knowledge_search",
+    "web_search",
+    "liteparse",
+    "file_read",
+    "list_files",
+    "session_search",
+    "mcp_call",
+}
+
+
+class VoiceConfirmGate(ConfirmGate):
+    """Deny interactive confirmations in phone mode to avoid blocked turns."""
+
+    async def request_confirm(self, question: str, context: dict[str, Any] | None = None) -> bool:
+        _ = question, context
+        return False
 
 
 def _read_u32_be(buf: bytes, offset: int) -> int:
@@ -178,6 +200,29 @@ def _persist_voice(updates: dict[str, Any]) -> None:
     ConfigManager._dump_yaml(path, doc)
 
 
+def _voice_tool_scope(raw: dict[str, Any]) -> str:
+    scope = str(raw.get("tool_scope") or "default").strip().lower()
+    return "advanced" if scope == "advanced" else "default"
+
+
+def _tool_name_from_schema(schema: dict[str, Any]) -> str:
+    fn = schema.get("function")
+    if not isinstance(fn, dict):
+        return ""
+    return str(fn.get("name") or "").strip()
+
+
+def _voice_tool_schemas(mode: str) -> list[dict[str, Any]]:
+    if mode == "advanced":
+        return copy.deepcopy([tool for tool in STUDIO_TOOLS if _tool_name_from_schema(tool)])
+    filtered: list[dict[str, Any]] = []
+    for tool in STUDIO_TOOLS:
+        name = _tool_name_from_schema(tool)
+        if name and name in VOICE_DEFAULT_TOOL_ALLOWLIST:
+            filtered.append(copy.deepcopy(tool))
+    return filtered
+
+
 def register_voice_endpoints(
     app: FastAPI,
     *,
@@ -235,6 +280,61 @@ def register_voice_endpoints(
         _persist_voice(merged)
         raw = _voice_section()
         return {"ok": True, "voice": _mask_voice(raw), "voice_flags": _voice_configured_flags(raw)}
+
+    @app.get("/api/voice/tool_schemas")
+    async def voice_tool_schemas_get(
+        mode: str | None = None,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        check_token(x_agx_desktop_token)
+        raw = _voice_section()
+        chosen = str(mode or _voice_tool_scope(raw)).strip().lower()
+        chosen = "advanced" if chosen == "advanced" else "default"
+        tools = _voice_tool_schemas(chosen)
+        return {"ok": True, "mode": chosen, "tools": tools}
+
+    @app.post("/api/voice/tool_call")
+    async def voice_tool_call(
+        body: dict[str, Any],
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        check_token(x_agx_desktop_token)
+        session_id = str(body.get("session_id") or "").strip()
+        call_id = str(body.get("call_id") or "").strip()
+        name = str(body.get("name") or "").strip()
+        raw_arguments = body.get("arguments")
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id required")
+        if not call_id:
+            raise HTTPException(status_code=400, detail="call_id required")
+        if not name:
+            raise HTTPException(status_code=400, detail="name required")
+        arguments: dict[str, Any]
+        if isinstance(raw_arguments, str):
+            try:
+                parsed = json.loads(raw_arguments)
+            except Exception as exc:
+                return {"ok": False, "error": f"arguments json parse failed: {exc}"}
+            arguments = parsed if isinstance(parsed, dict) else {}
+        elif isinstance(raw_arguments, dict):
+            arguments = raw_arguments
+        else:
+            arguments = {}
+
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        try:
+            result = await dispatch_tool_async(
+                name,
+                arguments,
+                managed.studio_session,
+                confirm_gate=VoiceConfirmGate(),
+                team_manager=getattr(managed, "_team_manager", None),
+            )
+            return {"ok": True, "result": str(result)}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
 
     @app.post("/api/voice/realtime/openai_sdp")
     async def voice_openai_sdp_proxy(
@@ -323,6 +423,11 @@ def register_voice_endpoints(
             content = str(raw.get("content") or "")
             meta = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else None
             agent_id_s = str(raw.get("agent_id") or "").strip()
+            tool_call_id = str(raw.get("tool_call_id") or "").strip()
+            tool_name = str(raw.get("tool_name") or "").strip()
+            tool_status = str(raw.get("tool_status") or "").strip()
+            tool_result_preview = str(raw.get("tool_result_preview") or "").strip()
+            tool_args = raw.get("tool_args") if isinstance(raw.get("tool_args"), dict) else None
             # Voice user/assistant turns must both default to ``meta`` so that
             # ChatPane's visibility filter (which keeps only agentId in {"", "meta"})
             # renders them in the conversation. The voice-focus provenance is kept
@@ -331,7 +436,7 @@ def register_voice_endpoints(
             # every voice user message in the UI even though it was persisted.
             agent_id_final = agent_id_s or "meta"
 
-            ok_role = role in {"user", "assistant"}
+            ok_role = role in {"user", "assistant", "tool"}
             if not ok_role or not content.strip():
                 continue
 
@@ -345,6 +450,17 @@ def register_voice_endpoints(
             }
             if meta:
                 entry["metadata"] = copy.deepcopy(meta)
+            if role == "tool":
+                if tool_call_id:
+                    entry["tool_call_id"] = tool_call_id
+                if tool_name:
+                    entry["tool_name"] = tool_name
+                if tool_status in {"ok", "error", "running", "pending"}:
+                    entry["tool_status"] = tool_status
+                if tool_result_preview:
+                    entry["tool_result_preview"] = tool_result_preview
+                if tool_args:
+                    entry["tool_args"] = copy.deepcopy(tool_args)
             session.chat_history.append(entry)
             session.agent_messages.append(copy.deepcopy(entry))
             appended += 1

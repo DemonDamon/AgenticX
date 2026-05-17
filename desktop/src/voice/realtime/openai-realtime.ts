@@ -1,4 +1,5 @@
 import type { RealtimeVoiceSession, VoiceConnectOptions, VoiceRealtimeEmit, VoiceRingPhase } from "./types";
+import { fetchToolSchemas, runToolCall } from "./tool-bridge";
 
 function timeDomainAnalyserPeak(bins: Uint8Array): number {
   let max = 0;
@@ -33,11 +34,80 @@ export class OpenAIRealtimeRtcSession implements RealtimeVoiceSession {
   /** Set true once transcript .done arrived; we then only return to listening
    * after audio playback has actually drained. */
   private transcriptDone = false;
+  private currentSessionId = "";
+  private apiBase = "";
+  private desktopToken = "";
+  private toolScope: "default" | "advanced" = "default";
+  private chainDepth = 0;
+  private pendingToolCalls = new Map<string, { name: string; argsJson: string }>();
+  private chainLimit = 8;
 
   private setPhase(next: VoiceRingPhase) {
     if (this.phase === next) return;
     this.phase = next;
     this.emit?.({ kind: "phase", phase: next });
+  }
+
+  private sendDc(payload: Record<string, unknown>) {
+    const ch = this.dc;
+    if (!ch || ch.readyState !== "open") return;
+    try {
+      ch.send(JSON.stringify(payload));
+    } catch {
+      // ignore channel send errors
+    }
+  }
+
+  private async handleFunctionCallDone(callId: string, fnName: string, argsJson: string) {
+    if (!callId || !fnName || !this.currentSessionId) return;
+    this.chainDepth += 1;
+    this.setPhase("tool_running");
+    this.emit?.({ kind: "tool_running", toolName: fnName });
+    if (this.chainDepth > this.chainLimit) {
+      this.sendDc({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: callId,
+          output: "Too many chained tool calls. Please answer with current evidence.",
+        },
+      });
+      this.sendDc({ type: "response.create" });
+      this.emit?.({ kind: "tool_running", toolName: null });
+      return;
+    }
+    const result = await runToolCall({
+      apiBase: this.apiBase,
+      desktopToken: this.desktopToken,
+      sessionId: this.currentSessionId,
+      callId,
+      name: fnName,
+      argumentsJson: argsJson,
+    });
+    let parsedArgs: Record<string, unknown> = {};
+    try {
+      parsedArgs = (JSON.parse(argsJson || "{}") as Record<string, unknown>) ?? {};
+    } catch {
+      parsedArgs = {};
+    }
+    this.emit?.({
+      kind: "tool_result",
+      callId,
+      toolName: fnName,
+      toolArgs: parsedArgs,
+      output: result.output,
+    });
+    this.sendDc({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: callId,
+        output: result.output.slice(0, 4000),
+      },
+    });
+    this.sendDc({ type: "response.create" });
+    this.emit?.({ kind: "tool_running", toolName: null });
+    if (!result.ok) this.setPhase("thinking");
   }
 
   private handleDcMessage(raw: string) {
@@ -48,12 +118,35 @@ export class OpenAIRealtimeRtcSession implements RealtimeVoiceSession {
       return;
     }
     const t = String(data.type ?? "");
+    if (t === "response.function_call_arguments.delta") {
+      const callId = String(data.call_id ?? "");
+      const fnName = String(data.name ?? "");
+      const delta = String(data.delta ?? "");
+      if (callId) {
+        const prev = this.pendingToolCalls.get(callId) ?? { name: fnName, argsJson: "" };
+        prev.name = fnName || prev.name;
+        prev.argsJson += delta;
+        this.pendingToolCalls.set(callId, prev);
+      }
+    }
+    if (t === "response.function_call_arguments.done") {
+      const callId = String(data.call_id ?? "");
+      const fnName = String(data.name ?? "");
+      const argsJson = String(data.arguments ?? "");
+      const prev = this.pendingToolCalls.get(callId);
+      const finalName = fnName || prev?.name || "";
+      const finalArgs = argsJson || prev?.argsJson || "{}";
+      this.pendingToolCalls.delete(callId);
+      void this.handleFunctionCallDone(callId, finalName, finalArgs);
+      return;
+    }
     if (t.includes("input_audio_buffer.speech_started")) {
       this.interrupt();
       this.setPhase("listening");
     }
     if (t === "response.created" || t === "response.in_progress") {
       this.setPhase("thinking");
+      if (t === "response.created") this.chainDepth = 0;
       // New response cycle: clear any pending transcript-done flag so the
       // audio watchdog won't prematurely flip to listening on the FIRST
       // silence gap (between thinking and speaking).
@@ -104,6 +197,12 @@ export class OpenAIRealtimeRtcSession implements RealtimeVoiceSession {
   async start(opts: VoiceConnectOptions): Promise<void> {
     this.emit = opts.emit;
     this.assistantBuf = "";
+    this.currentSessionId = String(opts.currentSessionId || "");
+    this.apiBase = opts.apiBase;
+    this.desktopToken = opts.desktopToken;
+    this.toolScope = opts.toolScope ?? "default";
+    this.chainDepth = 0;
+    this.pendingToolCalls.clear();
     this.setPhase("listening");
 
     const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -115,10 +214,28 @@ export class OpenAIRealtimeRtcSession implements RealtimeVoiceSession {
     dc.onmessage = (ev) => {
       if (typeof ev.data === "string") this.handleDcMessage(ev.data);
     };
-    // 历史注入：DataChannel open 后立即灌入此前对话作为
-    // `conversation.item.create` 事件，让模型「记得」之前聊过什么。
-    // 不调用 response.create —— 等用户开口后 server_vad 自然触发首轮回答，
-    // 避免一进电话模型主动播报无关历史摘要。
+    const initDc = async () => {
+      const tools = await fetchToolSchemas({
+        apiBase: this.apiBase,
+        desktopToken: this.desktopToken,
+        mode: this.toolScope,
+      });
+      this.sendDc({
+        type: "session.update",
+        session: {
+          tool_choice: "auto",
+          tools,
+        },
+      });
+    };
+    if (dc.readyState === "open") {
+      void initDc();
+    } else {
+      dc.addEventListener("open", () => void initDc(), { once: true });
+    }
+
+    // History injection: once data channel opens, replay recent text turns so
+    // realtime model can continue the same context before first spoken turn.
     const turns = (opts.historyTurns ?? []).filter((t) => t.content && t.content.trim());
     if (turns.length) {
       const sendHistory = () => {
@@ -323,5 +440,10 @@ export class OpenAIRealtimeRtcSession implements RealtimeVoiceSession {
     this.audioActive = false;
     this.audioSilenceFrames = 0;
     this.transcriptDone = false;
+    this.currentSessionId = "";
+    this.apiBase = "";
+    this.desktopToken = "";
+    this.chainDepth = 0;
+    this.pendingToolCalls.clear();
   }
 }

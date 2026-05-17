@@ -1,6 +1,7 @@
 /** Realtime capsule voice provider types. */
 
-export type VoiceRingPhase = "idle" | "listening" | "thinking" | "speaking";
+export type VoiceRingPhase = "idle" | "listening" | "thinking" | "speaking" | "tool_running";
+export type VoiceToolScope = "default" | "advanced";
 
 export type VoiceRealtimeEmit =
   | { kind: "phase"; phase: VoiceRingPhase }
@@ -14,7 +15,9 @@ export type VoiceRealtimeEmit =
   /** Assistant streaming text chunk (e.g. Doubao 550 ChatResponse content). */
   | { kind: "assistant_partial"; text: string }
   /** Assistant final paragraph (Realtime ASR/audio transcript completion). */
-  | { kind: "assistant_final"; text: string };
+  | { kind: "assistant_final"; text: string }
+  | { kind: "tool_running"; toolName: string | null }
+  | { kind: "tool_result"; callId: string; toolName: string; toolArgs: Record<string, unknown>; output: string };
 
 /** Prior-conversation turns to inherit into the realtime session for context continuity. */
 export type VoiceHistoryTurn = { role: "user" | "assistant"; content: string };
@@ -33,6 +36,8 @@ export type VoiceConnectOptions = {
    * 空数组 = 该 session 无历史（豆包/OpenAI 仍按全新对话处理）。
    */
   historyTurns?: VoiceHistoryTurn[];
+  currentSessionId?: string;
+  toolScope?: VoiceToolScope;
   emit: (e: VoiceRealtimeEmit) => void;
 };
 
@@ -42,4 +47,15 @@ export interface RealtimeVoiceSession {
   dispose(): Promise<void>;
   /** Stop model playback / current response branch. */
   interrupt(): void;
+  /**
+   * Doubao-only: suppress Chat/TTS output locally while Meta `/api/chat` tool bridge runs.
+   * Must clear queued PCM (flush).
+   */
+  pauseDoubaoOutput?(): void;
+  resumeDoubaoOutput?(): void;
+  /**
+   * Doubao-only: invoke handler once on next `user_final`, then clear.
+   * Returns unsubscribe if user cancels before speaking.
+   */
+  requestUserFinalOnce?(handler: (text: string) => void): () => void;
 }
