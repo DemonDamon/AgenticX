@@ -3708,8 +3708,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       setStallState((prev) => prev === "stall" ? "stall" : "none");
       return;
     }
-    /** 首 token / 工具进度前模型可能静默较久，阈值过短易误报 */
-    const STALL_THRESHOLD_MS = 60_000;
+    /** 首 token / 工具进度前模型可能静默较久，阈值过短易误报。
+     * 长任务（如读源码 → 分析 → file_write 长文档）的 think/工具间隙经常 60–110s，
+     * 阈值放到 120s 减少"任务可能中断"的误报闪现，再被新 SSE 帧自动收起的尴尬。 */
+    const STALL_THRESHOLD_MS = 120_000;
     const tick = () => {
       const lastAt = lastSseEventAtRef.current;
       if (lastAt > 0 && Date.now() - lastAt > STALL_THRESHOLD_MS) {
