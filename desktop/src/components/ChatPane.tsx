@@ -5239,11 +5239,38 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               }
             }
             if (payload.type === "subagent_paused") {
+              // FR-2: tool-rounds saturation must surface as an explicit "paused"
+              // state (not "running" or "completed") so the user knows the task
+              // halted at a hard limit rather than finishing naturally.
               const subId = payload.data?.agent_id;
               if (subId) {
-                const text = payload.data?.text ?? "已暂停，等待指令";
-                updateSubAgent(subId, { status: "running", currentAction: text });
-                addSubAgentEvent(subId, { type: "paused", content: text });
+                const round = Number(payload.data?.round ?? 0) || 0;
+                const maxRounds = Number(payload.data?.max_rounds ?? 0) || 0;
+                const baseText = String(payload.data?.text ?? "已暂停").trim();
+                const roundLabel = round && maxRounds ? `（触顶 ${round}/${maxRounds} 轮）` : "";
+                const tools = Array.isArray(payload.data?.executed_tools)
+                  ? (payload.data.executed_tools as unknown[]).map((t) => String(t)).filter(Boolean)
+                  : [];
+                const toolsLabel = tools.length ? ` · 最近工具：${tools.slice(-5).join(", ")}` : "";
+                const display = `${baseText}${roundLabel}${toolsLabel}`;
+                updateSubAgent(subId, {
+                  status: "paused",
+                  currentAction: display,
+                  resultSummary:
+                    typeof payload.data?.summary === "string" ? payload.data.summary : undefined,
+                  sessionId:
+                    (typeof payload.data?.avatar_session_id === "string" && payload.data.avatar_session_id.trim())
+                      || undefined,
+                });
+                addSubAgentEvent(subId, { type: "paused", content: display });
+                // Also drop a visible note into the avatar pane so the user does
+                // not need to expand the subagent panel to see why work stopped.
+                addPaneMessageIfSessionActive(
+                  pane.id,
+                  "tool",
+                  `⏸ 任务已暂停${roundLabel}。${baseText}${toolsLabel}`,
+                  eventAgentId || "meta",
+                );
               }
             }
             if (payload.type === "subagent_completed") {
@@ -5306,9 +5333,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 useAppStore.getState().accumulatePaneTokens(pane.id, inp, out);
               }
             }
+            if (payload.type === "compaction") {
+              // FR-3: surface context compaction so users do not learn about it
+              // only when the model later "explains" it as a failure cause.
+              const count = Number(payload.data?.compacted_count ?? 0) || 0;
+              const reactive = Boolean(payload.data?.reactive);
+              const text = reactive
+                ? `⚠️ Token 接近上限，已自动压缩 ${count} 条历史消息以释放上下文（保留最近若干条 + 摘要）。任务仍在继续。`
+                : `🗜️ 已自动压缩 ${count} 条历史消息（保留最近若干条 + 摘要）。任务仍在继续。`;
+              addPaneMessageIfSessionActive(pane.id, "tool", text, eventAgentId || "meta");
+            }
             if (payload.type === "error") {
               const errText = String(payload.data?.text ?? "未知错误");
-              if (errText.includes("已达到最大工具调用轮数")) {
+              const severity = String(payload.data?.severity ?? "").trim();
+              const detector = String(payload.data?.detector ?? "").trim();
+              if (severity === "warning" || detector === "token_budget_compress" || detector === "compactor_circuit_breaker") {
+                // FR-4 / FR-5: non-fatal warnings render as info chips, not blocking errors.
+                addPaneMessageIfSessionActive(pane.id, "tool", `⚠️ ${errText}`, eventAgentId || "meta");
+              } else if (errText.includes("已达到最大工具调用轮数")) {
                 const maxRounds = Number(payload.data?.max_rounds ?? 0) || 30;
                 const rounds = Number(payload.data?.round ?? maxRounds);
                 setExhaustedRounds({ rounds, maxRounds });

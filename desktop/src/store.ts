@@ -10,6 +10,7 @@ export type SubAgentStatus =
   | "pending"
   | "awaiting_confirm"
   | "running"
+  | "paused"
   | "completed"
   | "failed"
   | "cancelled";

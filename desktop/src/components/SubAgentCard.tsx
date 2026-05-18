@@ -15,6 +15,9 @@ const statusMap: Record<string, { icon: string; label: string; tone: string }> =
   pending: { icon: "⏳", label: "等待中", tone: "text-amber-300" },
   awaiting_confirm: { icon: "🛂", label: "待确认", tone: "text-orange-300" },
   running: { icon: "🔄", label: "执行中", tone: "text-cyan-300" },
+  // FR-2: distinct visual for "paused" (rounds saturated). Amber, not red,
+  // to communicate "halted but recoverable" rather than "failed".
+  paused: { icon: "⏸", label: "已暂停（触顶）", tone: "text-amber-300" },
   completed: { icon: "✅", label: "已完成", tone: "text-emerald-300" },
   failed: { icon: "❌", label: "失败", tone: "text-rose-300" },
   cancelled: { icon: "⏹", label: "已中断", tone: "text-text-muted" }
@@ -154,7 +157,7 @@ export function SubAgentCard({
 
   const canCancel =
     subAgent.status === "running" || subAgent.status === "pending" || subAgent.status === "awaiting_confirm";
-  const canRetry = subAgent.status === "failed" || subAgent.status === "completed" || subAgent.status === "cancelled";
+  const canRetry = subAgent.status === "failed" || subAgent.status === "completed" || subAgent.status === "cancelled" || subAgent.status === "paused";
   const modelLabel =
     subAgent.model
       ? (subAgent.provider ? `${subAgent.provider}/${subAgent.model}` : subAgent.model)

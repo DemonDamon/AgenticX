@@ -1461,6 +1461,46 @@ class AgentRuntime:
                                 ),
                             },
                         )
+                        # FR-4: surface a user-visible warning when even forced
+                        # compaction did not bring the budget back below COMPRESS.
+                        # Emitted as a non-fatal ERROR event with severity=warning so
+                        # Desktop renders it without halting the turn.
+                        yield RuntimeEvent(
+                            type=EventType.ERROR.value,
+                            data={
+                                "text": (
+                                    f"上下文 token 接近上限且压缩后仍未降低"
+                                    f"（{budget_current}/{budget_max}, source={budget_source}）。"
+                                    "已要求模型聚焦最终交付，建议尽快收口或新建会话。"
+                                ),
+                                "severity": "warning",
+                                "detector": "token_budget_compress",
+                                "current": budget_current,
+                                "max": budget_max,
+                            },
+                            agent_id=agent_id,
+                        )
+                    # FR-5: surface compactor circuit-breaker tripping so the user
+                    # knows long-session stability may degrade.
+                    cf_state = getattr(self, "_compactor_failure_warned", False)
+                    cf_count = int(getattr(self.compactor, "_consecutive_failures", 0) or 0)
+                    if cf_count >= 3 and not cf_state:
+                        self._compactor_failure_warned = True
+                        yield RuntimeEvent(
+                            type=EventType.ERROR.value,
+                            data={
+                                "text": (
+                                    "自动上下文压缩已暂停（连续 3 次失败）。长会话稳定性可能下降，"
+                                    "建议新建会话或检查模型连通性。"
+                                ),
+                                "severity": "warning",
+                                "detector": "compactor_circuit_breaker",
+                            },
+                            agent_id=agent_id,
+                        )
+                    elif cf_count == 0 and cf_state:
+                        # Reset latch when compactor recovers.
+                        self._compactor_failure_warned = False
                 if budget_level == BudgetLevel.WARNING:
                     messages.append({"role": "user", "content": self.token_budget.convergence_hint()})
             except asyncio.TimeoutError:

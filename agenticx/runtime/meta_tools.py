@@ -1613,7 +1613,15 @@ async def _run_delegation_in_avatar_session(
         "## 回复要求\n"
         "- 优先动手执行，不要反复确认。\n"
         "- 边做边汇报，每完成一步简要说明。\n"
-        "- 完成后给出结构化总结。\n"
+        "- 完成后给出结构化总结。\n\n"
+        "## 上下文压缩说明（重要，避免向用户编造失败原因）\n"
+        "- 上下文中可能出现 `[compacted]` / `[session_memory]` / `[user-pending-question]` 等标记，"
+        "这是历史摘要机制，**仅表示历史消息已被精炼，不代表任务被终止或失败**。\n"
+        "- 看到这些标记时应当**继续执行任务**，把摘要当作可信的历史上下文使用，而不是当作失败信号。\n"
+        "- 真实终止信号是显式的 `[系统通知]` 或运行时停止指令，不是 `[compacted]` 标记。\n"
+        "- 当用户问『为什么失败/中断』时，**禁止凭空猜测『会话被压缩了』等原因**。"
+        "如果当前没有真实可观察的错误信号，请诚实回答『未发现明确失败信号，可能是上一轮被中断』，"
+        "并基于现有上下文继续推进任务，而不是编造原因。\n"
     )
     if workspace_hint:
         delegation_system_prompt += f"\n## 工作目录\n- {workspace_hint}\n"
@@ -1642,6 +1650,10 @@ async def _run_delegation_in_avatar_session(
     final_text = ""
     error_text = ""
     status = "running"
+    paused_text = ""
+    paused_round: Optional[int] = None
+    paused_max_rounds: Optional[int] = None
+    paused_executed_tools: List[str] = []
 
     async def _should_stop() -> bool:
         return bool(cancel_event.is_set())
@@ -1664,6 +1676,24 @@ async def _run_delegation_in_avatar_session(
                 final_text = str(event.data.get("text", "")).strip()
             elif event.type == EventType.ERROR.value:
                 error_text = str(event.data.get("text", "")).strip()
+            elif event.type == EventType.SUBAGENT_PAUSED.value:
+                # FR-1: capture max_tool_rounds saturation; otherwise this terminal
+                # event would be silently swallowed and the delegation falsely marked
+                # as "completed".
+                paused_text = str(event.data.get("text", "")).strip()
+                pr = event.data.get("round")
+                pm = event.data.get("max_rounds")
+                try:
+                    paused_round = int(pr) if pr is not None else None
+                except (TypeError, ValueError):
+                    paused_round = None
+                try:
+                    paused_max_rounds = int(pm) if pm is not None else None
+                except (TypeError, ValueError):
+                    paused_max_rounds = None
+                exec_tools_raw = event.data.get("executed_tools") or []
+                if isinstance(exec_tools_raw, list):
+                    paused_executed_tools = [str(t) for t in exec_tools_raw if t][:10]
             now = time.time()
             if now - last_persist_at >= persist_interval:
                 try:
@@ -1671,15 +1701,37 @@ async def _run_delegation_in_avatar_session(
                 except Exception:
                     pass
                 last_persist_at = now
-        summary = final_text or _extract_recent_assistant_text(avatar_session) or "任务执行完成（无文本输出）"
-        if error_text and not final_text:
+        # FR-1: status precedence is paused > failed > cancelled > completed.
+        # Tool-rounds saturation must surface as an explicit "paused" status so
+        # Meta does not mistake a halted long task for a successful completion.
+        if paused_text:
+            status = "paused"
+            tools_hint = (
+                f"，最近工具：{', '.join(paused_executed_tools)}"
+                if paused_executed_tools
+                else ""
+            )
+            round_hint = ""
+            if paused_round and paused_max_rounds:
+                round_hint = f"（达到 {paused_round}/{paused_max_rounds} 轮上限）"
+            summary = (
+                final_text
+                or _extract_recent_assistant_text(avatar_session)
+                or f"任务已暂停{round_hint}{tools_hint}。已产出阶段性结果但未自然结束，可基于当前进展继续指示或缩小范围。"
+            )
+            if not error_text:
+                error_text = paused_text
+        elif error_text and not final_text:
             status = "failed"
+            summary = final_text or _extract_recent_assistant_text(avatar_session) or ""
         elif cancel_event.is_set():
             status = "cancelled"
+            summary = final_text or _extract_recent_assistant_text(avatar_session) or ""
             if not error_text:
                 error_text = "任务已取消"
         else:
             status = "completed"
+            summary = final_text or _extract_recent_assistant_text(avatar_session) or "任务执行完成（无文本输出）"
     except Exception as exc:
         status = "failed"
         error_text = str(exc)
@@ -1698,7 +1750,7 @@ async def _run_delegation_in_avatar_session(
         f"[{avatar_context['name']}] 状态={status}, "
         f"摘要: {(summary or '(无)')[:500]}"
     )
-    if error_text and status != "completed":
+    if error_text and status not in {"completed"}:
         result_text += f", 错误: {error_text[:300]}"
     meta_scratchpad[f"delegation_result::{delegation_id}"] = result_text
     # Keep backward-compatible fallback channel for status aggregation.
@@ -1727,11 +1779,21 @@ async def _run_delegation_in_avatar_session(
             "delegation_system_prompt": delegation_system_prompt,
         }
     )
+    if status == "paused":
+        info["paused_round"] = paused_round
+        info["paused_max_rounds"] = paused_max_rounds
+        info["paused_executed_tools"] = paused_executed_tools
     setattr(avatar_managed, "_delegation_info", info)
     avatar_managed.updated_at = time.time()
 
     if meta_team_manager is not None:
-        event_type = EventType.SUBAGENT_COMPLETED.value if status == "completed" else EventType.SUBAGENT_ERROR.value
+        # FR-1: paused must surface as SUBAGENT_PAUSED, not SUBAGENT_COMPLETED.
+        if status == "completed":
+            event_type = EventType.SUBAGENT_COMPLETED.value
+        elif status == "paused":
+            event_type = EventType.SUBAGENT_PAUSED.value
+        else:
+            event_type = EventType.SUBAGENT_ERROR.value
         event_payload: Dict[str, Any] = {
             "agent_id": delegation_id,
             "name": avatar_context["name"] or delegation_id,
@@ -1742,6 +1804,10 @@ async def _run_delegation_in_avatar_session(
             "avatar_id": str(getattr(avatar_config, "id", "") or ""),
             "avatar_session_id": avatar_managed.session_id,
         }
+        if status == "paused":
+            event_payload["round"] = paused_round
+            event_payload["max_rounds"] = paused_max_rounds
+            event_payload["executed_tools"] = paused_executed_tools
         try:
             await meta_team_manager._emit(
                 RuntimeEvent(
