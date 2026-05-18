@@ -6,7 +6,7 @@ import { TerminalLine } from "./TerminalLine";
 import { CleanBlock } from "./CleanBlock";
 import { ToolCallCard } from "./ToolCallCard";
 import { SystemNotice } from "./SystemNotice";
-import { TodoUpdateCard } from "../TodoUpdateCard";
+import { parseTodoMessage, TodoUpdateCard } from "../TodoUpdateCard";
 
 type Props = {
   message: Message;
@@ -45,7 +45,7 @@ function extractPathFromToolResult(msg: string): string {
 }
 
 export function isTodoUpdateToolMessage(content: string): boolean {
-  return content.includes("Todos have been modified successfully.");
+  return parseTodoMessage(content) !== null;
 }
 
 export function isNoisyToolStatusMessage(message: Pick<Message, "role" | "content" | "toolName">): boolean {
