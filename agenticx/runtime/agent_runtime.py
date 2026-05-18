@@ -1100,6 +1100,9 @@ class AgentRuntime:
                         "content": "<reminder>10+ rounds without todo_write. Please update todo list.</reminder>",
                     }
                 )
+            # FR-C: 标记本轮是否需要因流式工具调用截断而强制进入下一轮，
+            # 而不是把空 tool_calls 当作模型最终回答处理。每轮起始重置。
+            force_retry_next_round = False
             try:
                 # Increment per-turn counter for SessionReviewHook nudge threshold
                 session._turns_since_skill_manage = getattr(session, "_turns_since_skill_manage", 0) + 1
@@ -1329,11 +1332,29 @@ class AgentRuntime:
                                     },
                                 }
                             )
+                        # FR-C: 流式工具调用被截断后，drop 掉的空参 tool_call
+                        # 不能让 turn 走 finalText 分支结束。这里把 hint 注入
+                        # messages 里作为 system 消息，并设置 force_retry 标志，
+                        # 让外层 for round_idx 循环立即进入下一轮 LLM 调用。
                         if truncated_tool_names:
+                            force_retry_next_round = True
                             hint = _build_streamed_tool_truncation_hint(truncated_tool_names)
-                            response_text = (response_text or "").rstrip()
-                            response_text = (
-                                response_text + ("\n\n" if response_text else "") + hint
+                            # 把 hint 同时写进会话历史（让前端/后续 LLM 上下文都能感知），
+                            # 但不附加到 assistant_message——避免污染 tool_calls 链路。
+                            messages.append({"role": "system", "content": hint})
+                            session.agent_messages.append({"role": "system", "content": hint})
+                            # 给前端透出一条事件，提示当前轮被流式截断、即将自动重试，
+                            # 而不是让 UI 看到"模型沉默"再触发 stall 提示。
+                            yield RuntimeEvent(
+                                type=EventType.ROUND_END.value,
+                                data={
+                                    "round": round_idx,
+                                    "max_rounds": self.max_tool_rounds,
+                                    "auto_retry": True,
+                                    "reason": "streamed_tool_call_truncated",
+                                    "tools": sorted(set(truncated_tool_names)),
+                                },
+                                agent_id=agent_id,
                             )
                         response = type(
                             "StreamResponse",
@@ -1624,6 +1645,15 @@ class AgentRuntime:
                 and (tc.get("function", {}) if isinstance(tc.get("function"), dict) else {}).get("name")
                 and str((tc.get("function", {}) if isinstance(tc.get("function"), dict) else {}).get("name", "")).strip().lower() != "none"
             ]
+            # FR-C: 如果本轮所有 tool_calls 都因流式截断被丢弃，禁止把空 tool_calls
+            # 当作"模型最终回答"处理，强制进入下一轮 LLM 调用让模型重新生成完整工具调用。
+            if force_retry_next_round and not tool_calls:
+                logger.info(
+                    "force_retry_next_round=true session=%s round=%s reason=streamed_tool_call_truncated",
+                    getattr(session, "session_id", ""),
+                    round_idx,
+                )
+                continue
             if not tool_calls:
                 inline_tool = _extract_inline_tool_call(response_text, allowed_tool_names)
                 if inline_tool is not None:
