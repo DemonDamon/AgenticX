@@ -7,6 +7,7 @@ import {
   MenuItemConstructorOptions,
   nativeImage,
   powerSaveBlocker,
+  screen,
   session,
   shell,
   Tray
@@ -2230,6 +2231,35 @@ function createWindow(): void {
     boundsOverride.x = Math.floor(savedBounds.x);
     boundsOverride.y = Math.floor(savedBounds.y);
   }
+  if (typeof boundsOverride.x === "number" && typeof boundsOverride.y === "number") {
+    const candidate = {
+      x: boundsOverride.x,
+      y: boundsOverride.y,
+      width: boundsOverride.width,
+      height: boundsOverride.height,
+    };
+    const minVisibleWidth = 120;
+    const minVisibleHeight = 80;
+    const hasVisibleIntersection = screen.getAllDisplays().some((display) => {
+      const area = display.workArea;
+      const overlapWidth = Math.max(
+        0,
+        Math.min(candidate.x + candidate.width, area.x + area.width) - Math.max(candidate.x, area.x),
+      );
+      const overlapHeight = Math.max(
+        0,
+        Math.min(candidate.y + candidate.height, area.y + area.height) - Math.max(candidate.y, area.y),
+      );
+      return overlapWidth >= minVisibleWidth && overlapHeight >= minVisibleHeight;
+    });
+    if (!hasVisibleIntersection) {
+      const primaryArea = screen.getPrimaryDisplay().workArea;
+      boundsOverride.x = Math.round(primaryArea.x + (primaryArea.width - boundsOverride.width) / 2);
+      boundsOverride.y = Math.round(primaryArea.y + Math.max(20, (primaryArea.height - boundsOverride.height) / 6));
+    }
+  }
+  const transparentMainWindow = process.platform !== "win32";
+  const mainWindowBackgroundColor = transparentMainWindow ? "#00000000" : "#14141c";
   mainWindow = new BrowserWindow({
     ...boundsOverride,
     minWidth: 680,
@@ -2237,10 +2267,10 @@ function createWindow(): void {
     show: false,
     alwaysOnTop: false,
     skipTaskbar: false,
-    transparent: true,
+    transparent: transparentMainWindow,
     titleBarStyle: "hiddenInset",
     ...(vibrancyEnabled ? { vibrancy: "under-window" as const, visualEffectState: "followWindow" as const } : {}),
-    backgroundColor: "#00000000",
+    backgroundColor: mainWindowBackgroundColor,
     roundedCorners: true,
     trafficLightPosition: { x: 14, y: 14 },
     webPreferences: {
@@ -2441,7 +2471,7 @@ function registerEarlyIpc(): void {
         }
       }
       try {
-        mainWindow.setBackgroundColor("#00000000");
+        mainWindow.setBackgroundColor(process.platform === "win32" ? "#14141c" : "#00000000");
       } catch {
         // ignore
       }
@@ -2540,7 +2570,7 @@ function registerEarlyIpc(): void {
         }
       }
       try {
-        mainWindow.setBackgroundColor("#00000000");
+        mainWindow.setBackgroundColor(process.platform === "win32" ? "#14141c" : "#00000000");
       } catch {
         // ignore
       }
