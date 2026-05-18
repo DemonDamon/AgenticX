@@ -1,140 +1,133 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, LayoutList } from "lucide-react";
+import { ChevronDown, ChevronUp, ListChecks, Check, Circle, Loader2 } from "lucide-react";
 import { parseTodoMessage, type ParsedTodo } from "./TodoUpdateCard";
 import type { Message } from "../store";
 
-const COLLAPSED_TEXT_MAX = 50;
-
+/**
+ * Find the latest todo snapshot from pane messages.
+ *
+ * Priority:
+ *   1. role=tool && toolName="todo_write" — the canonical signal whether the
+ *      content was wrapped by `formatToolResultMessage` (live SSE) or kept raw
+ *      (history loaded from messages.json via `mapLoadedSessionMessage`).
+ *   2. Any message whose content parses as a todo render — fallback for paths
+ *      that lost the toolName metadata.
+ */
 function pickLatestTodoFromMessages(messages: Message[]): ParsedTodo | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const m = messages[i];
-    if (!m || m.role !== "assistant") continue;
+    if (!m) continue;
+    if (m.role === "tool" && (m.toolName ?? "").trim() === "todo_write") {
+      const parsed = parseTodoMessage(typeof m.content === "string" ? m.content : "");
+      if (parsed) return parsed;
+    }
+  }
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (!m) continue;
     const content = typeof m.content === "string" ? m.content : "";
-    if (!content.startsWith("🗂 任务清单更新")) continue;
+    if (!content) continue;
     const parsed = parseTodoMessage(content);
     if (parsed) return parsed;
   }
   return null;
 }
 
-function clip(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}…`;
-}
-
 interface StickyTaskBarProps {
   messages: Message[];
 }
 
+/**
+ * Sticky task progress card shown directly above the chat composer.
+ *
+ * Visual reference: Manus / Cursor — a card with a header row ("任务进度  N/M"
+ * + 折叠箭头) and a checklist underneath. Each item shows status:
+ *   - completed → ✓ (emerald)
+ *   - in_progress → spinner (amber)
+ *   - pending → empty circle (muted)
+ * Completed items render with strikethrough.
+ *
+ * Default: expanded when there is at least one in-progress / pending item;
+ * auto-collapses once everything is done so it does not eat composer space.
+ */
 export function StickyTaskBar({ messages }: StickyTaskBarProps) {
   const parsed = useMemo(() => pickLatestTodoFromMessages(messages), [messages]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
-  // 任务全部完成时自动收起，避免占位
+  const allDone = !!parsed && parsed.total > 0 && parsed.completed === parsed.total;
+
+  // Auto-collapse only when the run finishes; keep expanded while user is
+  // watching progress live.
   useEffect(() => {
-    if (parsed && parsed.total > 0 && parsed.completed === parsed.total) {
-      setExpanded(false);
-    }
-  }, [parsed?.completed, parsed?.total]);
+    if (allDone) setExpanded(false);
+    else setExpanded(true);
+  }, [allDone, parsed?.total, parsed?.completed]);
 
   if (!parsed) return null;
 
-  const inProgressItem = parsed.items.find((it) => it.status === "in_progress");
-  const allDone = parsed.total > 0 && parsed.completed === parsed.total;
-  const percent = parsed.total > 0 ? Math.round((parsed.completed / parsed.total) * 100) : 0;
-  const headlineText = allDone
-    ? "所有任务已完成"
-    : inProgressItem
-      ? clip(inProgressItem.activeForm || inProgressItem.content, COLLAPSED_TEXT_MAX)
-      : clip(
-          parsed.items.find((it) => it.status === "pending")?.content || "(暂无进行中任务)",
-          COLLAPSED_TEXT_MAX,
-        );
-
   return (
-    <div className="mb-1 rounded-lg border border-border bg-surface-card text-text-primary shadow-sm">
+    <div className="mb-2 rounded-lg border border-border bg-surface-card text-text-primary shadow-sm">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/40"
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/40"
         aria-expanded={expanded}
-        aria-label={expanded ? "收起任务清单" : "展开任务清单"}
+        aria-label={expanded ? "收起任务列表" : "展开任务列表"}
       >
-        <LayoutList className="h-3.5 w-3.5 shrink-0 text-cyan-300" aria-hidden />
-        <span className="text-[11px] font-medium text-cyan-300">任务</span>
+        <ListChecks className="h-4 w-4 shrink-0 text-cyan-300" aria-hidden />
+        <span className="text-[12px] font-semibold text-text-strong">任务进度</span>
         <span
           className={
             allDone
-              ? "rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] text-emerald-300"
-              : "rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300"
+              ? "rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300"
+              : "rounded bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-medium text-cyan-300"
           }
         >
-          {parsed.completed}/{parsed.total}
+          {parsed.completed} / {parsed.total}
         </span>
-        <span className="rounded bg-surface-hover px-1.5 py-0.5 text-[10px] text-text-muted">{percent}%</span>
-        <span
-          className={
-            allDone
-              ? "min-w-0 flex-1 truncate text-[11px] text-text-subtle line-through"
-              : "min-w-0 flex-1 truncate text-[11px] text-text-primary"
-          }
-          title={headlineText}
-        >
-          {headlineText}
-        </span>
-        <span className="ml-1 inline-flex h-4 w-4 items-center justify-center text-text-faint" aria-hidden>
+        <span className="flex-1" />
+        <span className="inline-flex h-4 w-4 items-center justify-center text-text-faint" aria-hidden>
           {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </span>
       </button>
-      {/* 进度条永远显示，便于与折叠/展开两态都能感知整体进度 */}
-      <div className="mx-2.5 mb-1.5 h-1 overflow-hidden rounded-full bg-surface-hover">
-        <div
-          className={
-            allDone
-              ? "h-full rounded-full bg-emerald-400/80 transition-all"
-              : "h-full rounded-full bg-cyan-400/80 transition-all"
-          }
-          style={{ width: `${percent}%` }}
-        />
-      </div>
       {expanded ? (
-        <div className="max-h-[40vh] space-y-1 overflow-y-auto px-2.5 pb-2">
+        <ul className="max-h-[40vh] space-y-0.5 overflow-y-auto px-3 pb-2">
           {parsed.items.map((item, idx) => (
-            <div
+            <li
               key={`${item.content}-${idx}`}
-              className="flex items-start gap-2 rounded px-1 py-0.5 hover:bg-surface-hover"
+              className="flex items-start gap-2 rounded px-1 py-1"
             >
               <span
-                className={
-                  item.status === "completed"
-                    ? "mt-0.5 text-[11px] text-emerald-300"
-                    : item.status === "in_progress"
-                      ? "mt-0.5 text-[11px] text-amber-300"
-                      : "mt-0.5 text-[11px] text-text-subtle"
-                }
+                className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center"
                 aria-hidden
               >
-                {item.status === "completed" ? "✓" : item.status === "in_progress" ? "●" : "○"}
+                {item.status === "completed" ? (
+                  <Check className="h-4 w-4 text-emerald-400" strokeWidth={2.5} />
+                ) : item.status === "in_progress" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />
+                ) : (
+                  <Circle className="h-3.5 w-3.5 text-text-faint" />
+                )}
               </span>
               <div className="min-w-0 flex-1">
                 <div
                   className={
                     item.status === "completed"
-                      ? "text-[11px] text-text-subtle line-through"
+                      ? "text-[12px] leading-snug text-text-subtle line-through"
                       : item.status === "in_progress"
-                        ? "text-[11px] font-medium text-amber-100"
-                        : "text-[11px] text-text-primary"
+                        ? "text-[12px] font-medium leading-snug text-text-strong"
+                        : "text-[12px] leading-snug text-text-primary"
                   }
                 >
                   {item.content}
                 </div>
                 {item.status === "in_progress" && item.activeForm && item.activeForm !== item.content ? (
-                  <div className="mt-0.5 text-[10px] text-amber-300/80">当前动作：{item.activeForm}</div>
+                  <div className="mt-0.5 text-[11px] text-amber-300/80">{item.activeForm}</div>
                 ) : null}
               </div>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       ) : null}
     </div>
   );

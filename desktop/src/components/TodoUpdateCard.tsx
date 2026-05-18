@@ -15,19 +15,30 @@ export type ParsedTodo = {
 };
 
 export function parseTodoMessage(text: string): ParsedTodo | null {
-  if (!text.startsWith("🗂 任务清单更新")) return null;
-  const body = text.replace(/^🗂\s*任务清单更新/, "").trim();
+  if (!text) return null;
+  // Two valid sources:
+  //   1) ChatPane.formatToolResultMessage 包过的："🗂 任务清单更新\n[x] ..."
+  //   2) messages.json 历史加载的裸 todo_manager.render() 输出："[x] ..."
+  // 历史路径不会经过 formatToolResultMessage，所以必须兼容裸格式，否则
+  // 分身/重启后的会话里 sticky bar 永远拿不到数据。
+  let body = text.trim();
+  const hadPrefix = body.startsWith("🗂 任务清单更新");
+  if (hadPrefix) {
+    body = body.replace(/^🗂\s*任务清单更新/, "").trim();
+  }
   if (!body) return null;
   const lines = body.split("\n").map((line) => line.trim()).filter(Boolean);
   const items: TodoItem[] = [];
   let completed = 0;
   let total = 0;
+  let hasSummary = false;
 
   for (const line of lines) {
     const summary = line.match(/^\((\d+)\s*\/\s*(\d+)\s*completed\)$/i);
     if (summary) {
       completed = Number(summary[1] ?? 0);
       total = Number(summary[2] ?? 0);
+      hasSummary = true;
       continue;
     }
     const done = line.match(/^(?:-\s*)?\[[xX]\]\s+(.+)$/);
@@ -51,6 +62,9 @@ export function parseTodoMessage(text: string): ParsedTodo | null {
   }
 
   if (items.length === 0) return null;
+  // 收紧裸格式识别：没有"🗂 任务清单更新"前缀时，必须有 (N/N completed) 摘要行
+  // 或至少 2 个 todo 行，避免把用户随手写的 `[x] 买菜` 误判为 todo 列表。
+  if (!hadPrefix && !hasSummary && items.length < 2) return null;
   if (!total) total = items.length;
   if (!completed) completed = items.filter((item) => item.status === "completed").length;
   return { items, completed, total };
