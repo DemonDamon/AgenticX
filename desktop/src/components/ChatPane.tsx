@@ -6401,7 +6401,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 <PaneModelPicker paneId={pane.id} />
                 <ActionCircleButton
                   hasInput={!!pane.sessionId && (!!input.trim() || readyAttachments.length > 0)}
-                  streaming={canInterruptCurrentSession || isRunGuardCurrentSession}
+                  /* `canInterruptCurrentSession` 只覆盖"当前 pane 自己发起 SSE"的场景。
+                   * 分身被 Meta 委派时，分身 pane 自己没有 SSE，但任务确实在跑。
+                   * 用 `hasDelegation` 兜底，让分身/Meta 视角下都能看到 stop 按钮，
+                   * 后端 `interruptSession` 对任意 session_id 生效。 */
+                  streaming={canInterruptCurrentSession || isRunGuardCurrentSession || (hasDelegation && !isGroupPane)}
                   recording={recording}
                   onSend={() => {
                     void sendChat(extractComposerText());
