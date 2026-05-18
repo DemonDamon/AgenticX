@@ -5988,7 +5988,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               ) : null}
             </div>
           ) : (
-            <div className="mx-auto min-w-0 w-full max-w-4xl space-y-1">
+            <div className="mx-auto flex min-w-0 w-full max-w-4xl flex-col gap-3">
               {renderedMessages}
             </div>
           )}
