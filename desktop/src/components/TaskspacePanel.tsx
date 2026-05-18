@@ -455,8 +455,7 @@ export function TaskspacePanel({
         onMouseDown={startResizePreview}
         title="拖拽调整代码预览高度"
       >
-        <div className="pointer-events-none absolute left-2 right-2 top-1/2 h-[2px] -translate-y-1/2 bg-cyan-500/35 transition group-hover:bg-cyan-400/90" />
-        <div className="pointer-events-none absolute left-1/2 top-1/2 h-2 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-400/70 bg-surface-panel shadow-[0_0_10px_rgba(34,211,238,0.25)]" />
+        <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-[var(--border-strong)] transition-all duration-200 group-hover:h-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
       </div>
       <div className="flex shrink-0 flex-col px-2 py-2" style={{ height: previewHeight }}>
         <div className="mb-1 truncate text-xs text-text-faint">{selectedFilePath || "文件预览"}</div>
