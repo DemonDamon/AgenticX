@@ -20,7 +20,12 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Sequence
 
-from agenticx.cli.agent_tools import STUDIO_TOOLS, dispatch_tool_async, tool_denied_by_session_permissions
+from agenticx.cli.agent_tools import (
+    STUDIO_TOOLS,
+    _TOOL_REQUIRED_PARAMS,
+    dispatch_tool_async,
+    tool_denied_by_session_permissions,
+)
 from agenticx.cli.studio_mcp import build_mcp_tools_context
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.compactor import ContextCompactor
@@ -369,6 +374,43 @@ def _resolve_llm_hard_timeout_seconds(session: StudioSession) -> float:
     except Exception:
         pass
     return DEFAULT_LLM_HARD_TIMEOUT_SECONDS
+
+
+def _streamed_tool_call_truncated(name: str, args_obj: Dict[str, Any]) -> bool:
+    """FR-C: judge whether a streamed tool call has been truncated.
+
+    A tool call is considered truncated (and should NOT be dispatched) when:
+    - the tool has at least one `required` parameter declared on its schema, AND
+    - the parsed arguments dict is empty.
+
+    Splitting this out as a module-level pure function keeps the streaming
+    aggregator readable and unit-testable.
+    """
+    if not name:
+        return False
+    required = _TOOL_REQUIRED_PARAMS.get(name)
+    if not required:
+        return False
+    if isinstance(args_obj, dict) and len(args_obj) == 0:
+        return True
+    return False
+
+
+def _build_streamed_tool_truncation_hint(names: Sequence[str]) -> str:
+    """FR-C: human-readable retry hint appended to assistant text when streamed
+    tool calls were dropped due to truncation.
+
+    The text is intentionally directive ("立即重新调用") to fight the failure
+    mode where weak models read "ERROR" and then give up the whole task.
+    """
+    unique_names = ", ".join(sorted({n for n in names if n}))
+    if not unique_names:
+        unique_names = "<unknown>"
+    return (
+        f"[系统通知] 上一次工具调用（{unique_names}）因流式输出被截断导致参数为空，已被丢弃。"
+        f"请立即重新调用同一工具，并把所有 required 参数完整填写一次"
+        f"（file_write/file_edit 必须包含完整的 path 与 content/old_string/new_string）。"
+    )
 
 
 def _repair_streamed_tool_arguments(raw: str) -> Dict[str, Any]:
@@ -1253,6 +1295,11 @@ class AgentRuntime:
                                 if args_delta:
                                     acc["arguments"] += args_delta
                         await stream_task
+                        # FR-C：流式工具调用偶尔因 token 紧张被截断 → arguments 字段为空。
+                        # 如果该工具有 required 参数（如 file_write），则不要把空参数派发出去，
+                        # 改成丢弃并往本轮 response_text 追加一条 retry hint，让下一轮 LLM
+                        # 看到提示后重新生成完整调用，避免「ERROR → 模型放弃」死循环。
+                        truncated_tool_names: List[str] = []
                         for idx in sorted(tool_calls_acc.keys()):
                             item = tool_calls_acc[idx]
                             accumulated_name = (item.get("name") or "").strip()
@@ -1263,6 +1310,15 @@ class AgentRuntime:
                                 )
                                 continue
                             args_obj = _repair_streamed_tool_arguments(item.get("arguments", ""))
+                            if _streamed_tool_call_truncated(accumulated_name, args_obj):
+                                logger.warning(
+                                    "Dropping streamed tool_call '%s' (idx=%d) due to truncated/empty arguments; "
+                                    "will surface retry hint to model",
+                                    accumulated_name,
+                                    idx,
+                                )
+                                truncated_tool_names.append(accumulated_name)
+                                continue
                             tool_calls.append(
                                 {
                                     "id": item.get("id") or f"stream-{uuid.uuid4().hex[:8]}",
@@ -1272,6 +1328,12 @@ class AgentRuntime:
                                         "arguments": json.dumps(args_obj, ensure_ascii=False),
                                     },
                                 }
+                            )
+                        if truncated_tool_names:
+                            hint = _build_streamed_tool_truncation_hint(truncated_tool_names)
+                            response_text = (response_text or "").rstrip()
+                            response_text = (
+                                response_text + ("\n\n" if response_text else "") + hint
                             )
                         response = type(
                             "StreamResponse",
@@ -1519,14 +1581,38 @@ class AgentRuntime:
                 )
                 return
             except Exception as exc:
+                fault = classify_provider_fault(exc)
                 record_session_provider_hard_failure(
                     session,
                     provider_name,
-                    fault=classify_provider_fault(exc),
+                    fault=fault,
                 )
+                if fault == "rate_limit" and agent_id != "meta":
+                    pause_text = (
+                        f"模型供应商触发限流（provider={provider_name or '(unknown)'}, "
+                        f"model={model_name or '(unknown)'}）。任务已暂停，可等待限流窗口恢复后继续。"
+                    )
+                    yield RuntimeEvent(
+                        type=EventType.SUBAGENT_PAUSED.value,
+                        data={
+                            "agent_id": agent_id,
+                            "round": round_idx,
+                            "max_rounds": self.max_tool_rounds,
+                            "text": pause_text,
+                            "detector": "rate_limit",
+                            "retryable": True,
+                        },
+                        agent_id=agent_id,
+                    )
+                    return
                 yield RuntimeEvent(
                     type=EventType.ERROR.value,
-                    data={"text": f"模型调用失败: {exc}"},
+                    data={
+                        "text": f"模型调用失败: {exc}",
+                        "detector": fault,
+                        "retryable": fault in {"rate_limit", "transient"},
+                        "severity": "warning" if fault == "rate_limit" else "error",
+                    },
                     agent_id=agent_id,
                 )
                 return

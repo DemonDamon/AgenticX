@@ -1503,6 +1503,73 @@ def _extract_recent_assistant_text(session: Any) -> str:
     return ""
 
 
+def _task_expects_file_output(task: str) -> bool:
+    """Best-effort check for tasks that explicitly require a file artifact."""
+    t = str(task or "").lower()
+    if not t:
+        return False
+    indicators = (
+        ".md",
+        ".markdown",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".html",
+        ".csv",
+        ".pdf",
+        "report",
+        "save to",
+        "write to",
+        "output file",
+        "生成报告",
+        "保存到",
+        "输出文件",
+        "写入",
+        "落盘",
+    )
+    return any(key in t for key in indicators)
+
+
+def _extract_output_files_from_messages(messages: List[Dict[str, Any]]) -> List[str]:
+    """Extract file paths reported by file_write/file_edit tool results."""
+    paths: List[str] = []
+    seen: set[str] = set()
+    for msg in messages:
+        if str(msg.get("role", "")) != "tool":
+            continue
+        tool_name = str(msg.get("name", "") or "").strip()
+        if tool_name not in {"file_write", "file_edit"}:
+            continue
+        content = str(msg.get("content", "") or "")
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            match = re.match(r"^OK:\s*(?:wrote|edited)\s+(.+?)(?:\s+\(\d+\s+chars\))?$", line)
+            if not match:
+                continue
+            path = str(match.group(1) or "").strip()
+            if path and path not in seen:
+                seen.add(path)
+                paths.append(path)
+    return paths
+
+
+def _missing_output_files(paths: List[str]) -> List[str]:
+    """Return output paths that do not exist on disk."""
+    missing: List[str] = []
+    for raw in paths:
+        p = str(raw or "").strip()
+        if not p:
+            continue
+        try:
+            if not Path(p).expanduser().exists():
+                missing.append(p)
+        except Exception:
+            missing.append(p)
+    return missing
+
+
 async def _run_delegation_in_avatar_session(
     *,
     avatar_managed: Any,
@@ -1622,6 +1689,9 @@ async def _run_delegation_in_avatar_session(
         "- 当用户问『为什么失败/中断』时，**禁止凭空猜测『会话被压缩了』等原因**。"
         "如果当前没有真实可观察的错误信号，请诚实回答『未发现明确失败信号，可能是上一轮被中断』，"
         "并基于现有上下文继续推进任务，而不是编造原因。\n"
+        "- 上下文中所有形如 `[xxx]` / `[/xxx]` 的方括号标签都是系统注入的**只读**元数据标签，"
+        "**禁止你在回复正文或工具参数中模仿造一个**，更**禁止用 `[/xxx]` 形式生成闭合标签**——"
+        "弱模型最常见的失败模式就是误把这些标签当 XML 复述，导致后续上下文被污染。\n"
     )
     if workspace_hint:
         delegation_system_prompt += f"\n## 工作目录\n- {workspace_hint}\n"
@@ -1654,6 +1724,8 @@ async def _run_delegation_in_avatar_session(
     paused_round: Optional[int] = None
     paused_max_rounds: Optional[int] = None
     paused_executed_tools: List[str] = []
+    paused_detector = ""
+    paused_retryable = False
 
     async def _should_stop() -> bool:
         return bool(cancel_event.is_set())
@@ -1681,6 +1753,8 @@ async def _run_delegation_in_avatar_session(
                 # event would be silently swallowed and the delegation falsely marked
                 # as "completed".
                 paused_text = str(event.data.get("text", "")).strip()
+                paused_detector = str(event.data.get("detector", "") or "").strip()
+                paused_retryable = bool(event.data.get("retryable", False))
                 pr = event.data.get("round")
                 pm = event.data.get("max_rounds")
                 try:
@@ -1706,6 +1780,8 @@ async def _run_delegation_in_avatar_session(
         # Meta does not mistake a halted long task for a successful completion.
         if paused_text:
             status = "paused"
+            detector_hint = f"，原因：{paused_detector}" if paused_detector else ""
+            retry_hint = "，可稍后继续" if paused_retryable else ""
             tools_hint = (
                 f"，最近工具：{', '.join(paused_executed_tools)}"
                 if paused_executed_tools
@@ -1717,7 +1793,7 @@ async def _run_delegation_in_avatar_session(
             summary = (
                 final_text
                 or _extract_recent_assistant_text(avatar_session)
-                or f"任务已暂停{round_hint}{tools_hint}。已产出阶段性结果但未自然结束，可基于当前进展继续指示或缩小范围。"
+                or f"任务已暂停{round_hint}{detector_hint}{tools_hint}{retry_hint}。已产出阶段性结果但未自然结束，可基于当前进展继续指示或缩小范围。"
             )
             if not error_text:
                 error_text = paused_text
@@ -1736,6 +1812,18 @@ async def _run_delegation_in_avatar_session(
         status = "failed"
         error_text = str(exc)
         summary = ""
+
+    output_files = _extract_output_files_from_messages(getattr(avatar_session, "agent_messages", []) or [])
+    missing_output_files = _missing_output_files(output_files)
+    if status == "completed" and _task_expects_file_output(task):
+        if not output_files:
+            status = "failed"
+            error_text = "任务要求输出文件，但未检测到 file_write/file_edit 产物。"
+            summary = error_text
+        elif missing_output_files:
+            status = "failed"
+            error_text = "任务产物路径不存在: " + ", ".join(missing_output_files[:10])
+            summary = error_text
 
     if status == "failed":
         summary = summary if "summary" in locals() else ""
@@ -1783,6 +1871,12 @@ async def _run_delegation_in_avatar_session(
         info["paused_round"] = paused_round
         info["paused_max_rounds"] = paused_max_rounds
         info["paused_executed_tools"] = paused_executed_tools
+        info["paused_detector"] = paused_detector
+        info["paused_retryable"] = paused_retryable
+    if output_files:
+        info["output_files"] = output_files
+    if missing_output_files:
+        info["missing_output_files"] = missing_output_files
     setattr(avatar_managed, "_delegation_info", info)
     avatar_managed.updated_at = time.time()
 
@@ -1808,6 +1902,10 @@ async def _run_delegation_in_avatar_session(
             event_payload["round"] = paused_round
             event_payload["max_rounds"] = paused_max_rounds
             event_payload["executed_tools"] = paused_executed_tools
+            event_payload["detector"] = paused_detector
+            event_payload["retryable"] = paused_retryable
+        if output_files:
+            event_payload["output_files"] = output_files
         try:
             await meta_team_manager._emit(
                 RuntimeEvent(

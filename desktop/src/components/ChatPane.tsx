@@ -39,6 +39,7 @@ import {
 } from "../store";
 import { startRecording, stopRecording } from "../voice/stt";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
+import { StickyTaskBar } from "./StickyTaskBar";
 import { WorkspacePanel } from "./WorkspacePanel";
 import { SpawnsColumn } from "./SpawnsColumn";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
@@ -6077,6 +6078,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         {/* 外层 px 与列表 agx-pane-message-list 一致，内层 max-w-4xl 单独一层，避免「padding 吃进 max-width」导致输入框比气泡窄一截 */}
         <div className="shrink-0 px-4 pt-2.5 pb-4">
           <div className="agx-pane-composer-shell mx-auto min-w-0 w-full max-w-4xl">
+          <StickyTaskBar messages={pane.messages ?? []} />
           {selectedSubAgent ? (
             <div className="mb-1 inline-flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-0.5 text-xs text-text-muted">
               对话目标: {selectedSubAgent}

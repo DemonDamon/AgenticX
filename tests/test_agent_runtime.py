@@ -65,6 +65,14 @@ class _TextOnlyLLM:
         yield "tok2"
 
 
+class _RateLimitLLM:
+    def invoke(self, *_args, **_kwargs):
+        raise RuntimeError("RateLimitError: rate limit reached")
+
+    def stream(self, *_args, **_kwargs):
+        yield ""
+
+
 class _ApproveGate(ConfirmGate):
     async def request_confirm(self, question: str, context: Dict[str, Any] | None = None) -> bool:
         return True
@@ -168,6 +176,23 @@ def test_runtime_accepts_custom_agent_id() -> None:
     events = __import__("asyncio").run(_collect_custom())
     assert events
     assert all(e["agent_id"] == "sa-1" for e in events)
+
+
+def test_runtime_rate_limit_pauses_subagent(monkeypatch) -> None:
+    monkeypatch.setenv("AGX_LLM_RETRY_RATE_LIMIT", "0")
+    runtime = AgentRuntime(_RateLimitLLM(), _ApproveGate())
+
+    async def _collect_rate_limited() -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        async for event in runtime.run_turn("long task", StudioSession(), agent_id="worker-1"):
+            items.append({"type": event.type, "data": event.data, "agent_id": event.agent_id})
+        return items
+
+    events = __import__("asyncio").run(_collect_rate_limited())
+    assert events[-1]["type"] == EventType.SUBAGENT_PAUSED.value
+    assert events[-1]["agent_id"] == "worker-1"
+    assert events[-1]["data"]["detector"] == "rate_limit"
+    assert events[-1]["data"]["retryable"] is True
 
 
 def test_runtime_rejects_tool_outside_allowlist(monkeypatch) -> None:
