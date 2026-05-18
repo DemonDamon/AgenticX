@@ -96,6 +96,28 @@ class _FakeRuntime:
         )
 
 
+class _FakeCompletedMissingFileRuntime:
+    """Runtime that reports a file write to a path that does not exist."""
+
+    def __init__(self, *_: Any, **__: Any) -> None:
+        pass
+
+    async def run_turn(self, *_args: Any, **__: Any):  # type: ignore[no-untyped-def]
+        avatar_session = _args[1]
+        avatar_session.agent_messages.append(
+            {
+                "role": "tool",
+                "name": "file_write",
+                "content": "OK: wrote /tmp/agenticx-missing-output-for-test.md (10 chars)",
+            }
+        )
+        yield RuntimeEvent(
+            type=EventType.FINAL.value,
+            data={"text": "文档已写入。"},
+            agent_id="delegation-1",
+        )
+
+
 @pytest.fixture
 def patched_meta_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(meta_tools, "ProviderResolver", types.SimpleNamespace(resolve=lambda **_: object()))
@@ -147,3 +169,36 @@ def test_delegation_paused_status_is_recorded(patched_meta_tools: None) -> None:
     # Pending summaries surfaced to Meta scratchpad must reflect paused state.
     pending = scratchpad.get("__pending_subagent_summaries__", [])
     assert pending and "状态=paused" in pending[-1]
+
+
+def test_delegation_missing_file_artifact_fails_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A document task must not be marked completed when its reported output path is missing."""
+    monkeypatch.setattr(meta_tools, "ProviderResolver", types.SimpleNamespace(resolve=lambda **_: object()))
+
+    import agenticx.runtime.agent_runtime as agent_runtime_module
+
+    monkeypatch.setattr(agent_runtime_module, "AgentRuntime", _FakeCompletedMissingFileRuntime)
+
+    avatar_managed = _FakeAvatarManaged()
+    avatar_config = _FakeAvatarConfig()
+    session_manager = _FakeSessionManager()
+    team_manager = _FakeTeamManager()
+    scratchpad: Dict[str, Any] = {}
+
+    asyncio.run(
+        meta_tools._run_delegation_in_avatar_session(
+            avatar_managed=avatar_managed,
+            avatar_config=avatar_config,
+            task="请写入 /tmp/agenticx-missing-output-for-test.md",
+            meta_scratchpad=scratchpad,
+            delegation_id="delegation-1",
+            session_manager=session_manager,
+            cancel_event=asyncio.Event(),
+            meta_team_manager=team_manager,  # type: ignore[arg-type]
+        )
+    )
+
+    info = avatar_managed._delegation_info or {}
+    assert info.get("status") == "failed", f"expected failed validation, got {info!r}"
+    assert "路径不存在" in str(info.get("error", ""))
+    assert any(ev.type == EventType.SUBAGENT_ERROR.value for ev in team_manager.emitted)

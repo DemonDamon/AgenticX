@@ -1,20 +1,20 @@
 import { useMemo, useState } from "react";
 
-type TodoStatus = "pending" | "in_progress" | "completed";
+export type TodoStatus = "pending" | "in_progress" | "completed";
 
-type TodoItem = {
+export type TodoItem = {
   status: TodoStatus;
   content: string;
   activeForm?: string;
 };
 
-type ParsedTodo = {
+export type ParsedTodo = {
   items: TodoItem[];
   completed: number;
   total: number;
 };
 
-function parseTodoMessage(text: string): ParsedTodo | null {
+export function parseTodoMessage(text: string): ParsedTodo | null {
   if (!text.startsWith("🗂 任务清单更新")) return null;
   const body = text.replace(/^🗂\s*任务清单更新/, "").trim();
   if (!body) return null;

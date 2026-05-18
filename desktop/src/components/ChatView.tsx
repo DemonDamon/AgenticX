@@ -590,7 +590,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           provider?: string;
           model?: string;
           task?: string;
-          status?: "pending" | "running" | "completed" | "failed" | "cancelled";
+          status?: "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
           result_summary?: string;
           error_text?: string;
           recent_events?: Array<{ type?: string; data?: Record<string, unknown> }>;

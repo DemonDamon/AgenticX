@@ -164,15 +164,21 @@ class TestCompactedMessageContent:
 class TestCompactionPromptPrioritization:
     """Test suite for compaction prompt changes (FR-6)."""
 
-    def test_prompt_includes_pending_question_priority(self):
-        """FR-6: Compaction prompt must emphasize pending question as highest priority."""
+    def test_prompt_emphasizes_pending_question_without_leaking_tag_name(self):
+        """FR-A.1: Compaction prompt must emphasize the pending user question
+        as a must-cover requirement, but MUST NOT mention any `[xxx]` placeholder
+        tag name (otherwise weak models hallucinate `[/xxx]` closers)."""
         c = ContextCompactor(_MockLLM())
         messages = [{"role": "user", "content": "Test"}]
         prompt = c._build_compaction_prompt(messages, memory_prefix="[test]")
 
-        assert "最高优先级" in prompt
-        assert "pending_user_question" in prompt
-        assert "任何对该问题的偏离/降级回答都视为压缩失败" in prompt
+        # 新 prompt 不暴露任何形如 `[xxx]` 的占位标签名给模型，
+        # 但必须明确把"用户最近一条尚未被回答的原始问题"列为必含项。
+        assert "[pending_user_question]" not in prompt
+        assert "[user-pending-question]" not in prompt
+        assert "用户最近一条尚未被完整回答的原始问题" in prompt
+        # memory_prefix 仍按原样写入
+        assert "[test]" in prompt
 
 
 class TestNoCompaction:

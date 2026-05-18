@@ -293,7 +293,7 @@ export function App() {
     agentName: string;
     summary: string;
     sessionId: string;
-    status: "completed" | "failed";
+    status: "completed" | "failed" | "paused";
     attempts?: number;
   }>>([]);
   const autoReportingRef = useRef(false);
@@ -827,7 +827,7 @@ export function App() {
             provider?: string;
             model?: string;
             task?: string;
-            status?: "pending" | "running" | "completed" | "failed" | "cancelled";
+            status?: "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
             result_summary?: string;
             error_text?: string;
             recent_events?: Array<{ type?: string; data?: Record<string, unknown> }>;
@@ -884,6 +884,8 @@ export function App() {
                 ? item.error_text || "执行异常"
                 : status === "cancelled"
                   ? "已中断"
+                  : status === "paused"
+                    ? summaryText || item.error_text || "已暂停，可稍后继续"
                   : "执行中";
           const pendingConfirm =
             hasPendingConfirm
@@ -908,14 +910,25 @@ export function App() {
           });
 
           if (
-            (effectiveStatus === "completed" || effectiveStatus === "failed") &&
+            (effectiveStatus === "completed" || effectiveStatus === "failed" || effectiveStatus === "paused") &&
             !completionNotifiedRef.current.has(id)
           ) {
             completionNotifiedRef.current.add(id);
             const agentName = item.name ?? id;
-            const emoji = effectiveStatus === "completed" ? "✅" : "❌";
-            const statusLabel = effectiveStatus === "completed" ? "已完成" : "执行失败";
-            const summaryBody = summaryText || (effectiveStatus === "failed" ? (item.error_text || "未知错误") : "任务已结束");
+            const emoji = effectiveStatus === "completed" ? "✅" : effectiveStatus === "paused" ? "⏸" : "❌";
+            const statusLabel =
+              effectiveStatus === "completed"
+                ? "已完成"
+                : effectiveStatus === "paused"
+                  ? "已暂停"
+                  : "执行失败";
+            const summaryBody = summaryText || (
+              effectiveStatus === "failed"
+                ? (item.error_text || "未知错误")
+                : effectiveStatus === "paused"
+                  ? (item.error_text || "任务已暂停，可稍后继续")
+                  : "任务已结束"
+            );
             const completionMsg = `${emoji} **子智能体 ${agentName} ${statusLabel}**\n\n${summaryBody}`;
             const store = useAppStore.getState();
             const matchingPane = resolvePaneForSession(sid, id);
@@ -928,7 +941,12 @@ export function App() {
               agentName,
               summary: summaryBody,
               sessionId: sid,
-              status: effectiveStatus === "completed" ? "completed" : "failed",
+              status:
+                effectiveStatus === "completed"
+                  ? "completed"
+                  : effectiveStatus === "paused"
+                    ? "paused"
+                    : "failed",
               attempts: 0,
             });
           }
@@ -1058,12 +1076,12 @@ export function App() {
 
         const agentLines = items
           .map((it) => {
-            const state = it.status === "completed" ? "已完成" : "失败";
+            const state = it.status === "completed" ? "已完成" : it.status === "paused" ? "已暂停" : "失败";
             return `- 【${it.agentName}】(${it.agentId}) [${state}]: ${it.summary.slice(0, 300)}`;
           })
           .join("\n");
         const triggerMsg =
-          `[系统通知] 以下子智能体已结束（可能成功或失败），请立即向用户主动汇报：完成情况/失败原因、产出文件列表、下一步建议。\n${agentLines}`;
+          `[系统通知] 以下子智能体已结束或暂停（可能成功、失败或因限流/轮次触顶暂停），请立即向用户主动汇报：完成情况/暂停原因/失败原因、产出文件列表、下一步建议。\n${agentLines}`;
 
         const paneProvider = String(matchingPane.modelProvider ?? "").trim();
         const paneModel = String(matchingPane.modelName ?? "").trim();

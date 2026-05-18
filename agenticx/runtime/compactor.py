@@ -278,12 +278,15 @@ class ContextCompactor:
         *,
         memory_prefix: str = "",
     ) -> str:
-        # FR-6: Prioritize pending user question in compression instructions
+        # FR-A.1: Prompt 改为不暴露任何 [xxx] 形式的占位标签名给模型，
+        # 避免弱模型（minimax-m2.x、glm-4-flash 等）误把它当成需要原样复述的
+        # XML/HTML 标签并幻觉出 `[/xxx]` 闭合，从而污染后续上下文。
         lines = [
-            "请将以下对话压缩成用于后续推理的精炼上下文。",
-            "最高优先级：必须在摘要的最顶部「一字不差」保留 `[pending_user_question]`（即用户最近一条尚未被回答的原始问题）；任何对该问题的偏离/降级回答都视为压缩失败。",
-            "其次必须包含：关键决策、关键工具结果、关键文件改动、当前待办与风险。",
-            "输出中文，长度控制在 400 字以内（不含 pending_user_question 原文），使用条目式。",
+            "请将以下多条历史对话压缩成一段精炼摘要，用于后续推理。",
+            "要求：",
+            "1. 仅输出摘要正文，不要复述本指令、不要输出任何形如 `[xxx]` 或 `[/xxx]` 的标签。",
+            "2. 必须覆盖：用户最近一条尚未被完整回答的原始问题（用一句话忠实复述）、关键决策、关键工具结果、关键文件改动、当前待办与风险。",
+            "3. 输出中文，长度控制在 400 字以内，使用条目式，不要写客套话或解释。",
             "",
         ]
         if memory_prefix:
@@ -293,6 +296,52 @@ class ContextCompactor:
         for item in messages_to_compact:
             lines.append(_stringify_message(item))
         return "\n".join(lines)
+
+    @staticmethod
+    def _sanitize_summary_text(text: str) -> str:
+        """Strip hallucinated `[xxx] ... [/xxx]` style wrappers from summary.
+
+        FR-A.2: 部分弱模型会把 prompt 中提到的标签名（即便我们已经避免暴露）
+        或自己幻觉的 `[pending_user_question]` 等，当成 XML 标签输出并配对
+        `[/xxx]` 闭合标签。这里**仅剥外壳**：
+        - 若整段被 `[/.../]` 包裹且内部完全等于 prompt 自身的指令文本，则丢弃；
+        - 若内部含有真实摘要内容，则保留内部内容、剥掉外壳标签；
+        - 多次迭代直到稳定。
+        """
+        if not text:
+            return text
+        # 已知的 prompt-leak 关键词：内部内容若主要是这类指令文本，整块视为污染。
+        leak_keywords = (
+            "请将以下对话压缩",
+            "请将以下多条历史对话压缩",
+            "压缩成用于后续推理",
+            "must preserve",
+            "highest priority",
+        )
+        # 形如 [tag] ... [/tag]，tag 由字母/数字/下划线/连字符组成
+        wrapper_re = re.compile(
+            r"\[(?P<tag>[A-Za-z][A-Za-z0-9_\-]*)\](?P<inner>[\s\S]*?)\[/(?P=tag)\]"
+        )
+        previous = None
+        current = text
+        # 上限 5 次防止极端嵌套死循环
+        for _ in range(5):
+            if previous == current:
+                break
+            previous = current
+
+            def _replace(match: re.Match) -> str:
+                inner = match.group("inner").strip()
+                # 若内部主要是 prompt 自身的指令，整块丢弃
+                if inner and any(kw in inner for kw in leak_keywords):
+                    return ""
+                # 否则只剥掉外壳标签，保留内部真实内容
+                return inner
+
+            current = wrapper_re.sub(_replace, current)
+        # 再清理掉残留的孤立闭合标签（模型偶尔只给一半）
+        current = re.sub(r"\[/[A-Za-z][A-Za-z0-9_\-]*\]", "", current)
+        return current.strip()
 
     async def _summarize(self, messages_to_compact: Sequence[Dict[str, Any]], memory_prefix: str = "") -> str:
         prompt = self._build_compaction_prompt(messages_to_compact, memory_prefix=memory_prefix)
@@ -304,6 +353,7 @@ class ContextCompactor:
                 max_tokens=400,
             )
             text = str(getattr(response, "content", "") or "").strip()
+            text = self._sanitize_summary_text(text)
             if text:
                 self._consecutive_failures = 0
                 return text

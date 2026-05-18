@@ -3987,10 +3987,32 @@ async def dispatch_tool_async(
     arguments = _repair_malformed_file_tool_arguments(name, arguments)
     required = _TOOL_REQUIRED_PARAMS.get(name)
     if required and not arguments:
+        # FR-B.1：空参数往往源于流式工具调用被截断或弱模型忘填字段；
+        # 错误文本必须强引导"立即重试本工具"，避免模型读到 ERROR 后转去
+        # 自言自语而放弃任务。对常见的文件类工具补充字段释义。
+        param_hints = {
+            "file_write": (
+                "path（绝对路径，不要省略）, content（要写入的完整文档正文，至少几百字的实际内容，不能是空字符串或省略号）"
+            ),
+            "file_edit": (
+                "path（绝对路径）, old_string（原文片段）, new_string（替换后的内容）"
+            ),
+            "skill_manage": (
+                "action（create / patch / delete）, name（skill 名称，可含子路径如 ima/notes）, "
+                "以及对应 action 所需的 markdown / old_string / new_string 字段"
+            ),
+            "schedule_task": (
+                "name（任务名）、frequency / time / date 至少一项、instruction（具体指令）、workspace（执行目录）"
+            ),
+        }
+        guidance = param_hints.get(name, "见工具 schema 中的 required 列表")
         return (
             f"ERROR: {name}() called with empty arguments. "
-            f"Required parameters: {', '.join(required)}. "
-            f"Please provide all required parameters."
+            f"Required parameters: {', '.join(required)}.\n"
+            f"参数说明：{guidance}\n"
+            f"行动要求：请立即重新调用 {name} 一次，并把上述所有必填参数完整填入；"
+            f"不要换其他工具、不要把这次失败汇报给用户、不要在没有重新调用前给出最终回复。"
+            f"如果你忘记了目标路径或正文内容，请回头查看用户最近的原始任务描述（含 [user-pending-question] 与 [user-goal-anchor]）以及 system prompt 里的工作区根，再生成完整调用。"
         )
     gate = confirm_gate or SyncConfirmGate()
     try:
