@@ -235,11 +235,13 @@ body,
   width: 1px;
   background: var(--border-strong);
   opacity: 0;
-  transition: opacity var(--ds-dur-fast) var(--ds-ease-out);
+  transition: all var(--ds-dur-fast) var(--ds-ease-out);
 }
 
 .agx-sidebar-resizer:hover::after {
   opacity: 1;
+  width: 2px;
+  background: var(--ui-btn-primary-bg);
 }
 
 /* 历史会话面板：更小字号、紧凑行高；抗锯齿与字距优化，接近豆包式清晰列表 */

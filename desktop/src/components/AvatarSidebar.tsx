@@ -822,8 +822,7 @@ export function AvatarSidebar() {
               onMouseDown={startResizeAvatars}
               title="拖拽调整分身区域高度"
             >
-              <div className="pointer-events-none absolute left-2 right-2 top-1/2 h-px -translate-y-1/2 transition bg-[var(--ui-accent-divider)]" />
-              <div className="pointer-events-none absolute left-1/2 top-1/2 h-1.5 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90 border-[var(--ui-accent-divider-hover)]" />
+              <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-[var(--border-strong)] transition-all duration-200 group-hover:h-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
             </div>
           )}
 
@@ -907,8 +906,7 @@ export function AvatarSidebar() {
               onMouseDown={startResizeGroups}
               title="拖拽调整群聊区域高度"
             >
-              <div className="pointer-events-none absolute left-2 right-2 top-1/2 h-px -translate-y-1/2 transition bg-[var(--ui-accent-divider)]" />
-              <div className="pointer-events-none absolute left-1/2 top-1/2 h-1.5 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90 border-[var(--ui-accent-divider-hover)]" />
+              <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-[var(--border-strong)] transition-all duration-200 group-hover:h-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
             </div>
           )}
 

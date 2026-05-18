@@ -880,14 +880,7 @@ export function WorkspacePanel({
             onMouseDown={startResizeTerminal}
             title="拖拽调整终端区域高度"
           >
-            <div
-              className="pointer-events-none absolute left-2 right-2 top-1/2 h-px -translate-y-1/2 transition"
-              style={{ background: "var(--ui-accent-divider)" }}
-            />
-            <div
-              className="pointer-events-none absolute left-1/2 top-1/2 h-2 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90"
-              style={{ borderColor: "var(--ui-accent-divider-hover)" }}
-            />
+            <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-[var(--border-strong)] transition-all duration-200 group-hover:h-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
           </div>
 
           <div className="flex min-h-0 shrink-0 flex-col border-t border-border" style={{ height: safeTerminalHeight }}>

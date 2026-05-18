@@ -6429,8 +6429,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             onMouseDown={startResizeTaskspace}
             title="拖拽调整面板宽度"
           >
-            <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
-            <div className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90" style={{ borderColor: "var(--ui-accent-divider-hover)" }} />
+            <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
           </div>
           <GroupMembersSidePanel
             groupId={groupChatId}
@@ -6447,8 +6446,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             onMouseDown={startResizeTaskspace}
             title="拖拽调整工作区面板宽度"
           >
-            <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
-            <div className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90" style={{ borderColor: "var(--ui-accent-divider-hover)" }} />
+            <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
           </div>
           <WorkspacePanel
             paneId={pane.id}
@@ -6503,8 +6501,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             onMouseDown={startResizeHistory}
             title="拖拽调整历史面板宽度"
           >
-            <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
-            <div className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90" style={{ borderColor: "var(--ui-accent-divider-hover)" }} />
+            <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
           </div>
           <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}-inline`}>
             <SessionHistoryPanel pane={pane} onClose={closeHistoryPanelOnly} tintColor={paneTint} />
@@ -6535,11 +6532,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 onMouseDown={startResizeTaskspace}
                 title="拖拽调整面板宽度"
               >
-                <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
-                <div
-                  className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90"
-                  style={{ borderColor: "var(--ui-accent-divider-hover)" }}
-                />
+                <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
               </div>
               <GroupMembersSidePanel
                 groupId={groupChatId}
@@ -6559,11 +6552,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 onMouseDown={startResizeTaskspace}
                 title="拖拽调整工作区面板宽度"
               >
-                <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
-                <div
-                  className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90"
-                  style={{ borderColor: "var(--ui-accent-divider-hover)" }}
-                />
+                <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
               </div>
               <WorkspacePanel
                 paneId={pane.id}
@@ -6628,11 +6617,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                 onMouseDown={startResizeHistory}
                 title="拖拽调整历史面板宽度"
               >
-                <div className="mx-auto h-full w-px transition" style={{ background: "var(--ui-accent-divider)" }} />
-                <div
-                  className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-surface-panel opacity-60 transition group-hover:opacity-90"
-                  style={{ borderColor: "var(--ui-accent-divider-hover)" }}
-                />
+                <div className="mx-auto h-full w-px bg-[var(--ui-accent-divider)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
               </div>
               <HistoryPanelBoundary key={`hpb-${pane.id}-${pane.historyOpen}-overlay`}>
                 <SessionHistoryPanel pane={pane} onClose={closeHistoryPanelOnly} tintColor={paneTint} />
