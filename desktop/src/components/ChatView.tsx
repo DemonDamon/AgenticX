@@ -1123,11 +1123,26 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               }
             }
             if (payload.type === "subagent_paused") {
+              // FR-2: dedicated "paused" status (was previously misreported as "failed").
               const subId = payload.data?.agent_id;
               if (subId) {
-                updateSubAgent(subId, { status: "failed", currentAction: payload.data?.text ?? "已暂停，等待指令" });
-                addSubAgentEvent(subId, { type: "paused", content: payload.data?.text ?? "已暂停，等待指令" });
+                const round = Number(payload.data?.round ?? 0) || 0;
+                const maxRounds = Number(payload.data?.max_rounds ?? 0) || 0;
+                const baseText = String(payload.data?.text ?? "已暂停").trim();
+                const roundLabel = round && maxRounds ? `（触顶 ${round}/${maxRounds} 轮）` : "";
+                const display = `${baseText}${roundLabel}`;
+                updateSubAgent(subId, { status: "paused", currentAction: display });
+                addSubAgentEvent(subId, { type: "paused", content: display });
               }
+            }
+            if (payload.type === "compaction") {
+              // FR-3: surface auto-compaction so users can see it in real time.
+              const count = Number(payload.data?.compacted_count ?? 0) || 0;
+              const reactive = Boolean(payload.data?.reactive);
+              const note = reactive
+                ? `⚠️ Token 接近上限，已自动压缩 ${count} 条历史消息以释放上下文。`
+                : `🗜️ 已自动压缩 ${count} 条历史消息（保留最近若干条 + 摘要）。`;
+              addMessage("tool", note, eventAgentId || "meta");
             }
             if (payload.type === "subagent_completed") {
               const subId = payload.data?.agent_id;
@@ -1160,8 +1175,20 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               }
             }
             if (payload.type === "error") {
-              if (eventAgentId === "meta") addMessage("tool", `❌ ${payload.data?.text ?? "未知错误"}`, "meta");
-              else { updateSubAgent(eventAgentId, { status: "failed", currentAction: payload.data?.text ?? "执行异常" }); addSubAgentEvent(eventAgentId, { type: "error", content: payload.data?.text ?? "未知错误" }); }
+              const errText = String(payload.data?.text ?? "未知错误");
+              const severity = String(payload.data?.severity ?? "").trim();
+              const detector = String(payload.data?.detector ?? "").trim();
+              const isWarning = severity === "warning"
+                || detector === "token_budget_compress"
+                || detector === "compactor_circuit_breaker";
+              if (eventAgentId === "meta") {
+                addMessage("tool", isWarning ? `⚠️ ${errText}` : `❌ ${errText}`, "meta");
+              } else if (isWarning) {
+                addSubAgentEvent(eventAgentId, { type: "warning", content: errText });
+              } else {
+                updateSubAgent(eventAgentId, { status: "failed", currentAction: errText });
+                addSubAgentEvent(eventAgentId, { type: "error", content: errText });
+              }
             }
           } catch { /* skip malformed SSE */ }
         }
