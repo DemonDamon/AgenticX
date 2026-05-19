@@ -27,7 +27,7 @@ export function AssistantBubble({ message, badge }: Props) {
           components={chatMarkdownComponents}
           urlTransform={chatUrlTransform}
         >
-          {normalizeChatMarkdownContent(message.content)}
+          {normalizeChatMarkdownContent(message.content, { isStreaming })}
         </ReactMarkdown>
       </MarkdownContext.Provider>
     </div>

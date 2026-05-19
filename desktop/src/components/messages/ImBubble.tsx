@@ -501,7 +501,7 @@ export function ImBubble({
                               components={chatMarkdownComponents}
                               urlTransform={chatUrlTransform}
                             >
-                              {normalizeChatMarkdownContent(bodyText)}
+                              {normalizeChatMarkdownContent(bodyText, { isStreaming })}
                             </ReactMarkdown>
                           </MarkdownContext.Provider>
                         </div>

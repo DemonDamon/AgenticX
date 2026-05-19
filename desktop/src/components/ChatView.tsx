@@ -21,6 +21,7 @@ import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/gr
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
+import { buildCompactionNoticeText } from "../utils/context-notice";
 import { StallRecoveryCard } from "./messages/StallRecoveryCard";
 import {
   shouldShowStopButton,
@@ -1263,10 +1264,10 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               // FR-3: surface auto-compaction so users can see it in real time.
               const count = Number(payload.data?.compacted_count ?? 0) || 0;
               const reactive = Boolean(payload.data?.reactive);
-              const note = reactive
-                ? `⚠️ Token 接近上限，已自动压缩 ${count} 条历史消息以释放上下文。`
-                : `🗜️ 已自动压缩 ${count} 条历史消息（保留最近若干条 + 摘要）。`;
-              addMessage("tool", note, eventAgentId || "meta");
+              const note = buildCompactionNoticeText(count, reactive);
+              addMessage("tool", note, eventAgentId || "meta", undefined, undefined, undefined, undefined, {
+                noticeKind: reactive ? "compaction_reactive" : "compaction_proactive",
+              });
             }
             if (payload.type === "subagent_completed") {
               const subId = payload.data?.agent_id;
@@ -1306,7 +1307,15 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
                 || detector === "token_budget_compress"
                 || detector === "compactor_circuit_breaker";
               if (eventAgentId === "meta") {
-                addMessage("tool", isWarning ? `⚠️ ${errText}` : `❌ ${errText}`, "meta");
+                if (isWarning) {
+                  const noticeKind =
+                    detector === "compactor_circuit_breaker" ? "compactor_cb" : "budget_compress";
+                  addMessage("tool", errText, "meta", undefined, undefined, undefined, undefined, {
+                    noticeKind,
+                  });
+                } else {
+                  addMessage("tool", `❌ ${errText}`, "meta");
+                }
               } else if (isWarning) {
                 addSubAgentEvent(eventAgentId, { type: "warning", content: errText });
               } else {

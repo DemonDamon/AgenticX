@@ -1528,15 +1528,6 @@ class AgentRuntime:
                     if did_react:
                         session.agent_messages = react_hist
                         messages[:] = [{"role": "system", "content": current_system_prompt}, *list(react_hist)]
-                        yield RuntimeEvent(
-                            type=EventType.COMPACTION.value,
-                            data={
-                                "compacted_count": react_count,
-                                "summary": react_summary,
-                                "reactive": True,
-                            },
-                            agent_id=agent_id,
-                        )
                         try:
                             await self.hooks.run_on_compaction(react_count, react_summary, session)
                         except Exception:
@@ -1552,22 +1543,33 @@ class AgentRuntime:
                                 ),
                             },
                         )
-                        # FR-4: surface a user-visible warning when even forced
-                        # compaction did not bring the budget back below COMPRESS.
-                        # Emitted as a non-fatal ERROR event with severity=warning so
-                        # Desktop renders it without halting the turn.
+                        # FR-4: one concise notice — skip separate reactive compaction event when
+                        # budget is still over limit (Desktop would otherwise show two long lines).
+                        if did_react:
+                            compress_notice = (
+                                f"上下文接近上限，已压缩 {react_count} 条历史但仍超限，"
+                                "建议收口或新建会话。"
+                            )
+                        else:
+                            compress_notice = "上下文接近上限，建议收口或新建会话。"
                         yield RuntimeEvent(
                             type=EventType.ERROR.value,
                             data={
-                                "text": (
-                                    f"上下文 token 接近上限且压缩后仍未降低"
-                                    f"（{budget_current}/{budget_max}, source={budget_source}）。"
-                                    "已要求模型聚焦最终交付，建议尽快收口或新建会话。"
-                                ),
+                                "text": compress_notice,
                                 "severity": "warning",
                                 "detector": "token_budget_compress",
                                 "current": budget_current,
                                 "max": budget_max,
+                            },
+                            agent_id=agent_id,
+                        )
+                    elif did_react:
+                        yield RuntimeEvent(
+                            type=EventType.COMPACTION.value,
+                            data={
+                                "compacted_count": react_count,
+                                "summary": react_summary,
+                                "reactive": True,
                             },
                             agent_id=agent_id,
                         )

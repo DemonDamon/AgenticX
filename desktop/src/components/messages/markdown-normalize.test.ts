@@ -17,6 +17,35 @@ test("normalizeLenientEmphasisInText: removes stray asterisk after closed **", (
     normalizeLenientEmphasisInText("**0.50/百万输入tokens** *"),
     "**0.50/百万输入tokens**",
   );
+  assert.equal(
+    normalizeLenientEmphasisInText("**0.50/百万输入tokens** *输出"),
+    "**0.50/百万输入tokens**输出",
+  );
+});
+
+test("normalizeLenientEmphasisInText: collapses spaced ** ** delimiter typos", () => {
+  assert.equal(
+    normalizeLenientEmphasisInText("** **0.50/百万输入tokens** **"),
+    "**0.50/百万输入tokens**",
+  );
+});
+
+test("normalizeLenientEmphasisInText: converts full-width asterisks", () => {
+  assert.equal(
+    normalizeLenientEmphasisInText("＊＊0.50/百万输入tokens＊＊"),
+    "**0.50/百万输入tokens**",
+  );
+});
+
+test("normalizeChatMarkdownContent: auto-closes dangling ** while streaming", () => {
+  assert.equal(
+    normalizeChatMarkdownContent("价格：**0.50/百万输入tokens", { isStreaming: true }),
+    "价格：**0.50/百万输入tokens**",
+  );
+  assert.equal(
+    normalizeChatMarkdownContent("价格：**0.50/百万输入tokens"),
+    "价格：**0.50/百万输入tokens",
+  );
 });
 
 test("normalizeChatMarkdownContent: skips fenced and inline code", () => {
@@ -24,5 +53,13 @@ test("normalizeChatMarkdownContent: skips fenced and inline code", () => {
   assert.equal(
     normalizeChatMarkdownContent(input),
     "prose **spaced** and `** keep **` and ```\n** code **\n```",
+  );
+});
+
+test("normalizeChatMarkdownContent: streaming close ignores ** inside inline code", () => {
+  const input = "before **open and `** not counted` tail";
+  assert.equal(
+    normalizeChatMarkdownContent(input, { isStreaming: true }),
+    "before **open and `** not counted` tail**",
   );
 });
