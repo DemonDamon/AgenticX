@@ -56,6 +56,15 @@ export function StickyTaskBar({ messages }: StickyTaskBarProps) {
 
   const allDone = !!parsed && parsed.total > 0 && parsed.completed === parsed.total;
 
+  // Guard against ghost task cards: when the model called `todo_write` but
+  // never actually advanced any item (all pending, 0 in_progress, 0 completed)
+  // and the agent has already returned, the list is just clutter and should
+  // be hidden. Typical trigger: user asked for a doc/plan and the model
+  // wrongly mirrored the doc's milestone checklist into todo_write.
+  const hasAnyProgress = !!parsed && parsed.items.some(
+    (item) => item.status === "in_progress" || item.status === "completed",
+  );
+
   // Auto-collapse only when the run finishes; keep expanded while user is
   // watching progress live.
   useEffect(() => {
@@ -64,6 +73,7 @@ export function StickyTaskBar({ messages }: StickyTaskBarProps) {
   }, [allDone, parsed?.total, parsed?.completed]);
 
   if (!parsed) return null;
+  if (!hasAnyProgress) return null;
 
   return (
     <div className="mb-2 rounded-lg border border-border bg-surface-card text-text-primary shadow-sm">
