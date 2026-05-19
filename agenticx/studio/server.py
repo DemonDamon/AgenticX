@@ -186,6 +186,38 @@ def _get_mcp_connect_cancelled(studio_session: Any) -> set[str]:
     return getattr(studio_session, "mcp_connect_cancelled")
 
 
+def _runtime_error_counts_as_failure(event: RuntimeEvent) -> bool:
+    """Return True when a runtime ERROR should leave the session interrupted."""
+    if event.type != EventType.ERROR.value:
+        return False
+    data = event.data if isinstance(event.data, dict) else {}
+    text = str(data.get("text", "") or "")
+    severity = str(data.get("severity", "") or "").strip().lower()
+    detector = str(data.get("detector", "") or "").strip().lower()
+    if severity == "warning":
+        return False
+    if "已达到最大工具调用轮数" in text:
+        return False
+    if detector in {"token_budget_compress", "compactor_circuit_breaker"}:
+        return False
+    return True
+
+
+def _resolve_chat_end_execution_state(
+    manager: SessionManager,
+    session_id: str,
+    *,
+    saw_final: bool,
+    had_runtime_failure: bool,
+) -> str:
+    """Pick idle vs interrupted when a chat SSE stream ends."""
+    if manager.should_interrupt(session_id):
+        return "interrupted"
+    if had_runtime_failure and not saw_final:
+        return "interrupted"
+    return "idle"
+
+
 def _runtime_event_to_sse_lines(event: RuntimeEvent) -> list[str]:
     """Serialize RuntimeEvent to SSE data line(s); emit token_usage after final when usage present."""
     event_data = dict(event.data)
@@ -1999,6 +2031,8 @@ def create_studio_app() -> FastAPI:
         async def _event_stream() -> AsyncGenerator[str, None]:
             runtime_task: "asyncio.Task[None] | None" = None
             meta_done = False
+            saw_final = False
+            had_runtime_failure = False
             keep_runtime_after_disconnect = bool(
                 getattr(payload, "keep_runtime_after_disconnect", False)
             )
@@ -2145,11 +2179,14 @@ def create_studio_app() -> FastAPI:
                             for line in _runtime_event_to_sse_lines(event):
                                 yield line
                         if event.type == EventType.FINAL.value and event.agent_id == "meta":
+                            saw_final = True
                             snap = str(getattr(managed, "session_name", None) or "").strip()
                             if manager.claim_llm_title_slot(payload.session_id, snap):
                                 asyncio.create_task(
                                     _llm_suggest_session_title_job(manager, payload.session_id)
                                 )
+                        elif _runtime_error_counts_as_failure(event):
+                            had_runtime_failure = True
                     if not meta_done:
                         continue
                     # Do not block the main chat stream on background sub-agent execution.
@@ -2158,6 +2195,7 @@ def create_studio_app() -> FastAPI:
                     if event_queue.empty():
                         break
             except Exception as exc:
+                had_runtime_failure = True
                 err = SseEvent(type="error", data={"text": f"Runtime error: {exc}"})
                 if not client_disconnected:
                     yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
@@ -2173,9 +2211,19 @@ def create_studio_app() -> FastAPI:
                             "[chat] runtime finished after disconnect session=%s",
                             payload.session_id,
                         )
+                elif runtime_task is not None and runtime_task.done():
+                    task_exc = runtime_task.exception()
+                    if task_exc is not None:
+                        had_runtime_failure = True
                 _flush_taskspace_hint(payload.session_id, session)
+                end_state = _resolve_chat_end_execution_state(
+                    manager,
+                    payload.session_id,
+                    saw_final=saw_final,
+                    had_runtime_failure=had_runtime_failure,
+                )
                 manager.clear_interrupt(payload.session_id)
-                manager.set_execution_state(payload.session_id, "idle")
+                manager.set_execution_state(payload.session_id, end_state)
                 manager.persist(payload.session_id)
             if not client_disconnected:
                 yield 'data: {"type":"done","data":{}}\n\n'

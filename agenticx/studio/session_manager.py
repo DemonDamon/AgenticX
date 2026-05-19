@@ -201,16 +201,21 @@ class SessionManager:
     def _normalize_execution_state_for_listing(self, session_id: str, state: Any) -> str:
         """Normalize execution_state for session list display.
 
-        Persisted stale `interrupted` states (left by old flows or historical data)
-        should not be shown forever. Only keep `interrupted` visible when there is
-        an active interrupt request in this process.
+        In-memory sessions keep ``interrupted`` after LLM timeout / runtime failure
+        even though ``clear_interrupt`` removed the active stop flag. Only hide
+        stale ``interrupted`` rows loaded from disk without a live managed session.
         """
         raw = str(state or "idle").strip().lower()
         if raw not in {"idle", "running", "interrupted"}:
             raw = "idle"
-        if raw == "interrupted" and not self.should_interrupt(session_id):
-            return "idle"
-        return raw
+        if raw != "interrupted":
+            return raw
+        managed = self._sessions.get(session_id)
+        if managed is not None and str(getattr(managed, "execution_state", "")).strip().lower() == "interrupted":
+            return "interrupted"
+        if self.should_interrupt(session_id):
+            return "interrupted"
+        return "idle"
 
     def request_interrupt(self, session_id: str) -> bool:
         sid = str(session_id or "").strip()
