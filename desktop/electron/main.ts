@@ -3752,6 +3752,28 @@ function registerIpc(): void {
     }
   });
 
+  const readStallNudgeRuntime = (raw: Record<string, unknown>) => {
+    const envEnabled = process.env.AGX_STALL_AUTO_NUDGE_ENABLED;
+    const envAfter = process.env.AGX_STALL_AUTO_NUDGE_AFTER_SECONDS;
+    const envMax = process.env.AGX_STALL_AUTO_NUDGE_MAX_PER_SESSION;
+    const enabledFromEnv =
+      envEnabled === "1" ? true : envEnabled === "0" ? false : undefined;
+    const afterRaw = envAfter !== undefined ? Number(envAfter) : Number(raw.stall_auto_nudge_after_seconds ?? 120);
+    const maxRaw = envMax !== undefined ? Number(envMax) : Number(raw.stall_auto_nudge_max_per_session ?? 2);
+    return {
+      stall_auto_nudge_enabled:
+        enabledFromEnv !== undefined
+          ? enabledFromEnv
+          : Boolean(raw.stall_auto_nudge_enabled ?? false),
+      stall_auto_nudge_after_seconds: Number.isFinite(afterRaw)
+        ? Math.max(60, Math.min(300, Math.round(afterRaw)))
+        : 120,
+      stall_auto_nudge_max_per_session: Number.isFinite(maxRaw)
+        ? Math.max(1, Math.min(5, Math.round(maxRaw)))
+        : 2,
+    };
+  };
+
   ipcMain.handle("load-runtime-config", async () => {
     try {
       const cfg = loadAgxConfig();
@@ -3765,9 +3787,19 @@ function registerIpc(): void {
         max_tool_rounds: Number.isFinite(val) ? Math.max(10, Math.min(120, val)) : 30,
         auto_resume_on_exhaustion: Boolean(raw.auto_resume_on_exhaustion ?? false),
         max_auto_resumes: Math.max(0, Math.min(10, Number(raw.max_auto_resumes ?? 3))),
+        ...readStallNudgeRuntime(raw),
       };
     } catch (err) {
-      return { ok: false, error: String(err), max_tool_rounds: 30, auto_resume_on_exhaustion: false, max_auto_resumes: 3 };
+      return {
+        ok: false,
+        error: String(err),
+        max_tool_rounds: 30,
+        auto_resume_on_exhaustion: false,
+        max_auto_resumes: 3,
+        stall_auto_nudge_enabled: false,
+        stall_auto_nudge_after_seconds: 120,
+        stall_auto_nudge_max_per_session: 2,
+      };
     }
   });
 
@@ -3792,6 +3824,21 @@ function registerIpc(): void {
       if (p.max_auto_resumes !== undefined) {
         const v = Number(p.max_auto_resumes);
         if (Number.isFinite(v)) merged.max_auto_resumes = Math.max(0, Math.min(10, Math.round(v)));
+      }
+      if (p.stall_auto_nudge_enabled !== undefined) {
+        merged.stall_auto_nudge_enabled = Boolean(p.stall_auto_nudge_enabled);
+      }
+      if (p.stall_auto_nudge_after_seconds !== undefined) {
+        const v = Number(p.stall_auto_nudge_after_seconds);
+        if (Number.isFinite(v)) {
+          merged.stall_auto_nudge_after_seconds = Math.max(60, Math.min(300, Math.round(v)));
+        }
+      }
+      if (p.stall_auto_nudge_max_per_session !== undefined) {
+        const v = Number(p.stall_auto_nudge_max_per_session);
+        if (Number.isFinite(v)) {
+          merged.stall_auto_nudge_max_per_session = Math.max(1, Math.min(5, Math.round(v)));
+        }
       }
       root.runtime = merged;
       saveAgxConfig(cfg);

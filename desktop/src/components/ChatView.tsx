@@ -21,6 +21,18 @@ import { groupConsecutiveToolMessages, type GroupedChatRow } from "./messages/gr
 import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
+import { StallRecoveryCard } from "./messages/StallRecoveryCard";
+import {
+  shouldShowStopButton,
+  type SessionExecutionState,
+} from "../utils/streaming-stop-policy";
+import {
+  CHANNEL_C_GRACE_MS,
+  STALL_RUNNING_SILENCE_MS,
+  STALL_SSE_SILENCE_MS,
+  messageLooksLikeAssistantFinal,
+  shouldTriggerIncompleteEndStall,
+} from "../utils/task-stall-policy";
 import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
@@ -364,6 +376,14 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const subAgentsRef = useRef(subAgents);
   const subAgentStatusRef = useRef<Record<string, string>>({});
   const ccBridgeLastSessionModeRef = useRef<CcBridgeSessionModeHint>("");
+  const [stallState, setStallState] = useState<"none" | "stall">("none");
+  const [sessionExecutionState, setSessionExecutionState] = useState<SessionExecutionState>("idle");
+  const [sseActive, setSseActive] = useState(false);
+  const [stallTick, setStallTick] = useState(0);
+  const lastProgressAtRef = useRef(0);
+  const channelCCheckedRef = useRef(false);
+  const sessionEnteredAtRef = useRef(0);
+  const settings = useAppStore((s) => s.settings);
   const isLite = mode === "lite";
   const applyUserMode = useCallback(
     async (nextMode: "pro" | "lite") => {
@@ -424,6 +444,105 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   );
 
   const canSend = useMemo(() => !!(apiBase && sessionId), [apiBase, sessionId]);
+
+  const stallModelOptions = useMemo(() => {
+    const result: { provider: string; model: string; label: string }[] = [];
+    for (const [provName, entry] of Object.entries(settings.providers)) {
+      if (entry.enabled === false) continue;
+      if (!entry.apiKey) continue;
+      const provLabel = getProviderDisplayName(provName, entry);
+      if (entry.models.length > 0) {
+        for (const m of entry.models) {
+          result.push({ provider: provName, model: m, label: `${provLabel}/${m}` });
+        }
+      } else if (entry.model) {
+        result.push({ provider: provName, model: entry.model, label: `${provLabel}/${entry.model}` });
+      }
+    }
+    return result;
+  }, [settings.providers]);
+
+  const currentModelLabel = useMemo(() => {
+    if (!activeModel) return "未选模型";
+    if (!activeProvider) return activeModel;
+    const entry = settings.providers[activeProvider];
+    return `${getProviderDisplayName(activeProvider, entry)}/${activeModel}`;
+  }, [activeModel, activeProvider, settings.providers]);
+
+  const showStopButton = shouldShowStopButton({
+    streaming,
+    streamingSessionId: sessionId || "",
+    currentSessionId: sessionId || "",
+    executionState: sessionExecutionState,
+  });
+
+  const recordProgressActivity = useCallback(() => {
+    lastProgressAtRef.current = Date.now();
+    setStallState((prev) => (prev === "stall" ? "none" : prev));
+  }, []);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    sessionEnteredAtRef.current = Date.now();
+    channelCCheckedRef.current = false;
+    void window.agenticxDesktop.listSessions(undefined).then((r) => {
+      if (!r.ok) return;
+      const row = (r.sessions ?? []).find((s) => s.session_id === sessionId);
+      setSessionExecutionState((row?.execution_state ?? "idle") as SessionExecutionState);
+    });
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    const evaluate = async () => {
+      const lastProgress = lastProgressAtRef.current;
+      const now = Date.now();
+      const silentMs = lastProgress > 0 ? now - lastProgress : 0;
+      let execState: SessionExecutionState = sessionExecutionState;
+      try {
+        const r = await window.agenticxDesktop.listSessions(undefined);
+        if (cancelled || !r.ok) return;
+        const row = (r.sessions ?? []).find((s) => s.session_id === sessionId);
+        if (row?.execution_state) {
+          execState = row.execution_state as SessionExecutionState;
+          setSessionExecutionState(execState);
+        }
+      } catch {
+        /* ignore */
+      }
+      const lastMsg = messages[messages.length - 1];
+      const graceMs = now - sessionEnteredAtRef.current;
+      const channelA = sseActive && lastProgress > 0 && silentMs >= STALL_SSE_SILENCE_MS;
+      const channelB =
+        !sseActive &&
+        execState === "running" &&
+        lastProgress > 0 &&
+        silentMs >= STALL_RUNNING_SILENCE_MS;
+      let channelC = false;
+      if (!channelCCheckedRef.current && graceMs >= CHANNEL_C_GRACE_MS) {
+        channelCCheckedRef.current = true;
+        channelC = shouldTriggerIncompleteEndStall(execState, sseActive, lastMsg, CHANNEL_C_GRACE_MS);
+      }
+      if (channelA || channelB || channelC) {
+        setStallState("stall");
+        return;
+      }
+      if (stallState === "stall" && (messageLooksLikeAssistantFinal(lastMsg) || silentMs < STALL_SSE_SILENCE_MS)) {
+        setStallState("none");
+      }
+    };
+    void evaluate();
+    const timer = window.setInterval(() => {
+      setStallTick((t) => t + 1);
+      void evaluate();
+    }, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [messages, sessionExecutionState, sessionId, sseActive, stallState]);
+
   const visibleMessages = useMemo(
     () => messages.filter((item) => !item.agentId || item.agentId === "meta"),
     [messages]
@@ -825,6 +944,9 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
 
     setStatus("processing");
     setStreaming(true);
+    setSseActive(true);
+    setSessionExecutionState("running");
+    recordProgressActivity();
     cancelStreamRenderFrame();
     setStreamedAssistantText("");
     setStreamingModel(reqModel ? { provider: reqProvider, model: reqModel } : null);
@@ -870,6 +992,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             const eventAgentId = payload.data?.agent_id ?? "meta";
             if (payload.type === "tool_progress") {
               if (!isCurrentRequest()) continue;
+              recordProgressActivity();
               const name = String(payload.data?.name ?? "tool");
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
               const outputLine = payload.data?.line as string | undefined;
@@ -902,6 +1025,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             }
             if (payload.type === "token") {
               if (eventAgentId !== "meta") { addSubAgentEvent(eventAgentId, { type: "token", content: "生成中..." }); continue; }
+              recordProgressActivity();
               const rawToken = String(payload.data?.text ?? "");
               // Strip backend-emitted ⏳ waiting placeholder from streamed tokens.
               const tokenText = rawToken.replace(/⏳\s*/g, "");
@@ -1232,6 +1356,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       setStreamingModel(null);
       setStatus("idle");
       setStreaming(false);
+      setSseActive(false);
       scrollToBottom();
       void syncSubAgents();
 
@@ -1241,6 +1366,40 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       }
     }
   };
+
+  const sendChatRef = useRef(sendChat);
+  sendChatRef.current = sendChat;
+
+  const resumeCurrentTask = useCallback(async () => {
+    if (!sessionId) return;
+    let state: SessionExecutionState = sessionExecutionState;
+    try {
+      const r = await window.agenticxDesktop.listSessions(undefined);
+      if (r.ok) {
+        const row = (r.sessions ?? []).find((s) => s.session_id === sessionId);
+        state = (row?.execution_state ?? "idle") as SessionExecutionState;
+        setSessionExecutionState(state);
+      }
+    } catch {
+      /* ignore */
+    }
+    if (state === "running") return;
+    setStallState("none");
+    const prompt =
+      state === "interrupted"
+        ? "上一次任务被中断，请从未完成的 todo 项继续，并更新 todo_write 状态。"
+        : "请汇报之前任务的执行结果；若仍有未完成项请继续。";
+    await sendChatRef.current(prompt);
+  }, [sessionExecutionState, sessionId]);
+
+  const resumeWithModel = useCallback(
+    async (provider: string, model: string) => {
+      setActiveModel(provider, model);
+      void window.agenticxDesktop.saveConfig({ activeProvider: provider, activeModel: model });
+      await resumeCurrentTask();
+    },
+    [resumeCurrentTask, setActiveModel]
+  );
 
   const send = async (manualInput?: string) => {
     const toSend = (manualInput ?? input).trim();
@@ -1262,7 +1421,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   };
 
   const stopStreaming = () => {
-    if (!streaming) return;
+    if (!showStopButton) return;
     const sid = String(sessionId || "").trim();
     if (sid) {
       void window.agenticxDesktop.interruptSession?.(sid);
@@ -1636,6 +1795,16 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               )}
             </div>
           )}
+          {stallState === "stall" ? (
+            <StallRecoveryCard
+              kind="stall"
+              currentModelLabel={currentModelLabel}
+              modelOptions={stallModelOptions}
+              onResume={() => void resumeCurrentTask()}
+              onResumeWithModel={(provider, model) => void resumeWithModel(provider, model)}
+              onStop={stopStreaming}
+            />
+          ) : null}
           {queuedMessages.length > 0 && queuedMessages.map((qm, qi) => (
             <QueuedMessageBubble
               key={qm.id}
@@ -1714,7 +1883,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             className="min-h-[40px] max-h-[120px] flex-1 resize-none rounded-xl border border-border bg-surface-card px-3 py-2.5 text-sm outline-none transition placeholder:text-text-faint focus:border-cyan-500/50"
           />
           <button className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border text-lg transition hover:bg-surface-hover" onClick={onMicClick} title="语音输入">🎙</button>
-          {streaming ? (
+          {showStopButton ? (
             <div className="flex items-center gap-2">
               <button className="flex h-10 shrink-0 items-center rounded-xl bg-rose-500 px-4 text-sm font-medium text-white transition hover:bg-rose-400" onClick={stopStreaming}>中断</button>
               <button className="flex h-10 shrink-0 items-center rounded-xl bg-btnPrimary px-4 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40 disabled:hover:bg-btnPrimary" disabled={!canSend || !input.trim()} onClick={() => void send()}>追问</button>

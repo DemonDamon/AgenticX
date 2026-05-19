@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, ListChecks, Check, Circle, Loader2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, Check, Circle, Loader2 } from "lucide-react";
 import { parseTodoMessage, type ParsedTodo } from "./TodoUpdateCard";
 import type { Message } from "../store";
 
@@ -35,6 +35,9 @@ function pickLatestTodoFromMessages(messages: Message[]): ParsedTodo | null {
 
 interface StickyTaskBarProps {
   messages: Message[];
+  liveness?: "active" | "stalled" | "idle";
+  silentSeconds?: number;
+  onResume?: () => void;
 }
 
 /**
@@ -50,7 +53,7 @@ interface StickyTaskBarProps {
  * Default: expanded when there is at least one in-progress / pending item;
  * auto-collapses once everything is done so it does not eat composer space.
  */
-export function StickyTaskBar({ messages }: StickyTaskBarProps) {
+export function StickyTaskBar({ messages, liveness = "idle", silentSeconds = 0, onResume }: StickyTaskBarProps) {
   const parsed = useMemo(() => pickLatestTodoFromMessages(messages), [messages]);
   const [expanded, setExpanded] = useState(true);
 
@@ -97,6 +100,21 @@ export function StickyTaskBar({ messages }: StickyTaskBarProps) {
         >
           {parsed.completed} / {parsed.total}
         </span>
+        {liveness === "stalled" && silentSeconds > 0 ? (
+          <span className="text-[10px] text-amber-300/90">已 {silentSeconds}s 无响应</span>
+        ) : null}
+        {liveness === "stalled" && onResume ? (
+          <button
+            type="button"
+            className="text-[10px] font-medium text-amber-300 hover:text-amber-200"
+            onClick={(e) => {
+              e.stopPropagation();
+              onResume();
+            }}
+          >
+            恢复
+          </button>
+        ) : null}
         <span className="flex-1" />
         <span className="inline-flex h-4 w-4 items-center justify-center text-text-faint" aria-hidden>
           {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -115,6 +133,8 @@ export function StickyTaskBar({ messages }: StickyTaskBarProps) {
               >
                 {item.status === "completed" ? (
                   <Check className="h-4 w-4 text-emerald-400" strokeWidth={2.5} />
+                ) : item.status === "in_progress" && liveness === "stalled" ? (
+                  <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
                 ) : item.status === "in_progress" ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-[rgb(var(--theme-color-rgb,59,130,246))]" />
                 ) : (
@@ -133,6 +153,9 @@ export function StickyTaskBar({ messages }: StickyTaskBarProps) {
                 >
                   {item.content}
                 </div>
+                {item.status === "in_progress" && liveness === "stalled" && silentSeconds > 0 ? (
+                  <div className="mt-0.5 text-[11px] text-amber-300/80">已 {silentSeconds}s 无响应</div>
+                ) : null}
                 {item.status === "in_progress" && item.activeForm && item.activeForm !== item.content ? (
                   <div className="mt-0.5 text-[11px] text-[rgba(var(--theme-color-rgb,59,130,246),0.8)]">{item.activeForm}</div>
                 ) : null}

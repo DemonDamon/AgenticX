@@ -345,8 +345,22 @@ type AppState = {
   sessionCatalogRevision: number;
   bumpSessionCatalogRevision: () => void;
   /** After merge-forward, target pane runs one normal /api/chat with this text (cleared when consumed). */
-  forwardAutoReply: { paneId: string; sessionId: string; text: string } | null;
-  setForwardAutoReply: (job: { paneId: string; sessionId: string; text: string } | null) => void;
+  forwardAutoReply: {
+    paneId: string;
+    sessionId: string;
+    text: string;
+    suppressUserEcho?: boolean;
+    skipUserHistory?: boolean;
+  } | null;
+  setForwardAutoReply: (
+    job: {
+      paneId: string;
+      sessionId: string;
+      text: string;
+      suppressUserEcho?: boolean;
+      skipUserHistory?: boolean;
+    } | null
+  ) => void;
   /** Per-pane queued user messages (sent automatically after current stream ends). */
   pendingMessages: Record<string, QueuedMessage[]>;
   enqueuePaneMessage: (paneId: string, msg: QueuedMessage) => void;

@@ -417,8 +417,24 @@ declare global {
 
       listSessions: (avatarId?: string) => Promise<{ ok: boolean; sessions: Array<{ session_id: string; avatar_id: string | null; avatar_name?: string | null; session_name: string | null; updated_at: number; created_at?: number; pinned?: boolean; archived?: boolean; execution_state?: "idle" | "running" | "interrupted"; provider?: string; model?: string }> }>;
       interruptSession: (sessionId: string) => Promise<{ ok: boolean; session_id?: string; error?: string }>;
-      loadRuntimeConfig: () => Promise<{ ok: boolean; max_tool_rounds: number; auto_resume_on_exhaustion: boolean; max_auto_resumes: number; error?: string }>;
-      saveRuntimeConfig: (payload: { max_tool_rounds?: number; auto_resume_on_exhaustion?: boolean; max_auto_resumes?: number }) => Promise<{ ok: boolean; error?: string }>;
+      loadRuntimeConfig: () => Promise<{
+        ok: boolean;
+        max_tool_rounds: number;
+        auto_resume_on_exhaustion: boolean;
+        max_auto_resumes: number;
+        stall_auto_nudge_enabled?: boolean;
+        stall_auto_nudge_after_seconds?: number;
+        stall_auto_nudge_max_per_session?: number;
+        error?: string;
+      }>;
+      saveRuntimeConfig: (payload: {
+        max_tool_rounds?: number;
+        auto_resume_on_exhaustion?: boolean;
+        max_auto_resumes?: number;
+        stall_auto_nudge_enabled?: boolean;
+        stall_auto_nudge_after_seconds?: number;
+        stall_auto_nudge_max_per_session?: number;
+      }) => Promise<{ ok: boolean; error?: string }>;
       searchSessions: (payload: { q: string; avatarId?: string }) => Promise<{
         ok: boolean;
         hits?: Array<{ session_id: string; snippet: string }>;
