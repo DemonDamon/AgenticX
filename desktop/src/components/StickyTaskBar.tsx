@@ -43,7 +43,7 @@ interface StickyTaskBarProps {
  * Visual reference: Manus / Cursor — a card with a header row ("任务进度  N/M"
  * + 折叠箭头) and a checklist underneath. Each item shows status:
  *   - completed → ✓ (emerald)
- *   - in_progress → spinner (amber)
+ *   - in_progress → spinner (theme accent)
  *   - pending → empty circle (muted)
  * Completed items render with strikethrough.
  *
@@ -80,17 +80,19 @@ export function StickyTaskBar({ messages }: StickyTaskBarProps) {
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400/40"
+        className="flex w-full items-center gap-2 py-1.5 pl-4 pr-3 text-left transition hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.4)]"
         aria-expanded={expanded}
         aria-label={expanded ? "收起任务列表" : "展开任务列表"}
       >
-        <ListChecks className="h-4 w-4 shrink-0 text-cyan-300" aria-hidden />
+        <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
+          <ListChecks className="h-4 w-4 text-[rgb(var(--theme-color-rgb,59,130,246))]" />
+        </span>
         <span className="text-[12px] font-semibold text-text-strong">任务进度</span>
         <span
           className={
             allDone
               ? "rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300"
-              : "rounded bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-medium text-cyan-300"
+              : "rounded bg-[rgba(var(--theme-color-rgb,59,130,246),0.15)] px-1.5 py-0.5 text-[10px] font-medium text-[rgb(var(--theme-color-rgb,59,130,246))]"
           }
         >
           {parsed.completed} / {parsed.total}
@@ -114,7 +116,7 @@ export function StickyTaskBar({ messages }: StickyTaskBarProps) {
                 {item.status === "completed" ? (
                   <Check className="h-4 w-4 text-emerald-400" strokeWidth={2.5} />
                 ) : item.status === "in_progress" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[rgb(var(--theme-color-rgb,59,130,246))]" />
                 ) : (
                   <Circle className="h-3.5 w-3.5 text-text-faint" />
                 )}
@@ -132,7 +134,7 @@ export function StickyTaskBar({ messages }: StickyTaskBarProps) {
                   {item.content}
                 </div>
                 {item.status === "in_progress" && item.activeForm && item.activeForm !== item.content ? (
-                  <div className="mt-0.5 text-[11px] text-amber-300/80">{item.activeForm}</div>
+                  <div className="mt-0.5 text-[11px] text-[rgba(var(--theme-color-rgb,59,130,246),0.8)]">{item.activeForm}</div>
                 ) : null}
               </div>
             </li>
