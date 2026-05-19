@@ -51,6 +51,10 @@ import {
   RUNTIME_MAX_TOOL_ROUNDS,
   RUNTIME_MIN_TOOL_ROUNDS,
 } from "./automation/RuntimeConfigSection";
+import {
+  StallNudgeConfigSection,
+  type StallNudgeConfig,
+} from "./automation/StallNudgeConfigSection";
 import { AccountTab } from "./AccountTab";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
@@ -1904,6 +1908,11 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
   const [installing, setInstalling] = useState<Record<string, ToolInstallState>>({});
   const [search, setSearch] = useState("");
   const [maxToolRounds, setMaxToolRounds] = useState(60);
+  const [stallNudge, setStallNudge] = useState<StallNudgeConfig>({
+    stall_auto_nudge_enabled: false,
+    stall_auto_nudge_after_seconds: 120,
+    stall_auto_nudge_max_per_session: 2,
+  });
   const [runtimeLoadError, setRuntimeLoadError] = useState("");
 
   const loadAll = useCallback(async () => {
@@ -1937,6 +1946,17 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         setMaxToolRounds(
           Math.max(RUNTIME_MIN_TOOL_ROUNDS, Math.min(RUNTIME_MAX_TOOL_ROUNDS, n)),
         );
+        setStallNudge({
+          stall_auto_nudge_enabled: Boolean(runtimeResult.stall_auto_nudge_enabled),
+          stall_auto_nudge_after_seconds: Math.max(
+            60,
+            Math.min(300, Number(runtimeResult.stall_auto_nudge_after_seconds ?? 120) || 120),
+          ),
+          stall_auto_nudge_max_per_session: Math.max(
+            1,
+            Math.min(5, Number(runtimeResult.stall_auto_nudge_max_per_session ?? 2) || 2),
+          ),
+        });
       } else {
         setRuntimeLoadError("读取运行时参数失败，仍可按当前滑块值保存。");
       }
@@ -2011,6 +2031,9 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         await saveBashDefaultTimeout();
         const rtRes = await window.agenticxDesktop.saveRuntimeConfig({
           max_tool_rounds: maxToolRounds,
+          stall_auto_nudge_enabled: stallNudge.stall_auto_nudge_enabled,
+          stall_auto_nudge_after_seconds: stallNudge.stall_auto_nudge_after_seconds,
+          stall_auto_nudge_max_per_session: stallNudge.stall_auto_nudge_max_per_session,
         });
         if (!rtRes?.ok) {
           return {
@@ -2025,7 +2048,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         return bridge.save();
       },
     }),
-    [loading, maxToolRounds, saveBashDefaultTimeout],
+    [loading, maxToolRounds, saveBashDefaultTimeout, stallNudge],
   );
 
   const startInstall = async (tool: ToolStatusItem) => {
@@ -2092,6 +2115,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         onChange={setMaxToolRounds}
         disabled={loading}
       />
+      <StallNudgeConfigSection value={stallNudge} onChange={setStallNudge} disabled={loading} />
       {runtimeLoadError ? (
         <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
           {runtimeLoadError}
