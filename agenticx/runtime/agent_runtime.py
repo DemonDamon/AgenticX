@@ -677,7 +677,9 @@ def _merge_consecutive_simple_roles_for_minimax(
 
     MiniMax returns error 2013 (invalid chat setting) when the same role
     appears on consecutive messages (e.g. main system prompt + [compacted]
-    system block from ContextCompactor). Tool-call turns are left unchanged.
+    system block from ContextCompactor). It also rejects system messages outside
+    the first position, so runtime-injected system notes are downgraded to user
+    context before the request is sent. Tool-call turns are left unchanged.
     """
     merge_roles = frozenset({"system", "user"})
     out: List[Dict[str, Any]] = []
@@ -687,6 +689,10 @@ def _merge_consecutive_simple_roles_for_minimax(
         if m.get("tool_calls"):
             out.append(m)
             continue
+        if role == "system" and out:
+            m["role"] = "user"
+            m["content"] = f"[system-context]\n{str(m.get('content', '')).strip()}"
+            role = "user"
         if role not in merge_roles:
             out.append(m)
             continue
@@ -1127,6 +1133,8 @@ class AgentRuntime:
                     messages_for_llm = list(messages) + [anchor_message]
                 else:
                     messages_for_llm = messages
+                if provider_name.strip().lower() == "minimax":
+                    messages_for_llm = _merge_consecutive_simple_roles_for_minimax(messages_for_llm)
                 response_text = ""
                 tool_calls: List[Dict[str, Any]] = []
                 response: Any
