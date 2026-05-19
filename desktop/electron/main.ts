@@ -3762,7 +3762,16 @@ function registerIpc(): void {
     }
   });
 
+  const clampStallDetectSeconds = (raw: unknown) => {
+    const envDetect = process.env.AGX_STALL_DETECT_SILENCE_SECONDS;
+    const n =
+      envDetect !== undefined ? Number(envDetect) : Number(raw ?? 90);
+    if (!Number.isFinite(n)) return 90;
+    return Math.max(30, Math.min(300, Math.round(n)));
+  };
+
   const readStallNudgeRuntime = (raw: Record<string, unknown>) => {
+    const detectSec = clampStallDetectSeconds(raw.stall_detect_silence_seconds);
     const envEnabled = process.env.AGX_STALL_AUTO_NUDGE_ENABLED;
     const envAfter = process.env.AGX_STALL_AUTO_NUDGE_AFTER_SECONDS;
     const envMax = process.env.AGX_STALL_AUTO_NUDGE_MAX_PER_SESSION;
@@ -3770,14 +3779,17 @@ function registerIpc(): void {
       envEnabled === "1" ? true : envEnabled === "0" ? false : undefined;
     const afterRaw = envAfter !== undefined ? Number(envAfter) : Number(raw.stall_auto_nudge_after_seconds ?? 120);
     const maxRaw = envMax !== undefined ? Number(envMax) : Number(raw.stall_auto_nudge_max_per_session ?? 2);
+    let afterSec = Number.isFinite(afterRaw)
+      ? Math.max(60, Math.min(300, Math.round(afterRaw)))
+      : 120;
+    if (afterSec < detectSec) afterSec = detectSec;
     return {
+      stall_detect_silence_seconds: detectSec,
       stall_auto_nudge_enabled:
         enabledFromEnv !== undefined
           ? enabledFromEnv
           : Boolean(raw.stall_auto_nudge_enabled ?? false),
-      stall_auto_nudge_after_seconds: Number.isFinite(afterRaw)
-        ? Math.max(60, Math.min(300, Math.round(afterRaw)))
-        : 120,
+      stall_auto_nudge_after_seconds: afterSec,
       stall_auto_nudge_max_per_session: Number.isFinite(maxRaw)
         ? Math.max(1, Math.min(5, Math.round(maxRaw)))
         : 2,
@@ -3806,6 +3818,7 @@ function registerIpc(): void {
         max_tool_rounds: 30,
         auto_resume_on_exhaustion: false,
         max_auto_resumes: 3,
+        stall_detect_silence_seconds: 90,
         stall_auto_nudge_enabled: false,
         stall_auto_nudge_after_seconds: 120,
         stall_auto_nudge_max_per_session: 2,
@@ -3835,14 +3848,28 @@ function registerIpc(): void {
         const v = Number(p.max_auto_resumes);
         if (Number.isFinite(v)) merged.max_auto_resumes = Math.max(0, Math.min(10, Math.round(v)));
       }
+      if (p.stall_detect_silence_seconds !== undefined) {
+        merged.stall_detect_silence_seconds = clampStallDetectSeconds(
+          p.stall_detect_silence_seconds,
+        );
+      }
+      const detectSec = clampStallDetectSeconds(merged.stall_detect_silence_seconds);
+      merged.stall_detect_silence_seconds = detectSec;
       if (p.stall_auto_nudge_enabled !== undefined) {
         merged.stall_auto_nudge_enabled = Boolean(p.stall_auto_nudge_enabled);
       }
       if (p.stall_auto_nudge_after_seconds !== undefined) {
         const v = Number(p.stall_auto_nudge_after_seconds);
         if (Number.isFinite(v)) {
-          merged.stall_auto_nudge_after_seconds = Math.max(60, Math.min(300, Math.round(v)));
+          let after = Math.max(60, Math.min(300, Math.round(v)));
+          if (after < detectSec) after = detectSec;
+          merged.stall_auto_nudge_after_seconds = after;
         }
+      } else if (
+        Number(merged.stall_auto_nudge_after_seconds) > 0 &&
+        Number(merged.stall_auto_nudge_after_seconds) < detectSec
+      ) {
+        merged.stall_auto_nudge_after_seconds = detectSec;
       }
       if (p.stall_auto_nudge_max_per_session !== undefined) {
         const v = Number(p.stall_auto_nudge_max_per_session);

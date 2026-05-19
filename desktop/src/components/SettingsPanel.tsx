@@ -1909,6 +1909,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
   const [search, setSearch] = useState("");
   const [maxToolRounds, setMaxToolRounds] = useState(60);
   const [stallNudge, setStallNudge] = useState<StallNudgeConfig>({
+    stall_detect_silence_seconds: 90,
     stall_auto_nudge_enabled: false,
     stall_auto_nudge_after_seconds: 120,
     stall_auto_nudge_max_per_session: 2,
@@ -1946,12 +1947,19 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         setMaxToolRounds(
           Math.max(RUNTIME_MIN_TOOL_ROUNDS, Math.min(RUNTIME_MAX_TOOL_ROUNDS, n)),
         );
+        const detectSec = Math.max(
+          30,
+          Math.min(300, Number(runtimeResult.stall_detect_silence_seconds ?? 90) || 90),
+        );
+        let afterSec = Math.max(
+          60,
+          Math.min(300, Number(runtimeResult.stall_auto_nudge_after_seconds ?? 120) || 120),
+        );
+        if (afterSec < detectSec) afterSec = detectSec;
         setStallNudge({
+          stall_detect_silence_seconds: detectSec,
           stall_auto_nudge_enabled: Boolean(runtimeResult.stall_auto_nudge_enabled),
-          stall_auto_nudge_after_seconds: Math.max(
-            60,
-            Math.min(300, Number(runtimeResult.stall_auto_nudge_after_seconds ?? 120) || 120),
-          ),
+          stall_auto_nudge_after_seconds: afterSec,
           stall_auto_nudge_max_per_session: Math.max(
             1,
             Math.min(5, Number(runtimeResult.stall_auto_nudge_max_per_session ?? 2) || 2),
@@ -2029,10 +2037,15 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
           return { ok: false, error: "工具列表仍在加载，请稍后再点窗口底部「保存」。" };
         }
         await saveBashDefaultTimeout();
+        let afterSec = stallNudge.stall_auto_nudge_after_seconds;
+        if (stallNudge.stall_auto_nudge_enabled && afterSec < stallNudge.stall_detect_silence_seconds) {
+          afterSec = stallNudge.stall_detect_silence_seconds;
+        }
         const rtRes = await window.agenticxDesktop.saveRuntimeConfig({
           max_tool_rounds: maxToolRounds,
+          stall_detect_silence_seconds: stallNudge.stall_detect_silence_seconds,
           stall_auto_nudge_enabled: stallNudge.stall_auto_nudge_enabled,
-          stall_auto_nudge_after_seconds: stallNudge.stall_auto_nudge_after_seconds,
+          stall_auto_nudge_after_seconds: afterSec,
           stall_auto_nudge_max_per_session: stallNudge.stall_auto_nudge_max_per_session,
         });
         if (!rtRes?.ok) {

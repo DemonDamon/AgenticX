@@ -440,6 +440,7 @@ declare global {
         max_tool_rounds: number;
         auto_resume_on_exhaustion: boolean;
         max_auto_resumes: number;
+        stall_detect_silence_seconds?: number;
         stall_auto_nudge_enabled?: boolean;
         stall_auto_nudge_after_seconds?: number;
         stall_auto_nudge_max_per_session?: number;
@@ -449,6 +450,7 @@ declare global {
         max_tool_rounds?: number;
         auto_resume_on_exhaustion?: boolean;
         max_auto_resumes?: number;
+        stall_detect_silence_seconds?: number;
         stall_auto_nudge_enabled?: boolean;
         stall_auto_nudge_after_seconds?: number;
         stall_auto_nudge_max_per_session?: number;
