@@ -126,6 +126,13 @@ export type ChatPane = {
 /** Lifecycle for merged tool_call + tool_result rows in chat (desktop Meta pane). */
 export type ToolCallStatus = "pending" | "running" | "done" | "error" | "cancelled";
 
+/** Flat inline notices for context/token budget events (not expandable tool cards). */
+export type ContextNoticeKind =
+  | "budget_compress"
+  | "compactor_cb"
+  | "compaction_reactive"
+  | "compaction_proactive";
+
 export type Message = {
   id: string;
   role: MsgRole;
@@ -155,6 +162,8 @@ export type Message = {
   toolStreamLines?: string[];
   /** Parsed from model `<followups>` block; shown as chips after reply completes. */
   suggestedQuestions?: string[];
+  /** Renders as flat ContextNoticeLine instead of ToolCallCard. */
+  noticeKind?: ContextNoticeKind;
 };
 
 /** Extras allowed on tool messages from `addPaneMessage` / `addMessage`. */
@@ -170,6 +179,7 @@ export type MessageToolExtras = Pick<
   | "toolStreamLines"
   | "inlineConfirm"
   | "suggestedQuestions"
+  | "noticeKind"
 >;
 
 export type ForwardedHistoryItem = {

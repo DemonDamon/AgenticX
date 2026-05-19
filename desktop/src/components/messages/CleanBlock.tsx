@@ -62,7 +62,7 @@ export function CleanBlock({ message, badge }: Props) {
                   components={chatMarkdownComponents}
                   urlTransform={chatUrlTransform}
                 >
-                  {normalizeChatMarkdownContent(bodyText)}
+                  {normalizeChatMarkdownContent(bodyText, { isStreaming })}
                 </ReactMarkdown>
               </MarkdownContext.Provider>
             </div>

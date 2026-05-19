@@ -6,6 +6,8 @@ import { TerminalLine } from "./TerminalLine";
 import { CleanBlock } from "./CleanBlock";
 import { ToolCallCard } from "./ToolCallCard";
 import { SystemNotice } from "./SystemNotice";
+import { ContextNoticeLine } from "./ContextNoticeLine";
+import { parseContextNotice } from "../../utils/context-notice";
 import { parseTodoMessage, TodoUpdateCard } from "../TodoUpdateCard";
 
 type Props = {
@@ -164,6 +166,10 @@ export function MessageRenderer({
   if (message.role === "tool") {
     if (isNoisyToolStatusMessage(message)) {
       return null;
+    }
+    const contextNotice = parseContextNotice(message);
+    if (contextNotice) {
+      return <ContextNoticeLine text={contextNotice.text} />;
     }
     if (isTodoUpdateToolMessage(message.content)) {
       return (

@@ -93,6 +93,7 @@ import {
 import type { AutomationTask } from "./automation/types";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
+import { buildCompactionNoticeText } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
 import machiEmptyState from "../assets/machi-logo-transparent.png";
@@ -5626,18 +5627,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               // only when the model later "explains" it as a failure cause.
               const count = Number(payload.data?.compacted_count ?? 0) || 0;
               const reactive = Boolean(payload.data?.reactive);
-              const text = reactive
-                ? `⚠️ Token 接近上限，已自动压缩 ${count} 条历史消息以释放上下文（保留最近若干条 + 摘要）。任务仍在继续。`
-                : `🗜️ 已自动压缩 ${count} 条历史消息（保留最近若干条 + 摘要）。任务仍在继续。`;
-              addPaneMessageIfSessionActive(pane.id, "tool", text, eventAgentId || "meta");
+              const text = buildCompactionNoticeText(count, reactive);
+              addPaneMessageIfSessionActive(pane.id, "tool", text, eventAgentId || "meta", undefined, undefined, undefined, {
+                noticeKind: reactive ? "compaction_reactive" : "compaction_proactive",
+              });
             }
             if (payload.type === "error") {
               const errText = String(payload.data?.text ?? "未知错误");
               const severity = String(payload.data?.severity ?? "").trim();
               const detector = String(payload.data?.detector ?? "").trim();
               if (severity === "warning" || detector === "token_budget_compress" || detector === "compactor_circuit_breaker") {
-                // FR-4 / FR-5: non-fatal warnings render as info chips, not blocking errors.
-                addPaneMessageIfSessionActive(pane.id, "tool", `⚠️ ${errText}`, eventAgentId || "meta");
+                // FR-4 / FR-5: non-fatal warnings render as flat context notices, not tool cards.
+                const noticeKind =
+                  detector === "compactor_circuit_breaker" ? "compactor_cb" : "budget_compress";
+                addPaneMessageIfSessionActive(pane.id, "tool", errText, eventAgentId || "meta", undefined, undefined, undefined, {
+                  noticeKind,
+                });
               } else if (errText.includes("已达到最大工具调用轮数")) {
                 const maxRounds = Number(payload.data?.max_rounds ?? 0) || 30;
                 const rounds = Number(payload.data?.round ?? maxRounds);

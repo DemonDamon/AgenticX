@@ -58,7 +58,7 @@ export function TerminalLine({ message, badge }: Props) {
                   components={chatMarkdownComponents}
                   urlTransform={chatUrlTransform}
                 >
-                  {normalizeChatMarkdownContent(bodyText)}
+                  {normalizeChatMarkdownContent(bodyText, { isStreaming })}
                 </ReactMarkdown>
               </MarkdownContext.Provider>
             )
