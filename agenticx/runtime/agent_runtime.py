@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict
 
 from agenticx.cli.agent_tools import (
     STUDIO_TOOLS,
+    studio_tools_for_session,
     _TOOL_REQUIRED_PARAMS,
     dispatch_tool_async,
     tool_denied_by_session_permissions,
@@ -505,6 +506,12 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
     if not mcp_context:
         mcp_context = "(no MCP tools connected)"
 
+    try:
+        from agenticx.runtime.prompts.code_mode import build_code_dev_prompt_blocks
+
+        code_dev_block = build_code_dev_prompt_blocks(session)
+    except Exception:
+        code_dev_block = ""
     return (
         "你是 AgenticX Studio 的执行型 Agent（implement 角色）。\n"
         "核心目标：根据用户请求完成代码/命令操作，并在不确定或高风险动作前主动确认。\n\n"
@@ -521,6 +528,7 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         f"{_serialize_scratchpad(session)}\n\n"
         "## 当前 context_files\n"
         f"{_serialize_context_files(session)}\n\n"
+        f"{code_dev_block}"
         "## 当前 MCP 工具上下文\n"
         f"{_truncate(mcp_context, 6000)}\n\n"
         "## 浏览器自动化（browser-use 等 MCP）\n"
@@ -968,13 +976,25 @@ class AgentRuntime:
         self._exploratory_error_streak = 0
 
         current_system_prompt = system_prompt or _build_agent_system_prompt(session)
-        active_tools: Sequence[Dict[str, Any]] = STUDIO_TOOLS if tools is None else tools
+        active_tools: Sequence[Dict[str, Any]] = (
+            studio_tools_for_session(session) if tools is None else tools
+        )
         allowed_tool_names = {
             str(tool.get("function", {}).get("name", "")).strip()
             for tool in active_tools
             if isinstance(tool, dict)
         }
         history = _sanitize_context_messages(session.agent_messages)
+        if getattr(session, "_code_dev_phase_compact_pending", False):
+            setattr(session, "_code_dev_phase_compact_pending", False)
+            compact_model = str(getattr(session, "model_name", "") or "")
+            history, _phase_did, _phase_sum, _phase_cnt, _ = await self.compactor.maybe_compact(
+                history,
+                force=True,
+                model=compact_model,
+            )
+            if _phase_did:
+                session.agent_messages = list(history)
         compact_model = str(getattr(session, "model_name", "") or "")
         compacted_history, did_compact, compact_summary, compacted_count, _pending_q = await self.compactor.maybe_compact(
             history,
@@ -982,6 +1002,29 @@ class AgentRuntime:
         )
         messages: List[Dict[str, Any]] = [{"role": "system", "content": current_system_prompt}]
         messages.extend(compacted_history)
+        try:
+            from agenticx.runtime.session_mode import (
+                EXPLORE_WHOLE_FILE_READ_WARN_KEY,
+                PHASE_EXPLORE,
+                get_session_phase,
+                is_code_dev,
+            )
+
+            if is_code_dev(session) and get_session_phase(session) == PHASE_EXPLORE:
+                scratch = getattr(session, "scratchpad", None) or {}
+                if isinstance(scratch, dict):
+                    warn_n = int(scratch.get(EXPLORE_WHOLE_FILE_READ_WARN_KEY, 0) or 0)
+                    if warn_n >= 2:
+                        messages.append({
+                            "role": "system",
+                            "content": (
+                                "[code_dev] 当前处于探索阶段，已连续整文件 file_read。"
+                                "请先使用 code_outline / grep 定位，再用 start_line/end_line 片段读取。"
+                            ),
+                        })
+                        scratch[EXPLORE_WHOLE_FILE_READ_WARN_KEY] = "0"
+        except Exception:
+            pass
         if did_compact:
             yield RuntimeEvent(
                 type=EventType.COMPACTION.value,

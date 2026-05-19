@@ -196,7 +196,12 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       `/api/sessions/search?${params.toString()}`
     );
   },
-  createSession: async (payload: { avatar_id?: string; name?: string; inherit_from_session_id?: string }) =>
+  createSession: async (payload: {
+    avatar_id?: string;
+    name?: string;
+    inherit_from_session_id?: string;
+    session_mode?: "code_dev" | "daily_office";
+  }) =>
     ipcRenderer.invoke("create-session", payload),
   renameSession: async (payload: { sessionId: string; name: string }) =>
     ipcRenderer.invoke("rename-session", payload),

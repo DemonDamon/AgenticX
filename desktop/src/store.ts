@@ -121,6 +121,8 @@ export type ChatPane = {
   sessionTokens: { input: number; output: number };
   /** Temporary highlight terms from session-history search navigation. */
   historySearchTerms: string[];
+  /** Harness mode for this pane's session (code_dev vs daily_office). */
+  sessionMode?: "code_dev" | "daily_office";
 };
 
 /** Lifecycle for merged tool_call + tool_result rows in chat (desktop Meta pane). */
@@ -461,6 +463,7 @@ type AppState = {
   updateLastPaneMessage: (paneId: string, content: string) => void;
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
+  setPaneSessionMode: (paneId: string, mode: "code_dev" | "daily_office") => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
   setPaneHistorySearchTerms: (paneId: string, terms: string[]) => void;
   togglePaneHistory: (paneId: string) => void;
@@ -1288,6 +1291,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       return next as AppState;
     });
   },
+  setPaneSessionMode: (paneId, mode) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, sessionMode: mode } : pane
+      ),
+    })),
   setPaneMessages: (paneId, messages) =>
     set((state) => ({
       panes: state.panes.map((pane) => (pane.id === paneId ? { ...pane, messages } : pane)),

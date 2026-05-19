@@ -14,6 +14,7 @@ from typing import Any
 from agenticx.cli.studio import StudioSession
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.skills.meta_skill import MetaSkillInjector
+from agenticx.runtime.prompts.code_mode import build_code_dev_prompt_blocks
 from agenticx.workspace.loader import load_workspace_context
 
 
@@ -743,6 +744,7 @@ def build_meta_agent_system_prompt(
         f"{memory_recall}"
         f"{session_summary}"
         f"{taskspaces_context}"
+        f"{build_code_dev_prompt_blocks(session)}"
         "## 当前会话上下文\n"
         f"- provider: {session.provider_name or 'default'}\n"
         f"- model: {session.model_name or 'default'}\n"

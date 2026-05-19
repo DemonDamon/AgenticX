@@ -3,41 +3,41 @@ name: machi-code-mode-harness
 overview: Machi 代码开发模式的 4 层上下文工程与 Phase Gate harness
 todos:
   - id: p0-mode-preset-skeleton
-    content: P0: 引入 mode 预设字段 (code_dev / daily_office) 与 Desktop 入口按钮
-    status: pending
+    content: "P0: 引入 mode 预设字段 (code_dev / daily_office) 与 Desktop 入口按钮"
+    status: completed
   - id: p0-code-outline-tool
-    content: P0: 新增 code_outline 工具 (AST 抽函数/类签名, 不返回函数体)
-    status: pending
+    content: "P0: 新增 code_outline 工具 (AST 抽函数/类签名, 不返回函数体)"
+    status: completed
   - id: p0-repo-skeleton-injection
-    content: P0: code_dev 模式系统提示注入 L1 仓库骨架 (目录树 + 关键入口)
-    status: pending
+    content: "P0: code_dev 模式系统提示注入 L1 仓库骨架 (目录树 + 关键入口)"
+    status: completed
   - id: p0-file-read-budget
-    content: P0: code_dev 下 file_read 默认走片段, MAX_READ_CHARS 调到 8K, 鼓励 start_line/end_line
-    status: pending
+    content: "P0: code_dev 下 file_read 默认走片段, MAX_READ_CHARS 调到 8K, 鼓励 start_line/end_line"
+    status: completed
   - id: p0-read-cache-scratchpad
-    content: P0: 已读文件清单写入 scratchpad, 二次读同文件优先回放摘要
-    status: pending
+    content: "P0: 已读文件清单写入 scratchpad, 二次读同文件优先回放摘要"
+    status: completed
   - id: p0-phase-gate-prompt
-    content: P0: 系统提示注入 Explore/Read/Author 三相位约束与预算
-    status: pending
+    content: "P0: 系统提示注入 Explore/Read/Author 三相位约束与预算"
+    status: completed
   - id: p1-phase-gate-runtime
-    content: P1: runtime 侧按相位计数与超额提醒 (软门, 不强阻断)
-    status: pending
+    content: "P1: runtime 侧按相位计数与超额提醒 (软门, 不强阻断)"
+    status: completed
   - id: p1-author-skeleton-first
-    content: P1: code_dev 任务约定先 file_write 骨架再分章追加, 避免一次性大输出
-    status: pending
+    content: "P1: code_dev 任务约定先 file_write 骨架再分章追加, 避免一次性大输出"
+    status: completed
   - id: p1-phase-aware-compaction
-    content: P1: compactor 在相位切换时定向压缩 file_read/bash_exec 原文, 保留 file_write 结果
-    status: pending
+    content: "P1: compactor 在相位切换时定向压缩 file_read/bash_exec 原文, 保留 file_write 结果"
+    status: completed
   - id: p1-task-bar-phase
-    content: P1: StickyTaskBar 显示当前相位 + 工具/读文件预算消耗
-    status: pending
+    content: "P1: StickyTaskBar 显示当前相位 + 工具/读文件预算消耗"
+    status: completed
   - id: p2-mode-skill-pack
-    content: P2: 配套 code_dev_workflow skill (含 explore->read->author 模板)
-    status: pending
+    content: "P2: 配套 code_dev_workflow skill (含 explore->read->author 模板)"
+    status: completed
   - id: p2-code-search-bridge
-    content: P2: code_dev 模式自动启用 code_search (依赖 2026-05-06 code_index plan)
-    status: pending
+    content: "P2: code_dev 模式自动启用 code_search (依赖 2026-05-06 code_index plan)"
+    status: completed
 isProject: false
 ---
 

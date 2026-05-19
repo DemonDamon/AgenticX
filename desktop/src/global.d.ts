@@ -415,7 +415,25 @@ declare global {
       installTool: (payload: { requestId: string; toolId: string }) => Promise<{ ok: boolean; error?: string }>;
       onToolInstallProgress: (cb: (payload: ToolInstallProgress) => void) => () => void;
 
-      listSessions: (avatarId?: string) => Promise<{ ok: boolean; sessions: Array<{ session_id: string; avatar_id: string | null; avatar_name?: string | null; session_name: string | null; updated_at: number; created_at?: number; pinned?: boolean; archived?: boolean; execution_state?: "idle" | "running" | "interrupted"; provider?: string; model?: string }> }>;
+      listSessions: (avatarId?: string) => Promise<{
+        ok: boolean;
+        sessions: Array<{
+          session_id: string;
+          avatar_id: string | null;
+          avatar_name?: string | null;
+          session_name: string | null;
+          updated_at: number;
+          created_at?: number;
+          pinned?: boolean;
+          archived?: boolean;
+          execution_state?: "idle" | "running" | "interrupted";
+          provider?: string;
+          model?: string;
+          session_mode?: "code_dev" | "daily_office";
+          harness_phase?: "explore" | "read" | "author";
+          read_files_count?: number;
+        }>;
+      }>;
       interruptSession: (sessionId: string) => Promise<{ ok: boolean; session_id?: string; error?: string }>;
       loadRuntimeConfig: () => Promise<{
         ok: boolean;
@@ -440,7 +458,18 @@ declare global {
         hits?: Array<{ session_id: string; snippet: string }>;
         error?: string;
       }>;
-      createSession: (payload: { avatar_id?: string; name?: string; inherit_from_session_id?: string }) => Promise<{ ok: boolean; session_id?: string; inherited?: boolean; error?: string }>;
+      createSession: (payload: {
+        avatar_id?: string;
+        name?: string;
+        inherit_from_session_id?: string;
+        session_mode?: "code_dev" | "daily_office";
+      }) => Promise<{
+        ok: boolean;
+        session_id?: string;
+        inherited?: boolean;
+        session_mode?: "code_dev" | "daily_office";
+        error?: string;
+      }>;
       renameSession: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       deleteSession: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
       deleteSessionsBatch: (sessionIds: string[]) => Promise<{ ok: boolean; deleted?: string[]; failed?: string[]; error?: string }>;
