@@ -69,8 +69,7 @@ import {
 } from "../utils/streaming-stop-policy";
 import {
   CHANNEL_C_GRACE_MS,
-  STALL_RUNNING_SILENCE_MS,
-  STALL_SSE_SILENCE_MS,
+  stallDetectSilenceMs,
   messageLooksLikeAssistantFinal,
   shouldTriggerIncompleteEndStall,
 } from "../utils/task-stall-policy";
@@ -2056,6 +2055,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const autoNudgeBucketRef = useRef<Record<string, number>>({});
   const [lastToolProgress, setLastToolProgress] = useState<{ name: string; sec: number } | null>(null);
   const [stallRuntimeConfig, setStallRuntimeConfig] = useState({
+    stall_detect_silence_seconds: 90,
     stall_auto_nudge_enabled: false,
     stall_auto_nudge_after_seconds: 120,
     stall_auto_nudge_max_per_session: 2,
@@ -3852,7 +3852,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         stall_auto_nudge_after_seconds?: number;
         stall_auto_nudge_max_per_session?: number;
       };
+      const detectSec = Math.max(
+        30,
+        Math.min(300, Number(cfg.stall_detect_silence_seconds ?? 90) || 90),
+      );
       setStallRuntimeConfig({
+        stall_detect_silence_seconds: detectSec,
         stall_auto_nudge_enabled: Boolean(cfg.stall_auto_nudge_enabled),
         stall_auto_nudge_after_seconds: Math.max(
           60,
@@ -3965,13 +3970,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const enteredAt = sessionEnteredAtRef.current[sid] ?? now;
       const graceMs = now - enteredAt;
 
-      const channelA =
-        sseActive && lastProgress > 0 && silentMs >= STALL_SSE_SILENCE_MS;
+      const stallSilenceMs = stallDetectSilenceMs(stallRuntimeConfig.stall_detect_silence_seconds);
+      const channelA = sseActive && lastProgress > 0 && silentMs >= stallSilenceMs;
       const channelB =
         !sseActive &&
         execState === "running" &&
         lastProgress > 0 &&
-        silentMs >= STALL_RUNNING_SILENCE_MS;
+        silentMs >= stallSilenceMs;
       let channelC = false;
       if (!channelCCheckedRef.current[sid] && graceMs >= CHANNEL_C_GRACE_MS) {
         channelCCheckedRef.current[sid] = true;
@@ -3986,7 +3991,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       if (stallState === "stall") {
         const recovered =
           execState === "idle" && messageLooksLikeAssistantFinal(lastMsg);
-        const progressOk = silentMs < STALL_SSE_SILENCE_MS && silentMs < STALL_RUNNING_SILENCE_MS;
+        const progressOk = silentMs < stallSilenceMs;
         if (recovered || (progressOk && (sseActive || execState !== "running"))) {
           setStallState("none");
         }
@@ -4016,6 +4021,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     pane.sessionId,
     runGuardSessionId,
     sessionExecutionState,
+    stallRuntimeConfig.stall_detect_silence_seconds,
     stallState,
   ]);
 

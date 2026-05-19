@@ -4,8 +4,29 @@
 
 import type { Message } from "../store";
 
-export const STALL_SSE_SILENCE_MS = 90_000;
-export const STALL_RUNNING_SILENCE_MS = 90_000;
+/** Default stall warning threshold (seconds) — overridable via Settings → 工具 → 长任务停滞与续跑. */
+export const DEFAULT_STALL_DETECT_SILENCE_SECONDS = 90;
+
+/** Legacy constants; prefer {@link stallDetectSilenceMs} with runtime config. */
+export const STALL_SSE_SILENCE_MS = DEFAULT_STALL_DETECT_SILENCE_SECONDS * 1000;
+export const STALL_RUNNING_SILENCE_MS = DEFAULT_STALL_DETECT_SILENCE_SECONDS * 1000;
+
+export const STALL_DETECT_SILENCE_MIN_SECONDS = 30;
+export const STALL_DETECT_SILENCE_MAX_SECONDS = 300;
+
+export function clampStallDetectSilenceSeconds(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_STALL_DETECT_SILENCE_SECONDS;
+  return Math.max(
+    STALL_DETECT_SILENCE_MIN_SECONDS,
+    Math.min(STALL_DETECT_SILENCE_MAX_SECONDS, Math.round(n)),
+  );
+}
+
+export function stallDetectSilenceMs(seconds?: number): number {
+  return clampStallDetectSilenceSeconds(seconds) * 1000;
+}
+
 export const CHANNEL_C_GRACE_MS = 5_000;
 
 export type StallPhase = "none" | "stall" | "exhausted";

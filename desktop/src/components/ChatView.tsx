@@ -29,8 +29,7 @@ import {
 } from "../utils/streaming-stop-policy";
 import {
   CHANNEL_C_GRACE_MS,
-  STALL_RUNNING_SILENCE_MS,
-  STALL_SSE_SILENCE_MS,
+  stallDetectSilenceMs,
   messageLooksLikeAssistantFinal,
   shouldTriggerIncompleteEndStall,
 } from "../utils/task-stall-policy";
@@ -381,6 +380,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const [sessionExecutionState, setSessionExecutionState] = useState<SessionExecutionState>("idle");
   const [sseActive, setSseActive] = useState(false);
   const [stallTick, setStallTick] = useState(0);
+  const [stallDetectSeconds, setStallDetectSeconds] = useState(90);
   const lastProgressAtRef = useRef(0);
   const channelCCheckedRef = useRef(false);
   const sessionEnteredAtRef = useRef(0);
@@ -483,6 +483,16 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   }, []);
 
   useEffect(() => {
+    void window.agenticxDesktop.loadRuntimeConfig().then((r) => {
+      if (!r?.ok) return;
+      const sec = Number(r.stall_detect_silence_seconds ?? 90);
+      if (Number.isFinite(sec)) {
+        setStallDetectSeconds(Math.max(30, Math.min(300, Math.round(sec))));
+      }
+    });
+  }, []);
+
+  useEffect(() => {
     if (!sessionId) return;
     sessionEnteredAtRef.current = Date.now();
     channelCCheckedRef.current = false;
@@ -514,12 +524,13 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       }
       const lastMsg = messages[messages.length - 1];
       const graceMs = now - sessionEnteredAtRef.current;
-      const channelA = sseActive && lastProgress > 0 && silentMs >= STALL_SSE_SILENCE_MS;
+      const stallSilenceMs = stallDetectSilenceMs(stallDetectSeconds);
+      const channelA = sseActive && lastProgress > 0 && silentMs >= stallSilenceMs;
       const channelB =
         !sseActive &&
         execState === "running" &&
         lastProgress > 0 &&
-        silentMs >= STALL_RUNNING_SILENCE_MS;
+        silentMs >= stallSilenceMs;
       let channelC = false;
       if (!channelCCheckedRef.current && graceMs >= CHANNEL_C_GRACE_MS) {
         channelCCheckedRef.current = true;
@@ -529,7 +540,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
         setStallState("stall");
         return;
       }
-      if (stallState === "stall" && (messageLooksLikeAssistantFinal(lastMsg) || silentMs < STALL_SSE_SILENCE_MS)) {
+      if (stallState === "stall" && (messageLooksLikeAssistantFinal(lastMsg) || silentMs < stallSilenceMs)) {
         setStallState("none");
       }
     };
@@ -542,7 +553,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [messages, sessionExecutionState, sessionId, sseActive, stallState]);
+  }, [messages, sessionExecutionState, sessionId, sseActive, stallDetectSeconds, stallState]);
 
   const visibleMessages = useMemo(
     () => messages.filter((item) => !item.agentId || item.agentId === "meta"),
