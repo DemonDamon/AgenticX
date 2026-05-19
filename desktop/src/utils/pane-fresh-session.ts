@@ -15,6 +15,25 @@ const awaitingFreshSessionPanes = new Set<string>();
 /** Parent session for `inherit_from_session_id` on the next lazy `createSession` (first send). */
 const lazyInheritParentByPane = new Map<string, string>();
 
+export type PaneSessionMode = "code_dev" | "daily_office";
+
+const pendingSessionModeByPane = new Map<string, PaneSessionMode>();
+
+export function setPanePendingSessionMode(paneId: string, mode: PaneSessionMode): void {
+  if (!paneId) return;
+  pendingSessionModeByPane.set(paneId, mode === "code_dev" ? "code_dev" : "daily_office");
+}
+
+export function peekPanePendingSessionMode(paneId: string): PaneSessionMode | undefined {
+  if (!paneId) return undefined;
+  return pendingSessionModeByPane.get(paneId);
+}
+
+export function clearPanePendingSessionMode(paneId: string): void {
+  if (!paneId) return;
+  pendingSessionModeByPane.delete(paneId);
+}
+
 export function markPaneAwaitingFreshSession(paneId: string): void {
   if (!paneId) return;
   awaitingFreshSessionPanes.add(paneId);

@@ -1,4 +1,4 @@
-import { PanelRightClose, ListChecks, MessageSquareMore, Smartphone } from "lucide-react";
+import { Code2, PanelRightClose, ListChecks, MessageSquareMore, Smartphone } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAppStore, type ChatPane, type Message } from "../store";
@@ -34,6 +34,7 @@ type SessionRow = {
   execution_state?: "idle" | "running" | "interrupted";
   provider?: string;
   model?: string;
+  session_mode?: "code_dev" | "daily_office";
 };
 
 type SessionContextMenu = {
@@ -197,6 +198,10 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
           : "idle",
       provider: typeof row.provider === "string" ? row.provider : "",
       model: typeof row.model === "string" ? row.model : "",
+      session_mode:
+        row.session_mode === "code_dev" || row.session_mode === "daily_office"
+          ? row.session_mode
+          : undefined,
     });
   }
   return sortSessionRows(rows);
@@ -205,6 +210,7 @@ function normalizeSessionRows(input: unknown): SessionRow[] {
 export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onClose, tintColor }: Props) {
   const sessionCatalogRevision = useAppStore((s) => s.sessionCatalogRevision);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
+  const setPaneSessionMode = useAppStore((s) => s.setPaneSessionMode);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const setPaneHistorySearchTerms = useAppStore((s) => s.setPaneHistorySearchTerms);
   const addPane = useAppStore((s) => s.addPane);
@@ -498,6 +504,9 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
       provider: targetRow.provider,
       model: targetRow.model,
     });
+    if (targetRow.session_mode === "code_dev" || targetRow.session_mode === "daily_office") {
+      setPaneSessionMode(targetPaneId, targetRow.session_mode);
+    }
     setPaneHistorySearchTerms(targetPaneId, highlightTerms);
     setUnreadSessionIds((prev) => prev.filter((id) => id !== sessionId));
 
@@ -732,6 +741,15 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, onC
             )}
             <span className="min-w-0 flex-1">
               <span className="flex w-full min-w-0 items-center gap-1.5">
+                {item.session_mode === "code_dev" ? (
+                  <span
+                    className="inline-flex shrink-0 items-center text-sky-400"
+                    title="代码开发模式"
+                    aria-label="代码开发"
+                  >
+                    <Code2 className="h-3.5 w-3.5" aria-hidden />
+                  </span>
+                ) : null}
                 {item.pinned ? <span className="shrink-0 text-[11px] font-medium text-amber-300">pin</span> : null}
                 {isRunning ? (
                   <span

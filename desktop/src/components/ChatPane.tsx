@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Copy,
   Database,
+  Code2,
   GitBranch,
   GripVertical,
   Layers,
@@ -102,9 +103,13 @@ import { createKbApi } from "./settings/knowledge/api";
 import {
   clearPaneAwaitingFreshSession,
   clearPaneLazyInheritParent,
+  clearPanePendingSessionMode,
   markPaneAwaitingFreshSession,
   peekPaneLazyInheritParent,
+  peekPanePendingSessionMode,
   setPaneLazyInheritParent,
+  setPanePendingSessionMode,
+  type PaneSessionMode,
 } from "../utils/pane-fresh-session";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 
@@ -196,7 +201,11 @@ const FALLBACK_PANE: ChatPaneState = {
 };
 
 /** Compose-style primary action (豆包式「撰写」语义) + 下拉切换「全新对话」/「继承上下文」，默认前者。 */
-function NewTopicSplitControl({ onNewTopic }: { onNewTopic: (inherit: boolean) => void }) {
+function NewTopicSplitControl({
+  onNewTopic,
+}: {
+  onNewTopic: (inherit: boolean, sessionMode?: PaneSessionMode) => void;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [inheritMode, setInheritMode] = useState(false);
   const [menuPos, setMenuPos] = useState<{ bottom: number; left: number } | null>(null);
@@ -272,6 +281,28 @@ function NewTopicSplitControl({ onNewTopic }: { onNewTopic: (inherit: boolean) =
             <button
               type="button"
               role="option"
+              className="group mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-hover"
+              onClick={() => {
+                setMenuOpen(false);
+                onNewTopic(false, "code_dev");
+              }}
+            >
+              <Code2
+                className="h-[15px] w-[15px] shrink-0 text-sky-400 group-hover:text-sky-300"
+                strokeWidth={2}
+              />
+              <span className="flex flex-1 flex-col gap-0.5">
+                <span className="text-[13px] font-medium leading-none text-text-standard">
+                  代码开发
+                </span>
+                <span className="text-[11px] leading-none text-text-faint">
+                  全新对话 · 4 层上下文工程
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="option"
               aria-selected={inheritMode}
               className={`group mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
                 inheritMode ? "bg-surface-hover" : "hover:bg-surface-hover"
@@ -316,7 +347,7 @@ function NewTopicSplitControl({ onNewTopic }: { onNewTopic: (inherit: boolean) =
             type="button"
             className="flex h-full w-7 shrink-0 items-center justify-center text-text-muted transition-colors hover:text-text-strong"
             aria-label={inheritMode ? "新建对话：继承上下文" : "新建对话：全新对话"}
-            onClick={() => onNewTopic(inheritMode)}
+            onClick={() => onNewTopic(inheritMode, inheritMode ? "daily_office" : "daily_office")}
           >
             {inheritMode ? (
               <GitBranch className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden />
@@ -1880,9 +1911,53 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const updatePaneMessageByToolCallId = useAppStore((s) => s.updatePaneMessageByToolCallId);
   const clearPaneMessages = useAppStore((s) => s.clearPaneMessages);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
+  const setPaneSessionMode = useAppStore((s) => s.setPaneSessionMode);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneContextInherited = useAppStore((s) => s.setPaneContextInherited);
+  const sessionCatalogRevision = useAppStore((s) => s.sessionCatalogRevision);
+  const [harnessPhase, setHarnessPhase] = useState<"explore" | "read" | "author" | undefined>();
+  const [harnessReadFiles, setHarnessReadFiles] = useState(0);
+  const isCodeDevPane = (pane.sessionMode ?? "daily_office") === "code_dev";
+  const toolRoundCount = useMemo(
+    () => (pane.messages ?? []).filter((m) => m.role === "tool" && (m.toolName ?? "").trim()).length,
+    [pane.messages]
+  );
+  const toolRoundBudget = 60;
+  useEffect(() => {
+    const sid = (pane.sessionId || "").trim();
+    if (!sid || !isCodeDevPane) {
+      setHarnessPhase(undefined);
+      setHarnessReadFiles(0);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const avatarId =
+          pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
+        const resp = await window.agenticxDesktop.listSessions(avatarId);
+        if (!resp.ok || cancelled) return;
+        const row = (resp.sessions ?? []).find((s) => s.session_id === sid) as
+          | { harness_phase?: string; read_files_count?: number; session_mode?: string }
+          | undefined;
+        const phase = row?.harness_phase;
+        if (phase === "explore" || phase === "read" || phase === "author") {
+          setHarnessPhase(phase);
+        }
+        const rc = Number(row?.read_files_count ?? 0);
+        setHarnessReadFiles(Number.isFinite(rc) ? rc : 0);
+        if (row?.session_mode === "code_dev" || row?.session_mode === "daily_office") {
+          setPaneSessionMode(pane.id, row.session_mode);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pane.sessionId, pane.avatarId, pane.id, isCodeDevPane, sessionCatalogRevision, setPaneSessionMode]);
   const queuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
   const removePendingMessage = useAppStore((s) => s.removePendingMessage);
   const editPendingMessage = useAppStore((s) => s.editPendingMessage);
@@ -4630,8 +4705,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         const avatarId =
           pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
         const inheritFrom = peekPaneLazyInheritParent(pane.id);
+        const pendingMode = peekPanePendingSessionMode(pane.id) ?? pane.sessionMode ?? "daily_office";
         const created = await window.agenticxDesktop.createSession({
           avatar_id: avatarId,
+          session_mode: pendingMode,
           ...(inheritFrom ? { inherit_from_session_id: inheritFrom } : {}),
         });
         if (!created.ok || !created.session_id) {
@@ -4645,6 +4722,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         }
         requestSessionId = created.session_id;
         clearPaneLazyInheritParent(pane.id);
+        clearPanePendingSessionMode(pane.id);
+        setPaneSessionMode(pane.id, created.session_mode ?? pendingMode);
         if (created.inherited) {
           setPaneContextInherited(pane.id, true);
         }
@@ -5737,13 +5816,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const initSession = async (inherit = false, prevSessionId?: string) => {
     const avatarId =
       pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
+    const pendingMode = peekPanePendingSessionMode(pane.id) ?? pane.sessionMode ?? "daily_office";
     try {
       const result = await window.agenticxDesktop.createSession({
         avatar_id: avatarId,
+        session_mode: pendingMode,
         ...(inherit && prevSessionId ? { inherit_from_session_id: prevSessionId } : {}),
       });
       if (result.ok && result.session_id) {
         setPaneSessionId(pane.id, result.session_id);
+        setPaneSessionMode(pane.id, result.session_mode ?? pendingMode);
+        clearPanePendingSessionMode(pane.id);
         clearPaneAwaitingFreshSession(pane.id);
         if (result.inherited) {
           setPaneContextInherited(pane.id, true);
@@ -5764,10 +5847,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     addPaneMessage(pane.id, "tool", "⚠️ 会话创建失败，已恢复上一会话。请检查后端服务是否正常。", "meta");
   };
 
-  const createNewTopic = (inherit = true) => {
+  const createNewTopic = (inherit = true, sessionMode: PaneSessionMode = "daily_office") => {
     const prevSessionId = (pane.sessionId || "").trim();
     clearPaneMessages(pane.id);
     setPaneContextInherited(pane.id, false);
+    setPanePendingSessionMode(pane.id, sessionMode);
+    setPaneSessionMode(pane.id, sessionMode);
     // Mark this pane as explicitly awaiting a brand-new session, so
     // WorkspacePanel's auto-restore effect will not snap it back to the
     // previously-running session (which would trap new messages in the
@@ -6375,6 +6460,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             liveness={taskLiveness}
             silentSeconds={silentSeconds}
             onResume={() => void resumeCurrentTask()}
+            codeDevMode={isCodeDevPane}
+            phase={harnessPhase}
+            toolBudget={{ used: toolRoundCount, total: toolRoundBudget }}
+            readFiles={harnessReadFiles}
           />
           {(sessionExecutionState === "running" || stallState === "stall") && (
             <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
@@ -6724,6 +6813,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     ) : null}
                   </div>
                 )}
+                {isCodeDevPane ? (
+                  <span
+                    className="flex h-7 items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 text-[11px] text-sky-300"
+                    title="当前会话为代码开发模式"
+                  >
+                    <Code2 className="h-3.5 w-3.5" aria-hidden />
+                    代码开发
+                  </span>
+                ) : null}
                 <PaneModelPicker paneId={pane.id} />
                 <ActionCircleButton
                   hasInput={!!pane.sessionId && (!!input.trim() || readyAttachments.length > 0)}

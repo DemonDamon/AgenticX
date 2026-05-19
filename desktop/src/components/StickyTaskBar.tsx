@@ -33,11 +33,17 @@ function pickLatestTodoFromMessages(messages: Message[]): ParsedTodo | null {
   return null;
 }
 
+type HarnessPhase = "explore" | "read" | "author";
+
 interface StickyTaskBarProps {
   messages: Message[];
   liveness?: "active" | "stalled" | "idle";
   silentSeconds?: number;
   onResume?: () => void;
+  codeDevMode?: boolean;
+  phase?: HarnessPhase;
+  toolBudget?: { used: number; total: number };
+  readFiles?: number;
 }
 
 /**
@@ -53,7 +59,22 @@ interface StickyTaskBarProps {
  * Default: expanded when there is at least one in-progress / pending item;
  * auto-collapses once everything is done so it does not eat composer space.
  */
-export function StickyTaskBar({ messages, liveness = "idle", silentSeconds = 0, onResume }: StickyTaskBarProps) {
+const PHASE_LABEL: Record<HarnessPhase, string> = {
+  explore: "探索",
+  read: "读取",
+  author: "编写",
+};
+
+export function StickyTaskBar({
+  messages,
+  liveness = "idle",
+  silentSeconds = 0,
+  onResume,
+  codeDevMode = false,
+  phase,
+  toolBudget,
+  readFiles,
+}: StickyTaskBarProps) {
   const parsed = useMemo(() => pickLatestTodoFromMessages(messages), [messages]);
   const [expanded, setExpanded] = useState(true);
 
@@ -100,6 +121,13 @@ export function StickyTaskBar({ messages, liveness = "idle", silentSeconds = 0, 
         >
           {parsed.completed} / {parsed.total}
         </span>
+        {codeDevMode && phase ? (
+          <span className="rounded bg-surface-panel px-1.5 py-0.5 text-[10px] text-text-muted">
+            相位: {PHASE_LABEL[phase]}
+            {toolBudget ? ` · 工具 ${toolBudget.used}/${toolBudget.total}` : ""}
+            {typeof readFiles === "number" ? ` · 已读 ${readFiles} 文件` : ""}
+          </span>
+        ) : null}
         {liveness === "stalled" && silentSeconds > 0 ? (
           <span className="text-[10px] text-amber-300/90">已 {silentSeconds}s 无响应</span>
         ) : null}
@@ -120,6 +148,21 @@ export function StickyTaskBar({ messages, liveness = "idle", silentSeconds = 0, 
           {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </span>
       </button>
+      {expanded && codeDevMode && phase ? (
+        <div className="border-b border-border px-3 py-1.5 text-[11px] text-text-muted">
+          <span
+            className={
+              phase === "explore"
+                ? "text-sky-400"
+                : phase === "read"
+                  ? "text-indigo-400"
+                  : "text-cyan-400"
+            }
+          >
+            当前相位：{PHASE_LABEL[phase]}
+          </span>
+        </div>
+      ) : null}
       {expanded ? (
         <ul className="max-h-[40vh] space-y-0.5 overflow-y-auto px-3 pb-2">
           {parsed.items.map((item, idx) => (

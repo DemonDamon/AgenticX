@@ -3227,7 +3227,17 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("create-session", async (_event, payload: { avatar_id?: string; name?: string; inherit_from_session_id?: string }) => {
+  ipcMain.handle(
+    "create-session",
+    async (
+      _event,
+      payload: {
+        avatar_id?: string;
+        name?: string;
+        inherit_from_session_id?: string;
+        session_mode?: "code_dev" | "daily_office";
+      }
+    ) => {
     try {
       const resp = await fetch(`${getStudioUrl()}/api/sessions`, {
         method: "POST",

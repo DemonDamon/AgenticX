@@ -84,6 +84,7 @@ SAFE_COMMANDS = {
 }
 
 MAX_READ_CHARS = 20_000
+MAX_READ_CHARS_CODE_DEV = 8_000
 # Cap bash_exec command string size (defense in depth; matches audit remediation).
 MAX_BASH_EXEC_COMMAND_CHARS = 65536
 PATH_GUARDED_READ_COMMANDS = {"cat", "head", "tail", "grep", "find", "wc", "ls", "tree"}
@@ -123,6 +124,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "lsp_find_references",
         "lsp_hover",
         "lsp_diagnostics",
+        "code_outline",
         "list_scheduled_tasks",
         "get_automation_task_logs",
         "cc_bridge_list",
@@ -313,6 +315,36 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "path": {"type": "string", "description": "File path."},
                     "start_line": {"type": "integer", "description": "Start line (1-based)."},
                     "end_line": {"type": "integer", "description": "End line (inclusive)."},
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "code_outline",
+            "description": (
+                "Return class/function signatures and one-line docstrings for code files "
+                "(no function bodies). Prefer this before file_read to save context. "
+                "Supports single file or directory (max 50 files)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Workspace file or directory path.",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional filter by symbol or path substring.",
+                    },
+                    "max_files": {
+                        "type": "integer",
+                        "description": "Max files when path is a directory (default 50).",
+                    },
                 },
                 "required": ["path"],
                 "additionalProperties": False,
@@ -1301,6 +1333,71 @@ def merge_computer_use_tools_into(tool_list: List[Dict[str, Any]]) -> List[Dict[
     return out
 
 
+_CODE_SEARCH_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "code_search",
+        "description": (
+            "Semantic/hybrid search over an indexed codebase (requires code_index.enabled). "
+            "Prefer in Explore phase before reading whole files."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "codebase_path": {"type": "string", "description": "Root path that was indexed."},
+                "query": {"type": "string", "description": "Natural language or keyword query."},
+                "top_k": {"type": "integer", "description": "Number of hits (default 10)."},
+            },
+            "required": ["codebase_path", "query"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+def code_index_config_enabled() -> bool:
+    try:
+        return bool(ConfigManager.get_value("code_index.enabled"))
+    except Exception:
+        return False
+
+
+def _code_search_tool_defs() -> List[Dict[str, Any]]:
+    if not code_index_config_enabled():
+        return []
+    try:
+        import importlib
+
+        importlib.import_module("agenticx.code_index")
+    except ImportError:
+        return []
+    return [_CODE_SEARCH_TOOL]
+
+
+def studio_tools_for_session(session: Optional[StudioSession] = None) -> List[Dict[str, Any]]:
+    """Studio/Meta tool list with optional code_search when code_index is enabled."""
+    tools = merge_computer_use_tools_into(list(STUDIO_TOOLS))
+    try:
+        from agenticx.runtime.session_mode import is_code_dev
+
+        if session is not None and is_code_dev(session):
+            extra = _code_search_tool_defs()
+            if extra:
+                names = {
+                    str(t.get("function", {}).get("name", ""))
+                    for t in tools
+                    if isinstance(t, dict)
+                }
+                for spec in extra:
+                    n = str(spec.get("function", {}).get("name", ""))
+                    if n and n not in names:
+                        tools.append(spec)
+                        names.add(n)
+    except Exception:
+        pass
+    return tools
+
+
 _MAX_DESKTOP_SCREENSHOT_BYTES_FOR_B64 = 950_000
 
 
@@ -2169,6 +2266,49 @@ async def _tool_bash_exec(
     return out
 
 
+def _max_read_chars_for_session(session: Optional[StudioSession]) -> int:
+    if session is None:
+        return MAX_READ_CHARS
+    try:
+        from agenticx.runtime.session_mode import is_code_dev
+
+        return MAX_READ_CHARS_CODE_DEV if is_code_dev(session) else MAX_READ_CHARS
+    except Exception:
+        return MAX_READ_CHARS
+
+
+def _tool_code_search(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
+    if not code_index_config_enabled():
+        return "ERROR: code_index.enabled is false in ~/.agenticx/config.yaml"
+    try:
+        from agenticx.code_index.tools import dispatch_code_search  # type: ignore
+    except ImportError:
+        return (
+            "ERROR: code_index package not installed. "
+            "See plan 2026-05-06-code-context-index-internalization."
+        )
+    return dispatch_code_search(arguments, session)
+
+
+def _tool_code_outline(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
+    from agenticx.runtime.code_outline import build_outline, format_outline_result
+
+    raw_path = str(arguments.get("path", "")).strip()
+    if not raw_path:
+        return "ERROR: path is required"
+    try:
+        resolved = _resolve_workspace_path(raw_path, session, pick_existing=True)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+    query = str(arguments.get("query", "") or "").strip() or None
+    max_files = int(arguments.get("max_files") or 50)
+    max_files = min(max(max_files, 1), 50)
+    payload = build_outline(resolved, query=query, max_files=max_files)
+    if payload.get("error"):
+        return f"ERROR: {payload['error']}"
+    return format_outline_result(payload)
+
+
 def _tool_file_read(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
     try:
         path = _resolve_workspace_path(str(arguments.get("path", "")), session, pick_existing=True)
@@ -2186,6 +2326,8 @@ def _tool_file_read(arguments: Dict[str, Any], session: Optional[StudioSession] 
 
     start_line = arguments.get("start_line")
     end_line = arguments.get("end_line")
+    max_chars = _max_read_chars_for_session(session)
+    whole_file = start_line is None and end_line is None
     if start_line is not None or end_line is not None:
         lines = content.splitlines()
         start = max(1, int(start_line or 1))
@@ -2194,15 +2336,53 @@ def _tool_file_read(arguments: Dict[str, Any], session: Optional[StudioSession] 
             return "ERROR: invalid line range"
         selected = lines[start - 1 : end]
         numbered = [f"{idx+start}|{line}" for idx, line in enumerate(selected)]
-        return "\n".join(numbered)
+        out = "\n".join(numbered)
+        if session is not None:
+            from agenticx.runtime.code_read_cache import record_file_read
 
-    if len(content) > MAX_READ_CHARS:
-        out = content[:MAX_READ_CHARS] + f"\n... (truncated, total {len(content)} chars)"
+            record_file_read(session, path, start_line=start, end_line=end, total_lines=len(lines))
+        return out
+
+    if session is not None:
+        try:
+            from agenticx.runtime.code_read_cache import record_file_read
+            from agenticx.runtime.session_mode import (
+                EXPLORE_WHOLE_FILE_READ_WARN_KEY,
+                PHASE_EXPLORE,
+                get_session_phase,
+                is_code_dev,
+            )
+
+            record_file_read(
+                session,
+                path,
+                start_line=None,
+                end_line=None,
+                total_lines=len(content.splitlines()),
+            )
+            if is_code_dev(session) and get_session_phase(session) == PHASE_EXPLORE:
+                scratch = getattr(session, "scratchpad", None) or {}
+                if isinstance(scratch, dict):
+                    count = int(scratch.get(EXPLORE_WHOLE_FILE_READ_WARN_KEY, 0) or 0) + 1
+                    scratch[EXPLORE_WHOLE_FILE_READ_WARN_KEY] = str(count)
+        except Exception:
+            pass
+
+    if len(content) > max_chars:
+        suffix = (
+            f"\n... (truncated, total {len(content)} chars)"
+            + (
+                " 建议：code_dev 模式下请使用 start_line/end_line 缩小范围，或先用 code_outline。"
+                if max_chars <= MAX_READ_CHARS_CODE_DEV
+                else ""
+            )
+        )
+        out = content[:max_chars] + suffix
     else:
         out = content
     if session is not None:
         tracker = getattr(session, "file_state_tracker", None)
-        if tracker is not None and start_line is None and end_line is None:
+        if tracker is not None and whole_file:
             tracker.record_read(str(path), content)
     return out
 
@@ -3274,7 +3454,23 @@ def _tool_scratchpad_write(arguments: Dict[str, Any], session: StudioSession) ->
         return "ERROR: scratchpad key limit exceeded (50)"
     if len(value) > 10_000:
         value = value[:10_000] + "\n... (truncated to 10000 chars)"
+    old_value = scratchpad.get(key, "")
     scratchpad[key] = value
+    try:
+        from agenticx.runtime.session_mode import (
+            PHASE_AUTHOR,
+            PHASE_READ,
+            PHASE_SCRATCH_KEY,
+            is_code_dev,
+        )
+
+        if is_code_dev(session) and key == PHASE_SCRATCH_KEY:
+            prev = str(old_value or "").strip().lower()
+            new = value.strip().lower()
+            if prev == PHASE_READ and new == PHASE_AUTHOR:
+                setattr(session, "_code_dev_phase_compact_pending", True)
+    except Exception:
+        pass
     return f"OK: scratchpad[{key}] updated"
 
 
@@ -4039,6 +4235,8 @@ async def dispatch_tool_async(
             )
         if name == "bash_exec":
             return await _tool_bash_exec(arguments, session, confirm_gate=gate, emit_event=event_callback)
+        if name == "code_outline":
+            return _tool_code_outline(arguments, session)
         if name == "file_read":
             return _tool_file_read(arguments, session)
         if name == "file_write":
@@ -4093,6 +4291,8 @@ async def dispatch_tool_async(
             return await asyncio.to_thread(_tool_web_search, arguments)
         if name == "session_search":
             return _tool_session_search(arguments, session)
+        if name == "code_search":
+            return _tool_code_search(arguments, session)
         if name == "ask_user":
             return _tool_ask_user(arguments, service_mode=isinstance(gate, AsyncConfirmGate))
         if name == "list_files":

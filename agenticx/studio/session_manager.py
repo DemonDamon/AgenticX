@@ -41,6 +41,25 @@ _PLACEHOLDER_SESSION_TITLE_CF: frozenset[str] = frozenset(
 LLM_TITLE_SCRATCH_KEY = "__agx_llm_title_done__"
 
 from agenticx.cli.studio import StudioSession
+from agenticx.runtime.session_mode import (
+    READ_FILES_SCRATCH_PREFIX,
+    normalize_session_mode,
+    is_code_dev,
+    get_session_phase,
+)
+
+
+def _harness_list_fields(session: StudioSession) -> dict[str, Any]:
+    if not is_code_dev(session):
+        return {}
+    scratch = getattr(session, "scratchpad", None) or {}
+    read_count = 0
+    if isinstance(scratch, dict):
+        read_count = sum(1 for k in scratch if str(k).startswith(READ_FILES_SCRATCH_PREFIX))
+    return {
+        "harness_phase": get_session_phase(session),
+        "read_files_count": read_count,
+    }
 from agenticx.memory.session_store import SessionStore, session_fts_enabled
 from agenticx.runtime import AsyncConfirmGate
 from agenticx.runtime.team_manager import AgentTeamManager, SubAgentContext
@@ -333,6 +352,10 @@ class SessionManager:
                 ),
                 "provider": str(getattr(managed.studio_session, "provider_name", "") or ""),
                 "model": str(getattr(managed.studio_session, "model_name", "") or ""),
+                "session_mode": normalize_session_mode(
+                    getattr(managed.studio_session, "session_mode", None)
+                ),
+                **_harness_list_fields(managed.studio_session),
             })
         for row in self._list_persisted_sessions():
             sid = str(row.get("session_id", "")).strip()
@@ -799,6 +822,12 @@ class SessionManager:
 
     def _restore_persisted_state(self, session_id: str, session: StudioSession) -> None:
         try:
+            metadata = self._session_store._load_latest_session_metadata_sync(session_id)
+            if isinstance(metadata, dict) and "session_mode" in metadata:
+                session.session_mode = normalize_session_mode(str(metadata.get("session_mode")))
+        except Exception:
+            pass
+        try:
             todos = self._session_store._load_todos_sync(session_id)
             if todos:
                 session.todo_manager.load_payload(todos)
@@ -865,6 +894,10 @@ class SessionManager:
                 managed.execution_state = raw_state
             else:
                 managed.execution_state = "idle"
+        if "session_mode" in metadata:
+            managed.studio_session.session_mode = normalize_session_mode(
+                str(metadata.get("session_mode"))
+            )
 
     def _persist_session_state(self, session_id: str, session: StudioSession) -> None:
         self._ensure_session_title_from_chat_history(session_id, session)
@@ -889,6 +922,10 @@ class SessionManager:
                 "archived": bool(getattr(managed_ref, "archived", False)),
                 "taskspaces": list(getattr(managed_ref, "taskspaces", []) or []),
                 "execution_state": getattr(managed_ref, "execution_state", "idle"),
+                "session_mode": normalize_session_mode(
+                    getattr(session, "session_mode", None)
+                ),
+                **_harness_list_fields(session),
             }
             self._session_store._save_session_summary_sync(session_id, summary, metadata)
             self._save_messages_snapshot(session_id, session.chat_history or [])

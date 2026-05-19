@@ -1559,6 +1559,12 @@ def create_studio_app() -> FastAPI:
             manager.auto_title_session(payload.session_id, payload.user_input)
 
         session = managed.studio_session
+        try:
+            from agenticx.runtime.prompts.code_mode import ensure_code_dev_workflow_skill
+
+            ensure_code_dev_workflow_skill(session)
+        except Exception:
+            pass
         if payload.context_files:
             session.context_files.update(_normalize_context_files(payload.context_files))
         if payload.skill_slugs:
@@ -3409,6 +3415,9 @@ def create_studio_app() -> FastAPI:
         avatar_id = str(payload.get("avatar_id", "")).strip() or None
         session_name = str(payload.get("name", "")).strip() or None
         inherit_from = str(payload.get("inherit_from_session_id", "")).strip() or None
+        from agenticx.runtime.session_mode import normalize_session_mode
+
+        session_mode = normalize_session_mode(str(payload.get("session_mode", "")))
         avatar_cfg = avatar_registry.get_avatar(avatar_id) if avatar_id else None
         provider_override = str(payload.get("provider", "") or "").strip() or None
         model_override = str(payload.get("model", "") or "").strip() or None
@@ -3437,6 +3446,15 @@ def create_studio_app() -> FastAPI:
                 }
 
         managed = manager.create(provider=provider, model=model)
+        managed.studio_session.session_mode = session_mode
+        if session_mode == "code_dev":
+            from agenticx.runtime.session_mode import PHASE_EXPLORE, PHASE_SCRATCH_KEY
+            from agenticx.runtime.prompts.code_mode import ensure_code_dev_workflow_skill
+
+            scratch = managed.studio_session.scratchpad
+            if isinstance(scratch, dict) and PHASE_SCRATCH_KEY not in scratch:
+                scratch[PHASE_SCRATCH_KEY] = PHASE_EXPLORE
+            ensure_code_dev_workflow_skill(managed.studio_session)
         if avatar_cfg and avatar_cfg.workspace_dir:
             managed.studio_session.workspace_dir = avatar_cfg.workspace_dir
         else:
@@ -3467,6 +3485,7 @@ def create_studio_app() -> FastAPI:
             "session_name": session_name,
             "created_at": managed.created_at,
             "inherited": bool(inherited_summary),
+            "session_mode": session_mode,
         }
 
     @app.put("/api/sessions/{session_id}")
