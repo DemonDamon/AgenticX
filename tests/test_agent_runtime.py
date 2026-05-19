@@ -73,6 +73,15 @@ class _RateLimitLLM:
         yield ""
 
 
+class _CaptureMessagesLLM:
+    def __init__(self) -> None:
+        self.messages: List[Dict[str, Any]] = []
+
+    def invoke(self, messages, **_kwargs):
+        self.messages = [dict(item) for item in messages]
+        return _FakeResponse("ok", [])
+
+
 class _ApproveGate(ConfirmGate):
     async def request_confirm(self, question: str, context: Dict[str, Any] | None = None) -> bool:
         return True
@@ -193,6 +202,21 @@ def test_runtime_rate_limit_pauses_subagent(monkeypatch) -> None:
     assert events[-1]["agent_id"] == "worker-1"
     assert events[-1]["data"]["detector"] == "rate_limit"
     assert events[-1]["data"]["retryable"] is True
+
+
+def test_runtime_minimax_does_not_send_non_initial_system_messages() -> None:
+    llm = _CaptureMessagesLLM()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+    session.provider_name = "minimax"
+    session.model_name = "MiniMax-M2.7"
+
+    events = __import__("asyncio").run(_collect(runtime, session, "hello"))
+
+    assert events[-1]["type"] == EventType.FINAL.value
+    assert llm.messages
+    assert llm.messages[0]["role"] == "system"
+    assert all(message.get("role") != "system" for message in llm.messages[1:])
 
 
 def test_runtime_rejects_tool_outside_allowlist(monkeypatch) -> None:
