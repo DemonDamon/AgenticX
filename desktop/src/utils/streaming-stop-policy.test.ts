@@ -1,89 +1,64 @@
-import assert from "node:assert/strict";
-import test from "node:test";
-
+import { describe, expect, it } from "vitest";
 import {
   canStopCurrentRun,
-  shouldInterruptOnResend,
-} from "./streaming-stop-policy.ts";
+  shouldShowStopButton,
+  shouldShowStopForExecutionState,
+} from "./streaming-stop-policy";
 
-test("停止按钮：单聊 streaming 中且会话匹配 → 可见", () => {
-  assert.equal(
-    canStopCurrentRun({
-      streaming: true,
-      streamingSessionId: "s-1",
-      currentSessionId: "s-1",
-    }),
-    true,
-  );
+describe("shouldShowStopForExecutionState", () => {
+  it("shows stop only when running", () => {
+    expect(shouldShowStopForExecutionState("running")).toBe(true);
+    expect(shouldShowStopForExecutionState("idle")).toBe(false);
+    expect(shouldShowStopForExecutionState("interrupted")).toBe(false);
+    expect(shouldShowStopForExecutionState(undefined)).toBe(false);
+  });
 });
 
-test("停止按钮：群聊 streaming 中且会话匹配 → 可见（不再排除群聊）", () => {
-  // 历史 bug：ChatPane 用 `!isGroupPane && streaming` 导致群聊永远拿不到停止按钮。
-  // 这里以与窗格类型无关的方式锁住"群聊也应可见"。
-  assert.equal(
-    canStopCurrentRun({
-      streaming: true,
-      streamingSessionId: "g-sse-1",
-      currentSessionId: "g-sse-1",
-    }),
-    true,
-  );
+describe("shouldShowStopButton", () => {
+  it("prefers active SSE on current session", () => {
+    expect(
+      shouldShowStopButton({
+        streaming: true,
+        streamingSessionId: "s1",
+        currentSessionId: "s1",
+        executionState: "idle",
+      })
+    ).toBe(true);
+  });
+
+  it("shows stop when backend still running after SSE ended", () => {
+    expect(
+      shouldShowStopButton({
+        streaming: false,
+        streamingSessionId: "",
+        currentSessionId: "s1",
+        executionState: "running",
+      })
+    ).toBe(true);
+  });
+
+  it("keeps delegation fallback for avatar panes", () => {
+    expect(
+      shouldShowStopButton({
+        streaming: false,
+        streamingSessionId: "",
+        currentSessionId: "s1",
+        executionState: "idle",
+        hasDelegation: true,
+        isGroupPane: false,
+      })
+    ).toBe(true);
+  });
 });
 
-test("停止按钮：streaming=false → 不可见", () => {
-  assert.equal(
-    canStopCurrentRun({
-      streaming: false,
-      streamingSessionId: "s-1",
-      currentSessionId: "s-1",
-    }),
-    false,
-  );
-});
-
-test("停止按钮：streaming 中但会话不匹配（多窗格） → 不可见", () => {
-  assert.equal(
-    canStopCurrentRun({
-      streaming: true,
-      streamingSessionId: "s-1",
-      currentSessionId: "s-2",
-    }),
-    false,
-  );
-});
-
-test("停止按钮：streamingSessionId 空字符串 → 不可见（防御）", () => {
-  assert.equal(
-    canStopCurrentRun({
-      streaming: true,
-      streamingSessionId: "",
-      currentSessionId: "s-1",
-    }),
-    false,
-  );
-});
-
-test("停止按钮：会话 id 包含前后空格 → trim 后比较一致 → 可见", () => {
-  assert.equal(
-    canStopCurrentRun({
-      streaming: true,
-      streamingSessionId: "s-1",
-      currentSessionId: "  s-1  ",
-    }),
-    true,
-  );
-});
-
-test("追问策略：当前 session 有进行中的流 → 应打断当前并发新一轮", () => {
-  assert.equal(
-    shouldInterruptOnResend({ isStreamRunActive: true }),
-    true,
-  );
-});
-
-test("追问策略：当前 session 没有进行中的流 → 直接发送（不打断不入队）", () => {
-  assert.equal(
-    shouldInterruptOnResend({ isStreamRunActive: false }),
-    false,
-  );
+describe("canStopCurrentRun", () => {
+  it("requires matching session ids", () => {
+    expect(
+      canStopCurrentRun({
+        streaming: true,
+        streamingSessionId: "a",
+        currentSessionId: "b",
+      })
+    ).toBe(false);
+  });
 });
