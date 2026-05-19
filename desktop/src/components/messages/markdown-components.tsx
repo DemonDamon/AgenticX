@@ -11,6 +11,7 @@ import { MermaidBlock } from "./MermaidBlock";
 import { highlightChatCode } from "./highlight-chat-code";
 import { Modal } from "../ds/Modal";
 import { HoverTip } from "../ds/HoverTip";
+export { normalizeChatMarkdownContent, normalizeLenientEmphasisInText } from "./markdown-normalize";
 
 export const MarkdownContext = createContext<{
   isStreaming?: boolean;
@@ -107,20 +108,6 @@ function codeElementFromPreHast(pre: HastElement): HastElement | undefined {
 function classNameFromHastProperty(cls: unknown): string | undefined {
   if (cls == null) return undefined;
   return Array.isArray(cls) ? cls.join(" ") : String(cls);
-}
-
-function normalizeLatexMathDelimitersInText(text: string): string {
-  let next = text;
-  // Convert LaTeX delimiters to remark-math syntax.
-  next = next.replace(/\\\[((?:.|\n)*?)\\\]/g, (_whole, expr: string) => {
-    const inner = expr.trim();
-    return inner ? `$$\n${inner}\n$$` : _whole;
-  });
-  next = next.replace(/\\\((.+?)\\\)/g, (_whole, expr: string) => {
-    const inner = expr.trim();
-    return inner ? `$${inner}$` : _whole;
-  });
-  return next;
 }
 
 function normalizeMarkdownImageSrc(raw?: string): string {
@@ -363,16 +350,6 @@ function CodeBlockComponent({
       </Modal>
     </div>
   );
-}
-
-export function normalizeChatMarkdownContent(raw: string): string {
-  if (!raw) return raw;
-  // Keep fenced code blocks untouched to avoid rewriting code snippets.
-  const FENCED_BLOCK_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
-  const chunks = raw.split(FENCED_BLOCK_RE);
-  return chunks
-    .map((chunk, idx) => (idx % 2 === 1 ? chunk : normalizeLatexMathDelimitersInText(chunk)))
-    .join("");
 }
 
 /** Shared ReactMarkdown `components` map (GFM + Mermaid fenced blocks). */
