@@ -426,7 +426,7 @@ declare global {
           created_at?: number;
           pinned?: boolean;
           archived?: boolean;
-          execution_state?: "idle" | "running" | "interrupted";
+          execution_state?: "idle" | "running" | "interrupted" | "failed";
           provider?: string;
           model?: string;
           session_mode?: "code_dev" | "daily_office";
@@ -444,6 +444,12 @@ declare global {
         stall_auto_nudge_enabled?: boolean;
         stall_auto_nudge_after_seconds?: number;
         stall_auto_nudge_max_per_session?: number;
+        unattended_enabled?: boolean;
+        unattended_max_continuations_per_session?: number;
+        unattended_max_wall_clock_hours?: number;
+        unattended_stall_continue_after_seconds?: number;
+        unattended_auto_resume_exhausted?: boolean;
+        unattended_auto_resume_interrupted?: boolean;
         error?: string;
       }>;
       saveRuntimeConfig: (payload: {
@@ -454,6 +460,12 @@ declare global {
         stall_auto_nudge_enabled?: boolean;
         stall_auto_nudge_after_seconds?: number;
         stall_auto_nudge_max_per_session?: number;
+        unattended_enabled?: boolean;
+        unattended_max_continuations_per_session?: number;
+        unattended_max_wall_clock_hours?: number;
+        unattended_stall_continue_after_seconds?: number;
+        unattended_auto_resume_exhausted?: boolean;
+        unattended_auto_resume_interrupted?: boolean;
       }) => Promise<{ ok: boolean; error?: string }>;
       searchSessions: (payload: { q: string; avatarId?: string }) => Promise<{
         ok: boolean;
@@ -572,8 +584,6 @@ declare global {
       saveTrinityConfig: (payload: TrinityConfig) => Promise<{ ok: boolean; error?: string }>;
       loadAutomationConfig: () => Promise<{ ok: boolean; config?: AutomationConfig; error?: string }>;
       saveAutomationConfig: (payload: AutomationConfig) => Promise<{ ok: boolean; error?: string }>;
-      loadRuntimeConfig: () => Promise<{ ok: boolean; config?: RuntimeConfig; error?: string }>;
-      saveRuntimeConfig: (payload: RuntimeConfig) => Promise<{ ok: boolean; error?: string }>;
       confirmDialog: (payload: {
         title?: string;
         message: string;

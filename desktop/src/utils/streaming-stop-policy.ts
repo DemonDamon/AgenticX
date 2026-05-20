@@ -2,7 +2,7 @@
  * Streaming-state policies shared by ChatPane / ChatView.
  */
 
-export type SessionExecutionState = "idle" | "running" | "interrupted";
+export type SessionExecutionState = "idle" | "running" | "interrupted" | "failed";
 
 export type StreamingStopInput = {
   /** True iff the desktop store's `streaming` flag is on. */

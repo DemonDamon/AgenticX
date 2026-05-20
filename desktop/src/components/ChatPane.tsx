@@ -71,8 +71,15 @@ import {
   CHANNEL_C_GRACE_MS,
   stallDetectSilenceMs,
   messageLooksLikeAssistantFinal,
+  shouldAllowStallAutoNudge,
   shouldTriggerIncompleteEndStall,
 } from "../utils/task-stall-policy";
+import {
+  continueSessionUrl,
+  inferContinueReason,
+  type ContinueReason,
+  type ContinueSource,
+} from "../utils/session-continue";
 import { mergeSessionMessagesTail } from "../utils/session-message-merge";
 import {
   attachmentsFromSessionRow,
@@ -2060,9 +2067,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     stall_auto_nudge_after_seconds: 120,
     stall_auto_nudge_max_per_session: 2,
   });
+  const [unattendedGlobalEnabled, setUnattendedGlobalEnabled] = useState(false);
+  const [unattendedMaxContinuations, setUnattendedMaxContinuations] = useState(20);
+  const [sessionUnattended, setSessionUnattended] = useState(false);
   const lastSseEventAtRef = useRef(0);
   const lastProgressAtRef = useRef(0);
-  const channelCCheckedRef = useRef<Record<string, boolean>>({});
   const sessionEnteredAtRef = useRef<Record<string, number>>({});
   const deferredSessionMessagesRef = useRef<Record<string, Array<Parameters<typeof addPaneMessage>>>>({});
   const streamRafRef = useRef<number | null>(null);
@@ -3848,9 +3857,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     void window.agenticxDesktop.loadRuntimeConfig().then((r) => {
       if (!r?.ok) return;
       const cfg = r as {
+        stall_detect_silence_seconds?: number;
         stall_auto_nudge_enabled?: boolean;
         stall_auto_nudge_after_seconds?: number;
         stall_auto_nudge_max_per_session?: number;
+        unattended_enabled?: boolean;
+        unattended_max_continuations_per_session?: number;
       };
       const detectSec = Math.max(
         30,
@@ -3868,14 +3880,53 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           Math.min(5, Number(cfg.stall_auto_nudge_max_per_session ?? 2) || 2)
         ),
       });
+      setUnattendedGlobalEnabled(Boolean(cfg.unattended_enabled));
+      setUnattendedMaxContinuations(
+        Math.max(1, Math.min(100, Number(cfg.unattended_max_continuations_per_session ?? 20) || 20))
+      );
     });
   }, []);
 
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
+    if (!sid) {
+      setSessionUnattended(false);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem("agx-session-unattended-v1");
+      const map = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+      setSessionUnattended(Boolean(map[sid]));
+    } catch {
+      setSessionUnattended(false);
+    }
+  }, [pane.sessionId]);
+
+  const toggleSessionUnattended = useCallback(async () => {
+    const sid = (pane.sessionId || "").trim();
+    if (!sid || !apiBase) return;
+    const next = !sessionUnattended;
+    try {
+      await fetch(`${apiBase.replace(/\/$/, "")}/api/sessions/${encodeURIComponent(sid)}/unattended`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ enabled: next }),
+      });
+      const raw = localStorage.getItem("agx-session-unattended-v1");
+      const map = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+      if (next) map[sid] = true;
+      else delete map[sid];
+      localStorage.setItem("agx-session-unattended-v1", JSON.stringify(map));
+      setSessionUnattended(next);
+    } catch {
+      setStallHintToast("无人值守开关保存失败");
+    }
+  }, [apiBase, apiToken, pane.sessionId, sessionUnattended]);
+
+  useEffect(() => {
+    const sid = (pane.sessionId || "").trim();
     if (!sid) return;
     sessionEnteredAtRef.current[sid] = Date.now();
-    channelCCheckedRef.current[sid] = false;
     setAutoNudgeCount(autoNudgeTriggeredRef.current[sid] ?? 0);
     void window.agenticxDesktop.listSessions(pane.avatarId ?? undefined).then((r) => {
       if (!r.ok) return;
@@ -3977,11 +4028,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         execState === "running" &&
         lastProgress > 0 &&
         silentMs >= stallSilenceMs;
-      let channelC = false;
-      if (!channelCCheckedRef.current[sid] && graceMs >= CHANNEL_C_GRACE_MS) {
-        channelCCheckedRef.current[sid] = true;
-        channelC = shouldTriggerIncompleteEndStall(execState, sseActive, lastMsg, CHANNEL_C_GRACE_MS);
-      }
+      const channelC =
+        graceMs >= CHANNEL_C_GRACE_MS &&
+        shouldTriggerIncompleteEndStall(execState, sseActive, lastMsg, CHANNEL_C_GRACE_MS);
 
       if (channelA || channelB || channelC) {
         setStallState("stall");
@@ -4027,7 +4076,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   useEffect(() => {
     if (!stallRuntimeConfig.stall_auto_nudge_enabled) return;
-    if (stallState !== "stall" || sessionExecutionState !== "running") return;
+    if (!shouldAllowStallAutoNudge(stallState, sessionExecutionState)) return;
     const sid = (pane.sessionId || "").trim();
     if (!sid) return;
     if (silentSeconds < stallRuntimeConfig.stall_auto_nudge_after_seconds) return;
@@ -4040,26 +4089,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     autoNudgeBucketRef.current[sid] = bucket;
     autoNudgeTriggeredRef.current[sid] = count + 1;
     setAutoNudgeCount(count + 1);
-    const max = stallRuntimeConfig.stall_auto_nudge_max_per_session;
-    addPaneMessage(
-      pane.id,
-      "tool",
-      `🔔 自动续跑提醒（第 ${count + 1}/${max} 次）`,
-      "meta"
-    );
-    setForwardAutoReply({
-      paneId: pane.id,
-      sessionId: sid,
-      text: "[auto-nudge] 任务似乎停滞，请汇报当前进度；若仍有未完成 todo 项请继续执行并更新 todo_write。",
-      suppressUserEcho: true,
-      skipUserHistory: false,
+    const reason: ContinueReason =
+      sessionExecutionState === "interrupted"
+        ? "interrupted"
+        : stallState === "exhausted"
+          ? "exhausted"
+          : "stall";
+    void sendChatRef.current("", {
+      continuation: { reason, source: "desktop_auto_nudge" },
     });
   }, [
-    addPaneMessage,
     pane.id,
     pane.sessionId,
     sessionExecutionState,
-    setForwardAutoReply,
     silentSeconds,
     stallRuntimeConfig,
     stallState,
@@ -4098,13 +4140,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     }
 
     setStallState("none");
-    const prompt =
-      stallState === "exhausted"
-        ? "继续执行，从上次停止的地方接续。"
-        : state === "interrupted"
-          ? "上一次任务被中断，请从未完成的 todo 项继续，并更新 todo_write 状态。"
-          : "请汇报之前任务的执行结果；若文档或文件已生成请给出路径摘要；若仍有未完成项请继续。";
-    void sendChatRef.current(prompt);
+    const reason = inferContinueReason({
+      stallState,
+      executionState: state,
+    });
+    void sendChatRef.current("", {
+      continuation: { reason, source: "desktop_manual" },
+    });
   }, [pane.avatarId, pane.sessionId, sessionExecutionState, stallState]);
 
   const resumeWithModel = useCallback(
@@ -4649,6 +4691,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       retryAttachments?: MessageAttachment[];
       suppressUserEcho?: boolean;
       skipUserHistory?: boolean;
+      continuation?: { reason: ContinueReason; source: ContinueSource };
     }
   ) => Promise<void>>(
     async () => {}
@@ -4675,13 +4718,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       retryAttachments?: MessageAttachment[];
       suppressUserEcho?: boolean;
       skipUserHistory?: boolean;
+      continuation?: { reason: ContinueReason; source: ContinueSource };
     }
   ) => {
+    const continuation = options?.continuation;
+    const isContinuation = !!continuation;
     const text = userText.trim();
-    const messageText = text || ATTACHMENT_ONLY_USER_PROMPT;
+    const messageText = isContinuation ? " " : text || ATTACHMENT_ONLY_USER_PROMPT;
     const retryAttachments = options?.retryAttachments;
-    const suppressUserEcho = !!options?.suppressUserEcho;
-    const skipUserHistory = !!options?.skipUserHistory;
+    const suppressUserEcho = isContinuation || !!options?.suppressUserEcho;
+    const skipUserHistory = isContinuation || !!options?.skipUserHistory;
     const readyEntries = attachmentEntries.filter(([, file]) => file.status === "ready");
     const composerAttachments: MessageAttachment[] = readyAttachments.map((file) => ({
       name: file.name,
@@ -4700,7 +4746,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     // otherwise context_files never reaches the model and the file looks "invisible".
     const userAttachments: MessageAttachment[] = rawUserAttachments;
     const hasReadyAttachments = userAttachments.length > 0;
-    if ((!text && !hasReadyAttachments) || !apiBase) return;
+    if (!isContinuation && !text && !hasReadyAttachments) return;
+    if (!apiBase) return;
 
     const useLazySession = !isGroupPane && !isAutomationTaskPane;
     let requestSessionId = (pane.sessionId || "").trim();
@@ -4981,6 +5028,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         }
       }
       const sendChatRequest = (sessionId: string) => {
+        if (isContinuation && continuation) {
+          return fetch(continueSessionUrl(apiBase, sessionId), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+            body: JSON.stringify({
+              reason: continuation.reason,
+              source: continuation.source,
+              suppress_user_echo: true,
+            }),
+            signal: abortController.signal,
+          });
+        }
         body.session_id = sessionId;
         return fetch(`${apiBase}/api/chat`, {
           method: "POST",
@@ -5053,6 +5112,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             const payload = JSON.parse(line.slice(6));
             recordSseActivity();
             const eventAgentId = payload.data?.agent_id ?? "meta";
+            if (payload.type === "continuation_notice") {
+              const noticeText = String(payload.data?.text ?? "").trim();
+              if (noticeText) {
+                addPaneMessageIfSessionActive(pane.id, "tool", noticeText, "meta");
+              }
+              continue;
+            }
+            if (payload.type === "continuation_rejected") {
+              const rejectText = String(payload.data?.text ?? "").trim();
+              if (rejectText) setStallHintToast(rejectText);
+              continue;
+            }
             if (payload.type === "group_typing") {
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
               setGroupTyping((prev) => ({ ...prev, [eventAgentId]: avatarName }));
@@ -6471,7 +6542,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             toolBudget={{ used: toolRoundCount, total: toolRoundBudget }}
             readFiles={harnessReadFiles}
           />
-          {(sessionExecutionState === "running" || stallState === "stall") && (
+          {(sessionExecutionState === "running" || stallState === "stall" || sessionUnattended) && (
             <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
               <span className="rounded-full border border-border bg-surface-panel px-2 py-0.5">
                 {currentModelLabel}
@@ -6481,6 +6552,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   ? ` · ${lastToolProgress.name}${lastToolProgress.sec > 0 ? ` ${lastToolProgress.sec}s` : ""}`
                   : ""}
               </span>
+              {sessionUnattended && unattendedGlobalEnabled ? (
+                <span className="rounded-full border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-violet-200">
+                  无人值守 · 续跑 {autoNudgeCount}/{unattendedMaxContinuations}
+                </span>
+              ) : null}
+              {unattendedGlobalEnabled ? (
+                <button
+                  type="button"
+                  onClick={() => void toggleSessionUnattended()}
+                  className={`rounded-full border px-2 py-0.5 transition ${
+                    sessionUnattended
+                      ? "border-violet-500/50 bg-violet-500/15 text-violet-200"
+                      : "border-border bg-surface-panel text-text-muted hover:text-text-strong"
+                  }`}
+                >
+                  {sessionUnattended ? "本会话无人值守：开" : "本会话无人值守：关"}
+                </button>
+              ) : null}
               {!isStreamingCurrentSession && sessionExecutionState === "running" ? (
                 <span className="text-amber-300/90">后台运行中</span>
               ) : null}

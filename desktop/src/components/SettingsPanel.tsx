@@ -55,6 +55,10 @@ import {
   StallNudgeConfigSection,
   type StallNudgeConfig,
 } from "./automation/StallNudgeConfigSection";
+import {
+  UnattendedConfigSection,
+  type UnattendedConfig,
+} from "./automation/UnattendedConfigSection";
 import { AccountTab } from "./AccountTab";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { getProviderDisplayName, makeCustomOpenAIProviderId } from "../utils/provider-display";
@@ -1914,6 +1918,14 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
     stall_auto_nudge_after_seconds: 120,
     stall_auto_nudge_max_per_session: 2,
   });
+  const [unattended, setUnattended] = useState<UnattendedConfig>({
+    unattended_enabled: false,
+    unattended_max_continuations_per_session: 20,
+    unattended_max_wall_clock_hours: 6,
+    unattended_stall_continue_after_seconds: 120,
+    unattended_auto_resume_exhausted: true,
+    unattended_auto_resume_interrupted: true,
+  });
   const [runtimeLoadError, setRuntimeLoadError] = useState("");
 
   const loadAll = useCallback(async () => {
@@ -1963,6 +1975,33 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
           stall_auto_nudge_max_per_session: Math.max(
             1,
             Math.min(5, Number(runtimeResult.stall_auto_nudge_max_per_session ?? 2) || 2),
+          ),
+        });
+        setUnattended({
+          unattended_enabled: Boolean(runtimeResult.unattended_enabled),
+          unattended_max_continuations_per_session: Math.max(
+            1,
+            Math.min(
+              100,
+              Number(runtimeResult.unattended_max_continuations_per_session ?? 20) || 20,
+            ),
+          ),
+          unattended_max_wall_clock_hours: Math.max(
+            0.5,
+            Math.min(48, Number(runtimeResult.unattended_max_wall_clock_hours ?? 6) || 6),
+          ),
+          unattended_stall_continue_after_seconds: Math.max(
+            30,
+            Math.min(
+              600,
+              Number(runtimeResult.unattended_stall_continue_after_seconds ?? 120) || 120,
+            ),
+          ),
+          unattended_auto_resume_exhausted: Boolean(
+            runtimeResult.unattended_auto_resume_exhausted ?? true,
+          ),
+          unattended_auto_resume_interrupted: Boolean(
+            runtimeResult.unattended_auto_resume_interrupted ?? true,
           ),
         });
       } else {
@@ -2047,6 +2086,12 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
           stall_auto_nudge_enabled: stallNudge.stall_auto_nudge_enabled,
           stall_auto_nudge_after_seconds: afterSec,
           stall_auto_nudge_max_per_session: stallNudge.stall_auto_nudge_max_per_session,
+          unattended_enabled: unattended.unattended_enabled,
+          unattended_max_continuations_per_session: unattended.unattended_max_continuations_per_session,
+          unattended_max_wall_clock_hours: unattended.unattended_max_wall_clock_hours,
+          unattended_stall_continue_after_seconds: unattended.unattended_stall_continue_after_seconds,
+          unattended_auto_resume_exhausted: unattended.unattended_auto_resume_exhausted,
+          unattended_auto_resume_interrupted: unattended.unattended_auto_resume_interrupted,
         });
         if (!rtRes?.ok) {
           return {
@@ -2061,7 +2106,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         return bridge.save();
       },
     }),
-    [loading, maxToolRounds, saveBashDefaultTimeout, stallNudge],
+    [loading, maxToolRounds, saveBashDefaultTimeout, stallNudge, unattended],
   );
 
   const startInstall = async (tool: ToolStatusItem) => {
@@ -2129,6 +2174,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         disabled={loading}
       />
       <StallNudgeConfigSection value={stallNudge} onChange={setStallNudge} disabled={loading} />
+      <UnattendedConfigSection value={unattended} onChange={setUnattended} disabled={loading} />
       {runtimeLoadError ? (
         <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
           {runtimeLoadError}

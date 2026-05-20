@@ -40,6 +40,16 @@ export function messageLooksLikeAssistantFinal(message: Message | undefined): bo
   return true;
 }
 
+/** Whether desktop auto-nudge may fire for the current stall + execution state. */
+export function shouldAllowStallAutoNudge(
+  stallState: StallPhase,
+  executionState: string | undefined,
+): boolean {
+  if (stallState !== "stall") return false;
+  const state = (executionState || "").trim();
+  return state === "running" || state === "interrupted" || state === "idle";
+}
+
 /** Channel C: session ended idle/interrupted but last visible message is not a final assistant reply. */
 export function shouldTriggerIncompleteEndStall(
   executionState: string | undefined,
