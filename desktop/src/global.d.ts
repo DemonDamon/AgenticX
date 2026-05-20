@@ -582,6 +582,24 @@ declare global {
       }) => Promise<{ ok: boolean; error?: string }>;
       loadComputerUseConfig: () => Promise<{ ok: boolean; config?: ComputerUseConfig; error?: string }>;
       saveComputerUseConfig: (payload: ComputerUseConfig) => Promise<{ ok: boolean; error?: string }>;
+      loadCodeIndexConfig: () => Promise<{
+        ok: boolean;
+        config?: {
+          enabled: boolean;
+          backend: string;
+          preload_model: boolean;
+          max_index_memory_mb: number;
+          semble: {
+            search_mode: string;
+            default_top_k: number;
+            include_text_files: boolean;
+            model: string;
+          };
+        };
+        error?: string;
+      }>;
+      saveCodeIndexConfig: (payload: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }>;
+      openCodeIndexModelCache: () => Promise<{ ok: boolean; path?: string; error?: string }>;
       loadTrinityConfig: () => Promise<{ ok: boolean; config?: TrinityConfig; error?: string }>;
       saveTrinityConfig: (payload: TrinityConfig) => Promise<{ ok: boolean; error?: string }>;
       loadAutomationConfig: () => Promise<{ ok: boolean; config?: AutomationConfig; error?: string }>;

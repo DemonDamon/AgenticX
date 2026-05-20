@@ -220,6 +220,7 @@ type AgxConfig = {
     };
   };
   computer_use?: Record<string, unknown>;
+  code_index?: Record<string, unknown>;
   agent_harness_trinity?: {
     skill_protocol?: boolean;
     session_summary?: boolean;
@@ -3956,6 +3957,81 @@ function registerIpc(): void {
       root.runtime = merged;
       saveAgxConfig(cfg);
       return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("load-code-index-config", async () => {
+    try {
+      const cfg = loadAgxConfig();
+      const raw = cfg.code_index;
+      const ci = raw && typeof raw === "object" && !Array.isArray(raw)
+        ? (raw as Record<string, unknown>)
+        : {};
+      const sem =
+        ci.semble && typeof ci.semble === "object" && !Array.isArray(ci.semble)
+          ? (ci.semble as Record<string, unknown>)
+          : {};
+      return {
+        ok: true,
+        config: {
+          enabled: Boolean(ci.enabled ?? false),
+          backend: String(ci.backend ?? "semble"),
+          preload_model: Boolean(ci.preload_model ?? false),
+          max_index_memory_mb: Number(ci.max_index_memory_mb ?? 1024) || 1024,
+          semble: {
+            search_mode: String(sem.search_mode ?? "hybrid"),
+            default_top_k: Number(sem.default_top_k ?? 10) || 10,
+            include_text_files: Boolean(sem.include_text_files ?? false),
+            model: String(sem.model ?? "minishlab/potion-code-16M"),
+          },
+        },
+      };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("save-code-index-config", async (_event, payload: unknown) => {
+    if (!payload || typeof payload !== "object") return { ok: false, error: "invalid payload" };
+    const p = payload as Record<string, unknown>;
+    try {
+      const cfg = loadAgxConfig();
+      const root = cfg as Record<string, unknown>;
+      const prev = root.code_index;
+      const merged =
+        prev && typeof prev === "object" && !Array.isArray(prev)
+          ? { ...(prev as Record<string, unknown>) }
+          : {};
+      if (p.enabled !== undefined) merged.enabled = Boolean(p.enabled);
+      if (p.backend !== undefined) merged.backend = String(p.backend);
+      if (p.preload_model !== undefined) merged.preload_model = Boolean(p.preload_model);
+      if (p.max_index_memory_mb !== undefined) {
+        const v = Number(p.max_index_memory_mb);
+        if (Number.isFinite(v)) merged.max_index_memory_mb = Math.max(128, Math.min(8192, Math.round(v)));
+      }
+      if (p.semble && typeof p.semble === "object" && !Array.isArray(p.semble)) {
+        const semPrev =
+          merged.semble && typeof merged.semble === "object" && !Array.isArray(merged.semble)
+            ? { ...(merged.semble as Record<string, unknown>) }
+            : {};
+        merged.semble = { ...semPrev, ...(p.semble as Record<string, unknown>) };
+      }
+      root.code_index = merged;
+      saveAgxConfig(cfg);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("open-code-index-model-cache", async () => {
+    const dir = path.join(os.homedir(), ".cache", "huggingface", "hub");
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      await shell.openPath(dir);
+      return { ok: true, path: dir };
     } catch (err) {
       return { ok: false, error: String(err) };
     }

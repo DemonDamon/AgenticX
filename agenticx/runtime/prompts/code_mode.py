@@ -113,29 +113,62 @@ def build_repo_skeleton_block(session: Any) -> str:
     return f"## 仓库骨架（L1，code_dev）\n{body}\n"
 
 
+def _code_index_enabled() -> bool:
+    try:
+        from agenticx.code_index.config import is_enabled
+
+        return is_enabled()
+    except Exception:
+        return False
+
+
 def build_phase_gate_block() -> str:
+    explore_tools = (
+        "`code_search`（优先）→ `code_outline` → `bash_exec grep` → `lsp_*`"
+        if _code_index_enabled()
+        else "`code_outline`、`bash_exec grep`、`lsp_*`、`code_search`（若可用）"
+    )
+    correct_line = (
+        "✅ 正确：code_search → file_read(命中行范围扩上下文) → scratchpad → file_write 分章。\n"
+        if _code_index_enabled()
+        else "✅ 正确：grep → code_outline → file_read(行范围) → scratchpad → file_write 分章。\n"
+    )
     return (
         "## 工作相位（Phase Gate，code_dev 必须遵守）\n"
         "三相位与建议工具预算（相对 max_tool_rounds）：\n"
-        "1. **Explore（≤25%）**：`code_outline`、`bash_exec grep`、`lsp_*`、`code_search`（若可用）。"
+        f"1. **Explore（≤25%）**：{explore_tools}。"
         "产出「待读文件清单」并 `scratchpad_write(key=\"phase\", value=\"explore\")`。\n"
         "2. **Read（≤50%）**：`file_read` 必须带 `start_line/end_line` 片段；结论写入 scratchpad。"
         "完成后 `scratchpad_write(key=\"phase\", value=\"read\")`。\n"
         "3. **Author（≥25%）**：先 `file_write` 骨架（仅标题占位），再分章追加；"
         "`scratchpad_write(key=\"phase\", value=\"author\")`。\n\n"
-        "✅ 正确：grep → code_outline → file_read(行范围) → scratchpad → file_write 分章。\n"
+        f"{correct_line}"
         "❌ 错误：一上来 file_read 整个 core/ 目录下所有 .py。\n\n"
         "切换相位时更新 scratchpad 的 `phase` 键；进入 Author 前须已有骨架文件。\n"
     )
 
 
 def build_file_read_discipline_block() -> str:
+    locate_hint = (
+        "2. `code_search` 命中后必须用 `file_read(start_line,end_line)` 扩上下文，禁止仅凭 snippet 作答。\n"
+        "3. 精确字符串/是否存在 → 仍用 `bash_exec grep -n`。\n"
+        if _code_index_enabled()
+        else "2. 已知行号 → 必须 `start_line/end_line`；未知 → 先 `bash_exec grep -n`。\n"
+    )
+    tail = (
+        "4. 已读文件见「已读文件清单」；未变更则勿重复整读。\n"
+        "5. 单文件输出上限 8000 字符（code_dev）；截断后请缩小行范围。\n"
+        if _code_index_enabled()
+        else (
+            "3. 已读文件见「已读文件清单」；未变更则勿重复整读。\n"
+            "4. 单文件输出上限 8000 字符（code_dev）；截断后请缩小行范围。\n"
+        )
+    )
     return (
         "## 读取纪律（L3/L4，code_dev）\n"
         "1. 整文件 `file_read` 仅在 outline + grep 仍无法定位时使用，并说明理由。\n"
-        "2. 已知行号 → 必须 `start_line/end_line`；未知 → 先 `bash_exec grep -n`。\n"
-        "3. 已读文件见「已读文件清单」；未变更则勿重复整读。\n"
-        "4. 单文件输出上限 8000 字符（code_dev）；截断后请缩小行范围。\n"
+        f"{locate_hint}"
+        f"{tail}"
     )
 
 
