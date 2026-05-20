@@ -87,6 +87,7 @@ from agenticx.studio.session_manager import (
 )
 from agenticx.tools.mcp_hub import MCPHub
 from agenticx.studio.kb.routes import register_kb_routes
+from agenticx.studio.code_index.routes import register_code_index_routes
 from agenticx.studio.voice_endpoints import register_voice_endpoints
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.workspace.loader import (
@@ -545,6 +546,28 @@ def create_studio_app() -> FastAPI:
             app.state.longrun_background_task = longrun_bg
         except Exception as exc:
             logger.debug("LongRun orchestrator not started: %s", exc)
+
+        def _preload_code_index_model() -> None:
+            try:
+                from agenticx.code_index.config import load_code_index_config
+                from agenticx.code_index.manager import CodeIndexManager
+
+                cfg = load_code_index_config()
+                if cfg.enabled or cfg.preload_model:
+                    CodeIndexManager.instance().preload_model()
+            except ImportError:
+                logger.debug("code_index optional deps not installed; skip preload")
+            except Exception as exc:
+                logger.warning("code_index model preload failed: %s", exc)
+
+        try:
+            from agenticx.code_index.config import load_code_index_config
+
+            if load_code_index_config().preload_model:
+                loop = asyncio.get_running_loop()
+                loop.run_in_executor(None, _preload_code_index_model)
+        except ImportError:
+            pass
 
         async def _internal_continue(
             session_id: str,
@@ -5208,6 +5231,7 @@ def create_studio_app() -> FastAPI:
 
     # Machi knowledge base — Stage-1 MVP (Plan-Id: machi-kb-stage1-local-mvp)
     register_kb_routes(app)
+    register_code_index_routes(app)
     from agenticx.studio.web_search.routes import register_web_search_routes
 
     register_web_search_routes(app)
