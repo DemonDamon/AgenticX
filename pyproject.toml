@@ -102,6 +102,8 @@ desktop-runtime = [
     # 缺失时 MCPClientV2._create_session 里 stdio_client=None，所有连接
     # 会以 "TypeError: 'NoneType' object is not callable" 静默失败。
     "mcp>=1.0.0,<2",
+    "semble>=0.1.10,<0.2.0",
+    "pathspec>=1.0.0",
 ]
 # ── 额外 LLM 提供者 ──
 llm = [
@@ -168,6 +170,11 @@ database = [
     "psycopg2-binary>=2.9.0,<3",
     "SQLAlchemy>=2.0.0,<3",
     "cryptography>=41.0.0,<45",
+]
+# ── 代码语义索引（Semble）──
+code_index = [
+    "semble>=0.1.10,<0.2.0",
+    "pathspec>=1.0.0",
 ]
 # ── MCP 协议 ──
 mcp = [
