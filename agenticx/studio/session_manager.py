@@ -103,7 +103,7 @@ class ManagedSession:
     pinned: bool = False
     archived: bool = False
     taskspaces: list[dict[str, str]] = field(default_factory=list)
-    execution_state: str = "idle"  # idle | running | interrupted
+    execution_state: str = "idle"  # idle | running | interrupted | failed
 
     def get_confirm_gate(self, agent_id: str = "meta") -> AsyncConfirmGate:
         if not agent_id or agent_id == "meta":
@@ -211,7 +211,7 @@ class SessionManager:
         return True
 
     def set_execution_state(self, session_id: str, state: str) -> None:
-        """Update execution_state for a session (idle | running | interrupted)."""
+        """Update execution_state for a session (idle | running | interrupted | failed)."""
         managed = self._sessions.get(session_id)
         if managed is not None:
             managed.execution_state = state
@@ -225,7 +225,7 @@ class SessionManager:
         stale ``interrupted`` rows loaded from disk without a live managed session.
         """
         raw = str(state or "idle").strip().lower()
-        if raw not in {"idle", "running", "interrupted"}:
+        if raw not in {"idle", "running", "interrupted", "failed"}:
             raw = "idle"
         if raw != "interrupted":
             return raw
@@ -890,7 +890,7 @@ class SessionManager:
             )
         if "execution_state" in metadata:
             raw_state = str(metadata.get("execution_state", "idle")).strip().lower()
-            if raw_state in ("idle", "running", "interrupted"):
+            if raw_state in ("idle", "running", "interrupted", "failed"):
                 managed.execution_state = raw_state
             else:
                 managed.execution_state = "idle"

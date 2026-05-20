@@ -69,7 +69,18 @@ from agenticx.runtime.group_router import (
     expand_mentions_with_meta_leader,
 )
 from agenticx.runtime.team_manager import AgentTeamManager
-from agenticx.studio.protocols import ChatRequest, ConfirmResponse, SessionState, SseEvent
+from agenticx.studio.protocols import (
+    ChatRequest,
+    ConfirmResponse,
+    ContinueRequest,
+    SessionState,
+    SseEvent,
+)
+from agenticx.studio.continuation import (
+    ContinuationReason,
+    ContinuationSource,
+    prepare_continue,
+)
 from agenticx.studio.session_manager import (
     SessionManager,
     managed_session_binding_matches_avatar_query,
@@ -535,6 +546,59 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.debug("LongRun orchestrator not started: %s", exc)
 
+        async def _internal_continue(
+            session_id: str,
+            *,
+            reason: str,
+            source: str,
+            skip_dedupe: bool = False,
+        ) -> bool:
+            sid = str(session_id or "").strip()
+            if not sid:
+                return False
+            managed = manager.get(sid, touch=False)
+            if managed is None:
+                return False
+            exec_state = str(getattr(managed, "execution_state", "idle") or "idle")
+            ok, prompt, _round_n, _notice = prepare_continue(
+                managed,
+                reason=reason,  # type: ignore[arg-type]
+                source=source,  # type: ignore[arg-type]
+                execution_state=exec_state,
+                skip_dedupe=skip_dedupe,
+            )
+            if not ok:
+                return False
+            manager.persist(sid)
+            chat_payload = ChatRequest(
+                session_id=sid,
+                user_input=prompt,
+                skip_user_history=True,
+                provider=managed.studio_session.provider_name,
+                model=managed.studio_session.model_name,
+            )
+
+            class _SupervisorRequest:
+                async def is_disconnected(self) -> bool:
+                    return False
+
+            stream_resp = await chat(
+                chat_payload,
+                _SupervisorRequest(),  # type: ignore[arg-type]
+                desktop_token,
+            )
+            if stream_resp.body_iterator is not None:
+                async for _chunk in stream_resp.body_iterator:
+                    pass
+            return True
+
+        try:
+            from agenticx.studio.supervisor import maybe_start_supervisor
+
+            await maybe_start_supervisor(app, manager, _internal_continue)
+        except Exception as exc:
+            logger.debug("Session supervisor not started: %s", exc)
+
         yield
 
         if longrun_bg is not None:
@@ -543,6 +607,13 @@ def create_studio_app() -> FastAPI:
                 await longrun_bg
             except asyncio.CancelledError:
                 pass
+        sup = getattr(app.state, "session_supervisor", None)
+        if sup is not None:
+            try:
+                await sup.stop()
+            except Exception as exc:
+                logger.debug("Session supervisor stop error: %s", exc)
+
         orch = getattr(app.state, "longrun_orchestrator", None)
         if orch is not None:
             try:
@@ -2235,6 +2306,109 @@ def create_studio_app() -> FastAPI:
                 yield 'data: {"type":"done","data":{}}\n\n'
 
         return StreamingResponse(_event_stream(), media_type="text/event-stream")
+
+    @app.post("/api/sessions/{session_id}/continue")
+    async def continue_session(
+        session_id: str,
+        payload: ContinueRequest,
+        request: Request,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> StreamingResponse:
+        _check_token(x_agx_desktop_token)
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        managed = manager.get(sid, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+
+        reason = str(payload.reason or "manual").strip().lower()
+        if reason not in {"stall", "interrupted", "exhausted", "rate_limit", "manual"}:
+            reason = "manual"
+        source = str(payload.source or "desktop_manual").strip().lower()
+        if source not in {"desktop_manual", "desktop_auto_nudge", "supervisor"}:
+            source = "desktop_manual"
+
+        exec_state = str(getattr(managed, "execution_state", "idle") or "idle")
+        if source == "desktop_manual" and exec_state == "running":
+            async def _still_running() -> AsyncGenerator[str, None]:
+                evt = SseEvent(
+                    type="continuation_rejected",
+                    data={"text": "任务仍在后台执行中，可继续等待或主动中断"},
+                )
+                yield f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+                yield 'data: {"type":"done","data":{}}\n\n'
+
+            return StreamingResponse(_still_running(), media_type="text/event-stream")
+
+        max_nudge = int(
+            __import__("agenticx.studio.continuation", fromlist=["get_runtime_value"]).get_runtime_value(
+                "runtime.stall_auto_nudge_max_per_session", 2
+            )
+            or 2
+        )
+        ok, prompt, round_n, notice = prepare_continue(
+            managed,
+            reason=reason,  # type: ignore[arg-type]
+            source=source,  # type: ignore[arg-type]
+            execution_state=exec_state,
+            max_rounds=max_nudge if source == "desktop_auto_nudge" else None,
+        )
+        if not ok:
+            async def _deduped() -> AsyncGenerator[str, None]:
+                evt = SseEvent(type="continuation_rejected", data={"text": "续跑请求已去重，请稍后再试"})
+                yield f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+                yield 'data: {"type":"done","data":{}}\n\n'
+
+            return StreamingResponse(_deduped(), media_type="text/event-stream")
+
+        manager.persist(sid)
+
+        async def _wrapped_stream() -> AsyncGenerator[str, None]:
+            notice_evt = SseEvent(
+                type="continuation_notice",
+                data={
+                    "text": notice.get("content", ""),
+                    "reason": reason,
+                    "source": source,
+                    "continuation_round": round_n,
+                    "metadata": notice.get("metadata", {}),
+                },
+            )
+            yield f"data: {json.dumps(notice_evt.model_dump(), ensure_ascii=False)}\n\n"
+            chat_payload = ChatRequest(
+                session_id=sid,
+                user_input=prompt,
+                skip_user_history=True,
+                provider=managed.studio_session.provider_name,
+                model=managed.studio_session.model_name,
+            )
+            inner = await chat(chat_payload, request, x_agx_desktop_token)
+            if inner.body_iterator is not None:
+                async for chunk in inner.body_iterator:
+                    yield chunk
+
+        return StreamingResponse(_wrapped_stream(), media_type="text/event-stream")
+
+    @app.put("/api/sessions/{session_id}/unattended")
+    async def set_session_unattended(
+        session_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        managed = manager.get(sid, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        enabled = bool(payload.get("enabled", False))
+        from agenticx.studio.supervisor import set_session_unattended_enabled
+
+        set_session_unattended_enabled(managed.studio_session, enabled)
+        manager.persist(sid)
+        return {"ok": True, "session_id": sid, "unattended_enabled": enabled}
 
     @app.post("/api/loop")
     async def run_loop(

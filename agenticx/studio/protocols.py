@@ -49,6 +49,14 @@ class ChatRequest(BaseModel):
     skill_slugs: Optional[List[str]] = None
 
 
+class ContinueRequest(BaseModel):
+    """Unified session continuation (manual / auto-nudge / supervisor)."""
+
+    reason: str = "manual"
+    suppress_user_echo: bool = True
+    source: str = "desktop_manual"
+
+
 class ConfirmResponse(BaseModel):
     session_id: str
     request_id: str
