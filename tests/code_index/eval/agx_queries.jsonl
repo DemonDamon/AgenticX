@@ -1,0 +1,5 @@
+{"id": "q1", "query": "delegate_to_avatar implementation", "gold_files": ["agenticx/runtime/meta_tools.py"]}
+{"id": "q2", "query": "code_search tool registration", "gold_files": ["agenticx/cli/agent_tools.py"]}
+{"id": "q3", "query": "CodeIndexManager singleton", "gold_files": ["agenticx/code_index/manager.py"]}
+{"id": "q4", "query": "knowledge base chromadb runtime", "gold_files": ["agenticx/studio/kb/runtime.py"]}
+{"id": "q5", "query": "group chat router mention", "gold_files": ["agenticx/runtime/group_router.py"]}
