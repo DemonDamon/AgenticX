@@ -1244,7 +1244,14 @@ export function App() {
     } catch {
       // ignore storage failures
     }
+    void window.agenticxDesktop.syncTitleBarOverlay(theme);
   }, [theme, themeColor]);
+
+  useEffect(() => {
+    void window.agenticxDesktop.platform().then((platform) => {
+      document.documentElement.setAttribute("data-platform", platform);
+    });
+  }, []);
 
   useEffect(() => {
     // Initial account hydration and subscription to device-flow OAuth events.

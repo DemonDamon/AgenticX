@@ -135,6 +135,10 @@ body,
   user-select: none;
 }
 
+html[data-platform="win32"] .agx-topbar {
+  padding-right: 140px;
+}
+
 .agx-topbar-left,
 .agx-topbar-right,
 .agx-topbar button,
