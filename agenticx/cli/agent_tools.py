@@ -1347,6 +1347,11 @@ _CODE_SEARCH_TOOL: Dict[str, Any] = {
                 "codebase_path": {"type": "string", "description": "Root path that was indexed."},
                 "query": {"type": "string", "description": "Natural language or keyword query."},
                 "top_k": {"type": "integer", "description": "Number of hits (default 10)."},
+                "strategy": {
+                    "type": "string",
+                    "enum": ["hybrid", "semantic", "bm25"],
+                    "description": "Search strategy (default hybrid).",
+                },
             },
             "required": ["codebase_path", "query"],
             "additionalProperties": False,
@@ -1363,15 +1368,7 @@ def code_index_config_enabled() -> bool:
 
 
 def _code_search_tool_defs() -> List[Dict[str, Any]]:
-    if not code_index_config_enabled():
-        return []
-    try:
-        import importlib
-
-        importlib.import_module("agenticx.code_index")
-    except ImportError:
-        return []
-    return [_CODE_SEARCH_TOOL]
+    return _code_index_tool_defs()
 
 
 def studio_tools_for_session(session: Optional[StudioSession] = None) -> List[Dict[str, Any]]:
@@ -2279,15 +2276,113 @@ def _max_read_chars_for_session(session: Optional[StudioSession]) -> int:
 
 def _tool_code_search(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
     if not code_index_config_enabled():
-        return "ERROR: code_index.enabled is false in ~/.agenticx/config.yaml"
+        return "ERROR: code_index.enabled 为 false，请在 ~/.agenticx/config.yaml 或 Machi 设置 → 工具 → 代码语义索引 中启用。"
     try:
         from agenticx.code_index.tools import dispatch_code_search  # type: ignore
     except ImportError:
         return (
-            "ERROR: code_index package not installed. "
-            "See plan 2026-05-06-code-context-index-internalization."
+            "ERROR: code_index 依赖未安装。请执行: pip install 'agenticx[code_index]'"
         )
     return dispatch_code_search(arguments, session)
+
+
+def _tool_code_index_create(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
+    from agenticx.code_index.tools import dispatch_code_index_create
+
+    return dispatch_code_index_create(arguments, session)
+
+
+def _tool_code_index_status(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
+    from agenticx.code_index.tools import dispatch_code_index_status
+
+    return dispatch_code_index_status(arguments, session)
+
+
+def _tool_code_index_clear(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
+    from agenticx.code_index.tools import dispatch_code_index_clear
+
+    return dispatch_code_index_clear(arguments, session)
+
+
+def _tool_code_index_cancel(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
+    from agenticx.code_index.tools import dispatch_code_index_cancel
+
+    return dispatch_code_index_cancel(arguments, session)
+
+
+_CODE_INDEX_LIFECYCLE_TOOLS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "code_index_create",
+            "description": "Start background indexing for a codebase (code_index.enabled).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "codebase_path": {"type": "string", "description": "Root path to index."},
+                },
+                "required": ["codebase_path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "code_index_status",
+            "description": "Query code index build status for a codebase (or all tasks if path omitted).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "codebase_path": {"type": "string", "description": "Optional root path."},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "code_index_clear",
+            "description": "Drop in-memory code index for a codebase and free memory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "codebase_path": {"type": "string", "description": "Root path to clear."},
+                },
+                "required": ["codebase_path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "code_index_cancel",
+            "description": "Cooperatively cancel an in-progress code index build by task_id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "Task id from code_index_create/status."},
+                },
+                "required": ["task_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+]
+
+
+def _code_index_tool_defs() -> List[Dict[str, Any]]:
+    if not code_index_config_enabled():
+        return []
+    try:
+        import importlib
+
+        importlib.import_module("agenticx.code_index")
+    except ImportError:
+        return []
+    return [_CODE_SEARCH_TOOL, *_CODE_INDEX_LIFECYCLE_TOOLS]
 
 
 def _tool_code_outline(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
@@ -4292,7 +4387,15 @@ async def dispatch_tool_async(
         if name == "session_search":
             return _tool_session_search(arguments, session)
         if name == "code_search":
-            return _tool_code_search(arguments, session)
+            return await asyncio.to_thread(_tool_code_search, arguments, session)
+        if name == "code_index_create":
+            return await asyncio.to_thread(_tool_code_index_create, arguments, session)
+        if name == "code_index_status":
+            return await asyncio.to_thread(_tool_code_index_status, arguments, session)
+        if name == "code_index_clear":
+            return await asyncio.to_thread(_tool_code_index_clear, arguments, session)
+        if name == "code_index_cancel":
+            return await asyncio.to_thread(_tool_code_index_cancel, arguments, session)
         if name == "ask_user":
             return _tool_ask_user(arguments, service_mode=isinstance(gate, AsyncConfirmGate))
         if name == "list_files":
