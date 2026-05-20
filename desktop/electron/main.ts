@@ -3236,6 +3236,8 @@ function registerIpc(): void {
         name?: string;
         inherit_from_session_id?: string;
         session_mode?: "code_dev" | "daily_office";
+        provider?: string;
+        model?: string;
       }
     ) => {
     try {
