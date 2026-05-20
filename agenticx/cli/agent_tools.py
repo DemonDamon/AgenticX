@@ -1067,11 +1067,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "knowledge_search",
             "description": (
-                "Search the local knowledge base (Machi Stage-1 MVP). "
-                "Returns the top-k most relevant chunks with source path, chunk index, "
-                "similarity score, and the chunk text. Use this before making claims that "
-                "depend on user-provided documents. Returns {hits: [...], used_top_k, source: 'local'}. "
-                "If the KB is disabled or empty, `hits` will be an empty list."
+                "Search mounted document brains (知识库 / docs brain) for the current session. "
+                "Returns {hits, by_brain, used_top_k, brains} — hits are merged top-k; "
+                "by_brain groups results per brain. Respects avatar brain mount settings. "
+                "Optional brain_id searches a single brain. If nothing is mounted, returns a hint."
             ),
             "parameters": {
                 "type": "object",
@@ -1080,6 +1079,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "top_k": {
                         "type": "integer",
                         "description": "Maximum number of chunks to return (1-20). Omit to use KB setting default Top-K.",
+                    },
+                    "brain_id": {
+                        "type": "string",
+                        "description": "Optional: search only this docs brain id (must be visible to the session avatar).",
                     },
                 },
                 "required": ["query"],
@@ -1338,22 +1341,30 @@ _CODE_SEARCH_TOOL: Dict[str, Any] = {
     "function": {
         "name": "code_search",
         "description": (
-            "Semantic/hybrid search over an indexed codebase (requires code_index.enabled). "
+            "Semantic/hybrid search over mounted code brains (设置 → 知识库 → 代码脑) "
+            "or a legacy global code_index codebase. Returns {hits, by_brain, brains}. "
             "Prefer in Explore phase before reading whole files."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "codebase_path": {"type": "string", "description": "Root path that was indexed."},
+                "codebase_path": {
+                    "type": "string",
+                    "description": "Legacy: root path indexed via global code_index (omit when using code brains).",
+                },
                 "query": {"type": "string", "description": "Natural language or keyword query."},
                 "top_k": {"type": "integer", "description": "Number of hits (default 10)."},
+                "brain_id": {
+                    "type": "string",
+                    "description": "Optional: search only this code brain id.",
+                },
                 "strategy": {
                     "type": "string",
                     "enum": ["hybrid", "semantic", "bm25"],
                     "description": "Search strategy (default hybrid).",
                 },
             },
-            "required": ["codebase_path", "query"],
+            "required": ["query"],
             "additionalProperties": False,
         },
     },
@@ -1363,6 +1374,19 @@ _CODE_SEARCH_TOOL: Dict[str, Any] = {
 def code_index_config_enabled() -> bool:
     try:
         return bool(ConfigManager.get_value("code_index.enabled"))
+    except Exception:
+        return False
+
+
+def _has_enabled_code_brains() -> bool:
+    try:
+        from agenticx.brain.registry import BrainRegistry
+        from agenticx.brain.types import BrainType
+
+        BrainRegistry.instance().bootstrap()
+        return any(
+            b.enabled and b.type == BrainType.CODE for b in BrainRegistry.instance().list_brains()
+        )
     except Exception:
         return False
 
@@ -2275,8 +2299,6 @@ def _max_read_chars_for_session(session: Optional[StudioSession]) -> int:
 
 
 def _tool_code_search(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
-    if not code_index_config_enabled():
-        return "ERROR: code_index.enabled 为 false，请在 ~/.agenticx/config.yaml 或 Machi 设置 → 工具 → 代码语义索引 中启用。"
     try:
         from agenticx.code_index.tools import dispatch_code_search  # type: ignore
     except ImportError:
@@ -2374,7 +2396,7 @@ _CODE_INDEX_LIFECYCLE_TOOLS: List[Dict[str, Any]] = [
 
 
 def _code_index_tool_defs() -> List[Dict[str, Any]]:
-    if not code_index_config_enabled():
+    if not code_index_config_enabled() and not _has_enabled_code_brains():
         return []
     try:
         import importlib
@@ -2382,7 +2404,10 @@ def _code_index_tool_defs() -> List[Dict[str, Any]]:
         importlib.import_module("agenticx.code_index")
     except ImportError:
         return []
-    return [_CODE_SEARCH_TOOL, *_CODE_INDEX_LIFECYCLE_TOOLS]
+    tools: List[Dict[str, Any]] = [_CODE_SEARCH_TOOL]
+    if code_index_config_enabled():
+        tools.extend(_CODE_INDEX_LIFECYCLE_TOOLS)
+    return tools
 
 
 def _tool_code_outline(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
@@ -3620,13 +3645,10 @@ async def _tool_memory_append(
     return f"OK: appended to {target}"
 
 
-def _tool_knowledge_search(arguments: Dict[str, Any]) -> str:
-    """Search the Stage-1 local knowledge base.
-
-    Plan-Id: machi-kb-stage1-local-mvp (plan §2.3). Returns a JSON payload
-    matching ``KBSearchResponse.to_dict()`` so the UI and the model share the
-    same ``hits[]`` shape.
-    """
+def _tool_knowledge_search(
+    arguments: Dict[str, Any], session: Optional["StudioSession"] = None
+) -> str:
+    """Search mounted docs brains (multi-brain architecture)."""
 
     query = str(arguments.get("query", "")).strip()
     if not query:
@@ -3635,22 +3657,15 @@ def _tool_knowledge_search(arguments: Dict[str, Any]) -> str:
             ensure_ascii=False,
         )
     try:
+        from agenticx.brain.search import search_docs_brains
         from agenticx.studio.kb import KBManager
-    except Exception as exc:  # pragma: no cover - packaging issue
+    except Exception as exc:
         return json.dumps(
             {"ok": False, "error": f"KB subsystem unavailable: {exc}", "hits": []},
             ensure_ascii=False,
         )
 
-    try:
-        manager = KBManager.instance()
-    except Exception as exc:  # pragma: no cover - first-boot errors
-        return json.dumps(
-            {"ok": False, "error": f"KB not initialised: {exc}", "hits": []},
-            ensure_ascii=False,
-        )
-
-    cfg = manager.read_config()
+    cfg = KBManager.instance().read_config()
     default_top_k = int(getattr(getattr(cfg, "retrieval", None), "top_k", 5) or 5)
     raw_top_k = arguments.get("top_k")
     try:
@@ -3659,36 +3674,24 @@ def _tool_knowledge_search(arguments: Dict[str, Any]) -> str:
         top_k = default_top_k
     top_k = max(1, min(20, top_k))
 
-    if not cfg.enabled:
-        return json.dumps(
-            {
-                "ok": True,
-                "hits": [],
-                "used_top_k": 0,
-                "source": "local",
-                "disabled": True,
-                "hint": "Knowledge base is disabled in settings.",
-            },
-            ensure_ascii=False,
-        )
+    avatar_id = None
+    if session is not None:
+        avatar_id = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+    brain_id = str(arguments.get("brain_id") or "").strip() or None
 
     try:
-        hits = manager.runtime.search(query, top_k=top_k)
+        payload = search_docs_brains(
+            query=query,
+            top_k=top_k,
+            avatar_id=avatar_id,
+            brain_id=brain_id,
+        )
     except Exception as exc:
         return json.dumps(
             {"ok": False, "error": f"search failed: {exc}", "hits": []},
             ensure_ascii=False,
         )
-
-    return json.dumps(
-        {
-            "ok": True,
-            "hits": [h.to_dict() for h in hits],
-            "used_top_k": len(hits),
-            "source": "local",
-        },
-        ensure_ascii=False,
-    )
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _tool_web_search(arguments: Dict[str, Any]) -> str:
@@ -4379,9 +4382,7 @@ async def dispatch_tool_async(
         if name == "memory_search":
             return _tool_memory_search(arguments)
         if name == "knowledge_search":
-            # Plan-Id: machi-kb-stage1-local-mvp — offloaded to a thread so the
-            # underlying chromadb + litellm calls don't block the event loop.
-            return await asyncio.to_thread(_tool_knowledge_search, arguments)
+            return await asyncio.to_thread(_tool_knowledge_search, arguments, session)
         if name == "web_search":
             return await asyncio.to_thread(_tool_web_search, arguments)
         if name == "session_search":

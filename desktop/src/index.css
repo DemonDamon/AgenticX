@@ -189,6 +189,31 @@ body {
   background-color: transparent !important;
 }
 
+.agx-settings-panel-resize-handle {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  z-index: 2;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  opacity: 0.45;
+  border-right: 2px solid var(--text-faint);
+  border-bottom: 2px solid var(--text-faint);
+  border-radius: 0 0 3px 0;
+  transition: opacity 0.15s;
+}
+
+.agx-settings-panel:hover .agx-settings-panel-resize-handle,
+.agx-settings-panel-resize-handle:hover {
+  opacity: 0.9;
+}
+
+body.agx-settings-panel-resizing {
+  cursor: nwse-resize !important;
+  user-select: none;
+}
+
 /* Settings modal: Chromium/Electron often ignores padding for the native <select> chevron.
    Strip native chrome and draw our own chevron with a fixed inset from the right edge. */
 .agx-settings-panel select {

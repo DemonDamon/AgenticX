@@ -14,7 +14,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 
@@ -53,11 +53,18 @@ class AvatarConfig:
     pinned: bool = False
     tools_enabled: Dict[str, bool] = field(default_factory=dict)
     skills_enabled: Optional[Dict[str, bool]] = None
+    # None = mount global brains only; "*" = all visible brains; list = explicit ids
+    brains_enabled: Optional[Any] = None
     created_at: str = ""
     updated_at: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {k: v for k, v in asdict(self).items() if v or k in {"id", "name", "pinned"}}
+        d = {k: v for k, v in asdict(self).items() if v or k in {"id", "name", "pinned"}}
+        if self.brains_enabled is not None:
+            d["brains_enabled"] = self.brains_enabled
+        if self.skills_enabled is not None:
+            d["skills_enabled"] = self.skills_enabled
+        return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> AvatarConfig:
@@ -130,6 +137,7 @@ class AvatarRegistry:
         default_model: str = "",
         tools_enabled: Optional[Dict[str, bool]] = None,
         skills_enabled: Optional[Dict[str, bool]] = None,
+        brains_enabled: Optional[Any] = None,
     ) -> AvatarConfig:
         """Create a new avatar with isolated workspace."""
         avatar_id = uuid.uuid4().hex[:12]
@@ -150,6 +158,7 @@ class AvatarRegistry:
             default_model=default_model,
             tools_enabled=dict(tools_enabled or {}),
             skills_enabled=se,
+            brains_enabled=brains_enabled,
             created_at=now,
             updated_at=now,
         )
@@ -174,6 +183,16 @@ class AvatarRegistry:
                         str(k): bool(v) for k, v in value.items() if str(k).strip()
                     }
                 continue
+            if key == "brains_enabled":
+                if value is None or value == "":
+                    config.brains_enabled = None
+                elif value == "*":
+                    config.brains_enabled = "*"
+                elif isinstance(value, list):
+                    config.brains_enabled = [str(x).strip() for x in value if str(x).strip()]
+                else:
+                    config.brains_enabled = value
+                continue
             if hasattr(config, key):
                 setattr(config, key, value)
         config.updated_at = datetime.now(timezone.utc).isoformat()
@@ -186,6 +205,9 @@ class AvatarRegistry:
         if not avatar_dir.exists():
             return False
         try:
+            from agenticx.brain.registry import BrainRegistry
+
+            BrainRegistry.instance().delete_private_brains_for_avatar(avatar_id)
             shutil.rmtree(avatar_dir)
         except OSError:
             return False

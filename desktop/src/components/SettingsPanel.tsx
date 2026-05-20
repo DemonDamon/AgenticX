@@ -71,6 +71,12 @@ import {
   VoiceSettingsPanel,
   type VoiceSettingsPanelHandle,
 } from "./settings/voice/VoiceSettingsPanel";
+import {
+  clampSettingsPanelSize,
+  loadSettingsPanelSize,
+  saveSettingsPanelSize,
+  type SettingsPanelSize,
+} from "../utils/settings-panel-size";
 export type { SettingsTab } from "../settings-tab";
 
 export type FavoriteForwardContext = {
@@ -4895,11 +4901,52 @@ export function SettingsPanel({
   const voiceSettingsRef = useRef<VoiceSettingsPanelHandle>(null);
   const permissionsPanelRef = useRef<PermissionsAdvancedPanelHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
+  const [panelSize, setPanelSize] = useState<SettingsPanelSize>(() => loadSettingsPanelSize());
   useEffect(() => {
     if (!open || !settingsOpenToTab) return;
     setTab(settingsOpenToTab);
     updateSettingsSlice({ openToTab: undefined });
   }, [open, settingsOpenToTab, updateSettingsSlice]);
+  useEffect(() => {
+    if (!open) return;
+    setPanelSize(loadSettingsPanelSize());
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const onWindowResize = () => {
+      setPanelSize((prev) => clampSettingsPanelSize(prev));
+    };
+    window.addEventListener("resize", onWindowResize);
+    return () => window.removeEventListener("resize", onWindowResize);
+  }, [open]);
+  const onPanelResizeMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startWidth = panelSize.width;
+    const startHeight = panelSize.height;
+    document.body.classList.add("agx-settings-panel-resizing");
+    const onMove = (moveEvent: MouseEvent) => {
+      setPanelSize(
+        clampSettingsPanelSize({
+          width: startWidth + (moveEvent.clientX - startX),
+          height: startHeight + (moveEvent.clientY - startY),
+        }),
+      );
+    };
+    const onUp = () => {
+      document.body.classList.remove("agx-settings-panel-resizing");
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      setPanelSize((prev) => {
+        saveSettingsPanelSize(prev);
+        return prev;
+      });
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [panelSize.height, panelSize.width]);
   const [active, setActive] = useState(defaultProvider || ALL_PROVIDERS[0]);
   const [draft, setDraft] = useState<Record<string, ProviderEntry>>({});
   const [defProv, setDefProv] = useState(defaultProvider);
@@ -6143,10 +6190,14 @@ export function SettingsPanel({
   return (
     <>
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-none">
-      {/* 固定为视口比例，避免切换 tab 时随内容伸缩；长内容在右侧滚动区内滚动 */}
+      {/* 默认更宽；右下角可拖拽调整尺寸并持久化，切换 tab 时尺寸不变 */}
       <div
-        className="agx-settings-panel flex h-[min(85vh,calc(100dvh-2rem))] w-[min(90vw,51.25rem)] max-w-[calc(100vw-2rem)] shrink-0 overflow-hidden rounded-2xl border border-border shadow-2xl"
-        style={{ backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
+        className="agx-settings-panel relative flex shrink-0 overflow-hidden rounded-2xl border border-border shadow-2xl"
+        style={{
+          width: panelSize.width,
+          height: panelSize.height,
+          backgroundColor: "var(--surface-base-fallback, var(--surface-panel))",
+        }}
       >
         {/* Left: tab navigation */}
         <div className="flex h-full min-h-0 w-[200px] shrink-0 flex-col bg-surface-sidebar p-4">
@@ -7917,6 +7968,14 @@ export function SettingsPanel({
             </button>
           </div>
         </div>
+        <div
+          className="agx-settings-panel-resize-handle"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="拖拽调整设置窗口大小"
+          title="拖拽调整大小"
+          onMouseDown={onPanelResizeMouseDown}
+        />
       </div>
     </div>
     {mcpErrorInspect ? (

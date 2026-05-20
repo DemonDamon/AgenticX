@@ -145,6 +145,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     pinned?: boolean;
     system_prompt?: string;
     tools_enabled?: Record<string, boolean>;
+    skills_enabled?: Record<string, boolean> | null;
+    brains_enabled?: "*" | string[] | null;
     default_provider?: string;
     default_model?: string;
   }) =>

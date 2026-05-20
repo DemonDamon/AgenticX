@@ -138,6 +138,12 @@ export function AvatarSidebar() {
               a.skills_enabled && typeof a.skills_enabled === "object"
                 ? { ...a.skills_enabled }
                 : undefined,
+            brainsEnabled:
+              a.brains_enabled === "*"
+                ? "*"
+                : Array.isArray(a.brains_enabled)
+                  ? a.brains_enabled.map(String)
+                  : undefined,
             defaultProvider: a.default_provider ?? "",
             defaultModel: a.default_model ?? "",
           }))

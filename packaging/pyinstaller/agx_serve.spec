@@ -42,6 +42,13 @@ _DESKTOP_RUNTIME_PACKAGES = (
     "pptx",         # python-pptx
     "docx2txt",
     "numpy",
+    # code_index / Semble（方法体内 import，须 collect_all）
+    "semble",
+    "model2vec",
+    "vicinity",
+    "bm25s",
+    "tree_sitter_language_pack",
+    "pathspec",
 )
 
 _CRITICAL_DESKTOP_RUNTIME_PACKAGES = (
@@ -75,6 +82,7 @@ hiddenimports = (
     + desktop_runtime_hiddenimports
     + list(_CRITICAL_DESKTOP_RUNTIME_PACKAGES)
     + ["tiktoken_ext.openai_public", "tiktoken_ext"]
+    + ["pathspec"]
 )
 
 datas = list(agenticx_datas) + desktop_runtime_datas

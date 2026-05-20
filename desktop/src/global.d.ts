@@ -116,6 +116,7 @@ type AvatarItem = {
   system_prompt?: string;
   tools_enabled?: Record<string, boolean>;
   skills_enabled?: Record<string, boolean> | null;
+  brains_enabled?: "*" | string[] | null;
   /** Default provider/model the avatar falls back to when a session has none. */
   default_provider?: string;
   default_model?: string;
@@ -394,6 +395,7 @@ declare global {
         system_prompt?: string;
         tools_enabled?: Record<string, boolean>;
         skills_enabled?: Record<string, boolean> | null;
+        brains_enabled?: "*" | string[] | null;
         default_provider?: string;
         default_model?: string;
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;

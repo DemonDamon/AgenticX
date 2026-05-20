@@ -8,6 +8,11 @@ from typing import Any, Sequence
 from agenticx.code_index.backends.base import CodeSearchHit
 
 
+def format_hits_for_tool(hits: Sequence[CodeSearchHit]) -> list[dict[str, Any]]:
+    """Alias for brain / tool layers that expect this name."""
+    return hits_to_json(hits)
+
+
 def hits_to_json(hits: Sequence[CodeSearchHit]) -> list[dict[str, Any]]:
     return [
         {
