@@ -12,6 +12,10 @@ import {
 } from "react";
 import { Library, Loader2 } from "lucide-react";
 import { useAppStore } from "../../../store";
+import {
+  CodeIndexSettingsPanel,
+  type CodeIndexSettingsHandle,
+} from "../code-index/CodeIndexSettingsPanel";
 import { createKbApi } from "./api";
 import { KnowledgeConfigPanel } from "./KnowledgeConfigPanel";
 import { KnowledgeMaterialsPanel } from "./KnowledgeMaterialsPanel";
@@ -19,7 +23,7 @@ import { KnowledgeDebugPanel } from "./KnowledgeDebugPanel";
 import type { KBConfig, KBStats } from "./types";
 import { defaultKBConfig } from "./types";
 
-type InnerTab = "config" | "materials" | "debug";
+type InnerTab = "config" | "code_index" | "materials" | "debug";
 
 export type KnowledgeSettingsHandle = {
   /** Persist pending edits in the config sub-panel to /api/kb/config.
@@ -43,6 +47,7 @@ export const KnowledgeSettings = forwardRef<KnowledgeSettingsHandle>(function Kn
   }, [backendUrl]);
 
   const api = useMemo(() => createKbApi(apiToken, resolveApiBase), [apiToken, resolveApiBase]);
+  const codeIndexPanelRef = useRef<CodeIndexSettingsHandle>(null);
 
   const [inner, setInner] = useState<InnerTab>("config");
   const [config, setConfig] = useState<KBConfig>(defaultKBConfig());
@@ -81,6 +86,13 @@ export const KnowledgeSettings = forwardRef<KnowledgeSettingsHandle>(function Kn
     ref,
     () => ({
       async flushIfDirty() {
+        const codeIdx = codeIndexPanelRef.current;
+        if (codeIdx) {
+          const ciRes = await codeIdx.flushIfDirty();
+          if (!ciRes.ok) {
+            return { ok: false, error: ciRes.error ?? "代码语义索引保存失败" };
+          }
+        }
         const persisted = config;
         const next = draftRef.current;
         if (JSON.stringify(persisted) === JSON.stringify(next)) {
@@ -108,13 +120,18 @@ export const KnowledgeSettings = forwardRef<KnowledgeSettingsHandle>(function Kn
   );
 
   const innerTabs: { id: InnerTab; label: string }[] = [
-    { id: "config", label: "配置" },
+    { id: "config", label: "文档库" },
+    { id: "code_index", label: "代码索引" },
     { id: "materials", label: "资料" },
     { id: "debug", label: "调试" },
   ];
 
   return (
     <div className="space-y-3">
+      <p className="text-xs text-text-faint">
+        <strong className="text-text-subtle">文档库</strong>用于 PDF/Office 等资料检索；
+        <strong className="text-text-subtle">代码索引</strong>用于工作区源码语义检索（<code>code_search</code>），二者配置独立。
+      </p>
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
           <Library className="h-4 w-4 text-[var(--settings-accent-fg)]" />
@@ -151,11 +168,15 @@ export const KnowledgeSettings = forwardRef<KnowledgeSettingsHandle>(function Kn
         </div>
       ) : null}
 
-      {loading ? (
+      <div className={inner === "code_index" ? "" : "hidden"} aria-hidden={inner !== "code_index"}>
+        <CodeIndexSettingsPanel ref={codeIndexPanelRef} />
+      </div>
+
+      {inner !== "code_index" && loading ? (
         <div className="flex items-center gap-2 text-xs text-text-subtle">
           <Loader2 className="h-4 w-4 animate-spin" /> 读取 KB 配置…
         </div>
-      ) : (
+      ) : inner !== "code_index" ? (
         <>
           {inner === "config" ? (
             <KnowledgeConfigPanel
@@ -175,7 +196,7 @@ export const KnowledgeSettings = forwardRef<KnowledgeSettingsHandle>(function Kn
           ) : null}
           {inner === "debug" ? <KnowledgeDebugPanel api={api} config={config} /> : null}
         </>
-      )}
+      ) : null}
     </div>
   );
 });

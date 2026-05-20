@@ -283,6 +283,10 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadComputerUseConfig: async () => ipcRenderer.invoke("load-computer-use-config"),
   saveComputerUseConfig: async (payload: { enabled: boolean }) =>
     ipcRenderer.invoke("save-computer-use-config", payload),
+  loadCodeIndexConfig: async () => ipcRenderer.invoke("load-code-index-config"),
+  saveCodeIndexConfig: async (payload: Record<string, unknown>) =>
+    ipcRenderer.invoke("save-code-index-config", payload),
+  openCodeIndexModelCache: async () => ipcRenderer.invoke("open-code-index-model-cache"),
   loadTrinityConfig: async () => ipcRenderer.invoke("load-trinity-config"),
   saveTrinityConfig: async (payload: {
     skill_protocol: boolean;
