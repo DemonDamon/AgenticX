@@ -1307,6 +1307,31 @@ function validateTrinityConfigPayload(input: unknown): { ok: true; config: Trini
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+const WIN_TITLE_BAR_OVERLAY_HEIGHT = 44;
+type WinTitleBarTheme = "dark" | "light" | "dim";
+let winTitleBarOverlayTheme: WinTitleBarTheme = "dark";
+
+function winTitleBarOverlayForTheme(theme: WinTitleBarTheme = "dark") {
+  switch (theme) {
+    case "light":
+      return { color: "#ffffff", symbolColor: "#111827", height: WIN_TITLE_BAR_OVERLAY_HEIGHT };
+    case "dim":
+      return { color: "#1e1e1e", symbolColor: "#f6f7f9", height: WIN_TITLE_BAR_OVERLAY_HEIGHT };
+    default:
+      return { color: "#26262a", symbolColor: "#ffffff", height: WIN_TITLE_BAR_OVERLAY_HEIGHT };
+  }
+}
+
+function applyWinTitleBarOverlay(theme: WinTitleBarTheme = winTitleBarOverlayTheme): void {
+  if (process.platform !== "win32" || !mainWindow || mainWindow.isDestroyed() || focusModeActive) return;
+  try {
+    mainWindow.setTitleBarOverlay(winTitleBarOverlayForTheme(theme));
+    winTitleBarOverlayTheme = theme;
+  } catch {
+    // ignore unsupported builds
+  }
+}
+
 /** When true, the scheduled bounds save is skipped so focus-mode's tiny
  *  capsule size is never persisted to layout.json. */
 let focusModeActive = false;
@@ -2270,12 +2295,21 @@ function createWindow(): void {
     alwaysOnTop: false,
     skipTaskbar: false,
     transparent: transparentMainWindow,
-    titleBarStyle: "hiddenInset",
     autoHideMenuBar: true,
+    ...(process.platform === "darwin"
+      ? {
+          titleBarStyle: "hiddenInset" as const,
+          trafficLightPosition: { x: 14, y: 14 },
+        }
+      : process.platform === "win32"
+        ? {
+            titleBarStyle: "hidden" as const,
+            titleBarOverlay: winTitleBarOverlayForTheme("dark"),
+          }
+        : {}),
     ...(vibrancyEnabled ? { vibrancy: "under-window" as const, visualEffectState: "followWindow" as const } : {}),
     backgroundColor: mainWindowBackgroundColor,
     roundedCorners: true,
-    trafficLightPosition: { x: 14, y: 14 },
     webPreferences: {
       preload: path.join(__dirname, "preload.js")
     }
@@ -2427,6 +2461,13 @@ function registerEarlyIpc(): void {
   ipcMain.handle("get-api-auth-token", async () => getStudioToken());
   ipcMain.handle("get-platform", async () => process.platform);
   ipcMain.handle("get-connection-mode", async () => remoteConfig ? "remote" : "local");
+  ipcMain.handle("sync-title-bar-overlay", async (_event, theme: unknown) => {
+    if (process.platform !== "win32") return { ok: true, skipped: true };
+    const mode: WinTitleBarTheme =
+      theme === "light" || theme === "dim" || theme === "dark" ? theme : "dark";
+    applyWinTitleBarOverlay(mode);
+    return { ok: true };
+  });
 
   /**
    * 「灵巧模式」胶囊窗口：右上角圆形语音 HUD（VoiceFocus）。Enter 会快照 bounds、无边框置顶透明背景；
@@ -2455,6 +2496,13 @@ function registerEarlyIpc(): void {
       mainWindow.setMinimumSize(160, 40);
       mainWindow.setMaximumSize(2000, 200);
       mainWindow.setResizable(false);
+      if (process.platform === "win32") {
+        try {
+          mainWindow.setTitleBarOverlay({ color: "#14141c", symbolColor: "#ffffff", height: 0 });
+        } catch {
+          // ignore
+        }
+      }
       // macOS 专属：隐藏红绿黄；关闭系统阴影，让 CSS 自己绘制圆角+阴影。
       if (process.platform === "darwin") {
         try {
@@ -2537,6 +2585,9 @@ function registerEarlyIpc(): void {
         if (focusModeWasMaximized) {
           mainWindow.maximize();
         }
+        if (process.platform === "win32") {
+          applyWinTitleBarOverlay(winTitleBarOverlayTheme);
+        }
       } catch {
         // ignore rollback failures
       }
@@ -2589,6 +2640,9 @@ function registerEarlyIpc(): void {
       focusModeWasMaximized = false;
       // Flip the flag LAST so any resize events above are still suppressed.
       focusModeActive = false;
+      if (process.platform === "win32") {
+        applyWinTitleBarOverlay(winTitleBarOverlayTheme);
+      }
       return { ok: true };
     } catch (error) {
       focusModeActive = false;

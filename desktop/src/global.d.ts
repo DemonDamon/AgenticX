@@ -326,6 +326,7 @@ declare global {
       getApiBase: () => Promise<string>;
       getApiAuthToken: () => Promise<string>;
       platform: () => Promise<string>;
+      syncTitleBarOverlay: (theme: "dark" | "light" | "dim") => Promise<{ ok: boolean; skipped?: boolean; error?: string }>;
       getConnectionMode: () => Promise<"local" | "remote">;
       focusModeEnter: () => Promise<{ ok: boolean; alreadyActive?: boolean; error?: string }>;
       focusModeExit: () => Promise<{ ok: boolean; alreadyInactive?: boolean; error?: string }>;

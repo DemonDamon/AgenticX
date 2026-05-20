@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   getApiBase: async (): Promise<string> => ipcRenderer.invoke("get-api-base"),
   getApiAuthToken: async (): Promise<string> => ipcRenderer.invoke("get-api-auth-token"),
   platform: async (): Promise<string> => ipcRenderer.invoke("get-platform"),
+  syncTitleBarOverlay: async (theme: "dark" | "light" | "dim") =>
+    ipcRenderer.invoke("sync-title-bar-overlay", theme) as Promise<{ ok: boolean; skipped?: boolean; error?: string }>,
   getConnectionMode: async (): Promise<"local" | "remote"> => ipcRenderer.invoke("get-connection-mode"),
   focusModeEnter: async (): Promise<{ ok: boolean; alreadyActive?: boolean; error?: string }> =>
     ipcRenderer.invoke("focus-mode-enter"),
