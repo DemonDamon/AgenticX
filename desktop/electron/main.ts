@@ -2262,6 +2262,7 @@ function createWindow(): void {
   const mainWindowBackgroundColor = transparentMainWindow ? "#00000000" : "#14141c";
   mainWindow = new BrowserWindow({
     ...boundsOverride,
+    title: "Machi",
     minWidth: 680,
     minHeight: 480,
     show: false,
@@ -2269,6 +2270,7 @@ function createWindow(): void {
     skipTaskbar: false,
     transparent: transparentMainWindow,
     titleBarStyle: "hiddenInset",
+    autoHideMenuBar: true,
     ...(vibrancyEnabled ? { vibrancy: "under-window" as const, visualEffectState: "followWindow" as const } : {}),
     backgroundColor: mainWindowBackgroundColor,
     roundedCorners: true,
@@ -5337,7 +5339,11 @@ if (!gotTheLock) {
 
   app.whenReady().then(async () => {
     try {
-      Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate()));
+      if (process.platform === "win32" || process.platform === "linux") {
+        Menu.setApplicationMenu(null);
+      } else {
+        Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate()));
+      }
       if (process.platform === "darwin") {
         const iconPath = app.isPackaged
           ? path.join(process.resourcesPath, "assets", "icon.png")
