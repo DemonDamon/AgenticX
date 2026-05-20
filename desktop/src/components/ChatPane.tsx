@@ -4763,6 +4763,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           avatar_id: avatarId,
           session_mode: pendingMode,
           ...(inheritFrom ? { inherit_from_session_id: inheritFrom } : {}),
+          ...(chatProvider && chatModel ? { provider: chatProvider, model: chatModel } : {}),
         });
         if (!created.ok || !created.session_id) {
           addPaneMessage(
@@ -4787,7 +4788,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         useAppStore.getState().setPaneMessages(pane.id, []);
         lastPollCountRef.current = 0;
         pollSessionSidRef.current = requestSessionId;
-        setPaneSessionId(pane.id, requestSessionId);
+        setPaneSessionId(pane.id, requestSessionId, {
+          provider: chatProvider || undefined,
+          model: chatModel || undefined,
+        });
         clearPaneAwaitingFreshSession(pane.id);
         useAppStore.getState().bumpSessionCatalogRevision();
         window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
@@ -5899,9 +5903,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         avatar_id: avatarId,
         session_mode: pendingMode,
         ...(inherit && prevSessionId ? { inherit_from_session_id: prevSessionId } : {}),
+        ...(chatProvider && chatModel ? { provider: chatProvider, model: chatModel } : {}),
       });
       if (result.ok && result.session_id) {
-        setPaneSessionId(pane.id, result.session_id);
+        setPaneSessionId(pane.id, result.session_id, {
+          provider: chatProvider || undefined,
+          model: chatModel || undefined,
+        });
         setPaneSessionMode(pane.id, result.session_mode ?? pendingMode);
         clearPanePendingSessionMode(pane.id);
         clearPaneAwaitingFreshSession(pane.id);

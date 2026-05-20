@@ -1238,14 +1238,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     const hintModel = String(modelHint?.model ?? "").trim();
     set((state) => {
       // Priority chain when binding a session to a pane:
-      //   modelHint (usually = session.provider/model from backend)
+      //   modelHint (session.provider/model from backend, e.g. history switch)
+      //   > pane.modelProvider/modelName (user's current picker selection)
       //   > avatar.defaultProvider/defaultModel
       //   > settings.defaultProvider + providers[default].model
-      // Leave empty strings alone so UI can still show "未选模型" if nothing
-      // is configured anywhere — but only for explicit empty hint cases.
+      // Lazy session create must not clobber a manual model switch on the pane.
       const pane = state.panes.find((p) => p.id === paneId);
+      const paneProvider = (pane?.modelProvider || "").trim();
+      const paneModel = (pane?.modelName || "").trim();
       let resolvedProvider = hintProvider;
       let resolvedModel = hintModel;
+      if (!resolvedProvider || !resolvedModel) {
+        if (paneProvider && paneModel) {
+          if (!resolvedProvider) resolvedProvider = paneProvider;
+          if (!resolvedModel) resolvedModel = paneModel;
+        }
+      }
       if (!resolvedProvider || !resolvedModel) {
         const avatar = pane?.avatarId
           ? state.avatars.find((a) => a.id === pane.avatarId)
@@ -1253,14 +1261,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         const avatarProvider = (avatar?.defaultProvider || "").trim();
         const avatarModel = (avatar?.defaultModel || "").trim();
         if (avatarProvider && avatarModel) {
-          resolvedProvider = avatarProvider;
-          resolvedModel = avatarModel;
+          if (!resolvedProvider) resolvedProvider = avatarProvider;
+          if (!resolvedModel) resolvedModel = avatarModel;
         } else {
           const dp = (state.settings.defaultProvider || "").trim();
           const dm = (state.settings.providers[dp]?.model || "").trim();
           if (dp && dm) {
-            resolvedProvider = dp;
-            resolvedModel = dm;
+            if (!resolvedProvider) resolvedProvider = dp;
+            if (!resolvedModel) resolvedModel = dm;
           }
         }
       }
