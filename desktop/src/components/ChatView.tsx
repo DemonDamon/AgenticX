@@ -31,8 +31,15 @@ import {
   CHANNEL_C_GRACE_MS,
   stallDetectSilenceMs,
   messageLooksLikeAssistantFinal,
+  shouldAllowStallAutoNudge,
   shouldTriggerIncompleteEndStall,
 } from "../utils/task-stall-policy";
+import {
+  continueSessionUrl,
+  inferContinueReason,
+  type ContinueReason,
+  type ContinueSource,
+} from "../utils/session-continue";
 import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
@@ -381,8 +388,15 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const [sseActive, setSseActive] = useState(false);
   const [stallTick, setStallTick] = useState(0);
   const [stallDetectSeconds, setStallDetectSeconds] = useState(90);
+  const [stallNudgeConfig, setStallNudgeConfig] = useState({
+    stall_auto_nudge_enabled: false,
+    stall_auto_nudge_after_seconds: 120,
+    stall_auto_nudge_max_per_session: 2,
+  });
+  const [autoNudgeCount, setAutoNudgeCount] = useState(0);
+  const autoNudgeTriggeredRef = useRef<Record<string, number>>({});
+  const autoNudgeBucketRef = useRef<Record<string, number>>({});
   const lastProgressAtRef = useRef(0);
-  const channelCCheckedRef = useRef(false);
   const sessionEnteredAtRef = useRef(0);
   const settings = useAppStore((s) => s.settings);
   const isLite = mode === "lite";
@@ -489,13 +503,24 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       if (Number.isFinite(sec)) {
         setStallDetectSeconds(Math.max(30, Math.min(300, Math.round(sec))));
       }
+      setStallNudgeConfig({
+        stall_auto_nudge_enabled: Boolean(r.stall_auto_nudge_enabled),
+        stall_auto_nudge_after_seconds: Math.max(
+          30,
+          Math.min(300, Number(r.stall_auto_nudge_after_seconds ?? 120) || 120),
+        ),
+        stall_auto_nudge_max_per_session: Math.max(
+          1,
+          Math.min(5, Number(r.stall_auto_nudge_max_per_session ?? 2) || 2),
+        ),
+      });
     });
   }, []);
 
   useEffect(() => {
     if (!sessionId) return;
     sessionEnteredAtRef.current = Date.now();
-    channelCCheckedRef.current = false;
+    setAutoNudgeCount(autoNudgeTriggeredRef.current[sessionId] ?? 0);
     void window.agenticxDesktop.listSessions(undefined).then((r) => {
       if (!r.ok) return;
       const row = (r.sessions ?? []).find((s) => s.session_id === sessionId);
@@ -531,11 +556,9 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
         execState === "running" &&
         lastProgress > 0 &&
         silentMs >= stallSilenceMs;
-      let channelC = false;
-      if (!channelCCheckedRef.current && graceMs >= CHANNEL_C_GRACE_MS) {
-        channelCCheckedRef.current = true;
-        channelC = shouldTriggerIncompleteEndStall(execState, sseActive, lastMsg, CHANNEL_C_GRACE_MS);
-      }
+      const channelC =
+        graceMs >= CHANNEL_C_GRACE_MS &&
+        shouldTriggerIncompleteEndStall(execState, sseActive, lastMsg, CHANNEL_C_GRACE_MS);
       if (channelA || channelB || channelC) {
         setStallState("stall");
         return;
@@ -874,9 +897,16 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
 
   const sendChat = async (
     userText: string,
-    opts?: { provider?: string; model?: string; insertAfterId?: string; agentId?: string }
+    opts?: {
+      provider?: string;
+      model?: string;
+      insertAfterId?: string;
+      agentId?: string;
+      continuation?: { reason: ContinueReason; source: ContinueSource };
+    }
   ) => {
-    if (!userText || !apiBase || !sessionId) return;
+    const isContinuation = !!opts?.continuation;
+    if ((!userText && !isContinuation) || !apiBase || !sessionId) return;
     if (streaming) {
       abortedByUserRef.current = true;
       abortRef.current?.abort();
@@ -944,7 +974,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       streamCommittedRef.current = false;
     };
 
-    if (!opts?.insertAfterId) {
+    if (!opts?.insertAfterId && !isContinuation) {
       setInput("");
       if (targetAgentId === "meta") {
         addMessage("user", userText, "meta");
@@ -974,12 +1004,23 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       if (reqProvider) body.provider = reqProvider;
       if (reqModel) body.model = reqModel;
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
-      const resp = await fetch(`${apiBase}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
-        body: JSON.stringify(body),
-        signal: abortController.signal
-      });
+      const resp = isContinuation && opts?.continuation
+        ? await fetch(continueSessionUrl(apiBase, sessionId), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+            body: JSON.stringify({
+              reason: opts.continuation.reason,
+              source: opts.continuation.source,
+              suppress_user_echo: true,
+            }),
+            signal: abortController.signal,
+          })
+        : await fetch(`${apiBase}/api/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+            body: JSON.stringify(body),
+            signal: abortController.signal,
+          });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const reader = resp.body?.getReader();
       const decoder = new TextDecoder();
@@ -1002,6 +1043,14 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           try {
             const payload = JSON.parse(line.slice(6));
             const eventAgentId = payload.data?.agent_id ?? "meta";
+            if (payload.type === "continuation_notice") {
+              const noticeText = String(payload.data?.text ?? "").trim();
+              if (noticeText) addMessage("tool", noticeText, "meta");
+              continue;
+            }
+            if (payload.type === "continuation_rejected") {
+              continue;
+            }
             if (payload.type === "tool_progress") {
               if (!isCurrentRequest()) continue;
               recordProgressActivity();
@@ -1390,6 +1439,32 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const sendChatRef = useRef(sendChat);
   sendChatRef.current = sendChat;
 
+  useEffect(() => {
+    if (!stallNudgeConfig.stall_auto_nudge_enabled) return;
+    if (!shouldAllowStallAutoNudge(stallState, sessionExecutionState)) return;
+    const sid = (sessionId || "").trim();
+    if (!sid) return;
+    const silentSeconds =
+      lastProgressAtRef.current > 0
+        ? Math.floor((Date.now() - lastProgressAtRef.current) / 1000)
+        : 0;
+    if (silentSeconds < stallNudgeConfig.stall_auto_nudge_after_seconds) return;
+    const count = autoNudgeTriggeredRef.current[sid] ?? 0;
+    if (count >= stallNudgeConfig.stall_auto_nudge_max_per_session) return;
+    const bucket = Math.floor(
+      silentSeconds / Math.max(1, stallNudgeConfig.stall_auto_nudge_after_seconds),
+    );
+    if ((autoNudgeBucketRef.current[sid] ?? -1) >= bucket) return;
+    autoNudgeBucketRef.current[sid] = bucket;
+    autoNudgeTriggeredRef.current[sid] = count + 1;
+    setAutoNudgeCount(count + 1);
+    const reason: ContinueReason =
+      sessionExecutionState === "interrupted" ? "interrupted" : "stall";
+    void sendChatRef.current("", {
+      continuation: { reason, source: "desktop_auto_nudge" },
+    });
+  }, [sessionExecutionState, sessionId, stallNudgeConfig, stallState, stallTick]);
+
   const resumeCurrentTask = useCallback(async () => {
     if (!sessionId) return;
     let state: SessionExecutionState = sessionExecutionState;
@@ -1405,12 +1480,14 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
     }
     if (state === "running") return;
     setStallState("none");
-    const prompt =
-      state === "interrupted"
-        ? "上一次任务被中断，请从未完成的 todo 项继续，并更新 todo_write 状态。"
-        : "请汇报之前任务的执行结果；若仍有未完成项请继续。";
-    await sendChatRef.current(prompt);
-  }, [sessionExecutionState, sessionId]);
+    const reason = inferContinueReason({
+      stallState,
+      executionState: state,
+    });
+    await sendChatRef.current("", {
+      continuation: { reason, source: "desktop_manual" },
+    });
+  }, [sessionExecutionState, sessionId, stallState]);
 
   const resumeWithModel = useCallback(
     async (provider: string, model: string) => {
@@ -1820,6 +1897,8 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               kind="stall"
               currentModelLabel={currentModelLabel}
               modelOptions={stallModelOptions}
+              autoNudgeCount={autoNudgeCount}
+              autoNudgeMax={stallNudgeConfig.stall_auto_nudge_max_per_session}
               onResume={() => void resumeCurrentTask()}
               onResumeWithModel={(provider, model) => void resumeWithModel(provider, model)}
               onStop={stopStreaming}

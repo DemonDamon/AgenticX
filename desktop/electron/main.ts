@@ -3770,6 +3770,36 @@ function registerIpc(): void {
     return Math.max(30, Math.min(300, Math.round(n)));
   };
 
+  const readUnattendedRuntime = (raw: Record<string, unknown>) => {
+    const nested =
+      raw.unattended && typeof raw.unattended === "object" && !Array.isArray(raw.unattended)
+        ? (raw.unattended as Record<string, unknown>)
+        : {};
+    const pick = (key: string, flatKey: string, fallback: unknown) =>
+      nested[key] ?? raw[flatKey] ?? fallback;
+    const maxCont = Number(pick("max_continuations_per_session", "unattended_max_continuations_per_session", 20));
+    const maxHours = Number(pick("max_wall_clock_hours", "unattended_max_wall_clock_hours", 6));
+    const stallAfter = Number(pick("stall_continue_after_seconds", "unattended_stall_continue_after_seconds", 120));
+    return {
+      unattended_enabled: Boolean(pick("enabled", "unattended_enabled", false)),
+      unattended_max_continuations_per_session: Number.isFinite(maxCont)
+        ? Math.max(1, Math.min(100, Math.round(maxCont)))
+        : 20,
+      unattended_max_wall_clock_hours: Number.isFinite(maxHours)
+        ? Math.max(0.5, Math.min(48, maxHours))
+        : 6,
+      unattended_stall_continue_after_seconds: Number.isFinite(stallAfter)
+        ? Math.max(30, Math.min(600, Math.round(stallAfter)))
+        : 120,
+      unattended_auto_resume_exhausted: Boolean(
+        pick("auto_resume_exhausted", "unattended_auto_resume_exhausted", true),
+      ),
+      unattended_auto_resume_interrupted: Boolean(
+        pick("auto_resume_interrupted", "unattended_auto_resume_interrupted", true),
+      ),
+    };
+  };
+
   const readStallNudgeRuntime = (raw: Record<string, unknown>) => {
     const detectSec = clampStallDetectSeconds(raw.stall_detect_silence_seconds);
     const envEnabled = process.env.AGX_STALL_AUTO_NUDGE_ENABLED;
@@ -3810,6 +3840,7 @@ function registerIpc(): void {
         auto_resume_on_exhaustion: Boolean(raw.auto_resume_on_exhaustion ?? false),
         max_auto_resumes: Math.max(0, Math.min(10, Number(raw.max_auto_resumes ?? 3))),
         ...readStallNudgeRuntime(raw),
+        ...readUnattendedRuntime(raw),
       };
     } catch (err) {
       return {
@@ -3822,6 +3853,12 @@ function registerIpc(): void {
         stall_auto_nudge_enabled: false,
         stall_auto_nudge_after_seconds: 120,
         stall_auto_nudge_max_per_session: 2,
+        unattended_enabled: false,
+        unattended_max_continuations_per_session: 20,
+        unattended_max_wall_clock_hours: 6,
+        unattended_stall_continue_after_seconds: 120,
+        unattended_auto_resume_exhausted: true,
+        unattended_auto_resume_interrupted: true,
       };
     }
   });
@@ -3876,6 +3913,41 @@ function registerIpc(): void {
         if (Number.isFinite(v)) {
           merged.stall_auto_nudge_max_per_session = Math.max(1, Math.min(5, Math.round(v)));
         }
+      }
+      const unattendedPrev =
+        merged.unattended && typeof merged.unattended === "object" && !Array.isArray(merged.unattended)
+          ? { ...(merged.unattended as Record<string, unknown>) }
+          : {};
+      const unattendedMerged: Record<string, unknown> = { ...unattendedPrev };
+      if (p.unattended_enabled !== undefined) {
+        unattendedMerged.enabled = Boolean(p.unattended_enabled);
+      }
+      if (p.unattended_max_continuations_per_session !== undefined) {
+        const v = Number(p.unattended_max_continuations_per_session);
+        if (Number.isFinite(v)) {
+          unattendedMerged.max_continuations_per_session = Math.max(1, Math.min(100, Math.round(v)));
+        }
+      }
+      if (p.unattended_max_wall_clock_hours !== undefined) {
+        const v = Number(p.unattended_max_wall_clock_hours);
+        if (Number.isFinite(v)) {
+          unattendedMerged.max_wall_clock_hours = Math.max(0.5, Math.min(48, v));
+        }
+      }
+      if (p.unattended_stall_continue_after_seconds !== undefined) {
+        const v = Number(p.unattended_stall_continue_after_seconds);
+        if (Number.isFinite(v)) {
+          unattendedMerged.stall_continue_after_seconds = Math.max(30, Math.min(600, Math.round(v)));
+        }
+      }
+      if (p.unattended_auto_resume_exhausted !== undefined) {
+        unattendedMerged.auto_resume_exhausted = Boolean(p.unattended_auto_resume_exhausted);
+      }
+      if (p.unattended_auto_resume_interrupted !== undefined) {
+        unattendedMerged.auto_resume_interrupted = Boolean(p.unattended_auto_resume_interrupted);
+      }
+      if (Object.keys(unattendedMerged).length > 0) {
+        merged.unattended = unattendedMerged;
       }
       root.runtime = merged;
       saveAgxConfig(cfg);

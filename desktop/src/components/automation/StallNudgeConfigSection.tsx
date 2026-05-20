@@ -67,7 +67,8 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
                 </span>
               </div>
               <p className="mt-0.5 text-xs text-text-muted">
-                已进入停滞警告且后端仍在运行时，自动发送续跑提醒（不显示用户气泡）。默认关闭。
+                已进入停滞警告时自动发送续跑提醒（不显示用户气泡）；支持 running / interrupted /
+                通道 C。无人值守模式由下方「无人值守完成任务」与后端 Supervisor 接管。默认关闭。
               </p>
             </div>
             <label className="flex shrink-0 items-center gap-2 text-xs text-text-muted">
