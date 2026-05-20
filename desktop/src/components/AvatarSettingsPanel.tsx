@@ -97,6 +97,10 @@ export function AvatarSettingsPanel(props: Props) {
   const [loadingSkills, setLoadingSkills] = useState(false);
   const [skillsEnabledDraft, setSkillsEnabledDraft] = useState<Record<string, boolean>>({});
 
+  const [brainsMountMode, setBrainsMountMode] = useState<"default" | "all" | "custom">("default");
+  const [brainsCustomIds, setBrainsCustomIds] = useState<string[]>([]);
+  const [brainsCatalog, setBrainsCatalog] = useState<{ id: string; name: string; type: string }[]>([]);
+
   // SOUL
   const [soulValue, setSoulValue] = useState("");
   const [loadingSoul, setLoadingSoul] = useState(false);
@@ -149,6 +153,17 @@ export function AvatarSettingsPanel(props: Props) {
           ? Object.fromEntries(Object.entries(raw).filter(([, v]) => v === false))
           : {},
       );
+      const be = avatar.brainsEnabled;
+      if (be === "*") {
+        setBrainsMountMode("all");
+        setBrainsCustomIds([]);
+      } else if (Array.isArray(be) && be.length > 0) {
+        setBrainsMountMode("custom");
+        setBrainsCustomIds([...be]);
+      } else {
+        setBrainsMountMode("default");
+        setBrainsCustomIds([]);
+      }
     } else {
       void (async () => {
         const policy = await window.agenticxDesktop.getToolsPolicy();
@@ -158,6 +173,23 @@ export function AvatarSettingsPanel(props: Props) {
     }
     void loadTools();
     void loadSoul();
+    if (mode === "avatar") {
+      void (async () => {
+        try {
+          const base = String((await window.agenticxDesktop.getApiBase()) || "").replace(/\/+$/, "");
+          const res = await fetch(`${base}/api/brains`);
+          const body = (await res.json()) as {
+            brains?: { id: string; name: string; type: string; scope: string; owner_avatar_id?: string }[];
+          };
+          const list = (body.brains ?? []).filter(
+            (b) => b.scope === "global" || b.owner_avatar_id === avatar?.id,
+          );
+          setBrainsCatalog(list.map((b) => ({ id: b.id, name: b.name, type: b.type })));
+        } catch {
+          setBrainsCatalog([]);
+        }
+      })();
+    }
   }, [mode, avatar, loadTools, loadSoul]);
 
   const loadSkillsList = useCallback(async () => {
@@ -219,6 +251,12 @@ export function AvatarSettingsPanel(props: Props) {
     setSaving(true);
     setMessage("");
     try {
+      const brainsPayload =
+        brainsMountMode === "all"
+          ? "*"
+          : brainsMountMode === "custom"
+            ? brainsCustomIds
+            : null;
       const res = await window.agenticxDesktop.updateAvatar({
         id: avatar.id,
         name: name.trim() || avatar.name,
@@ -227,6 +265,7 @@ export function AvatarSettingsPanel(props: Props) {
         avatar_url: avatarUrlDraft.trim(),
         default_provider: defaultProvider.trim(),
         default_model: defaultModel.trim(),
+        brains_enabled: brainsPayload,
       });
       if (!res?.ok) {
         setMessage(`保存失败: ${res?.error ?? "未知错误"}`);
@@ -466,6 +505,58 @@ export function AvatarSettingsPanel(props: Props) {
                   }}
                 />
               </label>
+              <div className="rounded-md border border-border bg-surface-card p-3">
+                <div className="text-sm font-medium text-text-primary">挂载知识脑</div>
+                <p className="mt-1 text-xs text-text-faint">
+                  控制该分身对话时 knowledge_search / code_search 可检索的脑。默认仅全局脑。
+                </p>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs">
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      checked={brainsMountMode === "default"}
+                      onChange={() => setBrainsMountMode("default")}
+                    />
+                    默认（仅全局）
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      checked={brainsMountMode === "all"}
+                      onChange={() => setBrainsMountMode("all")}
+                    />
+                    全部可见脑
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      checked={brainsMountMode === "custom"}
+                      onChange={() => setBrainsMountMode("custom")}
+                    />
+                    自定义
+                  </label>
+                </div>
+                {brainsMountMode === "custom" ? (
+                  <div className="mt-2 max-h-32 space-y-1 overflow-y-auto">
+                    {brainsCatalog.map((b) => (
+                      <label key={b.id} className="flex items-center gap-2 text-xs text-text-subtle">
+                        <input
+                          type="checkbox"
+                          checked={brainsCustomIds.includes(b.id)}
+                          onChange={(e) => {
+                            setBrainsCustomIds((prev) =>
+                              e.target.checked ? [...prev, b.id] : prev.filter((x) => x !== b.id),
+                            );
+                          }}
+                        />
+                        <span>
+                          {b.name} <span className="text-text-faint">({b.type})</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               <div className="border-t border-border pt-4">
                 <label className="block text-sm text-text-muted">
                   SOUL

@@ -47,6 +47,8 @@ export type Avatar = {
   toolsEnabled?: Record<string, boolean>;
   /** Per-skill overrides: false = disabled for this avatar; missing = inherit global. */
   skillsEnabled?: Record<string, boolean>;
+  /** null = global brains only; "*" = all visible; string[] = explicit brain ids */
+  brainsEnabled?: "*" | string[] | null;
   /** Default LLM provider the avatar uses when a session has no explicit model yet. */
   defaultProvider?: string;
   /** Default LLM model the avatar uses when a session has no explicit model yet. */

@@ -63,7 +63,15 @@ export type KBApi = {
 
 type ResolveBase = () => Promise<string>;
 
-export function createKbApi(apiToken: string, resolveApiBase: ResolveBase): KBApi {
+export type KbApiPathMode = "legacy" | "brain";
+
+export function createKbApi(
+  apiToken: string,
+  resolveApiBase: ResolveBase,
+  pathMode: KbApiPathMode = "legacy",
+): KBApi {
+  const p = (suffix: string) => (pathMode === "brain" ? suffix : `/api/kb${suffix}`);
+
   async function doJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     const base = await resolveApiBase();
     const headers: Record<string, string> = {
@@ -89,24 +97,24 @@ export function createKbApi(apiToken: string, resolveApiBase: ResolveBase): KBAp
 
   return {
     async readConfig() {
-      const body = await doJson<{ config: KBConfig; stats: KBStats }>(`/api/kb/config`);
+      const body = await doJson<{ config: KBConfig; stats: KBStats }>(p("/config"));
       return body;
     },
     async writeConfig(config: KBConfig) {
-      const body = await doJson<{ config: KBConfig; rebuild_required: boolean }>(
-        `/api/kb/config`,
-        { method: "PUT", body: JSON.stringify(config) },
-      );
+      const body = await doJson<{ config: KBConfig; rebuild_required: boolean }>(p("/config"), {
+        method: "PUT",
+        body: JSON.stringify(config),
+      });
       return body;
     },
     async listDocuments() {
-      const body = await doJson<{ documents: KBDocument[] }>(`/api/kb/documents`);
+      const body = await doJson<{ documents: KBDocument[] }>(p("/materials"));
       return body.documents;
     },
     async addDocumentByPath(path: string) {
       const form = new FormData();
       form.append("path", path);
-      return doJson<{ document: KBDocument; job_id: string }>(`/api/kb/documents`, {
+      return doJson<{ document: KBDocument; job_id: string }>(p("/materials"), {
         method: "POST",
         body: form,
       });
@@ -114,53 +122,53 @@ export function createKbApi(apiToken: string, resolveApiBase: ResolveBase): KBAp
     async addDocumentByFile(file: File) {
       const form = new FormData();
       form.append("file", file, file.name);
-      return doJson<{ document: KBDocument; job_id: string }>(`/api/kb/documents`, {
+      return doJson<{ document: KBDocument; job_id: string }>(p("/materials"), {
         method: "POST",
         body: form,
       });
     },
     async deleteDocument(id: string) {
-      await doJson(`/api/kb/documents/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await doJson(p(`/materials/${encodeURIComponent(id)}`), { method: "DELETE" });
     },
     async rebuildDocument(id: string) {
-      return doJson<{ job_id: string }>(`/api/kb/documents/${encodeURIComponent(id)}/rebuild`, {
+      return doJson<{ job_id: string }>(p(`/materials/${encodeURIComponent(id)}/rebuild`), {
         method: "POST",
       });
     },
     async getJob(id: string) {
-      const body = await doJson<{ job: IngestJob }>(`/api/kb/jobs/${encodeURIComponent(id)}`);
+      const body = await doJson<{ job: IngestJob }>(p(`/jobs/${encodeURIComponent(id)}`));
       return body.job;
     },
     async listJobs() {
-      const body = await doJson<{ jobs: IngestJob[] }>(`/api/kb/jobs`);
+      const body = await doJson<{ jobs: IngestJob[] }>(p("/jobs"));
       return body.jobs ?? [];
     },
     async search(query: string, topK?: number) {
-      const body = await doJson<{ hits: RetrievalHit[]; used_top_k: number }>(`/api/kb/search`, {
+      const body = await doJson<{ hits: RetrievalHit[]; used_top_k: number }>(p("/search"), {
         method: "POST",
         body: JSON.stringify({ query, top_k: topK }),
       });
       return body;
     },
     async previewChunks(path, chunking) {
-      const body = await doJson<{ chunks: PreviewChunk[] }>(`/api/kb/debug/preview`, {
+      const body = await doJson<{ chunks: PreviewChunk[] }>(p("/debug/preview"), {
         method: "POST",
         body: JSON.stringify({ path, chunking }),
       });
       return body.chunks;
     },
     async getStats() {
-      const body = await doJson<{ stats: KBStats }>(`/api/kb/stats`);
+      const body = await doJson<{ stats: KBStats }>(p("/stats"));
       return body.stats;
     },
     async testEmbedding(embedding: EmbeddingSpec) {
-      return doJson<EmbeddingTestResult>(`/api/kb/test_embedding`, {
+      return doJson<EmbeddingTestResult>(p("/test_embedding"), {
         method: "POST",
         body: JSON.stringify({ embedding }),
       });
     },
     async getParserStatus() {
-      return doJson<ParserStatus>(`/api/kb/parser_status`);
+      return doJson<ParserStatus>(p("/parser_status"));
     },
   };
 }

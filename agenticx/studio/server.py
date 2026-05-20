@@ -88,6 +88,7 @@ from agenticx.studio.session_manager import (
 from agenticx.tools.mcp_hub import MCPHub
 from agenticx.studio.kb.routes import register_kb_routes
 from agenticx.studio.code_index.routes import register_code_index_routes
+from agenticx.brain.routes import register_brain_routes
 from agenticx.studio.voice_endpoints import register_voice_endpoints
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.workspace.loader import (
@@ -1123,6 +1124,16 @@ def create_studio_app() -> FastAPI:
             if str(k).strip()
         }
         return out or None
+
+    def _sanitize_avatar_brains_enabled(raw: Any) -> Any:
+        if raw is None:
+            return None
+        if raw == "*":
+            return "*"
+        if isinstance(raw, list):
+            ids = [str(x).strip() for x in raw if str(x).strip()]
+            return ids or None
+        return None
 
     def _load_global_tools_policy() -> dict[str, bool]:
         try:
@@ -3528,16 +3539,18 @@ def create_studio_app() -> FastAPI:
                 if str(key).strip()
             }
         skills_enabled = _sanitize_avatar_skills_enabled(payload.get("skills_enabled"))
+        brains_enabled = _sanitize_avatar_brains_enabled(payload.get("brains_enabled"))
         config = avatar_registry.create_avatar(
             name=name,
             role=str(payload.get("role", "")).strip(),
             avatar_url=str(payload.get("avatar_url", "")).strip(),
             system_prompt=str(payload.get("system_prompt", "")).strip(),
-            created_by=str(payload.get("created_by", "manual")).strip(),
+            created_by=str(payload.get("created_by", "")).strip(),
             default_provider=str(payload.get("default_provider", "")).strip(),
             default_model=str(payload.get("default_model", "")).strip(),
             tools_enabled=tools_enabled,
             skills_enabled=skills_enabled,
+            brains_enabled=brains_enabled,
         )
         return {"ok": True, "avatar": config.to_dict()}
 
@@ -3555,6 +3568,11 @@ def create_studio_app() -> FastAPI:
             payload = dict(payload)
             payload["skills_enabled"] = _sanitize_avatar_skills_enabled(
                 payload.get("skills_enabled")
+            )
+        if "brains_enabled" in payload:
+            payload = dict(payload)
+            payload["brains_enabled"] = _sanitize_avatar_brains_enabled(
+                payload.get("brains_enabled")
             )
         updated = avatar_registry.update_avatar(avatar_id, payload)
         if updated is None:
@@ -5231,6 +5249,7 @@ def create_studio_app() -> FastAPI:
 
     # Machi knowledge base — Stage-1 MVP (Plan-Id: machi-kb-stage1-local-mvp)
     register_kb_routes(app)
+    register_brain_routes(app)
     register_code_index_routes(app)
     from agenticx.studio.web_search.routes import register_web_search_routes
 

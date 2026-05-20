@@ -76,8 +76,8 @@ class CodeIndexManager:
         self._backends: dict[str, CodeIndexBackend] = {}
         self._build_threads: dict[str, threading.Thread] = {}
 
-    def _config(self) -> CodeIndexConfig:
-        return load_code_index_config()
+    def _config(self, override: Optional[CodeIndexConfig] = None) -> CodeIndexConfig:
+        return override if override is not None else load_code_index_config()
 
     def _make_backend(self, cfg: CodeIndexConfig) -> CodeIndexBackend:
         if cfg.backend == "native":
@@ -139,8 +139,14 @@ class CodeIndexManager:
                     return True
         return False
 
-    def _run_build(self, codebase_path: Path, *, wait: bool = False) -> IndexTask:
-        cfg = self._config()
+    def _run_build(
+        self,
+        codebase_path: Path,
+        *,
+        wait: bool = False,
+        config: Optional[CodeIndexConfig] = None,
+    ) -> IndexTask:
+        cfg = self._config(config)
         task = self._get_task(codebase_path)
         key = _task_key(codebase_path)
 
@@ -223,15 +229,19 @@ class CodeIndexManager:
             thread.start()
         return task
 
-    def ensure_indexing(self, codebase_path: Path) -> IndexTask:
+    def ensure_indexing(
+        self, codebase_path: Path, *, config: Optional[CodeIndexConfig] = None
+    ) -> IndexTask:
         task = self._get_task(codebase_path)
         with task.lock:
             if task.status in (IndexStatus.INDEXED, IndexStatus.INDEXING):
                 return task
-        return self._run_build(codebase_path, wait=False)
+        return self._run_build(codebase_path, wait=False, config=config)
 
-    def create_index(self, codebase_path: Path) -> dict[str, Any]:
-        task = self._run_build(codebase_path, wait=False)
+    def create_index(
+        self, codebase_path: Path, *, config: Optional[CodeIndexConfig] = None
+    ) -> dict[str, Any]:
+        task = self._run_build(codebase_path, wait=False, config=config)
         with task.lock:
             return {"task_id": task.task_id, "status": task.status.value}
 
@@ -253,9 +263,10 @@ class CodeIndexManager:
         top_k: int | None = None,
         strategy: str | None = None,
         wait_for_index: bool = True,
+        config: Optional[CodeIndexConfig] = None,
     ) -> tuple[list[CodeSearchHit], bool, dict[str, Any] | None]:
-        cfg = self._config()
-        task = self.ensure_indexing(codebase_path)
+        cfg = self._config(config)
+        task = self.ensure_indexing(codebase_path, config=config)
         if wait_for_index and task.status == IndexStatus.INDEXING:
             task = self.wait_until_indexed(codebase_path, timeout=300.0)
 

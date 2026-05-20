@@ -24,23 +24,20 @@ def _resolve_codebase_path(raw: str, session: Any) -> Path:
 def _require_enabled() -> None:
     if not is_enabled():
         raise RuntimeError(
-            "code_index.enabled 为 false。请在 ~/.agenticx/config.yaml 启用 code_index，"
-            "或在 Machi 设置 → 工具 → 代码语义索引 中打开。"
+            "未挂载代码脑且 code_index.enabled 为 false。请在 Machi 设置 → 知识库 创建代码脑，"
+            "或在 ~/.agenticx/config.yaml 启用 code_index。"
         )
 
 
 def dispatch_code_search(arguments: dict[str, Any], session: Any = None) -> str:
-    _require_enabled()
-    raw_path = str(arguments.get("codebase_path", "") or "").strip()
     query = str(arguments.get("query", "") or "").strip()
     if not query:
         return "ERROR: query 不能为空"
-    try:
-        codebase_path = _resolve_codebase_path(raw_path, session)
-    except ValueError as exc:
-        return f"ERROR: {exc}"
-    if not codebase_path.is_dir():
-        return f"ERROR: codebase_path 不是目录: {codebase_path}"
+
+    avatar_id = None
+    if session is not None:
+        avatar_id = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+    brain_id = str(arguments.get("brain_id") or "").strip() or None
 
     cfg = load_code_index_config()
     top_k = arguments.get("top_k")
@@ -48,14 +45,70 @@ def dispatch_code_search(arguments: dict[str, Any], session: Any = None) -> str:
         top_k_int = int(top_k) if top_k is not None else cfg.semble_default_top_k
     except (TypeError, ValueError):
         top_k_int = cfg.semble_default_top_k
+    top_k_int = max(1, min(50, top_k_int))
     strategy = str(arguments.get("strategy") or cfg.semble_search_mode)
+
+    try:
+        from agenticx.brain.mount import resolve_mounted_brain_ids
+        from agenticx.brain.registry import BrainRegistry
+        from agenticx.brain.runtime_code import CodeBrainRuntime
+        from agenticx.brain.manager import BrainManager
+        from agenticx.brain.mount import load_avatar_brains_enabled
+        from agenticx.brain.types import BrainType
+
+        BrainRegistry.instance().bootstrap()
+        targets = resolve_mounted_brain_ids(
+            avatar_id=avatar_id,
+            brains_enabled=load_avatar_brains_enabled(avatar_id),
+            explicit_brain_id=brain_id,
+            brain_type=BrainType.CODE,
+        )
+    except Exception:
+        targets = []
+
+    if targets:
+        by_brain = []
+        all_hits = []
+        for bid in targets:
+            brain = BrainRegistry.instance().get(bid)
+            if brain is None:
+                continue
+            rt = BrainManager.instance().get_runtime(bid)
+            if not isinstance(rt, CodeBrainRuntime):
+                continue
+            try:
+                hits = rt.search(query, top_k=top_k_int)
+                from agenticx.code_index.format import format_hits_for_tool
+
+                formatted = format_hits_for_tool(hits)
+                for h in formatted:
+                    h["brain_id"] = bid
+                    h["brain_name"] = brain.name
+                by_brain.append({"brain_id": bid, "brain_name": brain.name, "hits": formatted})
+                all_hits.extend(formatted)
+            except Exception as exc:
+                by_brain.append({"brain_id": bid, "brain_name": brain.name, "error": str(exc), "hits": []})
+        return json.dumps(
+            {"ok": True, "hits": all_hits[:top_k_int], "by_brain": by_brain, "brains": targets},
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    _require_enabled()
+    raw_path = str(arguments.get("codebase_path", "") or "").strip()
+    try:
+        codebase_path = _resolve_codebase_path(raw_path, session)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+    if not codebase_path.is_dir():
+        return f"ERROR: codebase_path 不是目录: {codebase_path}"
 
     mgr = CodeIndexManager.instance()
     try:
         hits, partial, progress = mgr.search(
             codebase_path,
             query,
-            top_k=max(1, min(50, top_k_int)),
+            top_k=top_k_int,
             strategy=strategy,
             wait_for_index=True,
         )
