@@ -1,8 +1,10 @@
 # AI Gateway API
 
+> 源码：`apps/gateway/internal/server/server.go`（路由注册：`Router()` 方法）
+
 基址：`http://localhost:8088`（`GATEWAY_HTTP_ADDR`）
 
-OpenAI 兼容 + 企业管控扩展。源码：`apps/gateway/internal/server/`。
+OpenAI 兼容 + 企业管控扩展。
 
 ---
 
