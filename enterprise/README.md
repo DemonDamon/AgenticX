@@ -173,10 +173,23 @@ pnpm exec turbo run dev \
 
 ## 相关文档
 
-- 产品架构：`../docs/plans/2026-04-21-agenticx-enterprise-architecture.md`
-- 插件协议：`./docs/plugin-protocol/`
-- API 契约：`./docs/api/`
-- 部署手册：`./docs/deployment/`
+完整文档索引：**[docs/README.md](./docs/README.md)**
+
+| 主题 | 路径 |
+|---|---|
+| 架构总览 | [docs/architecture/overview.md](./docs/architecture/overview.md) |
+| 数据流 | [docs/architecture/data-flow.md](./docs/architecture/data-flow.md) |
+| API 契约 | [docs/api/README.md](./docs/api/README.md) |
+| 数据库 Schema | [docs/database/schema.md](./docs/database/schema.md) |
+| RBAC Scopes | [docs/rbac/scopes.md](./docs/rbac/scopes.md) |
+| Gateway | [docs/gateway/overview.md](./docs/gateway/overview.md) |
+| 插件协议 | [docs/plugin-protocol/README.md](./docs/plugin-protocol/README.md) |
+| Features / Packages / Apps | [docs/features/](./docs/features/) · [docs/packages/](./docs/packages/) · [docs/apps/](./docs/apps/) |
+| 本地开发 / 排障 | [docs/development/local-dev.md](./docs/development/local-dev.md) · [docs/development/troubleshooting.md](./docs/development/troubleshooting.md) |
+| 测试 | [docs/testing/README.md](./docs/testing/README.md) |
+| 部署 | [docs/deployment/README.md](./docs/deployment/README.md) |
+| 客户定制协作 | [docs/guides/enterprise-customers-collaboration.md](./docs/guides/enterprise-customers-collaboration.md) |
+| 产品架构（主仓） | [../docs/plans/2026-04-21-agenticx-enterprise-architecture.md](../docs/plans/2026-04-21-agenticx-enterprise-architecture.md) |
 
 ## License
 
