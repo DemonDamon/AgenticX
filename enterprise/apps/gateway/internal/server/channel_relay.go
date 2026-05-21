@@ -103,16 +103,18 @@ func (s *Server) channelStatsJSON() map[string]any {
 	raw := s.channelStats.Snapshot()
 	out := make(map[string]any, len(raw))
 	for id, st := range raw {
+		stat := st
 		out[id] = map[string]any{
-			"success_count": st.SuccessCount,
-			"failure_count": st.FailureCount,
-			"success_rate":  st.SuccessRate(),
-			"last_error":    st.LastError,
+			"success_count":  stat.SuccessCount,
+			"failure_count":  stat.FailureCount,
+			"success_rate":   stat.SuccessRate(),
+			"p50_latency_ms": stat.P50LatencyMS(),
+			"last_error":     stat.LastError,
 			"cooldown_until": func() any {
-				if st.CooldownUntil.IsZero() {
+				if stat.CooldownUntil.IsZero() {
 					return nil
 				}
-				return st.CooldownUntil.UTC().Format("2006-01-02T15:04:05Z")
+				return stat.CooldownUntil.UTC().Format("2006-01-02T15:04:05Z")
 			}(),
 		}
 	}

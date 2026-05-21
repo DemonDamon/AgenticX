@@ -122,6 +122,12 @@ func (r *Registry) Snapshot() []Channel {
 	return append([]Channel(nil), r.snapshot()...)
 }
 
+// SetSnapshot 用于测试与启动期 seed：直接替换内存快照，不触发 reload。
+func (r *Registry) SetSnapshot(channels []Channel) {
+	copyCh := append([]Channel(nil), channels...)
+	r.current.Store(&copyCh)
+}
+
 func (r *Registry) reload() error {
 	channels, err := r.loadRemoteOrFile()
 	if err != nil {

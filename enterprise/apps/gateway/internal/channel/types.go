@@ -108,13 +108,18 @@ func AttemptsJSON(attempts []Attempt) json.RawMessage {
 	return raw
 }
 
+// LatencyRingSize 控制每个 Channel 在内存中保留的 latency 样本数，用于 p50 计算。
+const LatencyRingSize = 64
+
 // Stat 内存态健康统计。
 type Stat struct {
-	SuccessCount int64
-	FailureCount int64
-	LastError    string
+	SuccessCount  int64
+	FailureCount  int64
+	LastError     string
 	CooldownUntil time.Time
-	LastSuccess  time.Time
+	LastSuccess   time.Time
+	// Latencies 环形缓冲（仅成功样本），长度上限 LatencyRingSize。
+	Latencies []int64
 }
 
 func (s *Stat) InCooldown(now time.Time) bool {
@@ -133,4 +138,23 @@ func (s *Stat) SuccessRate() float64 {
 		return 0
 	}
 	return float64(s.SuccessCount) / float64(total)
+}
+
+// P50LatencyMS 返回当前 latency 样本的 p50（中位数）；样本不足时返回 0。
+func (s *Stat) P50LatencyMS() int64 {
+	if s == nil || len(s.Latencies) == 0 {
+		return 0
+	}
+	buf := append([]int64(nil), s.Latencies...)
+	sortInt64(buf)
+	mid := len(buf) / 2
+	return buf[mid]
+}
+
+func sortInt64(a []int64) {
+	for i := 1; i < len(a); i++ {
+		for j := i; j > 0 && a[j-1] > a[j]; j-- {
+			a[j-1], a[j] = a[j], a[j-1]
+		}
+	}
 }

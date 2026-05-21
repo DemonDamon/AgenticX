@@ -122,12 +122,12 @@ func (p *Picker) weightedSample(cands []Channel) Channel {
 	return cands[len(cands)-1]
 }
 
-func (p *Picker) MarkSuccess(id Identity, model string, ch Channel) {
+func (p *Picker) MarkSuccess(id Identity, model string, ch Channel, latencyMS int64) {
 	if p.affinity != nil && strings.TrimSpace(id.SessionID) != "" {
 		p.affinity.Set(id.SessionID, model, ch.ID)
 	}
 	if p.stats != nil {
-		p.stats.RecordSuccess(ch.ID)
+		p.stats.RecordSuccess(ch.ID, latencyMS)
 	}
 }
 
@@ -157,13 +157,19 @@ func (s *StatsStore) InCooldown(channelID string, now time.Time) bool {
 	return st.InCooldown(now)
 }
 
-func (s *StatsStore) RecordSuccess(channelID string) {
+func (s *StatsStore) RecordSuccess(channelID string, latencyMS int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.ensure(channelID)
 	st.SuccessCount++
 	st.LastSuccess = time.Now().UTC()
 	st.LastError = ""
+	if latencyMS > 0 {
+		if len(st.Latencies) >= LatencyRingSize {
+			st.Latencies = st.Latencies[1:]
+		}
+		st.Latencies = append(st.Latencies, latencyMS)
+	}
 }
 
 func (s *StatsStore) RecordFailure(channelID string, reason string, cooldown time.Duration) {

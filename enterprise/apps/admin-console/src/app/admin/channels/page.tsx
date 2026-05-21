@@ -24,7 +24,7 @@ import {
   PageHeader,
   toast,
 } from "@agenticx/ui";
-import { Activity, Plus, RefreshCcw, Trash2 } from "lucide-react";
+import { Activity, Pencil, Plus, RefreshCcw, Trash2 } from "lucide-react";
 
 interface ChannelRow {
   id: string;
@@ -42,8 +42,21 @@ type HealthStat = {
   success_count?: number;
   failure_count?: number;
   success_rate?: number;
+  p50_latency_ms?: number;
   last_error?: string;
   cooldown_until?: string | null;
+};
+
+type EditForm = {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  weight: string;
+  priority: string;
+  models: string;
+  status: "active" | "disabled";
+  providerLabel: string;
 };
 
 export default function ChannelsPage() {
@@ -51,6 +64,7 @@ export default function ChannelsPage() {
   const [stats, setStats] = useState<Record<string, HealthStat>>({});
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<EditForm | null>(null);
   const [form, setForm] = useState({
     name: "",
     baseUrl: "",
@@ -105,6 +119,54 @@ export default function ChannelsPage() {
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "创建失败");
+    }
+  };
+
+  const openEdit = (ch: ChannelRow) => {
+    setEditing({
+      id: ch.id,
+      name: ch.name,
+      baseUrl: ch.baseUrl,
+      apiKey: "",
+      weight: String(ch.weight ?? 1),
+      priority: String(ch.priority ?? 0),
+      models: (ch.supportedModels ?? []).join(", "),
+      status: ch.status === "disabled" ? "disabled" : "active",
+      providerLabel: ch.providerType ?? "",
+    });
+  };
+
+  const onSaveEdit = async () => {
+    if (!editing) return;
+    try {
+      const models = editing.models
+        .split(/[\n,]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const body: Record<string, unknown> = {
+        name: editing.name,
+        baseUrl: editing.baseUrl,
+        weight: Number(editing.weight) || 1,
+        priority: Number(editing.priority) || 0,
+        status: editing.status,
+        supportedModels: models,
+      };
+      if (editing.apiKey.trim() !== "") body.apiKey = editing.apiKey;
+      if (editing.providerLabel.trim() !== "") {
+        body.metadata = { provider: editing.providerLabel, route: "third-party" };
+      }
+      const res = await fetch(`/api/admin/channels/${editing.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (json.code !== "00000") throw new Error(json.message || "update failed");
+      toast.success("Channel 已更新");
+      setEditing(null);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "更新失败");
     }
   };
 
@@ -178,15 +240,25 @@ export default function ChannelsPage() {
                     <p>权重 {ch.weight} · 优先级 {ch.priority}</p>
                     <p>模型：{ch.supportedModels.join(", ") || "—"}</p>
                     <p>Key：{ch.apiKeyConfigured ? "已配置" : "未配置"}</p>
-                    <p>成功率：{rate}</p>
+                    <p>
+                      成功率：{rate}
+                      {typeof health?.p50_latency_ms === "number" && health.p50_latency_ms > 0
+                        ? ` · p50 ${health.p50_latency_ms} ms`
+                        : ""}
+                    </p>
                     {health?.cooldown_until ? (
                       <p className="text-amber-600">Cooldown 至 {health.cooldown_until}</p>
                     ) : null}
                     {health?.last_error ? <p className="text-destructive truncate">最近错误：{health.last_error}</p> : null}
                   </div>
-                  <Button variant="ghost" size="sm" className="text-destructive" onClick={() => void onDelete(ch.id)}>
-                    <Trash2 className="mr-1 h-4 w-4" /> 删除
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" size="sm" onClick={() => openEdit(ch)}>
+                      <Pencil className="mr-1 h-4 w-4" /> 编辑
+                    </Button>
+                    <Button variant="ghost" size="sm" className="text-destructive" onClick={() => void onDelete(ch.id)}>
+                      <Trash2 className="mr-1 h-4 w-4" /> 删除
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             );
@@ -230,6 +302,80 @@ export default function ChannelsPage() {
               取消
             </Button>
             <Button onClick={() => void onCreate()}>保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editing != null} onOpenChange={(v) => (!v ? setEditing(null) : null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>编辑 Channel</DialogTitle>
+          </DialogHeader>
+          {editing ? (
+            <div className="space-y-3">
+              <div>
+                <Label>名称</Label>
+                <Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+              </div>
+              <div>
+                <Label>Base URL</Label>
+                <Input value={editing.baseUrl} onChange={(e) => setEditing({ ...editing, baseUrl: e.target.value })} />
+              </div>
+              <div>
+                <Label>API Key（留空保留原值）</Label>
+                <Input
+                  type="password"
+                  value={editing.apiKey}
+                  onChange={(e) => setEditing({ ...editing, apiKey: e.target.value })}
+                  placeholder="******"
+                />
+              </div>
+              <div>
+                <Label>Provider 标识</Label>
+                <Input value={editing.providerLabel} onChange={(e) => setEditing({ ...editing, providerLabel: e.target.value })} />
+              </div>
+              <div>
+                <Label>支持模型（逗号或换行分隔）</Label>
+                <Input value={editing.models} onChange={(e) => setEditing({ ...editing, models: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>权重</Label>
+                  <Input value={editing.weight} onChange={(e) => setEditing({ ...editing, weight: e.target.value })} />
+                </div>
+                <div>
+                  <Label>优先级</Label>
+                  <Input value={editing.priority} onChange={(e) => setEditing({ ...editing, priority: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <Label>状态</Label>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={editing.status === "active" ? "default" : "outline"}
+                    onClick={() => setEditing({ ...editing, status: "active" })}
+                  >
+                    启用
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={editing.status === "disabled" ? "default" : "outline"}
+                    onClick={() => setEditing({ ...editing, status: "disabled" })}
+                  >
+                    禁用
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(null)}>
+              取消
+            </Button>
+            <Button onClick={() => void onSaveEdit()}>保存</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
