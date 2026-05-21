@@ -369,6 +369,13 @@ a {
   border-radius: var(--radius-sm);
 }
 
+/* cmdk 命令面板：外层 [cmdk-input-wrapper] 已有边框，勿叠加全局 input outline（否则出现蓝色粗框） */
+[cmdk-input-wrapper] input:focus,
+[cmdk-input-wrapper] input:focus-visible {
+  outline: none;
+  outline-offset: 0;
+}
+
 /* 禁用动画（系统 prefers-reduced-motion） */
 @media (prefers-reduced-motion: reduce) {
   *,
