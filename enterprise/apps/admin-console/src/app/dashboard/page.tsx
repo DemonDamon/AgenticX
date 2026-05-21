@@ -20,7 +20,6 @@ import {
   EmptyState,
   LineCard,
   PageHeader,
-  SparkLine,
   StatCard,
   chartPalette,
 } from "@agenticx/ui";
@@ -265,7 +264,7 @@ export default function DashboardPage() {
           icon={<BarChart3 />}
           delta={{ value: "12.4", trend: "up" }}
           accentClassName="bg-primary"
-          footer={<SparkLine data={kpi.callsSeries.length ? kpi.callsSeries : [{ v: 0 }, { v: 0 }]} color={chartPalette[0]} />}
+          footer={<span className="text-xs text-muted-foreground">近 24 小时累计</span>}
         />
         <StatCard
           label="今日消耗（USD）"
@@ -273,7 +272,7 @@ export default function DashboardPage() {
           icon={<DollarSign />}
           delta={{ value: "3.1", trend: "up" }}
           accentClassName="bg-chart-3"
-          footer={<SparkLine data={kpi.costSeries.length ? kpi.costSeries : [{ v: 0 }, { v: 0 }]} color={chartPalette[2]} />}
+          footer={<span className="text-xs text-muted-foreground">按模型计费估算</span>}
         />
         <StatCard
           label="命中合规事件"

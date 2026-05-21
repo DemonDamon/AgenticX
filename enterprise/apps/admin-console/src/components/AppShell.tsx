@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import {
   Badge,
   Button,
@@ -14,7 +14,6 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
-  CommandShortcut,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -37,8 +36,9 @@ import {
   BarChart3,
   Bell,
   Building2,
-  ChevronLeft,
   ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
   FileWarning,
   Gauge,
   KeyRound,
@@ -66,7 +66,6 @@ type NavItem = {
   href: string;
   label: string;
   icon: LucideIcon;
-  shortcut?: string;
 };
 
 type NavGroup = {
@@ -79,15 +78,15 @@ const NAV_GROUPS: NavGroup[] = [
   {
     id: "overview",
     label: "概览",
-    items: [{ href: "/dashboard", label: "Dashboard", icon: Gauge, shortcut: "G D" }],
+    items: [{ href: "/dashboard", label: "Dashboard", icon: Gauge }],
   },
   {
     id: "iam",
     label: "身份与权限",
     items: [
-      { href: "/iam/users", label: "用户", icon: Users, shortcut: "G U" },
-      { href: "/iam/departments", label: "部门", icon: Building2, shortcut: "G P" },
-      { href: "/iam/roles", label: "角色", icon: UserCog, shortcut: "G R" },
+      { href: "/iam/users", label: "用户", icon: Users },
+      { href: "/iam/departments", label: "部门", icon: Building2 },
+      { href: "/iam/roles", label: "角色", icon: UserCog },
       { href: "/iam/bulk-import", label: "批量导入", icon: Wand2 },
     ],
   },
@@ -95,8 +94,8 @@ const NAV_GROUPS: NavGroup[] = [
     id: "ops",
     label: "运维监控",
     items: [
-      { href: "/audit", label: "审计日志", icon: FileWarning, shortcut: "G A" },
-      { href: "/metering", label: "四维消耗", icon: BarChart3, shortcut: "G M" },
+      { href: "/audit", label: "审计日志", icon: FileWarning },
+      { href: "/metering", label: "四维消耗", icon: BarChart3 },
       { href: "/metering/quota", label: "额度控制", icon: Sliders },
     ],
   },
@@ -105,7 +104,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "平台配置",
     items: [
       { href: "/policy", label: "策略规则", icon: Shield },
-      { href: "/admin/models", label: "模型服务", icon: Package, shortcut: "G K" },
+      { href: "/admin/models", label: "模型服务", icon: Package },
       { href: "/admin/channels", label: "Channel 管理", icon: Activity },
     ],
   },
@@ -213,6 +212,14 @@ function healthLabel(status: HealthStatus, locale: UiLocale): string {
 }
 
 const COLLAPSED_KEY = "agenticx-admin-sidebar-collapsed";
+const SIDEBAR_WIDTH_KEY = "agenticx-admin-sidebar-width";
+const SIDEBAR_DEFAULT_WIDTH = 244;
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 360;
+
+function clampSidebarWidth(width: number): number {
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+}
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
@@ -220,6 +227,7 @@ export function AppShell({ children }: AppShellProps) {
   const { resolved: resolvedTheme, theme, setTheme, toggle: toggleTheme } = useUiTheme();
   const { locale, setLocale } = useLocale();
   const [collapsed, setCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [health, setHealth] = useState<HealthStatus>("offline");
   const [commandOpen, setCommandOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -229,6 +237,10 @@ export function AppShell({ children }: AppShellProps) {
     try {
       const stored = window.localStorage.getItem(COLLAPSED_KEY);
       if (stored === "1") setCollapsed(true);
+      const storedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
+      if (Number.isFinite(storedWidth) && storedWidth > 0) {
+        setSidebarWidth(clampSidebarWidth(storedWidth));
+      }
     } catch {
       // noop
     }
@@ -241,6 +253,40 @@ export function AppShell({ children }: AppShellProps) {
       // noop
     }
   }, [collapsed]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+    } catch {
+      // noop
+    }
+  }, [sidebarWidth]);
+
+  const handleSidebarResizeStart = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (collapsed || event.button !== 0) return;
+      event.preventDefault();
+
+      const startX = event.clientX;
+      const startWidth = sidebarWidth;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        setSidebarWidth(clampSidebarWidth(startWidth + moveEvent.clientX - startX));
+      };
+      const handlePointerUp = () => {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", handlePointerUp);
+      };
+
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp, { once: true });
+    },
+    [collapsed, sidebarWidth]
+  );
 
   // Cmd+K / Ctrl+K 打开命令面板
   useEffect(() => {
@@ -308,9 +354,10 @@ export function AppShell({ children }: AppShellProps) {
             "w-[244px] data-[collapsed=1]:w-[68px]",
             "-translate-x-full data-[mobile-open=1]:translate-x-0 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0",
           ].join(" ")}
+          style={collapsed ? undefined : { width: sidebarWidth }}
         >
           {/* brand */}
-          <div className="flex h-14 items-center gap-2 px-3">
+          <div className="flex h-14 items-center justify-center gap-2 px-3">
             <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-sm">
               <MachiAvatar size={22} className="h-[22px] w-[22px] rounded-sm" />
             </span>
@@ -355,9 +402,6 @@ export function AppShell({ children }: AppShellProps) {
                       )}
                       <Icon className={["h-4 w-4 shrink-0", active ? "text-primary" : "text-muted-foreground"].join(" ")} />
                       {!collapsed && <span className="truncate">{itemLabel}</span>}
-                      {!collapsed && item.shortcut && (
-                        <span className="ml-auto text-[10px] tracking-widest text-muted-foreground/70">{item.shortcut}</span>
-                      )}
                     </Link>
                   );
                   if (!collapsed) return link;
@@ -376,20 +420,29 @@ export function AppShell({ children }: AppShellProps) {
 
           <Separator className="bg-sidebar-border" />
 
-          {/* collapse toggle */}
           <div className="flex items-center gap-2 px-2 py-2">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setCollapsed((prev) => !prev)}
-              aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
-              className="hidden lg:inline-flex"
-            >
-              {collapsed ? <ChevronRight /> : <ChevronLeft />}
-            </Button>
             {!collapsed && (
               <span className="hidden text-xs text-muted-foreground lg:inline">{collapsed ? "" : `v0.1 · ${process.env.NODE_ENV ?? "dev"}`}</span>
             )}
+          </div>
+
+          <div
+            role="separator"
+            aria-label="调整侧栏宽度"
+            aria-orientation="vertical"
+            aria-valuemin={SIDEBAR_MIN_WIDTH}
+            aria-valuemax={SIDEBAR_MAX_WIDTH}
+            aria-valuenow={sidebarWidth}
+            className={[
+              "group/resize absolute right-0 top-0 hidden h-full w-3 translate-x-1/2 cursor-col-resize touch-none lg:block",
+              collapsed ? "pointer-events-none opacity-0" : "opacity-100",
+            ].join(" ")}
+            onPointerDown={handleSidebarResizeStart}
+          >
+            <span
+              className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-transparent transition-all duration-150 group-hover/resize:w-1 group-hover/resize:bg-primary group-active/resize:w-1 group-active/resize:bg-primary"
+              aria-hidden
+            />
           </div>
         </aside>
 
@@ -417,6 +470,15 @@ export function AppShell({ children }: AppShellProps) {
 
             {/* breadcrumbs */}
             <nav aria-label="面包屑" className="hidden min-w-0 items-center gap-1.5 text-sm text-muted-foreground sm:flex">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setCollapsed((prev) => !prev)}
+                aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
+                className="hidden shrink-0 text-muted-foreground hover:text-primary lg:inline-flex"
+              >
+                {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+              </Button>
               <span className="shrink-0">{copy.adminLabel}</span>
               {breadcrumbs.map((segment, index) => (
                 <span key={`${segment}-${index}`} className="flex shrink-0 items-center gap-1.5">
@@ -587,7 +649,6 @@ export function AppShell({ children }: AppShellProps) {
                     >
                       <Icon className="mr-2 h-4 w-4 text-muted-foreground" />
                       {itemLabel}
-                      {item.shortcut ? <CommandShortcut>{item.shortcut}</CommandShortcut> : null}
                     </CommandItem>
                   );
                 })}
