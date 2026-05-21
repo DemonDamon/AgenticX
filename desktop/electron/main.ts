@@ -4447,7 +4447,8 @@ function registerIpc(): void {
 
   ipcMain.handle("load-mcp-status", async (_event, sessionId: string) => {
     const sid = String(sessionId || "").trim();
-    if (!sid) return { ok: false, error: "missing sessionId", servers: [] };
+    // Empty sid is allowed: backend falls back to process-level configs so the
+    // Settings panel can render before any session is bound (FR-2).
     try {
       const resp = await fetch(
         `${getStudioUrl()}/api/mcp/servers?session_id=${encodeURIComponent(sid)}`,

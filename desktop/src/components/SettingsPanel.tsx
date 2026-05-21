@@ -6175,7 +6175,9 @@ export function SettingsPanel({
   }, [open, tab, mcpDiscoverHits.length, mcpMarketplaceItems.length, refreshMcpDiscover, refreshMcpMarketplace]);
 
   useEffect(() => {
-    if (!open || tab !== "mcp" || !sessionId) return;
+    if (!open || tab !== "mcp") return;
+    // sessionId may be empty (no session yet); backend falls back to
+    // process-level configs in that case, so we still poll.
     void onRefreshMcp(sessionId);
     const timer = window.setInterval(() => {
       void onRefreshMcp(sessionId);
@@ -7197,7 +7199,7 @@ export function SettingsPanel({
                   <div className="space-y-1.5">
                     {mcpServers.length === 0 ? (
                       <div className="py-6 text-center text-sm text-text-faint">
-                        尚未发现 MCP 服务。点右上角「扫描发现」或下方「New MCP Server」添加。
+                        尚未发现 MCP 服务。点上方主配置右侧的编辑图标，在 <code>~/.agenticx/mcp.json</code> 中添加。
                       </div>
                     ) : null}
                     {mcpServers.map((server) => {

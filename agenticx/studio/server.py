@@ -2775,27 +2775,41 @@ def create_studio_app() -> FastAPI:
 
     @app.get("/api/mcp/servers")
     async def list_mcp_servers(
-        session_id: str = Query(...),
+        session_id: str = Query(default=""),
         reload: bool = Query(default=True),
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_mcp_admin_token(x_agx_desktop_token)
-        managed = manager.get(session_id, touch=False)
+        from agenticx.runtime.global_mcp_manager import GlobalMcpManager
+        from types import SimpleNamespace
+
+        sid = (session_id or "").strip()
+        managed = manager.get(sid, touch=False) if sid else None
+        # No-session fallback: return process-level configs + connection state
+        # so the Settings panel works even before a session is bound (FR-1).
         if managed is None:
-            raise HTTPException(status_code=404, detail="session not found")
-        sess = managed.studio_session
-        if reload:
-            from agenticx.runtime.global_mcp_manager import GlobalMcpManager
-            GlobalMcpManager.singleton()._reload_configs_if_needed()
-        configs = sess.mcp_configs if isinstance(sess.mcp_configs, dict) else {}
-        connected = (
-            sess.connected_servers
-            if isinstance(sess.connected_servers, set)
-            else set(sess.connected_servers or [])
-        )
-        tool_counts = _mcp_tool_counts_for_session(sess)
-        tool_names_map = _mcp_tool_names_for_session(sess)
-        server_ops = _get_mcp_server_ops(sess)
+            gmcp = GlobalMcpManager.singleton()
+            if reload:
+                gmcp._reload_configs_if_needed()
+            configs = gmcp.mcp_configs if isinstance(gmcp.mcp_configs, dict) else {}
+            connected = set(gmcp.connected_servers or set())
+            shim = SimpleNamespace(mcp_hub=gmcp.hub)
+            tool_counts = _mcp_tool_counts_for_session(shim)
+            tool_names_map = _mcp_tool_names_for_session(shim)
+            server_ops: dict = {}
+        else:
+            sess = managed.studio_session
+            if reload:
+                GlobalMcpManager.singleton()._reload_configs_if_needed()
+            configs = sess.mcp_configs if isinstance(sess.mcp_configs, dict) else {}
+            connected = (
+                sess.connected_servers
+                if isinstance(sess.connected_servers, set)
+                else set(sess.connected_servers or [])
+            )
+            tool_counts = _mcp_tool_counts_for_session(sess)
+            tool_names_map = _mcp_tool_names_for_session(sess)
+            server_ops = _get_mcp_server_ops(sess)
         servers = []
         for name, cfg in sorted(configs.items()):
             in_connected = name in connected

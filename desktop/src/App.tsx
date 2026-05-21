@@ -331,8 +331,9 @@ export function App() {
   }, []);
 
   const refreshMcpStatus = useCallback(async (sid?: string) => {
-    const effectiveSid = sid || useAppStore.getState().sessionId;
-    if (!effectiveSid) return;
+    // Allow empty sid: backend returns process-level MCP configs so the
+    // Settings panel is not blocked by a not-yet-bound session (FR-3).
+    const effectiveSid = sid || useAppStore.getState().sessionId || "";
     const status = await window.agenticxDesktop.loadMcpStatus(effectiveSid);
     if (status.ok && Array.isArray(status.servers)) {
       setMcpServers(
