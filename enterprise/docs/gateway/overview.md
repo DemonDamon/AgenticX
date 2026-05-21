@@ -43,16 +43,20 @@ apps/gateway/
 
 ## 请求处理顺序（Chat）
 
-```
-handleChatCompletions
-  → parseJWT → tenant/dept/user/session
-  → quota.Check
-  → policy.EvaluateRequest
-  → routing.Decide (或 channel.Pick)
-  → provider.Call / relay.Execute
-  → policy.EvaluateResponse (非流式)
-  → audit.Write
-  → metering.Record
+```mermaid
+flowchart TD
+    A[handleChatCompletions] --> B[parseJWT<br/>tenant/dept/user/session]
+    B --> C[quota.Check]
+    C --> D[policy.EvaluateRequest]
+    D -->|block| Z1[return error]
+    D -->|pass| E{routing.Decide<br/>或 channel.Pick}
+    E --> F[provider.Call / relay.Execute]
+    F --> G{流式?}
+    G -->|否| H[policy.EvaluateResponse]
+    G -->|是| I[SSE 扫描 + stream 阶段策略]
+    H --> J[audit.Write<br/>JSONL + PG]
+    I --> J
+    J --> K[metering.Record<br/>usage_records]
 ```
 
 流式路径在 SSE 扫描过程中做 **stream 阶段** 策略评估与分段审计。
@@ -76,13 +80,14 @@ handleChatCompletions
 
 启用：`GATEWAY_CHANNEL_REGISTRY=on`
 
-```
-admin CRUD gateway_channels
-  → GET /api/internal/channels
-  → channel.Registry.Refresh
-  → Picker 按 weight/priority
-  → relay.Executor 失败重试
-  → adaptor 调用上游
+```mermaid
+flowchart LR
+    admin["admin CRUD<br/>gateway_channels"] --> api["/api/internal/channels"]
+    api --> reg["channel.Registry.Refresh"]
+    reg --> pick["Picker<br/>weight + priority"]
+    pick --> relay["relay.Executor<br/>失败重试"]
+    relay --> adp["adaptor"]
+    adp --> up([上游])
 ```
 
 Runbook：[runbooks/gateway-channel-relay.md](../runbooks/gateway-channel-relay.md)
