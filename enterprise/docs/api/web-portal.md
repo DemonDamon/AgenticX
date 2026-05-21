@@ -1,5 +1,8 @@
 # Web Portal API
 
+> 源码根：`apps/web-portal/src/app/api/`  
+> 页面根：`apps/web-portal/src/app/`
+
 基址：`http://localhost:3000`（生产替换为实际域名）
 
 ---

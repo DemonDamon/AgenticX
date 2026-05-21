@@ -6,12 +6,14 @@
 
 ## 总览
 
-| App | 技术 | 端口 | Workspace | 成熟度 |
+> 状态图例：✅ 已实现 · 🟡 部分 · ⚪ Stub · ⛔ Skeleton（详见 [docs/README.md](../README.md)）
+
+| App | 技术 | 端口 | Workspace | 状态 |
 |---|---|---|---|---|
-| web-portal | Next.js 15 | 3000 | ✅ pnpm | 生产可用 |
-| admin-console | Next.js 15 | 3001 | ✅ pnpm | 生产可用 |
-| gateway | Go 1.25 | 8088 | ❌ go.mod | 生产可用 |
-| edge-agent | Go | 7823（设计） | ❌ | Skeleton |
+| web-portal | Next.js 15 | 3000 | pnpm | ✅ |
+| admin-console | Next.js 15 | 3001 | pnpm | ✅ |
+| gateway | Go 1.25 | 8088 | go.mod 独立 | ✅ |
+| edge-agent | Go | 7823（设计） | — | ⛔ |
 
 ---
 

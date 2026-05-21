@@ -1,5 +1,8 @@
 # Admin Console API
 
+> 源码根：`apps/admin-console/src/app/api/`  
+> 页面根：`apps/admin-console/src/app/`
+
 基址：`http://localhost:3001`
 
 所有 `/api/admin/*`、`/api/policy/*`、`/api/audit/*`、`/api/metering/*` 路由需 admin session 且通过 RBAC scope 校验。

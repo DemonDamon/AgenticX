@@ -14,6 +14,10 @@ Enterprise 是企业级大模型应用一体化平台，由 **员工前台（web
 | 理解整体架构 | [architecture/overview.md](./architecture/overview.md) |
 | 查 API 路由 | [api/README.md](./api/README.md) |
 | 查数据库表 | [database/schema.md](./database/schema.md) |
+| 查环境变量 | [configuration/env-vars.md](./configuration/env-vars.md) |
+| **接通真实模型** | [development/local-dev.md#接通真实模型](./development/local-dev.md) · [gateway/runtime-config.md](./gateway/runtime-config.md) |
+| **发布 / 测试策略** | [gateway/policy-engine.md](./gateway/policy-engine.md) · [api/admin-console.md#策略规则中心](./api/admin-console.md) |
+| **看 Token 用量** | [api/admin-console.md#计量](./api/admin-console.md) · `/metering` 页面 |
 | 配 SSO | [runbooks/sso-oidc-setup.md](./runbooks/sso-oidc-setup.md) |
 | 配策略 / 插件 | [plugin-protocol/README.md](./plugin-protocol/README.md) · [gateway/policy-engine.md](./gateway/policy-engine.md) |
 | 部署到 Vercel + 外部 Gateway | [deployment/README.md](./deployment/README.md) |
@@ -53,6 +57,10 @@ Enterprise 是企业级大模型应用一体化平台，由 **员工前台（web
 
 - [database/schema.md](./database/schema.md) — Drizzle schema、22 张表、迁移策略
 - [rbac/scopes.md](./rbac/scopes.md) — Scope 注册表与角色模板
+
+### 配置
+
+- [configuration/env-vars.md](./configuration/env-vars.md) — 全量环境变量分组表
 
 ### 插件
 
@@ -96,11 +104,11 @@ Enterprise 是企业级大模型应用一体化平台，由 **员工前台（web
 
 ---
 
-## 成熟度说明
+## 成熟度图例（全文档通用）
 
-文档中标注的实现状态：
-
-- **已实现** — 可本地演示、有 PG 落库
-- **部分** — 核心路径可用，周边 stub
-- **Stub** — 仅占位 package，逻辑在其他位置或未开发
-- **Skeleton** — 设计文档存在，代码未落地
+| 标记 | 含义 |
+|---|---|
+| ✅ 已实现 | 可本地演示、有 PG 落库 |
+| 🟡 部分 | 核心路径可用，周边能力 stub |
+| ⚪ Stub | 仅占位 package，逻辑在其他位置或未开发 |
+| ⛔ Skeleton | 设计文档存在，代码未落地，不可演示 |

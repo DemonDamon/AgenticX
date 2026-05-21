@@ -1,5 +1,8 @@
 # Internal API（Gateway ↔ Admin）
 
+> Admin 源码：`apps/admin-console/src/app/api/internal/`  
+> Gateway 客户端：`apps/gateway/internal/gatewayinternal/`
+
 Admin Console 暴露一组 **仅 Gateway 调用** 的内部路由，用于 Vercel 分体部署或本地轮询配置。
 
 ---

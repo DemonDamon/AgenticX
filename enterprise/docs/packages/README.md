@@ -7,19 +7,21 @@
 
 ## 包清单
 
+> 状态图例：✅ 已实现 · 🟡 部分 · ⚪ Stub · ⛔ Skeleton
+
 | 包 | NPM | 状态 | 说明 |
 |---|---|---|---|
 | ui | `@agenticx/ui` | ✅ | shadcn 原语、OKLCH 主题、AppShell、DataTable 等 |
 | auth | `@agenticx/auth` | ✅ | JWT、密码、OIDC/SAML、Next middleware |
 | db-schema | `@agenticx/db-schema` | ✅ | Drizzle schema、migrations、seed |
 | iam-core | `@agenticx/iam-core` | ✅ | PG repos、scope-registry、crypto、legacy 迁移 |
-| core-api | `@agenticx/core-api` | 部分 | Chat 类型、errors、audit schema |
-| config | `@agenticx/config` | 部分 | 品牌/feature flag/插件配置加载 |
-| policy-engine | `@agenticx/policy-engine` | Go ✅ / TS stub | Gateway 内嵌策略引擎 |
-| sdk-ts | `@agenticx/sdk-ts` | 部分 | HTTP chat client / mock |
-| sdk-py | `agenticx-sdk` | Stub | 不在 pnpm workspace |
-| branding | `@agenticx/branding` | Stub | 白标组件预留 |
-| telemetry | `@agenticx/telemetry` | Stub | 埋点/OTel 预留 |
+| core-api | `@agenticx/core-api` | 🟡 | Chat 类型、errors、audit schema |
+| config | `@agenticx/config` | 🟡 | 品牌/feature flag/插件配置加载 |
+| policy-engine | `@agenticx/policy-engine` | Go ✅ / TS ⚪ | Gateway 内嵌策略引擎 |
+| sdk-ts | `@agenticx/sdk-ts` | 🟡 | HTTP chat client / mock |
+| sdk-py | `agenticx-sdk` | ⚪ | 不在 pnpm workspace |
+| branding | `@agenticx/branding` | ⚪ | 白标组件预留 |
+| telemetry | `@agenticx/telemetry` | ⚪ | 埋点/OTel 预留 |
 
 ---
 
