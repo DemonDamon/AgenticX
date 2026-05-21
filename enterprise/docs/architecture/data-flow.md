@@ -1,36 +1,42 @@
 # Enterprise 数据流
 
+> 最后更新：2026-05-21
+
 本文描述一次完整聊天请求及关联子系统的数据流向。
 
 ---
 
 ## 1. 聊天 completions 主链路
 
-```
-用户 (浏览器)
-  │
-  ▼
-web-portal  /workspace
-  │  ChatWorkspace → POST /api/chat/completions
-  │  附带 JWT Cookie + model + messages
-  ▼
-web-portal API Route
-  │  校验 session · 组装 OpenAI body
-  │  转发至 GATEWAY_COMPLETIONS_URL (默认 http://127.0.0.1:8088/v1/chat/completions)
-  ▼
-apps/gateway  handleChatCompletions
-  │
-  ├─ 1. JWT 解析 → tenant_id / dept_id / user_id / session_id
-  ├─ 2. quota.Tracker 检查租户配额
-  ├─ 3. policy-engine 请求阶段评估 (keyword/regex/pii)
-  │      action=block → 直接返回业务错误（非模型拒答）
-  ├─ 4. routing.Decider 或 Channel Registry 选上游
-  ├─ 5. provider/adaptor 调用 OpenAI-compatible 上游
-  ├─ 6. 流式/非流式响应阶段二次策略评估
-  ├─ 7. audit 双写 JSONL + gateway_audit_events (checksum 链)
-  └─ 8. metering 写入 usage_records
-  ▼
-上游 LLM
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 用户浏览器
+    participant P as web-portal API
+    participant G as apps/gateway
+    participant Pol as policy-engine
+    participant Up as 上游 LLM
+    participant DB as PostgreSQL
+
+    U->>P: POST /api/chat/completions<br/>(JWT cookie + model + messages)
+    P->>P: 校验 session<br/>组装 OpenAI body
+    P->>G: 转发至 GATEWAY_COMPLETIONS_URL
+    G->>G: 解析 JWT → tenant/dept/user/session
+    G->>DB: quota.Tracker 检查配额
+    G->>Pol: 请求阶段评估 (keyword/regex/pii)
+    alt action=block
+        Pol-->>G: 命中
+        G-->>P: 业务错误（非模型拒答）
+        P-->>U: 合规拦截 UI
+    else 放行/redact
+        G->>Up: 调用 OpenAI 兼容上游
+        Up-->>G: response / SSE stream
+        G->>Pol: 响应/流式阶段二次评估
+        G->>DB: audit (JSONL + gateway_audit_events)
+        G->>DB: metering (usage_records)
+        G-->>P: completions / SSE
+        P-->>U: 渲染
+    end
 ```
 
 ### Portal 侧会话持久化
@@ -46,15 +52,13 @@ Gateway 只负责推理、策略、审计、计量。
 
 ## 2. 模型可见性
 
-```
-admin-console  /admin/models
-  │  CRUD enterprise_runtime_model_providers
-  │  用户详情 → 可见模型分配 → enterprise_runtime_user_visible_models
-  ▼
-web-portal  GET /api/me/models
-  │  按当前用户 JWT 过滤
-  ▼
-ChatWorkspace 模型下拉
+```mermaid
+flowchart LR
+    admin["admin-console<br/>/admin/models"] -->|CRUD| providers[("enterprise_runtime_<br/>model_providers")]
+    admin -->|可见模型分配| visible[("enterprise_runtime_<br/>user_visible_models")]
+    portal["web-portal<br/>GET /api/me/models"] -->|按 JWT 过滤| visible
+    portal --> ui["ChatWorkspace<br/>模型下拉"]
+    gateway["apps/gateway"] -. /api/internal/providers .-> providers
 ```
 
 Gateway 侧通过 internal API 或 PG 读取 provider 配置（含 `api_key_cipher` 解密），与 portal 可见性**独立**：portal 控制「用户能看到哪些 model id」，gateway 控制「哪些 upstream 可调用」。
@@ -63,15 +67,14 @@ Gateway 侧通过 internal API 或 PG 读取 provider 配置（含 `api_key_ciph
 
 ## 3. 策略发布流
 
-```
-admin-console  /policy
-  │  草稿规则 policy_rules (status=draft)
-  │  POST /api/policy/publish
-  ▼
-policy_publish_events + enterprise_runtime_policy_snapshots
-  │
-  ├─ Gateway 读 GATEWAY_REMOTE_POLICY_SNAPSHOT_URL 或本地文件
-  └─ 仅 status=active 的规则进入快照
+```mermaid
+flowchart LR
+    draft["policy_rules<br/>status=draft"] -->|POST /api/policy/publish| publish[/发布/]
+    publish --> events[("policy_publish_events")]
+    publish --> snap[("enterprise_runtime_<br/>policy_snapshots")]
+    snap -->|远程 URL 或本地文件| gateway["apps/gateway<br/>policy-engine 热加载"]
+    note["⚠️ 仅 status=active<br/>进入快照"]:::n
+    classDef n fill:#fef3c7,stroke:#f59e0b
 ```
 
 **注意**：`blocked=true` 仅当 action 为 **block**；warn/redact 可有 hits 但不拦截。
@@ -82,13 +85,13 @@ policy_publish_events + enterprise_runtime_policy_snapshots
 
 ## 4. 审计双写
 
-```
-Gateway 每次 LLM 调用
-  │
-  ├─ 必须成功：append-only JSONL (apps/gateway/.runtime/audit/)
-  └─ best-effort：gateway_audit_events (PG)
-         失败 → .runtime/audit/.pg-pending
-         启动回灌窗口 GATEWAY_AUDIT_BACKFILL_DAYS (默认 7)
+```mermaid
+flowchart LR
+    call["Gateway 每次 LLM 调用"] -->|必须成功| jsonl[("JSONL<br/>apps/gateway/<br/>.runtime/audit/")]
+    call -->|best-effort| pg[("gateway_audit_events")]
+    pg -.->|失败| pending[(".pg-pending")]
+    boot["进程启动"] -->|回灌窗口 GATEWAY_AUDIT_BACKFILL_DAYS=7| pending
+    pending --> pg
 ```
 
 admin-console `/audit` 查询走 PG `PgAuditStore`，可见域依赖 scope：
@@ -103,13 +106,11 @@ IAM 管理操作审计在**另一张表** `audit_events`，与 gateway 审计分
 
 ## 5. Token 计量
 
-```
-Gateway billing 结算
-  ▼
-usage_records (tenant/dept/user/provider/model/time_bucket)
-  ▼
-admin-console /metering 查询与导出
-portal 顶栏 token chip（SSE/响应 usage 累加）
+```mermaid
+flowchart LR
+    bill["Gateway billing 结算"] --> usage[("usage_records<br/>tenant/dept/user/<br/>provider/model/time_bucket")]
+    usage --> admin["admin-console /metering<br/>查询 + 导出"]
+    bill -. SSE/usage .-> chip["portal 顶栏<br/>token chip"]
 ```
 
 配额：`enterprise_runtime_token_quotas` → gateway `quota.Tracker`。当前以**租户级**为主；部门/用户级 TPM 需独立规划。
@@ -120,14 +121,12 @@ portal 顶栏 token chip（SSE/响应 usage 累加）
 
 启用 `GATEWAY_CHANNEL_REGISTRY=on` 时：
 
-```
-admin  CRUD gateway_channels
-  ▼
-GET /api/internal/channels → Gateway registry (~5s)
-  ▼
-channel.Picker + relay.Executor（权重/优先级/亲和/重试）
-  ▼
-adaptor 工厂 → 上游
+```mermaid
+flowchart LR
+    admin["admin CRUD<br/>gateway_channels"] -->|/api/internal/channels<br/>~5s 轮询| reg["channel.Registry"]
+    reg --> picker["Picker<br/>权重/优先级/亲和"]
+    picker --> relay["relay.Executor<br/>失败重试"]
+    relay --> adaptor["adaptor 工厂"] --> upstream(["上游"])
 ```
 
 详见 [runbooks/gateway-channel-relay.md](../runbooks/gateway-channel-relay.md)。
@@ -136,14 +135,21 @@ adaptor 工厂 → 上游
 
 ## 7. SSO 登录流（OIDC 示例）
 
-```
-portal /auth → GET /api/auth/sso/oidc/start
-  │  302 → IdP authorize
-  ▼
-IdP callback → GET /api/auth/sso/oidc/callback
-  │  换 token · JIT 用户 · 写 refresh session
-  ▼
-Set-Cookie → redirect /workspace
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant P as portal /auth
+    participant IdP as 企业 IdP
+    participant DB as PostgreSQL
+
+    U->>P: 点击 SSO 按钮
+    P->>U: 302 → GET /api/auth/sso/oidc/start
+    U->>IdP: authorize
+    IdP-->>U: 回调 → /api/auth/sso/oidc/callback?code=...
+    U->>P: callback
+    P->>IdP: token endpoint 换 token
+    P->>DB: JIT 用户 upsert + 写 auth_refresh_sessions
+    P-->>U: Set-Cookie + redirect /workspace
 ```
 
 Admin 侧镜像路由在 `:3001`，Provider CRUD 在 `/settings/sso` + `/api/admin/sso/providers/*`。
