@@ -19,6 +19,7 @@ type Props = {
   onResume: () => void;
   onResumeWithModel: (provider: string, model: string) => void;
   onStop: () => void;
+  stopInFlight?: boolean;
   onOpenSettings?: () => void;
 };
 
@@ -38,6 +39,7 @@ export function StallRecoveryCard({
   onResume,
   onResumeWithModel,
   onStop,
+  stopInFlight = false,
   onOpenSettings,
 }: Props) {
   const isStall = kind === "stall";
@@ -122,9 +124,10 @@ export function StallRecoveryCard({
                           <button
                             type="button"
                             onClick={onStop}
-                            className="rounded-md bg-rose-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-rose-500"
+                            disabled={stopInFlight}
+                            className="rounded-md bg-rose-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            中断任务
+                            {stopInFlight ? "正在中断…" : "中断任务"}
                           </button>
                         </>
                       ) : (
