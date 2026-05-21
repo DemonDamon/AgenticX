@@ -1,4 +1,6 @@
 export * from "./db";
+export * from "./provider-api-key-crypto";
+export * from "./runtime-legacy-migrate";
 export * from "./refresh-token-pg-store";
 export * from "./scope-registry";
 export * from "./pg-auth-user-repository";

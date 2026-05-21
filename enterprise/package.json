@@ -14,12 +14,14 @@
     "visual-tour:install": "playwright install chromium",
     "e2e:iam": "tsx scripts/e2e-iam.ts",
     "e2e:sso": "tsx scripts/e2e-sso.ts",
+    "migrate:legacy-runtime": "tsx scripts/migrate-runtime-legacy.ts",
     "sso:oidc-smoke": "tsx scripts/sso/oidc-smoke.ts",
     "sso:saml-mock": "node scripts/sso/mock-saml-idp/index.mjs",
     "sso:saml-mock-setup": "bash scripts/sso/mock-saml-idp/setup-keypair.sh",
     "saml:mock": "pnpm sso:saml-mock"
   },
   "devDependencies": {
+    "@agenticx/iam-core": "workspace:*",
     "@types/node": "^20.11.0",
     "playwright": "^1.59.1",
     "tsx": "^4.21.0",

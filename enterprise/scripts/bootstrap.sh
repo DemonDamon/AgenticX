@@ -360,6 +360,10 @@ log "running db:seed"
 (cd "$ENTERPRISE_DIR" && pnpm --filter @agenticx/db-schema db:seed)
 ok "db:seed done"
 
+log "running migrate:legacy-runtime"
+(cd "$ENTERPRISE_DIR" && pnpm migrate:legacy-runtime)
+ok "migrate:legacy-runtime done"
+
 #################################
 # 8. 结尾提示
 #################################

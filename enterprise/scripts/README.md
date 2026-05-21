@@ -35,6 +35,18 @@ bash scripts/bootstrap.sh --skip-docker    # 即便 local 模式也不起 docker
 
 ---
 
+## migrate-runtime-legacy.ts — legacy JSON → Postgres（幂等）
+
+将 `enterprise/.runtime/admin/{providers,user-models,quotas}.json` 一次性导入 `enterprise_runtime_*` 表。`bootstrap.sh` 与本地 `start-dev.sh` 会自动调用；也可手动执行：
+
+```bash
+pnpm -C enterprise migrate:legacy-runtime
+```
+
+适用场景：PG 化升级后、换机恢复 `.runtime/admin` 备份、或前台出现「无可用模型」而 JSON 里仍有分配时。
+
+---
+
 ## start-dev.sh — 本机一条命令起 enterprise
 
 前置：已经跑过一次 `bootstrap.sh`，并且本机已有 Postgres/Redis（或前置使用 `start-dev-with-infra.sh`）。
@@ -49,7 +61,7 @@ bash scripts/start-dev.sh -h
 注意事项：
 
 - 加载 `.env.local`，自动把 `AUTH_JWT_*_KEY_FILE` 指向的 PEM 读成环境变量再启进程。
-- 默认 `AGX_AUTO_DB_MIGRATE=1`：仅当 `DATABASE_URL` 指向 `127.0.0.1` / `localhost` 才会自动 `db:migrate`，远程库自动跳过。需要手动跳过可 `AGX_AUTO_DB_MIGRATE=0`。
+- 默认 `AGX_AUTO_DB_MIGRATE=1`：仅当 `DATABASE_URL` 指向 `127.0.0.1` / `localhost` 才会自动 `db:migrate` 并执行 `pnpm migrate:legacy-runtime`，远程库自动跳过。需要手动跳过可 `AGX_AUTO_DB_MIGRATE=0`。
 - 端口冲突时（3000/3001/8088 被占）请先 `lsof -i :8088` 杀进程。
 - Ctrl+C 会触发 `cleanup` 一并 kill 所有子进程，无需逐个收尾。
 

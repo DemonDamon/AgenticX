@@ -6,8 +6,7 @@
  */
 
 import { enterpriseRuntimeModelProviders as mpTable } from "@agenticx/db-schema";
-import { getIamDb } from "@agenticx/iam-core";
-import * as fs from "node:fs";
+import { getIamDb, migrateLegacyProvidersIfNeeded } from "@agenticx/iam-core";
 import * as path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { ulid } from "ulid";
@@ -69,8 +68,6 @@ export interface UpdateProviderInput {
 const RUNTIME_DIR = path.resolve(process.cwd(), "../../.runtime/admin");
 const LEGACY_FILE = path.join(RUNTIME_DIR, "providers.json");
 
-let legacyMigrationRan = false;
-
 function requiredTenantId(): string {
   const t = process.env.DEFAULT_TENANT_ID?.trim();
   if (!t) {
@@ -123,44 +120,12 @@ function rowToRecord(row: typeof mpTable.$inferSelect): ProviderRecord {
   };
 }
 
-async function migrateLegacyProvidersIfNeeded(tenantId: string): Promise<void> {
-  if (legacyMigrationRan) return;
-  legacyMigrationRan = true;
-  const db = getIamDb();
-  const cnt = await db.select({ id: mpTable.id }).from(mpTable).where(eq(mpTable.tenantId, tenantId)).limit(1);
-  if (cnt.length > 0) return;
-  if (!fs.existsSync(LEGACY_FILE)) return;
-  try {
-    const raw = fs.readFileSync(LEGACY_FILE, "utf-8");
-    if (!raw.trim()) return;
-    const parsed = JSON.parse(raw) as { providers?: ProviderRecord[] };
-    const providers = Array.isArray(parsed.providers) ? parsed.providers : [];
-    if (providers.length === 0) return;
-    const now = nowIso();
-    for (const p of providers) {
-      await db.insert(mpTable).values({
-        id: ulid(),
-        tenantId,
-        providerId: p.id,
-        displayName: p.displayName,
-        baseUrl: p.baseUrl,
-        apiKeyCipher: encryptProviderApiKey(p.apiKey ?? ""),
-        enabled: p.enabled ?? true,
-        isDefault: p.isDefault ?? false,
-        route: (p.route as string) ?? "third-party",
-        envKey: p.envKey ?? null,
-        models: (p.models ?? []) as unknown as Record<string, unknown>[],
-        createdAt: new Date(p.createdAt || now),
-        updatedAt: new Date(p.updatedAt || now),
-      });
-    }
-  } catch {
-    /* ignore malformed legacy */
-  }
+async function migrateLegacyProvidersIfNeededLocal(tenantId: string): Promise<void> {
+  await migrateLegacyProvidersIfNeededLocal(tenantId);
 }
 
 async function loadAll(tenantId: string): Promise<ProviderRecord[]> {
-  await migrateLegacyProvidersIfNeeded(tenantId);
+  await migrateLegacyProvidersIfNeededLocal(tenantId);
   const db = getIamDb();
   const rows = await db.select().from(mpTable).where(eq(mpTable.tenantId, tenantId));
   return rows.map(rowToRecord).sort((a, b) => a.id.localeCompare(b.id));
@@ -303,7 +268,7 @@ export async function listProvidersInternal(): Promise<ProviderRecord[]> {
 
 export async function createProvider(input: CreateProviderInput): Promise<PublicProviderRecord> {
   const tenantId = requiredTenantId();
-  await migrateLegacyProvidersIfNeeded(tenantId);
+  await migrateLegacyProvidersIfNeededLocal(tenantId);
   const db = getIamDb();
   const id = normalizeProviderId(input.id);
   if (!id) throw new Error("provider id is required");
@@ -359,7 +324,7 @@ export async function createProvider(input: CreateProviderInput): Promise<Public
 
 export async function updateProvider(id: string, patch: UpdateProviderInput): Promise<PublicProviderRecord> {
   const tenantId = requiredTenantId();
-  await migrateLegacyProvidersIfNeeded(tenantId);
+  await migrateLegacyProvidersIfNeededLocal(tenantId);
   const db = getIamDb();
   const rows = await db
     .select()
@@ -419,7 +384,7 @@ export async function deleteProvider(id: string): Promise<boolean> {
 
 export async function addProviderModel(id: string, model: ProviderModel): Promise<PublicProviderRecord> {
   const tenantId = requiredTenantId();
-  await migrateLegacyProvidersIfNeeded(tenantId);
+  await migrateLegacyProvidersIfNeededLocal(tenantId);
   const db = getIamDb();
   const rows = await db
     .select()
@@ -459,7 +424,7 @@ export async function updateProviderModel(
   patch: Partial<ProviderModel>
 ): Promise<PublicProviderRecord> {
   const tenantId = requiredTenantId();
-  await migrateLegacyProvidersIfNeeded(tenantId);
+  await migrateLegacyProvidersIfNeededLocal(tenantId);
   const db = getIamDb();
   const rows = await db
     .select()
@@ -490,7 +455,7 @@ export async function updateProviderModel(
 
 export async function deleteProviderModel(id: string, modelName: string): Promise<PublicProviderRecord> {
   const tenantId = requiredTenantId();
-  await migrateLegacyProvidersIfNeeded(tenantId);
+  await migrateLegacyProvidersIfNeededLocal(tenantId);
   const db = getIamDb();
   const rows = await db
     .select()
@@ -519,7 +484,7 @@ export async function deleteProviderModel(id: string, modelName: string): Promis
 
 /** Reset migrate flag（test）。 */
 export function __resetProvidersCache(): void {
-  legacyMigrationRan = false;
+  /* legacy in-process flag removed; shared migrator is idempotent via PG */
 }
 
 /** 已不再使用文件路径；占位兼容旧 metering / health。 */

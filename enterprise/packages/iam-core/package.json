@@ -7,7 +7,9 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./scope-registry": "./src/scope-registry.ts"
+    "./scope-registry": "./src/scope-registry.ts",
+    "./provider-api-key-crypto": "./src/provider-api-key-crypto.ts",
+    "./runtime-legacy-migrate": "./src/runtime-legacy-migrate.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

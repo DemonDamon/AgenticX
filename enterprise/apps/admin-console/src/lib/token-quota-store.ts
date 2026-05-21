@@ -1,6 +1,5 @@
 import { enterpriseRuntimeTokenQuotas as qTable } from "@agenticx/db-schema";
-import { getIamDb } from "@agenticx/iam-core";
-import * as fs from "node:fs";
+import { getIamDb, migrateLegacyQuotasIfNeeded, resolveRuntimeAdminDir, type QuotaConfig as SharedQuotaConfig } from "@agenticx/iam-core";
 import * as path from "node:path";
 import { eq } from "drizzle-orm";
 
@@ -11,19 +10,9 @@ export type QuotaRule = {
   action: QuotaAction;
 };
 
-export type QuotaConfig = {
-  defaults: {
-    role: Record<string, QuotaRule>;
-    model: Record<string, QuotaRule>;
-  };
-  users: Record<string, QuotaRule>;
-  departments: Record<string, QuotaRule>;
-  updatedAt: string;
-};
+export type QuotaConfig = SharedQuotaConfig;
 
-const ROOT = path.resolve(process.cwd(), "../..");
-const RUNTIME_DIR = process.env.ENTERPRISE_ADMIN_RUNTIME_DIR || path.join(ROOT, ".runtime/admin");
-const LEGACY_FILE = process.env.ENTERPRISE_QUOTA_CONFIG_FILE || path.join(RUNTIME_DIR, "quotas.json");
+const LEGACY_FILE = path.join(resolveRuntimeAdminDir(), "quotas.json");
 
 const DEFAULT_CONFIG: QuotaConfig = {
   defaults: {
@@ -82,21 +71,7 @@ function configFromRow(payload: Record<string, unknown> | undefined | null): Quo
 async function migrateLegacyQuotasOnce(tid: string): Promise<void> {
   if (legacyRan) return;
   legacyRan = true;
-  const db = getIamDb();
-  const row = await db.select().from(qTable).where(eq(qTable.tenantId, tid)).limit(1);
-  if (row.length > 0) return;
-  if (!fs.existsSync(LEGACY_FILE)) return;
-  try {
-    const parsed = JSON.parse(fs.readFileSync(LEGACY_FILE, "utf-8"));
-    const cfg = normalizeQuota(parsed as Partial<QuotaConfig>);
-    await db.insert(qTable).values({
-      tenantId: tid,
-      config: cfg as unknown as Record<string, unknown>,
-      updatedAt: new Date(cfg.updatedAt),
-    });
-  } catch {
-    /* ignore */
-  }
+  await migrateLegacyQuotasIfNeeded(tid);
 }
 
 /** 租户 token 配额整包读取。 */

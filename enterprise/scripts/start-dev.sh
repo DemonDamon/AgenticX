@@ -91,6 +91,7 @@ if [[ "$AUTO_MIGRATE" = "1" ]]; then
     (
       cd "$ENTERPRISE_DIR"
       pnpm --filter @agenticx/db-schema db:migrate
+      pnpm migrate:legacy-runtime
     )
   else
     echo "[start-dev] skip auto migration (non-local DATABASE_URL)."
