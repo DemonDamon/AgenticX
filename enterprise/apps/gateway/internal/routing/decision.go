@@ -14,11 +14,12 @@ const (
 )
 
 type Decision struct {
-	Route    string
-	Provider string
-	Endpoint string
-	APIKey   string
-	Model    string
+	Route     string
+	Provider  string
+	Endpoint  string
+	APIKey    string
+	Model     string
+	ChannelID string
 }
 
 type Decider struct {

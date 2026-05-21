@@ -34,6 +34,13 @@ type Event struct {
 	Provider     string      `json:"provider,omitempty"`
 	Model        string      `json:"model,omitempty"`
 	Route        string      `json:"route"`
+	ChannelID    string      `json:"channel_id,omitempty"`
+	AttemptIndex int         `json:"attempt_index,omitempty"`
+	RetryReason  string      `json:"retry_reason,omitempty"`
+	EstimatedTokens int      `json:"estimated_tokens,omitempty"`
+	ActualTokens    int      `json:"actual_tokens,omitempty"`
+	SettleDelta     int64     `json:"settle_delta,omitempty"`
+	Attempts     json.RawMessage `json:"attempts,omitempty"`
 	InputTokens  int         `json:"input_tokens,omitempty"`
 	OutputTokens int         `json:"output_tokens,omitempty"`
 	TotalTokens  int         `json:"total_tokens,omitempty"`

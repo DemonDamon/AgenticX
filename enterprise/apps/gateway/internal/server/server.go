@@ -18,13 +18,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/agenticx/enterprise/gateway/internal/adaptor"
 	"github.com/agenticx/enterprise/gateway/internal/audit"
+	"github.com/agenticx/enterprise/gateway/internal/billing"
+	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/config"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
+	"github.com/agenticx/enterprise/gateway/internal/keypool"
 	"github.com/agenticx/enterprise/gateway/internal/metering"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/provider"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
+	"github.com/agenticx/enterprise/gateway/internal/relay"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 	"github.com/agenticx/enterprise/gateway/internal/runtimeconfig"
 	policyengine "github.com/agenticx/enterprise/policy-engine"
@@ -51,6 +56,14 @@ type Server struct {
 	adminLoader        *runtimeconfig.Loader
 	quotaTracker       *quota.Tracker
 	policySnapBodyHash string
+	channelRegistry    *channel.Registry
+	channelPicker      *channel.Picker
+	channelStats       *channel.StatsStore
+	channelAffinity    *channel.AffinityStore
+	adaptorFactory     *adaptor.Factory
+	keyPool            *keypool.Pool
+	relayExecutor      *relay.Executor
+	billingService     *billing.Service
 }
 
 var (
@@ -155,6 +168,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		adminLoader:        adminLoader,
 		quotaTracker:       quota.NewTracker(quotaCfgPath, quotaUsagePath),
 	}
+	srv.initChannelRelay()
 	return srv, nil
 }
 
@@ -479,6 +493,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.Timeout(10 * time.Minute))
 
 	r.Get("/healthz", s.handleHealth)
+	r.Get("/internal/channel-stats", s.handleChannelStats)
 	r.Post("/v1/chat/completions", s.handleChatCompletions)
 	r.Post("/v1/embeddings", s.handleEmbeddings)
 
@@ -568,20 +583,41 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		req.Messages = replaceLastUserMessageContent(req.Messages, reqPolicy.RedactedText)
 	}
 	estimatedInputTokens := estimateTextTokens(joinMessages(req.Messages))
-	quotaDecision := s.quotaTracker.CheckAndAdd(
-		identity.UserID,
-		identity.DepartmentID,
-		roleFromScopes(identity.Scopes),
-		req.Model,
-		int64(estimatedInputTokens),
-	)
-	if !quotaDecision.Allowed {
-		writeAPIError(w, openai.QuotaExceeded("token quota exceeded"))
-		return
+	reserveTokens := estimateTokensWithMax(estimatedInputTokens, maxTokensFromRequest(req))
+	var quotaReservation billing.Reservation
+	if s.useChannelRelay() {
+		quotaReservation = s.billingService.Reserve(
+			identity.UserID,
+			identity.DepartmentID,
+			roleFromScopes(identity.Scopes),
+			req.Model,
+			reserveTokens,
+		)
+		if !quotaReservation.Allowed {
+			writeAPIError(w, openai.QuotaExceeded("token quota exceeded"))
+			return
+		}
+	} else {
+		quotaDecision := s.quotaTracker.CheckAndAdd(
+			identity.UserID,
+			identity.DepartmentID,
+			roleFromScopes(identity.Scopes),
+			req.Model,
+			int64(estimatedInputTokens),
+		)
+		if !quotaDecision.Allowed {
+			writeAPIError(w, openai.QuotaExceeded("token quota exceeded"))
+			return
+		}
 	}
 
 	if req.Stream {
-		s.handleStream(w, r, req, decision, startedAt, identity, estimatedInputTokens)
+		s.handleStream(w, r, req, decision, startedAt, identity, estimatedInputTokens, reserveTokens)
+		return
+	}
+
+	if s.useChannelRelay() {
+		s.handleChatCompleteRelay(w, r, req, startedAt, identity, estimatedInputTokens, reserveTokens)
 		return
 	}
 
@@ -593,7 +629,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	responseContent := ""
 	if len(resp.Choices) > 0 {
-		responseContent = resp.Choices[0].Message.Content
+		msg := &resp.Choices[0].Message
+		responseContent = openai.ComposeMessageContent(msg.Content, msg.ReasoningContent)
+		msg.Content = responseContent
+		msg.ReasoningContent = ""
 	}
 	providerInputTokens := resp.Usage.PromptTokens
 	providerOutputTokens := resp.Usage.CompletionTokens
@@ -815,6 +854,7 @@ func (s *Server) handleStream(
 	startedAt time.Time,
 	identity requestIdentity,
 	estimatedInputTokens int,
+	reservedTokens int64,
 ) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -829,17 +869,24 @@ func (s *Server) handleStream(
 	var responseBuilder strings.Builder
 	inputText := joinMessages(req.Messages)
 	var blockedHits []policyengine.HitEvent
+	var reasoningState openai.StreamReasoningState
 
 	push := func(chunk openai.StreamChunk) error {
 		if len(chunk.Choices) > 0 {
-			deltaContent := chunk.Choices[0].Delta.Content
-			policyResult := s.evaluatePolicy(deltaContent, makeEvalContext(identity, "response"))
-			if policyResult.Blocked {
-				blockedHits = append(blockedHits, policyResult.Hits...)
-				return fmt.Errorf("policy blocked stream chunk")
+			delta := &chunk.Choices[0].Delta
+			delta.Content = openai.NormalizeThinkTags(delta.Content)
+			delta.ReasoningContent = openai.NormalizeThinkTags(delta.ReasoningContent)
+			merged := reasoningState.MergeDelta(responseBuilder.String(), delta.ReasoningContent, delta.Content)
+			if merged != "" {
+				policyResult := s.evaluatePolicy(merged, makeEvalContext(identity, "response"))
+				if policyResult.Blocked {
+					blockedHits = append(blockedHits, policyResult.Hits...)
+					return fmt.Errorf("policy blocked stream chunk")
+				}
+				delta.Content = policyResult.RedactedText
+				responseBuilder.WriteString(delta.Content)
 			}
-			chunk.Choices[0].Delta.Content = policyResult.RedactedText
-			responseBuilder.WriteString(chunk.Choices[0].Delta.Content)
+			delta.ReasoningContent = ""
 		}
 		payload, err := json.Marshal(chunk)
 		if err != nil {
@@ -852,9 +899,21 @@ func (s *Server) handleStream(
 		return nil
 	}
 
-	if err := s.provider.Stream(r.Context(), req, decision, push); err != nil {
+	var streamErr error
+	var streamResult relay.StreamResult
+	if s.useChannelRelay() {
+		streamResult, streamErr = s.relayExecutor.Stream(r.Context(), req, req.Model, channelIdentity(identity), push)
+		decision = routingDecisionFromStream(streamResult, req.Model, decision)
+	} else {
+		streamErr = s.provider.Stream(r.Context(), req, decision, push)
+	}
+
+	if streamErr != nil {
+		if s.useChannelRelay() {
+			s.billingService.Rollback(identity.UserID, reservedTokens)
+		}
 		if len(blockedHits) > 0 {
-			_ = s.writeAuditEvent(audit.Event{
+			ev := audit.Event{
 				ID:           makeID("audit"),
 				TenantID:     identity.TenantID,
 				EventTime:    time.Now().UTC().Format(time.RFC3339),
@@ -868,33 +927,77 @@ func (s *Server) handleStream(
 				Provider:     decision.Provider,
 				Model:        req.Model,
 				Route:        decision.Route,
+				ChannelID:    decision.ChannelID,
 				Digest: &audit.Digest{
 					PromptHash:   hashText(inputText),
 					ResponseHash: hashText(responseBuilder.String()),
 				},
 				PoliciesHit: toAuditPolicyHits(blockedHits),
 				LatencyMS:   time.Since(startedAt).Milliseconds(),
-			})
+			}
+			enrichAuditFromAttempts(&ev, streamResult.Attempts)
+			_ = s.writeAuditEvent(ev)
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			partialOutputTokens := estimateTextTokens(responseBuilder.String())
 			s.reportUsage(identity, decision, estimatedInputTokens, partialOutputTokens)
-			s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, estimatedInputTokens+partialOutputTokens)
+			if !s.useChannelRelay() {
+				s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, estimatedInputTokens+partialOutputTokens)
+			}
 			return
 		}
 		partialOutputTokens := estimateTextTokens(responseBuilder.String())
 		s.reportUsage(identity, decision, estimatedInputTokens, partialOutputTokens)
-		s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, estimatedInputTokens+partialOutputTokens)
-		writeStreamError(w, flusher, err.Error())
+		if s.useChannelRelay() {
+			actualTotal := int64(estimatedInputTokens + partialOutputTokens)
+			s.billingService.Settle(
+				identity.UserID,
+				identity.DepartmentID,
+				roleFromScopes(identity.Scopes),
+				req.Model,
+				reservedTokens,
+				actualTotal,
+			)
+		} else {
+			s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, estimatedInputTokens+partialOutputTokens)
+		}
+		if code := streamErrorCode(streamErr); code != "" {
+			writeStreamPolicyError(w, flusher, code, formatStreamError(streamErr), nil)
+		} else {
+			writeStreamError(w, flusher, streamErr.Error())
+		}
 		return
 	}
 
 	responseText := responseBuilder.String()
+	if tail := reasoningState.CloseOpenReasoning(); tail != "" {
+		responseText += tail
+		tailChunk := openai.StreamChunk{
+			Choices: []openai.StreamChoice{{
+				Index: 0,
+				Delta: openai.StreamDelta{Content: tail},
+			}},
+		}
+		_ = push(tailChunk)
+	}
 	inputTokens := estimatedInputTokens
 	outputTokens := estimateTextTokens(responseText)
 	s.reportUsage(identity, decision, inputTokens, outputTokens)
-	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, inputTokens+outputTokens)
+	var settleDelta int64
+	if s.useChannelRelay() {
+		settle := s.billingService.Settle(
+			identity.UserID,
+			identity.DepartmentID,
+			roleFromScopes(identity.Scopes),
+			req.Model,
+			reservedTokens,
+			int64(inputTokens+outputTokens),
+		)
+		settleDelta = settle.Delta
+	} else {
+		s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, inputTokens+outputTokens)
+	}
 
-	if err := s.writeAuditEvent(audit.Event{
+	ev := audit.Event{
 		ID:           makeID("audit"),
 		TenantID:     identity.TenantID,
 		EventTime:    time.Now().UTC().Format(time.RFC3339),
@@ -908,17 +1011,23 @@ func (s *Server) handleStream(
 		Provider:     decision.Provider,
 		Model:        req.Model,
 		Route:        decision.Route,
+		ChannelID:    decision.ChannelID,
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
 		TotalTokens:  inputTokens + outputTokens,
 		LatencyMS:    time.Since(startedAt).Milliseconds(),
+		EstimatedTokens: estimatedInputTokens,
+		ActualTokens:    inputTokens + outputTokens,
+		SettleDelta:     settleDelta,
 		Digest: &audit.Digest{
 			PromptHash:      hashText(inputText),
 			ResponseHash:    hashText(responseText),
 			PromptSummary:   summarize(inputText, 120),
 			ResponseSummary: summarize(responseText, 120),
 		},
-	}); err != nil {
+	}
+	enrichAuditFromAttempts(&ev, streamResult.Attempts)
+	if err := s.writeAuditEvent(ev); err != nil {
 		writeStreamError(w, flusher, "audit write failed")
 		return
 	}
