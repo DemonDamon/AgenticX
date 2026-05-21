@@ -121,7 +121,7 @@ function rowToRecord(row: typeof mpTable.$inferSelect): ProviderRecord {
 }
 
 async function migrateLegacyProvidersIfNeededLocal(tenantId: string): Promise<void> {
-  await migrateLegacyProvidersIfNeededLocal(tenantId);
+  await migrateLegacyProvidersIfNeeded(tenantId, RUNTIME_DIR);
 }
 
 async function loadAll(tenantId: string): Promise<ProviderRecord[]> {
