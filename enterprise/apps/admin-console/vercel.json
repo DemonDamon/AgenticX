@@ -1,0 +1,4 @@
+{
+  "installCommand": "cd ../.. && npx --yes pnpm@9.12.0 install --no-frozen-lockfile",
+  "buildCommand": "cd ../.. && npx --yes pnpm@9.12.0 exec turbo run build --filter=@agenticx/app-admin-console"
+}
