@@ -4,15 +4,11 @@
  */
 
 import { enterpriseRuntimeUserVisibleModels as uvmTable } from "@agenticx/db-schema";
-import { getIamDb } from "@agenticx/iam-core";
-import * as fs from "node:fs";
+import { getIamDb, migrateLegacyUserVisibleModelsIfNeeded, resolveRuntimeAdminDir } from "@agenticx/iam-core";
 import * as path from "node:path";
-import { sql, eq, and } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
-const RUNTIME_DIR = path.resolve(process.cwd(), "../../.runtime/admin");
-const LEGACY_PATH = path.join(RUNTIME_DIR, "user-models.json");
-
-let legacyMigrationRan = false;
+const LEGACY_PATH = path.join(resolveRuntimeAdminDir(), "user-models.json");
 
 function requiredTenant(): string {
   const t = process.env.DEFAULT_TENANT_ID?.trim();
@@ -22,36 +18,14 @@ function requiredTenant(): string {
 
 type Mapping = Record<string, string[]>;
 
-async function migrateLegacyIfNeeded(tid: string): Promise<void> {
-  if (legacyMigrationRan) return;
-  legacyMigrationRan = true;
-  const db = getIamDb();
-  const existing = await db.select({ modelId: uvmTable.modelId }).from(uvmTable).where(eq(uvmTable.tenantId, tid)).limit(1);
-  if (existing.length > 0) return;
-  if (!fs.existsSync(LEGACY_PATH)) return;
-  try {
-    const parsed = JSON.parse(fs.readFileSync(LEGACY_PATH, "utf-8")) as { userModels?: Mapping };
-    const userModels = parsed.userModels ?? {};
-    const rows = Object.entries(userModels).flatMap(([assignmentKey, modelIds]) =>
-      (modelIds ?? []).filter(Boolean).map((modelId) => ({
-        tenantId: tid,
-        assignmentKey,
-        modelId: modelId.trim(),
-      }))
-    );
-    if (rows.length === 0) return;
-    for (const chunk of chunked(rows, 200)) {
-      await db.insert(uvmTable).values(chunk).onConflictDoNothing();
-    }
-  } catch {
-    /* ignore */
-  }
-}
-
 function chunked<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
+}
+
+async function migrateLegacyIfNeeded(tid: string): Promise<void> {
+  await migrateLegacyUserVisibleModelsIfNeeded(tid);
 }
 
 export async function getUserModels(userId: string): Promise<string[]> {
@@ -107,5 +81,5 @@ export function userModelsFilePath(): string {
 }
 
 export function __resetUserModelsCache(): void {
-  legacyMigrationRan = false;
+  /* legacy in-process flag removed; kept for tests that reset module state */
 }

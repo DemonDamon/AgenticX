@@ -92,8 +92,9 @@ bash scripts/start-dev.sh     # 每天开工跑这一条
 5. 用该用户的账号登录前台 portal：模型下拉只会出现刚才分配的模型，发送消息走真调
 6. 顶部 token chip 实时显示「↑输入 ↓输出 Σ合计」累计
 
-> 配置数据落在 `enterprise/.runtime/admin/{providers,user-models}.json`（chmod 600，已 `.gitignore`）。
-> Gateway 后台每 5 秒重读一次，admin 改完几秒内生效，无需重启。
+> **运行时配置（模型服务 / 用户可见模型 / Token 配额）以 Postgres 为单一数据源**（表 `enterprise_runtime_*`）。
+> 本地开发若仍保留 `enterprise/.runtime/admin/{providers,user-models,quotas}.json`，会在 `bootstrap.sh` / `start-dev.sh` 与 `pnpm migrate:legacy-runtime` 时**幂等导入** PG；导入后 admin / portal 均只读 PG。
+> Gateway 后台每 5 秒重读一次 provider 配置，admin 改完几秒内生效，无需重启。
 
 ### 让聊天回真实模型（备选 ② · 环境变量）
 
@@ -137,7 +138,8 @@ bash scripts/bootstrap.sh --mode=server
 4. `pnpm install`
 5. 启动 postgres + redis（local）；server 模式跳过
 6. 跑 `db:migrate` + `db:seed`
-7. 生成 RSA-2048 JWT 密钥对至 `enterprise/.local-secrets/`（local）
+7. 跑 `migrate:legacy-runtime`（将 `.runtime/admin/*.json` 幂等导入 PG）
+8. 生成 RSA-2048 JWT 密钥对至 `enterprise/.local-secrets/`（local）
 
 常用选项：
 

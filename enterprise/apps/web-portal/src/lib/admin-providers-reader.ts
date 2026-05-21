@@ -4,7 +4,7 @@
 
 import { enterpriseRuntimeModelProviders as mpTable } from "@agenticx/db-schema";
 import { enterpriseRuntimeUserVisibleModels as uvmTable } from "@agenticx/db-schema";
-import { getIamDb } from "@agenticx/iam-core";
+import { getIamDb, migrateLegacyUserVisibleModelsIfNeeded } from "@agenticx/iam-core";
 import { eq } from "drizzle-orm";
 
 import { decryptProviderApiKey } from "./provider-api-key-crypto";
@@ -73,6 +73,7 @@ async function readProviders(): Promise<ProviderRecord[]> {
 
 async function readUserModels(): Promise<Record<string, string[]>> {
   const tid = requiredTenant();
+  await migrateLegacyUserVisibleModelsIfNeeded(tid);
   const db = getIamDb();
   const rows = await db.select().from(uvmTable).where(eq(uvmTable.tenantId, tid));
   const map: Record<string, string[]> = {};
