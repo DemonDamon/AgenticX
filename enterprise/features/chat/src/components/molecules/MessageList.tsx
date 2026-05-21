@@ -1,11 +1,13 @@
 import * as React from "react";
-import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage } from "@agenticx/core-api";
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@agenticx/ui";
 import { ReasoningBlock } from "../atoms/ReasoningBlock";
 import { ToolCallCard } from "../atoms/ToolCallCard";
+import { parseAssistantContent } from "../../assistant-content";
+import { ASSISTANT_MD_COMPONENTS } from "../../markdown/assistant-markdown-components";
+import "../../markdown/chat-prism-themes.css";
 
 // 内联 SVG 图标组件
 function IconCopy({ className }: { className?: string }) {
@@ -113,51 +115,6 @@ type MessageListProps = {
   onFeedback?: (messageId: string, type: "like" | "dislike") => void;
 };
 
-type ParsedAssistantContent = {
-  displayContent: string;
-  reasoningContent: string;
-  thinkingStarted: boolean;
-  thinkingInProgress: boolean;
-};
-
-function parseAssistantContent(message: ChatMessage): ParsedAssistantContent {
-  const fallbackReasoning = (message.reasoning ?? "").trim();
-  const raw = message.content ?? "";
-  const lower = raw.toLowerCase();
-  const openTag = "<think>";
-  const closeTag = "</think>";
-  const openIdx = lower.indexOf(openTag);
-
-  if (openIdx < 0) {
-    return {
-      displayContent: raw,
-      reasoningContent: fallbackReasoning,
-      thinkingStarted: fallbackReasoning.length > 0,
-      thinkingInProgress: false,
-    };
-  }
-
-  const before = raw.slice(0, openIdx);
-  const reasoningStart = openIdx + openTag.length;
-  const closeIdx = lower.indexOf(closeTag, reasoningStart);
-
-  if (closeIdx < 0) {
-    return {
-      displayContent: before,
-      reasoningContent: raw.slice(reasoningStart),
-      thinkingStarted: true,
-      thinkingInProgress: true,
-    };
-  }
-
-  return {
-    displayContent: `${before}${raw.slice(closeIdx + closeTag.length)}`,
-    reasoningContent: raw.slice(reasoningStart, closeIdx),
-    thinkingStarted: true,
-    thinkingInProgress: false,
-  };
-}
-
 function ThinkingDotsPlaceholder() {
   return (
     <div className="inline-flex min-h-[40px] items-center gap-2 py-1">
@@ -168,58 +125,9 @@ function ThinkingDotsPlaceholder() {
   );
 }
 
-/** 助手主文 Markdown：GFM + 与主题 token 对齐的基础排版
- *  列表使用 list-inside，避免 marker 溢出到正文容器外造成“左侧多出一截”。 */
-const ASSISTANT_MD_COMPONENTS: Components = {
-  h1: ({ children }) => <h1 className="mb-2 mt-3 text-balance pl-0 text-xl font-semibold first:mt-0">{children}</h1>,
-  h2: ({ children }) => <h2 className="mb-1.5 mt-3 text-balance pl-0 text-lg font-semibold first:mt-0">{children}</h2>,
-  h3: ({ children }) => <h3 className="mb-1.5 mt-2 text-balance pl-0 text-base font-semibold first:mt-0">{children}</h3>,
-  p: ({ children }) => <p className="mb-2.5 pl-0 last:mb-0">{children}</p>,
-  ul: ({ children }) => <ul className="mb-2.5 list-inside list-disc pl-0 last:mb-0">{children}</ul>,
-  ol: ({ children }) => <ol className="mb-2.5 list-inside list-decimal pl-0 last:mb-0">{children}</ol>,
-  li: ({ children }) => <li className="mb-0.5 pl-0 [&>p]:mb-0">{children}</li>,
-  blockquote: ({ children }) => (
-    <blockquote className="my-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>
-  ),
-  a: ({ children, href }) => (
-    <a className="font-medium text-primary underline underline-offset-2 hover:opacity-90" href={href} rel="noreferrer" target="_blank">
-      {children}
-    </a>
-  ),
-  hr: () => <hr className="my-3 border-border" />,
-  table: ({ children }) => (
-    <div className="my-2 max-w-full overflow-x-auto rounded-md border border-border">
-      <table className="w-full min-w-[280px] border-collapse text-left text-sm">{children}</table>
-    </div>
-  ),
-  thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
-  th: ({ children }) => <th className="border-b border-border px-3 py-2 font-medium">{children}</th>,
-  td: ({ children }) => <td className="border-b border-border/80 px-3 py-2 align-top">{children}</td>,
-  code: ({ className, children, ...rest }) => {
-    const isBlock = /language-/.test(className ?? "");
-    if (isBlock) {
-      return (
-        <code className={`${className ?? ""} block`} {...rest}>
-          {children}
-        </code>
-      );
-    }
-    return (
-      <code className="rounded bg-muted/80 px-1 py-0.5 font-mono text-[0.9em] text-foreground" {...rest}>
-        {children}
-      </code>
-    );
-  },
-  pre: ({ children }) => (
-    <pre className="mb-2.5 overflow-x-auto rounded-lg border border-border/70 bg-muted/40 p-3 font-mono text-xs leading-relaxed last:mb-0">
-      {children}
-    </pre>
-  ),
-};
-
 function AssistantMessageMarkdown({ text, className }: { text: string; className?: string }) {
   return (
-    <div className={className}>
+    <div className={`agx-assistant-md ${className ?? ""}`.trim()}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={ASSISTANT_MD_COMPONENTS}>
         {text}
       </ReactMarkdown>

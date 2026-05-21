@@ -42,6 +42,7 @@ export function InputArea({
   appearance = "default",
 }: InputAreaProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const imeComposingRef = React.useRef(false);
   const canSend = status !== "sending" && status !== "streaming" && value.trim().length > 0;
   const canCancel = status === "sending" || status === "streaming";
   const minTextareaHeight = appearance === "portal" ? 48 : 40;
@@ -73,7 +74,21 @@ export function InputArea({
         rows={1}
         className={`w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pb-2 pt-2.5 text-sm leading-6 text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${appearance === "portal" ? "min-h-[48px]" : "min-h-[40px]"}`}
         placeholder="发送消息给 Machi..."
+        onCompositionStart={() => {
+          imeComposingRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          window.setTimeout(() => {
+            imeComposingRef.current = false;
+          }, 0);
+        }}
         onKeyDown={(event) => {
+          const isImeComposing =
+            event.nativeEvent.isComposing ||
+            imeComposingRef.current ||
+            event.key === "Process" ||
+            event.keyCode === 229;
+          if (isImeComposing) return;
           if (event.key !== "Enter") return;
           if (event.shiftKey) return;
           event.preventDefault();

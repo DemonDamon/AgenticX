@@ -8,7 +8,7 @@ import {
   type ChatSession,
 } from "@agenticx/core-api";
 import type { ChatClient, ChatRequest as SdkChatRequest } from "@agenticx/sdk-ts";
-import { createPortalChatHistoryClient } from "./history-client";
+import { ChatHistoryHttpError, createPortalChatHistoryClient } from "./history-client";
 
 export type ChatStatus = "idle" | "sending" | "streaming" | "error";
 
@@ -213,7 +213,27 @@ function mergeSessionMessages(messages: ChatMessage[], sessionId: string, sessio
 
 let chatHydrateInFlight: Promise<void> | null = null;
 let sessionMessageLoadSeq = 0;
+let historyAuthRedirectScheduled = false;
 const portalHistory = createPortalChatHistoryClient();
+
+function resolveHistoryErrorMessage(error: unknown, fallback: string): string {
+  const unauthorized =
+    (error instanceof ChatHistoryHttpError && error.status === 401) ||
+    (error instanceof Error && /unauthorized/i.test(error.message));
+
+  if (unauthorized) {
+    if (typeof window !== "undefined" && !historyAuthRedirectScheduled) {
+      historyAuthRedirectScheduled = true;
+      const returnTo = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+      window.setTimeout(() => {
+        window.location.assign(`/auth?returnTo=${returnTo}`);
+      }, 0);
+    }
+    return "登录已过期，请重新登录";
+  }
+
+  return error instanceof Error ? error.message : fallback;
+}
 
 function stripVersionsForSession(
   state: ChatStoreState,
@@ -319,12 +339,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           sessionTokensBySessionId: { [activeSessionId]: { ...EMPTY_USAGE } },
           responseVersionsByUserMessageId: responseVersions,
         });
+        historyAuthRedirectScheduled = false;
       } catch (error) {
-        const message = error instanceof Error ? error.message : "加载历史失败";
+        const message = resolveHistoryErrorMessage(error, "加载历史失败");
+        const unauthorized = message === "登录已过期，请重新登录";
         set({
           historyLoading: false,
           historyError: message,
-          hydrated: false,
+          hydrated: unauthorized ? false : get().hydrated,
         });
       } finally {
         chatHydrateInFlight = null;
@@ -383,6 +405,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         status: "idle",
         errorMessage: null,
         activeRequestId: null,
+        historyError: null,
         sessionTokens: { ...EMPTY_USAGE },
         sessionTokensBySessionId: {
           ...prev.sessionTokensBySessionId,
@@ -413,7 +436,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         responseVersionsByUserMessageId: {},
       }));
     } catch (error) {
-      set({ historyError: error instanceof Error ? error.message : "创建会话失败" });
+      const message = resolveHistoryErrorMessage(error, "创建会话失败");
+      set({
+        historyError: message,
+        hydrated: message === "登录已过期，请重新登录" ? false : get().hydrated,
+      });
     }
   },
 

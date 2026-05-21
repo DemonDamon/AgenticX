@@ -5,19 +5,31 @@ import { refreshTokens, verifyAccessToken } from "./auth-runtime";
 export const ACCESS_COOKIE = "agenticx_access_token";
 export const REFRESH_COOKIE = "agenticx_refresh_token";
 
-async function hydrateFromDatabase<T extends { tenantId: string; email: string; scopes: string[]; deptId?: string | null }>(
-  context: T
-): Promise<T | null> {
+async function hydrateFromDatabase<
+  T extends { userId: string; tenantId: string; email: string; scopes: string[]; deptId?: string | null },
+>(context: T): Promise<T | null> {
   if (!process.env.DATABASE_URL?.trim()) return context;
-  const live = await loadAuthUserByEmail(context.tenantId, context.email);
-  if (!live || live.status === "disabled") return null;
-  if (live.status === "locked") return null;
-  if (live.lockedUntil && live.lockedUntil > Date.now()) return null;
-  return {
-    ...context,
-    scopes: live.scopes,
-    deptId: live.deptId ?? null,
-  };
+  try {
+    const live = await loadAuthUserByEmail(context.tenantId, context.email);
+    if (!live) {
+      // Access JWT 仍有效但 PG 暂未命中用户行时，信任 token，避免 dev/HMR 期间误报 unauthorized。
+      return context;
+    }
+    if (live.status === "disabled") return null;
+    if (live.status === "locked") return null;
+    if (live.lockedUntil && live.lockedUntil > Date.now()) return null;
+    return {
+      ...context,
+      userId: live.id,
+      scopes: live.scopes,
+      deptId: live.deptId ?? null,
+    };
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production") {
+      console.error("[session] hydrateFromDatabase failed, falling back to JWT context:", error);
+    }
+    return context;
+  }
 }
 
 export async function getSessionFromCookies() {

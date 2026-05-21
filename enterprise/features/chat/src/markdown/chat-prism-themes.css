@@ -1,0 +1,132 @@
+/**
+ * Enterprise chat Markdown code fences: Prism token colors per light/dark theme.
+ */
+
+.agx-assistant-md pre.agx-chat-prism {
+  margin: 0;
+}
+
+.agx-assistant-md pre.agx-chat-prism code {
+  display: block;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  white-space: pre;
+  word-break: normal;
+  tab-size: 4;
+  background: transparent !important;
+  text-shadow: none !important;
+}
+
+.agx-assistant-md :not(pre) > code {
+  color: var(--foreground);
+  background: color-mix(in oklch, var(--muted) 88%, var(--foreground) 12%) !important;
+}
+
+/* Light */
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism code {
+  color: #24292f;
+}
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.comment,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.prolog,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.doctype,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.cdata {
+  color: #57606a;
+}
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.punctuation {
+  color: #656d76;
+}
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.property,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.tag,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.boolean,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.number,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.constant,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.symbol,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.deleted {
+  color: #953800;
+}
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.selector,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.attr-name,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.string,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.char,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.builtin,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.inserted {
+  color: #116329;
+}
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.operator,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.entity,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.url {
+  color: #953800;
+}
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.atrule,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.attr-value,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.keyword {
+  color: #0550ae;
+}
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.function,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.class-name {
+  color: #8250df;
+}
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.regex,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.important,
+:root:not(.dark) .agx-assistant-md pre.agx-chat-prism .token.variable {
+  color: #bf3989;
+}
+
+/* Dark */
+.dark .agx-assistant-md pre.agx-chat-prism code {
+  color: #ccc;
+}
+.dark .agx-assistant-md pre.agx-chat-prism .token.comment,
+.dark .agx-assistant-md pre.agx-chat-prism .token.block-comment,
+.dark .agx-assistant-md pre.agx-chat-prism .token.prolog,
+.dark .agx-assistant-md pre.agx-chat-prism .token.doctype,
+.dark .agx-assistant-md pre.agx-chat-prism .token.cdata {
+  color: #999;
+}
+.dark .agx-assistant-md pre.agx-chat-prism .token.punctuation {
+  color: #ccc;
+}
+.dark .agx-assistant-md pre.agx-chat-prism .token.tag,
+.dark .agx-assistant-md pre.agx-chat-prism .token.attr-name,
+.dark .agx-assistant-md pre.agx-chat-prism .token.namespace,
+.dark .agx-assistant-md pre.agx-chat-prism .token.deleted {
+  color: #e2777a;
+}
+.dark .agx-assistant-md pre.agx-chat-prism .token.function-name {
+  color: #6196cc;
+}
+.dark .agx-assistant-md pre.agx-chat-prism .token.boolean,
+.dark .agx-assistant-md pre.agx-chat-prism .token.number,
+.dark .agx-assistant-md pre.agx-chat-prism .token.function {
+  color: #f08d49;
+}
+.dark .agx-assistant-md pre.agx-chat-prism .token.property,
+.dark .agx-assistant-md pre.agx-chat-prism .token.class-name,
+.dark .agx-assistant-md pre.agx-chat-prism .token.constant,
+.dark .agx-assistant-md pre.agx-chat-prism .token.symbol {
+  color: #f8c555;
+}
+.dark .agx-assistant-md pre.agx-chat-prism .token.selector,
+.dark .agx-assistant-md pre.agx-chat-prism .token.important,
+.dark .agx-assistant-md pre.agx-chat-prism .token.atrule,
+.dark .agx-assistant-md pre.agx-chat-prism .token.keyword,
+.dark .agx-assistant-md pre.agx-chat-prism .token.builtin {
+  color: #cc99cd;
+}
+.dark .agx-assistant-md pre.agx-chat-prism .token.string,
+.dark .agx-assistant-md pre.agx-chat-prism .token.char,
+.dark .agx-assistant-md pre.agx-chat-prism .token.attr-value,
+.dark .agx-assistant-md pre.agx-chat-prism .token.regex,
+.dark .agx-assistant-md pre.agx-chat-prism .token.variable {
+  color: #7ec699;
+}
+.dark .agx-assistant-md pre.agx-chat-prism .token.operator,
+.dark .agx-assistant-md pre.agx-chat-prism .token.entity,
+.dark .agx-assistant-md pre.agx-chat-prism .token.url {
+  color: #67cdcc;
+}
+.dark .agx-assistant-md pre.agx-chat-prism .token.inserted {
+  color: #7ec699;
+}
