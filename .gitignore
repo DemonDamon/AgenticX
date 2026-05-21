@@ -9,6 +9,10 @@
 .mypy_cache/
 .lingma/
 .agenticx/
+
+# Per-skill usage stats (agenticx/learning/skill_usage_tracker.py)
+**/.usage_stats.json
+
 .mynotes/
 .myblog/
 
