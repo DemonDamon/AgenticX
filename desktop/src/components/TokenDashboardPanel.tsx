@@ -4,7 +4,6 @@ import { useAppStore, type ThemeMode, type TokenDashboardRange } from "../store"
 import {
   fetchUsageBreakdown,
   fetchUsageDaily,
-  fetchUsageHeatmap,
   fetchUsageMeta,
   fetchUsageSummary,
   fetchUsageTopModels,
@@ -23,6 +22,8 @@ const RANGE_LABELS: { id: TokenDashboardRange; label: string }[] = [
 ];
 
 const PROVIDER_BAR_COLORS = ["#7c3aed", "#0891b2", "#10b981", "#eab308", "#f97316", "#ec4899", "#6366f1"];
+const KPI_ACCENTS = ["bg-violet-400", "bg-cyan-400", "bg-emerald-400", "bg-amber-400"];
+const MODEL_ACCENTS = ["bg-violet-400", "bg-cyan-400", "bg-emerald-400"];
 
 function fmtCompact(n: number): string {
   const x = Math.max(0, Number(n) || 0);
@@ -35,50 +36,6 @@ function fmtCompact(n: number): string {
 function fmtUsd(n: number): string {
   const x = Number(n) || 0;
   return x.toFixed(2);
-}
-
-/** 热力图纯色填充（SVG 内避免依赖 `color-mix`+CSS 变量，部分环境下易退化为同色条）。浅色用绿梯，深色/dim 用白透明梯。 */
-function heatmapBarFill(theme: ThemeMode, lvl: number): string {
-  if (theme === "light") {
-    if (lvl === 0) return "#e5e7eb";
-    if (lvl === 1) return "#86efac";
-    if (lvl === 2) return "#22c55e";
-    if (lvl === 3) return "#15803d";
-    return "#052e16";
-  }
-  if (lvl === 0) return "rgba(255, 255, 255, 0.08)";
-  if (lvl === 1) return "rgba(255, 255, 255, 0.22)";
-  if (lvl === 2) return "rgba(255, 255, 255, 0.40)";
-  if (lvl === 3) return "rgba(255, 255, 255, 0.62)";
-  return "rgba(255, 255, 255, 0.90)";
-}
-
-function heatmapActivityLevel(total: number, maxTotal: number): number {
-  if (total <= 0) return 0;
-  const logMax = Math.log10(Math.max(maxTotal, 1));
-  if (logMax <= 0) return 2;
-  const ratio = Math.log10(total + 1) / logMax;
-  if (ratio < 0.25) return 1;
-  if (ratio < 0.5) return 2;
-  if (ratio < 0.75) return 3;
-  return 4;
-}
-
-function datesAscending(fromIso: string, days: number): string[] {
-  const out: string[] = [];
-  try {
-    const base = new Date(`${fromIso}T00:00:00.000Z`);
-    const y = base.getUTCFullYear();
-    const mo = base.getUTCMonth();
-    const da = base.getUTCDate();
-    for (let i = 0; i < days; i += 1) {
-      const d = new Date(Date.UTC(y, mo, da + i));
-      out.push(d.toISOString().slice(0, 10));
-    }
-  } catch {
-    // ignore
-  }
-  return out;
 }
 
 type Props = {
@@ -104,7 +61,6 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
   const [breakdown, setBreakdown] = useState<UsageBreakdownItem[]>([]);
   const [daily, setDaily] = useState<UsageDailyRow[]>([]);
   const [topModels, setTopModels] = useState<UsageTopModel[]>([]);
-  const [heatmap, setHeatmap] = useState<{ date: string; total: number }[]>([]);
   const [meta, setMeta] = useState<{ started_at: number | null; active_days_30d: number; month_conversations: number } | null>(
     null,
   );
@@ -140,27 +96,27 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
       try {
         const base = await resolveApiBase();
         const tok = apiToken ?? "";
-        if (range === "custom" && (!customParams?.from || !customParams?.to)) {
+        const customIncomplete = range === "custom" && (!customParams?.from || !customParams?.to);
+
+        if (customIncomplete) {
           setErr("请选择自定义区间的开始与结束日期");
-          setBusy(false);
+          const [m, wChip, mChip] = await Promise.all([
+            fetchUsageMeta(base, tok),
+            fetchUsageSummary(base, tok, "week"),
+            fetchUsageSummary(base, tok, "month"),
+          ]);
+          if (cancelled) return;
+          setMeta(m);
+          setWeekChip(wChip);
+          setMonthChip(mChip);
           return;
         }
 
-        const [
-          s,
-          prov,
-          dRows,
-          tm,
-          hm,
-          m,
-          wChip,
-          mChip,
-        ] = await Promise.all([
+        const [s, prov, dRows, tm, m, wChip, mChip] = await Promise.all([
           fetchUsageSummary(base, tok, range, customParams),
           fetchUsageBreakdown(base, tok, range, "provider", customParams),
           fetchUsageDaily(base, tok, range, customParams),
           fetchUsageTopModels(base, tok, range, 3, customParams),
-          fetchUsageHeatmap(base, tok, "total"),
           fetchUsageMeta(base, tok),
           fetchUsageSummary(base, tok, "week"),
           fetchUsageSummary(base, tok, "month"),
@@ -171,7 +127,6 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
         setBreakdown(prov.items ?? []);
         setDaily(dRows.items ?? []);
         setTopModels(tm.items ?? []);
-        setHeatmap(hm.items ?? []);
         setMeta(m);
         setWeekChip(wChip);
         setMonthChip(mChip);
@@ -188,25 +143,6 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
     };
   }, [open, range, customParams?.from, customParams?.to, apiToken, resolveApiBase]);
 
-  const heatmapCells = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const row of heatmap) {
-      map.set(row.date, row.total);
-    }
-    const today = new Date();
-    const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-    const start = new Date(end);
-    start.setUTCDate(end.getUTCDate() - 371);
-    const labels = datesAscending(start.toISOString().slice(0, 10), 372);
-    let maxT = 1;
-    const totals = labels.map((d) => {
-      const v = map.get(d) ?? 0;
-      maxT = Math.max(maxT, v);
-      return v;
-    });
-    return { labels, totals, maxT };
-  }, [heatmap]);
-
   const trendBars = useMemo(() => {
     const rows = [...daily];
     const tail = rows.slice(-30);
@@ -222,17 +158,13 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
 
   const dailyDesc = useMemo(() => [...daily].reverse(), [daily]);
 
-  /** Hide cached / reasoning columns when every row in the current range is 0 (model doesn't report them). */
-  const showCached = useMemo(() => daily.some((r) => r.cached > 0), [daily]);
+  /** Hide reasoning column when every row in the current range is 0 (model doesn't report it). */
   const showReasoning = useMemo(() => daily.some((r) => r.reasoning > 0), [daily]);
 
   const kpiMainValueClass =
     theme === "light"
-      ? "truncate text-base font-bold tabular-nums text-black"
-      : "truncate text-base font-bold tabular-nums text-white";
-
-  const statDateClass =
-    theme === "light" ? "text-base font-bold tabular-nums text-black" : "text-base font-bold tabular-nums text-white";
+      ? "truncate text-base font-bold tabular-nums tracking-tight text-black"
+      : "truncate text-base font-bold tabular-nums tracking-tight text-white";
 
   if (!open) return null;
 
@@ -262,79 +194,63 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
           </button>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden bg-surface-base p-5 md:flex-row md:gap-5">
-          <aside className="agx-token-dash-aside flex w-full shrink-0 flex-col gap-4 md:w-[340px] md:overflow-y-auto">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto bg-surface-base p-5 md:flex-row md:gap-5 md:overflow-hidden">
+          <aside className="agx-token-dash-aside flex w-full shrink-0 flex-col gap-3.5 md:w-[340px] md:overflow-y-auto md:pr-1">
             <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-lg border border-border bg-surface-card px-3 py-2.5">
-                <div className="text-xs uppercase tracking-wide text-[var(--text-primary)]">7d</div>
-                <div className={kpiMainValueClass}>
-                  {fmtCompact(weekChip?.tokens ?? 0)}
+              {[
+                { label: "7D", value: fmtCompact(weekChip?.tokens ?? 0) },
+                { label: "30D", value: fmtCompact(monthChip?.tokens ?? 0) },
+                { label: "日均(估)", value: fmtCompact(avgDaily30) },
+                { label: "本月会话", value: fmtCompact(meta?.month_conversations ?? 0) },
+              ].map((item, i) => (
+                <div key={item.label} className="rounded-lg border border-border bg-surface-card px-3 py-2.5">
+                  <div className={`mb-2 h-0.5 w-7 rounded-full ${KPI_ACCENTS[i]}`}></div>
+                  <div className="text-xs uppercase tracking-wide text-[var(--text-primary)]">{item.label}</div>
+                  <div className={kpiMainValueClass}>{item.value}</div>
                 </div>
-              </div>
-              <div className="rounded-lg border border-border bg-surface-card px-3 py-2.5">
-                <div className="text-xs uppercase tracking-wide text-[var(--text-primary)]">30d</div>
-                <div className={kpiMainValueClass}>
-                  {fmtCompact(monthChip?.tokens ?? 0)}
+              ))}
+            </div>
+
+            <div className="rounded-lg border border-border bg-surface-card p-3.5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs uppercase tracking-wide text-[var(--text-primary)]">统计起始</div>
+                  <div className="mt-1 truncate text-2xl font-bold tabular-nums tracking-tight text-[var(--text-strong)]">
+                    {startedLabel}
+                  </div>
                 </div>
-              </div>
-              <div className="rounded-lg border border-border bg-surface-card px-3 py-2.5">
-                <div className="text-xs uppercase tracking-wide text-[var(--text-primary)]">日均(估)</div>
-                <div className={kpiMainValueClass}>
-                  {fmtCompact(avgDaily30)}
-                </div>
-              </div>
-              <div className="rounded-lg border border-border bg-surface-card px-3 py-2.5">
-                <div className="text-xs uppercase tracking-wide text-[var(--text-primary)]">本月会话</div>
-                <div className={kpiMainValueClass}>
-                  {fmtCompact(meta?.month_conversations ?? 0)}
+                <div className="shrink-0 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold tabular-nums text-emerald-400">
+                  {meta?.active_days_30d ?? 0}/30 天活跃
                 </div>
               </div>
             </div>
 
-            <div className="rounded-lg border border-border bg-surface-card p-3">
-              <div className="mb-1 text-sm font-medium text-[var(--text-strong)]">统计起始</div>
-              <div className={statDateClass}>{startedLabel}</div>
-              <div className="mt-2 text-sm font-medium text-[var(--text-primary)]">
-                近30日活跃天：{meta?.active_days_30d ?? 0}
-              </div>
-              <div className="mt-3 text-sm leading-relaxed text-[var(--text-primary)]">
-                {/* Pricing overrides: ~/.agenticx/config.yaml → pricing.models */}
-                {/* 金额为基于内置单价表的估算；可通过配置文件覆盖模型单价。 */}
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border bg-surface-card p-3">
-              <div className="mb-2 text-sm font-medium text-[var(--text-strong)]">常用模型 Top 3</div>
-              <ol className="space-y-2 text-sm">
+            <div className="rounded-lg border border-border bg-surface-card p-3.5">
+              <div className="mb-3 text-sm font-medium text-[var(--text-strong)]">常用模型 Top 3</div>
+              <ol className="space-y-3 text-sm">
                 {(topModels.length ? topModels : []).map((m, i) => (
-                  <li key={m.model} className="flex justify-between gap-2 text-[var(--text-strong)]">
-                    <span className="truncate">
-                      {i + 1}. {m.model || "(unknown)"}
-                    </span>
-                    <span className="shrink-0 tabular-nums text-[var(--text-primary)]">{m.percent.toFixed(1)}%</span>
+                  <li key={m.model}>
+                    <div className="mb-1.5 flex justify-between gap-3 text-[var(--text-strong)]">
+                      <span className="truncate">
+                        {i + 1}. {m.model || "(unknown)"}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-[var(--text-primary)]">{m.percent.toFixed(1)}%</span>
+                    </div>
+                    <div className="h-1 overflow-hidden rounded-full bg-surface-base">
+                      <div
+                        className={`h-full rounded-full ${MODEL_ACCENTS[i % MODEL_ACCENTS.length]}`}
+                        style={{ width: `${Math.max(2, Math.min(100, m.percent))}%` }}
+                      ></div>
+                    </div>
                   </li>
                 ))}
                 {!topModels.length ? <li className="font-medium text-[var(--text-primary)]">暂无数据</li> : null}
               </ol>
             </div>
 
-            <div className="rounded-lg border border-border bg-surface-card p-3">
-              <div className="mb-2 text-sm font-medium text-[var(--text-strong)]">活动热力</div>
-              <div className="overflow-x-auto rounded-md bg-surface-base px-1 py-1">
-                <svg width={heatmapCells.labels.length * 5} height={32} className="block max-w-full">
-                  {heatmapCells.labels.map((dayLabel, i) => {
-                    const t = heatmapCells.totals[i] ?? 0;
-                    const lvl = heatmapActivityLevel(t, heatmapCells.maxT);
-                    const fill = heatmapBarFill(theme, lvl);
-                    return <rect key={dayLabel} x={i * 5} y={5} width={4} height={20} fill={fill} rx={1} />;
-                  })}
-                </svg>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border bg-surface-card p-3">
+            <div className="flex flex-col rounded-lg border border-border bg-surface-card p-3.5 md:flex-1">
               <div className="mb-2 text-sm font-medium text-[var(--text-strong)]">趋势（当前区间 · 最多30日）</div>
-              <div className="flex h-16 items-end gap-0.5 overflow-x-auto rounded-md bg-surface-base px-2 py-2">
+              <div className="flex h-16 items-end gap-0.5 overflow-x-auto rounded-md bg-surface-base px-2 py-2 md:flex-1">
                 {trendBars.map((r) => (
                   <div
                     key={r.date}
@@ -347,7 +263,7 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
             </div>
           </aside>
 
-          <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+          <main className="flex min-h-0 flex-1 flex-col gap-4 md:overflow-y-auto">
             <div className="flex flex-wrap gap-2">
               {RANGE_LABELS.map((tab) => (
                 <button
@@ -429,19 +345,14 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-surface-card">
-              <div className="sticky top-0 z-[1] flex gap-2 border-b border-border bg-surface-base px-4 py-3 text-sm font-medium text-[var(--text-strong)]">
-                <button type="button" className="agx-topbar-btn--active rounded-md px-3 py-1 text-[var(--text-strong)]">
-                  每日明细
-                </button>
-              </div>
               <table className="w-full border-collapse text-left text-sm">
-                <thead className="bg-surface-base text-[var(--text-strong)]">
+                <thead className="sticky top-0 z-[1] border-b border-border bg-surface-base text-[var(--text-strong)]">
                   <tr>
                     <th className="px-4 py-3 font-semibold">日期</th>
                     <th className="px-4 py-3 font-semibold">合计</th>
                     <th className="px-4 py-3 font-semibold">输入</th>
                     <th className="px-4 py-3 font-semibold">输出</th>
-                    {showCached && <th className="px-4 py-3 font-semibold">缓存</th>}
+                    <th className="px-4 py-3 font-semibold">缓存</th>
                     {showReasoning && <th className="px-4 py-3 font-semibold">推理</th>}
                     <th className="px-4 py-3 font-semibold">会话</th>
                   </tr>
@@ -453,14 +364,14 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
                       <td className="px-4 py-2.5 tabular-nums text-[var(--text-strong)]">{fmtCompact(row.total)}</td>
                       <td className="px-4 py-2.5 tabular-nums text-[var(--text-primary)]">{fmtCompact(row.input)}</td>
                       <td className="px-4 py-2.5 tabular-nums text-[var(--text-primary)]">{fmtCompact(row.output)}</td>
-                      {showCached && <td className="px-4 py-2.5 tabular-nums text-[var(--text-primary)]">{fmtCompact(row.cached)}</td>}
+                      <td className="px-4 py-2.5 tabular-nums text-[var(--text-primary)]">{fmtCompact(row.cached)}</td>
                       {showReasoning && <td className="px-4 py-2.5 tabular-nums text-[var(--text-primary)]">{fmtCompact(row.reasoning)}</td>}
                       <td className="px-4 py-2.5 tabular-nums text-[var(--text-primary)]">{row.convs}</td>
                     </tr>
                   ))}
                   {!dailyDesc.length ? (
                     <tr>
-                      <td colSpan={4 + (showCached ? 1 : 0) + (showReasoning ? 1 : 0) + 1} className="px-4 py-10 text-center text-base font-medium text-[var(--text-primary)]">
+                      <td colSpan={6 + (showReasoning ? 1 : 0)} className="px-4 py-10 text-center text-base font-medium text-[var(--text-primary)]">
                         暂无数据（新版启用后的用量才会入账）
                       </td>
                     </tr>
