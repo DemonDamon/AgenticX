@@ -256,10 +256,96 @@ class BrainRegistry:
                     self._write_registry(ids)
         return brain
 
+    def _validate_private_owner(self, owner_avatar_id: Optional[str]) -> str:
+        owner = str(owner_avatar_id or "").strip()
+        if not owner:
+            raise BrainError("owner_avatar_id required for private brain")
+        try:
+            from agenticx.avatar.registry import AvatarRegistry
+
+            if AvatarRegistry().get_avatar(owner) is None:
+                raise BrainError(f"unknown avatar_id: {owner}")
+        except BrainError:
+            raise
+        except Exception as exc:
+            raise BrainError(f"avatar lookup failed: {exc}") from exc
+        return owner
+
+    def relocate_visibility(
+        self,
+        brain_id: str,
+        *,
+        scope: BrainScope,
+        owner_avatar_id: Optional[str] = None,
+    ) -> Brain:
+        """Move brain storage and update registry when scope / owner changes."""
+        if brain_id == DEFAULT_DOCS_BRAIN_ID:
+            raise BrainError("cannot change visibility of default docs brain")
+        brain = self.get(brain_id)
+        if brain is None:
+            raise BrainError(f"unknown brain_id: {brain_id}")
+
+        new_owner: Optional[str] = None
+        if scope == BrainScope.PRIVATE:
+            new_owner = self._validate_private_owner(owner_avatar_id)
+        elif owner_avatar_id:
+            new_owner = None
+
+        if brain.scope == scope and brain.owner_avatar_id == new_owner:
+            brain.updated_at = utc_now_iso()
+            with self._data_lock:
+                self._write_brain_yaml(brain)
+            return brain
+
+        old_root = Path(brain.storage_root).resolve()
+        new_root = self._storage_root_for(scope, new_owner, brain_id).resolve()
+        if old_root != new_root:
+            if new_root.exists():
+                raise BrainError(f"target storage already exists: {new_root}")
+            new_root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old_root), str(new_root))
+            try:
+                old_root.parent.rmdir()
+            except OSError:
+                pass
+
+        brain.scope = scope
+        brain.owner_avatar_id = new_owner
+        brain.storage_root = str(new_root)
+        if brain.type == BrainType.DOCS:
+            cfg = KBConfig.from_dict(brain.config)
+            cfg.vector_store.path = str(new_root / "chroma")
+            brain.config = cfg.to_dict()
+
+        with self._data_lock:
+            ids = self._read_registry_ids()
+            if scope == BrainScope.GLOBAL:
+                if brain_id not in ids:
+                    ids.append(brain_id)
+                    self._write_registry(ids)
+            elif brain_id in ids:
+                self._write_registry([i for i in ids if i != brain_id])
+            brain.updated_at = utc_now_iso()
+            self._write_brain_yaml(brain)
+        return brain
+
     def update(self, brain_id: str, patch: Dict[str, Any]) -> Brain:
         brain = self.get(brain_id)
         if brain is None:
             raise BrainError(f"unknown brain_id: {brain_id}")
+        if "scope" in patch or "owner_avatar_id" in patch:
+            scope_raw = str(patch.get("scope") or brain.scope.value)
+            try:
+                new_scope = BrainScope(scope_raw)
+            except ValueError as exc:
+                raise BrainError(f"invalid scope: {scope_raw}") from exc
+            owner = patch.get("owner_avatar_id", brain.owner_avatar_id)
+            return self.relocate_visibility(
+                brain_id,
+                scope=new_scope,
+                owner_avatar_id=str(owner) if owner else None,
+            )
+
         immutable = {"id", "type", "scope", "storage_root", "owner_avatar_id", "created_at"}
         for key, value in patch.items():
             if key in immutable:

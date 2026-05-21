@@ -20,9 +20,16 @@ class CodeBrainRuntime:
         self._manager = CodeIndexManager.instance()
 
     def codebase_path(self) -> Path:
-        p = Path(self._cfg.codebase_path).expanduser()
+        raw = str(self._cfg.codebase_path or "").strip()
+        if not raw:
+            raise ValueError(
+                "codebase_path 未配置：请先在设置中填写代码库绝对路径并点击「保存配置」"
+            )
+        p = Path(raw).expanduser()
         if not p.is_absolute():
-            raise ValueError("codebase_path must be absolute")
+            raise ValueError(
+                f"codebase_path 必须是绝对路径（以 / 开头），当前值: {raw!r}"
+            )
         return p.resolve()
 
     def _code_index_config(self) -> CodeIndexConfig:

@@ -31,7 +31,14 @@ def load_encoder(model_name: str) -> Any:
     global _encoder, _encoder_load_count
     with _encoder_lock:
         if _encoder is None:
-            from semble.index.dense import load_model
+            try:
+                from semble.index.dense import load_model
+            except ImportError as exc:
+                raise ImportError(
+                    "缺少 semble 包（代码索引后端）。请在运行 agx serve 的同一 Python 环境中执行："
+                    " pip install 'semble>=0.1.10,<0.2.0' pathspec"
+                    " 或 pip install -e '.[code_index]' / pip install -e '.[desktop-runtime]'"
+                ) from exc
 
             _encoder = load_model(model_name)
             _encoder_load_count += 1
