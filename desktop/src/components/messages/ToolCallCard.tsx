@@ -233,9 +233,41 @@ export function ToolCallCard({
           {!expanded && shouldForceExpand && action && <div className={forcedActionClass}>{action}</div>}
         </div>
       </div>
+    ) : variant === "flat" ? (
+      <div className={shellOuterClass}>
+        <button
+          type="button"
+          className="relative z-[1] inline-flex w-full max-w-full items-center gap-2 px-3 py-1 text-left disabled:cursor-default disabled:opacity-60"
+          onClick={() => hasDetail && setExpanded((v) => !v)}
+          disabled={!hasDetail}
+        >
+          <span className="flex h-[20px] w-[20px] shrink-0 items-center justify-center" aria-hidden>
+            <Icon className={`h-3.5 w-3.5 ${iconTone(status)}`} aria-hidden />
+          </span>
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span className="min-w-0 flex-1 truncate text-left">{titleEl}</span>
+            {metaRight}
+          </span>
+          {hasDetail ? (
+            expanded ? (
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
+            )
+          ) : null}
+        </button>
+
+        {expanded && (
+          <div className={expandedDetailClass}>
+            <div className="pl-[28px]">{detailBody}</div>
+          </div>
+        )}
+
+        {!expanded && shouldForceExpand && action && <div className={forcedActionClass}>{action}</div>}
+      </div>
     ) : (
       <div className={shellOuterClass}>
-        <div className={`flex w-full items-center gap-1.5 px-3 ${variant === "flat" ? "py-1" : "py-3"} text-left`}>
+        <div className={`flex w-full items-center gap-1.5 px-3 py-3 text-left`}>
           <button
             type="button"
             className="inline-flex min-w-0 flex-1 items-center gap-1.5 text-left disabled:cursor-default disabled:opacity-60"

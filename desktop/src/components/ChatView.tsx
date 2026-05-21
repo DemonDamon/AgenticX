@@ -83,6 +83,9 @@ const confirmModeLabel: Record<string, string> = {
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
   const toolName = String(toolNameRaw ?? "tool");
   const resultText = String(resultRaw ?? "");
+  if (toolName === "check_resources") {
+    return { content: "", silent: true };
+  }
   if (toolName === "delegate_to_avatar") {
     try {
       const parsed = JSON.parse(resultText) as Record<string, unknown>;
