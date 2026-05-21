@@ -176,17 +176,6 @@ export function KnowledgeConfigPanel({
         </div>
       ) : null}
 
-      <Panel title="启用">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={config.enabled}
-            onChange={(e) => patch("enabled", e.target.checked)}
-          />
-          <span>启用本地知识库（禁用后 `knowledge_search` 工具返回空结果）</span>
-        </label>
-      </Panel>
-
       <Panel title="向量库">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="后端">
