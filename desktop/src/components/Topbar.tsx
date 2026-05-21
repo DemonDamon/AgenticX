@@ -24,11 +24,6 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
   const onThemeToggle = () => {
     // Topbar 快速切换仅在 dark/light 之间切换，dim 仍保留在「设置」里可选
     setTheme(isDarkLike ? "light" : "dark");
-    try {
-      window.localStorage.setItem("agx-theme", isDarkLike ? "light" : "dark");
-    } catch {
-      // ignore storage errors
-    }
   };
 
   const onLoginClick = async () => {

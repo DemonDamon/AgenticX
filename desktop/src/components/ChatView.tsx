@@ -1726,11 +1726,6 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             onClick={() => {
               const next = theme === "dark" || theme === "dim" ? "light" : "dark";
               setTheme(next);
-              try {
-                window.localStorage.setItem("agx-theme", next);
-              } catch {
-                // ignore storage errors
-              }
             }}
             title={theme === "light" ? "切换到暗色" : "切换到亮色"}
             aria-label="切换主题"
