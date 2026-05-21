@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, LogIn, LogOut, Moon, PanelLeftOpen, Settings, Sun, User } from "lucide-react";
+import { Gauge, LogIn, LogOut, Moon, PanelLeftOpen, Settings, Sun, User } from "lucide-react";
 import { useAppStore } from "../store";
 
 type Props = {
@@ -105,7 +105,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
           title="Token 消耗看板"
           aria-label="Token 消耗看板"
         >
-          <Activity className="h-[18px] w-[18px]" strokeWidth={1.8} />
+          <Gauge className="h-[18px] w-[18px]" strokeWidth={1.8} />
         </button>
         <button
           className="agx-topbar-btn agx-topbar-btn--icon-only"
