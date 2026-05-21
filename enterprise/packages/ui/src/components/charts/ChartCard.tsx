@@ -289,29 +289,41 @@ export function DonutCard({
 export interface SparkLineProps {
   data: Array<{ v: number }>;
   color?: string;
-  height?: number;
+  height?: number | string;
   className?: string;
 }
 
 export function SparkLine({ data, color, height = 32, className }: SparkLineProps) {
+  // 至少需要 2 个点才能画出面/折线，若只有 1 个点则简单复制一个使其变成平移的直线，避免单点显得怪异
+  const validData = data.length === 1 ? [data[0], data[0]] : data;
+  const gradientId = `spark-gradient-${React.useId().replace(/:/g, "")}`;
+
+  if (validData.length === 0) {
+    return null;
+  }
+
   return (
-    <div className={className} style={{ height, width: "100%" }}>
+    <div className={cn("pointer-events-none outline-none select-none", className)} style={{ height, width: "100%" }}>
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+        <AreaChart data={validData} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
           <defs>
-            <linearGradient id="sparkGradient" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={color ?? chartPalette[0]} stopOpacity={0.35} />
               <stop offset="100%" stopColor={color ?? chartPalette[0]} stopOpacity={0} />
             </linearGradient>
           </defs>
+          {/* 通过 YAxis 限制：当数据全为 0 时，保证 max 至少为 1，使 0 坐标贴在图表底部，防止全屏填充色块 */}
+          <YAxis hide domain={[0, (dataMax: number) => Math.max(dataMax, 1)]} />
           <Area
             type="monotone"
             dataKey="v"
             stroke={color ?? chartPalette[0]}
             strokeWidth={1.5}
-            fill="url(#sparkGradient)"
+            fill={`url(#${gradientId})`}
             animationDuration={500}
+            isAnimationActive={false}
             dot={false}
+            activeDot={false}
           />
         </AreaChart>
       </ResponsiveContainer>

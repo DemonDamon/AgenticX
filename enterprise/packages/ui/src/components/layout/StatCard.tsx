@@ -6,13 +6,13 @@ import { cn } from "../../lib/cn";
 
 /**
  * StatCard · 仪表盘 KPI 卡片
- *   包含 icon + 标签 + 大号数值 + 可选 delta 徽标 + 可选 sparkline 区域
+ *   包含 icon + 标签 + 大号数值 + 可选 delta 徽标 + 可选 footnote
  *
  * 设计要点：
  *   - 卡片背景用 bg-card（暗色自动切换）
  *   - icon 放在左上小圆章位置，使用 bg-primary-soft 浅色背景
  *   - delta 根据 trend 自动上色：up → success，down → danger，flat → muted
- *   - 底部 footer 区域可渲染 sparkline / footnote
+ *   - 底部 footer 区域渲染简短解释文案
  */
 export interface StatCardProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "title"> {
   label: React.ReactNode;
@@ -61,6 +61,7 @@ export function StatCard({
       {accentClassName ? (
         <div className={cn("pointer-events-none absolute inset-x-0 -top-px h-0.5", accentClassName)} />
       ) : null}
+
       <div className="flex items-start justify-between gap-3">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
         {icon ? (
@@ -69,6 +70,7 @@ export function StatCard({
           </span>
         ) : null}
       </div>
+
       <div className="flex items-baseline gap-2">
         <span className="text-3xl font-semibold leading-none tracking-tight text-foreground">{value}</span>
         {delta ? (
@@ -84,7 +86,8 @@ export function StatCard({
           </span>
         ) : null}
       </div>
-      {footer ? <div className="text-xs text-muted-foreground">{footer}</div> : null}
+
+      {footer ? <div className="mt-auto text-xs text-muted-foreground">{footer}</div> : null}
     </div>
   );
 }
