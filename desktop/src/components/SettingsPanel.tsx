@@ -6242,7 +6242,11 @@ export function SettingsPanel({
             </button>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          <div
+            className={`min-h-0 flex-1 px-4 py-3 ${
+              tab === "knowledge" ? "flex flex-col overflow-hidden" : "overflow-y-auto"
+            }`}
+          >
             {tab === "account" && <AccountTab />}
 
             {/* === GENERAL TAB ===（保持挂载以便底部「保存」能刷入权限 API，避免仅失焦写入） */}
