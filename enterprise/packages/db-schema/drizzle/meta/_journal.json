@@ -78,6 +78,13 @@
       "when": 1778200000000,
       "tag": "0010_runtime_config_pg",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1778300000000,
+      "tag": "0011_gateway_channels",
+      "breakpoints": true
     }
   ]
 }

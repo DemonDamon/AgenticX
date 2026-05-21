@@ -1,0 +1,195 @@
+package server
+
+import (
+	"fmt"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/agenticx/enterprise/gateway/internal/audit"
+	"github.com/agenticx/enterprise/gateway/internal/openai"
+	"github.com/agenticx/enterprise/gateway/internal/relay"
+	"github.com/agenticx/enterprise/gateway/internal/routing"
+)
+
+func (s *Server) handleChatCompleteRelay(
+	w http.ResponseWriter,
+	r *http.Request,
+	req openai.ChatCompletionRequest,
+	startedAt time.Time,
+	identity requestIdentity,
+	estimatedInputTokens int,
+	reservedTokens int64,
+) {
+	result, err := s.relayExecutor.Complete(r.Context(), req, req.Model, channelIdentity(identity))
+	decision := routingDecisionFromRelay(result, req.Model, s.decider.Decide(r, req.Model))
+	if err != nil {
+		s.billingService.Rollback(identity.UserID, reservedTokens)
+		writeAPIError(w, openai.Internal(err.Error()))
+		return
+	}
+	resp := result.Response
+	responseContent := ""
+	if len(resp.Choices) > 0 {
+		msg := &resp.Choices[0].Message
+		responseContent = openai.ComposeMessageContent(msg.Content, msg.ReasoningContent)
+		msg.Content = responseContent
+		msg.ReasoningContent = ""
+	}
+	providerInputTokens := resp.Usage.PromptTokens
+	providerOutputTokens := resp.Usage.CompletionTokens
+	if providerInputTokens == 0 {
+		providerInputTokens = estimatedInputTokens
+	}
+	if providerOutputTokens == 0 {
+		providerOutputTokens = estimateTextTokens(responseContent)
+	}
+	actualTotal := int64(providerInputTokens + providerOutputTokens)
+	settle := s.billingService.Settle(
+		identity.UserID,
+		identity.DepartmentID,
+		roleFromScopes(identity.Scopes),
+		req.Model,
+		reservedTokens,
+		actualTotal,
+	)
+	s.reportUsage(identity, decision, providerInputTokens, providerOutputTokens)
+
+	if len(resp.Choices) > 0 {
+		respPolicy := s.evaluatePolicy(resp.Choices[0].Message.Content, makeEvalContext(identity, "response"))
+		if respPolicy.Blocked {
+			s.logger.Warn("policy blocked response", "model", req.Model, "hits", len(respPolicy.Hits))
+			ev := audit.Event{
+				ID:              makeID("audit"),
+				TenantID:        identity.TenantID,
+				EventTime:       time.Now().UTC().Format(time.RFC3339),
+				EventType:       "policy_hit",
+				UserID:          identity.UserID,
+				UserEmail:       identity.UserEmail,
+				DepartmentID:    identity.DepartmentID,
+				SessionID:       identity.SessionID,
+				ClientType:      "web-portal",
+				ClientIP:        r.RemoteAddr,
+				Provider:        decision.Provider,
+				Model:           req.Model,
+				Route:           decision.Route,
+				Digest:          &audit.Digest{PromptHash: hashText(joinMessages(req.Messages)), ResponseHash: hashText(resp.Choices[0].Message.Content)},
+				PoliciesHit:     toAuditPolicyHits(respPolicy.Hits),
+				LatencyMS:       time.Since(startedAt).Milliseconds(),
+				EstimatedTokens: estimatedInputTokens,
+				ActualTokens:    providerInputTokens + providerOutputTokens,
+				SettleDelta:     settle.Delta,
+			}
+			enrichAuditFromAttempts(&ev, result.Attempts)
+			if err := s.writeAuditEvent(ev); err != nil {
+				writeAPIError(w, openai.Internal("audit write failed"))
+				return
+			}
+			writePolicyError(w, "90002", "响应触发合规拦截", respPolicy.Hits)
+			return
+		}
+		if respPolicy.RedactedText != resp.Choices[0].Message.Content {
+			resp.Choices[0].Message.Content = respPolicy.RedactedText
+		}
+	}
+
+	ev := audit.Event{
+		ID:              makeID("audit"),
+		TenantID:        identity.TenantID,
+		EventTime:       time.Now().UTC().Format(time.RFC3339),
+		EventType:       "chat_call",
+		UserID:          identity.UserID,
+		UserEmail:       identity.UserEmail,
+		DepartmentID:    identity.DepartmentID,
+		SessionID:       identity.SessionID,
+		ClientType:      "web-portal",
+		ClientIP:        r.RemoteAddr,
+		Provider:        decision.Provider,
+		Model:           req.Model,
+		Route:           decision.Route,
+		ChannelID:       decision.ChannelID,
+		InputTokens:     providerInputTokens,
+		OutputTokens:    providerOutputTokens,
+		TotalTokens:     providerInputTokens + providerOutputTokens,
+		LatencyMS:       time.Since(startedAt).Milliseconds(),
+		EstimatedTokens: estimatedInputTokens,
+		ActualTokens:    providerInputTokens + providerOutputTokens,
+		SettleDelta:     settle.Delta,
+		Digest: &audit.Digest{
+			PromptHash:      hashText(joinMessages(req.Messages)),
+			ResponseHash:    hashText(responseContent),
+			PromptSummary:   summarize(joinMessages(req.Messages), 120),
+			ResponseSummary: summarize(responseContent, 120),
+		},
+	}
+	enrichAuditFromAttempts(&ev, result.Attempts)
+	if err := s.writeAuditEvent(ev); err != nil {
+		writeAPIError(w, openai.Internal("audit write failed"))
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func routingDecisionFromRelay(result relay.CompleteResult, model string, fallback routing.Decision) routing.Decision {
+	if result.Channel.ID != "" {
+		return decisionFromChannel(result.Channel, model)
+	}
+	return fallback
+}
+
+func (s *Server) handleChannelStats(w http.ResponseWriter, r *http.Request) {
+	if !gatewayInternalAuthorized(r) {
+		writeAPIError(w, openai.Unauthorized("unauthorized"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"code":    "00000",
+		"message": "ok",
+		"data": map[string]any{
+			"enabled": s.useChannelRelay(),
+			"stats":   s.channelStatsJSON(),
+		},
+	})
+}
+
+func gatewayInternalAuthorized(r *http.Request) bool {
+	expected := strings.TrimSpace(os.Getenv("GATEWAY_INTERNAL_TOKEN"))
+	if expected == "" {
+		return false
+	}
+	auth := r.Header.Get("authorization")
+	const prefix = "Bearer "
+	if len(auth) < len(prefix) || !strings.EqualFold(auth[:len(prefix)], prefix) {
+		return false
+	}
+	return strings.TrimSpace(auth[len(prefix):]) == expected
+}
+
+func streamErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "stream:buffer_exceeded") {
+		return "90002"
+	}
+	if strings.Contains(msg, "stream:idle_timeout") {
+		return "90002"
+	}
+	return ""
+}
+
+func formatStreamError(err error) string {
+	if err == nil {
+		return "stream failed"
+	}
+	return fmt.Sprintf("%v", err)
+}
+
+func routingDecisionFromStream(result relay.StreamResult, model string, fallback routing.Decision) routing.Decision {
+	if result.Channel.ID != "" {
+		return decisionFromChannel(result.Channel, model)
+	}
+	return fallback
+}

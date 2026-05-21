@@ -1,15 +1,18 @@
 package openai
 
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type ChatCompletionRequest struct {
-	Model       string        `json:"model"`
-	Messages    []ChatMessage `json:"messages"`
-	Temperature float64       `json:"temperature,omitempty"`
-	Stream      bool          `json:"stream,omitempty"`
+	Model                string        `json:"model"`
+	Messages             []ChatMessage `json:"messages"`
+	Temperature          float64       `json:"temperature,omitempty"`
+	Stream               bool          `json:"stream,omitempty"`
+	MaxCompletionTokens  int           `json:"max_completion_tokens,omitempty"`
+	MaxTokens            int           `json:"max_tokens,omitempty"`
 }
 
 type ChatCompletionChoice struct {
@@ -34,8 +37,9 @@ type ChatCompletionResponse struct {
 }
 
 type StreamDelta struct {
-	Role    string `json:"role,omitempty"`
-	Content string `json:"content,omitempty"`
+	Role             string `json:"role,omitempty"`
+	Content          string `json:"content,omitempty"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type StreamChoice struct {
