@@ -41,6 +41,7 @@ import {
   PanelLeftOpen,
   FileWarning,
   Gauge,
+  History,
   KeyRound,
   Languages,
   LogOut,
@@ -141,6 +142,8 @@ const SHELL_COPY = {
     commandTitle: "命令面板",
     commandDescription: "搜索页面并执行快捷操作",
     commandEmpty: "未找到匹配项",
+    recentSearches: "最近搜索",
+    noSearchHistory: "暂无搜索记录",
     quickActions: "快捷操作",
     openMenu: "打开菜单",
     theme: "主题",
@@ -165,6 +168,8 @@ const SHELL_COPY = {
     commandTitle: "Command palette",
     commandDescription: "Search pages and run quick actions",
     commandEmpty: "No matching result",
+    recentSearches: "Recent searches",
+    noSearchHistory: "No recent searches",
     quickActions: "Quick actions",
     openMenu: "Open menu",
     theme: "Theme",
@@ -213,9 +218,42 @@ function healthLabel(status: HealthStatus, locale: UiLocale): string {
 
 const COLLAPSED_KEY = "agenticx-admin-sidebar-collapsed";
 const SIDEBAR_WIDTH_KEY = "agenticx-admin-sidebar-width";
+const COMMAND_SEARCH_HISTORY_KEY = "agenticx-admin-command-search-history";
 const SIDEBAR_DEFAULT_WIDTH = 244;
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 360;
+const COMMAND_SEARCH_HISTORY_MAX = 12;
+
+function readCommandSearchHistory(): string[] {
+  try {
+    const raw = window.localStorage.getItem(COMMAND_SEARCH_HISTORY_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+      .slice(0, COMMAND_SEARCH_HISTORY_MAX);
+  } catch {
+    return [];
+  }
+}
+
+function writeCommandSearchHistory(items: string[]) {
+  try {
+    window.localStorage.setItem(
+      COMMAND_SEARCH_HISTORY_KEY,
+      JSON.stringify(items.slice(0, COMMAND_SEARCH_HISTORY_MAX))
+    );
+  } catch {
+    // noop
+  }
+}
+
+function pushCommandSearchHistory(prev: string[], term: string): string[] {
+  const normalized = term.trim();
+  if (!normalized) return prev;
+  return [normalized, ...prev.filter((item) => item !== normalized)].slice(0, COMMAND_SEARCH_HISTORY_MAX);
+}
 
 function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -230,8 +268,28 @@ export function AppShell({ children }: AppShellProps) {
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [health, setHealth] = useState<HealthStatus>("offline");
   const [commandOpen, setCommandOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const copy = SHELL_COPY[locale];
+  const commandHasQuery = commandQuery.trim().length > 0;
+
+  const recordCommandSearch = useCallback((term: string) => {
+    setSearchHistory((prev) => {
+      const next = pushCommandSearchHistory(prev, term);
+      writeCommandSearchHistory(next);
+      return next;
+    });
+  }, []);
+
+  const handleCommandOpenChange = useCallback((open: boolean) => {
+    setCommandOpen(open);
+    if (!open) setCommandQuery("");
+  }, []);
+
+  useEffect(() => {
+    setSearchHistory(readCommandSearchHistory());
+  }, []);
 
   useEffect(() => {
     try {
@@ -293,7 +351,11 @@ export function AppShell({ children }: AppShellProps) {
     const handler = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setCommandOpen((prev) => !prev);
+        setCommandOpen((prev) => {
+          const next = !prev;
+          if (!next) setCommandQuery("");
+          return next;
+        });
       }
     };
     window.addEventListener("keydown", handler);
@@ -368,8 +430,6 @@ export function AppShell({ children }: AppShellProps) {
               </div>
             )}
           </div>
-
-          <Separator className="bg-sidebar-border" />
 
           {/* nav */}
           <nav className="flex-1 space-y-4 overflow-y-auto px-2 py-3">
@@ -626,55 +686,84 @@ export function AppShell({ children }: AppShellProps) {
         {/* ===================== Command Palette ===================== */}
         <CommandDialog
           open={commandOpen}
-          onOpenChange={setCommandOpen}
+          onOpenChange={handleCommandOpenChange}
           title={copy.commandTitle}
           description={copy.commandDescription}
         >
-          <CommandInput placeholder={copy.commandInputPlaceholder} />
+          <CommandInput
+            placeholder={copy.commandInputPlaceholder}
+            value={commandQuery}
+            onValueChange={setCommandQuery}
+          />
           <CommandList>
-            <CommandEmpty>{copy.commandEmpty}</CommandEmpty>
-            {NAV_GROUPS.map((group) => (
-              <CommandGroup key={group.id} heading={localizeGroupLabel(group.id, locale)}>
-                {group.items.map((item) => {
-                  const Icon = item.icon;
-                  const itemLabel = localizeItemLabel(group.id, item.label, locale);
-                  return (
+            {!commandHasQuery ? (
+              searchHistory.length > 0 ? (
+                <CommandGroup heading={copy.recentSearches}>
+                  {searchHistory.map((term) => (
                     <CommandItem
-                      key={`${group.id}-${item.href}-${item.label}`}
+                      key={term}
+                      value={term}
                       onSelect={() => {
-                        setCommandOpen(false);
-                        router.push(item.href);
+                        recordCommandSearch(term);
+                        setCommandQuery(term);
                       }}
-                      value={`${localizeGroupLabel(group.id, locale)} ${itemLabel} ${item.href}`}
                     >
-                      <Icon className="mr-2 h-4 w-4 text-muted-foreground" />
-                      {itemLabel}
+                      <History className="mr-2 h-4 w-4 text-muted-foreground" />
+                      {term}
                     </CommandItem>
-                  );
-                })}
-              </CommandGroup>
-            ))}
-            <CommandSeparator />
-            <CommandGroup heading={copy.quickActions}>
-              <CommandItem
-                onSelect={() => {
-                  setCommandOpen(false);
-                  toggleTheme();
-                }}
-              >
-                {resolvedTheme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                {copy.switchTo} {resolvedTheme === "dark" ? copy.light : copy.dark} {copy.theme}
-              </CommandItem>
-              <CommandItem
-                onSelect={() => {
-                  setCommandOpen(false);
-                  void handleSignOut();
-                }}
-              >
-                <LogOut className="mr-2 h-4 w-4" />
-                {copy.signOut}
-              </CommandItem>
-            </CommandGroup>
+                  ))}
+                </CommandGroup>
+              ) : (
+                <div className="px-4 py-10 text-center text-sm text-muted-foreground">{copy.noSearchHistory}</div>
+              )
+            ) : (
+              <>
+                <CommandEmpty>{copy.commandEmpty}</CommandEmpty>
+                {NAV_GROUPS.map((group) => (
+                  <CommandGroup key={group.id} heading={localizeGroupLabel(group.id, locale)}>
+                    {group.items.map((item) => {
+                      const Icon = item.icon;
+                      const itemLabel = localizeItemLabel(group.id, item.label, locale);
+                      return (
+                        <CommandItem
+                          key={`${group.id}-${item.href}-${item.label}`}
+                          onSelect={() => {
+                            recordCommandSearch(commandQuery);
+                            handleCommandOpenChange(false);
+                            router.push(item.href);
+                          }}
+                          value={`${localizeGroupLabel(group.id, locale)} ${itemLabel} ${item.href}`}
+                        >
+                          <Icon className="mr-2 h-4 w-4 text-muted-foreground" />
+                          {itemLabel}
+                        </CommandItem>
+                      );
+                    })}
+                  </CommandGroup>
+                ))}
+                <CommandSeparator />
+                <CommandGroup heading={copy.quickActions}>
+                  <CommandItem
+                    onSelect={() => {
+                      handleCommandOpenChange(false);
+                      toggleTheme();
+                    }}
+                  >
+                    {resolvedTheme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
+                    {copy.switchTo} {resolvedTheme === "dark" ? copy.light : copy.dark} {copy.theme}
+                  </CommandItem>
+                  <CommandItem
+                    onSelect={() => {
+                      handleCommandOpenChange(false);
+                      void handleSignOut();
+                    }}
+                  >
+                    <LogOut className="mr-2 h-4 w-4" />
+                    {copy.signOut}
+                  </CommandItem>
+                </CommandGroup>
+              </>
+            )}
           </CommandList>
         </CommandDialog>
 
