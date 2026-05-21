@@ -268,6 +268,12 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                       onChange={setCodeEnabledDraft}
                       aria-label="启用此代码脑"
                     />
+                  ) : selected.type === "docs" ? (
+                    <SettingsOnOffSwitch
+                      checked={kbDraft.enabled}
+                      onChange={(enabled) => setKbDraft((prev) => ({ ...prev, enabled }))}
+                      aria-label="启用此文档库"
+                    />
                   ) : null}
                 </div>
               </div>
