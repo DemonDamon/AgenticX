@@ -52,8 +52,11 @@ export function isTodoUpdateToolMessage(content: string): boolean {
 
 export function isNoisyToolStatusMessage(message: Pick<Message, "role" | "content" | "toolName">): boolean {
   if (message.role !== "tool") return false;
-  if ((message.toolName ?? "").trim()) return false;
+  const toolName = (message.toolName ?? "").trim();
+  if (toolName === "check_resources") return true;
   const content = String(message.content ?? "").trim();
+  if (!toolName && /^[✅🔧⚠️❌🗣]?\s*check_resources\b/i.test(content)) return true;
+  if (toolName) return false;
   return content === "后台任务已完成" || content === "已发送中断请求";
 }
 
