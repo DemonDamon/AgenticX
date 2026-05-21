@@ -78,7 +78,7 @@ func (e *Executor) Complete(
 		resp, err := ad.Complete(ctx, req, ch)
 		latency := time.Since(start).Milliseconds()
 		if err == nil {
-			e.picker.MarkSuccess(id, model, ch)
+			e.picker.MarkSuccess(id, model, ch, latency)
 			attempts = append(attempts, channel.Attempt{
 				ChannelID: ch.ID,
 				Provider:  ch.ProviderLabel,
@@ -137,7 +137,7 @@ func (e *Executor) Stream(
 		err = ad.Stream(ctx, req, ch, push)
 		latency := time.Since(start).Milliseconds()
 		if err == nil {
-			e.picker.MarkSuccess(id, model, ch)
+			e.picker.MarkSuccess(id, model, ch, latency)
 			attempts = append(attempts, channel.Attempt{
 				ChannelID: ch.ID,
 				Provider:  ch.ProviderLabel,

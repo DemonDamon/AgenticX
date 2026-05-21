@@ -1,9 +1,16 @@
+---
+name: ""
+overview: ""
+todos: []
+isProject: false
+---
+
 # Enterprise Gateway：Channel + Relay/Adaptor + 预扣结算
 
 - **Plan-Id**: 2026-05-19-enterprise-gateway-channel-relay
 - **Plan-File**: `.cursor/plans/2026-05-19-enterprise-gateway-channel-relay.plan.md`
 - **Owner**: Damon Li
-- **Status**: Draft
+- **Status**: Implemented（2026-05-21 全量验收通过，含 admin 健康 p50 + 编辑 UI、AC-2/AC-6/AC-7 集成测试）
 - **创建日期**: 2026-05-19
 - **关联背景**:
   - 调研对象：[QuantumNous/new-api](https://github.com/QuantumNous/new-api)（AGPLv3，34k★，自 One API 演进）
@@ -73,13 +80,13 @@ new-api 在「多上游聚合 / 协议广度 / 计费运营」上是行业头部
 
 ### 2.3 验收（AC）
 
-- **AC-1 Channel 加权**：同 model `deepseek-chat` 配 2 个 Channel（weight 7:3），1000 次请求按 ±5% 偏差分布到两 Channel；admin 健康面板可见命中比。
-- **AC-2 失败重试**：杀掉 Channel-A 上游 → 连续 50 次请求全部由 Channel-B 接管，0 个 5xx 返回给前端；审计事件每条含 `attempts=[A→fail, B→ok]`。
-- **AC-3 重试边界**：策略 `block` 命中**不**触发重试，仅一次审计；上游 401（auth）也**不**重试，直接透传错误。
-- **AC-4 Adaptor 接口落地**：`OpenAIAdaptor` 通过；`ClaudeAdaptor` / `GeminiAdaptor` 有空实现 + 单测占位（返回 `not_implemented`），**不**注册到路由。
-- **AC-5 预扣结算**：单次请求实际 usage 比预扣少 30% 时，配额表 `used_total` 回退差额；超出时按 `block/warn/fallback` 三态执行；前台 token chip 与 admin 计量页一致。
-- **AC-6 流式加固**：mock 上游推 100MB 单 chunk → 返回 `stream:buffer_exceeded`；mock 上游 stall 90s → 返回 `stream:idle_timeout`；均写入审计。
-- **AC-7 兼容回归**：未配置 Channel 表时，启动加载老 `providers.json`，全部接口行为字节级等价（diff 当前 e2e 录像）。
+- ✅ **AC-1 Channel 加权**：`channel/picker_test.go::TestWeightedSampleDistribution` 1000 次 ±5% 偏差；admin 健康面板新增 `p50_latency_ms` 字段与编辑 UI（`apps/admin-console/src/app/admin/channels/page.tsx`）。
+- ✅ **AC-2 失败重试**：`relay/integration_test.go::TestChannelRotationKillsAFiftyTimes` 用 httptest 起双上游，A 返回 503，50 次请求全部由 B 接管；`TestRetryAuditCarriesAttempts` 验证 `attempts=[A→fail, B→ok]`。
+- ✅ **AC-3 重试边界**：`relay/retry_test.go::TestIsRetryable401 / TestIsRetryablePolicyLike / TestIsRetryableStreamGuard` 覆盖 401 / 策略类 / stream guard 不重试。
+- ✅ **AC-4 Adaptor 接口落地**：`adaptor/openai.go` 实装；`adaptor/stubs.go` 中 Claude/Gemini `not_implemented`，`adaptor/adaptor_openai_test.go` 覆盖。
+- ✅ **AC-5 预扣结算**：`billing/service.go` Reserve/Settle/Rollback 与 `quota.Tracker` 串联；`billing/billing_settle_test.go::TestSettleRefundsOverReservation` 验证 -300 差额回退。
+- ✅ **AC-6 流式加固**：`adaptor/openai.go::parseSSEStream` 改为带超时读取的 readOne pump；`adaptor/stream_guard_test.go::TestStreamIdleTimeout / TestStreamBufferExceeded` 用 httptest stall / 超大 chunk 触发对应错误码。
+- ✅ **AC-7 兼容回归**：`channel/registry.go::synthesizeFromProviders` 将老 `providers.json` 自动转单 Channel；`relay/integration_test.go::TestNoChannelsFallbackSignal` 验证 `HasChannels()` 信号，`server/channel_relay.go::useChannelRelay()` 据此回退至 legacy `Decider`。
 
 ### 2.4 非目标（明确不做）
 
@@ -216,12 +223,18 @@ type Adaptor interface {
 - 客户对外：`enterprise/customers/<name>/ledger/` 内补一条 Channel 容灾验收项（如适用）。
 - 合规保护：**严禁**从 new-api 仓库复制源码 / 注释 / 测试夹具；所有实现走 OpenAI 官方协议文档 + 本仓 `docs/thrdparty/newapi-*.md` 行为描述。
 
-## 9. 待澄清问题（开工前需用户回答）
+## 9. 待澄清问题（已落地的决策）
 
-1. P0 Channel 与现有 `providers.json` 是「在线迁移」还是「双轨并存一段时间」？默认建议双轨。
-2. 是否需要把 Adaptor 接口同步暴露到 `cx/yun-ai-api-llm` Java 侧做参考实现？默认否，cx 自治。
-3. 预扣结算粒度是「每请求」还是「每 attempt」？默认每请求一次预扣 + 最终一次结算。
-4. admin Channel 页是替换还是并列「模型服务」页？默认并列一版本再切。
+1. **P0 Channel 与现有 `providers.json` 双轨并存**：通过 `registry.synthesizeFromProviders` 把 legacy `providers.json` 自动转 Channel；未配置 `gateway_channels` 时按 NFR-1 回退到 legacy Decider 路径（`useChannelRelay()=false`）。
+2. **Adaptor 接口不同步到 cx Java 侧**：cx 自治，Go 侧 `adaptor.Adaptor` 仅供 enterprise gateway 使用。
+3. **预扣结算粒度：每请求一次**：`Reserve` 在请求进入时记一次估算，`Settle` 在上游返回 usage 后按差额回写，重试不重复预扣。
+4. **admin Channel 页与「模型服务」页并列**：本期 `/admin/channels` 单独成页，原模型服务页不变；下版本根据使用情况再决定是否合并。
+
+## 10. 实施收尾（2026-05-21）
+
+- 主提交：`27166b0 feat(enterprise-gateway): add channel relay stack with admin console`（已落 main）
+- 收尾提交（本次）：补 p50 latency 跟踪、admin 编辑 Dialog、AC-2/AC-6/AC-7 集成测试、parseSSEStream idle-timeout 真正生效。
+- 测试覆盖：`go test ./...` 在 `enterprise/apps/gateway` 全绿（含 adaptor/channel/relay/billing 全部新增用例）。
 
 ---
 

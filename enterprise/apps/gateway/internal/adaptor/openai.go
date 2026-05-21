@@ -247,7 +247,29 @@ func parseSSEStream(body io.Reader, cfg StreamConfig, push StreamPush) error {
 	var eventName string
 	var dataLines []string
 	var totalBytes int64
-	lastRead := time.Now()
+
+	type readResult struct {
+		line []byte
+		err  error
+	}
+	readCh := make(chan readResult, 1)
+	pendingRead := false
+	readOne := func() (readResult, error) {
+		if !pendingRead {
+			pendingRead = true
+			go func() {
+				line, err := reader.ReadBytes('\n')
+				readCh <- readResult{line: line, err: err}
+			}()
+		}
+		select {
+		case res := <-readCh:
+			pendingRead = false
+			return res, nil
+		case <-time.After(idle):
+			return readResult{}, fmt.Errorf("stream:idle_timeout")
+		}
+	}
 
 	flushEvent := func() (bool, error) {
 		if len(dataLines) == 0 {
@@ -301,12 +323,13 @@ func parseSSEStream(body io.Reader, cfg StreamConfig, push StreamPush) error {
 	}
 
 	for {
-		if time.Since(lastRead) > idle {
-			return fmt.Errorf("stream:idle_timeout")
+		res, idleErr := readOne()
+		if idleErr != nil {
+			return idleErr
 		}
-		line, readErr := reader.ReadBytes('\n')
+		line := res.line
+		readErr := res.err
 		if len(line) > 0 {
-			lastRead = time.Now()
 			trimmed := bytes.TrimRight(line, "\r\n")
 			if len(trimmed) == 0 {
 				done, err := flushEvent()
