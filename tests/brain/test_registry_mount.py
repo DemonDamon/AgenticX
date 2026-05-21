@@ -87,6 +87,48 @@ def test_mount_explicit_list(isolated_brains):
     assert ids == [b.id]
 
 
+def test_relocate_global_to_private(isolated_brains):
+    from agenticx.avatar.registry import AvatarRegistry
+
+    av_reg = AvatarRegistry(isolated_brains / "avatars")
+    av = av_reg.create_avatar(name="Owner")
+    reg = BrainRegistry.instance()
+    reg.bootstrap()
+    b = reg.create(name="Movable", brain_type=BrainType.CODE, scope=BrainScope.GLOBAL)
+    global_path = isolated_brains / "brains" / b.id
+    assert global_path.is_dir()
+    updated = reg.relocate_visibility(b.id, scope=BrainScope.PRIVATE, owner_avatar_id=av.id)
+    assert updated.scope == BrainScope.PRIVATE
+    assert updated.owner_avatar_id == av.id
+    assert not global_path.exists()
+    assert (isolated_brains / "avatars" / av.id / "brains" / b.id / "brain.yaml").exists()
+    ids = json.loads((isolated_brains / "brains" / "registry.json").read_text())["brains"]
+    assert b.id not in ids
+
+
+def test_relocate_private_to_global(isolated_brains):
+    from agenticx.avatar.registry import AvatarRegistry
+
+    av_reg = AvatarRegistry(isolated_brains / "avatars")
+    av = av_reg.create_avatar(name="Owner")
+    reg = BrainRegistry.instance()
+    reg.bootstrap()
+    b = reg.create(
+        name="Priv",
+        brain_type=BrainType.CODE,
+        scope=BrainScope.PRIVATE,
+        owner_avatar_id=av.id,
+    )
+    priv_path = isolated_brains / "avatars" / av.id / "brains" / b.id
+    updated = reg.relocate_visibility(b.id, scope=BrainScope.GLOBAL)
+    assert updated.scope == BrainScope.GLOBAL
+    assert updated.owner_avatar_id is None
+    assert not priv_path.exists()
+    assert (isolated_brains / "brains" / b.id / "brain.yaml").exists()
+    ids = json.loads((isolated_brains / "brains" / "registry.json").read_text())["brains"]
+    assert b.id in ids
+
+
 def test_delete_avatar_cascades_private_brains(isolated_brains):
     av_reg = AvatarRegistry(isolated_brains / "avatars")
     av = av_reg.create_avatar(name="Test")

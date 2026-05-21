@@ -60,7 +60,12 @@ from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.events import EventType, RuntimeEvent, normalize_tool_sse_payload
 from agenticx.runtime.loop_controller import LoopController
-from agenticx.cli.agent_tools import META_TOOL_NAMES, STUDIO_TOOLS, merge_computer_use_tools_into
+from agenticx.cli.agent_tools import (
+    META_TOOL_NAMES,
+    STUDIO_TOOLS,
+    _code_search_tool_defs,
+    merge_computer_use_tools_into,
+)
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS, META_LEADER_LABEL_SCRATCH_KEY
 from agenticx.runtime.prompts.meta_agent import _build_taskspaces_context, build_meta_agent_system_prompt
 from agenticx.runtime.group_router import (
@@ -1214,6 +1219,36 @@ def create_studio_app() -> FastAPI:
             return tools
         return [t for t in tools if str((t.get("function") or {}).get("name", "")).strip() != "web_search"]
 
+    def _maybe_inject_code_search_tools(
+        sess: Any,
+        tools: list[dict[str, Any]],
+        *,
+        avatar_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Inject code_search when the session has mounted code brains (avatar/Meta)."""
+        try:
+            from agenticx.brain.mount import session_has_mounted_code_brains
+
+            if not session_has_mounted_code_brains(sess, avatar_id=avatar_id):
+                return tools
+            extra = _code_search_tool_defs()
+            if not extra:
+                return tools
+            existing_names = {
+                str((t.get("function") or {}).get("name", "")).strip()
+                for t in tools
+                if isinstance(t, dict)
+            }
+            merged = list(tools)
+            for spec in extra:
+                name = str((spec.get("function") or {}).get("name", "")).strip()
+                if name and name not in existing_names:
+                    merged.append(spec)
+                    existing_names.add(name)
+            return merged
+        except Exception:
+            return tools
+
     def _sse_event(event: str, data: dict[str, Any]) -> str:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -1621,8 +1656,10 @@ def create_studio_app() -> FastAPI:
         session_id = str(payload.get("session_id", "") or "").strip()
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required")
-        if not manager.request_interrupt(session_id):
-            raise HTTPException(status_code=400, detail="invalid session_id")
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        manager.request_interrupt(session_id)
         manager.set_execution_state(session_id, "interrupted")
         manager.persist(session_id)
         return {"ok": True, "session_id": session_id}
@@ -2133,6 +2170,11 @@ def create_studio_app() -> FastAPI:
             effective_tools_source = list(META_AGENT_TOOLS)
         effective_tools_source = merge_computer_use_tools_into(effective_tools_source)
         effective_tools_source = _strip_disabled_web_search_tools(effective_tools_source)
+        effective_tools_source = _maybe_inject_code_search_tools(
+            session,
+            effective_tools_source,
+            avatar_id=active_avatar_id if is_avatar_session else None,
+        )
         effective_tools: list = _filter_tools_by_policy(
             effective_tools_source,
             avatar_tools_enabled=avatar_tools_enabled,
@@ -2506,6 +2548,11 @@ def create_studio_app() -> FastAPI:
         loop_tools_source: list = list(STUDIO_TOOLS) if loop_is_avatar else list(META_AGENT_TOOLS)
         loop_tools_source = merge_computer_use_tools_into(loop_tools_source)
         loop_tools_source = _strip_disabled_web_search_tools(loop_tools_source)
+        loop_tools_source = _maybe_inject_code_search_tools(
+            session,
+            loop_tools_source,
+            avatar_id=loop_avatar_id if loop_is_avatar else None,
+        )
         loop_tools: list = _filter_tools_by_policy(
             loop_tools_source,
             avatar_tools_enabled=loop_avatar_tools_enabled,

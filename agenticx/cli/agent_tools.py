@@ -1396,12 +1396,12 @@ def _code_search_tool_defs() -> List[Dict[str, Any]]:
 
 
 def studio_tools_for_session(session: Optional[StudioSession] = None) -> List[Dict[str, Any]]:
-    """Studio/Meta tool list with optional code_search when code_index is enabled."""
+    """Studio/Meta tool list with optional code_search when mounted code brains exist."""
     tools = merge_computer_use_tools_into(list(STUDIO_TOOLS))
     try:
-        from agenticx.runtime.session_mode import is_code_dev
+        from agenticx.brain.mount import session_has_mounted_code_brains
 
-        if session is not None and is_code_dev(session):
+        if session is not None and session_has_mounted_code_brains(session):
             extra = _code_search_tool_defs()
             if extra:
                 names = {
