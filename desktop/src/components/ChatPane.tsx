@@ -7,7 +7,6 @@ import {
   ChevronDown,
   Copy,
   Database,
-  Code2,
   GitBranch,
   GripVertical,
   Layers,
@@ -72,6 +71,7 @@ import {
   stallDetectSilenceMs,
   messageLooksLikeAssistantFinal,
   shouldAllowStallAutoNudge,
+  shouldSuppressStallDetection,
   shouldTriggerIncompleteEndStall,
 } from "../utils/task-stall-policy";
 import {
@@ -282,28 +282,6 @@ function NewTopicSplitControl({
               </span>
               <span className="flex w-4 shrink-0 justify-end">
                 {!inheritMode && <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />}
-              </span>
-            </button>
-            <button
-              type="button"
-              role="option"
-              className="group mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-hover"
-              onClick={() => {
-                setMenuOpen(false);
-                onNewTopic(false, "code_dev");
-              }}
-            >
-              <Code2
-                className="h-[15px] w-[15px] shrink-0 text-sky-400 group-hover:text-sky-300"
-                strokeWidth={2}
-              />
-              <span className="flex flex-1 flex-col gap-0.5">
-                <span className="text-[13px] font-medium leading-none text-text-standard">
-                  代码开发
-                </span>
-                <span className="text-[11px] leading-none text-text-faint">
-                  全新对话 · 4 层上下文工程
-                </span>
               </span>
             </button>
             <button
@@ -1921,49 +1899,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneContextInherited = useAppStore((s) => s.setPaneContextInherited);
-  const sessionCatalogRevision = useAppStore((s) => s.sessionCatalogRevision);
-  const [harnessPhase, setHarnessPhase] = useState<"explore" | "read" | "author" | undefined>();
-  const [harnessReadFiles, setHarnessReadFiles] = useState(0);
-  const isCodeDevPane = (pane.sessionMode ?? "daily_office") === "code_dev";
   const toolRoundCount = useMemo(
     () => (pane.messages ?? []).filter((m) => m.role === "tool" && (m.toolName ?? "").trim()).length,
     [pane.messages]
   );
   const toolRoundBudget = 60;
-  useEffect(() => {
-    const sid = (pane.sessionId || "").trim();
-    if (!sid || !isCodeDevPane) {
-      setHarnessPhase(undefined);
-      setHarnessReadFiles(0);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const avatarId =
-          pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
-        const resp = await window.agenticxDesktop.listSessions(avatarId);
-        if (!resp.ok || cancelled) return;
-        const row = (resp.sessions ?? []).find((s) => s.session_id === sid) as
-          | { harness_phase?: string; read_files_count?: number; session_mode?: string }
-          | undefined;
-        const phase = row?.harness_phase;
-        if (phase === "explore" || phase === "read" || phase === "author") {
-          setHarnessPhase(phase);
-        }
-        const rc = Number(row?.read_files_count ?? 0);
-        setHarnessReadFiles(Number.isFinite(rc) ? rc : 0);
-        if (row?.session_mode === "code_dev" || row?.session_mode === "daily_office") {
-          setPaneSessionMode(pane.id, row.session_mode);
-        }
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [pane.sessionId, pane.avatarId, pane.id, isCodeDevPane, sessionCatalogRevision, setPaneSessionMode]);
   const queuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
   const removePendingMessage = useAppStore((s) => s.removePendingMessage);
   const editPendingMessage = useAppStore((s) => s.editPendingMessage);
@@ -2051,6 +1991,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   /** Text last committed at a tool_call boundary; avoids duplicating the same assistant bubble at stream end. */
   const lastMidStreamAssistantCommitRef = useRef<string | null>(null);
   const [stallState, setStallState] = useState<"none" | "stall" | "exhausted">("none");
+  const [stoppingSessionId, setStoppingSessionId] = useState("");
   const [exhaustedRounds, setExhaustedRounds] = useState<{ rounds: number; maxRounds: number } | null>(null);
   const [sessionExecutionState, setSessionExecutionState] = useState<SessionExecutionState>("idle");
   const prevExecutionStateRef = useRef<SessionExecutionState>("idle");
@@ -2060,6 +2001,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const [autoNudgeCount, setAutoNudgeCount] = useState(0);
   const autoNudgeTriggeredRef = useRef<Record<string, number>>({});
   const autoNudgeBucketRef = useRef<Record<string, number>>({});
+  /** User clicked stop — do not re-show stall card until the next send/continue. */
+  const userStoppedSessionRef = useRef<Record<string, boolean>>({});
+  const stopInFlightRef = useRef<Record<string, boolean>>({});
+  const interruptNoticeSentRef = useRef<Record<string, boolean>>({});
   const [lastToolProgress, setLastToolProgress] = useState<{ name: string; sec: number } | null>(null);
   const [stallRuntimeConfig, setStallRuntimeConfig] = useState({
     stall_detect_silence_seconds: 90,
@@ -3963,22 +3908,57 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     [pane.id, recordProgressActivity, setPaneMessages]
   );
 
-  const stopCurrentRun = useCallback(() => {
+  const stopCurrentRun = useCallback(async () => {
     const sid = (streamingSessionId || pane.sessionId || "").trim();
     if (!sid) return;
+    if (stopInFlightRef.current[sid]) return;
+
+    stopInFlightRef.current[sid] = true;
+    setStoppingSessionId(sid);
+    userStoppedSessionRef.current[sid] = true;
     setRunGuardSessionId(sid);
-    void window.agenticxDesktop.interruptSession?.(sid);
+    setStallState("none");
+
     const st = sessionStreamStateRef.current[sid];
     if (st) {
       st.text = "⏹ 正在中断...";
+      st.active = false;
       sessionStreamStateRef.current[sid] = st;
     }
     abortRef.current?.abort();
     if ((pane.sessionId || "").trim() === sid) {
       setStreamedAssistantText("⏹ 正在中断...");
+      setStreaming(false);
+      setStreamingSessionId("");
     }
-    addPaneMessage(pane.id, "tool", "已发送中断请求", "meta");
-    setStallState("none");
+
+    try {
+      const r = await window.agenticxDesktop.interruptSession?.(sid);
+      if (r?.ok) {
+        setSessionExecutionState("interrupted");
+        setStallState("none");
+        if (!interruptNoticeSentRef.current[sid]) {
+          interruptNoticeSentRef.current[sid] = true;
+          addPaneMessage(pane.id, "tool", "已中断任务", "meta");
+        }
+      } else {
+        userStoppedSessionRef.current[sid] = false;
+        setRunGuardSessionId("");
+        addPaneMessage(
+          pane.id,
+          "tool",
+          `⚠️ 中断失败：${r?.error ?? "未知错误"}`,
+          "meta"
+        );
+      }
+    } catch (err) {
+      userStoppedSessionRef.current[sid] = false;
+      setRunGuardSessionId("");
+      addPaneMessage(pane.id, "tool", `⚠️ 中断失败：${String(err)}`, "meta");
+    } finally {
+      stopInFlightRef.current[sid] = false;
+      setStoppingSessionId((current) => (current === sid ? "" : current));
+    }
   }, [addPaneMessage, pane.id, pane.sessionId, streamingSessionId]);
 
   useEffect(() => {
@@ -4020,6 +4000,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       const lastMsg = msgs[msgs.length - 1];
       const enteredAt = sessionEnteredAtRef.current[sid] ?? now;
       const graceMs = now - enteredAt;
+
+      const userStopped = Boolean(userStoppedSessionRef.current[sid]);
+      if (shouldSuppressStallDetection(runGuardSessionId, sid, userStopped)) {
+        setStallState("none");
+        if (execState === "interrupted" || execState === "idle") {
+          setRunGuardSessionId("");
+        }
+        return;
+      }
 
       const stallSilenceMs = stallDetectSilenceMs(stallRuntimeConfig.stall_detect_silence_seconds);
       const channelA = sseActive && lastProgress > 0 && silentMs >= stallSilenceMs;
@@ -4122,6 +4111,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const resumeCurrentTask = useCallback(async () => {
     const sid = (pane.sessionId || "").trim();
     if (!sid) return;
+    delete userStoppedSessionRef.current[sid];
     let state: SessionExecutionState = sessionExecutionState;
     try {
       const r = await window.agenticxDesktop.listSessions(pane.avatarId ?? undefined);
@@ -4541,7 +4531,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           autoNudgeMax={stallRuntimeConfig.stall_auto_nudge_max_per_session}
           onResume={() => void resumeCurrentTask()}
           onResumeWithModel={(provider, model) => void resumeWithModel(provider, model)}
-          onStop={stopCurrentRun}
+          onStop={() => void stopCurrentRun()}
+          stopInFlight={stoppingSessionId === (pane.sessionId || "").trim()}
         />
       )}
       {stallState === "exhausted" && (
@@ -4553,7 +4544,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           modelOptions={stallModelOptions}
           onResume={() => void resumeCurrentTask()}
           onResumeWithModel={(provider, model) => void resumeWithModel(provider, model)}
-          onStop={stopCurrentRun}
+          onStop={() => void stopCurrentRun()}
+          stopInFlight={stoppingSessionId === (pane.sessionId || "").trim()}
           onOpenSettings={() => useAppStore.getState().openSettings()}
         />
       )}
@@ -4751,6 +4743,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
     const useLazySession = !isGroupPane && !isAutomationTaskPane;
     let requestSessionId = (pane.sessionId || "").trim();
+    const clearStopSuppressForSession = (sessionKey: string) => {
+      const key = sessionKey.trim();
+      if (!key) return;
+      delete userStoppedSessionRef.current[key];
+      delete interruptNoticeSentRef.current[key];
+      delete stopInFlightRef.current[key];
+    };
 
     if (!requestSessionId) {
       if (!useLazySession) return;
@@ -4914,6 +4913,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       provider: chatProvider,
       model: chatModel,
     };
+    clearStopSuppressForSession(requestSessionId);
     setRunGuardSessionId(requestSessionId);
     setSessionExecutionState("running");
     prevExecutionStateRef.current = "running";
@@ -6543,12 +6543,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           <StickyTaskBar
             messages={pane.messages ?? []}
             liveness={taskLiveness}
+            executionState={sessionExecutionState}
             silentSeconds={silentSeconds}
             onResume={() => void resumeCurrentTask()}
-            codeDevMode={isCodeDevPane}
-            phase={harnessPhase}
+            codeDevMode={false}
+            phase={undefined}
             toolBudget={{ used: toolRoundCount, total: toolRoundBudget }}
-            readFiles={harnessReadFiles}
+            readFiles={0}
           />
           {(sessionExecutionState === "running" || stallState === "stall" || sessionUnattended) && (
             <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
@@ -6916,15 +6917,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                     ) : null}
                   </div>
                 )}
-                {isCodeDevPane ? (
-                  <span
-                    className="flex h-7 items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 text-[11px] text-sky-300"
-                    title="当前会话为代码开发模式"
-                  >
-                    <Code2 className="h-3.5 w-3.5" aria-hidden />
-                    代码开发
-                  </span>
-                ) : null}
                 <PaneModelPicker paneId={pane.id} />
                 <ActionCircleButton
                   hasInput={!!pane.sessionId && (!!input.trim() || readyAttachments.length > 0)}

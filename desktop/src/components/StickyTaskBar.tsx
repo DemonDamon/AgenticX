@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, Check, Circle, Loader2 } from "lucide-react";
 import { parseTodoMessage, type ParsedTodo } from "./TodoUpdateCard";
 import type { Message } from "../store";
+import { resolveStickyTodoDisplay } from "../utils/task-stall-policy";
+import type { SessionExecutionState } from "../utils/streaming-stop-policy";
 
 /**
  * Find the latest todo snapshot from pane messages.
@@ -38,6 +40,7 @@ type HarnessPhase = "explore" | "read" | "author";
 interface StickyTaskBarProps {
   messages: Message[];
   liveness?: "active" | "stalled" | "idle";
+  executionState?: SessionExecutionState | string;
   silentSeconds?: number;
   onResume?: () => void;
   codeDevMode?: boolean;
@@ -68,6 +71,7 @@ const PHASE_LABEL: Record<HarnessPhase, string> = {
 export function StickyTaskBar({
   messages,
   liveness = "idle",
+  executionState,
   silentSeconds = 0,
   onResume,
   codeDevMode = false,
@@ -75,10 +79,16 @@ export function StickyTaskBar({
   toolBudget,
   readFiles,
 }: StickyTaskBarProps) {
-  const parsed = useMemo(() => pickLatestTodoFromMessages(messages), [messages]);
+  const rawParsed = useMemo(() => pickLatestTodoFromMessages(messages), [messages]);
+  const parsed = useMemo(
+    () => (rawParsed ? resolveStickyTodoDisplay(rawParsed, liveness, executionState) : null),
+    [rawParsed, liveness, executionState]
+  );
   const [expanded, setExpanded] = useState(true);
+  const [dismissed, setDismissed] = useState(false);
 
   const allDone = !!parsed && parsed.total > 0 && parsed.completed === parsed.total;
+  const runEnded = liveness === "idle";
 
   // Guard against ghost task cards: when the model called `todo_write` but
   // never actually advanced any item (all pending, 0 in_progress, 0 completed)
@@ -96,8 +106,13 @@ export function StickyTaskBar({
     else setExpanded(true);
   }, [allDone, parsed?.total, parsed?.completed]);
 
+  useEffect(() => {
+    if (!runEnded) setDismissed(false);
+  }, [runEnded, rawParsed?.total]);
+
   if (!parsed) return null;
   if (!hasAnyProgress) return null;
+  if (dismissed && runEnded) return null;
 
   return (
     <div className="mb-2 rounded-lg border border-border bg-surface-card text-text-primary shadow-sm">
@@ -141,6 +156,23 @@ export function StickyTaskBar({
             }}
           >
             恢复
+          </button>
+        ) : null}
+        {runEnded ? (
+          <span className="text-[10px] text-text-muted">
+            {executionState === "interrupted" ? "已中断" : "已结束"}
+          </span>
+        ) : null}
+        {runEnded ? (
+          <button
+            type="button"
+            className="rounded px-1.5 py-0.5 text-[10px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
+            onClick={(e) => {
+              e.stopPropagation();
+              setDismissed(true);
+            }}
+          >
+            关闭
           </button>
         ) : null}
         <span className="flex-1" />
@@ -198,6 +230,9 @@ export function StickyTaskBar({
                 </div>
                 {item.status === "in_progress" && liveness === "stalled" && silentSeconds > 0 ? (
                   <div className="mt-0.5 text-[11px] text-amber-300/80">已 {silentSeconds}s 无响应</div>
+                ) : null}
+                {executionState === "interrupted" && item.status === "pending" ? (
+                  <div className="mt-0.5 text-[11px] text-text-muted">任务已中断</div>
                 ) : null}
                 {item.status === "in_progress" && item.activeForm && item.activeForm !== item.content ? (
                   <div className="mt-0.5 text-[11px] text-[rgba(var(--theme-color-rgb,59,130,246),0.8)]">{item.activeForm}</div>

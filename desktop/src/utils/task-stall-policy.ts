@@ -2,6 +2,7 @@
  * Stall detection thresholds and helpers for long-running Machi tasks.
  */
 
+import type { ParsedTodo, TodoItem } from "../components/TodoUpdateCard";
 import type { Message } from "../store";
 
 /** Default stall warning threshold (seconds) — overridable via Settings → 工具 → 长任务停滞与续跑. */
@@ -50,7 +51,45 @@ export function shouldAllowStallAutoNudge(
   return state === "running" || state === "interrupted" || state === "idle";
 }
 
-/** Channel C: session ended idle/interrupted but last visible message is not a final assistant reply. */
+/**
+ * Align sticky task bar with session execution: when the agent is no longer
+ * running but todo_write still has in_progress, stop ghost spinners.
+ */
+export function resolveStickyTodoDisplay(
+  parsed: ParsedTodo,
+  liveness: "active" | "stalled" | "idle",
+  executionState?: string
+): ParsedTodo {
+  if (liveness === "active" || liveness === "stalled") {
+    return parsed;
+  }
+  const state = (executionState || "").trim();
+  const items: TodoItem[] = parsed.items.map((item) => {
+    if (item.status !== "in_progress") return item;
+    if (state === "interrupted") {
+      return { ...item, status: "pending" };
+    }
+    return { ...item, status: "completed" };
+  });
+  const completed = items.filter((item) => item.status === "completed").length;
+  const total = parsed.total > 0 ? parsed.total : items.length;
+  return { items, completed, total };
+}
+
+/** While the user requested stop, suppress stall re-detection until execution settles. */
+export function shouldSuppressStallDetection(
+  runGuardSessionId: string | undefined,
+  sessionId: string,
+  userStopped?: boolean
+): boolean {
+  const sid = (sessionId || "").trim();
+  if (!sid) return false;
+  if (userStopped) return true;
+  const guard = (runGuardSessionId || "").trim();
+  return Boolean(guard && guard === sid);
+}
+
+/** Channel C: session ended idle but last visible message is not a final assistant reply. */
 export function shouldTriggerIncompleteEndStall(
   executionState: string | undefined,
   sseActive: boolean,
@@ -60,7 +99,8 @@ export function shouldTriggerIncompleteEndStall(
   if (sseActive) return false;
   if (graceElapsedMs < CHANNEL_C_GRACE_MS) return false;
   const state = (executionState || "").trim();
-  if (state !== "idle" && state !== "interrupted") return false;
+  // Only idle — user-interrupted sessions are handled via userStopped stall suppress.
+  if (state !== "idle") return false;
   return !messageLooksLikeAssistantFinal(lastMessage);
 }
 
