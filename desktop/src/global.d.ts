@@ -504,7 +504,9 @@ declare global {
           modelName: string;
         }>;
         activePaneId: string;
+        theme?: string;
       }>;
+      saveUiPrefs: (payload: { theme: "dark" | "light" | "dim" }) => Promise<{ ok: boolean; error?: string }>;
       saveLayout: (payload: {
         panes?: Array<{
           id: string;

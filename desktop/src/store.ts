@@ -573,6 +573,7 @@ function makeDefaultPane(): ChatPane {
 }
 
 const CHAT_STYLE_STORAGE_KEY = "agx-chat-style";
+const THEME_STORAGE_KEY = "agx-theme";
 const THEME_COLOR_STORAGE_KEY = "agx-theme-color";
 const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
 const USER_PREFERENCE_KEY = "agx-user-preference";
@@ -588,6 +589,17 @@ function loadChatStyle(): ChatStyle {
     // ignore storage errors
   }
   return "im";
+}
+
+function loadTheme(): ThemeMode {
+  try {
+    const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (saved === "dark" || saved === "light") return saved;
+    if (saved === "dim") return "dark";
+  } catch {
+    // ignore storage errors
+  }
+  return "dark";
 }
 
 function loadThemeColor(): ThemeColor {
@@ -718,7 +730,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   focusMode: false,
   focusModePaneId: null,
   focusExitScrollBottomPaneId: null,
-  theme: "dark",
+  theme: loadTheme(),
   themeColor: loadThemeColor(),
   agxAccount: { loggedIn: false, email: "", displayName: "" },
   chatStyle: loadChatStyle(),
@@ -824,7 +836,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     state.enterFocusMode(paneId);
   },
-  setTheme: (theme) => set({ theme }),
+  setTheme: (theme) =>
+    set(() => {
+      try {
+        window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+      } catch {
+        // ignore storage errors
+      }
+      try {
+        void window.agenticxDesktop.saveUiPrefs({ theme });
+      } catch {
+        // ignore when not running inside Electron (e.g. unit tests)
+      }
+      return { theme };
+    }),
   setThemeColor: (themeColor) =>
     set(() => {
       try {

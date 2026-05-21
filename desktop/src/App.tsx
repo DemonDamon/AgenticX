@@ -1220,13 +1220,6 @@ export function App() {
 
   useEffect(() => {
     try {
-      const savedTheme = window.localStorage.getItem("agx-theme");
-      if (savedTheme === "dark" || savedTheme === "light") {
-        setTheme(savedTheme);
-      } else if (savedTheme === "dim") {
-        // Legacy migration: dim theme is removed from UI, fallback to dark.
-        setTheme("dark");
-      }
       const savedSidebarWidth = window.localStorage.getItem("agx-sidebar-width");
       if (savedSidebarWidth) {
         document.documentElement.style.setProperty("--sidebar-width", savedSidebarWidth);
@@ -1234,16 +1227,40 @@ export function App() {
     } catch {
       // ignore storage failures
     }
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const layout = await window.agenticxDesktop.loadLayout();
+        if (!layout.ok) return;
+        const saved = String(layout.theme ?? "").trim();
+        if (saved === "light" || saved === "dark") {
+          if (useAppStore.getState().theme !== saved) {
+            setTheme(saved);
+          }
+          return;
+        }
+        if (saved === "dim") {
+          if (useAppStore.getState().theme !== "dark") {
+            setTheme("dark");
+          }
+          return;
+        }
+        // First run after upgrade: seed ~/.agenticx/layout.json from localStorage.
+        const current = useAppStore.getState().theme;
+        if (current === "light" || current === "dark" || current === "dim") {
+          void window.agenticxDesktop.saveUiPrefs({ theme: current });
+        }
+      } catch {
+        // ignore; localStorage fallback from store init remains
+      }
+    })();
   }, [setTheme]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     document.documentElement.setAttribute("data-theme-color", themeColor);
-    try {
-      window.localStorage.setItem("agx-theme", theme);
-    } catch {
-      // ignore storage failures
-    }
     void window.agenticxDesktop.syncTitleBarOverlay(theme);
   }, [theme, themeColor]);
 

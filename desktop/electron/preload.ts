@@ -220,6 +220,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   setSessionModel: async (payload: { sessionId: string; provider: string; model: string }) =>
     ipcRenderer.invoke("set-session-model", payload),
   loadLayout: async () => ipcRenderer.invoke("layout-get"),
+  saveUiPrefs: async (payload: { theme: "dark" | "light" | "dim" }) =>
+    ipcRenderer.invoke("ui-prefs-set", payload) as Promise<{ ok: boolean; error?: string }>,
   saveLayout: async (payload: {
     panes?: Array<{
       id: string;

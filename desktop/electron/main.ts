@@ -323,10 +323,17 @@ type LayoutPaneSnapshot = {
   modelName: string;
 };
 
+type LayoutTheme = "dark" | "light" | "dim";
+
+function normalizeLayoutTheme(raw: unknown): LayoutTheme | undefined {
+  return raw === "light" || raw === "dark" || raw === "dim" ? raw : undefined;
+}
+
 type LayoutFile = {
   mainWindow?: LayoutBounds;
   panes?: LayoutPaneSnapshot[];
   activePaneId?: string;
+  theme?: LayoutTheme;
 };
 
 /** Disk read for the pane/window layout. Returns an empty object on any error
@@ -3406,11 +3413,24 @@ function registerIpc(): void {
 
   ipcMain.handle("layout-get", async () => {
     const data = loadLayoutData();
+    const theme = normalizeLayoutTheme(data.theme);
     return {
       ok: true,
       panes: Array.isArray(data.panes) ? data.panes : [],
       activePaneId: typeof data.activePaneId === "string" ? data.activePaneId : "",
+      theme: theme ?? "",
     };
+  });
+
+  ipcMain.handle("ui-prefs-set", async (_event, payload: { theme?: unknown }) => {
+    try {
+      const theme = normalizeLayoutTheme(payload?.theme);
+      if (!theme) return { ok: false, error: "invalid theme" };
+      saveLayoutData({ theme });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
   });
 
   ipcMain.handle("layout-set", async (_event, payload: { panes?: LayoutPaneSnapshot[]; activePaneId?: string }) => {
