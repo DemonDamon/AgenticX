@@ -12,7 +12,11 @@
 
 | 字段 | Install Command |
 | --- | --- |
-| 两端相同 | `cd ../.. && pnpm install --frozen-lockfile` |
+| 两端相同（install） | `cd ../.. && npx --yes pnpm@9.12.0 install --no-frozen-lockfile` |
+| admin-console（build） | `cd ../.. && npx --yes pnpm@9.12.0 exec turbo run build --filter=@agenticx/app-admin-console` |
+| web-portal（build） | `cd ../.. && npx --yes pnpm@9.12.0 exec turbo run build --filter=@agenticx/app-web-portal` |
+
+> Vercel 机器上直接执行 `pnpm` 往往是 **6.35.1**，会触发 `ERR_PNPM_UNSUPPORTED_ENGINE`；须用 `npx pnpm@9.12.0`。`pnpm-lock.yaml` 未入库（见 `enterprise/.gitignore`），不能用 `--frozen-lockfile`。
 
 | 字段 | Build Command |
 | --- | --- |
