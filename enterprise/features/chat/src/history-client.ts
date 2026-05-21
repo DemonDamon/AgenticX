@@ -2,19 +2,30 @@ import type { ChatMessage, ChatSession } from "@agenticx/core-api";
 
 const BASE = "/api/chat/sessions";
 
+export class ChatHistoryHttpError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ChatHistoryHttpError";
+    this.status = status;
+  }
+}
+
 async function ensureOk(res: Response): Promise<void> {
   if (res.ok) return;
   let message = res.statusText;
   try {
     const raw = await res.text();
     if (raw) {
-      const parsed = JSON.parse(raw) as { error?: { message?: string } };
+      const parsed = JSON.parse(raw) as { error?: { message?: string }; message?: string };
       if (parsed.error?.message) message = parsed.error.message;
+      else if (parsed.message) message = parsed.message;
     }
   } catch {
     // keep statusText
   }
-  throw new Error(message || `request failed: ${res.status}`);
+  throw new ChatHistoryHttpError(message || `request failed: ${res.status}`, res.status);
 }
 
 export type PortalChatHistoryClient = {

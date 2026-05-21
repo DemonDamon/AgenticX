@@ -20,9 +20,11 @@
     "ulid": "^2.3.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "prismjs": "^1.29.0",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@types/prismjs": "^1.26.5",
     "@types/react": "19.2.14",
     "vitest": "^4.1.5"
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -39,7 +39,6 @@ import { usePortalCopy } from "../../lib/portal-copy";
 import { getPortalSsoProviderOptions, pickPreferredSsoProvider } from "../../lib/sso-provider-options";
 
 function AuthPageInner() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const t = usePortalCopy();
   const { locale, setLocale } = useLocale();
@@ -70,6 +69,7 @@ function AuthPageInner() {
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
+        credentials: "include",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email: signInEmail, password: signInPassword }),
       });
@@ -79,7 +79,10 @@ function AuthPageInner() {
         return;
       }
       setStatus({ type: "success", message: t.signInSuccess });
-      router.push("/workspace");
+      const returnTo = searchParams.get("returnTo");
+      const destination =
+        returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/workspace";
+      window.location.assign(destination);
     } finally {
       setBusy(false);
     }

@@ -27,6 +27,18 @@ function parseErrorPayload(raw: unknown): { code: string; message: string } {
   return { code: "50000", message: "Gateway request failed" };
 }
 
+function pickStreamDelta(deltaObj: { content?: string; reasoning_content?: string } | undefined): string | undefined {
+  if (!deltaObj) return undefined;
+  const parts: string[] = [];
+  if (typeof deltaObj.content === "string" && deltaObj.content.length > 0) {
+    parts.push(deltaObj.content);
+  }
+  if (typeof deltaObj.reasoning_content === "string" && deltaObj.reasoning_content.length > 0) {
+    parts.push(deltaObj.reasoning_content);
+  }
+  return parts.length > 0 ? parts.join("") : undefined;
+}
+
 export class HttpChatClient implements ChatClient {
   private readonly endpoint: string;
   private readonly pending = new Map<string, PendingRequest>();
@@ -180,7 +192,10 @@ export class HttpChatClient implements ChatClient {
             };
           }
 
-          const delta = chunk.choices?.[0]?.delta?.content;
+          const deltaObj = chunk.choices?.[0]?.delta as
+            | { content?: string; reasoning_content?: string }
+            | undefined;
+          const delta = pickStreamDelta(deltaObj);
           const finished = chunk.choices?.[0]?.finish_reason === "stop";
           if (delta) {
             yield {
