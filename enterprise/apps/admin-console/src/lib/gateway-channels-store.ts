@@ -206,7 +206,7 @@ export async function updateChannel(id: string, input: UpdateChannelInput): Prom
   if (input.priority !== undefined) patch.priority = input.priority;
   if (input.status !== undefined) patch.status = input.status;
   if (input.supportedModels !== undefined) patch.supportedModels = input.supportedModels;
-  if (input.metadata !== undefined) patch.metadata = input.metadata;
+  if (input.metadata !== undefined) patch.metadata = { ...existing.metadata, ...input.metadata };
 
   await db.update(chTable).set(patch).where(and(eq(chTable.tenantId, tenantId), eq(chTable.id, id)));
   const updated = (await loadAll(tenantId)).find((r) => r.id === id);
@@ -218,6 +218,32 @@ export async function deleteChannel(id: string): Promise<void> {
   const tenantId = requiredTenantId();
   const db = getIamDb();
   await db.delete(chTable).where(and(eq(chTable.tenantId, tenantId), eq(chTable.id, id)));
+}
+
+export async function fetchGatewayKeypoolStats(channelId: string, keyRefs: string[]): Promise<unknown[]> {
+  const base = process.env.GATEWAY_INTERNAL_BASE_URL?.trim() || "http://127.0.0.1:8080";
+  const token = process.env.GATEWAY_INTERNAL_TOKEN?.trim();
+  if (!token || !channelId) return [];
+  const qs = new URLSearchParams({ channel_id: channelId, key_refs: keyRefs.join(",") });
+  const res = await fetch(`${base.replace(/\/$/, "")}/internal/keypool-stats?${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
+  const body = (await res.json()) as { data?: { keys?: unknown[] } };
+  return body.data?.keys ?? [];
+}
+
+export async function resetGatewayKeypoolCooldown(channelId: string, keyRef: string): Promise<void> {
+  const base = process.env.GATEWAY_INTERNAL_BASE_URL?.trim() || "http://127.0.0.1:8080";
+  const token = process.env.GATEWAY_INTERNAL_TOKEN?.trim();
+  if (!token) throw new Error("GATEWAY_INTERNAL_TOKEN is required");
+  const res = await fetch(`${base.replace(/\/$/, "")}/internal/keypool/reset`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ channel_id: channelId, key_ref: keyRef }),
+  });
+  if (!res.ok) throw new Error("reset keypool cooldown failed");
 }
 
 export async function fetchGatewayChannelStats(): Promise<Record<string, unknown>> {

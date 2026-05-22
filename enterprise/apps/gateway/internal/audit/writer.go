@@ -34,7 +34,9 @@ type Event struct {
 	Provider     string      `json:"provider,omitempty"`
 	Model        string      `json:"model,omitempty"`
 	Route        string      `json:"route"`
-	ChannelID    string      `json:"channel_id,omitempty"`
+	ChannelID       string      `json:"channel_id,omitempty"`
+	ChannelKeyRef   string      `json:"channel_key_ref,omitempty"`
+	APITokenID      int64       `json:"api_token_id,omitempty"`
 	AttemptIndex int         `json:"attempt_index,omitempty"`
 	RetryReason  string      `json:"retry_reason,omitempty"`
 	EstimatedTokens int      `json:"estimated_tokens,omitempty"`
