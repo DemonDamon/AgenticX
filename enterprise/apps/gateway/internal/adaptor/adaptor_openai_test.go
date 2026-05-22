@@ -8,19 +8,25 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 )
 
-func TestClaudeAdaptorNotImplemented(t *testing.T) {
+func TestClaudeAdaptorRegistered(t *testing.T) {
 	ad := NewClaudeAdaptor()
+	if ad.Name() != "claude" {
+		t.Fatalf("expected claude, got %s", ad.Name())
+	}
 	_, err := ad.Complete(context.Background(), openai.ChatCompletionRequest{}, channel.Channel{})
-	if err == nil || err.Error() != "claude: not_implemented" {
-		t.Fatalf("expected not_implemented, got %v", err)
+	if err == nil || err.Error() != "channel missing api key" {
+		t.Fatalf("expected missing api key, got %v", err)
 	}
 }
 
-func TestGeminiAdaptorNotImplemented(t *testing.T) {
+func TestGeminiAdaptorRegistered(t *testing.T) {
 	ad := NewGeminiAdaptor()
+	if ad.Name() != "gemini" {
+		t.Fatalf("expected gemini, got %s", ad.Name())
+	}
 	err := ad.Stream(context.Background(), openai.ChatCompletionRequest{}, channel.Channel{}, nil)
-	if err == nil || err.Error() != "gemini: not_implemented" {
-		t.Fatalf("expected not_implemented, got %v", err)
+	if err == nil || err.Error() != "channel missing api key" {
+		t.Fatalf("expected missing api key, got %v", err)
 	}
 }
 

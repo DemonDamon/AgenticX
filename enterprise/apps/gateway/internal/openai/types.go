@@ -1,18 +1,39 @@
 package openai
 
+type ToolFunction struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Parameters  any    `json:"parameters,omitempty"`
+}
+
+type Tool struct {
+	Type     string        `json:"type"`
+	Function *ToolFunction `json:"function,omitempty"`
+}
+
 type ChatMessage struct {
 	Role             string `json:"role"`
 	Content          string `json:"content"`
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+	ToolCallID       string `json:"tool_call_id,omitempty"`
+	Name             string `json:"name,omitempty"`
 }
 
 type ChatCompletionRequest struct {
-	Model                string        `json:"model"`
-	Messages             []ChatMessage `json:"messages"`
-	Temperature          float64       `json:"temperature,omitempty"`
-	Stream               bool          `json:"stream,omitempty"`
-	MaxCompletionTokens  int           `json:"max_completion_tokens,omitempty"`
-	MaxTokens            int           `json:"max_tokens,omitempty"`
+	Model               string        `json:"model"`
+	Messages            []ChatMessage `json:"messages"`
+	System              string        `json:"system,omitempty"`
+	Temperature         float64       `json:"temperature,omitempty"`
+	Stream              bool          `json:"stream,omitempty"`
+	MaxCompletionTokens int           `json:"max_completion_tokens,omitempty"`
+	MaxTokens           int           `json:"max_tokens,omitempty"`
+	TopP                float64       `json:"top_p,omitempty"`
+	Stop                []string      `json:"stop,omitempty"`
+	Tools               []Tool        `json:"tools,omitempty"`
+	ToolChoice          any           `json:"tool_choice,omitempty"`
+	ReasoningEffort     string        `json:"reasoning_effort,omitempty"`
+	// ThinkingBudget tokens for Anthropic/Gemini thinking models (internal pivot field).
+	ThinkingBudget int `json:"-"`
 }
 
 type ChatCompletionChoice struct {
