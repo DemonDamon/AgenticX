@@ -906,6 +906,137 @@ def project_info():
     console.print("✓ 这是一个 AgenticX 项目")
 
 
+@project_app.command("status")
+def project_status_cmd(
+    workspace: Optional[str] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace root containing .agx/project (defaults to cwd).",
+    ),
+    progress_tail: int = typer.Option(
+        20,
+        "--progress-tail",
+        "-n",
+        help="Number of progress.md tail lines to render (0-200).",
+    ),
+) -> None:
+    """从磁盘读取 .agx/project/ 状态（项目级 Harness）。"""
+    from pathlib import Path as _Path
+
+    from agenticx.project_state.feature_list import summarize as _summarize
+    from agenticx.project_state.store import (
+        ProjectStateError as _PSError,
+        ProjectStore as _Store,
+    )
+
+    root = _Path(workspace).expanduser().resolve() if workspace else _Path.cwd()
+    try:
+        store = _Store.open(root)
+        status = store.load_status()
+        feature_list = store.load_feature_list()
+    except _PSError as exc:
+        console.print(f"[red]未找到项目状态:[/red] {exc}")
+        console.print(
+            "[yellow]提示:[/yellow] 在 feature_loop 模式下让 agent 调用 project_init 完成奠基。"
+        )
+        raise typer.Exit(code=1)
+
+    counts = _summarize(feature_list)
+    console.print(f"[bold]project_id:[/bold] {status.project_id or '(unknown)'}")
+    console.print(f"[bold]root:[/bold] {store.root}")
+    console.print(f"[bold]phase:[/bold] {status.phase}")
+    if status.active_feature_id:
+        console.print(f"[bold]active feature:[/bold] {status.active_feature_id}")
+    console.print(
+        f"[bold]progress:[/bold] verified {counts['verified']}/{counts['total']}, "
+        f"committed {counts['committed']}, pending {counts['pending']}, "
+        f"in_progress {counts['in_progress']}"
+    )
+    console.print(
+        f"[bold]verify:[/bold] pass {status.verify_pass_count} / fail {status.verify_fail_count}"
+    )
+    if status.last_commit_sha:
+        console.print(f"[bold]last commit:[/bold] {status.last_commit_sha[:12]}")
+
+    tail = max(0, min(200, int(progress_tail)))
+    if tail > 0:
+        lines = store.read_progress_tail(tail)
+        if lines:
+            console.print("\n[bold]progress.md (tail)[/bold]")
+            for ln in lines:
+                console.print(f"  {ln}")
+
+
+@project_app.command("resume")
+def project_resume(
+    workspace: Optional[str] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace root containing .agx/project (defaults to cwd).",
+    ),
+) -> None:
+    """从磁盘单一事实源重建项目级会话上下文（无需历史 SQLite）。
+
+    打印冷启动 recipe：让用户/Studio 在新建 feature_loop session 时直接
+    调用 ``project_status`` 与 ``feature_select`` 即可恢复到上次离开的位置。
+    """
+    from pathlib import Path as _Path
+
+    from agenticx.project_state.feature_list import (
+        find_feature as _find,
+        select_next_pending as _next,
+        summarize as _summarize,
+    )
+    from agenticx.project_state.store import (
+        ProjectStateError as _PSError,
+        ProjectStore as _Store,
+    )
+
+    root = _Path(workspace).expanduser().resolve() if workspace else _Path.cwd()
+    try:
+        store = _Store.open(root)
+        status = store.load_status()
+        feature_list = store.load_feature_list()
+    except _PSError as exc:
+        console.print(f"[red]无法 resume:[/red] {exc}")
+        raise typer.Exit(code=1)
+
+    counts = _summarize(feature_list)
+    console.print("[bold cyan]Project Resume Recipe[/bold cyan]")
+    console.print(f"workspace_root: {root}")
+    console.print(f"project_root:   {store.root}")
+    console.print(f"project_id:     {status.project_id or '(unknown)'}")
+    console.print(f"phase:          {status.phase}")
+    console.print(
+        f"counts:         verified {counts['verified']}/{counts['total']} "
+        f"(pending {counts['pending']}, in_progress {counts['in_progress']}, committed {counts['committed']})"
+    )
+
+    active = _find(feature_list, status.active_feature_id or "")
+    if active is not None:
+        console.print(f"\n[bold]Active feature already in flight:[/bold] {active.id} — {active.title}")
+        console.print(f"  status: {active.status}")
+    else:
+        nxt = _next(feature_list)
+        if nxt is None:
+            console.print("\n[yellow]没有 pending 且依赖满足的 feature；可能已完成或需新增 deliverable。[/yellow]")
+        else:
+            console.print(f"\n[bold]Next pending pickup:[/bold] {nxt.id} — {nxt.title}")
+            ac = "; ".join((nxt.acceptance_criteria or [])[:3]) or "(no criteria)"
+            console.print(f"  acceptance: {ac}")
+
+    console.print(
+        "\n[bold]How to resume in a new session:[/bold]\n"
+        "  1. Open Machi (or `agx serve` + Desktop) and start a session with mode=feature_loop in this workspace.\n"
+        "  2. Send a single user message asking to continue. The system prompt block will already include the on-disk state.\n"
+        "  3. The agent must first call `project_status` (single source of truth on disk).\n"
+        "  4. Then `feature_select` (auto picks the right feature) → code_dev loop → `verify_run` → git commit → `feature_complete`.\n"
+        "  5. No SQLite or message history is required to resume — only .agx/project/ on disk.\n"
+    )
+
+
 # === 智能体管理命令 ===
 @agent_app.command("create")
 def create_agent(

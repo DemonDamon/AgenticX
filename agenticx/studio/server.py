@@ -1539,6 +1539,123 @@ def create_studio_app() -> FastAPI:
         messages = manager.get_messages(session_id)
         return {"ok": True, "messages": messages}
 
+    # -------------------------------------------------------------------
+    # Project state harness — read-only views over .agx/project/
+    # -------------------------------------------------------------------
+    @app.get("/api/projects")
+    async def list_projects(
+        session_id: str | None = Query(default=None),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        from pathlib import Path as _Path
+
+        from agenticx.project_state.store import (
+            ProjectStateError as _PSError,
+            ProjectStore as _Store,
+            locate_project_root as _locate,
+        )
+
+        candidate_roots: list[_Path] = []
+        if session_id:
+            managed = manager.get(session_id, touch=False)
+            if managed is not None:
+                taskspaces = getattr(managed.studio_session, "taskspaces", None) or []
+                for ts in taskspaces:
+                    if isinstance(ts, dict):
+                        path = str(ts.get("path", "") or "").strip()
+                        if path:
+                            candidate_roots.append(_Path(path).expanduser())
+                wd = str(getattr(managed.studio_session, "workspace_dir", "") or "").strip()
+                if wd:
+                    candidate_roots.append(_Path(wd).expanduser())
+        if not candidate_roots:
+            candidate_roots.append(_Path.cwd())
+
+        seen: set[str] = set()
+        projects: list[dict] = []
+        for root in candidate_roots:
+            try:
+                resolved = root.resolve(strict=False)
+            except OSError:
+                continue
+            if str(resolved) in seen or not resolved.is_dir():
+                continue
+            seen.add(str(resolved))
+            try:
+                project_root = _locate(resolved, use_fallback=False, create=False)
+            except _PSError:
+                continue
+            try:
+                store = _Store(project_root)
+                status = store.load_status()
+                feature_list = store.load_feature_list()
+            except _PSError as exc:
+                projects.append({"workspace_root": str(resolved), "error": str(exc)})
+                continue
+            projects.append(
+                {
+                    "workspace_root": str(resolved),
+                    "project_root": str(store.root),
+                    "project_id": status.project_id,
+                    "phase": status.phase,
+                    "feature_count": len(feature_list.features),
+                }
+            )
+        return {"ok": True, "projects": projects}
+
+    @app.get("/api/projects/status")
+    async def get_project_status(
+        workspace_root: str = Query(...),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        from pathlib import Path as _Path
+
+        from agenticx.project_state.feature_list import summarize as _summarize
+        from agenticx.project_state.store import (
+            ProjectStateError as _PSError,
+            ProjectStore as _Store,
+        )
+
+        try:
+            store = _Store.open(_Path(workspace_root).expanduser())
+            status = store.load_status()
+            feature_list = store.load_feature_list()
+        except _PSError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        return {
+            "ok": True,
+            "project_root": str(store.root),
+            "status": status.to_dict(),
+            "feature_list": feature_list.to_dict(),
+            "counts": _summarize(feature_list),
+        }
+
+    @app.get("/api/projects/progress")
+    async def get_project_progress(
+        workspace_root: str = Query(...),
+        tail: int = Query(default=100, ge=0, le=500),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        from pathlib import Path as _Path
+
+        from agenticx.project_state.store import (
+            ProjectStateError as _PSError,
+            ProjectStore as _Store,
+        )
+
+        try:
+            store = _Store.open(_Path(workspace_root).expanduser())
+        except _PSError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        return {
+            "ok": True,
+            "project_root": str(store.root),
+            "progress_tail": store.read_progress_tail(int(tail)),
+        }
+
     @app.post("/api/session/messages/delete")
     async def delete_session_messages(
         payload: dict,
