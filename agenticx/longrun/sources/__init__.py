@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Protocol, Sequence
 from agenticx.longrun.sources.cron_source import CronSource
 from agenticx.longrun.sources.linear_source import LinearTaskSource
 from agenticx.longrun.sources.manual_source import ManualSource
+from agenticx.longrun.sources.project_feature_source import ProjectFeatureSource
 
 
 class TaskSource(Protocol):
@@ -45,6 +46,7 @@ __all__ = [
     "CronSource",
     "LinearTaskSource",
     "ManualSource",
+    "ProjectFeatureSource",
     "TaskSource",
     "merge_sources",
 ]
