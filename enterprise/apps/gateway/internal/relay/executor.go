@@ -37,13 +37,15 @@ func NewExecutor(picker *channel.Picker, factory *adaptor.Factory, pool *keypool
 }
 
 type CompleteResult struct {
-	Response openai.ChatCompletionResponse
-	Channel  channel.Channel
-	Attempts []channel.Attempt
+	Response      openai.ChatCompletionResponse
+	Channel       channel.Channel
+	KeyRef        string
+	Attempts      []channel.Attempt
 }
 
 type StreamResult struct {
 	Channel  channel.Channel
+	KeyRef   string
 	Attempts []channel.Attempt
 }
 
@@ -54,12 +56,12 @@ func (e *Executor) Complete(
 	id channel.Identity,
 ) (CompleteResult, error) {
 	var lastErr error
-	exclude := map[string]struct{}{}
+	excludeChannels := map[string]struct{}{}
 	attempts := make([]channel.Attempt, 0)
 	maxRetries := defaultMaxRetries
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		ch, ok := e.picker.Pick(model, id, exclude)
+		ch, ok := e.picker.Pick(model, id, excludeChannels)
 		if !ok {
 			if lastErr != nil {
 				return CompleteResult{Attempts: attempts}, lastErr
@@ -69,40 +71,102 @@ func (e *Executor) Complete(
 		if ch.MaxRetries > 0 {
 			maxRetries = ch.MaxRetries
 		}
-		ch = e.resolveKey(ch)
-		start := time.Now()
-		ad, err := e.factory.For(ch)
-		if err != nil {
-			return CompleteResult{Attempts: attempts}, err
+
+		result, err := e.completeOnChannel(ctx, req, ch)
+		attempts = append(attempts, result.attempts...)
+		if err == nil {
+			e.picker.MarkSuccess(id, model, ch, result.latencyMS)
+			return CompleteResult{
+				Response: result.response,
+				Channel:  ch,
+				KeyRef:   result.keyRef,
+				Attempts: attempts,
+			}, nil
 		}
-		resp, err := ad.Complete(ctx, req, ch)
+		lastErr = err
+		if !IsChannelRetryable(err) {
+			return CompleteResult{Attempts: attempts, Channel: ch, KeyRef: result.keyRef}, err
+		}
+		e.picker.MarkFailure(ch, err.Error(), e.cooldown)
+		excludeChannels[ch.ID] = struct{}{}
+	}
+	return CompleteResult{Attempts: attempts}, lastErr
+}
+
+type channelCompleteOutcome struct {
+	response  openai.ChatCompletionResponse
+	keyRef    string
+	latencyMS int64
+	attempts  []channel.Attempt
+}
+
+func (e *Executor) completeOnChannel(
+	ctx context.Context,
+	req openai.ChatCompletionRequest,
+	ch channel.Channel,
+) (channelCompleteOutcome, error) {
+	poolID := poolIDForChannel(ch)
+	refs := ch.KeyRefs()
+	maxKeyTries := maxKeyAttempts(ch)
+	excludeKeys := map[string]struct{}{}
+	var lastErr error
+	var lastKeyRef string
+
+	for keyTry := 0; keyTry < maxKeyTries; keyTry++ {
+		resolved := e.resolveKeyWithExcludes(ch, poolID, excludeKeys)
+		lastKeyRef = resolved.KeyRef
+		if resolved.Key == "" && len(refs) > 0 {
+			lastErr = fmt.Errorf("no available key in channel %s", ch.ID)
+			break
+		}
+		chTry := ch
+		chTry.APIKey = resolved.Key
+
+		start := time.Now()
+		ad, err := e.factory.For(chTry)
+		if err != nil {
+			return channelCompleteOutcome{}, err
+		}
+		resp, err := ad.Complete(ctx, req, chTry)
 		latency := time.Since(start).Milliseconds()
 		if err == nil {
-			e.picker.MarkSuccess(id, model, ch, latency)
-			attempts = append(attempts, channel.Attempt{
-				ChannelID: ch.ID,
-				Provider:  ch.ProviderLabel,
-				Success:   true,
-				LatencyMS: latency,
-			})
-			return CompleteResult{Response: resp, Channel: ch, Attempts: attempts}, nil
+			if resolved.KeyRef != "" && resolved.KeyRef != "direct" {
+				e.keypool.MarkSuccess(poolID, resolved.KeyRef)
+			}
+			return channelCompleteOutcome{
+				response:  resp,
+				keyRef:    resolved.KeyRef,
+				latencyMS: latency,
+				attempts: []channel.Attempt{{
+					ChannelID: ch.ID,
+					Provider:  ch.ProviderLabel,
+					Success:   true,
+					LatencyMS: latency,
+				}},
+			}, nil
 		}
 		lastErr = err
 		reason := err.Error()
-		attempts = append(attempts, channel.Attempt{
+		attempt := channel.Attempt{
 			ChannelID:   ch.ID,
 			Provider:    ch.ProviderLabel,
 			Success:     false,
 			RetryReason: reason,
 			LatencyMS:   latency,
-		})
-		if !IsRetryable(err) {
-			return CompleteResult{Attempts: attempts, Channel: ch}, err
 		}
-		e.picker.MarkFailure(ch, reason, e.cooldown)
-		exclude[ch.ID] = struct{}{}
+		if IsKeyRetryable(err) && len(refs) > 0 && resolved.KeyRef != "" && resolved.KeyRef != "direct" {
+			e.keypool.MarkFailure(poolID, resolved.KeyRef, reason)
+			excludeKeys[resolved.KeyRef] = struct{}{}
+			if keyTry+1 < maxKeyTries {
+				continue
+			}
+		}
+		return channelCompleteOutcome{
+			keyRef:   lastKeyRef,
+			attempts: []channel.Attempt{attempt},
+		}, err
 	}
-	return CompleteResult{Attempts: attempts}, lastErr
+	return channelCompleteOutcome{keyRef: lastKeyRef}, lastErr
 }
 
 func (e *Executor) Stream(
@@ -113,12 +177,12 @@ func (e *Executor) Stream(
 	push adaptor.StreamPush,
 ) (StreamResult, error) {
 	var lastErr error
-	exclude := map[string]struct{}{}
+	excludeChannels := map[string]struct{}{}
 	attempts := make([]channel.Attempt, 0)
 	maxRetries := defaultMaxRetries
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		ch, ok := e.picker.Pick(model, id, exclude)
+		ch, ok := e.picker.Pick(model, id, excludeChannels)
 		if !ok {
 			if lastErr != nil {
 				return StreamResult{Attempts: attempts}, lastErr
@@ -128,59 +192,163 @@ func (e *Executor) Stream(
 		if ch.MaxRetries > 0 {
 			maxRetries = ch.MaxRetries
 		}
-		ch = e.resolveKey(ch)
-		start := time.Now()
-		ad, err := e.factory.For(ch)
-		if err != nil {
-			return StreamResult{Attempts: attempts}, err
+
+		result, err := e.streamOnChannel(ctx, req, ch, push)
+		attempts = append(attempts, result.attempts...)
+		if err == nil {
+			e.picker.MarkSuccess(id, model, ch, result.latencyMS)
+			return StreamResult{Channel: ch, KeyRef: result.keyRef, Attempts: attempts}, nil
 		}
-		err = ad.Stream(ctx, req, ch, push)
+		lastErr = err
+		if !IsChannelRetryable(err) {
+			return StreamResult{Attempts: attempts, Channel: ch, KeyRef: result.keyRef}, err
+		}
+		e.picker.MarkFailure(ch, err.Error(), e.cooldown)
+		excludeChannels[ch.ID] = struct{}{}
+	}
+	return StreamResult{Attempts: attempts}, lastErr
+}
+
+type channelStreamOutcome struct {
+	keyRef    string
+	latencyMS int64
+	attempts  []channel.Attempt
+}
+
+func (e *Executor) streamOnChannel(
+	ctx context.Context,
+	req openai.ChatCompletionRequest,
+	ch channel.Channel,
+	push adaptor.StreamPush,
+) (channelStreamOutcome, error) {
+	poolID := poolIDForChannel(ch)
+	refs := ch.KeyRefs()
+	maxKeyTries := maxKeyAttempts(ch)
+	excludeKeys := map[string]struct{}{}
+	var lastErr error
+	var lastKeyRef string
+
+	for keyTry := 0; keyTry < maxKeyTries; keyTry++ {
+		resolved := e.resolveKeyWithExcludes(ch, poolID, excludeKeys)
+		lastKeyRef = resolved.KeyRef
+		if resolved.Key == "" && len(refs) > 0 {
+			lastErr = fmt.Errorf("no available key in channel %s", ch.ID)
+			break
+		}
+		chTry := ch
+		chTry.APIKey = resolved.Key
+
+		var tokensSent bool
+		wrappedPush := func(chunk openai.StreamChunk) error {
+			if len(chunk.Choices) > 0 {
+				delta := chunk.Choices[0].Delta
+				if strings.TrimSpace(delta.Content) != "" || strings.TrimSpace(delta.ReasoningContent) != "" {
+					tokensSent = true
+				}
+			}
+			return push(chunk)
+		}
+
+		start := time.Now()
+		ad, err := e.factory.For(chTry)
+		if err != nil {
+			return channelStreamOutcome{}, err
+		}
+		err = ad.Stream(ctx, req, chTry, wrappedPush)
 		latency := time.Since(start).Milliseconds()
 		if err == nil {
-			e.picker.MarkSuccess(id, model, ch, latency)
-			attempts = append(attempts, channel.Attempt{
-				ChannelID: ch.ID,
-				Provider:  ch.ProviderLabel,
-				Success:   true,
-				LatencyMS: latency,
-			})
-			return StreamResult{Channel: ch, Attempts: attempts}, nil
+			if resolved.KeyRef != "" && resolved.KeyRef != "direct" {
+				e.keypool.MarkSuccess(poolID, resolved.KeyRef)
+			}
+			return channelStreamOutcome{
+				keyRef:    resolved.KeyRef,
+				latencyMS: latency,
+				attempts: []channel.Attempt{{
+					ChannelID: ch.ID,
+					Provider:  ch.ProviderLabel,
+					Success:   true,
+					LatencyMS: latency,
+				}},
+			}, nil
 		}
 		lastErr = err
 		reason := err.Error()
-		attempts = append(attempts, channel.Attempt{
+		attempt := channel.Attempt{
 			ChannelID:   ch.ID,
 			Provider:    ch.ProviderLabel,
 			Success:     false,
 			RetryReason: reason,
 			LatencyMS:   latency,
-		})
-		if !IsRetryable(err) {
-			return StreamResult{Attempts: attempts, Channel: ch}, err
 		}
-		e.picker.MarkFailure(ch, reason, e.cooldown)
-		exclude[ch.ID] = struct{}{}
+		canRetryKey := IsKeyRetryable(err) && len(refs) > 0 && resolved.KeyRef != "" && resolved.KeyRef != "direct" && !tokensSent
+		if canRetryKey {
+			e.keypool.MarkFailure(poolID, resolved.KeyRef, reason)
+			excludeKeys[resolved.KeyRef] = struct{}{}
+			if keyTry+1 < maxKeyTries {
+				continue
+			}
+		}
+		return channelStreamOutcome{keyRef: lastKeyRef, attempts: []channel.Attempt{attempt}}, err
 	}
-	return StreamResult{Attempts: attempts}, lastErr
+	return channelStreamOutcome{keyRef: lastKeyRef}, lastErr
 }
 
-func (e *Executor) resolveKey(ch channel.Channel) channel.Channel {
+func (e *Executor) resolveKeyWithExcludes(ch channel.Channel, poolID string, exclude map[string]struct{}) keypool.ResolveResult {
 	if strings.TrimSpace(ch.APIKey) != "" {
-		return ch
+		return keypool.ResolveResult{Key: ch.APIKey, KeyRef: "direct"}
 	}
+	return e.keypool.ResolveWithRef(poolID, "", ch.KeyRefs(), exclude)
+}
+
+func poolIDForChannel(ch channel.Channel) string {
 	poolID := ch.KeyPoolID()
 	if poolID == "" {
 		poolID = ch.ID
 	}
-	key := e.keypool.Resolve(poolID, "", ch.KeyRefs())
-	if key != "" {
-		ch.APIKey = key
-	}
-	return ch
+	return poolID
 }
 
-// IsRetryable 上游 5xx / 429 / 连接错误可重试；401 与策略类不重试。
-func IsRetryable(err error) bool {
+func maxKeyAttempts(ch channel.Channel) int {
+	refs := ch.KeyRefs()
+	if len(refs) == 0 {
+		return 1
+	}
+	return len(refs)
+}
+
+// IsKeyRetryable upstream errors that should try the next key within the same channel.
+func IsKeyRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var up *adaptor.UpstreamError
+	if errors.As(err, &up) {
+		switch up.StatusCode {
+		case 401, 403, 429:
+			return true
+		default:
+			return up.StatusCode >= 500
+		}
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "stream:idle_timeout") || strings.Contains(msg, "stream:buffer_exceeded") {
+		return false
+	}
+	if strings.Contains(msg, "connection refused") || strings.Contains(msg, "timeout") {
+		return true
+	}
+	return false
+}
+
+// IsChannelRetryable upstream errors that should try another channel.
+func IsChannelRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -188,9 +356,6 @@ func IsRetryable(err error) bool {
 	if errors.As(err, &up) {
 		if up.StatusCode == httpStatusTooManyRequests || up.StatusCode >= 500 {
 			return true
-		}
-		if up.StatusCode == 401 || up.StatusCode == 403 {
-			return false
 		}
 		return false
 	}
@@ -209,6 +374,11 @@ func IsRetryable(err error) bool {
 		return true
 	}
 	return false
+}
+
+// IsRetryable kept for backward-compatible tests (channel-level retry).
+func IsRetryable(err error) bool {
+	return IsChannelRetryable(err)
 }
 
 const httpStatusTooManyRequests = 429

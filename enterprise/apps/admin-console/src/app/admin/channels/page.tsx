@@ -24,7 +24,7 @@ import {
   PageHeader,
   toast,
 } from "@agenticx/ui";
-import { Activity, Pencil, Plus, RefreshCcw, Trash2 } from "lucide-react";
+import { Activity, Circle, Pencil, Plus, RefreshCcw, Trash2 } from "lucide-react";
 
 interface ChannelRow {
   id: string;
@@ -47,16 +47,26 @@ type HealthStat = {
   cooldown_until?: string | null;
 };
 
+type KeypoolStat = {
+  key_ref: string;
+  status: string;
+  cooldown_until?: string;
+  last_error?: string;
+  consecutive_failures?: number;
+};
+
 type EditForm = {
   id: string;
   name: string;
   baseUrl: string;
   apiKey: string;
+  keyRefs: string;
   weight: string;
   priority: string;
   models: string;
   status: "active" | "disabled";
   providerLabel: string;
+  metadata: Record<string, unknown>;
 };
 
 export default function ChannelsPage() {
@@ -65,6 +75,7 @@ export default function ChannelsPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<EditForm | null>(null);
+  const [keypoolStats, setKeypoolStats] = useState<KeypoolStat[]>([]);
   const [form, setForm] = useState({
     name: "",
     baseUrl: "",
@@ -122,18 +133,48 @@ export default function ChannelsPage() {
     }
   };
 
-  const openEdit = (ch: ChannelRow) => {
+  const loadKeypoolStats = useCallback(async (channelId: string, keyRefs: string[]) => {
+    if (!keyRefs.length) {
+      setKeypoolStats([]);
+      return;
+    }
+    const qs = new URLSearchParams({ key_refs: keyRefs.join(",") });
+    const res = await fetch(`/api/admin/channels/${channelId}/keypool/stats?${qs}`);
+    const json = await res.json();
+    setKeypoolStats((json.data?.keys ?? []) as KeypoolStat[]);
+  }, []);
+
+  const openEdit = async (ch: ChannelRow) => {
+    const res = await fetch(`/api/admin/channels/${ch.id}`);
+    const json = await res.json();
+    const detail = json.data?.channel as { metadata?: Record<string, unknown> } | undefined;
+    const metadata = detail?.metadata && typeof detail.metadata === "object" ? detail.metadata : {};
+    const rawRefs = metadata.keyRefs;
+    const keyRefs = Array.isArray(rawRefs)
+      ? rawRefs.filter((item): item is string => typeof item === "string").join(", ")
+      : "";
+    const providerLabel =
+      typeof metadata.provider === "string"
+        ? metadata.provider
+        : ch.providerType ?? "";
     setEditing({
       id: ch.id,
       name: ch.name,
       baseUrl: ch.baseUrl,
       apiKey: "",
+      keyRefs,
       weight: String(ch.weight ?? 1),
       priority: String(ch.priority ?? 0),
       models: (ch.supportedModels ?? []).join(", "),
       status: ch.status === "disabled" ? "disabled" : "active",
-      providerLabel: ch.providerType ?? "",
+      providerLabel,
+      metadata,
     });
+    const refs = keyRefs
+      .split(/[\n,]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    await loadKeypoolStats(ch.id, refs);
   };
 
   const onSaveEdit = async () => {
@@ -152,9 +193,18 @@ export default function ChannelsPage() {
         supportedModels: models,
       };
       if (editing.apiKey.trim() !== "") body.apiKey = editing.apiKey;
-      if (editing.providerLabel.trim() !== "") {
-        body.metadata = { provider: editing.providerLabel, route: "third-party" };
-      }
+      const keyRefList = editing.keyRefs
+        .split(/[\n,]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const metadata: Record<string, unknown> = {
+        ...editing.metadata,
+        route: "third-party",
+      };
+      if (editing.providerLabel.trim() !== "") metadata.provider = editing.providerLabel.trim();
+      if (keyRefList.length > 0) metadata.keyRefs = keyRefList;
+      else delete metadata.keyRefs;
+      body.metadata = metadata;
       const res = await fetch(`/api/admin/channels/${editing.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -330,6 +380,59 @@ export default function ChannelsPage() {
                   placeholder="******"
                 />
               </div>
+              <div>
+                <Label>Key Refs（环境变量名，逗号分隔）</Label>
+                <Input
+                  value={editing.keyRefs}
+                  onChange={(e) => setEditing({ ...editing, keyRefs: e.target.value })}
+                  placeholder="DEEPSEEK_API_KEY_1, DEEPSEEK_API_KEY_2"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">与单 Key 互斥：配置 Key Refs 后优先轮询 env 中的多把 Key。</p>
+              </div>
+              {keypoolStats.length > 0 ? (
+                <div className="space-y-2 rounded-md border border-border p-3">
+                  <p className="text-xs font-medium">Key Pool 健康</p>
+                  {keypoolStats.map((stat) => (
+                    <div key={stat.key_ref} className="flex items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <Circle
+                          className={`h-2.5 w-2.5 fill-current ${
+                            stat.status === "active"
+                              ? "text-emerald-500"
+                              : stat.status === "cooldown"
+                                ? "text-amber-500"
+                                : "text-destructive"
+                          }`}
+                        />
+                        <code>{stat.key_ref}</code>
+                        <span className="text-muted-foreground">{stat.status}</span>
+                      </div>
+                      {stat.status === "cooldown" ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            await fetch(`/api/admin/channels/${editing.id}/keypool/stats`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ keyRef: stat.key_ref }),
+                            });
+                            const refs = editing.keyRefs
+                              .split(/[\n,]/)
+                              .map((s) => s.trim())
+                              .filter(Boolean);
+                            await loadKeypoolStats(editing.id, refs);
+                            toast.success("已重置 cooldown");
+                          }}
+                        >
+                          重置
+                        </Button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <div>
                 <Label>Provider 标识</Label>
                 <Input value={editing.providerLabel} onChange={(e) => setEditing({ ...editing, providerLabel: e.target.value })} />

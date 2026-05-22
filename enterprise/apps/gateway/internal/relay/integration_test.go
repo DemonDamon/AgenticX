@@ -13,6 +13,7 @@ import (
 
 	"github.com/agenticx/enterprise/gateway/internal/adaptor"
 	"github.com/agenticx/enterprise/gateway/internal/channel"
+	"github.com/agenticx/enterprise/gateway/internal/keypool"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 )
 
@@ -142,7 +143,56 @@ func TestRetryAuditCarriesAttempts(t *testing.T) {
 	}
 }
 
-// TestNoChannelsFallbackSignal 覆盖 AC-7：Registry 无 channel 时 HasChannels=false，
+// TestKeyFailoverWithinChannel401 覆盖 AC-1：同 Channel 内 bad key 401 后自动切到下一把 key。
+func TestKeyFailoverWithinChannel401(t *testing.T) {
+	const keyA = "TEST_KEYPOOL_KEY_A"
+	const keyB = "TEST_KEYPOOL_KEY_B"
+	t.Setenv(keyA, "sk-bad")
+	t.Setenv(keyB, "sk-good")
+
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if strings.Contains(auth, "sk-bad") {
+			http.Error(w, `{"error":"invalid key"}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
+			ID:    "ok",
+			Model: "deepseek-chat",
+			Choices: []openai.ChatCompletionChoice{
+				{Index: 0, Message: openai.ChatMessage{Role: "assistant", Content: "hi"}, FinishReason: "stop"},
+			},
+		})
+	}))
+	defer up.Close()
+
+	channels := []channel.Channel{
+		{
+			ID: "chan-k", TenantID: "t1", Name: "K", ProviderType: "openai",
+			BaseURL: up.URL, Weight: 1, Status: channel.StatusActive,
+			SupportedModels: []string{"deepseek-chat"},
+			Metadata: map[string]any{"keyRefs": []string{keyA, keyB}},
+		},
+	}
+	reg := channel.NewRegistry(nil, nil)
+	reg.SetSnapshot(channels)
+	picker := channel.NewPicker(reg, channel.NewStatsStore(), channel.NewAffinityStore(time.Minute))
+	pool := keypool.NewPool()
+	exec := NewExecutor(picker, adaptor.NewFactory(adaptor.NewOpenAIAdaptor()), pool)
+
+	res, err := exec.Complete(context.Background(), openai.ChatCompletionRequest{
+		Model:    "deepseek-chat",
+		Messages: []openai.ChatMessage{{Role: "user", Content: "ping"}},
+	}, "deepseek-chat", channel.Identity{TenantID: "t1"})
+	if err != nil {
+		t.Fatalf("expected success after key failover, got %v", err)
+	}
+	if res.KeyRef != keyB {
+		t.Fatalf("expected key ref %s, got %s", keyB, res.KeyRef)
+	}
+}
+
 // server 路径会回退到 legacy Decider；此处校验信号。
 func TestNoChannelsFallbackSignal(t *testing.T) {
 	reg := channel.NewRegistry(nil, nil)

@@ -63,6 +63,7 @@ INSERT INTO gateway_audit_events (
   id, tenant_id, event_time, event_type,
   user_id, user_email, department_id, session_id,
   client_type, client_ip, provider, model, route,
+  channel_id, channel_key_ref, api_token_id,
   input_tokens, output_tokens, total_tokens, latency_ms,
   digest, policies_hit, tools_called,
   prev_checksum, checksum, signature,
@@ -71,9 +72,10 @@ INSERT INTO gateway_audit_events (
   $1,$2,$3,$4,
   $5,$6,$7,$8,
   $9,$10,$11,$12,$13,
-  $14,$15,$16,$17,
-  $18,$19,$20,
+  $14,$15,$16,
+  $17,$18,$19,$20,
   $21,$22,$23,
+  $24,$25,$26,
   timezone('utc', now()), timezone('utc', now())
 )
 ON CONFLICT (id) DO NOTHING`,
@@ -90,6 +92,9 @@ ON CONFLICT (id) DO NOTHING`,
 		nullStr(e.Provider),
 		nullStr(e.Model),
 		strings.TrimSpace(e.Route),
+		nullStr(e.ChannelID),
+		nullStr(e.ChannelKeyRef),
+		nullInt64(e.APITokenID),
 		e.InputTokens,
 		e.OutputTokens,
 		e.TotalTokens,
@@ -112,4 +117,11 @@ func nullJSON(b []byte) any {
 		return nil
 	}
 	return b
+}
+
+func nullInt64(v int64) any {
+	if v <= 0 {
+		return nil
+	}
+	return v
 }

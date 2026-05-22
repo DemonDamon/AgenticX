@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -109,6 +110,8 @@ func (s *Server) handleChatCompleteRelay(
 		Model:           req.Model,
 		Route:           decision.Route,
 		ChannelID:       decision.ChannelID,
+		ChannelKeyRef:   result.KeyRef,
+		APITokenID:      identity.APITokenID,
 		InputTokens:     providerInputTokens,
 		OutputTokens:    providerOutputTokens,
 		TotalTokens:     providerInputTokens + providerOutputTokens,
@@ -151,6 +154,62 @@ func (s *Server) handleChannelStats(w http.ResponseWriter, r *http.Request) {
 			"stats":   s.channelStatsJSON(),
 		},
 	})
+}
+
+func (s *Server) handleKeypoolStats(w http.ResponseWriter, r *http.Request) {
+	if !gatewayInternalAuthorized(r) {
+		writeAPIError(w, openai.Unauthorized("unauthorized"))
+		return
+	}
+	channelID := strings.TrimSpace(r.URL.Query().Get("channel_id"))
+	keyRefsRaw := strings.TrimSpace(r.URL.Query().Get("key_refs"))
+	if channelID == "" {
+		writeAPIError(w, openai.BadRequest("channel_id is required"))
+		return
+	}
+	var refs []string
+	if keyRefsRaw != "" {
+		for _, part := range strings.Split(keyRefsRaw, ",") {
+			if t := strings.TrimSpace(part); t != "" {
+				refs = append(refs, t)
+			}
+		}
+	}
+	poolID := channelID
+	if s.keyPool == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"code": "00000", "message": "ok", "data": map[string]any{"keys": []any{}}})
+		return
+	}
+	stats := s.keyPool.Stats(poolID, refs)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"code":    "00000",
+		"message": "ok",
+		"data": map[string]any{
+			"channel_id": channelID,
+			"keys":       stats,
+		},
+	})
+}
+
+func (s *Server) handleKeypoolReset(w http.ResponseWriter, r *http.Request) {
+	if !gatewayInternalAuthorized(r) {
+		writeAPIError(w, openai.Unauthorized("unauthorized"))
+		return
+	}
+	var body struct {
+		ChannelID string `json:"channel_id"`
+		KeyRef    string `json:"key_ref"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, openai.BadRequest("invalid body"))
+		return
+	}
+	if s.keyPool == nil || strings.TrimSpace(body.ChannelID) == "" || strings.TrimSpace(body.KeyRef) == "" {
+		writeAPIError(w, openai.BadRequest("channel_id and key_ref required"))
+		return
+	}
+	s.keyPool.ResetCooldown(body.ChannelID, body.KeyRef)
+	writeJSON(w, http.StatusOK, map[string]any{"code": "00000", "message": "ok"})
 }
 
 func gatewayInternalAuthorized(r *http.Request) bool {
