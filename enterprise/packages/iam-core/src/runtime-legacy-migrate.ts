@@ -48,6 +48,9 @@ export type QuotaAction = "block" | "warn" | "fallback";
 
 export type QuotaRule = {
   monthlyTokens: number;
+  tpm?: number;
+  rpm?: number;
+  maxConcurrency?: number;
   action: QuotaAction;
 };
 
@@ -58,6 +61,7 @@ export type QuotaConfig = {
   };
   users: Record<string, QuotaRule>;
   departments: Record<string, QuotaRule>;
+  apiTokens?: Record<string, QuotaRule>;
   updatedAt: string;
 };
 
