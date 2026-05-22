@@ -7,9 +7,10 @@ type Props = {
   total: number;
   onEdit: (id: string, newText: string) => void;
   onRemove: (id: string) => void;
+  onSendNow?: (id: string) => void;
 };
 
-export function QueuedMessageBubble({ msg, index, total, onEdit, onRemove }: Props) {
+export function QueuedMessageBubble({ msg, index, total, onEdit, onRemove, onSendNow }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(msg.text);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -80,6 +81,17 @@ export function QueuedMessageBubble({ msg, index, total, onEdit, onRemove }: Pro
       </div>
       {!editing && (
         <div className="flex shrink-0 flex-col gap-0.5 pt-4 opacity-0 transition group-hover/queued:opacity-100">
+          {onSendNow ? (
+            <button
+              className="rounded p-1 text-text-faint transition hover:bg-surface-hover hover:text-cyan-400"
+              onClick={() => onSendNow(msg.id)}
+              title="立即发送（中断当前生成）"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 19V5M5 12l7-7 7 7" />
+              </svg>
+            </button>
+          ) : null}
           <button
             className="rounded p-1 text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
             onClick={() => setEditing(true)}
