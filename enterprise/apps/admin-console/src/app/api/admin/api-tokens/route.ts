@@ -1,18 +1,26 @@
 import { NextResponse } from "next/server";
 import { createPat, listPats } from "@agenticx/auth";
-import { requireAdminScope } from "../../../../../lib/admin-auth";
+import { requireAdminScope } from "../../../../lib/admin-auth";
 
 export async function GET(request: Request) {
-  const auth = await requireAdminScope(["provider:read"]);
-  if (!auth.ok) return auth.response;
-  const tenantId = process.env.DEFAULT_TENANT_ID?.trim();
-  if (!tenantId) {
-    return NextResponse.json({ code: "50000", message: "DEFAULT_TENANT_ID missing" }, { status: 500 });
+  try {
+    const auth = await requireAdminScope(["provider:read"]);
+    if (!auth.ok) return auth.response;
+    const tenantId = process.env.DEFAULT_TENANT_ID?.trim();
+    if (!tenantId) {
+      return NextResponse.json({ code: "50000", message: "DEFAULT_TENANT_ID missing" }, { status: 500 });
+    }
+    const url = new URL(request.url);
+    const userId = url.searchParams.get("userId")?.trim() || undefined;
+    const tokens = await listPats({ tenantId, userId });
+    return NextResponse.json({ code: "00000", message: "ok", data: { tokens } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "failed to load api tokens";
+    const hint = /api_tokens|relation .* does not exist/i.test(message)
+      ? "请先执行 pnpm --filter @agenticx/db-schema db:migrate"
+      : message;
+    return NextResponse.json({ code: "50000", message: hint }, { status: 500 });
   }
-  const url = new URL(request.url);
-  const userId = url.searchParams.get("userId")?.trim() || undefined;
-  const tokens = await listPats({ tenantId, userId });
-  return NextResponse.json({ code: "00000", message: "ok", data: { tokens } });
 }
 
 export async function POST(request: Request) {
