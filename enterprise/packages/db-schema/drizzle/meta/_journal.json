@@ -85,6 +85,27 @@
       "when": 1778300000000,
       "tag": "0011_gateway_channels",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1778400000000,
+      "tag": "0012_gateway_audit_keypool_pat",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1778500000000,
+      "tag": "0013_api_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1778600000000,
+      "tag": "0014_usage_records_api_token",
+      "breakpoints": true
     }
   ]
 }

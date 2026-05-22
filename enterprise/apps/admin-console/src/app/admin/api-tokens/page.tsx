@@ -36,6 +36,16 @@ type PatRow = {
   userId: string;
 };
 
+async function readJsonBody<T>(res: Response, fallback: T): Promise<T> {
+  const text = await res.text();
+  if (!text.trim()) return fallback;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function ApiTokensPage() {
   const [tokens, setTokens] = useState<PatRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,8 +57,8 @@ export default function ApiTokensPage() {
     setLoading(true);
     try {
       const res = await fetch("/api/admin/api-tokens");
-      const json = await res.json();
-      if (json.code !== "00000") throw new Error(json.message || "load failed");
+      const json = await readJsonBody(res, { code: "50000", message: "empty response", data: { tokens: [] as PatRow[] } });
+      if (!res.ok || json.code !== "00000") throw new Error(json.message || "load failed");
       setTokens(json.data?.tokens ?? []);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "加载失败");
@@ -72,8 +82,8 @@ export default function ApiTokensPage() {
           expireDays: Number(form.expireDays) || 90,
         }),
       });
-      const json = await res.json();
-      if (json.code !== "00000") throw new Error(json.message || "create failed");
+      const json = await readJsonBody(res, { code: "50000", message: "empty response" });
+      if (!res.ok || json.code !== "00000") throw new Error(json.message || "create failed");
       setPlainToken(json.data?.token ?? null);
       setOpen(false);
       setForm({ name: "", userId: "", expireDays: "90" });
@@ -87,8 +97,8 @@ export default function ApiTokensPage() {
   const onRevoke = async (id: number) => {
     if (!confirm("确定吊销该 Token？")) return;
     const res = await fetch(`/api/admin/api-tokens/${id}`, { method: "DELETE" });
-    const json = await res.json();
-    if (json.code !== "00000") {
+    const json = await readJsonBody(res, { code: "50000", message: "empty response" });
+    if (!res.ok || json.code !== "00000") {
       toast.error(json.message || "吊销失败");
       return;
     }
