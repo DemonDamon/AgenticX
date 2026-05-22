@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   canStopCurrentRun,
+  isDoubleEnterWithinWindow,
+  shouldEnqueueOnResend,
+  shouldInterruptOnResend,
+  shouldShowSessionWorkInProgress,
   shouldShowStopButton,
   shouldShowStopForExecutionState,
 } from "./streaming-stop-policy";
+import type { Message } from "../store";
 
 describe("shouldShowStopForExecutionState", () => {
   it("shows stop only when running", () => {
@@ -51,6 +56,24 @@ describe("shouldShowStopButton", () => {
   });
 });
 
+describe("message queue resend policy", () => {
+  it("enqueues by default while streaming", () => {
+    expect(shouldEnqueueOnResend({ isStreamRunActive: true })).toBe(true);
+    expect(shouldInterruptOnResend({ isStreamRunActive: true })).toBe(false);
+  });
+
+  it("force send interrupts instead of enqueueing", () => {
+    expect(shouldEnqueueOnResend({ isStreamRunActive: true, forceSend: true })).toBe(false);
+    expect(shouldInterruptOnResend({ isStreamRunActive: true, forceSend: true })).toBe(true);
+  });
+
+  it("detects double-enter within window", () => {
+    const now = 10_000;
+    expect(isDoubleEnterWithinWindow(now - 200, now)).toBe(true);
+    expect(isDoubleEnterWithinWindow(now - 500, now)).toBe(false);
+  });
+});
+
 describe("canStopCurrentRun", () => {
   it("requires matching session ids", () => {
     expect(
@@ -60,5 +83,65 @@ describe("canStopCurrentRun", () => {
         currentSessionId: "b",
       })
     ).toBe(false);
+  });
+});
+
+describe("shouldShowSessionWorkInProgress", () => {
+  const userMsg: Message = { id: "u1", role: "user", content: "do task" };
+  const toolMsg: Message = { id: "t1", role: "tool", toolName: "file_read", content: "ok" };
+
+  it("shows for unattended session after tool without final assistant reply", () => {
+    expect(
+      shouldShowSessionWorkInProgress({
+        isStreamingCurrentSession: false,
+        executionState: "interrupted",
+        sessionUnattended: true,
+        unattendedGlobalEnabled: true,
+        messages: [userMsg, toolMsg],
+      })
+    ).toBe(true);
+  });
+
+  it("hides when user stopped the session", () => {
+    expect(
+      shouldShowSessionWorkInProgress({
+        isStreamingCurrentSession: false,
+        executionState: "interrupted",
+        sessionUnattended: true,
+        unattendedGlobalEnabled: true,
+        userStopped: true,
+        messages: [userMsg, toolMsg],
+      })
+    ).toBe(false);
+  });
+
+  it("hides when todos are all completed", () => {
+    const todoDone: Message = {
+      id: "todo1",
+      role: "tool",
+      toolName: "todo_write",
+      content: "🗂 任务清单更新\n[x] a\n[x] b\n(2/2 completed)",
+    };
+    expect(
+      shouldShowSessionWorkInProgress({
+        isStreamingCurrentSession: false,
+        executionState: "idle",
+        sessionUnattended: true,
+        unattendedGlobalEnabled: true,
+        messages: [userMsg, todoDone],
+      })
+    ).toBe(false);
+  });
+
+  it("shows stop when session work is in progress without local SSE", () => {
+    expect(
+      shouldShowStopButton({
+        streaming: false,
+        streamingSessionId: "",
+        currentSessionId: "s1",
+        executionState: "idle",
+        sessionWorkInProgress: true,
+      })
+    ).toBe(true);
   });
 });

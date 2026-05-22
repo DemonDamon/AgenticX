@@ -24,6 +24,8 @@ import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { buildCompactionNoticeText } from "../utils/context-notice";
 import { StallRecoveryCard } from "./messages/StallRecoveryCard";
 import {
+  isDoubleEnterWithinWindow,
+  shouldEnqueueOnResend,
   shouldShowStopButton,
   type SessionExecutionState,
 } from "../utils/streaming-stop-policy";
@@ -43,7 +45,7 @@ import {
 import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
-import { QueuedMessageBubble } from "./messages/QueuedMessageBubble";
+import { MessageQueuePanel } from "./messages/MessageQueuePanel";
 const EMPTY_QUEUE: QueuedMessage[] = [];
 
 /** Matches {@link useAppStore.getState().updateMessageByToolCallId} `patch` argument. */
@@ -351,6 +353,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const liteQueueKey = "lite-pane";
   const queuedMessages = useAppStore((s) => s.pendingMessages[liteQueueKey] ?? EMPTY_QUEUE);
   const enqueuePaneMessage = useAppStore((s) => s.enqueuePaneMessage);
+  const takePendingMessage = useAppStore((s) => s.takePendingMessage);
   const removePendingMessage = useAppStore((s) => s.removePendingMessage);
   const editPendingMessage = useAppStore((s) => s.editPendingMessage);
   const addSubAgent = useAppStore((s) => s.addSubAgent);
@@ -382,6 +385,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
   const activeRequestIdRef = useRef(0);
   const modelBtnRef = useRef<HTMLButtonElement | null>(null);
   const imeComposingRef = useRef(false);
+  const lastComposerEnterAtRef = useRef(0);
   const polledEventSeenRef = useRef<Record<string, Set<string>>>({});
   const subAgentsRef = useRef(subAgents);
   const subAgentStatusRef = useRef<Record<string, string>>({});
@@ -905,12 +909,29 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       model?: string;
       insertAfterId?: string;
       agentId?: string;
+      forceSend?: boolean;
       continuation?: { reason: ContinueReason; source: ContinueSource };
     }
   ) => {
     const isContinuation = !!opts?.continuation;
     if ((!userText && !isContinuation) || !apiBase || !sessionId) return;
-    if (streaming) {
+
+    if (
+      !isContinuation &&
+      shouldEnqueueOnResend({ isStreamRunActive: streaming, forceSend: opts?.forceSend })
+    ) {
+      enqueuePaneMessage(liteQueueKey, {
+        id: crypto.randomUUID(),
+        text: userText,
+        attachments: [],
+        contextFiles: [],
+        timestamp: Date.now(),
+      });
+      setInput("");
+      return;
+    }
+
+    if (streaming && opts?.forceSend) {
       abortedByUserRef.current = true;
       abortRef.current?.abort();
       const partial = streamTextRef.current.trim();
@@ -1648,6 +1669,16 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
         }
         return;
       }
+      if (streaming && isDoubleEnterWithinWindow(lastComposerEnterAtRef.current)) {
+        lastComposerEnterAtRef.current = 0;
+        void sendChat(input.trim(), { forceSend: true });
+        return;
+      }
+      if (streaming) {
+        lastComposerEnterAtRef.current = Date.now();
+      } else {
+        lastComposerEnterAtRef.current = 0;
+      }
       void send();
     }
   };
@@ -1902,21 +1933,23 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
               onStop={stopStreaming}
             />
           ) : null}
-          {queuedMessages.length > 0 && queuedMessages.map((qm, qi) => (
-            <QueuedMessageBubble
-              key={qm.id}
-              msg={qm}
-              index={qi}
-              total={queuedMessages.length}
-              onEdit={(id, newText) => editPendingMessage(liteQueueKey, id, newText)}
-              onRemove={(id) => removePendingMessage(liteQueueKey, id)}
-            />
-          ))}
         </div>
       </div>
 
       {/* Input area */}
       <div className="relative shrink-0 border-t border-border bg-surface-panel/80 px-4 pt-3 pb-4">
+        <div className="mx-auto mb-2 max-w-2xl">
+          <MessageQueuePanel
+            messages={queuedMessages}
+            onEdit={(id, newText) => editPendingMessage(liteQueueKey, id, newText)}
+            onRemove={(id) => removePendingMessage(liteQueueKey, id)}
+            onSendNow={(id) => {
+              const item = takePendingMessage(liteQueueKey, id);
+              if (!item) return;
+              void sendChatRef.current(item.text, { forceSend: true });
+            }}
+          />
+        </div>
         {!isLite && (
           <CommandPalette
             open={commandOpen}
@@ -1975,7 +2008,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
             }}
             onKeyDown={onKeyDown}
             rows={input.split("\n").length > 3 ? 4 : input.includes("\n") ? 2 : 1}
-            placeholder={canSend ? (isLite ? (selectedSubAgent ? `对 ${selectedSubAgentName} 发送消息...` : "问我任何问题...") : (planMode ? "计划模式：描述目标，我只返回可执行计划" : (selectedSubAgent ? `对 ${selectedSubAgentName} 发送补充指令，Enter 发送` : "输入需求，Enter 发送（生成中可直接追问）"))) : "连接中..."}
+            placeholder={canSend ? (isLite ? (selectedSubAgent ? `对 ${selectedSubAgentName} 发送消息...` : (streaming ? "生成中：Enter 排队，连按两次 Enter 立即发送" : "问我任何问题...")) : (planMode ? "计划模式：描述目标，我只返回可执行计划" : (selectedSubAgent ? `对 ${selectedSubAgentName} 发送补充指令，Enter 发送` : (streaming ? "生成中：Enter 排队，连按两次 Enter 立即发送" : "输入需求，Enter 发送")))) : "连接中..."}
             disabled={!canSend && !streaming}
             className="min-h-[40px] max-h-[120px] flex-1 resize-none rounded-xl border border-border bg-surface-card px-3 py-2.5 text-sm outline-none transition placeholder:text-text-faint focus:border-cyan-500/50"
           />
@@ -1983,7 +2016,7 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
           {showStopButton ? (
             <div className="flex items-center gap-2">
               <button className="flex h-10 shrink-0 items-center rounded-xl bg-rose-500 px-4 text-sm font-medium text-white transition hover:bg-rose-400" onClick={stopStreaming}>中断</button>
-              <button className="flex h-10 shrink-0 items-center rounded-xl bg-btnPrimary px-4 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40 disabled:hover:bg-btnPrimary" disabled={!canSend || !input.trim()} onClick={() => void send()}>追问</button>
+              <button className="flex h-10 shrink-0 items-center rounded-xl bg-btnPrimary px-4 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40 disabled:hover:bg-btnPrimary" disabled={!canSend || !input.trim()} onClick={() => { lastComposerEnterAtRef.current = 0; void sendChat(input.trim(), { forceSend: true }); }}>立即发送</button>
               <button
                 className="flex h-10 shrink-0 items-center rounded-xl border border-border px-4 text-sm font-medium text-text-subtle transition hover:bg-surface-hover disabled:opacity-40"
                 disabled={!canSend || !input.trim()}

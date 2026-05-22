@@ -379,6 +379,7 @@ type AppState = {
   pendingMessages: Record<string, QueuedMessage[]>;
   enqueuePaneMessage: (paneId: string, msg: QueuedMessage) => void;
   dequeuePaneMessage: (paneId: string) => QueuedMessage | undefined;
+  takePendingMessage: (paneId: string, msgId: string) => QueuedMessage | undefined;
   removePendingMessage: (paneId: string, msgId: string) => void;
   editPendingMessage: (paneId: string, msgId: string, newText: string) => void;
   clearPendingMessages: (paneId: string) => void;
@@ -994,6 +995,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       },
     }));
     return first;
+  },
+  takePendingMessage: (paneId, msgId) => {
+    const queue = get().pendingMessages[paneId] ?? [];
+    const item = queue.find((m) => m.id === msgId);
+    if (!item) return undefined;
+    set((state) => ({
+      pendingMessages: {
+        ...state.pendingMessages,
+        [paneId]: (state.pendingMessages[paneId] ?? []).filter((m) => m.id !== msgId),
+      },
+    }));
+    return item;
   },
   removePendingMessage: (paneId, msgId) =>
     set((state) => ({

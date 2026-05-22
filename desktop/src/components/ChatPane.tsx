@@ -52,7 +52,7 @@ import { getAssistantActionStyle } from "./messages/im-layout";
 import { TerminalLine } from "./messages/TerminalLine";
 import { ProviderIcon } from "./ProviderIcon";
 import { CleanBlock } from "./messages/CleanBlock";
-import { QueuedMessageBubble } from "./messages/QueuedMessageBubble";
+import { MessageQueuePanel } from "./messages/MessageQueuePanel";
 import { StallRecoveryCard } from "./messages/StallRecoveryCard";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { HoverTip } from "./ds/HoverTip";
@@ -62,7 +62,10 @@ import { clipboardPlainTextForPaste } from "../utils/clipboard-plain-text";
 import { isKnownNonVisionChatModel } from "../utils/model-vision";
 import {
   canStopCurrentRun,
+  isDoubleEnterWithinWindow,
+  shouldEnqueueOnResend,
   shouldInterruptOnResend,
+  shouldShowSessionWorkInProgress,
   shouldShowStopButton,
   type SessionExecutionState,
 } from "../utils/streaming-stop-policy";
@@ -1908,6 +1911,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   );
   const toolRoundBudget = 60;
   const queuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
+  const enqueuePaneMessage = useAppStore((s) => s.enqueuePaneMessage);
+  const takePendingMessage = useAppStore((s) => s.takePendingMessage);
   const removePendingMessage = useAppStore((s) => s.removePendingMessage);
   const editPendingMessage = useAppStore((s) => s.editPendingMessage);
   const setSpawnsColumnOpen = useAppStore((s) => s.setSpawnsColumnOpen);
@@ -2022,6 +2027,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const lastProgressAtRef = useRef(0);
   const sessionEnteredAtRef = useRef<Record<string, number>>({});
   const deferredSessionMessagesRef = useRef<Record<string, Array<Parameters<typeof addPaneMessage>>>>({});
+  const lastComposerEnterAtRef = useRef(0);
   const streamRafRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const autoScrollPinnedRef = useRef(true);
@@ -3695,7 +3701,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   // Group chats also have a real streaming run in flight; only the
   // assistant-text overlay is gated by !isGroupPane (group chats render
-  // per-member typing bubbles instead). The stop button + barge-in resend
+  // per-member typing bubbles instead). The stop button + queued follow-ups
   // judgment must work in both modes.
   const canInterruptCurrentSession = canStopCurrentRun({
     streaming,
@@ -3707,6 +3713,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     !!pane.sessionId &&
     runGuardSessionId === (pane.sessionId || "").trim();
 
+  const sessionWorkInProgress = useMemo(() => {
+    const sid = (pane.sessionId || "").trim();
+    return shouldShowSessionWorkInProgress({
+      isStreamingCurrentSession,
+      executionState: sessionExecutionState,
+      stallState,
+      sessionUnattended,
+      unattendedGlobalEnabled,
+      userStopped: sid ? Boolean(userStoppedSessionRef.current[sid]) : false,
+      messages: pane.messages ?? [],
+      isGroupPane,
+    });
+  }, [
+    isGroupPane,
+    isStreamingCurrentSession,
+    pane.messages,
+    pane.sessionId,
+    sessionExecutionState,
+    sessionUnattended,
+    stallState,
+    stallTick,
+    unattendedGlobalEnabled,
+  ]);
+
   const showStopButton = shouldShowStopButton({
     streaming,
     streamingSessionId,
@@ -3715,6 +3745,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     runGuardSessionId,
     hasDelegation,
     isGroupPane,
+    sessionWorkInProgress,
   });
 
   const stallModelOptions = useMemo(() => {
@@ -3750,9 +3781,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
 
   const taskLiveness = useMemo((): "active" | "stalled" | "idle" => {
     if (stallState === "stall") return "stalled";
+    if (sessionWorkInProgress) return "active";
     if (sessionExecutionState === "running") return "active";
     return "idle";
-  }, [stallState, sessionExecutionState]);
+  }, [sessionWorkInProgress, stallState, sessionExecutionState]);
 
   const syncStreamingUiForCurrentSession = useCallback(() => {
     const sid = (pane.sessionId || "").trim();
@@ -4161,6 +4193,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
     void sendChatRef.current(t);
   }, []);
 
+  const sendQueuedMessageNow = useCallback(
+    (msgId: string) => {
+      const item = takePendingMessage(paneId, msgId);
+      if (!item) return;
+      void sendChatRef.current(item.text, {
+        retryAttachments: item.attachments,
+        forceSend: true,
+      });
+    },
+    [paneId, takePendingMessage]
+  );
+
   const renderedMessages = useMemo(() => {
     const reactActionStyle = getAssistantActionStyle({ inReActRow: true });
     const renderGroupedRow = (
@@ -4482,6 +4526,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           assistantName={name}
         />
       ))}
+      {sessionWorkInProgress && !isStreamingCurrentSession && !isGroupPane ? (
+        <ImBubble
+          key="typing-meta"
+          message={{ id: "typing-meta", role: "assistant", content: "" }}
+          assistantName={paneAvatarMeta.name}
+          assistantAvatarUrl={paneAvatarMeta.url}
+        />
+      ) : null}
       {isStreamingCurrentSession && !hideStreamOverlayAsDuplicate && !useReActImLayout ? (
         chatStyle === "terminal" ? (
           <TerminalLine
@@ -4515,16 +4567,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
           />
         )
       ) : null}
-      {queuedMessages.length > 0 && queuedMessages.map((qm, qi) => (
-        <QueuedMessageBubble
-          key={qm.id}
-          msg={qm}
-          index={qi}
-          total={queuedMessages.length}
-          onEdit={(id, newText) => editPendingMessage(paneId, id, newText)}
-          onRemove={(id) => removePendingMessage(paneId, id)}
-        />
-      ))}
       {stallState === "stall" && (
         <StallRecoveryCard
           kind="stall"
@@ -4554,7 +4596,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       )}
     </>
     );
-  }, [autoNudgeCount, chatStyle, copyMessage, copyReActBlock, currentModelLabel, editPendingMessage, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, queuedMessages, readyAttachments.length, removePendingMessage, resolveGroupInlineConfirm, resolveQuoteBody, resumeCurrentTask, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, setQuoteTarget, showInlineAssistantModelBadge, stallModelOptions, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [autoNudgeCount, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupTyping, groupedVisibleMessages, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, pane.historySearchTerms, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveQuoteBody, resumeCurrentTask, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionWorkInProgress, setQuoteTarget, showInlineAssistantModelBadge, stallModelOptions, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -4686,6 +4728,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       retryAttachments?: MessageAttachment[];
       suppressUserEcho?: boolean;
       skipUserHistory?: boolean;
+      forceSend?: boolean;
       continuation?: { reason: ContinueReason; source: ContinueSource };
     }
   ) => Promise<void>>(
@@ -4713,6 +4756,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
       retryAttachments?: MessageAttachment[];
       suppressUserEcho?: boolean;
       skipUserHistory?: boolean;
+      forceSend?: boolean;
       continuation?: { reason: ContinueReason; source: ContinueSource };
     }
   ) => {
@@ -4802,16 +4846,38 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         return;
       }
     }
+    const isStreamRunActive = !!sessionStreamStateRef.current[requestSessionId]?.active;
+    const canQueueFollowUp =
+      !isContinuation && !options?.suppressUserEcho && !options?.skipUserHistory;
+
     if (
-      shouldInterruptOnResend({
-        isStreamRunActive: !!sessionStreamStateRef.current[requestSessionId]?.active,
+      canQueueFollowUp &&
+      shouldEnqueueOnResend({
+        isStreamRunActive,
+        forceSend: options?.forceSend,
       })
     ) {
-      // Barge-in semantics (Cursor / ChatGPT style): when the user sends a
-      // follow-up while the previous round is still streaming, abort the
-      // current run and start a new round. The natural chat history (Q1 +
-      // partial assistant + Q2) is preserved by the SSE finally block which
-      // commits any non-empty partial text before resolving.
+      enqueuePaneMessage(pane.id, {
+        id: crypto.randomUUID(),
+        text: messageText,
+        attachments: userAttachments,
+        contextFiles: [],
+        timestamp: Date.now(),
+      });
+      setComposerText("");
+      setQuoteTarget(null);
+      setContextFiles({});
+      return;
+    }
+
+    if (
+      shouldInterruptOnResend({
+        isStreamRunActive,
+        forceSend: options?.forceSend,
+      })
+    ) {
+      // Force-send while streaming: abort the current run, then start the new round.
+      // Partial assistant text is preserved by commitCurrentStreamIfNeeded in finally.
       try {
         await window.agenticxDesktop.interruptSession?.(requestSessionId);
       } catch (err) {
@@ -6558,7 +6624,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
               <span className="rounded-full border border-border bg-surface-panel px-2 py-0.5">
                 {currentModelLabel}
-                {sessionExecutionState === "running" ? " · 运行中" : ""}
+                {sessionExecutionState === "running"
+                  ? " · 运行中"
+                  : sessionWorkInProgress
+                    ? " · 处理中"
+                    : ""}
                 {silentSeconds > 0 ? ` · 静默 ${silentSeconds}s` : ""}
                 {lastToolProgress?.name
                   ? ` · ${lastToolProgress.name}${lastToolProgress.sec > 0 ? ` ${lastToolProgress.sec}s` : ""}`
@@ -6655,6 +6725,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
               <button className="rounded px-1 hover:bg-surface-hover" onClick={() => setSelectedMessageIds(new Set())}>取消</button>
             </div>
           ) : null}
+          <MessageQueuePanel
+            messages={queuedMessages}
+            onEdit={(id, newText) => editPendingMessage(paneId, id, newText)}
+            onRemove={(id) => removePendingMessage(paneId, id)}
+            onSendNow={sendQueuedMessageNow}
+          />
           <div className="agx-pane-composer-body agx-theme-focus-ring relative rounded-2xl border border-transparent bg-surface-card transition-all duration-300 ease-out">
             {visibleAttachmentEntries.length > 0 ? (
               <div className="flex flex-wrap gap-2 px-3 pt-3">
@@ -6783,12 +6859,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   if (composerExpanded) {
                     if (e.metaKey || e.ctrlKey) {
                       e.preventDefault();
+                      lastComposerEnterAtRef.current = 0;
                       void sendChat(extractComposerText());
                     }
                     return;
                   }
                   e.preventDefault();
-                  void sendChat(extractComposerText());
+                  const composerText = extractComposerText();
+                  const streamActive = !!sessionStreamStateRef.current[(pane.sessionId || "").trim()]?.active;
+                  if (streamActive && isDoubleEnterWithinWindow(lastComposerEnterAtRef.current)) {
+                    lastComposerEnterAtRef.current = 0;
+                    void sendChat(composerText, { forceSend: true });
+                    return;
+                  }
+                  if (streamActive) {
+                    lastComposerEnterAtRef.current = Date.now();
+                  } else {
+                    lastComposerEnterAtRef.current = 0;
+                  }
+                  void sendChat(composerText);
                 }
               }}
               className={`agx-pane-composer-input block w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-0 pt-4 text-[15px] leading-relaxed text-text-primary outline-none ${
@@ -6930,6 +7019,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   streaming={showStopButton}
                   recording={recording}
                   onSend={() => {
+                    lastComposerEnterAtRef.current = 0;
                     void sendChat(extractComposerText());
                   }}
                   onMic={onMicClick}
