@@ -39,6 +39,10 @@ type Event struct {
 	APITokenID      int64       `json:"api_token_id,omitempty"`
 	AttemptIndex int         `json:"attempt_index,omitempty"`
 	RetryReason  string      `json:"retry_reason,omitempty"`
+	InboundProtocol  string  `json:"inbound_protocol,omitempty"`
+	OutboundProtocol string  `json:"outbound_protocol,omitempty"`
+	ReasoningEffort  string  `json:"reasoning_effort,omitempty"`
+	ThinkingMode     string  `json:"thinking_mode,omitempty"`
 	EstimatedTokens int      `json:"estimated_tokens,omitempty"`
 	ActualTokens    int      `json:"actual_tokens,omitempty"`
 	SettleDelta     int64     `json:"settle_delta,omitempty"`
