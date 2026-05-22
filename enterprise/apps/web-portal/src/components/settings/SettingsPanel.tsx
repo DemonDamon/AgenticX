@@ -34,6 +34,8 @@ import {
   Settings as SettingsIcon,
   Shield,
   Sparkles,
+  KeyRound,
+  Trash2,
 } from "lucide-react";
 import { usePortalCopy } from "../../lib/portal-copy";
 
@@ -78,6 +80,9 @@ export function SettingsPanel() {
   const [streamingOn, setStreamingOn] = useState(true);
   const [autoTitleOn, setAutoTitleOn] = useState(true);
   const [chatStyle, setChatStyle] = useState<ChatStyleVariant>("im");
+  const [patName, setPatName] = useState("");
+  const [patPlain, setPatPlain] = useState<string | null>(null);
+  const [patRows, setPatRows] = useState<Array<{ id: number; name: string; tokenPrefix: string; status: string }>>([]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(CHAT_STYLE_STORAGE_KEY);
@@ -85,6 +90,39 @@ export function SettingsPanel() {
       setChatStyle(saved);
     }
   }, []);
+
+  useEffect(() => {
+    if (active !== "general") return;
+    void (async () => {
+      try {
+        const res = await fetch("/api/me/api-tokens");
+        const json = await res.json();
+        setPatRows(json.data?.tokens ?? []);
+      } catch {
+        setPatRows([]);
+      }
+    })();
+  }, [active]);
+
+  const createPat = async () => {
+    const res = await fetch("/api/me/api-tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: patName }),
+    });
+    const json = await res.json();
+    if (json.code !== "00000") return;
+    setPatPlain(json.data?.token ?? null);
+    setPatName("");
+    const listRes = await fetch("/api/me/api-tokens");
+    const listJson = await listRes.json();
+    setPatRows(listJson.data?.tokens ?? []);
+  };
+
+  const revokePat = async (id: number) => {
+    await fetch(`/api/me/api-tokens?id=${id}`, { method: "DELETE" });
+    setPatRows((rows) => rows.filter((r) => r.id !== id));
+  };
 
   const updateChatStyle = (next: ChatStyleVariant) => {
     setChatStyle(next);
@@ -193,6 +231,55 @@ export function SettingsPanel() {
                   }
                 />
               </SettingsSection>
+            ) : null}
+
+            {active === "general" ? (
+              <div className="mt-6">
+                <SettingsSection
+                  title="API Tokens"
+                  description="创建 agx-pat-* 令牌，供脚本或 IDE 直连 Enterprise Gateway"
+                  icon={<KeyRound className="h-4 w-4" />}
+                >
+                  {patPlain ? (
+                    <SettingsRow
+                      label="明文 Token（仅显示一次）"
+                      description={<code className="break-all text-xs">{patPlain}</code>}
+                      control={
+                        <Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(patPlain)}>
+                          复制
+                        </Button>
+                      }
+                      stack
+                    />
+                  ) : null}
+                  <SettingsRow
+                    label="新建 Token"
+                    control={
+                      <div className="flex w-full gap-2">
+                        <Input value={patName} onChange={(e) => setPatName(e.target.value)} placeholder="名称，如 ci-bot" />
+                        <Button size="sm" onClick={() => void createPat()} disabled={!patName.trim()}>
+                          创建
+                        </Button>
+                      </div>
+                    }
+                    stack
+                  />
+                  {patRows.map((row) => (
+                    <SettingsRow
+                      key={row.id}
+                      label={row.name}
+                      description={`${row.tokenPrefix}… · ${row.status}`}
+                      control={
+                        row.status === "active" ? (
+                          <Button size="sm" variant="ghost" className="text-destructive" onClick={() => void revokePat(row.id)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        ) : null
+                      }
+                    />
+                  ))}
+                </SettingsSection>
+              </div>
             ) : null}
 
             {active === "model-service" ? (

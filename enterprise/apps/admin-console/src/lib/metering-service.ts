@@ -16,6 +16,7 @@ function resolveTenantId(): string {
 export async function queryMetering(input: {
   dept_id?: string[];
   user_id?: string[];
+  api_token_id?: string[];
   provider?: string[];
   model?: string[];
   start: string;
