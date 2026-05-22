@@ -78,9 +78,22 @@ if [ -n "${AUTH_JWT_PUBLIC_KEY_FILE:-}" ] && [ -f "$AUTH_JWT_PUBLIC_KEY_FILE" ];
   AUTH_JWT_PUBLIC_KEY="$(cat "$AUTH_JWT_PUBLIC_KEY_FILE")"; export AUTH_JWT_PUBLIC_KEY
 fi
 
+# 3) Gateway internal token（与 admin internal API 共用，不落盘到 .env.local 明文）
+if [ -n "${GATEWAY_INTERNAL_TOKEN_FILE:-}" ] && [ -f "$GATEWAY_INTERNAL_TOKEN_FILE" ]; then
+  GATEWAY_INTERNAL_TOKEN="$(cat "$GATEWAY_INTERNAL_TOKEN_FILE")"; export GATEWAY_INTERNAL_TOKEN
+elif [ -n "${GATEWAY_INTERNAL_TOKEN:-}" ]; then
+  export GATEWAY_INTERNAL_TOKEN
+fi
+
 if [ -z "${AUTH_JWT_PRIVATE_KEY:-}" ] || [ -z "${AUTH_JWT_PUBLIC_KEY:-}" ]; then
   echo "[start-dev] 缺少 AUTH_JWT_PRIVATE_KEY / AUTH_JWT_PUBLIC_KEY，请检查 .env.local 与 .local-secrets/" >&2
   exit 1
+fi
+
+if [ -z "${GATEWAY_INTERNAL_TOKEN:-}" ] || [ -z "${GATEWAY_REMOTE_PROVIDERS_URL:-}" ]; then
+  echo "[start-dev] 警告：未配置 GATEWAY_INTERNAL_TOKEN（或 GATEWAY_INTERNAL_TOKEN_FILE）/ GATEWAY_REMOTE_PROVIDERS_URL；" >&2
+  echo "          gateway 将无法从 admin PG 读取模型厂商配置（前台聊天会回退 mock）。" >&2
+  echo "          请重新运行：bash scripts/bootstrap.sh" >&2
 fi
 
 # 3) 可选自动迁移：仅本地 DB 默认开启，避免共享库被意外改 schema。
@@ -151,6 +164,9 @@ echo "[start-dev] all services launching. Ctrl+C 结束。"
 echo "  - web-portal    http://localhost:3000"
 echo "  - admin-console http://localhost:3001"
 echo "  - gateway       ${GATEWAY_BASE_URL:-http://127.0.0.1:8088}/healthz"
+if [ -n "${GATEWAY_REMOTE_PROVIDERS_URL:-}" ]; then
+  echo "    providers ← ${GATEWAY_REMOTE_PROVIDERS_URL}"
+fi
 if [ "$ALL_APPS" -eq 1 ]; then
   echo "  - hechuang portal  http://localhost:3100"
   echo "  - hechuang admin   http://localhost:3101"

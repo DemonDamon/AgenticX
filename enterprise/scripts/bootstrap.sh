@@ -217,9 +217,24 @@ if [ -z "${AUTH_JWT_PRIVATE_KEY:-}" ] || [ -z "${AUTH_JWT_PUBLIC_KEY:-}" ]; then
   fi
 fi
 
-# --- 3.6 网关地址 ---
+# --- 3.6 网关地址与 admin internal 拉取（local 默认接通 PG 里的模型服务配置）---
 : "${GATEWAY_BASE_URL:=http://127.0.0.1:8088}"
 : "${GATEWAY_COMPLETIONS_URL:=http://127.0.0.1:8088/v1/chat/completions}"
+: "${ADMIN_CONSOLE_DEV_URL:=http://127.0.0.1:3001}"
+
+if [ "$MODE" = "local" ]; then
+  GATEWAY_INTERNAL_TOKEN_FILE="$SECRETS_DIR/gateway_internal.token"
+  if [ ! -f "$GATEWAY_INTERNAL_TOKEN_FILE" ]; then
+    random_hex 16 > "$GATEWAY_INTERNAL_TOKEN_FILE"
+    chmod 600 "$GATEWAY_INTERNAL_TOKEN_FILE"
+    ok "generated gateway internal token at $GATEWAY_INTERNAL_TOKEN_FILE"
+  else
+    ok "gateway internal token already exists"
+  fi
+  : "${GATEWAY_REMOTE_PROVIDERS_URL:=${ADMIN_CONSOLE_DEV_URL}/api/internal/providers}"
+  : "${GATEWAY_REMOTE_QUOTA_CONFIG_URL:=${ADMIN_CONSOLE_DEV_URL}/api/internal/quotas}"
+  : "${GATEWAY_REMOTE_POLICY_SNAPSHOT_URL:=${ADMIN_CONSOLE_DEV_URL}/api/internal/policy-snapshot}"
+fi
 
 # --- 3.7 Next 公开展示用 SSO（按钮是否可用；非 secret）---
 # local 模式给出开发入口；server 模式不自动启用，避免未配置真实 IdP 时暴露不可用按钮。
@@ -292,6 +307,10 @@ AUTH_JWT_PUBLIC_KEY_FILE='${AUTH_JWT_PUBLIC_KEY_FILE:-}'
 
 GATEWAY_BASE_URL='$GATEWAY_BASE_URL'
 GATEWAY_COMPLETIONS_URL='$GATEWAY_COMPLETIONS_URL'
+GATEWAY_INTERNAL_TOKEN_FILE='${GATEWAY_INTERNAL_TOKEN_FILE:-}'
+GATEWAY_REMOTE_PROVIDERS_URL='${GATEWAY_REMOTE_PROVIDERS_URL:-}'
+GATEWAY_REMOTE_QUOTA_CONFIG_URL='${GATEWAY_REMOTE_QUOTA_CONFIG_URL:-}'
+GATEWAY_REMOTE_POLICY_SNAPSHOT_URL='${GATEWAY_REMOTE_POLICY_SNAPSHOT_URL:-}'
 
 NEXT_PUBLIC_SSO_PROVIDERS='${NEXT_PUBLIC_SSO_PROVIDERS:-}'
 SSO_STATE_SIGNING_SECRET='$SSO_STATE_SIGNING_SECRET'
@@ -393,4 +412,5 @@ cat <<EOF
   - web-portal   http://localhost:3000
   - admin-console http://localhost:3001 （账号 ${ADMIN_CONSOLE_LOGIN_EMAIL}）
   - gateway      http://127.0.0.1:8088/healthz
+     （local 模式已默认 GATEWAY_REMOTE_PROVIDERS_URL → admin internal API，模型 Key 走 PG 真调）
 EOF
