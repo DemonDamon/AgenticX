@@ -24,8 +24,11 @@ const (
 )
 
 type Rule struct {
-	MonthlyTokens int64  `json:"monthlyTokens"`
-	Action        Action `json:"action"`
+	MonthlyTokens   int64  `json:"monthlyTokens"`
+	TPM             int    `json:"tpm,omitempty"`
+	RPM             int    `json:"rpm,omitempty"`
+	MaxConcurrency  int    `json:"maxConcurrency,omitempty"`
+	Action          Action `json:"action"`
 }
 
 type Config struct {
@@ -35,6 +38,7 @@ type Config struct {
 	} `json:"defaults"`
 	Users       map[string]Rule `json:"users"`
 	Departments map[string]Rule `json:"departments"`
+	APITokens   map[string]Rule `json:"apiTokens"`
 }
 
 type usageRow struct {
@@ -302,6 +306,9 @@ func (t *Tracker) normalizeConfig(cfg Config) Config {
 	}
 	if cfg.Departments == nil {
 		cfg.Departments = map[string]Rule{}
+	}
+	if cfg.APITokens == nil {
+		cfg.APITokens = map[string]Rule{}
 	}
 	return cfg
 }

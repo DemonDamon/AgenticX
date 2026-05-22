@@ -7,10 +7,15 @@ export type QuotaAction = "block" | "warn" | "fallback";
 
 export type QuotaRule = {
   monthlyTokens: number;
+  tpm?: number;
+  rpm?: number;
+  maxConcurrency?: number;
   action: QuotaAction;
 };
 
-export type QuotaConfig = SharedQuotaConfig;
+export type QuotaConfig = SharedQuotaConfig & {
+  apiTokens?: Record<string, QuotaRule>;
+};
 
 const LEGACY_FILE = path.join(resolveRuntimeAdminDir(), "quotas.json");
 
@@ -38,9 +43,15 @@ function tenant(): string {
 
 function normalizeRule(input: Partial<QuotaRule> | undefined): QuotaRule {
   const monthlyTokens = Number(input?.monthlyTokens ?? 0);
+  const tpm = Number(input?.tpm ?? 0);
+  const rpm = Number(input?.rpm ?? 0);
+  const maxConcurrency = Number(input?.maxConcurrency ?? 0);
   const action = input?.action ?? "warn";
   return {
     monthlyTokens: Number.isFinite(monthlyTokens) && monthlyTokens > 0 ? Math.floor(monthlyTokens) : 0,
+    tpm: Number.isFinite(tpm) && tpm > 0 ? Math.floor(tpm) : 0,
+    rpm: Number.isFinite(rpm) && rpm > 0 ? Math.floor(rpm) : 0,
+    maxConcurrency: Number.isFinite(maxConcurrency) && maxConcurrency > 0 ? Math.floor(maxConcurrency) : 0,
     action: action === "block" || action === "fallback" ? action : "warn",
   };
 }
@@ -50,6 +61,7 @@ function normalizeQuota(input: Partial<QuotaConfig> | undefined): QuotaConfig {
     defaults: { role: {}, model: {} },
     users: {},
     departments: {},
+    apiTokens: {},
     updatedAt: new Date().toISOString(),
   };
   const roles = input?.defaults?.role ?? {};
@@ -60,6 +72,8 @@ function normalizeQuota(input: Partial<QuotaConfig> | undefined): QuotaConfig {
   for (const [key, value] of Object.entries(users)) next.users[key] = normalizeRule(value);
   const depts = input?.departments ?? {};
   for (const [key, value] of Object.entries(depts)) next.departments[key] = normalizeRule(value);
+  const apiTokens = input?.apiTokens ?? {};
+  for (const [key, value] of Object.entries(apiTokens)) next.apiTokens![key] = normalizeRule(value);
   return next;
 }
 

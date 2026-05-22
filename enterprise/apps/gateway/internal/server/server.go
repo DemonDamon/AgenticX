@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/adaptor"
+	gatewayauth "github.com/agenticx/enterprise/gateway/internal/auth"
 	"github.com/agenticx/enterprise/gateway/internal/audit"
 	"github.com/agenticx/enterprise/gateway/internal/billing"
 	"github.com/agenticx/enterprise/gateway/internal/channel"
@@ -64,6 +65,7 @@ type Server struct {
 	keyPool            *keypool.Pool
 	relayExecutor      *relay.Executor
 	billingService     *billing.Service
+	patVerifier        *gatewayauth.PATVerifier
 }
 
 var (
@@ -132,11 +134,13 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 
 	fileWriter := audit.NewFileWriter(cfg.AuditDir)
 	var auditWriter audit.EventWriter = fileWriter
+	var patVerifier *gatewayauth.PATVerifier
 	if dbURL != "" {
 		pool, aerr := audit.NewPgxPool(dbURL)
 		if aerr != nil {
 			logger.Warn("audit pg unavailable, using file-only audit", "error", aerr)
 		} else {
+			patVerifier = gatewayauth.NewPATVerifier(pool)
 			auditWriter = audit.NewDualWriter(fileWriter, audit.NewPgWriter(pool), cfg.AuditDir, logger)
 			days := audit.BackfillDaysFromEnv()
 			realPool := pool
@@ -167,6 +171,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		metering:           sink,
 		adminLoader:        adminLoader,
 		quotaTracker:       quota.NewTracker(quotaCfgPath, quotaUsagePath),
+		patVerifier:        patVerifier,
 	}
 	srv.initChannelRelay()
 	return srv, nil
@@ -494,6 +499,8 @@ func (s *Server) Router() http.Handler {
 
 	r.Get("/healthz", s.handleHealth)
 	r.Get("/internal/channel-stats", s.handleChannelStats)
+	r.Get("/internal/keypool-stats", s.handleKeypoolStats)
+	r.Post("/internal/keypool/reset", s.handleKeypoolReset)
 	r.Post("/v1/chat/completions", s.handleChatCompletions)
 	r.Post("/v1/embeddings", s.handleEmbeddings)
 
@@ -514,14 +521,22 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	startedAt := time.Now()
-	identity, err := identityFromRequest(r)
+	identity, err := s.identityFromRequest(r)
 	if err != nil {
-		writeAPIError(w, openai.Unauthorized("invalid or missing bearer token"))
+		msg := err.Error()
+		if strings.Contains(msg, "auth:pat") {
+			writeAPIError(w, openai.Unauthorized(msg))
+		} else {
+			writeAPIError(w, openai.Unauthorized("invalid or missing bearer token"))
+		}
 		return
 	}
 	if !hasScope(identity.Scopes, "workspace:chat") {
 		writeAPIError(w, openai.Forbidden("missing workspace:chat scope"))
 		return
+	}
+	if identity.AuthViaPAT && identity.APITokenID > 0 && s.patVerifier != nil {
+		s.patVerifier.NoteUsed(identity.APITokenID)
 	}
 
 	var req openai.ChatCompletionRequest
@@ -537,6 +552,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, openai.BadRequest("messages is required"))
 		return
 	}
+
+	qctx := s.quotaContext(identity, req.Model)
+	defer s.billingService.ReleaseContext(qctx)
 
 	decision := s.decider.Decide(r, req.Model)
 	s.logger.Info("gateway routing decision",
@@ -586,29 +604,19 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	reserveTokens := estimateTokensWithMax(estimatedInputTokens, maxTokensFromRequest(req))
 	var quotaReservation billing.Reservation
 	if s.useChannelRelay() {
-		quotaReservation = s.billingService.Reserve(
-			identity.UserID,
-			identity.DepartmentID,
-			roleFromScopes(identity.Scopes),
-			req.Model,
-			reserveTokens,
-		)
+		quotaReservation = s.billingService.ReserveContext(qctx, reserveTokens)
 		if !quotaReservation.Allowed {
-			writeAPIError(w, openai.QuotaExceeded("token quota exceeded"))
+			s.writeQuotaError(w, quotaReservation.Check)
 			return
 		}
+		s.applyQuotaHeaders(w, quotaReservation.Check)
 	} else {
-		quotaDecision := s.quotaTracker.CheckAndAdd(
-			identity.UserID,
-			identity.DepartmentID,
-			roleFromScopes(identity.Scopes),
-			req.Model,
-			int64(estimatedInputTokens),
-		)
-		if !quotaDecision.Allowed {
-			writeAPIError(w, openai.QuotaExceeded("token quota exceeded"))
+		check := s.quotaTracker.CheckRequest(qctx, int64(estimatedInputTokens))
+		if !check.Allowed {
+			s.writeQuotaError(w, check)
 			return
 		}
+		s.applyQuotaHeaders(w, check)
 	}
 
 	if req.Stream {
@@ -714,9 +722,14 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	startedAt := time.Now()
-	identity, err := identityFromRequest(r)
+	identity, err := s.identityFromRequest(r)
 	if err != nil {
-		writeAPIError(w, openai.Unauthorized("invalid or missing bearer token"))
+		msg := err.Error()
+		if strings.Contains(msg, "auth:pat") {
+			writeAPIError(w, openai.Unauthorized(msg))
+		} else {
+			writeAPIError(w, openai.Unauthorized("invalid or missing bearer token"))
+		}
 		return
 	}
 	if !hasScope(identity.Scopes, "workspace:chat") {
@@ -927,7 +940,8 @@ func (s *Server) handleStream(
 				Provider:     decision.Provider,
 				Model:        req.Model,
 				Route:        decision.Route,
-				ChannelID:    decision.ChannelID,
+				ChannelID:       decision.ChannelID,
+		ChannelKeyRef:   streamResult.KeyRef,
 				Digest: &audit.Digest{
 					PromptHash:   hashText(inputText),
 					ResponseHash: hashText(responseBuilder.String()),
@@ -1011,7 +1025,8 @@ func (s *Server) handleStream(
 		Provider:     decision.Provider,
 		Model:        req.Model,
 		Route:        decision.Route,
-		ChannelID:    decision.ChannelID,
+		ChannelID:       decision.ChannelID,
+		ChannelKeyRef:   streamResult.KeyRef,
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
 		TotalTokens:  inputTokens + outputTokens,
@@ -1153,12 +1168,61 @@ type requestIdentity struct {
 	RoleCodes     []string
 	ClientType    string
 	Scopes        []string
+	APITokenID    int64
+	AuthViaPAT    bool
 }
 
-func identityFromRequest(r *http.Request) (requestIdentity, error) {
+func (s *Server) quotaContext(identity requestIdentity, model string) quota.RequestContext {
+	apiTokenID := ""
+	if identity.APITokenID > 0 {
+		apiTokenID = fmt.Sprintf("%d", identity.APITokenID)
+	}
+	return quota.RequestContext{
+		TenantID:   identity.TenantID,
+		UserID:     identity.UserID,
+		DeptID:     identity.DepartmentID,
+		APITokenID: apiTokenID,
+		Role:       roleFromScopes(identity.Scopes),
+		Model:      model,
+	}
+}
+
+func (s *Server) applyQuotaHeaders(w http.ResponseWriter, check quota.CheckResult) {
+	for k, v := range check.Headers {
+		w.Header().Set(k, v)
+	}
+}
+
+func (s *Server) writeQuotaError(w http.ResponseWriter, check quota.CheckResult) {
+	msg := check.Description
+	if msg == "" {
+		msg = "policy:quota:exceeded"
+	}
+	writeAPIError(w, openai.QuotaExceeded(msg))
+}
+
+func (s *Server) identityFromRequest(r *http.Request) (requestIdentity, error) {
 	token := bearerToken(r.Header.Get("authorization"))
 	if token == "" {
 		return requestIdentity{}, errors.New("missing bearer token")
+	}
+	if strings.HasPrefix(token, "agx-pat-") {
+		if s.patVerifier == nil {
+			return requestIdentity{}, errors.New("auth:pat:database_unavailable")
+		}
+		pat, err := s.patVerifier.Verify(r.Context(), token)
+		if err != nil {
+			return requestIdentity{}, err
+		}
+		return requestIdentity{
+			TenantID:     pat.TenantID,
+			UserID:       pat.UserID,
+			DepartmentID: pat.DeptID,
+			Scopes:       pat.Scopes,
+			ClientType:   "api-token",
+			APITokenID:   pat.APITokenID,
+			AuthViaPAT:   true,
+		}, nil
 	}
 	fromJWT, err := parseIdentityFromJWT(token)
 	if err != nil {
@@ -1302,6 +1366,7 @@ func (s *Server) reportUsage(identity requestIdentity, decision routing.Decision
 		TenantID:     identity.TenantID,
 		DeptID:       identity.DepartmentID,
 		UserID:       identity.UserID,
+		APITokenID:   identity.APITokenID,
 		Provider:     decision.Provider,
 		Model:        decision.Model,
 		Route:        decision.Route,
