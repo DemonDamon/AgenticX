@@ -9,6 +9,7 @@ import (
 
 	"github.com/agenticx/enterprise/gateway/internal/adaptor"
 	"github.com/agenticx/enterprise/gateway/internal/audit"
+	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/inbound"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
@@ -167,6 +168,15 @@ func (s *Server) dispatchProtocol(
 		s.applyQuotaHeaders(w, check)
 	}
 
+	decision := s.decider.Decide(r, req.Model)
+	if !req.Stream && s.tryServeProtocolCache(w, cacheServeContext{
+		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
+		estimatedInputTokens: estimatedInputTokens, reservedTokens: reserveTokens,
+		inboundProtocol: inboundProtocolLabel(session.inbound),
+	}, session) {
+		return
+	}
+
 	if req.Stream {
 		s.protocolStream(w, r, req, identity, session, derived, thinkingMode, startedAt, estimatedInputTokens, reserveTokens)
 		return
@@ -230,7 +240,10 @@ func (s *Server) protocolComplete(
 		reservedTokens,
 		actualTotal,
 	)
-	s.reportUsage(identity, decision, providerInputTokens, providerOutputTokens)
+	s.reportUsageDetailed(identity, decision, resp.Usage)
+	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
+		Stream: false, Response: resp, Usage: resp.Usage,
+	})
 
 	outboundProto := outboundProtocolForChannel(result.Channel, session.outbound)
 	ev := s.protocolAuditEvent(identity, r, decision, req.Model, session.inbound, outboundProto, derived, thinkingMode, startedAt, result, streamResultFromComplete(result), estimatedInputTokens, providerInputTokens, providerOutputTokens, settle.Delta, responseContent, req.Messages)

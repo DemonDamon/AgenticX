@@ -71,6 +71,9 @@ export class MeteringService {
         coalesce(sum(input_tokens), 0)::bigint as input_tokens,
         coalesce(sum(output_tokens), 0)::bigint as output_tokens,
         coalesce(sum(total_tokens), 0)::bigint as total_tokens,
+        coalesce(sum(cached_tokens), 0)::bigint as cached_tokens,
+        coalesce(sum(cache_read_input_tokens), 0)::bigint as cache_read_input_tokens,
+        coalesce(sum(cache_creation_input_tokens), 0)::bigint as cache_creation_input_tokens,
         coalesce(sum(cost_usd), 0)::numeric(18,8) as cost_usd
       from usage_records
       where ${where.join(" and ")}
@@ -101,6 +104,9 @@ export class MeteringService {
           input_tokens: Number(row.input_tokens ?? 0),
           output_tokens: Number(row.output_tokens ?? 0),
           total_tokens: Number(row.total_tokens ?? 0),
+          cached_tokens: Number(row.cached_tokens ?? 0),
+          cache_read_input_tokens: Number(row.cache_read_input_tokens ?? 0),
+          cache_creation_input_tokens: Number(row.cache_creation_input_tokens ?? 0),
           cost_usd: Number(row.cost_usd ?? 0),
         };
       });

@@ -1,5 +1,7 @@
 package openai
 
+import "encoding/json"
+
 type ToolFunction struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
@@ -12,17 +14,19 @@ type Tool struct {
 }
 
 type ChatMessage struct {
-	Role             string `json:"role"`
-	Content          string `json:"content"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
-	ToolCallID       string `json:"tool_call_id,omitempty"`
-	Name             string `json:"name,omitempty"`
+	Role             string          `json:"role"`
+	Content          string          `json:"content"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	ToolCallID       string          `json:"tool_call_id,omitempty"`
+	Name             string          `json:"name,omitempty"`
+	CacheControl     json.RawMessage `json:"__cache_control,omitempty"`
 }
 
 type ChatCompletionRequest struct {
 	Model               string        `json:"model"`
 	Messages            []ChatMessage `json:"messages"`
-	System              string        `json:"system,omitempty"`
+	System              string          `json:"system,omitempty"`
+	SystemCacheControl  json.RawMessage `json:"-"`
 	Temperature         float64       `json:"temperature,omitempty"`
 	Stream              bool          `json:"stream,omitempty"`
 	MaxCompletionTokens int           `json:"max_completion_tokens,omitempty"`
@@ -42,10 +46,20 @@ type ChatCompletionChoice struct {
 	FinishReason string      `json:"finish_reason"`
 }
 
+type PromptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens,omitempty"`
+}
+
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens             int                  `json:"prompt_tokens"`
+	CompletionTokens         int                  `json:"completion_tokens"`
+	TotalTokens              int                  `json:"total_tokens"`
+	CachedTokens             int                  `json:"cached_tokens,omitempty"`
+	CacheCreationInputTokens int                  `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int                  `json:"cache_read_input_tokens,omitempty"`
+	ReasoningTokens          int                  `json:"reasoning_tokens,omitempty"`
+	PromptTokensDetails      *PromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+	Source                   string               `json:"-"`
 }
 
 type ChatCompletionResponse struct {

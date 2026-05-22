@@ -1,0 +1,40 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "panels": [
+    {
+      "title": "Gateway QPS",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum(rate(agx_gateway_cache_lookups_total[1m]))" }]
+    },
+    {
+      "title": "TTFT p95",
+      "type": "timeseries",
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(agx_gateway_ttft_seconds_bucket[5m])) by (le))" }]
+    },
+    {
+      "title": "TPS p95",
+      "type": "timeseries",
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(agx_gateway_tokens_per_second_bucket[5m])) by (le))" }]
+    },
+    {
+      "title": "Cache Hit Ratio",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum(rate(agx_gateway_cache_hits_total[5m])) / sum(rate(agx_gateway_cache_lookups_total{result=\"hit\"}[5m]))" }]
+    },
+    {
+      "title": "Channel Health",
+      "type": "timeseries",
+      "targets": [{ "expr": "agx_gateway_channel_health" }]
+    },
+    {
+      "title": "Top Upstream Errors",
+      "type": "timeseries",
+      "targets": [{ "expr": "topk(5, sum by (reason) (rate(agx_gateway_upstream_error_total[5m])))" }]
+    }
+  ],
+  "schemaVersion": 39,
+  "title": "AgenticX AI Gateway",
+  "uid": "agx-ai-gateway",
+  "version": 1
+}

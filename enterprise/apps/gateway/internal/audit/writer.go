@@ -43,6 +43,10 @@ type Event struct {
 	OutboundProtocol string  `json:"outbound_protocol,omitempty"`
 	ReasoningEffort  string  `json:"reasoning_effort,omitempty"`
 	ThinkingMode     string  `json:"thinking_mode,omitempty"`
+	CacheLayer           string  `json:"cache_layer,omitempty"`
+	CacheKeyHash         string  `json:"cache_key_hash,omitempty"`
+	SemanticSimilarity   float64 `json:"semantic_similarity,omitempty"`
+	LatencyMSUpstream    int64   `json:"latency_ms_upstream,omitempty"`
 	EstimatedTokens int      `json:"estimated_tokens,omitempty"`
 	ActualTokens    int      `json:"actual_tokens,omitempty"`
 	SettleDelta     int64     `json:"settle_delta,omitempty"`

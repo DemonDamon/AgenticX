@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/agenticx/enterprise/gateway/internal/audit"
+	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/relay"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
@@ -55,7 +56,13 @@ func (s *Server) handleChatCompleteRelay(
 		reservedTokens,
 		actualTotal,
 	)
-	s.reportUsage(identity, decision, providerInputTokens, providerOutputTokens)
+	s.reportUsageDetailed(identity, decision, resp.Usage)
+
+	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
+		Stream:   false,
+		Response: resp,
+		Usage:    resp.Usage,
+	})
 
 	if len(resp.Choices) > 0 {
 		respPolicy := s.evaluatePolicy(resp.Choices[0].Message.Content, makeEvalContext(identity, "response"))
@@ -116,9 +123,11 @@ func (s *Server) handleChatCompleteRelay(
 		OutputTokens:    providerOutputTokens,
 		TotalTokens:     providerInputTokens + providerOutputTokens,
 		LatencyMS:       time.Since(startedAt).Milliseconds(),
+		LatencyMSUpstream: time.Since(startedAt).Milliseconds(),
 		EstimatedTokens: estimatedInputTokens,
 		ActualTokens:    providerInputTokens + providerOutputTokens,
 		SettleDelta:     settle.Delta,
+		CacheLayer:      string(cache.LayerNone),
 		Digest: &audit.Digest{
 			PromptHash:      hashText(joinMessages(req.Messages)),
 			ResponseHash:    hashText(responseContent),

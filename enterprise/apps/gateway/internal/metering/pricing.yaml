@@ -1,0 +1,26 @@
+default:
+  input: 0.000001
+  output: 0.000002
+  cached_input: 0.0000001
+  cache_creation: 0.000001
+  cache_read: 0.0000001
+  reasoning_output: 0.000003
+
+models:
+  gpt-4o:
+    input: 0.0000025
+    output: 0.00001
+    cached_input: 0.00000125
+  gpt-4o-mini:
+    input: 0.00000015
+    output: 0.0000006
+    cached_input: 0.000000075
+  claude-3-5-sonnet-latest:
+    input: 0.000003
+    output: 0.000015
+    cache_creation: 0.00000375
+    cache_read: 0.0000003
+  deepseek-chat:
+    input: 0.00000014
+    output: 0.00000028
+    cached_input: 0.000000014

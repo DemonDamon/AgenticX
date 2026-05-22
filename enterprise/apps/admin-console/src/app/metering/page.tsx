@@ -42,6 +42,9 @@ type MeteringRow = {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  cached_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
   cost_usd: number;
 };
 
@@ -471,6 +474,9 @@ export default function MeteringPage() {
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">用户</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">模型</th>
                         <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tokens</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cached</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cache Read</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cache Write</th>
                         <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">成本</th>
                       </tr>
                     </thead>
@@ -491,6 +497,9 @@ export default function MeteringPage() {
                             </Badge>
                           </td>
                           <td className="px-4 py-2.5 text-right font-mono">{row.total_tokens.toLocaleString()}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{(row.cached_tokens ?? 0).toLocaleString()}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{(row.cache_read_input_tokens ?? 0).toLocaleString()}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{(row.cache_creation_input_tokens ?? 0).toLocaleString()}</td>
                           <td className="px-4 py-2.5 text-right font-mono">${row.cost_usd.toFixed(6)}</td>
                         </tr>
                       ))}
@@ -501,6 +510,9 @@ export default function MeteringPage() {
                           合计
                         </td>
                         <td className="px-4 py-2.5 text-right font-mono">{totalTokens.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">—</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">—</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">—</td>
                         <td className="px-4 py-2.5 text-right font-mono">${totalCost.toFixed(4)}</td>
                       </tr>
                     </tfoot>

@@ -13,8 +13,9 @@ import (
 const ProtocolClaude = "claude-messages"
 
 type claudeContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type          string          `json:"type"`
+	Text          string          `json:"text,omitempty"`
+	CacheControl  json.RawMessage `json:"cache_control,omitempty"`
 }
 
 type claudeMessage struct {
@@ -62,7 +63,7 @@ func ParseClaudeMessages(body io.Reader) (openai.ChatCompletionRequest, error) {
 		req.TopP = *raw.TopP
 	}
 	if len(raw.System) > 0 {
-		req.System = claudeSystemText(raw.System)
+		req.System, req.SystemCacheControl = claudeSystemParts(raw.System)
 	}
 	if len(raw.ToolChoice) > 0 {
 		req.ToolChoice = json.RawMessage(raw.ToolChoice)
@@ -75,8 +76,8 @@ func ParseClaudeMessages(body io.Reader) (openai.ChatCompletionRequest, error) {
 		} else if role != "user" {
 			role = "user"
 		}
-		text := claudeMessageText(msg.Content)
-		req.Messages = append(req.Messages, openai.ChatMessage{Role: role, Content: text})
+		text, cacheCtrl := claudeMessageParts(msg.Content)
+		req.Messages = append(req.Messages, openai.ChatMessage{Role: role, Content: text, CacheControl: cacheCtrl})
 	}
 	if len(req.Messages) == 0 {
 		return openai.ChatCompletionRequest{}, fmt.Errorf("messages is required")
@@ -84,14 +85,14 @@ func ParseClaudeMessages(body io.Reader) (openai.ChatCompletionRequest, error) {
 	return req, nil
 }
 
-func claudeSystemText(raw json.RawMessage) string {
+func claudeSystemParts(raw json.RawMessage) (text string, cacheControl json.RawMessage) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw)))
 	if len(raw) == 0 || string(raw) == "null" {
-		return ""
+		return "", nil
 	}
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
+		return s, nil
 	}
 	var blocks []claudeContentBlock
 	if err := json.Unmarshal(raw, &blocks); err == nil {
@@ -100,20 +101,23 @@ func claudeSystemText(raw json.RawMessage) string {
 			if block.Type == "text" && block.Text != "" {
 				b.WriteString(block.Text)
 			}
+			if len(block.CacheControl) > 0 && cacheControl == nil {
+				cacheControl = block.CacheControl
+			}
 		}
-		return b.String()
+		return b.String(), cacheControl
 	}
-	return string(raw)
+	return string(raw), nil
 }
 
-func claudeMessageText(raw json.RawMessage) string {
+func claudeMessageParts(raw json.RawMessage) (text string, cacheControl json.RawMessage) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw)))
 	if len(raw) == 0 {
-		return ""
+		return "", nil
 	}
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
+		return s, nil
 	}
 	var blocks []claudeContentBlock
 	if err := json.Unmarshal(raw, &blocks); err == nil {
@@ -122,8 +126,11 @@ func claudeMessageText(raw json.RawMessage) string {
 			if block.Type == "text" && block.Text != "" {
 				b.WriteString(block.Text)
 			}
+			if len(block.CacheControl) > 0 && cacheControl == nil {
+				cacheControl = block.CacheControl
+			}
 		}
-		return b.String()
+		return b.String(), cacheControl
 	}
-	return string(raw)
+	return string(raw), nil
 }
