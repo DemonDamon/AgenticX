@@ -9,6 +9,8 @@
 - AC-1: `ChatPane` 生成中 Enter 一次 → 入队并清空输入
 - AC-2: 生成中 Enter 两次（400ms 内）→ 立即发送输入内容
 - AC-3: 队首在 `sendChat` finally 中自动 dequeue 续发
+- FR-5: 强制插队中断时若上一轮无 assistant 落盘，自动追加「（已中断）」assistant 占位到 `messages.json`，避免下一请求出现 user → user 串问导致模型一并作答（context bleed）
+- AC-4: 中断 query1 后再发 query2，模型只回答 query2，不再追溯回答 query1
 
 ## 改动范围
 

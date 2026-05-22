@@ -4902,6 +4902,41 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
         setStreamedAssistantText("");
       }
       setStallState("none");
+
+      // Brief wait for the aborted SSE finally block to commit any partial
+      // assistant text via commitCurrentStreamIfNeeded. Then close the prior
+      // turn with an "(已中断)" placeholder if no assistant turn was written —
+      // otherwise the next request would feed the model two unanswered user
+      // questions and it would answer both.
+      await new Promise((r) => setTimeout(r, 60));
+      const tailMsgs = (useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [])
+        .filter((m) => m.role !== "tool");
+      const lastNonTool = tailMsgs[tailMsgs.length - 1];
+      if (!lastNonTool || lastNonTool.role === "user") {
+        const interruptedNote = "（已中断）";
+        addPaneMessage(pane.id, "assistant", interruptedNote, "meta", chatProvider, chatModel);
+        try {
+          await fetch(`${apiBase}/api/session/messages/append`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-agx-desktop-token": apiToken,
+            },
+            body: JSON.stringify({
+              session_id: requestSessionId,
+              messages: [
+                {
+                  role: "assistant",
+                  content: interruptedNote,
+                  metadata: { source: "barge-in" },
+                },
+              ],
+            }),
+          });
+        } catch (err) {
+          console.warn("[ChatPane] append interrupted placeholder failed:", err);
+        }
+      }
       // Fall through: proceed with a normal send below.
     }
 
@@ -6866,17 +6901,36 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
                   }
                   e.preventDefault();
                   const composerText = extractComposerText();
-                  const streamActive = !!sessionStreamStateRef.current[(pane.sessionId || "").trim()]?.active;
-                  if (streamActive && isDoubleEnterWithinWindow(lastComposerEnterAtRef.current)) {
-                    lastComposerEnterAtRef.current = 0;
-                    void sendChat(composerText, { forceSend: true });
+                  const trimmedComposer = composerText.trim();
+                  const hasComposerPayload = !!trimmedComposer || readyAttachments.length > 0;
+                  const sid = (pane.sessionId || "").trim();
+                  const streamActive = !!sessionStreamStateRef.current[sid]?.active;
+                  const queue = useAppStore.getState().pendingMessages[paneId] ?? [];
+
+                  if (streamActive) {
+                    const sendQueuedNow =
+                      isDoubleEnterWithinWindow(lastComposerEnterAtRef.current) ||
+                      (!hasComposerPayload && queue.length > 0 && lastComposerEnterAtRef.current > 0);
+
+                    if (sendQueuedNow) {
+                      lastComposerEnterAtRef.current = 0;
+                      if (hasComposerPayload) {
+                        void sendChat(composerText, { forceSend: true });
+                      } else {
+                        const latestQueued = queue[queue.length - 1];
+                        if (latestQueued) void sendQueuedMessageNow(latestQueued.id);
+                      }
+                      return;
+                    }
+
+                    if (!hasComposerPayload) return;
+
+                    lastComposerEnterAtRef.current = Date.now();
+                    void sendChat(composerText);
                     return;
                   }
-                  if (streamActive) {
-                    lastComposerEnterAtRef.current = Date.now();
-                  } else {
-                    lastComposerEnterAtRef.current = 0;
-                  }
+
+                  lastComposerEnterAtRef.current = 0;
                   void sendChat(composerText);
                 }
               }}

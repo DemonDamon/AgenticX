@@ -935,7 +935,9 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       abortedByUserRef.current = true;
       abortRef.current?.abort();
       const partial = streamTextRef.current.trim();
-      if (partial && !isThinkingPlaceholderText(partial) && !streamCommittedRef.current) {
+      const partialCommitted =
+        !!partial && !isThinkingPlaceholderText(partial) && !streamCommittedRef.current;
+      if (partialCommitted) {
         addMessage("assistant", streamTextRef.current, "meta", activeProvider, activeModel);
         streamCommittedRef.current = true;
       }
@@ -946,6 +948,35 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
       setStreamingModel(null);
       setStatus("idle");
       setStreaming(false);
+
+      // Close the prior user turn with "（已中断）" so the next request does
+      // not arrive at the backend with two consecutive unanswered user
+      // messages (the model would otherwise answer both).
+      if (!partialCommitted) {
+        const interruptedNote = "（已中断）";
+        addMessage("assistant", interruptedNote, "meta", activeProvider, activeModel);
+        try {
+          await fetch(`${apiBase}/api/session/messages/append`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-agx-desktop-token": apiToken,
+            },
+            body: JSON.stringify({
+              session_id: sessionId,
+              messages: [
+                {
+                  role: "assistant",
+                  content: interruptedNote,
+                  metadata: { source: "barge-in" },
+                },
+              ],
+            }),
+          });
+        } catch (err) {
+          console.warn("[ChatView] append interrupted placeholder failed:", err);
+        }
+      }
     }
     const reqProvider = opts?.provider ?? activeProvider;
     const reqModel = opts?.model ?? activeModel;
@@ -1669,16 +1700,35 @@ export function ChatView({ onOpenConfirm, mode = "pro" }: Props) {
         }
         return;
       }
-      if (streaming && isDoubleEnterWithinWindow(lastComposerEnterAtRef.current)) {
-        lastComposerEnterAtRef.current = 0;
-        void sendChat(input.trim(), { forceSend: true });
+      if (streaming) {
+        const trimmed = input.trim();
+        const queue = useAppStore.getState().pendingMessages[liteQueueKey] ?? [];
+        const sendQueuedNow =
+          isDoubleEnterWithinWindow(lastComposerEnterAtRef.current) ||
+          (!trimmed && queue.length > 0 && lastComposerEnterAtRef.current > 0);
+
+        if (sendQueuedNow) {
+          lastComposerEnterAtRef.current = 0;
+          if (trimmed) {
+            void sendChat(trimmed, { forceSend: true });
+          } else {
+            const latestQueued = queue[queue.length - 1];
+            if (latestQueued) {
+              const item = takePendingMessage(liteQueueKey, latestQueued.id);
+              if (item) void sendChatRef.current(item.text, { forceSend: true });
+            }
+          }
+          return;
+        }
+
+        if (!trimmed) return;
+
+        lastComposerEnterAtRef.current = Date.now();
+        void send();
         return;
       }
-      if (streaming) {
-        lastComposerEnterAtRef.current = Date.now();
-      } else {
-        lastComposerEnterAtRef.current = 0;
-      }
+
+      lastComposerEnterAtRef.current = 0;
       void send();
     }
   };
