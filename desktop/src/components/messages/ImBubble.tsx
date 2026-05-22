@@ -144,9 +144,17 @@ export function ImBubble({
   const displayName = isUser ? (userName || "我") : (assistantName || "AI");
   const avatarUrl = isUser ? userAvatarUrl : assistantAvatarUrl;
   const isStreaming = message.id === "__stream__";
-  const isGroupTyping = !isUser && typeof message.id === "string" && message.id.startsWith("typing-");
+  const isMetaPendingWork = !isUser && message.id === "typing-meta";
+  const isGroupTyping =
+    !isUser &&
+    typeof message.id === "string" &&
+    message.id.startsWith("typing-") &&
+    message.id !== "typing-meta";
   const compactAssistant =
-    !isUser && (assistantVisual === "compact-inline" || assistantVisual === "compact-inline-with-actions") && !isGroupTyping;
+    !isUser &&
+    (assistantVisual === "compact-inline" || assistantVisual === "compact-inline-with-actions") &&
+    !isGroupTyping &&
+    !isMetaPendingWork;
   const hideActions = compactAssistant && assistantVisual !== "compact-inline-with-actions";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
   const hasThinkTag = parsed?.hasReasoningTag ?? false;
@@ -464,6 +472,8 @@ export function ImBubble({
                       </div>
                     </div>
                   </div>
+                ) : isMetaPendingWork ? (
+                  <StreamingDots />
                 ) : isGroupTyping ? (
                   <span className="inline-flex items-baseline gap-0.5" aria-live="polite" aria-label="正在输入">
                     <span>正在输入</span>
