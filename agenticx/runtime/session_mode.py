@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Session harness mode helpers (code_dev vs daily_office).
+"""Session harness mode helpers (code_dev / daily_office / feature_loop).
 
 Author: Damon Li
 """
@@ -10,7 +10,8 @@ from typing import Any
 
 CODE_DEV = "code_dev"
 DAILY_OFFICE = "daily_office"
-VALID_MODES = frozenset({CODE_DEV, DAILY_OFFICE})
+FEATURE_LOOP = "feature_loop"
+VALID_MODES = frozenset({CODE_DEV, DAILY_OFFICE, FEATURE_LOOP})
 
 PHASE_EXPLORE = "explore"
 PHASE_READ = "read"
@@ -24,15 +25,30 @@ EXPLORE_WHOLE_FILE_READ_WARN_KEY = "__code_dev_explore_whole_reads__"
 
 
 def normalize_session_mode(raw: str | None) -> str:
+    """Coerce incoming mode strings into one of the valid mode constants.
+
+    Unknown values fall back to ``DAILY_OFFICE`` to preserve existing behavior.
+    """
     value = (raw or "").strip().lower()
-    return CODE_DEV if value == CODE_DEV else DAILY_OFFICE
+    if value == CODE_DEV:
+        return CODE_DEV
+    if value == FEATURE_LOOP:
+        return FEATURE_LOOP
+    return DAILY_OFFICE
 
 
 def is_code_dev(session: Any) -> bool:
+    """Return True when the session uses the code_dev harness."""
     return normalize_session_mode(getattr(session, "session_mode", None)) == CODE_DEV
 
 
+def is_feature_loop(session: Any) -> bool:
+    """Return True when the session uses the project-level feature_loop harness."""
+    return normalize_session_mode(getattr(session, "session_mode", None)) == FEATURE_LOOP
+
+
 def get_session_phase(session: Any) -> str:
+    """Read the current code_dev phase from the session scratchpad."""
     scratch = getattr(session, "scratchpad", None) or {}
     if not isinstance(scratch, dict):
         return PHASE_EXPLORE

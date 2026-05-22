@@ -512,6 +512,12 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         code_dev_block = build_code_dev_prompt_blocks(session)
     except Exception:
         code_dev_block = ""
+    try:
+        from agenticx.project_state.prompts import build_project_state_blocks
+
+        project_state_block = build_project_state_blocks(session)
+    except Exception:
+        project_state_block = ""
     return (
         "你是 AgenticX Studio 的执行型 Agent（implement 角色）。\n"
         "核心目标：根据用户请求完成代码/命令操作，并在不确定或高风险动作前主动确认。\n\n"
@@ -529,6 +535,7 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         "## 当前 context_files\n"
         f"{_serialize_context_files(session)}\n\n"
         f"{code_dev_block}"
+        f"{project_state_block}"
         "## 当前 MCP 工具上下文\n"
         f"{_truncate(mcp_context, 6000)}\n\n"
         "## 浏览器自动化（browser-use 等 MCP）\n"

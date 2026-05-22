@@ -4085,6 +4085,17 @@ async def _dispatch_lsp_tool(name: str, arguments: Dict[str, Any], session: Stud
     return json.dumps({"ok": False, "error": f"unknown LSP tool: {name}"}, ensure_ascii=False)
 
 
+# Project state harness tools (.agx/project state machine).
+try:
+    from agenticx.project_state.tools import project_state_tool_schemas as _project_state_schemas
+
+    STUDIO_TOOLS.extend(_project_state_schemas())
+except Exception as _exc:  # pragma: no cover - defensive import isolation
+    logging.getLogger(__name__).warning(
+        "project_state tool registration skipped: %s", _exc,
+    )
+
+
 _TOOL_REQUIRED_PARAMS: Dict[str, List[str]] = {}
 for _td in STUDIO_TOOLS:
     _fn = _td.get("function", {})
@@ -4377,6 +4388,19 @@ async def dispatch_tool_async(
             return _tool_scratchpad_write(arguments, session)
         if name == "scratchpad_read":
             return _tool_scratchpad_read(arguments, session)
+        if name in {
+            "project_init",
+            "project_status",
+            "feature_select",
+            "feature_complete",
+            "progress_append",
+            "verify_run",
+        }:
+            from agenticx.project_state.tools import dispatch_project_state_tool
+
+            return await asyncio.to_thread(
+                dispatch_project_state_tool, name, arguments, session
+            )
         if name == "memory_append":
             return await _tool_memory_append(arguments, confirm_gate=gate, emit_event=event_callback)
         if name == "memory_search":
