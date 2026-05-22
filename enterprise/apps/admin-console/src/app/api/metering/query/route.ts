@@ -20,11 +20,12 @@ export async function POST(request: Request) {
     const result = await queryMetering({
       dept_id: toArray(body.dept_id),
       user_id: toArray(body.user_id),
+      api_token_id: toArray(body.api_token_id),
       provider: toArray(body.provider),
       model: toArray(body.model),
       start: typeof body.start === "string" ? body.start : new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(),
       end: typeof body.end === "string" ? body.end : new Date().toISOString(),
-      group_by: toArray(body.group_by) as Array<"dept" | "user" | "provider" | "model" | "day">,
+      group_by: toArray(body.group_by) as Array<"dept" | "user" | "provider" | "model" | "day" | "pat">,
     });
     return NextResponse.json(result);
   } catch (error) {

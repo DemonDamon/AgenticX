@@ -9,6 +9,7 @@ const GROUP_COLUMN: Record<MeteringGroupKey, string> = {
   provider: "provider",
   model: "model",
   day: "date_trunc('day', time_bucket)",
+  pat: "api_token_id",
 };
 
 const ALIAS: Record<MeteringGroupKey, string> = {
@@ -17,6 +18,7 @@ const ALIAS: Record<MeteringGroupKey, string> = {
   provider: "provider",
   model: "model",
   day: "day",
+  pat: "pat",
 };
 
 export class MeteringService {
@@ -59,6 +61,7 @@ export class MeteringService {
     params.push(input.end);
     this.pushInClause("dept_id", input.dept_id, where, params);
     this.pushInClause("user_id", input.user_id, where, params);
+    this.pushInClause("api_token_id", input.api_token_id, where, params);
     this.pushInClause("provider", input.provider, where, params);
     this.pushInClause("model", input.model, where, params);
 
@@ -128,6 +131,7 @@ export class MeteringService {
       TenantID?: string;
       DeptID?: string;
       UserID?: string;
+      APITokenID?: number;
       Provider?: string;
       Model?: string;
       TimeBucket?: string;
@@ -159,6 +163,7 @@ export class MeteringService {
       if ((parsed.TenantID ?? "") !== input.tenant_id) continue;
       if (input.dept_id?.length && !input.dept_id.includes(parsed.DeptID ?? "")) continue;
       if (input.user_id?.length && !input.user_id.includes(parsed.UserID ?? "")) continue;
+      if (input.api_token_id?.length && !input.api_token_id.includes(String(parsed.APITokenID ?? ""))) continue;
       if (input.provider?.length && !input.provider.includes(parsed.Provider ?? "")) continue;
       if (input.model?.length && !input.model.includes(parsed.Model ?? "")) continue;
 
@@ -170,6 +175,8 @@ export class MeteringService {
           dims.dept = parsed.DeptID ?? null;
         } else if (group === "user") {
           dims.user = parsed.UserID ?? null;
+        } else if (group === "pat") {
+          dims.pat = parsed.APITokenID ? String(parsed.APITokenID) : null;
         } else if (group === "provider") {
           dims.provider = parsed.Provider ?? null;
         } else if (group === "model") {

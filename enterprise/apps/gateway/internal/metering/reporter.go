@@ -16,6 +16,7 @@ type UsageRecord struct {
 	TenantID     string
 	DeptID       string
 	UserID       string
+	APITokenID   int64
 	Provider     string
 	Model        string
 	Route        string
@@ -63,16 +64,17 @@ func (r *Reporter) ReportAsync(record UsageRecord) {
 		defer cancel()
 		if _, err := r.db.ExecContext(ctx, `
       insert into usage_records (
-        id, tenant_id, dept_id, user_id, provider, model, route, time_bucket,
+        id, tenant_id, dept_id, user_id, api_token_id, provider, model, route, time_bucket,
         input_tokens, output_tokens, total_tokens, cost_usd, created_at, updated_at
       ) values (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now(), now()
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now(), now()
       )
     `,
 			record.ID,
 			tenantID,
 			nullIfEmpty(record.DeptID),
 			nullIfEmpty(record.UserID),
+			nullInt64(record.APITokenID),
 			record.Provider,
 			record.Model,
 			record.Route,
@@ -89,6 +91,13 @@ func (r *Reporter) ReportAsync(record UsageRecord) {
 
 func nullIfEmpty(value string) any {
 	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
+func nullInt64(value int64) any {
+	if value <= 0 {
 		return nil
 	}
 	return value

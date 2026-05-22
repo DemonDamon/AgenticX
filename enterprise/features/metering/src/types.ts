@@ -1,9 +1,10 @@
-export type MeteringGroupKey = "dept" | "user" | "provider" | "model" | "day";
+export type MeteringGroupKey = "dept" | "user" | "provider" | "model" | "day" | "pat";
 
 export type MeteringQueryInput = {
   tenant_id: string;
   dept_id?: string[];
   user_id?: string[];
+  api_token_id?: string[];
   provider?: string[];
   model?: string[];
   start: string;

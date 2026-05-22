@@ -107,6 +107,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/policy", label: "策略规则", icon: Shield },
       { href: "/admin/models", label: "模型服务", icon: Package },
       { href: "/admin/channels", label: "Channel 管理", icon: Activity },
+      { href: "/admin/api-tokens", label: "API Tokens", icon: KeyRound },
     ],
   },
 ];
@@ -132,6 +133,7 @@ const NAV_ITEM_LABELS: Record<string, { zh: string; en: string }> = {
   "platform:策略规则": { zh: "策略规则", en: "Policy Rules" },
   "platform:模型服务": { zh: "模型服务", en: "Model Services" },
   "platform:Channel 管理": { zh: "Channel 管理", en: "Channel Management" },
+  "platform:API Tokens": { zh: "API Tokens", en: "API Tokens" },
 };
 
 const SHELL_COPY = {

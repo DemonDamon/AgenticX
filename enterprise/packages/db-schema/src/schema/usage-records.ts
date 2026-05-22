@@ -1,4 +1,4 @@
-import { index, numeric, pgTable, timestamp, varchar } from "drizzle-orm/pg-core";
+import { bigint, index, numeric, pgTable, timestamp, varchar } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { auditColumns, ulid } from "./_shared";
 
@@ -11,6 +11,7 @@ export const usageRecords = pgTable(
       .references(() => tenants.id, { onDelete: "restrict" }),
     deptId: varchar("dept_id", { length: 64 }),
     userId: varchar("user_id", { length: 64 }),
+    apiTokenId: bigint("api_token_id", { mode: "number" }),
     provider: varchar("provider", { length: 64 }).notNull(),
     model: varchar("model", { length: 128 }).notNull(),
     route: varchar("route", { length: 32 }).notNull(),

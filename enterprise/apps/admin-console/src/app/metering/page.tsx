@@ -46,6 +46,7 @@ type MeteringRow = {
 };
 
 type UserOption = { id: string; name: string; deptId: string | null };
+type PatOption = { id: number; name: string; tokenPrefix: string };
 type ProviderOption = { id: string; name: string; models: string[] };
 
 const ALL = "__all__";
@@ -63,12 +64,14 @@ async function readJsonBody<T>(res: Response, fallback: T): Promise<T> {
 export default function MeteringPage() {
   const [dept, setDept] = useState(ALL);
   const [user, setUser] = useState(ALL);
+  const [apiToken, setApiToken] = useState(ALL);
   const [provider, setProvider] = useState(ALL);
   const [model, setModel] = useState(ALL);
   const [start, setStart] = useState(new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10));
   const [end, setEnd] = useState(new Date().toISOString().slice(0, 10));
   const [rows, setRows] = useState<MeteringRow[]>([]);
   const [usersData, setUsersData] = useState<UserOption[]>([]);
+  const [patOptions, setPatOptions] = useState<PatOption[]>([]);
   const [providersData, setProvidersData] = useState<ProviderOption[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -99,9 +102,10 @@ export default function MeteringPage() {
     let active = true;
     const loadMeta = async () => {
       try {
-        const [usersRes, providersRes] = await Promise.all([
+        const [usersRes, providersRes, patRes] = await Promise.all([
           fetch("/api/admin/users?limit=200", { cache: "no-store" }),
           fetch("/api/admin/providers", { cache: "no-store" }),
+          fetch("/api/admin/api-tokens", { cache: "no-store" }),
         ]);
         const emptyUsers = { data: { items: [] as Array<{ id: string; displayName: string; deptId: string | null }> } };
         const emptyProviders = {
@@ -109,14 +113,23 @@ export default function MeteringPage() {
             providers: [] as Array<{ id: string; displayName: string; enabled: boolean; models?: Array<{ name: string; enabled: boolean }> }>,
           },
         };
+        const emptyPats = { data: { tokens: [] as Array<{ id: number; name: string; tokenPrefix: string }> } };
         const usersJson = await readJsonBody(usersRes, emptyUsers);
         const providersJson = await readJsonBody(providersRes, emptyProviders);
+        const patJson = await readJsonBody(patRes, emptyPats);
         if (!active) return;
         setUsersData(
           (usersJson.data?.items ?? []).map((item) => ({
             id: item.id,
             name: item.displayName || item.id,
             deptId: item.deptId ?? null,
+          }))
+        );
+        setPatOptions(
+          (patJson.data?.tokens ?? []).map((item) => ({
+            id: item.id,
+            name: item.name,
+            tokenPrefix: item.tokenPrefix,
           }))
         );
         setProvidersData(
@@ -131,6 +144,7 @@ export default function MeteringPage() {
       } catch {
         if (!active) return;
         setUsersData([]);
+        setPatOptions([]);
         setProvidersData([]);
       }
     };
@@ -161,11 +175,12 @@ export default function MeteringPage() {
         body: JSON.stringify({
           dept_id: dept !== ALL ? [dept] : [],
           user_id: user !== ALL ? [user] : [],
+          api_token_id: apiToken !== ALL ? [apiToken] : [],
           provider: provider !== ALL ? [provider] : [],
           model: model !== ALL ? [model] : [],
           start: `${start}T00:00:00.000Z`,
           end: `${end}T23:59:59.999Z`,
-          group_by: ["day", "dept", "user", "provider", "model"],
+          group_by: ["day", "dept", "user", "pat", "provider", "model"],
         }),
       });
       const payload = await readJsonBody<{ data?: { rows?: MeteringRow[] } }>(response, { data: { rows: [] } });
@@ -175,7 +190,7 @@ export default function MeteringPage() {
     } finally {
       setLoading(false);
     }
-  }, [dept, user, provider, model, start, end]);
+  }, [dept, user, apiToken, provider, model, start, end]);
 
   useEffect(() => {
     void query();
@@ -301,6 +316,22 @@ export default function MeteringPage() {
                 {users.map((item) => (
                   <SelectItem key={item.id} value={item.id}>
                     {item.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>API Token</Label>
+            <Select value={apiToken} onValueChange={setApiToken}>
+              <SelectTrigger>
+                <SelectValue placeholder="全部 PAT" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>全部</SelectItem>
+                {patOptions.map((item) => (
+                  <SelectItem key={item.id} value={String(item.id)}>
+                    {item.name} ({item.tokenPrefix}…)
                   </SelectItem>
                 ))}
               </SelectContent>
