@@ -6620,43 +6620,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             toolBudget={{ used: toolRoundCount, total: toolRoundBudget }}
             readFiles={0}
           />
-          {(sessionExecutionState === "running" || stallState === "stall" || sessionUnattended) && (
-            <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
-              <span className="rounded-full border border-border bg-surface-panel px-2 py-0.5">
-                {currentModelLabel}
-                {sessionExecutionState === "running"
-                  ? " · 运行中"
-                  : sessionWorkInProgress
-                    ? " · 处理中"
-                    : ""}
-                {silentSeconds > 0 ? ` · 静默 ${silentSeconds}s` : ""}
-                {lastToolProgress?.name
-                  ? ` · ${lastToolProgress.name}${lastToolProgress.sec > 0 ? ` ${lastToolProgress.sec}s` : ""}`
-                  : ""}
-              </span>
-              {sessionUnattended && unattendedGlobalEnabled ? (
-                <span className="rounded-full border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-violet-200">
-                  无人值守 · 续跑 {autoNudgeCount}/{unattendedMaxContinuations}
-                </span>
-              ) : null}
-              {unattendedGlobalEnabled ? (
-                <button
-                  type="button"
-                  onClick={() => void toggleSessionUnattended()}
-                  className={`rounded-full border px-2 py-0.5 transition ${
-                    sessionUnattended
-                      ? "border-violet-500/50 bg-violet-500/15 text-violet-200"
-                      : "border-border bg-surface-panel text-text-muted hover:text-text-strong"
-                  }`}
-                >
-                  {sessionUnattended ? "本会话无人值守：开" : "本会话无人值守：关"}
-                </button>
-              ) : null}
-              {!isStreamingCurrentSession && sessionExecutionState === "running" ? (
-                <span className="text-amber-300/90">后台运行中</span>
-              ) : null}
-            </div>
-          )}
           {bgCompleteToast ? (
             <div className="pointer-events-none mb-1 flex justify-center">
               <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-200">
@@ -6731,6 +6694,43 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             onRemove={(id) => removePendingMessage(paneId, id)}
             onSendNow={sendQueuedMessageNow}
           />
+          {(sessionExecutionState === "running" || stallState === "stall" || sessionUnattended) && (
+            <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
+              <span className="rounded-full bg-surface-panel/75 px-2 py-0.5">
+                {currentModelLabel}
+                {sessionExecutionState === "running"
+                  ? " · 运行中"
+                  : sessionWorkInProgress
+                    ? " · 处理中"
+                    : ""}
+                {silentSeconds > 0 ? ` · 静默 ${silentSeconds}s` : ""}
+                {lastToolProgress?.name
+                  ? ` · ${lastToolProgress.name}${lastToolProgress.sec > 0 ? ` ${lastToolProgress.sec}s` : ""}`
+                  : ""}
+              </span>
+              {sessionUnattended && unattendedGlobalEnabled ? (
+                <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-violet-200">
+                  无人值守 · 续跑 {autoNudgeCount}/{unattendedMaxContinuations}
+                </span>
+              ) : null}
+              {unattendedGlobalEnabled ? (
+                <button
+                  type="button"
+                  onClick={() => void toggleSessionUnattended()}
+                  className={`rounded-full px-2 py-0.5 transition outline-none focus-visible:outline-none ${
+                    sessionUnattended
+                      ? "bg-violet-500/15 text-violet-200"
+                      : "bg-surface-panel/75 text-text-muted hover:text-text-strong"
+                  }`}
+                >
+                  {sessionUnattended ? "本会话无人值守：开" : "本会话无人值守：关"}
+                </button>
+              ) : null}
+              {!isStreamingCurrentSession && sessionExecutionState === "running" ? (
+                <span className="text-amber-300/90">后台运行中</span>
+              ) : null}
+            </div>
+          )}
           <div className="agx-pane-composer-body agx-theme-focus-ring relative rounded-2xl border border-transparent bg-surface-card transition-all duration-300 ease-out">
             {visibleAttachmentEntries.length > 0 ? (
               <div className="flex flex-wrap gap-2 px-3 pt-3">
