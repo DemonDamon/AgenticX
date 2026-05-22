@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Badge,
@@ -95,6 +95,14 @@ type TestResp = {
   data?: { reachable?: boolean; via?: string; status?: number; preview?: string; modelCount?: number };
 };
 
+interface ProviderFormBaseline {
+  displayName: string;
+  baseUrl: string;
+  enabled: boolean;
+  isDefault: boolean;
+  apiKeyDraft: string;
+}
+
 const ROUTE_LABEL: Record<ProviderRoute, string> = {
   local: "本地",
   "private-cloud": "私有云",
@@ -107,14 +115,48 @@ export default function ModelProvidersPage() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
+  const [baseline, setBaseline] = useState<ProviderFormBaseline | null>(null);
+  const [displayNameDraft, setDisplayNameDraft] = useState("");
+  const [baseUrlDraft, setBaseUrlDraft] = useState("");
+  const [enabledDraft, setEnabledDraft] = useState(false);
+  const [isDefaultDraft, setIsDefaultDraft] = useState(false);
   const [keyDraft, setKeyDraft] = useState("");
-  const [keyDirty, setKeyDirty] = useState(false);
   const [keyVisible, setKeyVisible] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [addingModel, setAddingModel] = useState(false);
   const [newModel, setNewModel] = useState<{ name: string; label: string }>({ name: "", label: "" });
+  const formInitializedForId = useRef<string | null>(null);
 
   const active = useMemo(() => providers.find((p) => p.id === activeId) ?? null, [providers, activeId]);
+
+  const formDirty = useMemo(() => {
+    if (!baseline) return false;
+    return (
+      displayNameDraft.trim() !== baseline.displayName ||
+      baseUrlDraft.trim() !== baseline.baseUrl ||
+      enabledDraft !== baseline.enabled ||
+      isDefaultDraft !== baseline.isDefault ||
+      keyDraft !== baseline.apiKeyDraft
+    );
+  }, [baseline, displayNameDraft, baseUrlDraft, enabledDraft, isDefaultDraft, keyDraft]);
+
+  const syncFormFromProvider = useCallback((provider: ProviderRecord) => {
+    const snap: ProviderFormBaseline = {
+      displayName: provider.displayName,
+      baseUrl: provider.baseUrl,
+      enabled: provider.enabled,
+      isDefault: provider.isDefault,
+      apiKeyDraft: "",
+    };
+    setBaseline(snap);
+    setDisplayNameDraft(snap.displayName);
+    setBaseUrlDraft(snap.baseUrl);
+    setEnabledDraft(snap.enabled);
+    setIsDefaultDraft(snap.isDefault);
+    setKeyDraft("");
+    setKeyVisible(false);
+  }, []);
 
   const load = useCallback(async (preferId?: string) => {
     setLoading(true);
@@ -139,12 +181,19 @@ export default function ModelProvidersPage() {
     void load();
   }, [load]);
 
-  // 切换 provider 时重置 key 草稿
+  // 切换厂商时从已落库数据初始化表单草稿
   useEffect(() => {
-    setKeyDraft("");
-    setKeyDirty(false);
-    setKeyVisible(false);
-  }, [activeId]);
+    if (!activeId) {
+      formInitializedForId.current = null;
+      setBaseline(null);
+      return;
+    }
+    const provider = providers.find((p) => p.id === activeId);
+    if (!provider) return;
+    if (formInitializedForId.current === activeId) return;
+    formInitializedForId.current = activeId;
+    syncFormFromProvider(provider);
+  }, [activeId, providers, syncFormFromProvider]);
 
   const persistProvider = useCallback(
     async (id: string, patch: Partial<ProviderRecord> & { apiKey?: string }) => {
@@ -164,24 +213,36 @@ export default function ModelProvidersPage() {
     []
   );
 
-  const handleSaveKey = async () => {
-    if (!active) return;
-    const updated = await persistProvider(active.id, { apiKey: keyDraft });
-    if (updated) {
-      toast.success("已保存 API Key");
-      setKeyDraft("");
-      setKeyDirty(false);
+  const handleSaveForm = async () => {
+    if (!active || !baseline || !formDirty) return;
+    const patch: Partial<ProviderRecord> & { apiKey?: string } = {};
+    const nextDisplayName = displayNameDraft.trim();
+    const nextBaseUrl = baseUrlDraft.trim();
+    if (!nextDisplayName) {
+      toast.error("服务厂商显示名不能为空");
+      return;
     }
-  };
+    if (!nextBaseUrl) {
+      toast.error("API 地址不能为空");
+      return;
+    }
+    if (nextDisplayName !== baseline.displayName) patch.displayName = nextDisplayName;
+    if (nextBaseUrl !== baseline.baseUrl) patch.baseUrl = nextBaseUrl;
+    if (enabledDraft !== baseline.enabled) patch.enabled = enabledDraft;
+    if (isDefaultDraft !== baseline.isDefault) patch.isDefault = isDefaultDraft;
+    if (keyDraft.trim() && keyDraft !== baseline.apiKeyDraft) patch.apiKey = keyDraft.trim();
 
-  const handleToggleEnabled = async (next: boolean) => {
-    if (!active) return;
-    await persistProvider(active.id, { enabled: next });
-  };
-
-  const handleSetDefault = async (next: boolean) => {
-    if (!active) return;
-    await persistProvider(active.id, { isDefault: next });
+    setSaving(true);
+    try {
+      const updated = await persistProvider(active.id, patch);
+      if (updated) {
+        toast.success("已保存");
+        formInitializedForId.current = active.id;
+        syncFormFromProvider(updated);
+      }
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDeleteProvider = async () => {
@@ -193,6 +254,7 @@ export default function ModelProvidersPage() {
       return;
     }
     toast.success("已删除");
+    formInitializedForId.current = null;
     setActiveId(null);
     await load();
   };
@@ -380,7 +442,7 @@ export default function ModelProvidersPage() {
               <>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-lg font-semibold">{active.displayName}</h2>
+                    <h2 className="text-lg font-semibold">{displayNameDraft || active.displayName}</h2>
                     <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                       <Badge variant="soft" className="font-mono text-[10px]">{active.id}</Badge>
                       <span>·</span>
@@ -403,32 +465,22 @@ export default function ModelProvidersPage() {
                   <ToggleRow
                     label="已启用"
                     description="未启用时该厂商对前台不可见，gateway 也会跳过"
-                    checked={active.enabled}
-                    onChange={handleToggleEnabled}
+                    checked={enabledDraft}
+                    onChange={setEnabledDraft}
                   />
                   <ToggleRow
                     label="设为默认"
                     description="新会话兜底使用该厂商首个启用模型"
-                    checked={active.isDefault}
-                    onChange={handleSetDefault}
+                    checked={isDefaultDraft}
+                    onChange={setIsDefaultDraft}
                   />
                 </div>
 
                 <div className="space-y-1.5">
                   <Label>服务厂商显示名</Label>
                   <Input
-                    value={active.displayName}
-                    onChange={(event) =>
-                      setProviders((prev) =>
-                        prev.map((p) => (p.id === active.id ? { ...p, displayName: event.target.value } : p))
-                      )
-                    }
-                    onBlur={(event) => {
-                      const next = event.target.value.trim();
-                      if (next && next !== active.displayName) {
-                        void persistProvider(active.id, { displayName: next });
-                      }
-                    }}
+                    value={displayNameDraft}
+                    onChange={(event) => setDisplayNameDraft(event.target.value)}
                   />
                   <p className="text-xs text-muted-foreground">仅用于界面与侧栏展示；配置中的厂商 id 仍为左侧英文标识。</p>
                 </div>
@@ -440,10 +492,7 @@ export default function ModelProvidersPage() {
                       type={keyVisible ? "text" : "password"}
                       placeholder={active.apiKeyConfigured ? active.apiKeyMasked : "粘贴 API Key（仅 admin 可见）"}
                       value={keyDraft}
-                      onChange={(event) => {
-                        setKeyDraft(event.target.value);
-                        setKeyDirty(true);
-                      }}
+                      onChange={(event) => setKeyDraft(event.target.value)}
                     />
                     <Button variant="ghost" size="icon-sm" onClick={() => setKeyVisible((v) => !v)} aria-label="切换显示">
                       {keyVisible ? <EyeOff /> : <Eye />}
@@ -452,29 +501,20 @@ export default function ModelProvidersPage() {
                       <Activity />
                       {testing ? "检测中..." : "检测"}
                     </Button>
-                    <Button size="sm" onClick={() => void handleSaveKey()} disabled={!keyDirty}>
-                      <Check />
-                      保存
-                    </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Key 仅落到本机 <code className="font-mono">.runtime/admin/providers.json</code>（chmod 600），不会被前台用户读到。
+                    Key 加密存入 PostgreSQL（admin internal API 下发给 Gateway），不会被前台用户读到。
                   </p>
                 </div>
 
                 <div className="space-y-1.5">
                   <Label>API 地址</Label>
                   <Input
-                    defaultValue={active.baseUrl}
-                    onBlur={(event) => {
-                      const next = event.target.value.trim();
-                      if (next && next !== active.baseUrl) {
-                        void persistProvider(active.id, { baseUrl: next });
-                      }
-                    }}
+                    value={baseUrlDraft}
+                    onChange={(event) => setBaseUrlDraft(event.target.value)}
                   />
                   <p className="text-xs text-muted-foreground">
-                    预览：{active.baseUrl.replace(/\/$/, "")}/chat/completions
+                    预览：{(baseUrlDraft || active.baseUrl).replace(/\/$/, "")}/chat/completions
                   </p>
                 </div>
 
@@ -525,6 +565,20 @@ export default function ModelProvidersPage() {
                       ))}
                     </ul>
                   )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
+                  {!formDirty ? (
+                    <span className="text-xs text-muted-foreground">已保存</span>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    onClick={() => void handleSaveForm()}
+                    disabled={!formDirty || saving}
+                  >
+                    {saving ? null : <Check />}
+                    {saving ? "保存中..." : "保存"}
+                  </Button>
                 </div>
               </>
             )}
