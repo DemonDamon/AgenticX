@@ -12,19 +12,24 @@ import (
 )
 
 type UsageRecord struct {
-	ID           string
-	TenantID     string
-	DeptID       string
-	UserID       string
-	APITokenID   int64
-	Provider     string
-	Model        string
-	Route        string
-	TimeBucket   time.Time
-	InputTokens  int
-	OutputTokens int
-	TotalTokens  int
-	CostUSD      float64
+	ID                       string
+	TenantID                 string
+	DeptID                   string
+	UserID                   string
+	APITokenID               int64
+	Provider                 string
+	Model                    string
+	Route                    string
+	TimeBucket               time.Time
+	InputTokens              int
+	OutputTokens             int
+	TotalTokens              int
+	CachedTokens             int
+	CacheReadInputTokens     int
+	CacheCreationInputTokens int
+	ReasoningTokens          int
+	UsageSource              string
+	CostUSD                  float64
 }
 
 type Reporter struct {
@@ -65,9 +70,11 @@ func (r *Reporter) ReportAsync(record UsageRecord) {
 		if _, err := r.db.ExecContext(ctx, `
       insert into usage_records (
         id, tenant_id, dept_id, user_id, api_token_id, provider, model, route, time_bucket,
-        input_tokens, output_tokens, total_tokens, cost_usd, created_at, updated_at
+        input_tokens, output_tokens, total_tokens,
+        cached_tokens, cache_read_input_tokens, cache_creation_input_tokens, reasoning_tokens, usage_source,
+        cost_usd, created_at, updated_at
       ) values (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now(), now()
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, now(), now()
       )
     `,
 			record.ID,
@@ -82,6 +89,11 @@ func (r *Reporter) ReportAsync(record UsageRecord) {
 			record.InputTokens,
 			record.OutputTokens,
 			record.TotalTokens,
+			record.CachedTokens,
+			record.CacheReadInputTokens,
+			record.CacheCreationInputTokens,
+			record.ReasoningTokens,
+			nullIfEmpty(record.UsageSource),
 			record.CostUSD,
 		); err != nil {
 			r.logger.Error("usage report write failed", "error", err)

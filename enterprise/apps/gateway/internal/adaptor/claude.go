@@ -108,7 +108,7 @@ type claudeWireRequest struct {
 	Model         string                 `json:"model"`
 	MaxTokens     int                    `json:"max_tokens"`
 	Messages      []map[string]any       `json:"messages"`
-	System        string                 `json:"system,omitempty"`
+	System        any                    `json:"system,omitempty"`
 	Temperature   float64                `json:"temperature,omitempty"`
 	TopP          float64                `json:"top_p,omitempty"`
 	StopSequences []string               `json:"stop_sequences,omitempty"`
@@ -125,8 +125,10 @@ type claudeMessageResponse struct {
 		Text string `json:"text"`
 	} `json:"content"`
 	Usage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	} `json:"usage"`
 }
 
@@ -142,13 +144,13 @@ func pivotToClaudeRequest(req openai.ChatCompletionRequest, ch channel.Channel, 
 	out := claudeWireRequest{
 		Model:         model,
 		MaxTokens:     maxTok,
-		System:        req.System,
 		Temperature:   req.Temperature,
 		TopP:          req.TopP,
 		StopSequences: req.Stop,
 		Stream:        stream,
 		Tools:         transform.OpenAIToolsToClaude(req.Tools),
 	}
+	out.System = claudeSystemWire(req.System, req.SystemCacheControl)
 	if req.ThinkingBudget > 0 || req.ReasoningEffort != "" {
 		budget := req.ThinkingBudget
 		if budget <= 0 {
@@ -163,9 +165,18 @@ func pivotToClaudeRequest(req openai.ChatCompletionRequest, ch channel.Channel, 
 			}
 			continue
 		}
+		content := any(m.Content)
+		if len(m.CacheControl) > 0 {
+			block := map[string]any{"type": "text", "text": m.Content}
+			var cacheCtrl any
+			if err := json.Unmarshal(m.CacheControl, &cacheCtrl); err == nil {
+				block["cache_control"] = cacheCtrl
+			}
+			content = []map[string]any{block}
+		}
 		out.Messages = append(out.Messages, map[string]any{
 			"role":    m.Role,
-			"content": m.Content,
+			"content": content,
 		})
 	}
 	return out
@@ -184,11 +195,28 @@ func claudeToPivotResponse(wire claudeMessageResponse, model string) openai.Chat
 		Model:   nonEmpty(wire.Model, model),
 		Choices: []openai.ChatCompletionChoice{{Index: 0, Message: openai.ChatMessage{Role: "assistant", Content: text.String()}, FinishReason: "stop"}},
 		Usage: openai.Usage{
-			PromptTokens:     wire.Usage.InputTokens,
-			CompletionTokens: wire.Usage.OutputTokens,
-			TotalTokens:      wire.Usage.InputTokens + wire.Usage.OutputTokens,
+			PromptTokens:             wire.Usage.InputTokens,
+			CompletionTokens:         wire.Usage.OutputTokens,
+			TotalTokens:              wire.Usage.InputTokens + wire.Usage.OutputTokens,
+			CacheCreationInputTokens: wire.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     wire.Usage.CacheReadInputTokens,
 		},
 	}
+}
+
+func claudeSystemWire(system string, cacheControl json.RawMessage) any {
+	if strings.TrimSpace(system) == "" {
+		return nil
+	}
+	if len(cacheControl) == 0 {
+		return system
+	}
+	block := map[string]any{"type": "text", "text": system}
+	var cacheCtrl any
+	if err := json.Unmarshal(cacheControl, &cacheCtrl); err == nil {
+		block["cache_control"] = cacheCtrl
+	}
+	return []map[string]any{block}
 }
 
 func claudePrepare(ch channel.Channel) (endpoint, apiKey string, err error) {

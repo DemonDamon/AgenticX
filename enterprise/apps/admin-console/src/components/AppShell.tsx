@@ -57,6 +57,7 @@ import {
   UserCog,
   Users,
   Wand2,
+  Database,
 } from "lucide-react";
 
 type AppShellProps = {
@@ -107,6 +108,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/policy", label: "策略规则", icon: Shield },
       { href: "/admin/models", label: "模型服务", icon: Package },
       { href: "/admin/channels", label: "Channel 管理", icon: Activity },
+      { href: "/admin/cache", label: "AI 缓存", icon: Database },
       { href: "/admin/api-tokens", label: "API Tokens", icon: KeyRound },
     ],
   },

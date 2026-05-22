@@ -22,11 +22,13 @@ import (
 	gatewayauth "github.com/agenticx/enterprise/gateway/internal/auth"
 	"github.com/agenticx/enterprise/gateway/internal/audit"
 	"github.com/agenticx/enterprise/gateway/internal/billing"
+	"github.com/agenticx/enterprise/gateway/internal/cache"
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/config"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 	"github.com/agenticx/enterprise/gateway/internal/keypool"
 	"github.com/agenticx/enterprise/gateway/internal/metering"
+	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/provider"
 	"github.com/agenticx/enterprise/gateway/internal/quota"
@@ -66,6 +68,9 @@ type Server struct {
 	relayExecutor      *relay.Executor
 	billingService     *billing.Service
 	patVerifier        *gatewayauth.PATVerifier
+	cacheService       *cache.Service
+	pricing            *metering.PricingTable
+	metrics            *observability.Registry
 }
 
 var (
@@ -172,6 +177,9 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		adminLoader:        adminLoader,
 		quotaTracker:       quota.NewTracker(quotaCfgPath, quotaUsagePath),
 		patVerifier:        patVerifier,
+		cacheService:       initCacheService(logger),
+		pricing:            initPricingTable(logger),
+		metrics:            observability.NewRegistryFromEnv(),
 	}
 	srv.initChannelRelay()
 	return srv, nil
@@ -498,9 +506,14 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.Timeout(10 * time.Minute))
 
 	r.Get("/healthz", s.handleHealth)
+	if s.metrics != nil && s.metrics.Enabled() {
+		r.Handle("/metrics", s.metrics.Handler())
+	}
 	r.Get("/internal/channel-stats", s.handleChannelStats)
 	r.Get("/internal/keypool-stats", s.handleKeypoolStats)
 	r.Post("/internal/keypool/reset", s.handleKeypoolReset)
+	r.Post("/internal/cache/reload", s.handleCacheConfigReload)
+	r.Post("/internal/cache/evict", s.handleCacheEvict)
 	r.Post("/v1/chat/completions", s.handleChatCompletions)
 	r.Post("/v1/embeddings", s.handleEmbeddings)
 	if claudeInboundEnabled() {
@@ -633,6 +646,15 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		s.applyQuotaHeaders(w, check)
 	}
 
+	cacheCtx := cacheServeContext{
+		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
+		estimatedInputTokens: estimatedInputTokens, reservedTokens: reserveTokens,
+		inboundProtocol: inboundProtocolLabel("openai-chat"),
+	}
+	if s.tryServeFromCache(cacheCtx) {
+		return
+	}
+
 	if req.Stream {
 		s.handleStream(w, r, req, decision, startedAt, identity, estimatedInputTokens, reserveTokens)
 		return
@@ -664,8 +686,14 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if providerOutputTokens == 0 {
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
-	s.reportUsage(identity, decision, providerInputTokens, providerOutputTokens)
+	s.reportUsageDetailed(identity, decision, resp.Usage)
 	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, providerInputTokens+providerOutputTokens)
+
+	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
+		Stream:   false,
+		Response: resp,
+		Usage:    resp.Usage,
+	})
 
 	if len(resp.Choices) > 0 {
 		respPolicy := s.evaluatePolicy(resp.Choices[0].Message.Content, makeEvalContext(identity, "response"))
@@ -703,7 +731,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.writeAuditEvent(audit.Event{
+	if err := s.writeAuditEvent(s.auditChatCall(audit.Event{
 		ID:           makeID("audit"),
 		TenantID:     identity.TenantID,
 		EventTime:    time.Now().UTC().Format(time.RFC3339),
@@ -717,17 +745,19 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		Provider:     decision.Provider,
 		Model:        req.Model,
 		Route:        decision.Route,
+		InboundProtocol: inboundProtocolLabel("openai-chat"),
 		InputTokens:  estimateTextTokens(joinMessages(req.Messages)),
 		OutputTokens: estimateTextTokens(responseContent),
 		TotalTokens:  estimateTextTokens(joinMessages(req.Messages)) + estimateTextTokens(responseContent),
 		LatencyMS:    time.Since(startedAt).Milliseconds(),
+		LatencyMSUpstream: time.Since(startedAt).Milliseconds(),
 		Digest: &audit.Digest{
 			PromptHash:      hashText(joinMessages(req.Messages)),
 			ResponseHash:    hashText(responseContent),
 			PromptSummary:   summarize(joinMessages(req.Messages), 120),
 			ResponseSummary: summarize(responseContent, 120),
 		},
-	}); err != nil {
+	}, cache.LayerNone, "", 0, time.Since(startedAt).Milliseconds())); err != nil {
 		writeAPIError(w, openai.Internal("audit write failed"))
 		return
 	}
@@ -897,8 +927,20 @@ func (s *Server) handleStream(
 	inputText := joinMessages(req.Messages)
 	var blockedHits []policyengine.HitEvent
 	var reasoningState openai.StreamReasoningState
+	var streamChunks []openai.StreamChunk
+	var firstTokenAt time.Time
+	if s.metrics != nil {
+		s.metrics.IncActiveStreams(req.Model)
+		defer s.metrics.DecActiveStreams(req.Model)
+	}
 
 	push := func(chunk openai.StreamChunk) error {
+		if firstTokenAt.IsZero() {
+			firstTokenAt = time.Now()
+			if s.metrics != nil {
+				s.metrics.ObserveTTFT(req.Model, decision.ChannelID, inboundProtocolLabel("openai-chat"), firstTokenAt.Sub(startedAt))
+			}
+		}
 		if len(chunk.Choices) > 0 {
 			delta := &chunk.Choices[0].Delta
 			delta.Content = openai.NormalizeThinkTags(delta.Content)
@@ -915,6 +957,7 @@ func (s *Server) handleStream(
 			}
 			delta.ReasoningContent = ""
 		}
+		streamChunks = append(streamChunks, chunk)
 		payload, err := json.Marshal(chunk)
 		if err != nil {
 			return err
@@ -1009,7 +1052,16 @@ func (s *Server) handleStream(
 	}
 	inputTokens := estimatedInputTokens
 	outputTokens := estimateTextTokens(responseText)
-	s.reportUsage(identity, decision, inputTokens, outputTokens)
+	streamUsage := openai.Usage{
+		PromptTokens:     inputTokens,
+		CompletionTokens: outputTokens,
+		TotalTokens:      inputTokens + outputTokens,
+	}
+	s.reportUsageDetailed(identity, decision, streamUsage)
+	if s.metrics != nil && !firstTokenAt.IsZero() {
+		s.metrics.ObserveTPS(req.Model, decision.ChannelID, outputTokens, time.Since(firstTokenAt))
+	}
+	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.BuildStreamEntry(streamChunks, streamUsage, req.Model))
 	var settleDelta int64
 	if s.useChannelRelay() {
 		settle := s.billingService.Settle(
@@ -1374,21 +1426,10 @@ func (s *Server) writeAuditEvent(event audit.Event) error {
 }
 
 func (s *Server) reportUsage(identity requestIdentity, decision routing.Decision, inputTokens, outputTokens int) {
-	total := inputTokens + outputTokens
-	s.metering.ReportAsync(metering.UsageRecord{
-		ID:           makeID("usage"),
-		TenantID:     identity.TenantID,
-		DeptID:       identity.DepartmentID,
-		UserID:       identity.UserID,
-		APITokenID:   identity.APITokenID,
-		Provider:     decision.Provider,
-		Model:        decision.Model,
-		Route:        decision.Route,
-		TimeBucket:   time.Now().UTC(),
-		InputTokens:  inputTokens,
-		OutputTokens: outputTokens,
-		TotalTokens:  total,
-		CostUSD:      float64(total) * 0.000001,
+	s.reportUsageDetailed(identity, decision, openai.Usage{
+		PromptTokens:     inputTokens,
+		CompletionTokens: outputTokens,
+		TotalTokens:      inputTokens + outputTokens,
 	})
 }
 

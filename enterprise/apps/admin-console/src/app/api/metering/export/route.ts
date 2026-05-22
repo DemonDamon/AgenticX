@@ -27,7 +27,21 @@ export async function POST(request: Request) {
     group_by: toArray(body.group_by) as Array<"dept" | "user" | "provider" | "model" | "day" | "pat">,
   });
   const rows = result.data?.rows ?? [];
-  const header = ["dept", "user", "pat", "provider", "model", "day", "input_tokens", "output_tokens", "total_tokens", "cost_usd"];
+  const header = [
+    "dept",
+    "user",
+    "pat",
+    "provider",
+    "model",
+    "day",
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "cached_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+    "cost_usd",
+  ];
   const csv = [
     header.join(","),
     ...rows.map((row) =>
@@ -41,6 +55,9 @@ export async function POST(request: Request) {
         row.input_tokens,
         row.output_tokens,
         row.total_tokens,
+        row.cached_tokens ?? 0,
+        row.cache_read_input_tokens ?? 0,
+        row.cache_creation_input_tokens ?? 0,
         row.cost_usd,
       ]
         .map((value) => `"${String(value).replace(/"/g, '""')}"`)
