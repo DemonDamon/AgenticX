@@ -82,7 +82,7 @@ async function loginAdmin(page: Page): Promise<boolean> {
   const ok = await safeGoto(page, `${ADMIN_BASE}/login`);
   if (!ok) return false;
   try {
-    await page.getByLabel(/邮箱/).fill("owner@agenticx.local", { timeout: 5_000 });
+    await page.getByLabel(/邮箱/).fill("admin@agenticx.local", { timeout: 5_000 });
     await page.getByLabel(/密码/).fill(ADMIN_PASSWORD, { timeout: 5_000 });
     await page.getByRole("button", { name: /登录并进入控制台/ }).click({ timeout: 5_000 });
     await page.waitForURL(/\/dashboard/, { timeout: 15_000 });
@@ -130,6 +130,9 @@ async function tourAdmin(page: Page, theme: Theme): Promise<void> {
     { name: "admin-iam-bulk-import", path: "/iam/bulk-import" },
     { name: "admin-audit", path: "/audit" },
     { name: "admin-metering", path: "/metering" },
+    { name: "admin-metering-quota", path: "/metering/quota" },
+    { name: "admin-channels", path: "/admin/channels" },
+    { name: "admin-api-tokens", path: "/admin/api-tokens" },
   ];
 
   for (const p of pages) {
