@@ -503,6 +503,20 @@ func (s *Server) Router() http.Handler {
 	r.Post("/internal/keypool/reset", s.handleKeypoolReset)
 	r.Post("/v1/chat/completions", s.handleChatCompletions)
 	r.Post("/v1/embeddings", s.handleEmbeddings)
+	if claudeInboundEnabled() {
+		r.Post("/v1/messages", s.handleClaudeMessages)
+	}
+	if geminiInboundEnabled() {
+		r.Post("/v1beta/models/{model}:generateContent", func(w http.ResponseWriter, r *http.Request) {
+			s.handleGeminiGenerate(w, r, chi.URLParam(r, "model"), false)
+		})
+		r.Post("/v1beta/models/{model}:streamGenerateContent", func(w http.ResponseWriter, r *http.Request) {
+			s.handleGeminiGenerate(w, r, chi.URLParam(r, "model"), true)
+		})
+	}
+	if responsesInboundEnabled() {
+		r.Post("/v1/responses", s.handleResponses)
+	}
 
 	return r
 }
