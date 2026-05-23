@@ -1,0 +1,14 @@
+name: wasm-audit-tagger
+version: "1.0.0"
+type: plugin
+runtime: wasm
+enabled: false
+priority: 50
+scope:
+  tenant_ids: ["*"]
+  routes: ["/v1/*"]
+wasm:
+  binary: builtin:audit-tagger
+  host_capabilities: [audit_log]
+config:
+  audit_tag: wasm-tagged

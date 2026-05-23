@@ -1,0 +1,15 @@
+name: wasm-bearer-extractor
+version: "1.0.0"
+type: plugin
+runtime: wasm
+enabled: false
+priority: 20
+scope:
+  tenant_ids: ["*"]
+  routes: ["/v1/*"]
+wasm:
+  binary: builtin:bearer-extractor
+  host_capabilities: []
+config:
+  header: X-Custom-Token
+  property: custom_token
