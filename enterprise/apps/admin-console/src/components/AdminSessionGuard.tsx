@@ -1,17 +1,13 @@
 "use client";
 
-import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { redirectToAdminLogin } from "../lib/admin-client-auth";
 
 const SESSION_CHECK_MS = 60_000;
 
+/** Session probe on mount / focus / interval only — not on every client route change. */
 export function AdminSessionGuard() {
-  const pathname = usePathname();
-
   useEffect(() => {
-    if (pathname === "/login") return;
-
     let cancelled = false;
 
     const verify = async () => {
@@ -36,7 +32,7 @@ export function AdminSessionGuard() {
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
     };
-  }, [pathname]);
+  }, []);
 
   return null;
 }

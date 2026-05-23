@@ -65,6 +65,11 @@
     "resizeSidebarAria": "Resize sidebar width"
   },
   "common": {
+    "breadcrumb": {
+      "home": "Home",
+      "admin": "Admin",
+      "metering": "Usage"
+    },
     "actions": {
       "save": "Save",
       "cancel": "Cancel",
@@ -72,6 +77,9 @@
       "refresh": "Refresh",
       "upload": "Upload",
       "add": "Add",
+      "create": "Create",
+      "copy": "Copy",
+      "closeSaved": "Close",
       "evict": "Evict"
     },
     "states": {
@@ -84,6 +92,10 @@
       "disabled": "Disabled",
       "on": "ON",
       "off": "OFF"
+    },
+    "toast": {
+      "loadFailed": "Failed to load",
+      "saveFailed": "Failed to save"
     }
   },
   "pages": {

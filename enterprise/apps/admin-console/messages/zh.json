@@ -65,6 +65,11 @@
     "resizeSidebarAria": "调整侧栏宽度"
   },
   "common": {
+    "breadcrumb": {
+      "home": "首页",
+      "admin": "管理后台",
+      "metering": "四维消耗"
+    },
     "actions": {
       "save": "保存",
       "cancel": "取消",
@@ -72,6 +77,9 @@
       "refresh": "刷新",
       "upload": "上传",
       "add": "添加",
+      "create": "创建",
+      "copy": "复制",
+      "closeSaved": "关闭",
       "evict": "驱逐"
     },
     "states": {
@@ -84,6 +92,10 @@
       "disabled": "已禁用",
       "on": "ON",
       "off": "OFF"
+    },
+    "toast": {
+      "loadFailed": "加载失败",
+      "saveFailed": "保存失败"
     }
   },
   "pages": {
