@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../../lib/admin-client-auth";
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -214,7 +215,7 @@ export default function RolesPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/roles", { cache: "no-store" });
+      const res = await adminFetch("/api/admin/roles", { cache: "no-store" });
       const json = (await res.json()) as ApiEnvelope<{ items: RoleRow[] }>;
       if (!res.ok || !json.data?.items) {
         toast.error(json.message ?? t("toast.loadFailed"));
@@ -270,7 +271,7 @@ export default function RolesPage() {
       toast.error(t("toast.pickScope"));
       return;
     }
-    const res = await fetch("/api/admin/roles", {
+    const res = await adminFetch("/api/admin/roles", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code, name: newName.trim(), scopes }),
@@ -290,7 +291,7 @@ export default function RolesPage() {
 
   const handleDuplicate = async () => {
     if (!dupSource || !dupCode.trim() || !dupName.trim()) return;
-    const res = await fetch("/api/admin/roles", {
+    const res = await adminFetch("/api/admin/roles", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../../lib/admin-client-auth";
 
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
@@ -240,7 +241,7 @@ export default function BulkImportPage() {
     setBusy(true);
     setProgressPct(10);
     try {
-      const res = await fetch("/api/admin/iam/bulk-import", {
+      const res = await adminFetch("/api/admin/iam/bulk-import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rows: buildApiRows() }),

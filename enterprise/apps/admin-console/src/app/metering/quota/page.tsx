@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../../lib/admin-client-auth";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -126,7 +127,7 @@ export default function MeteringQuotaPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/metering/quota", { cache: "no-store" });
+      const res = await adminFetch("/api/metering/quota", { cache: "no-store" });
       const json = (await res.json()) as { data?: { quota?: QuotaConfig } };
       setQuota({ ...EMPTY, ...(json.data?.quota ?? EMPTY), apiTokens: json.data?.quota?.apiTokens ?? {} });
     } catch (error) {
@@ -141,7 +142,7 @@ export default function MeteringQuotaPage() {
   }, []);
 
   const save = async () => {
-    const res = await fetch("/api/metering/quota", {
+    const res = await adminFetch("/api/metering/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(quota),

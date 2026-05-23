@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../../lib/admin-client-auth";
 
 import { useCallback, useEffect, useState } from "react";
 import { Button, Card, CardContent, CardHeader, CardTitle, PageHeader, toast } from "@agenticx/ui";
@@ -17,7 +18,7 @@ export default function AdminPerfPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/perf");
+      const res = await adminFetch("/api/admin/perf");
       const json = await res.json();
       if (json.code !== "00000") throw new Error(json.message || "load failed");
       setCfg(json.data ?? null);

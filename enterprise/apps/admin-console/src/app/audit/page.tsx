@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../lib/admin-client-auth";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -68,7 +69,7 @@ export default function AuditPage() {
 
   const loadChainVerify = useCallback(async () => {
     try {
-      const response = await fetch("/api/audit/chain-verify");
+      const response = await adminFetch("/api/audit/chain-verify");
       const payload = (await response.json()) as {
         data?: { valid: boolean; at?: string; reason?: string; scanned: number };
       };
@@ -81,7 +82,7 @@ export default function AuditPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/audit/query", {
+      const response = await adminFetch("/api/audit/query", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -115,7 +116,7 @@ export default function AuditPage() {
   }, [load]);
 
   const handleExport = async () => {
-    const response = await fetch("/api/audit/export", {
+    const response = await adminFetch("/api/audit/export", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({

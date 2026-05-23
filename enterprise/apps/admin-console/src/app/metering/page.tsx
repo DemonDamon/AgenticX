@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../lib/admin-client-auth";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -110,9 +111,9 @@ export default function MeteringPage() {
     const loadMeta = async () => {
       try {
         const [usersRes, providersRes, patRes] = await Promise.all([
-          fetch("/api/admin/users?limit=200", { cache: "no-store" }),
-          fetch("/api/admin/providers", { cache: "no-store" }),
-          fetch("/api/admin/api-tokens", { cache: "no-store" }),
+          adminFetch("/api/admin/users?limit=200", { cache: "no-store" }),
+          adminFetch("/api/admin/providers", { cache: "no-store" }),
+          adminFetch("/api/admin/api-tokens", { cache: "no-store" }),
         ]);
         const emptyUsers = { data: { items: [] as Array<{ id: string; displayName: string; deptId: string | null }> } };
         const emptyProviders = {
@@ -176,7 +177,7 @@ export default function MeteringPage() {
   const query = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/metering/query", {
+      const response = await adminFetch("/api/metering/query", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -204,7 +205,7 @@ export default function MeteringPage() {
   }, [query]);
 
   const exportCsv = async () => {
-    const response = await fetch("/api/metering/export", {
+    const response = await adminFetch("/api/metering/export", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
