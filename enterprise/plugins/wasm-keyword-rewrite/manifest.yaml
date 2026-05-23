@@ -1,0 +1,15 @@
+name: wasm-keyword-rewrite
+version: "1.0.0"
+type: plugin
+runtime: wasm
+enabled: true
+priority: 100
+scope:
+  tenant_ids: ["*"]
+  routes: ["/v1/*"]
+wasm:
+  binary: builtin:keyword-rewrite
+  host_capabilities: [audit_log, metrics_inc]
+config:
+  replacements:
+    secret-keyword: "[REDACTED]"
