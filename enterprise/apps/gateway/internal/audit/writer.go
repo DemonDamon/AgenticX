@@ -57,6 +57,11 @@ type Event struct {
 	LatencyMS    int64       `json:"latency_ms,omitempty"`
 	Digest       *Digest     `json:"digest,omitempty"`
 	PoliciesHit  []PolicyHit `json:"policies_hit,omitempty"`
+	MCPStatus      string      `json:"mcp_status,omitempty"`
+	MCPServer      string      `json:"mcp_server,omitempty"`
+	MCPToolName    string      `json:"mcp_tool_name,omitempty"`
+	MCPInputHash   string      `json:"mcp_input_hash,omitempty"`
+	MCPOutputHash  string      `json:"mcp_output_hash,omitempty"`
 	PrevChecksum string      `json:"prev_checksum"`
 	Checksum     string      `json:"checksum"`
 }
