@@ -1,9 +1,9 @@
+import { requireGatewayInternalToken } from "./gateway-internal-token";
+
 const base = () => process.env.GATEWAY_INTERNAL_BASE_URL?.trim() || "http://127.0.0.1:8080";
-const token = () => process.env.GATEWAY_INTERNAL_TOKEN?.trim() || "";
 
 function authHeaders(extra?: Record<string, string>) {
-  const t = token();
-  if (!t) throw new Error("GATEWAY_INTERNAL_TOKEN is required");
+  const t = requireGatewayInternalToken();
   return { Authorization: `Bearer ${t}`, ...extra };
 }
 

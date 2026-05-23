@@ -8,6 +8,7 @@ import { and, eq } from "drizzle-orm";
 import { ulid } from "ulid";
 
 import { decryptProviderApiKey, encryptProviderApiKey } from "./provider-api-key-crypto";
+import { getGatewayInternalToken, requireGatewayInternalToken } from "./gateway-internal-token";
 
 export type ChannelStatus = "active" | "disabled";
 
@@ -222,7 +223,7 @@ export async function deleteChannel(id: string): Promise<void> {
 
 export async function fetchGatewayKeypoolStats(channelId: string, keyRefs: string[]): Promise<unknown[]> {
   const base = process.env.GATEWAY_INTERNAL_BASE_URL?.trim() || "http://127.0.0.1:8080";
-  const token = process.env.GATEWAY_INTERNAL_TOKEN?.trim();
+  const token = getGatewayInternalToken();
   if (!token || !channelId) return [];
   const qs = new URLSearchParams({ channel_id: channelId, key_refs: keyRefs.join(",") });
   const res = await fetch(`${base.replace(/\/$/, "")}/internal/keypool-stats?${qs}`, {
@@ -236,8 +237,7 @@ export async function fetchGatewayKeypoolStats(channelId: string, keyRefs: strin
 
 export async function resetGatewayKeypoolCooldown(channelId: string, keyRef: string): Promise<void> {
   const base = process.env.GATEWAY_INTERNAL_BASE_URL?.trim() || "http://127.0.0.1:8080";
-  const token = process.env.GATEWAY_INTERNAL_TOKEN?.trim();
-  if (!token) throw new Error("GATEWAY_INTERNAL_TOKEN is required");
+  const token = requireGatewayInternalToken();
   const res = await fetch(`${base.replace(/\/$/, "")}/internal/keypool/reset`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -248,7 +248,7 @@ export async function resetGatewayKeypoolCooldown(channelId: string, keyRef: str
 
 export async function fetchGatewayChannelStats(): Promise<Record<string, unknown>> {
   const base = process.env.GATEWAY_INTERNAL_BASE_URL?.trim() || "http://127.0.0.1:8080";
-  const token = process.env.GATEWAY_INTERNAL_TOKEN?.trim();
+  const token = getGatewayInternalToken();
   if (!token) return {};
   const res = await fetch(`${base.replace(/\/$/, "")}/internal/channel-stats`, {
     headers: { Authorization: `Bearer ${token}` },
