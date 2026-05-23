@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../../lib/admin-client-auth";
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -42,7 +43,7 @@ export default function AdminCachePage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/cache");
+      const res = await adminFetch("/api/admin/cache");
       const json = (await res.json()) as { data?: GatewayCacheConfig };
       const data = json.data ?? DEFAULT;
       setConfig(data);
@@ -67,7 +68,7 @@ export default function AdminCachePage() {
         model_allowlist: allowlist.split(",").map((s) => s.trim()).filter(Boolean),
         model_blocklist: blocklist.split(",").map((s) => s.trim()).filter(Boolean),
       };
-      const res = await fetch("/api/admin/cache", {
+      const res = await adminFetch("/api/admin/cache", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
@@ -84,7 +85,7 @@ export default function AdminCachePage() {
 
   async function evict() {
     try {
-      const res = await fetch("/api/admin/cache", {
+      const res = await adminFetch("/api/admin/cache", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ prefix: evictPrefix }),

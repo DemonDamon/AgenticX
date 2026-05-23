@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../../lib/admin-client-auth";
 
 import { getAdminSsoErrorMessageZh } from "@agenticx/auth/src/services/oidc-error-codes";
 import { useEffect, useMemo, useState } from "react";
@@ -150,7 +151,7 @@ export default function SsoSettingsPage() {
   }
 
   async function loadProviders() {
-    const response = await fetch("/api/admin/sso/providers");
+    const response = await adminFetch("/api/admin/sso/providers");
     const data = await response.json();
     if (response.ok) {
       const parsed = parseProvidersPayload<Provider>(data);
@@ -160,7 +161,7 @@ export default function SsoSettingsPage() {
   }
 
   async function loadCacheStats() {
-    const response = await fetch("/api/admin/sso/providers/stats");
+    const response = await adminFetch("/api/admin/sso/providers/stats");
     const data = await response.json();
     if (response.ok) {
       setCacheStats((data.data?.stats ?? null) as SsoCacheStatsPayload | null);
@@ -200,7 +201,7 @@ export default function SsoSettingsPage() {
                 idpCertPemList: parseCertList(samlForm.samlConfig.idpCertPemListText),
               },
             };
-      const response = await fetch("/api/admin/sso/providers", {
+      const response = await adminFetch("/api/admin/sso/providers", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),

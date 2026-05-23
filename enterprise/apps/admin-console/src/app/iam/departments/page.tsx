@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../../lib/admin-client-auth";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -109,7 +110,7 @@ export default function DepartmentsPage() {
   const loadTree = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/departments?shape=tree", { cache: "no-store" });
+      const res = await adminFetch("/api/admin/departments?shape=tree", { cache: "no-store" });
       const json = (await res.json()) as ApiEnvelope<{ shape: string; items: ApiDept[] }>;
       if (!res.ok || !json.data?.items) {
         toast.error(json.message ?? t("toast.loadFailed"));
@@ -145,7 +146,7 @@ export default function DepartmentsPage() {
 
   async function handleCreate() {
     if (!newName.trim()) return;
-    const res = await fetch("/api/admin/departments", {
+    const res = await adminFetch("/api/admin/departments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: newName.trim(), parentId: currentDeptId }),
@@ -211,7 +212,7 @@ export default function DepartmentsPage() {
   }
 
   async function exportStructure() {
-    const res = await fetch("/api/admin/departments?shape=flat", { cache: "no-store" });
+    const res = await adminFetch("/api/admin/departments?shape=flat", { cache: "no-store" });
     const json = (await res.json()) as ApiEnvelope<{ shape: string; items: ApiDept[] }>;
     if (!res.ok || !json.data?.items) {
       toast.error(json.message ?? t("toast.exportFailed"));

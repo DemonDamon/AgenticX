@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../../lib/admin-client-auth";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -158,7 +159,7 @@ function UsersPageContent() {
     let alive = true;
     void (async () => {
       try {
-        const res = await fetch("/api/admin/departments?shape=flat", { cache: "no-store" });
+        const res = await adminFetch("/api/admin/departments?shape=flat", { cache: "no-store" });
         const json = (await res.json()) as {
           data?: { items: Array<{ id: string; name: string; path: string }> };
         };
@@ -182,7 +183,7 @@ function UsersPageContent() {
     let alive = true;
     void (async () => {
       try {
-        const res = await fetch("/api/admin/roles", { cache: "no-store" });
+        const res = await adminFetch("/api/admin/roles", { cache: "no-store" });
         const json = (await res.json()) as { data?: { items: RoleOption[] } };
         if (!alive || !json.data?.items) return;
         setRoleOptions(json.data.items.map((r) => ({ id: r.id, code: r.code, name: r.name })));
@@ -200,7 +201,7 @@ function UsersPageContent() {
     let alive = true;
     void (async () => {
       try {
-        const res = await fetch("/api/admin/providers", { cache: "no-store" });
+        const res = await adminFetch("/api/admin/providers", { cache: "no-store" });
         const json = (await res.json()) as {
           data?: {
             providers: Array<{
@@ -284,7 +285,7 @@ function UsersPageContent() {
   };
 
   const handleCreate = async (input: Record<string, unknown>) => {
-    const res = await fetch("/api/admin/users", {
+    const res = await adminFetch("/api/admin/users", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),

@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../lib/admin-client-auth";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -87,7 +88,7 @@ export default function DashboardPage() {
     const load = async () => {
       try {
         const [meteringRes, auditRes] = await Promise.all([
-          fetch("/api/metering/query", {
+          adminFetch("/api/metering/query", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
@@ -96,7 +97,7 @@ export default function DashboardPage() {
               group_by: ["day", "dept", "model"],
             }),
           }),
-          fetch("/api/audit/query", {
+          adminFetch("/api/audit/query", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ limit: 20 }),

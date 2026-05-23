@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../../lib/admin-client-auth";
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -91,7 +92,7 @@ export default function ChannelsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/channels/health");
+      const res = await adminFetch("/api/admin/channels/health");
       const json = await res.json();
       if (json.code !== "00000") throw new Error(json.message || "load failed");
       setChannels(json.data.channels ?? []);
@@ -113,7 +114,7 @@ export default function ChannelsPage() {
         .split(/[\n,]/)
         .map((s) => s.trim())
         .filter(Boolean);
-      const res = await fetch("/api/admin/channels", {
+      const res = await adminFetch("/api/admin/channels", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

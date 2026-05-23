@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../../lib/admin-client-auth";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -171,7 +172,7 @@ export default function ModelProvidersPage() {
   const load = useCallback(async (preferId?: string) => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/providers", { cache: "no-store" });
+      const res = await adminFetch("/api/admin/providers", { cache: "no-store" });
       const json = (await res.json()) as ListResp;
       if (!res.ok || !json.data) {
         toast.error(json.message ?? t("toast.loadFailed"));
@@ -790,7 +791,7 @@ function AddProviderDialog({
           route: custom.route,
         };
       }
-      const res = await fetch("/api/admin/providers", {
+      const res = await adminFetch("/api/admin/providers", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),

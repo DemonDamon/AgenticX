@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../lib/admin-client-auth";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -177,9 +178,9 @@ export default function PolicyPage() {
     setLoading(true);
     try {
       const [packsRes, rulesRes, publishRes] = await Promise.all([
-        fetch("/api/policy/packs", { cache: "no-store" }),
-        fetch("/api/policy/rules", { cache: "no-store" }),
-        fetch("/api/policy/publishes", { cache: "no-store" }),
+        adminFetch("/api/policy/packs", { cache: "no-store" }),
+        adminFetch("/api/policy/rules", { cache: "no-store" }),
+        adminFetch("/api/policy/publishes", { cache: "no-store" }),
       ]);
       const packsJson = (await packsRes.json()) as { message?: string; data?: { packs?: PolicyPack[] } };
       const rulesJson = (await rulesRes.json()) as { message?: string; data?: { rules?: PolicyRule[] } };
@@ -310,7 +311,7 @@ export default function PolicyPage() {
   };
 
   const triggerPublish = async () => {
-    const res = await fetch("/api/policy/publish", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const res = await adminFetch("/api/policy/publish", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
       toast.error(json.message ?? t("toast.publishFailed"));
@@ -381,7 +382,7 @@ export default function PolicyPage() {
         : form.kind === "regex"
           ? { pattern: form.payloadPattern.trim() }
           : { piiType: form.payloadPiiType.trim() };
-    const res = await fetch("/api/policy/test", {
+    const res = await adminFetch("/api/policy/test", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({

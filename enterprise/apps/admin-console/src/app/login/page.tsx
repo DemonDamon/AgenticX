@@ -19,6 +19,7 @@ import {
 } from "@agenticx/ui";
 import { getAdminSsoErrorMessageZh } from "@agenticx/auth/src/services/oidc-error-codes";
 import { ArrowRight, ShieldAlert, ShieldCheck } from "lucide-react";
+import { safeAdminNextPath } from "../../lib/admin-client-auth";
 import { getAdminSsoProviderOptions, pickPreferredSsoProvider } from "../../lib/admin-sso-provider-options";
 import { useTranslations } from "next-intl";
 
@@ -54,7 +55,7 @@ function LoginPageInner() {
         setStatus(data.message ?? t("loginFailed"));
         return;
       }
-      router.push("/dashboard");
+      router.push(safeAdminNextPath(searchParams.get("next")));
     } finally {
       setBusy(false);
     }

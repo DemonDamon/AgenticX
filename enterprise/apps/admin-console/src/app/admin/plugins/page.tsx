@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../../lib/admin-client-auth";
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -35,7 +36,7 @@ export default function AdminPluginsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/plugins");
+      const res = await adminFetch("/api/admin/plugins");
       const json = await res.json();
       if (json.code !== "00000") throw new Error(json.message || "load failed");
       setPlugins(json.data?.plugins ?? []);
@@ -53,7 +54,7 @@ export default function AdminPluginsPage() {
 
   async function reloadPlugins() {
     try {
-      const res = await fetch("/api/admin/plugins", { method: "PUT" });
+      const res = await adminFetch("/api/admin/plugins", { method: "PUT" });
       const json = await res.json();
       if (json.code !== "00000") throw new Error(json.message || "reload failed");
       toast.success(t("toast.reloadSuccess"));
@@ -71,7 +72,7 @@ export default function AdminPluginsPage() {
         return;
       }
       fd.set("name", uploadName.trim());
-      const res = await fetch("/api/admin/plugins", { method: "POST", body: fd });
+      const res = await adminFetch("/api/admin/plugins", { method: "POST", body: fd });
       const json = await res.json();
       if (json.code !== "00000") throw new Error(json.message || "upload failed");
       toast.success(t("toast.uploadSuccess"));

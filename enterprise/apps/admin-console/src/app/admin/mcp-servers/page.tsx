@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../../lib/admin-client-auth";
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -50,7 +51,7 @@ export default function AdminMcpServersPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/mcp-servers");
+      const res = await adminFetch("/api/admin/mcp-servers");
       const json = (await res.json()) as { data?: { servers?: McpServer[] } };
       setServers(json.data?.servers ?? []);
     } catch {
@@ -70,7 +71,7 @@ export default function AdminMcpServersPage() {
       return;
     }
     try {
-      const res = await fetch("/api/admin/mcp-servers", {
+      const res = await adminFetch("/api/admin/mcp-servers", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: name.trim(), backendType, displayName: name.trim() }),

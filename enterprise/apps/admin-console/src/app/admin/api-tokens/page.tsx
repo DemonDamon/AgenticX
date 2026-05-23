@@ -1,4 +1,5 @@
 "use client";
+import { adminFetch } from "../../../lib/admin-client-auth";
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -59,7 +60,7 @@ export default function ApiTokensPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/api-tokens");
+      const res = await adminFetch("/api/admin/api-tokens");
       const json = await readJsonBody(res, { code: "50000", message: "empty response", data: { tokens: [] as PatRow[] } });
       if (!res.ok || json.code !== "00000") throw new Error(json.message || "load failed");
       setTokens(json.data?.tokens ?? []);
@@ -76,7 +77,7 @@ export default function ApiTokensPage() {
 
   const onCreate = async () => {
     try {
-      const res = await fetch("/api/admin/api-tokens", {
+      const res = await adminFetch("/api/admin/api-tokens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { AdminSessionGuard } from "./AdminSessionGuard";
 import { AppShell } from "./AppShell";
 
 export function RootShell({ children }: { children: ReactNode }) {
@@ -9,6 +10,11 @@ export function RootShell({ children }: { children: ReactNode }) {
   if (pathname === "/login") {
     return <>{children}</>;
   }
-  return <AppShell>{children}</AppShell>;
+  return (
+    <>
+      <AdminSessionGuard />
+      <AppShell>{children}</AppShell>
+    </>
+  );
 }
 
