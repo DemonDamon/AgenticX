@@ -14,4 +14,6 @@ export * from "./chat-messages";
 export * from "./runtime-config";
 export * from "./gateway-channels";
 export * from "./api-tokens";
+export * from "./mcp-servers";
+export * from "./mcp-tools";
 
