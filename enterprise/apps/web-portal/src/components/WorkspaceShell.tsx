@@ -56,13 +56,31 @@ type PanelMode = "chat" | "settings";
 type HistorySession = {
   id: string;
   title: string;
-  updatedAt: number;
+  /** 列表排序与分组锚点：对齐 Machi Desktop，仅用创建时间，避免切换 session 时 updated_at 变化导致跳动 */
+  createdAt: number;
 };
 
 const COLLAPSED_KEY = "agenticx-portal-sidebar-collapsed";
 
+function getSessionCreatedTimestampMs(session: Pick<HistorySession, "createdAt">): number {
+  const created = Number(session.createdAt);
+  return Number.isFinite(created) && created > 0 ? created : 0;
+}
+
+function sortHistorySessions(rows: HistorySession[]): HistorySession[] {
+  return [...rows].sort((a, b) => {
+    const tsDiff = getSessionCreatedTimestampMs(b) - getSessionCreatedTimestampMs(a);
+    if (tsDiff !== 0) return tsDiff;
+    return b.id.localeCompare(a.id);
+  });
+}
+
 function groupHistory(history: HistorySession[]): Array<{ key: string; label: string; items: HistorySession[] }> {
-  const now = Date.now();
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startYesterday = startToday - 24 * 3600 * 1000;
+  const startWeek = startToday - 7 * 24 * 3600 * 1000;
+  const startMonth = startToday - 30 * 24 * 3600 * 1000;
   const buckets = {
     today: [] as HistorySession[],
     yesterday: [] as HistorySession[],
@@ -71,11 +89,11 @@ function groupHistory(history: HistorySession[]): Array<{ key: string; label: st
     older: [] as HistorySession[],
   };
   for (const item of history) {
-    const diff = now - item.updatedAt;
-    if (diff < 24 * 3600 * 1000) buckets.today.push(item);
-    else if (diff < 2 * 24 * 3600 * 1000) buckets.yesterday.push(item);
-    else if (diff < 7 * 24 * 3600 * 1000) buckets.week.push(item);
-    else if (diff < 30 * 24 * 3600 * 1000) buckets.month.push(item);
+    const createdAt = getSessionCreatedTimestampMs(item);
+    if (createdAt >= startToday) buckets.today.push(item);
+    else if (createdAt >= startYesterday) buckets.yesterday.push(item);
+    else if (createdAt >= startWeek) buckets.week.push(item);
+    else if (createdAt >= startMonth) buckets.month.push(item);
     else buckets.older.push(item);
   }
   return [
@@ -104,13 +122,13 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
 
   const history = React.useMemo<HistorySession[]>(
     () =>
-      [...sessions]
-        .map((session) => ({
+      sortHistorySessions(
+        sessions.map((session) => ({
           id: session.id,
           title: session.title,
-          updatedAt: new Date(session.updated_at).getTime(),
-        }))
-        .sort((a, b) => b.updatedAt - a.updatedAt),
+          createdAt: new Date(session.created_at).getTime(),
+        })),
+      ),
     [sessions],
   );
 
