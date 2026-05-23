@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -26,6 +27,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/channel"
 	"github.com/agenticx/enterprise/gateway/internal/config"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
+	"github.com/agenticx/enterprise/gateway/internal/gwerrors"
 	"github.com/agenticx/enterprise/gateway/internal/keypool"
 	"github.com/agenticx/enterprise/gateway/internal/mcphost"
 	"github.com/agenticx/enterprise/gateway/internal/metering"
@@ -36,6 +38,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/relay"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 	"github.com/agenticx/enterprise/gateway/internal/runtimeconfig"
+	"github.com/agenticx/enterprise/gateway/internal/wasmhost"
 	policyengine "github.com/agenticx/enterprise/policy-engine"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -77,6 +80,9 @@ type Server struct {
 	mcpHost            *mcphost.Host
 	mcpStreamable      mcphost.StreamableHTTPTransport
 	mcpSSE             *mcphost.SSETransport
+	wasmManager        *wasmhost.Manager
+	errorStore         *gwerrors.Store
+	channelProber      *channel.Prober
 }
 
 var (
@@ -192,6 +198,10 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	}
 	srv.initMCPHost()
 	srv.initChannelRelay()
+	srv.errorStore = gwerrors.NewStore()
+	srv.channelProber = channel.NewProber()
+	srv.initWasmHost()
+	observability.InitPyroscopeFromEnv()
 	return srv, nil
 }
 
@@ -524,6 +534,12 @@ func (s *Server) Router() http.Handler {
 	r.Post("/internal/keypool/reset", s.handleKeypoolReset)
 	r.Post("/internal/cache/reload", s.handleCacheConfigReload)
 	r.Post("/internal/cache/evict", s.handleCacheEvict)
+	r.Get("/internal/plugins", s.handleInternalPluginsList)
+	r.Post("/internal/plugins/reload", s.handleInternalPluginsReload)
+	r.Post("/internal/plugins/upload", s.handleInternalPluginsUpload)
+	r.Get("/internal/errors", s.handleInternalErrors)
+	r.Get("/internal/perf", s.handleInternalPerf)
+	r.Post("/internal/channels/{id}/probe", s.handleInternalChannelProbe)
 	r.Post("/v1/chat/completions", s.handleChatCompletions)
 	r.Post("/v1/embeddings", s.handleEmbeddings)
 	if claudeInboundEnabled() {
@@ -578,7 +594,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req openai.ChatCompletionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	rawBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeAPIError(w, openai.BadRequest("invalid request body"))
+		return
+	}
+	if err := json.Unmarshal(rawBody, &req); err != nil {
 		writeAPIError(w, openai.BadRequest("invalid request body"))
 		return
 	}
@@ -591,9 +612,6 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	qctx := s.quotaContext(identity, req.Model)
-	defer s.billingService.ReleaseContext(qctx)
-
 	decision := s.decider.Decide(r, req.Model)
 	s.logger.Info("gateway routing decision",
 		"model", req.Model,
@@ -601,6 +619,31 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		"provider", decision.Provider,
 		"endpoint", decision.Endpoint,
 	)
+
+	pluginCtx := s.newPluginHookContext(identity, r, pluginRouteFromRequest(r))
+	if s.runWasmRequestHooks(w, pluginCtx, rawBody) {
+		_ = s.writeAuditEvent(audit.Event{
+			ID:             makeID("audit"),
+			TenantID:       identity.TenantID,
+			EventTime:      time.Now().UTC().Format(time.RFC3339),
+			EventType:      "policy_hit",
+			UserID:         identity.UserID,
+			UserEmail:      identity.UserEmail,
+			DepartmentID:   identity.DepartmentID,
+			SessionID:      identity.SessionID,
+			ClientType:     "web-portal",
+			ClientIP:       r.RemoteAddr,
+			Model:          req.Model,
+			Route:          decision.Route,
+			Digest:         &audit.Digest{PromptHash: hashText(joinMessages(req.Messages))},
+			LatencyMS:      time.Since(startedAt).Milliseconds(),
+			PluginsInvoked: append([]string(nil), pluginCtx.Invoked...),
+		})
+		return
+	}
+
+	qctx := s.quotaContext(identity, req.Model)
+	defer s.billingService.ReleaseContext(qctx)
 
 	latestUserText := latestUserMessageContent(req.Messages)
 	reqPolicy := s.evaluatePolicy(latestUserText, makeEvalContext(identity, "request"))
@@ -667,12 +710,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Stream {
-		s.handleStream(w, r, req, decision, startedAt, identity, estimatedInputTokens, reserveTokens)
+		s.handleStream(w, r, req, decision, startedAt, identity, estimatedInputTokens, reserveTokens, pluginCtx)
 		return
 	}
 
 	if s.useChannelRelay() {
-		s.handleChatCompleteRelay(w, r, req, startedAt, identity, estimatedInputTokens, reserveTokens)
+		s.handleChatCompleteRelay(w, r, req, startedAt, identity, estimatedInputTokens, reserveTokens, pluginCtx)
 		return
 	}
 
@@ -742,7 +785,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.writeAuditEvent(s.auditChatCall(audit.Event{
+	s.transformChatResponseJSON(pluginCtx, &resp)
+	if len(resp.Choices) > 0 {
+		responseContent = openai.ComposeMessageContent(resp.Choices[0].Message.Content, resp.Choices[0].Message.ReasoningContent)
+	}
+
+	chatAudit := s.auditChatCall(audit.Event{
 		ID:           makeID("audit"),
 		TenantID:     identity.TenantID,
 		EventTime:    time.Now().UTC().Format(time.RFC3339),
@@ -768,7 +816,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			PromptSummary:   summarize(joinMessages(req.Messages), 120),
 			ResponseSummary: summarize(responseContent, 120),
 		},
-	}, cache.LayerNone, "", 0, time.Since(startedAt).Milliseconds())); err != nil {
+	}, cache.LayerNone, "", 0, time.Since(startedAt).Milliseconds())
+	applyPluginsInvoked(&chatAudit, pluginCtx)
+	if err := s.writeAuditEvent(chatAudit); err != nil {
 		writeAPIError(w, openai.Internal("audit write failed"))
 		return
 	}
@@ -923,6 +973,7 @@ func (s *Server) handleStream(
 	identity requestIdentity,
 	estimatedInputTokens int,
 	reservedTokens int64,
+	pluginCtx *wasmhost.HookContext,
 ) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -973,6 +1024,7 @@ func (s *Server) handleStream(
 		if err != nil {
 			return err
 		}
+		payload = s.applyWasmStreamChunk(pluginCtx, payload)
 		if _, err := w.Write([]byte("data: " + string(payload) + "\n\n")); err != nil {
 			return err
 		}
@@ -1119,6 +1171,7 @@ func (s *Server) handleStream(
 		},
 	}
 	enrichAuditFromAttempts(&ev, streamResult.Attempts)
+	applyPluginsInvoked(&ev, pluginCtx)
 	if err := s.writeAuditEvent(ev); err != nil {
 		writeStreamError(w, flusher, "audit write failed")
 		return
