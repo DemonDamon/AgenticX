@@ -2,6 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Alert,
   AlertDescription,
@@ -34,13 +35,15 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
-import { getPortalSsoErrorMessageZh } from "@agenticx/auth/src/services/oidc-error-codes";
-import { usePortalCopy } from "../../lib/portal-copy";
+import {
+  getPortalSsoErrorMessageEn,
+  getPortalSsoErrorMessageZh,
+} from "@agenticx/auth/src/services/oidc-error-codes";
 import { getPortalSsoProviderOptions, pickPreferredSsoProvider } from "../../lib/sso-provider-options";
 
 function AuthPageInner() {
   const searchParams = useSearchParams();
-  const t = usePortalCopy();
+  const t = useTranslations("portal");
   const { locale, setLocale } = useLocale();
   const [signInEmail, setSignInEmail] = useState("admin@agenticx.local");
   const [signInPassword, setSignInPassword] = useState("");
@@ -52,14 +55,23 @@ function AuthPageInner() {
   const [busy, setBusy] = useState(false);
   const ssoProviders = useMemo(() => getPortalSsoProviderOptions(), []);
 
+  const features = useMemo(
+    () => [
+      { icon: Sparkles, title: t("featureAiTitle"), desc: t("featureAiDesc") },
+      { icon: Zap, title: t("featureWorkflowTitle"), desc: t("featureWorkflowDesc") },
+      { icon: ShieldCheck, title: t("featureSecurityTitle"), desc: t("featureSecurityDesc") },
+    ],
+    [t],
+  );
+
   useEffect(() => {
     const raw = searchParams.get("sso_error");
     if (!raw) return;
     setStatus({
       type: "error",
-      message: getPortalSsoErrorMessageZh(raw),
+      message: locale === "en" ? getPortalSsoErrorMessageEn(raw) : getPortalSsoErrorMessageZh(raw),
     });
-  }, [searchParams]);
+  }, [searchParams, locale]);
 
   const handleSignIn = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -75,10 +87,10 @@ function AuthPageInner() {
       });
       const data = await response.json();
       if (!response.ok) {
-        setStatus({ type: "error", message: data.message ?? "登录失败" });
+        setStatus({ type: "error", message: data.message ?? t("loginFailed") });
         return;
       }
-      setStatus({ type: "success", message: t.signInSuccess });
+      setStatus({ type: "success", message: t("signInSuccess") });
       const returnTo = searchParams.get("returnTo");
       const destination =
         returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/workspace";
@@ -91,7 +103,7 @@ function AuthPageInner() {
   const handleSignUp = async (event: React.FormEvent) => {
     event.preventDefault();
     if (signUpPassword !== confirmPassword) {
-      setStatus({ type: "error", message: t.passwordMismatch });
+      setStatus({ type: "error", message: t("passwordMismatch") });
       return;
     }
     setBusy(true);
@@ -122,10 +134,10 @@ function AuthPageInner() {
         data = await fallback.json();
       }
       if (!ok) {
-        setStatus({ type: "error", message: data.message ?? "注册失败" });
+        setStatus({ type: "error", message: data.message ?? t("signupFailed") });
         return;
       }
-      setStatus({ type: "success", message: t.signUpSuccess });
+      setStatus({ type: "success", message: t("signUpSuccess") });
       setSignInEmail(signUpEmail);
       setSignInPassword(signUpPassword);
     } finally {
@@ -159,23 +171,21 @@ function AuthPageInner() {
             <div className="space-y-6">
               <Badge variant="soft" className="mb-4 gap-1.5 px-3 py-1">
                 <Sparkles className="h-3 w-3" />
-                AI Workspace
+                {t("heroBadge")}
               </Badge>
               <h1 className="max-w-3xl text-4xl font-bold leading-[1.15] tracking-tighter xl:text-5xl">
-                你的专属<br /><span className="text-primary">AI 智能工作台</span>
+                {t("heroTitle1")}
+                <br />
+                <span className="text-primary">{t("heroTitle2")}</span>
               </h1>
               <p className="max-w-xl text-base leading-relaxed text-muted-foreground">
-                无缝连接顶级大模型与企业私有知识库，为每位员工提供极速、安全、全能的 AI 助手。
+                {t("heroSubtitle")}
               </p>
             </div>
 
             {/* 特性列表 */}
             <ul className="grid max-w-2xl gap-5 text-base">
-              {[
-                { icon: Sparkles, title: "全能 AI 助手", desc: "极速响应日常问答、长文总结、数据分析与代码编写" },
-                { icon: Zap, title: "开箱即用的工作流", desc: "内置丰富场景模板，一键调用企业内部专业智能体" },
-                { icon: ShieldCheck, title: "企业级数据保护", desc: "所有对话不用于模型训练，企业数据绝对隔离" },
-              ].map((feature) => {
+              {features.map((feature) => {
                 const Icon = feature.icon;
                 return (
                   <li key={feature.title} className="flex items-start gap-3.5">
@@ -199,14 +209,14 @@ function AuthPageInner() {
             <CardHeader className="pb-6">
               <div className="flex items-start justify-between">
                 <div className="space-y-1.5">
-                  <CardTitle className="text-2xl">{t.authTitle}</CardTitle>
-                  <CardDescription>{t.authSubtitle}</CardDescription>
+                  <CardTitle className="text-2xl">{t("authTitle")}</CardTitle>
+                  <CardDescription>{t("authSubtitle")}</CardDescription>
                 </div>
                 <Button
                   variant="ghost"
                   size="icon-sm"
                   onClick={() => setLocale(locale === "zh" ? "en" : "zh")}
-                  aria-label="切换语言"
+                  aria-label={t("switchLanguage")}
                 >
                   <Languages />
                 </Button>
@@ -215,15 +225,15 @@ function AuthPageInner() {
             <CardContent className="space-y-4">
               <Tabs defaultValue="signin">
                 <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="signin">{t.signIn}</TabsTrigger>
-                  <TabsTrigger value="signup">{t.signUp}</TabsTrigger>
+                  <TabsTrigger value="signin">{t("signIn")}</TabsTrigger>
+                  <TabsTrigger value="signup">{t("signUp")}</TabsTrigger>
                 </TabsList>
 
                 {/* 登录 */}
                 <TabsContent value="signin" className="space-y-3 pt-3">
                   <form onSubmit={handleSignIn} className="space-y-3">
                     <div className="space-y-1.5">
-                      <Label htmlFor="signin-email">{t.email}</Label>
+                      <Label htmlFor="signin-email">{t("email")}</Label>
                       <Input
                         id="signin-email"
                         type="email"
@@ -235,13 +245,13 @@ function AuthPageInner() {
                     </div>
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
-                        <Label htmlFor="signin-password">{t.password}</Label>
+                        <Label htmlFor="signin-password">{t("password")}</Label>
                         <button
                           type="button"
                           className="text-xs text-muted-foreground hover:text-foreground"
-                          onClick={() => setStatus({ type: "info", message: "请联系企业管理员重置" })}
+                          onClick={() => setStatus({ type: "info", message: t("forgotPasswordHint") })}
                         >
-                          忘记密码？
+                          {t("forgotPassword")}
                         </button>
                       </div>
                       <Input
@@ -255,7 +265,7 @@ function AuthPageInner() {
                       />
                     </div>
                     <Button type="submit" className="w-full" disabled={busy}>
-                      {busy ? "登录中..." : t.loginAction}
+                      {busy ? t("signingIn") : t("loginAction")}
                       <ArrowRight />
                     </Button>
                   </form>
@@ -265,7 +275,7 @@ function AuthPageInner() {
                 <TabsContent value="signup" className="space-y-3 pt-3">
                   <form onSubmit={handleSignUp} className="space-y-3">
                     <div className="space-y-1.5">
-                      <Label htmlFor="signup-email">{t.email}</Label>
+                      <Label htmlFor="signup-email">{t("email")}</Label>
                       <Input
                         id="signup-email"
                         type="email"
@@ -275,7 +285,7 @@ function AuthPageInner() {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="signup-name">{t.username}</Label>
+                      <Label htmlFor="signup-name">{t("username")}</Label>
                       <Input
                         id="signup-name"
                         required
@@ -285,7 +295,7 @@ function AuthPageInner() {
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
-                        <Label htmlFor="signup-password">{t.password}</Label>
+                        <Label htmlFor="signup-password">{t("password")}</Label>
                         <Input
                           id="signup-password"
                           type="password"
@@ -295,7 +305,7 @@ function AuthPageInner() {
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label htmlFor="signup-confirm">{t.confirmPassword}</Label>
+                        <Label htmlFor="signup-confirm">{t("confirmPassword")}</Label>
                         <Input
                           id="signup-confirm"
                           type="password"
@@ -306,7 +316,7 @@ function AuthPageInner() {
                       </div>
                     </div>
                     <Button type="submit" className="w-full" disabled={busy}>
-                      {busy ? "处理中..." : t.signupAction}
+                      {busy ? t("processing") : t("signupAction")}
                       <ChevronRight />
                     </Button>
                   </form>
@@ -337,9 +347,9 @@ function AuthPageInner() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setStatus({ type: "info", message: t.wechatComingSoon })}
+                  onClick={() => setStatus({ type: "info", message: t("wechatComingSoon") })}
                 >
-                  微信
+                  {t("wechat")}
                 </Button>
                 <Button
                   type="button"
@@ -356,7 +366,7 @@ function AuthPageInner() {
                     window.location.href = `${startPath}?provider=${encodeURIComponent(providerId)}&returnTo=${encodeURIComponent("/workspace")}`;
                   }}
                 >
-                  企业 SSO
+                  {t("enterpriseSso")}
                 </Button>
                 <Button
                   type="button"
@@ -369,8 +379,10 @@ function AuthPageInner() {
               </div>
 
               <p className="text-center text-xs text-muted-foreground">
-                登录即代表同意 <span className="underline-offset-2 hover:underline">服务协议</span> 与{" "}
-                <span className="underline-offset-2 hover:underline">隐私政策</span>
+                {t("termsPrefix")}{" "}
+                <span className="underline-offset-2 hover:underline">{t("termsOfService")}</span>{" "}
+                {t("and")}{" "}
+                <span className="underline-offset-2 hover:underline">{t("privacyPolicy")}</span>
               </p>
             </CardContent>
           </Card>

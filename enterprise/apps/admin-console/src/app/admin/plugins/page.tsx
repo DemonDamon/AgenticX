@@ -14,6 +14,7 @@ import {
   toast,
 } from "@agenticx/ui";
 import { Package, RefreshCcw, Upload } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 type PluginRow = {
   name: string;
@@ -24,6 +25,8 @@ type PluginRow = {
 };
 
 export default function AdminPluginsPage() {
+  const t = useTranslations("pages.admin.plugins");
+  const tc = useTranslations("common");
   const [plugins, setPlugins] = useState<PluginRow[]>([]);
   const [enabled, setEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -38,11 +41,11 @@ export default function AdminPluginsPage() {
       setPlugins(json.data?.plugins ?? []);
       setEnabled(Boolean(json.data?.enabled));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "加载插件失败");
+      toast.error(e instanceof Error ? e.message : t("toast.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -53,10 +56,10 @@ export default function AdminPluginsPage() {
       const res = await fetch("/api/admin/plugins", { method: "PUT" });
       const json = await res.json();
       if (json.code !== "00000") throw new Error(json.message || "reload failed");
-      toast.success("插件已热加载");
+      toast.success(t("toast.reloadSuccess"));
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "热加载失败");
+      toast.error(e instanceof Error ? e.message : t("toast.reloadFailed"));
     }
   }
 
@@ -64,31 +67,31 @@ export default function AdminPluginsPage() {
     try {
       const fd = new FormData(form);
       if (!uploadName.trim()) {
-        toast.error("请填写插件目录名");
+        toast.error(t("toast.nameRequired"));
         return;
       }
       fd.set("name", uploadName.trim());
       const res = await fetch("/api/admin/plugins", { method: "POST", body: fd });
       const json = await res.json();
       if (json.code !== "00000") throw new Error(json.message || "upload failed");
-      toast.success("插件已上传并加载");
+      toast.success(t("toast.uploadSuccess"));
       setUploadName("");
       form.reset();
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "上传失败");
+      toast.error(e instanceof Error ? e.message : t("toast.uploadFailed"));
     }
   }
 
   return (
     <div className="space-y-6 p-6">
       <PageHeader
-        title="Wasm 插件"
-        description="管理网关 Wasm/内置插件：列表、热加载与上传。"
+        title={t("title")}
+        description={t("description")}
         actions={
           <Button variant="outline" size="sm" onClick={() => void reloadPlugins()}>
             <RefreshCcw className="mr-2 h-4 w-4" />
-            热加载
+            {t("hotReload")}
           </Button>
         }
       />
@@ -97,25 +100,32 @@ export default function AdminPluginsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Package className="h-4 w-4" />
-            运行中的插件
-            <Badge variant={enabled ? "default" : "secondary"}>{enabled ? "已启用" : "已关闭"}</Badge>
+            {t("runningPlugins")}
+            <Badge variant={enabled ? "default" : "secondary"}>
+              {enabled ? tc("status.enabled") : tc("status.disabled")}
+            </Badge>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {loading ? (
-            <p className="text-sm text-muted-foreground">加载中…</p>
+            <p className="text-sm text-muted-foreground">{tc("states.loading")}</p>
           ) : plugins.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无已加载插件</p>
+            <p className="text-sm text-muted-foreground">{t("emptyPlugins")}</p>
           ) : (
             plugins.map((p, idx) => (
-              <div key={`${p.name ?? "plugin"}-${idx}`} className="flex items-center justify-between rounded-md border px-3 py-2">
+              <div
+                key={`${p.name ?? "plugin"}-${idx}`}
+                className="flex items-center justify-between rounded-md border px-3 py-2"
+              >
                 <div>
                   <div className="font-medium">{p.name}</div>
                   <div className="text-xs text-muted-foreground">
                     runtime={p.runtime ?? "wasm"} · priority={p.priority ?? 0}
                   </div>
                 </div>
-                <Badge variant={p.enabled ? "default" : "secondary"}>{p.enabled ? "ON" : "OFF"}</Badge>
+                <Badge variant={p.enabled ? "default" : "secondary"}>
+                  {p.enabled ? "ON" : "OFF"}
+                </Badge>
               </div>
             ))
           )}
@@ -124,7 +134,7 @@ export default function AdminPluginsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">上传插件包</CardTitle>
+          <CardTitle className="text-base">{t("uploadTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
           <form
@@ -135,20 +145,25 @@ export default function AdminPluginsPage() {
             }}
           >
             <div className="space-y-2">
-              <Label htmlFor="plugin-name">插件目录名</Label>
-              <Input id="plugin-name" value={uploadName} onChange={(e) => setUploadName(e.target.value)} placeholder="wasm-my-plugin" />
+              <Label htmlFor="plugin-name">{t("pluginDirName")}</Label>
+              <Input
+                id="plugin-name"
+                value={uploadName}
+                onChange={(e) => setUploadName(e.target.value)}
+                placeholder="wasm-my-plugin"
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="manifest">manifest.yaml</Label>
               <Input id="manifest" name="manifest" type="file" accept=".yaml,.yml" />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="wasm">plugin.wasm（可选）</Label>
+              <Label htmlFor="wasm">{t("wasmOptional")}</Label>
               <Input id="wasm" name="wasm" type="file" accept=".wasm" />
             </div>
             <Button type="submit">
               <Upload className="mr-2 h-4 w-4" />
-              上传并加载
+              {t("uploadSubmit")}
             </Button>
           </form>
         </CardContent>

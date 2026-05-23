@@ -25,6 +25,7 @@ import {
   PageHeader,
   toast,
 } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 import type { DepartmentTreeNode } from "@agenticx/feature-iam";
 import { Download, Pencil, Plus, RefreshCw, Trash2, FolderTree, Users, ChevronRight, CornerRightUp } from "lucide-react";
 
@@ -86,6 +87,9 @@ function getBreadcrumbPath(nodes: DepartmentTreeNode[], targetId: string | null)
 }
 
 export default function DepartmentsPage() {
+  const t = useTranslations("pages.iam.departments");
+  const tc = useTranslations("common");
+  const ts = useTranslations("shell");
   const [tree, setTree] = useState<DepartmentTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -108,12 +112,12 @@ export default function DepartmentsPage() {
       const res = await fetch("/api/admin/departments?shape=tree", { cache: "no-store" });
       const json = (await res.json()) as ApiEnvelope<{ shape: string; items: ApiDept[] }>;
       if (!res.ok || !json.data?.items) {
-        toast.error(json.message ?? "加载失败");
+        toast.error(json.message ?? t("toast.loadFailed"));
         return;
       }
       setTree(json.data.items.map(mapApiToNode));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "网络错误");
+      toast.error(e instanceof Error ? e.message : t("toast.networkError"));
     } finally {
       setLoading(false);
     }
@@ -148,10 +152,10 @@ export default function DepartmentsPage() {
     });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "创建失败");
+      toast.error(json.message ?? t("toast.createFailed"));
       return;
     }
-    toast.success("已创建部门");
+    toast.success(t("toast.created"));
     setCreateOpen(false);
     setNewName("");
     await loadTree();
@@ -166,10 +170,10 @@ export default function DepartmentsPage() {
     });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "保存失败");
+      toast.error(json.message ?? t("toast.saveFailed"));
       return;
     }
-    toast.success("已更新名称");
+    toast.success(t("toast.nameUpdated"));
     setEditOpen(false);
     await loadTree();
   }
@@ -183,23 +187,23 @@ export default function DepartmentsPage() {
     });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "移动失败");
+      toast.error(json.message ?? t("toast.moveFailed"));
       return;
     }
-    toast.success("已移动部门");
+    toast.success(t("toast.moved"));
     setMoveOpen(false);
     await loadTree();
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("确定要删除此部门吗？下级部门及成员将被解绑。")) return;
+    if (!confirm(t("confirmDelete"))) return;
     const res = await fetch(`/api/admin/departments/${id}`, { method: "DELETE" });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "删除失败");
+      toast.error(json.message ?? t("toast.deleteFailed"));
       return;
     }
-    toast.success("已删除");
+    toast.success(t("toast.deleted"));
     if (currentDeptId === id) {
       setCurrentDeptId(currentNode?.parentId ?? null);
     }
@@ -210,7 +214,7 @@ export default function DepartmentsPage() {
     const res = await fetch("/api/admin/departments?shape=flat", { cache: "no-store" });
     const json = (await res.json()) as ApiEnvelope<{ shape: string; items: ApiDept[] }>;
     if (!res.ok || !json.data?.items) {
-      toast.error(json.message ?? "导出失败");
+      toast.error(json.message ?? t("toast.exportFailed"));
       return;
     }
     const rows = json.data.items;
@@ -230,7 +234,7 @@ export default function DepartmentsPage() {
     a.download = `departments-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success(`已导出 ${rows.length} 行`);
+    toast.success(t("toast.exportSuccess", { count: rows.length }));
   }
 
   return (
@@ -245,25 +249,25 @@ export default function DepartmentsPage() {
                 </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator />
-              <BreadcrumbItem>身份与权限</BreadcrumbItem>
+              <BreadcrumbItem>{t("breadcrumbIam")}</BreadcrumbItem>
               <BreadcrumbSeparator />
               <BreadcrumbItem>
-                <BreadcrumbPage>部门</BreadcrumbPage>
+                <BreadcrumbPage>{t("breadcrumbDepartments")}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
         }
-        title="部门管理"
-        description="层级目录式组织架构，点击部门卡片进入下级。支持在任意层级新建与管理。"
+        title={t("title")}
+        description={t("description")}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => void loadTree()} disabled={loading}>
               <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-              刷新
+              {t("refresh")}
             </Button>
             <Button variant="outline" size="sm" onClick={() => void exportStructure()}>
               <Download className="mr-2 h-4 w-4" />
-              导出结构
+              {t("exportStructure")}
             </Button>
           </div>
         }
@@ -278,7 +282,7 @@ export default function DepartmentsPage() {
           onClick={() => setCurrentDeptId(null)}
         >
           <FolderTree className="mr-2 h-4 w-4" />
-          （根目录）企业架构
+          {t("rootLabel")}
         </Button>
 
         {breadcrumbs.map((b) => (
@@ -306,10 +310,10 @@ export default function DepartmentsPage() {
                 <Link 
                   href={`/iam/users?dept=${currentNode.id}`}
                   className="inline-flex items-center hover:opacity-80 transition-opacity"
-                  title="点击跳转至成员管理页面"
+                  title={t("membersLinkTitle")}
                 >
                   <Badge variant="secondary" className="bg-background shadow-sm hover:bg-muted cursor-pointer">
-                    {currentNode.memberCount} 名成员
+                    {t("memberCount", { count: currentNode.memberCount })}
                   </Badge>
                 </Link>
               </h3>
@@ -324,7 +328,7 @@ export default function DepartmentsPage() {
                   setEditOpen(true);
                 }}
               >
-                <Pencil className="mr-2 h-4 w-4" /> 编辑
+                <Pencil className="mr-2 h-4 w-4" /> {t("edit")}
               </Button>
               <Button
                 variant="outline"
@@ -334,14 +338,14 @@ export default function DepartmentsPage() {
                   setMoveOpen(true);
                 }}
               >
-                <CornerRightUp className="mr-2 h-4 w-4" /> 移动
+                <CornerRightUp className="mr-2 h-4 w-4" /> {t("move")}
               </Button>
               <Button
                 variant="destructive"
                 className="bg-destructive/10 text-destructive hover:bg-destructive hover:text-destructive-foreground"
                 onClick={() => void handleDelete(currentNode.id)}
               >
-                <Trash2 className="mr-2 h-4 w-4" /> 删除
+                <Trash2 className="mr-2 h-4 w-4" /> {t("delete")}
               </Button>
             </div>
           </CardContent>
@@ -372,14 +376,14 @@ export default function DepartmentsPage() {
                   href={`/iam/users?dept=${child.id}`} 
                   onClick={(e) => e.stopPropagation()}
                   className="flex items-center gap-1.5 hover:text-primary transition-colors" 
-                  title="点击跳转至成员管理页面查看"
+                  title={t("membersLinkTitle")}
                 >
                   <Users className="h-4 w-4" />
-                  {child.memberCount} 成员
+                  {t("members", { count: child.memberCount })}
                 </Link>
-                <div className="flex items-center gap-1.5" title="点击进入此部门">
+                <div className="flex items-center gap-1.5" title={t("drillInTitle")}>
                   <FolderTree className="h-4 w-4" />
-                  {child.children.length} 子部门
+                  {t("subDepartments", { count: child.children.length })}
                 </div>
               </div>
             </CardContent>
@@ -397,7 +401,7 @@ export default function DepartmentsPage() {
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted transition-colors group-hover:bg-primary/20">
             <Plus className="h-5 w-5" />
           </div>
-          <span className="font-medium">{currentNode ? "新建子部门" : "新建一级部门"}</span>
+          <span className="font-medium">{currentNode ? t("newSubDept") : t("newTopDept")}</span>
         </button>
       </div>
 
@@ -407,15 +411,15 @@ export default function DepartmentsPage() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{currentNode ? `在 [${currentNode.name}] 下新建部门` : "新建一级部门"}</DialogTitle>
+<DialogTitle>{currentNode ? t("createDialogUnder", { name: currentNode.name }) : t("createDialogRoot")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>部门名称</Label>
+              <Label>{t("deptNameLabel")}</Label>
               <Input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="例如：研发中心"
+                placeholder={t("deptNamePlaceholder")}
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void handleCreate();
@@ -425,9 +429,9 @@ export default function DepartmentsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
-              取消
+              {tc("actions.cancel")}
             </Button>
-            <Button onClick={() => void handleCreate()}>确认创建</Button>
+            <Button onClick={() => void handleCreate()}>{t("confirmCreate")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -436,11 +440,11 @@ export default function DepartmentsPage() {
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>编辑部门名称</DialogTitle>
+            <DialogTitle>{t("editDialogTitle")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>新名称</Label>
+              <Label>{t("newNameLabel")}</Label>
               <Input
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
@@ -453,9 +457,9 @@ export default function DepartmentsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>
-              取消
+              {tc("actions.cancel")}
             </Button>
-            <Button onClick={() => void handleSaveName()}>保存</Button>
+<Button onClick={() => void handleSaveName()}>{tc("actions.save")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -464,17 +468,17 @@ export default function DepartmentsPage() {
       <Dialog open={moveOpen} onOpenChange={setMoveOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>移动部门</DialogTitle>
+            <DialogTitle>{t("moveDialogTitle")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>选择新的上级部门</Label>
+              <Label>{t("moveParentLabel")}</Label>
               <select
                 className="w-full rounded-md border border-border bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
                 value={moveParentId ?? ""}
                 onChange={(e) => setMoveParentId(e.target.value || null)}
               >
-                <option value="">（移至根级）</option>
+                <option value="">{t("moveToRoot")}</option>
                 {flatForParentSelect
                   .filter((o) => o.id !== currentDeptId)
                   .map((o) => (
@@ -487,9 +491,9 @@ export default function DepartmentsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setMoveOpen(false)}>
-              取消
+              {tc("actions.cancel")}
             </Button>
-            <Button onClick={() => void handleMove()}>确认移动</Button>
+            <Button onClick={() => void handleMove()}>{t("confirmMove")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

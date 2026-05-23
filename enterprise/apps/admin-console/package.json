@@ -7,7 +7,7 @@
     "dev": "next dev --port 3001",
     "build": "next build",
     "start": "next start -p 3001",
-    "lint": "next lint",
+    "lint": "eslint src/app src/components",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "saml:mock": "pnpm -C ../.. sso:saml-mock"
@@ -26,21 +26,27 @@
     "@agenticx/feature-tools-mcp": "workspace:*",
     "@agenticx/iam-core": "workspace:*",
     "@agenticx/ui": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "papaparse": "^5.5.3",
     "@tanstack/react-table": "^8.21.3",
+    "drizzle-orm": "^0.45.2",
     "lucide-react": "^0.542.0",
     "next": "^15.1.0",
+    "next-intl": "^3",
     "openid-client": "^6.0.0",
+    "papaparse": "^5.5.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "server-only": "^0.0.1",
     "recharts": "^3.2.1",
+    "server-only": "^0.0.1",
     "ulid": "^2.3.0"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
     "@types/papaparse": "^5.3.15",
     "@types/react": "19.2.14",
+    "eslint": "^10.4.0",
+    "eslint-config-next": "^16.2.6",
+    "eslint-plugin-i18next": "^6.1.4",
+    "typescript-eslint": "^8.59.4",
     "vitest": "^4.1.5"
   }
 }

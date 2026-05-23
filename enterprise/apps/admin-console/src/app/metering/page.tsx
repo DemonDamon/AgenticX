@@ -35,6 +35,7 @@ import {
   chartPalette,
   toast,
 } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 import { BarChart3, Download, FileSpreadsheet, Filter, RefreshCcw, Search } from "lucide-react";
 
 type MeteringRow = {
@@ -65,6 +66,9 @@ async function readJsonBody<T>(res: Response, fallback: T): Promise<T> {
 }
 
 export default function MeteringPage() {
+  const t = useTranslations("pages.ops.metering");
+  const tc = useTranslations("common");
+  const ts = useTranslations("shell");
   const [dept, setDept] = useState(ALL);
   const [user, setUser] = useState(ALL);
   const [apiToken, setApiToken] = useState(ALL);
@@ -189,7 +193,7 @@ export default function MeteringPage() {
       const payload = await readJsonBody<{ data?: { rows?: MeteringRow[] } }>(response, { data: { rows: [] } });
       setRows(payload.data?.rows ?? []);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "查询失败");
+      toast.error(error instanceof Error ? error.message : t("toast.queryFailed"));
     } finally {
       setLoading(false);
     }
@@ -221,17 +225,20 @@ export default function MeteringPage() {
     anchor.download = `metering-${new Date().toISOString().slice(0, 10)}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
-    toast.success(`已导出 ${rows.length} 条记录`);
+    toast.success(t("toast.exportSuccess", { count: rows.length }));
   };
+
+  const callsSeriesKey = t("callsSeries");
+  const costSeriesKey = t("costSeries");
 
   const trendData = useMemo(
     () =>
       rows.map((row, index) => ({
         day: row.dims.day ?? `slot-${index + 1}`,
-        调用量: row.total_tokens,
-        成本: Number(row.cost_usd.toFixed(4)),
+        [callsSeriesKey]: row.total_tokens,
+        [costSeriesKey]: Number(row.cost_usd.toFixed(4)),
       })),
-    [rows]
+    [rows, callsSeriesKey, costSeriesKey]
   );
 
   const deptBarData = useMemo(
@@ -258,25 +265,25 @@ export default function MeteringPage() {
                 </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator />
-              <BreadcrumbItem>运维监控</BreadcrumbItem>
+              <BreadcrumbItem>{t("breadcrumbOps")}</BreadcrumbItem>
               <BreadcrumbSeparator />
               <BreadcrumbItem>
-                <BreadcrumbPage>四维消耗</BreadcrumbPage>
+                <BreadcrumbPage>{t("breadcrumbMetering")}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
         }
-        title="四维消耗查询"
-        description="部门 × 员工 × 厂商/模型 × 时间段 · 四级联动分析"
+        title={t("title")}
+        description={t("description")}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => void query()} disabled={loading}>
               <RefreshCcw />
-              刷新
+              {tc("actions.refresh")}
             </Button>
             <Button size="sm" onClick={exportCsv}>
               <Download />
-              导出 CSV
+              {t("exportCsv")}
             </Button>
           </>
         }
@@ -287,19 +294,19 @@ export default function MeteringPage() {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-sm">
             <Filter className="h-4 w-4" />
-            筛选条件
+            {t("filtersTitle")}
           </CardTitle>
-          <CardDescription>所有条件改动后自动重新查询</CardDescription>
+          <CardDescription>{t("filtersDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
           <div className="space-y-1.5">
-            <Label>部门</Label>
+            <Label>{t("dept")}</Label>
             <Select value={dept} onValueChange={setDept}>
               <SelectTrigger>
-                <SelectValue placeholder="全部部门" />
+                <SelectValue placeholder={t("allDept")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={ALL}>全部</SelectItem>
+                <SelectItem value={ALL}>{t("all")}</SelectItem>
                 {deptOptions.map((deptId) => (
                   <SelectItem key={deptId} value={deptId}>
                     {deptId}
@@ -309,13 +316,13 @@ export default function MeteringPage() {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>员工</Label>
+            <Label>{t("user")}</Label>
             <Select value={user} onValueChange={setUser}>
               <SelectTrigger>
-                <SelectValue placeholder="全部员工" />
+                <SelectValue placeholder={t("allUser")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={ALL}>全部</SelectItem>
+                <SelectItem value={ALL}>{t("all")}</SelectItem>
                 {users.map((item) => (
                   <SelectItem key={item.id} value={item.id}>
                     {item.name}
@@ -325,13 +332,13 @@ export default function MeteringPage() {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>API Token</Label>
+            <Label>{t("apiToken")}</Label>
             <Select value={apiToken} onValueChange={setApiToken}>
               <SelectTrigger>
-                <SelectValue placeholder="全部 PAT" />
+                <SelectValue placeholder={t("allPat")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={ALL}>全部</SelectItem>
+                <SelectItem value={ALL}>{t("all")}</SelectItem>
                 {patOptions.map((item) => (
                   <SelectItem key={item.id} value={String(item.id)}>
                     {item.name} ({item.tokenPrefix}…)
@@ -341,13 +348,13 @@ export default function MeteringPage() {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>厂商</Label>
+            <Label>{t("provider")}</Label>
             <Select value={provider} onValueChange={setProvider}>
               <SelectTrigger>
-                <SelectValue placeholder="全部厂商" />
+                <SelectValue placeholder={t("allProvider")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={ALL}>全部</SelectItem>
+                <SelectItem value={ALL}>{t("all")}</SelectItem>
                 {providers.map((providerItem) => (
                   <SelectItem key={providerItem.id} value={providerItem.id}>
                     {providerItem.name}
@@ -357,13 +364,13 @@ export default function MeteringPage() {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>模型</Label>
+            <Label>{t("model")}</Label>
             <Select value={model} onValueChange={setModel}>
               <SelectTrigger>
-                <SelectValue placeholder="全部模型" />
+                <SelectValue placeholder={t("allModel")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={ALL}>全部</SelectItem>
+                <SelectItem value={ALL}>{t("all")}</SelectItem>
                 {models.map((modelName) => (
                   <SelectItem key={modelName} value={modelName}>
                     {modelName}
@@ -373,11 +380,11 @@ export default function MeteringPage() {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="mt-start">开始日期</Label>
+            <Label htmlFor="mt-start">{t("startDate")}</Label>
             <Input id="mt-start" type="date" value={start} onChange={(event) => setStart(event.target.value)} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="mt-end">结束日期</Label>
+            <Label htmlFor="mt-end">{t("endDate")}</Label>
             <Input id="mt-end" type="date" value={end} onChange={(event) => setEnd(event.target.value)} />
           </div>
         </CardContent>
@@ -391,7 +398,7 @@ export default function MeteringPage() {
               <BarChart3 className="h-5 w-5" />
             </span>
             <div>
-              <div className="text-xs text-muted-foreground">总 Token</div>
+              <div className="text-xs text-muted-foreground">{t("totalTokens")}</div>
               <div className="text-xl font-semibold">{totalTokens.toLocaleString()}</div>
             </div>
           </CardContent>
@@ -402,7 +409,7 @@ export default function MeteringPage() {
               <FileSpreadsheet className="h-5 w-5" />
             </span>
             <div>
-              <div className="text-xs text-muted-foreground">总成本</div>
+              <div className="text-xs text-muted-foreground">{t("totalCost")}</div>
               <div className="text-xl font-semibold">${totalCost.toFixed(4)}</div>
             </div>
           </CardContent>
@@ -413,7 +420,7 @@ export default function MeteringPage() {
               <Search className="h-5 w-5" />
             </span>
             <div>
-              <div className="text-xs text-muted-foreground">记录数</div>
+              <div className="text-xs text-muted-foreground">{t("recordCount")}</div>
               <div className="text-xl font-semibold">{rows.length}</div>
             </div>
           </CardContent>
@@ -423,27 +430,27 @@ export default function MeteringPage() {
       {/* 图表 + 表格 切换 */}
       <Tabs defaultValue="charts" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="charts">可视化</TabsTrigger>
-          <TabsTrigger value="table">透视表</TabsTrigger>
+          <TabsTrigger value="charts">{t("tabCharts")}</TabsTrigger>
+          <TabsTrigger value="table">{t("tabTable")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="charts" className="space-y-4">
           <div className="grid gap-4 lg:grid-cols-2">
             <LineCard
-              title="Token 消耗趋势"
-              description="按天聚合"
+              title={t("trendTitle")}
+              description={t("trendDescription")}
               variant="area"
               data={trendData}
               xKey="day"
               series={[
-                { key: "调用量", color: chartPalette[0] },
-                { key: "成本", color: chartPalette[2] },
+                { key: t("callsSeries"), color: chartPalette[0] },
+                { key: t("costSeries"), color: chartPalette[2] },
               ]}
               height={280}
             />
             <BarCard
-              title="按日分布"
-              description="Token 数量"
+              title={t("dailyTitle")}
+              description={t("dailyDescription")}
               data={deptBarData}
               xKey="name"
               series={[{ key: "tokens", label: "Token", color: chartPalette[4] }]}
@@ -459,8 +466,8 @@ export default function MeteringPage() {
               {rows.length === 0 ? (
                 <EmptyState
                   icon={<FileSpreadsheet className="h-5 w-5" />}
-                  title={loading ? "加载中..." : "暂无数据"}
-                  description={loading ? "正在查询计量后端" : "调整筛选条件后重试"}
+                  title={loading ? t("emptyLoadingTitle") : t("emptyTitle")}
+                  description={loading ? t("emptyLoadingDescription") : t("emptyDescription")}
                   size="default"
                   className="m-6 border-0"
                 />
@@ -469,15 +476,15 @@ export default function MeteringPage() {
                   <table className="w-full text-sm">
                     <thead className="bg-muted/40">
                       <tr className="border-b border-border">
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">日期</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">部门</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">用户</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">模型</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tokens</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cached</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cache Read</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cache Write</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">成本</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("table.date")}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("dept")}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("table.user")}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("model")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("table.tokens")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("table.cached")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("table.cacheRead")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("table.cacheWrite")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("costSeries")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -507,7 +514,7 @@ export default function MeteringPage() {
                     <tfoot>
                       <tr className="bg-muted/40 font-medium">
                         <td colSpan={4} className="px-4 py-2.5 text-right text-muted-foreground">
-                          合计
+                          {t("table.total")}
                         </td>
                         <td className="px-4 py-2.5 text-right font-mono">{totalTokens.toLocaleString()}</td>
                         <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">—</td>

@@ -1,15 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Badge,
   Button,
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  EmptyState,
   Input,
   Label,
   Select,
@@ -18,18 +15,13 @@ import {
   SelectTrigger,
   SelectValue,
   Separator,
-  Tooltip,
-  TooltipContent,
   TooltipProvider,
-  TooltipTrigger,
 } from "@agenticx/ui";
 import {
   Bot,
   Check,
-  Database,
   FileSearch,
   Globe,
-  Info,
   MessageSquare,
   Settings as SettingsIcon,
   Shield,
@@ -37,43 +29,15 @@ import {
   KeyRound,
   Trash2,
 } from "lucide-react";
-import { usePortalCopy } from "../../lib/portal-copy";
 
 type TabId = "model-service" | "defaults" | "web-search" | "parser" | "chat" | "general";
 
-interface TabSpec {
-  id: TabId;
-  labelKey: "modelService" | "defaults" | "webSearch" | "parser" | "chat" | "general";
-  icon: React.ReactNode;
-  description: string;
-}
-
-const TABS: TabSpec[] = [
-  { id: "general", labelKey: "general", icon: <SettingsIcon className="h-4 w-4" />, description: "语言 / 主题 / 数据导出" },
-  { id: "model-service", labelKey: "modelService", icon: <Bot className="h-4 w-4" />, description: "API Key、Provider 配置" },
-  { id: "defaults", labelKey: "defaults", icon: <Sparkles className="h-4 w-4" />, description: "默认模型与命名模型" },
-  { id: "web-search", labelKey: "webSearch", icon: <Globe className="h-4 w-4" />, description: "联网搜索开关与密钥" },
-  { id: "parser", labelKey: "parser", icon: <FileSearch className="h-4 w-4" />, description: "文档解析器选择" },
-  { id: "chat", labelKey: "chat", icon: <MessageSquare className="h-4 w-4" />, description: "流式输出 / 自动命名" },
-];
-
-const PROVIDERS = [
-  { id: "deepseek", name: "DeepSeek", tagline: "国产开源", color: "bg-chart-1/80" },
-  { id: "moonshot", name: "Moonshot", tagline: "长文本优势", color: "bg-chart-5/80" },
-  { id: "openai", name: "OpenAI", tagline: "GPT-4o 系列", color: "bg-chart-2/80" },
-  { id: "anthropic", name: "Anthropic", tagline: "Claude 系列", color: "bg-chart-3/80" },
-];
-
 const CHAT_STYLE_STORAGE_KEY = "agx-enterprise-chat-style";
-const CHAT_STYLE_OPTIONS = [
-  { id: "im", label: "IM 风格（头像 + 气泡）" },
-  { id: "terminal", label: "Terminal 风格（终端前缀）" },
-  { id: "clean", label: "Clean 风格（极简留白）" },
-] as const;
-type ChatStyleVariant = (typeof CHAT_STYLE_OPTIONS)[number]["id"];
+const CHAT_STYLE_IDS = ["im", "terminal", "clean"] as const;
+type ChatStyleVariant = (typeof CHAT_STYLE_IDS)[number];
 
 export function SettingsPanel() {
-  const t = usePortalCopy();
+  const t = useTranslations("settings");
   const [active, setActive] = useState<TabId>("general");
   const [provider, setProvider] = useState<string>("deepseek");
   const [webSearchOn, setWebSearchOn] = useState(true);
@@ -83,6 +47,43 @@ export function SettingsPanel() {
   const [patName, setPatName] = useState("");
   const [patPlain, setPatPlain] = useState<string | null>(null);
   const [patRows, setPatRows] = useState<Array<{ id: number; name: string; tokenPrefix: string; status: string }>>([]);
+
+  const tabs = useMemo(
+    () =>
+      [
+        { id: "general" as const, label: t("tabs.general"), description: t("tabDescriptions.general"), icon: <SettingsIcon className="h-4 w-4" /> },
+        { id: "model-service" as const, label: t("tabs.modelService"), description: t("tabDescriptions.modelService"), icon: <Bot className="h-4 w-4" /> },
+        { id: "defaults" as const, label: t("tabs.defaults"), description: t("tabDescriptions.defaults"), icon: <Sparkles className="h-4 w-4" /> },
+        { id: "web-search" as const, label: t("tabs.webSearch"), description: t("tabDescriptions.webSearch"), icon: <Globe className="h-4 w-4" /> },
+        { id: "parser" as const, label: t("tabs.parser"), description: t("tabDescriptions.parser"), icon: <FileSearch className="h-4 w-4" /> },
+        { id: "chat" as const, label: t("tabs.chat"), description: t("tabDescriptions.chat"), icon: <MessageSquare className="h-4 w-4" /> },
+      ] satisfies Array<{ id: TabId; label: string; description: string; icon: React.ReactNode }>,
+    [t],
+  );
+
+  const chatStyleOptions = useMemo(
+    () =>
+      CHAT_STYLE_IDS.map((id) => ({
+        id,
+        label:
+          id === "im"
+            ? t("general.chatStyleIm")
+            : id === "terminal"
+              ? t("general.chatStyleTerminal")
+              : t("general.chatStyleClean"),
+      })),
+    [t],
+  );
+
+  const providers = useMemo(
+    () => [
+      { id: "deepseek", name: "DeepSeek", tagline: t("modelService.providers.deepseekTagline"), color: "bg-chart-1/80" },
+      { id: "moonshot", name: "Moonshot", tagline: t("modelService.providers.moonshotTagline"), color: "bg-chart-5/80" },
+      { id: "openai", name: "OpenAI", tagline: t("modelService.providers.openaiTagline"), color: "bg-chart-2/80" },
+      { id: "anthropic", name: "Anthropic", tagline: t("modelService.providers.anthropicTagline"), color: "bg-chart-3/80" },
+    ],
+    [t],
+  );
 
   useEffect(() => {
     const saved = window.localStorage.getItem(CHAT_STYLE_STORAGE_KEY);
@@ -140,7 +141,7 @@ export function SettingsPanel() {
         <header className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="flex items-center gap-2">
             <SettingsIcon className="h-5 w-5 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">{t.settings}</h2>
+            <h2 className="text-lg font-semibold">{t("title")}</h2>
           </div>
         </header>
 
@@ -148,7 +149,7 @@ export function SettingsPanel() {
           {/* 左侧纵向 nav */}
           <nav className="overflow-y-auto border-r border-border bg-surface-subtle/40 p-3">
             <div className="space-y-0.5">
-              {TABS.map((tab) => {
+              {tabs.map((tab) => {
                 const isActive = active === tab.id;
                 return (
                   <button
@@ -171,7 +172,7 @@ export function SettingsPanel() {
                       {tab.icon}
                     </span>
                     <div className="min-w-0">
-                      <div className="text-sm font-medium">{t[tab.labelKey]}</div>
+                      <div className="text-sm font-medium">{tab.label}</div>
                       <div className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{tab.description}</div>
                     </div>
                   </button>
@@ -184,30 +185,30 @@ export function SettingsPanel() {
           <div className="min-h-0 overflow-y-auto p-5 sm:p-6">
             {active === "general" ? (
               <SettingsSection
-                title={t.general}
-                description="跨应用的通用偏好设置"
+                title={t("tabs.general")}
+                description={t("general.sectionDescription")}
                 icon={<SettingsIcon className="h-4 w-4" />}
               >
                 <SettingsRow
-                  label="界面主题"
-                  description="可在右上角用户菜单随时切换 · 会记住你的偏好"
-                  control={<Badge variant="soft">已同步至系统</Badge>}
+                  label={t("general.uiTheme")}
+                  description={t("general.uiThemeDescription")}
+                  control={<Badge variant="soft">{t("general.syncedToSystem")}</Badge>}
                 />
                 <SettingsRow
-                  label="显示语言"
-                  description="中文 / English 双语 · 右上角用户菜单内切换"
-                  control={<Badge variant="soft">已同步</Badge>}
+                  label={t("general.displayLanguage")}
+                  description={t("general.displayLanguageDescription")}
+                  control={<Badge variant="soft">{t("general.synced")}</Badge>}
                 />
                 <SettingsRow
-                  label="聊天风格"
-                  description="可在 IM / Terminal / Clean 三种风格间切换"
+                  label={t("general.chatStyle")}
+                  description={t("general.chatStyleDescription")}
                   control={
                     <Select value={chatStyle} onValueChange={(value) => updateChatStyle(value as ChatStyleVariant)}>
                       <SelectTrigger className="w-[280px]">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {CHAT_STYLE_OPTIONS.map((item) => (
+                        {chatStyleOptions.map((item) => (
                           <SelectItem key={item.id} value={item.id}>
                             {item.label}
                           </SelectItem>
@@ -217,15 +218,15 @@ export function SettingsPanel() {
                   }
                 />
                 <SettingsRow
-                  label="数据导入 / 导出"
-                  description="把当前本地配置导出为 JSON，或导入其他配置"
+                  label={t("general.dataImportExport")}
+                  description={t("general.dataImportExportDescription")}
                   control={
                     <div className="flex gap-2">
                       <Button variant="outline" size="sm">
-                        导入
+                        {t("general.import")}
                       </Button>
                       <Button variant="outline" size="sm">
-                        导出
+                        {t("general.export")}
                       </Button>
                     </div>
                   }
@@ -236,29 +237,29 @@ export function SettingsPanel() {
             {active === "general" ? (
               <div className="mt-6">
                 <SettingsSection
-                  title="API Tokens"
-                  description="创建 agx-pat-* 令牌，供脚本或 IDE 直连 Enterprise Gateway"
+                  title={t("apiTokens.title")}
+                  description={t("apiTokens.description")}
                   icon={<KeyRound className="h-4 w-4" />}
                 >
                   {patPlain ? (
                     <SettingsRow
-                      label="明文 Token（仅显示一次）"
+                      label={t("apiTokens.plainTokenLabel")}
                       description={<code className="break-all text-xs">{patPlain}</code>}
                       control={
                         <Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(patPlain)}>
-                          复制
+                          {t("apiTokens.copy")}
                         </Button>
                       }
                       stack
                     />
                   ) : null}
                   <SettingsRow
-                    label="新建 Token"
+                    label={t("apiTokens.newToken")}
                     control={
                       <div className="flex w-full gap-2">
-                        <Input value={patName} onChange={(e) => setPatName(e.target.value)} placeholder="名称，如 ci-bot" />
+                        <Input value={patName} onChange={(e) => setPatName(e.target.value)} placeholder={t("apiTokens.newTokenPlaceholder")} />
                         <Button size="sm" onClick={() => void createPat()} disabled={!patName.trim()}>
-                          创建
+                          {t("apiTokens.create")}
                         </Button>
                       </div>
                     }
@@ -284,14 +285,14 @@ export function SettingsPanel() {
 
             {active === "model-service" ? (
               <SettingsSection
-                title={t.modelService}
-                description="选择云厂商并配置 API Key"
+                title={t("tabs.modelService")}
+                description={t("modelService.sectionDescription")}
                 icon={<Bot className="h-4 w-4" />}
               >
                 <div>
-                  <Label className="mb-2 block">Provider</Label>
+                  <Label className="mb-2 block">{t("modelService.provider")}</Label>
                   <div className="grid gap-2 sm:grid-cols-2">
-                    {PROVIDERS.map((p) => {
+                    {providers.map((p) => {
                       const selected = p.id === provider;
                       return (
                         <button
@@ -329,14 +330,14 @@ export function SettingsPanel() {
                 </div>
 
                 <SettingsRow
-                  label="API Key"
-                  description={`已选择 ${provider} · 密钥仅保存在浏览器本地`}
+                  label={t("modelService.apiKey")}
+                  description={t("modelService.apiKeyDescription", { provider })}
                   control={<Input placeholder="sk-..." type="password" className="w-[320px]" />}
                   stack
                 />
                 <SettingsRow
-                  label="Endpoint"
-                  description="自定义 OpenAI 兼容 Base URL（可选）"
+                  label={t("modelService.endpoint")}
+                  description={t("modelService.endpointDescription")}
                   control={<Input placeholder="https://api.example.com/v1" className="w-[320px]" />}
                   stack
                 />
@@ -345,13 +346,13 @@ export function SettingsPanel() {
 
             {active === "defaults" ? (
               <SettingsSection
-                title={t.defaults}
-                description="为新会话挑选默认模型"
+                title={t("tabs.defaults")}
+                description={t("defaults.sectionDescription")}
                 icon={<Sparkles className="h-4 w-4" />}
               >
                 <SettingsRow
-                  label="默认对话模型"
-                  description="新建会话时会自动选中"
+                  label={t("defaults.defaultChatModel")}
+                  description={t("defaults.defaultChatModelDescription")}
                   control={
                     <Select defaultValue="deepseek-chat">
                       <SelectTrigger className="w-[240px]">
@@ -366,8 +367,8 @@ export function SettingsPanel() {
                   }
                 />
                 <SettingsRow
-                  label="会话命名模型"
-                  description="系统自动为会话起名时使用"
+                  label={t("defaults.sessionNamingModel")}
+                  description={t("defaults.sessionNamingModelDescription")}
                   control={
                     <Select defaultValue="moonshot-v1-8k">
                       <SelectTrigger className="w-[240px]">
@@ -385,18 +386,18 @@ export function SettingsPanel() {
 
             {active === "web-search" ? (
               <SettingsSection
-                title={t.webSearch}
-                description="联网搜索为模型补充实时信息"
+                title={t("tabs.webSearch")}
+                description={t("webSearch.sectionDescription")}
                 icon={<Globe className="h-4 w-4" />}
                 highlight={
                   webSearchOn
-                    ? { label: "已启用", description: "新消息可主动调用 Web Search", variant: "success" }
+                    ? { label: t("webSearch.enabledLabel"), description: t("webSearch.enabledDescription"), variant: "success" }
                     : undefined
                 }
               >
                 <SettingsRow
-                  label="启用联网搜索"
-                  description="开启后聊天消息可调用 Web Search 工具"
+                  label={t("webSearch.enableWebSearch")}
+                  description={t("webSearch.enableWebSearchDescription")}
                   control={
                     <Switch
                       checked={webSearchOn}
@@ -406,8 +407,8 @@ export function SettingsPanel() {
                 />
                 {webSearchOn ? (
                   <SettingsRow
-                    label="Search Provider API Key"
-                    description="支持 Bing / SerpAPI / 百川 · 密钥仅本地存储"
+                    label={t("webSearch.searchApiKey")}
+                    description={t("webSearch.searchApiKeyDescription")}
                     control={<Input placeholder="search-key-..." type="password" className="w-[320px]" />}
                     stack
                   />
@@ -417,12 +418,12 @@ export function SettingsPanel() {
 
             {active === "parser" ? (
               <SettingsSection
-                title={t.parser}
-                description="文件上传时的解析策略"
+                title={t("tabs.parser")}
+                description={t("parser.sectionDescription")}
                 icon={<FileSearch className="h-4 w-4" />}
               >
                 <SettingsRow
-                  label="默认解析器"
+                  label={t("parser.defaultParser")}
                   control={
                     <Select defaultValue="machi-ai">
                       <SelectTrigger className="w-[240px]">
@@ -437,7 +438,7 @@ export function SettingsPanel() {
                   }
                 />
                 <SettingsRow
-                  label="支持的格式"
+                  label={t("parser.supportedFormats")}
                   control={
                     <div className="flex flex-wrap gap-1.5">
                       {["PDF", "Word", "Excel", "PPT", "JPG", "PNG"].map((format) => (
@@ -453,28 +454,28 @@ export function SettingsPanel() {
 
             {active === "chat" ? (
               <SettingsSection
-                title={t.chat}
-                description="对话体验相关的细节偏好"
+                title={t("tabs.chat")}
+                description={t("chat.sectionDescription")}
                 icon={<MessageSquare className="h-4 w-4" />}
                 highlight={
                   streamingOn
-                    ? { label: "流式输出已启用", description: "回复将边生成边显示", variant: "success" }
+                    ? { label: t("chat.streamingEnabledLabel"), description: t("chat.streamingEnabledDescription"), variant: "success" }
                     : undefined
                 }
               >
                 <SettingsRow
-                  label="流式输出"
-                  description="SSE 实时渲染，首 token 延迟更低"
+                  label={t("chat.streaming")}
+                  description={t("chat.streamingDescription")}
                   control={<Switch checked={streamingOn} onChange={setStreamingOn} />}
                 />
                 <SettingsRow
-                  label="自动命名会话"
-                  description="首条消息后自动为会话生成标题"
+                  label={t("chat.autoTitle")}
+                  description={t("chat.autoTitleDescription")}
                   control={<Switch checked={autoTitleOn} onChange={setAutoTitleOn} />}
                 />
                 <SettingsRow
-                  label="默认温度"
-                  description="数值越低越确定，越高越多样"
+                  label={t("chat.defaultTemperature")}
+                  description={t("chat.defaultTemperatureDescription")}
                   control={<Input type="number" defaultValue={0.7} step={0.1} className="w-[120px]" />}
                 />
               </SettingsSection>

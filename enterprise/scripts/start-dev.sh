@@ -113,16 +113,52 @@ else
   echo "[start-dev] skip auto migration (AGX_AUTO_DB_MIGRATE=$AUTO_MIGRATE)."
 fi
 
-# 4) 子进程管理
+# 4) 子进程管理（Ctrl+C 须能一次退出；turbo/next 会起多层子进程，只 kill 父 PID 不够）
 PIDS=()
+SHUTTING_DOWN=0
+
+kill_process_tree() {
+  local pid="$1"
+  local child
+  kill -0 "$pid" 2>/dev/null || return 0
+  while IFS= read -r child; do
+    [ -n "$child" ] && kill_process_tree "$child"
+  done < <(pgrep -P "$pid" 2>/dev/null || true)
+  kill -TERM "$pid" 2>/dev/null || true
+}
+
+force_kill_process_tree() {
+  local pid="$1"
+  local child
+  kill -0 "$pid" 2>/dev/null || return 0
+  while IFS= read -r child; do
+    [ -n "$child" ] && force_kill_process_tree "$child"
+  done < <(pgrep -P "$pid" 2>/dev/null || true)
+  kill -KILL "$pid" 2>/dev/null || true
+}
+
 cleanup() {
-  echo; echo "[start-dev] stopping services..."
+  if [ "$SHUTTING_DOWN" -eq 1 ]; then
+    for pid in "${PIDS[@]:-}"; do
+      force_kill_process_tree "$pid"
+    done
+    exit 130
+  fi
+  SHUTTING_DOWN=1
+  trap - INT TERM EXIT
+  echo
+  echo "[start-dev] stopping services... (再按一次 Ctrl+C 强制结束)"
   for pid in "${PIDS[@]:-}"; do
-    kill "$pid" 2>/dev/null || true
+    kill_process_tree "$pid"
+  done
+  sleep 0.5
+  for pid in "${PIDS[@]:-}"; do
+    force_kill_process_tree "$pid"
   done
   wait 2>/dev/null || true
+  exit 130
 }
-trap cleanup INT TERM EXIT
+trap cleanup INT TERM
 
 wait_for_http() {
   local label="$1"
@@ -158,8 +194,9 @@ echo "[start-dev] booting Next apps → $SCOPE"
 ) &
 PIDS+=("$!")
 
-wait_for_http "admin-console" "http://127.0.0.1:3001" 90 || true
-wait_for_http "web-portal" "http://127.0.0.1:3000" 90 || true
+# 根路径 / 会 307 重定向，curl -f 可能判失败；用稳定 200 页面探活
+wait_for_http "admin-console" "http://127.0.0.1:3001/login" 90 || true
+wait_for_http "web-portal" "http://127.0.0.1:3000/auth" 90 || true
 
 # 6) admin 就绪后再拉起 gateway（避免 policy/providers 远程拉取 connection refused）
 echo "[start-dev] booting gateway (:8088) ..."
@@ -175,7 +212,7 @@ if ! wait_for_http "gateway" "${GATEWAY_BASE_URL:-http://127.0.0.1:8088}/healthz
 fi
 
 echo
-echo "[start-dev] all services launching. Ctrl+C 结束。"
+echo "[start-dev] all services launching. Ctrl+C 结束（约 1s 内退出；卡住可再按一次强制杀进程树）。"
 echo "  - web-portal    http://localhost:3000"
 echo "  - admin-console http://localhost:3001"
 echo "  - gateway       ${GATEWAY_BASE_URL:-http://127.0.0.1:8088}/healthz"

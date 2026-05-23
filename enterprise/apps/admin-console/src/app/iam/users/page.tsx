@@ -43,6 +43,7 @@ import {
   SheetTitle,
   toast,
 } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { MoreHorizontal, Pencil, Plus, RefreshCcw, ShieldCheck, ShieldX, Trash2, UserPlus, Users, Sparkles, Check } from "lucide-react";
 
@@ -76,11 +77,13 @@ type ApiUserResp = {
   data?: { user: AdminUser; initialPassword?: string };
 };
 
-const STATUS_META: Record<Status, { label: string; variant: "success" | "warning" | "destructive" }> = {
-  active: { label: "启用", variant: "success" },
-  disabled: { label: "停用", variant: "warning" },
-  locked: { label: "锁定", variant: "destructive" },
-};
+function getStatusMeta(t: ReturnType<typeof useTranslations<"pages.iam.users">>) {
+  return {
+    active: { label: t("status.active"), variant: "success" as const },
+    disabled: { label: t("status.disabled"), variant: "warning" as const },
+    locked: { label: t("status.locked"), variant: "destructive" as const },
+  } satisfies Record<Status, { label: string; variant: "success" | "warning" | "destructive" }>;
+}
 
 interface ModelOption {
   id: string;
@@ -96,6 +99,10 @@ type RoleOption = { id: string; code: string; name: string };
 const PAGE_SIZE = 50;
 
 function UsersPageContent() {
+  const t = useTranslations("pages.iam.users");
+  const tc = useTranslations("common");
+  const ts = useTranslations("shell");
+  const statusMeta = useMemo(() => getStatusMeta(t), [t]);
   const searchParams = useSearchParams();
   const initialDept = searchParams.get("dept") || "all";
 
@@ -134,10 +141,10 @@ function UsersPageContent() {
         setUsers(json.data.items);
         setTotal(json.data.total);
       } else {
-        toast.error(json.message ?? "加载失败");
+        toast.error(json.message ?? t("toast.loadFailed"));
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "网络错误");
+      toast.error(error instanceof Error ? error.message : t("toast.networkError"));
     } finally {
       setLoading(false);
     }
@@ -267,7 +274,7 @@ function UsersPageContent() {
       });
       const json = (await res.json()) as { data?: { modelIds: string[] }; message?: string };
       if (!res.ok || !json.data) {
-        toast.error(json.message ?? "保存失败");
+        toast.error(json.message ?? t("toast.saveFailed"));
         return;
       }
       setUserModels(json.data.modelIds);
@@ -284,15 +291,15 @@ function UsersPageContent() {
     });
     const json = (await res.json()) as ApiUserResp;
     if (!res.ok || !json.data?.user) {
-      toast.error(json.message ?? "创建失败");
+      toast.error(json.message ?? t("toast.createFailed"));
       return false;
     }
-    toast.success(`已创建用户 ${json.data.user.email}`);
+    toast.success(`${t("toast.created")} ${json.data.user.email}`);
     if (json.data.initialPassword) {
-      toast.success(`初始密码（仅此一次）：${json.data.initialPassword}`, { duration: 15_000 });
+      toast.success(`${t("toast.initialPassword")}${json.data.initialPassword}`, { duration: 15_000 });
       try {
         await navigator.clipboard.writeText(json.data.initialPassword);
-        toast.success("初始密码已复制到剪贴板");
+        toast.success(t("toast.passwordCopied"));
       } catch {
         /* ignore */
       }
@@ -309,10 +316,10 @@ function UsersPageContent() {
     });
     const json = (await res.json()) as ApiUserResp;
     if (!res.ok || !json.data?.user) {
-      toast.error(json.message ?? "更新失败");
+      toast.error(json.message ?? t("toast.saveFailed"));
       return false;
     }
-    toast.success("已更新");
+    toast.success(t("toast.updated"));
     await load();
     if (selected?.id === id) setSelected(json.data.user);
     return true;
@@ -322,27 +329,27 @@ function UsersPageContent() {
     const res = await fetch(`/api/admin/users/${user.id}/reset-password`, { method: "POST" });
     const json = (await res.json()) as { data?: { initialPassword?: string }; message?: string };
     if (!res.ok || !json.data?.initialPassword) {
-      toast.error(json.message ?? "重置失败");
+      toast.error(json.message ?? t("toast.resetFailed"));
       return;
     }
-    toast.success(`新密码（仅此一次）：${json.data.initialPassword}`, { duration: 15_000 });
+    toast.success(`${t("toast.newPassword")}${json.data.initialPassword}`, { duration: 15_000 });
     try {
       await navigator.clipboard.writeText(json.data.initialPassword);
-      toast.success("新密码已复制到剪贴板");
+      toast.success(t("toast.newPasswordCopied"));
     } catch {
       /* ignore */
     }
   };
 
   const handleDelete = async (user: AdminUser) => {
-    if (!window.confirm(`确认删除用户 ${user.email}？该操作不可撤销。`)) return;
+    if (!window.confirm(t("toast.deleteConfirm", { email: user.email }))) return;
     const res = await fetch(`/api/admin/users/${user.id}`, { method: "DELETE" });
     if (!res.ok) {
       const json = (await res.json()) as { message?: string };
-      toast.error(json.message ?? "删除失败");
+      toast.error(json.message ?? t("toast.deleteFailed"));
       return;
     }
-    toast.success(`已删除 ${user.email}`);
+    toast.success(`${t("toast.deleted")} ${user.email}`);
     if (selected?.id === user.id) setSelected(null);
     await load();
   };
@@ -356,7 +363,7 @@ function UsersPageContent() {
     () => [
       {
         accessorKey: "displayName",
-        header: "用户",
+        header: t("breadcrumbUsers"),
         cell: ({ row }) => (
           <div className="flex items-center gap-2">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary">
@@ -371,7 +378,7 @@ function UsersPageContent() {
       },
       {
         accessorKey: "deptId",
-        header: "部门",
+        header: t("columns.department"),
         cell: ({ row }) => (
           <span className="text-sm text-muted-foreground" title={row.original.deptId ?? ""}>
             {row.original.deptId ? (deptLabelMap.get(row.original.deptId) ?? row.original.deptId) : "—"}
@@ -380,15 +387,15 @@ function UsersPageContent() {
       },
       {
         accessorKey: "status",
-        header: "状态",
+        header: t("columns.status"),
         cell: ({ row }) => {
-          const meta = STATUS_META[row.original.status];
+          const meta = statusMeta[row.original.status];
           return <Badge variant={meta.variant}>{meta.label}</Badge>;
         },
       },
       {
         accessorKey: "scopes",
-        header: "权限数",
+        header: t("columns.scopeCount"),
         cell: ({ row }) => (
           <Badge variant="soft" className="gap-1">
             <ShieldCheck className="h-3 w-3" />
@@ -398,7 +405,7 @@ function UsersPageContent() {
       },
       {
         accessorKey: "updatedAt",
-        header: "更新时间",
+        header: t("columns.updatedAt"),
         cell: ({ row }) => (
           <span className="font-mono text-xs text-muted-foreground">
             {new Date(row.original.updatedAt).toLocaleString("zh-CN", { hour12: false })}
@@ -417,13 +424,13 @@ function UsersPageContent() {
                   variant="ghost"
                   size="icon-sm"
                   onClick={(event) => event.stopPropagation()}
-                  aria-label="更多操作"
+                  aria-label={t("actions.more")}
                 >
                   <MoreHorizontal />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-44">
-                <DropdownMenuLabel>快速操作</DropdownMenuLabel>
+                <DropdownMenuLabel>{t("actions.quickActions")}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={(event) => {
@@ -433,7 +440,7 @@ function UsersPageContent() {
                   }}
                 >
                   <Pencil className="mr-2 h-4 w-4" />
-                  编辑
+                  {t("actions.edit")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={(event) => {
@@ -444,12 +451,12 @@ function UsersPageContent() {
                   {row.original.status === "active" ? (
                     <>
                       <ShieldX className="mr-2 h-4 w-4" />
-                      停用
+                      {t("actions.disable")}
                     </>
                   ) : (
                     <>
                       <ShieldCheck className="mr-2 h-4 w-4" />
-                      启用
+                      {t("actions.enable")}
                     </>
                   )}
                 </DropdownMenuItem>
@@ -462,7 +469,7 @@ function UsersPageContent() {
                   }}
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
-                  删除
+                  {t("actions.delete")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -470,7 +477,6 @@ function UsersPageContent() {
         ),
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [selected?.id, deptLabelMap]
   );
 
@@ -479,14 +485,14 @@ function UsersPageContent() {
     if (statusFilter !== "all") {
       filters.push({
         id: "status",
-        label: `状态：${STATUS_META[statusFilter].label}`,
+        label: `${t("filterLabels.status")}${statusMeta[statusFilter].label}`,
         onRemove: () => setStatusFilter("all"),
       });
     }
     if (deptFilter !== "all") {
       filters.push({
         id: "dept",
-        label: `部门：${deptLabelMap.get(deptFilter) ?? deptFilter}`,
+        label: `${t("filterLabels.department")}${deptLabelMap.get(deptFilter) ?? deptFilter}`,
         onRemove: () => setDeptFilter("all"),
       });
     }
@@ -505,25 +511,25 @@ function UsersPageContent() {
                 </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator />
-              <BreadcrumbItem>身份与权限</BreadcrumbItem>
+              <BreadcrumbItem>{t("breadcrumbIam")}</BreadcrumbItem>
               <BreadcrumbSeparator />
               <BreadcrumbItem>
-                <BreadcrumbPage>用户</BreadcrumbPage>
+                <BreadcrumbPage>{t("breadcrumbUsers")}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
         }
-        title="用户管理"
-        description={`共 ${total} 位用户 · 每页 ${PAGE_SIZE} 条 · 支持搜索 / 筛选 / 批量操作 / 详情抽屉`}
+        title={t("title")}
+        description={t("description", { total, pageSize: PAGE_SIZE })}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => void load()}>
               <RefreshCcw />
-              刷新
+              {t("refresh")}
             </Button>
             <Button size="sm" onClick={() => setCreateOpen(true)}>
               <UserPlus />
-              新建用户
+              {t("newUser")}
             </Button>
           </>
         }
@@ -534,8 +540,8 @@ function UsersPageContent() {
           {loading && users.length === 0 ? (
             <EmptyState
               icon={<Users className="h-5 w-5" />}
-              title="加载中..."
-              description="正在从 /api/admin/users 拉取用户列表"
+              title={t("loadingTitle")}
+              description={t("loadingDescription")}
               size="sm"
               className="border-0"
             />
@@ -543,7 +549,7 @@ function UsersPageContent() {
             <DataTable
               columns={columns}
               data={users}
-              searchPlaceholder="按邮箱 / 姓名 / ID 搜索..."
+              searchPlaceholder={t("searchPlaceholder")}
               activeFilters={activeFilters}
               onClearFilters={() => {
                 setStatusFilter("all");
@@ -564,13 +570,13 @@ function UsersPageContent() {
                     }}
                   >
                     <SelectTrigger className="h-9 w-[140px]">
-                      <SelectValue placeholder="全部状态" />
+                      <SelectValue placeholder={t("filterAllStatus")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">全部状态</SelectItem>
-                      <SelectItem value="active">启用</SelectItem>
-                      <SelectItem value="disabled">停用</SelectItem>
-                      <SelectItem value="locked">锁定</SelectItem>
+                      <SelectItem value="all">{t("filterAllStatus")}</SelectItem>
+                      <SelectItem value="active">{t("status.active")}</SelectItem>
+                      <SelectItem value="disabled">{t("status.disabled")}</SelectItem>
+                      <SelectItem value="locked">{t("status.locked")}</SelectItem>
                     </SelectContent>
                   </Select>
                   <Select
@@ -581,10 +587,10 @@ function UsersPageContent() {
                     }}
                   >
                     <SelectTrigger className="h-9 w-[200px]">
-                      <SelectValue placeholder="全部部门" />
+                      <SelectValue placeholder={t("filterAllDept")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">全部部门</SelectItem>
+                      <SelectItem value="all">{t("filterAllDept")}</SelectItem>
                       {deptOptions.map((opt) => (
                         <SelectItem key={opt.id} value={opt.id}>
                           {opt.label}
@@ -610,7 +616,7 @@ function UsersPageContent() {
                 a.download = `users-${new Date().toISOString().slice(0, 10)}.csv`;
                 a.click();
                 URL.revokeObjectURL(url);
-                toast.success(`已导出本页 ${users.length} 条记录`);
+                toast.success(t("toast.exportSuccess", { count: users.length }));
               }}
               getRowId={(row) => row.id}
             />
@@ -620,7 +626,7 @@ function UsersPageContent() {
 
       <div className="flex flex-wrap items-center justify-end gap-2 text-sm text-muted-foreground">
         <span>
-          第 {page} / {Math.max(1, Math.ceil(total / PAGE_SIZE))} 页 · 共 {total} 人
+          {t("pagination.page", { page, totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)), total })}
         </span>
         <Button
           variant="outline"
@@ -628,7 +634,7 @@ function UsersPageContent() {
           disabled={page <= 1 || loading}
           onClick={() => setPage((p) => Math.max(1, p - 1))}
         >
-          上一页
+          {t("pagination.prev")}
         </Button>
         <Button
           variant="outline"
@@ -636,7 +642,7 @@ function UsersPageContent() {
           disabled={page >= Math.max(1, Math.ceil(total / PAGE_SIZE)) || loading}
           onClick={() => setPage((p) => p + 1)}
         >
-          下一页
+          {t("pagination.next")}
         </Button>
       </div>
 
@@ -658,19 +664,19 @@ function UsersPageContent() {
               </SheetHeader>
 
               <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-                <DetailRow label="用户 ID" value={<span className="font-mono text-xs">{selected.id}</span>} />
-                <DetailRow label="租户" value={<span className="font-mono text-xs">{selected.tenantId}</span>} />
+                <DetailRow label={t("detail.userId")} value={<span className="font-mono text-xs">{selected.id}</span>} />
+                <DetailRow label={t("detail.tenant")} value={<span className="font-mono text-xs">{selected.tenantId}</span>} />
                 <DetailRow
-                  label="部门"
+                  label={t("columns.department")}
                   value={
                     selected.deptId ? (deptLabelMap.get(selected.deptId) ?? selected.deptId) : "—"
                   }
                 />
-                <DetailRow label="手机" value={selected.phone ?? "—"} />
-                <DetailRow label="工号" value={selected.employeeNo ?? "—"} />
-                <DetailRow label="职位" value={selected.jobTitle ?? "—"} />
+                <DetailRow label={t("detail.phone")} value={selected.phone ?? "—"} />
+                <DetailRow label={t("detail.employeeNo")} value={selected.employeeNo ?? "—"} />
+                <DetailRow label={t("detail.jobTitle")} value={selected.jobTitle ?? "—"} />
                 <DetailRow
-                  label="角色"
+                  label={t("detail.roles")}
                   value={
                     selected.roleCodes?.length ? (
                       <div className="flex flex-wrap gap-1">
@@ -686,15 +692,15 @@ function UsersPageContent() {
                   }
                 />
                 <DetailRow
-                  label="状态"
-                  value={<Badge variant={STATUS_META[selected.status].variant}>{STATUS_META[selected.status].label}</Badge>}
+                  label={t("columns.status")}
+                  value={<Badge variant={statusMeta[selected.status].variant}>{statusMeta[selected.status].label}</Badge>}
                 />
                 <DetailRow
-                  label="权限作用域"
+                  label={t("detail.scopes")}
                   value={
                     <div className="flex flex-wrap gap-1">
                       {selected.scopes.length === 0 ? (
-                        <span className="text-sm text-muted-foreground">无</span>
+                        <span className="text-sm text-muted-foreground">{t("detail.none")}</span>
                       ) : (
                         selected.scopes.map((scope) => (
                           <Badge key={scope} variant="soft" className="font-mono text-[10px]">
@@ -706,11 +712,11 @@ function UsersPageContent() {
                   }
                 />
                 <DetailRow
-                  label="创建时间"
+                  label={t("detail.createdAt")}
                   value={<span className="font-mono text-xs">{new Date(selected.createdAt).toLocaleString("zh-CN")}</span>}
                 />
                 <DetailRow
-                  label="更新时间"
+                  label={t("columns.updatedAt")}
                   value={<span className="font-mono text-xs">{new Date(selected.updatedAt).toLocaleString("zh-CN")}</span>}
                 />
 
@@ -719,19 +725,19 @@ function UsersPageContent() {
                     <div>
                       <div className="flex items-center gap-1.5 text-sm font-semibold">
                         <Sparkles className="h-3.5 w-3.5 text-primary" />
-                        可见模型分配
+                        {t("detail.visibleModels")}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        勾选后该用户登录前台仅能看到这些模型；未勾选时无可用模型
+                        {t("detail.visibleModelsHint")}
                       </div>
                     </div>
                     <Badge variant="soft" className="text-[10px]">
-                      已选 {userModels.length} / 可选 {modelOptions.length}
+                      {t("detail.selectedCount", { selected: userModels.length, total: modelOptions.length })}
                     </Badge>
                   </div>
                   {modelOptions.length === 0 ? (
                     <p className="text-xs text-muted-foreground">
-                      尚无可分配模型，请先到「平台配置 · 模型服务」启用厂商与模型。
+                      {t("detail.noModelsHint")}
                     </p>
                   ) : (
                     <div className="grid gap-1.5 sm:grid-cols-2">
@@ -773,10 +779,10 @@ function UsersPageContent() {
               <div className="flex flex-wrap gap-2 border-t border-border pt-3">
                 <Button variant="outline" className="flex-1 min-w-[100px]" onClick={() => setEditOpen(true)}>
                   <Pencil />
-                  编辑
+                  {t("actions.edit")}
                 </Button>
                 <Button variant="outline" className="flex-1 min-w-[100px]" onClick={() => void handleResetPassword(selected)}>
-                  重置密码
+                  {t("detail.resetPassword")}
                 </Button>
                 <Button
                   variant={selected.status === "active" ? "outline" : "default"}
@@ -784,7 +790,7 @@ function UsersPageContent() {
                   onClick={() => void handleQuickToggleStatus(selected)}
                 >
                   {selected.status === "active" ? <ShieldX /> : <ShieldCheck />}
-                  {selected.status === "active" ? "停用" : "启用"}
+                  {selected.status === "active" ? t("status.disabled") : t("status.active")}
                 </Button>
                 <Button variant="destructive" onClick={() => void handleDelete(selected)}>
                   <Trash2 />
@@ -799,9 +805,9 @@ function UsersPageContent() {
       <UserFormDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
-        title="新建用户"
-        description="创建后用户将立即出现在 workspace 可登录列表"
-        submitLabel="创建"
+        title={t("newUser")}
+        description={t("form.createDescription")}
+        submitLabel={t("form.submitCreate")}
         roleOptions={roleOptions}
         deptOptions={deptOptions}
         onSubmit={async (values) => {
@@ -827,9 +833,9 @@ function UsersPageContent() {
           setEditOpen(open);
           if (!open) setSelected(selected);
         }}
-        title="编辑用户"
+        title={t("form.editTitle")}
         description={selected?.email}
-        submitLabel="保存"
+        submitLabel={t("form.submitSave")}
         roleOptions={roleOptions}
         deptOptions={deptOptions}
         initial={
@@ -922,6 +928,8 @@ function UserFormDialog({
   roleOptions: RoleOption[];
   onSubmit: (values: UserFormValues) => Promise<void>;
 }) {
+  const t = useTranslations("pages.iam.users");
+  const tc = useTranslations("common");
   const [values, setValues] = useState<UserFormValues>(() => initial ?? EMPTY_USER_FORM);
   const [submitting, setSubmitting] = useState(false);
 
@@ -952,7 +960,7 @@ function UserFormDialog({
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="user-email">邮箱</Label>
+            <Label htmlFor="user-email">{t("form.emailLabel")}</Label>
             <Input
               id="user-email"
               type="email"
@@ -964,18 +972,18 @@ function UserFormDialog({
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="user-name">姓名</Label>
+            <Label htmlFor="user-name">{t("form.nameLabel")}</Label>
             <Input
               id="user-name"
               required
               value={values.displayName}
               onChange={(event) => setValues((prev) => ({ ...prev, displayName: event.target.value }))}
-              placeholder="例如：张三"
+              placeholder={t("form.namePlaceholder")}
             />
           </div>
             <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>状态</Label>
+              <Label>{t("columns.status")}</Label>
               <Select
                 value={values.status}
                 onValueChange={(value) => setValues((prev) => ({ ...prev, status: value as Status }))}
@@ -984,23 +992,23 @@ function UserFormDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="active">启用</SelectItem>
-                  <SelectItem value="disabled">停用</SelectItem>
-                  <SelectItem value="locked">锁定</SelectItem>
+                  <SelectItem value="active">{t("status.active")}</SelectItem>
+                  <SelectItem value="disabled">{t("status.disabled")}</SelectItem>
+                  <SelectItem value="locked">{t("status.locked")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>部门</Label>
+              <Label>{t("columns.department")}</Label>
               <Select
                 value={values.deptId || "__none__"}
                 onValueChange={(v) => setValues((prev) => ({ ...prev, deptId: v === "__none__" ? "" : v }))}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="选择部门" />
+                  <SelectValue placeholder={t("form.deptPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">（未分配）</SelectItem>
+                  <SelectItem value="__none__">{t("form.deptUnassigned")}</SelectItem>
                   {deptOptions.map((d) => (
                     <SelectItem key={d.id} value={d.id}>
                       {d.label}
@@ -1013,7 +1021,7 @@ function UserFormDialog({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="user-phone">手机</Label>
+              <Label htmlFor="user-phone">{t("detail.phone")}</Label>
               <Input
                 id="user-phone"
                 value={values.phone}
@@ -1021,7 +1029,7 @@ function UserFormDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="user-eno">工号</Label>
+              <Label htmlFor="user-eno">{t("detail.employeeNo")}</Label>
               <Input
                 id="user-eno"
                 value={values.employeeNo}
@@ -1030,7 +1038,7 @@ function UserFormDialog({
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="user-job">职位</Label>
+            <Label htmlFor="user-job">{t("detail.jobTitle")}</Label>
             <Input
               id="user-job"
               value={values.jobTitle}
@@ -1038,7 +1046,7 @@ function UserFormDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label>角色</Label>
+            <Label>{t("detail.roles")}</Label>
             <div className="grid max-h-40 gap-1.5 overflow-y-auto rounded-md border border-border p-2 sm:grid-cols-2">
               {roleOptions.map((r) => {
                 const checked = values.roleCodes.includes(r.code);
@@ -1078,7 +1086,7 @@ function UserFormDialog({
           </div>
           {!emailReadOnly ? (
             <div className="space-y-1.5">
-              <Label htmlFor="user-init-pw">初始密码（可选，留空则自动生成）</Label>
+              <Label htmlFor="user-init-pw">{t("form.initialPasswordLabel")}</Label>
               <Input
                 id="user-init-pw"
                 type="password"
@@ -1091,11 +1099,11 @@ function UserFormDialog({
 
           <DialogFooter className="mt-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              取消
+              {tc("actions.cancel")}
             </Button>
             <Button type="submit" disabled={submitting}>
               <Plus />
-              {submitting ? "处理中..." : submitLabel}
+              {submitting ? t("form.processing") : submitLabel}
             </Button>
           </DialogFooter>
         </form>
@@ -1105,8 +1113,9 @@ function UserFormDialog({
 }
 
 export default function UsersPage() {
+  const t = useTranslations("pages.iam.users");
   return (
-    <Suspense fallback={<div className="p-8 text-center text-muted-foreground">加载中...</div>}>
+    <Suspense fallback={<div className="p-8 text-center text-muted-foreground">{t("suspenseLoading")}</div>}>
       <UsersPageContent />
     </Suspense>
   );

@@ -30,6 +30,7 @@ import {
   toast,
 } from "@agenticx/ui";
 import { Plus, Save, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 type QuotaAction = "block" | "warn" | "fallback";
 type QuotaRule = {
@@ -68,27 +69,29 @@ function RuleEditor({
   onChange: (patch: Partial<QuotaRule>) => void;
   onRemove?: () => void;
 }) {
+  const tf = useTranslations("pages.ops.quota.fields");
+
   return (
     <div className="grid grid-cols-[160px_repeat(5,minmax(0,1fr))_auto] items-end gap-2 rounded-md border border-border px-3 py-3">
       <div className="font-medium text-sm pb-2">{label}</div>
       <div className="space-y-1">
-        <Label className="text-xs">月 Token</Label>
+        <Label className="text-xs">{tf("monthlyTokens")}</Label>
         <Input type="number" value={rule.monthlyTokens} onChange={(e) => onChange({ monthlyTokens: Number(e.target.value || 0) })} />
       </div>
       <div className="space-y-1">
-        <Label className="text-xs">TPM</Label>
+        <Label className="text-xs">{tf("tpm")}</Label>
         <Input type="number" value={rule.tpm ?? 0} onChange={(e) => onChange({ tpm: Number(e.target.value || 0) })} />
       </div>
       <div className="space-y-1">
-        <Label className="text-xs">RPM</Label>
+        <Label className="text-xs">{tf("rpm")}</Label>
         <Input type="number" value={rule.rpm ?? 0} onChange={(e) => onChange({ rpm: Number(e.target.value || 0) })} />
       </div>
       <div className="space-y-1">
-        <Label className="text-xs">并发</Label>
+        <Label className="text-xs">{tf("concurrency")}</Label>
         <Input type="number" value={rule.maxConcurrency ?? 0} onChange={(e) => onChange({ maxConcurrency: Number(e.target.value || 0) })} />
       </div>
       <div className="space-y-1">
-        <Label className="text-xs">策略</Label>
+        <Label className="text-xs">{tf("policy")}</Label>
         <Select value={rule.action} onValueChange={(v) => onChange({ action: v as QuotaAction })}>
           <SelectTrigger>
             <SelectValue />
@@ -112,6 +115,8 @@ function RuleEditor({
 }
 
 export default function MeteringQuotaPage() {
+  const t = useTranslations("pages.ops.quota");
+  const tc = useTranslations("common");
   const [quota, setQuota] = useState<QuotaConfig>(EMPTY);
   const [loading, setLoading] = useState(false);
   const [newDept, setNewDept] = useState("");
@@ -125,7 +130,7 @@ export default function MeteringQuotaPage() {
       const json = (await res.json()) as { data?: { quota?: QuotaConfig } };
       setQuota({ ...EMPTY, ...(json.data?.quota ?? EMPTY), apiTokens: json.data?.quota?.apiTokens ?? {} });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载失败");
+      toast.error(error instanceof Error ? error.message : tc("toast.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -142,10 +147,10 @@ export default function MeteringQuotaPage() {
       body: JSON.stringify(quota),
     });
     if (!res.ok) {
-      toast.error("保存失败");
+      toast.error(tc("toast.saveFailed"));
       return;
     }
-    toast.success("额度配置已保存");
+    toast.success(t("toast.saveSuccess"));
     await load();
   };
 
@@ -184,45 +189,45 @@ export default function MeteringQuotaPage() {
             <BreadcrumbList>
               <BreadcrumbItem>
                 <BreadcrumbLink asChild>
-                  <Link href="/dashboard">Admin</Link>
+                  <Link href="/dashboard">{tc("breadcrumb.admin")}</Link>
                 </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator />
               <BreadcrumbItem>
                 <BreadcrumbLink asChild>
-                  <Link href="/metering">四维消耗</Link>
+                  <Link href="/metering">{tc("breadcrumb.metering")}</Link>
                 </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator />
               <BreadcrumbItem>
-                <BreadcrumbPage>额度控制</BreadcrumbPage>
+                <BreadcrumbPage>{t("breadcrumbQuota")}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
         }
-        title="Token 额度控制"
-        description="租户 / 部门 / 用户 / API Token 四维度配额：monthly、TPM、RPM、并发。"
+        title={t("title")}
+        description={t("description")}
         actions={
           <Button size="sm" onClick={save} disabled={loading}>
             <Save className="h-4 w-4" />
-            保存
+            {tc("actions.save")}
           </Button>
         }
       />
 
       <Tabs defaultValue="roles">
         <TabsList>
-          <TabsTrigger value="roles">角色默认</TabsTrigger>
-          <TabsTrigger value="departments">部门</TabsTrigger>
-          <TabsTrigger value="users">用户</TabsTrigger>
-          <TabsTrigger value="pats">API Token</TabsTrigger>
+          <TabsTrigger value="roles">{t("tabs.roles")}</TabsTrigger>
+          <TabsTrigger value="departments">{t("tabs.departments")}</TabsTrigger>
+          <TabsTrigger value="users">{t("tabs.users")}</TabsTrigger>
+          <TabsTrigger value="pats">{t("tabs.pats")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="roles" className="mt-4">
           <Card>
             <CardHeader>
-              <CardTitle>角色默认额度</CardTitle>
-              <CardDescription>未命中更细粒度规则时按角色回退。</CardDescription>
+              <CardTitle>{t("roleDefaultsTitle")}</CardTitle>
+              <CardDescription>{t("roleDefaultsDescription")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {Object.entries(quota.defaults.role).map(([role, rule]) => (
@@ -242,9 +247,9 @@ export default function MeteringQuotaPage() {
 
         <TabsContent value="departments" className="mt-4 space-y-3">
           <div className="flex gap-2">
-            <Input placeholder="部门 ID" value={newDept} onChange={(e) => setNewDept(e.target.value)} />
+            <Input placeholder={t("deptIdPlaceholder")} value={newDept} onChange={(e) => setNewDept(e.target.value)} />
             <Button type="button" variant="outline" onClick={() => { addMapKey("departments", newDept); setNewDept(""); }}>
-              <Plus className="h-4 w-4" /> 添加
+              <Plus className="h-4 w-4" /> {tc("actions.add")}
             </Button>
           </div>
           {Object.entries(quota.departments).map(([id, rule]) => (
@@ -254,9 +259,9 @@ export default function MeteringQuotaPage() {
 
         <TabsContent value="users" className="mt-4 space-y-3">
           <div className="flex gap-2">
-            <Input placeholder="用户 ID" value={newUser} onChange={(e) => setNewUser(e.target.value)} />
+            <Input placeholder={t("userIdPlaceholder")} value={newUser} onChange={(e) => setNewUser(e.target.value)} />
             <Button type="button" variant="outline" onClick={() => { addMapKey("users", newUser); setNewUser(""); }}>
-              <Plus className="h-4 w-4" /> 添加
+              <Plus className="h-4 w-4" /> {tc("actions.add")}
             </Button>
           </div>
           {Object.entries(quota.users).map(([id, rule]) => (
@@ -266,13 +271,13 @@ export default function MeteringQuotaPage() {
 
         <TabsContent value="pats" className="mt-4 space-y-3">
           <div className="flex gap-2">
-            <Input placeholder="API Token ID（数字）" value={newPat} onChange={(e) => setNewPat(e.target.value)} />
+            <Input placeholder={t("patIdPlaceholder")} value={newPat} onChange={(e) => setNewPat(e.target.value)} />
             <Button type="button" variant="outline" onClick={() => { addMapKey("apiTokens", newPat); setNewPat(""); }}>
-              <Plus className="h-4 w-4" /> 添加
+              <Plus className="h-4 w-4" /> {tc("actions.add")}
             </Button>
           </div>
           {Object.entries(quota.apiTokens ?? {}).map(([id, rule]) => (
-            <RuleEditor key={id} label={`PAT #${id}`} rule={rule} onChange={(patch) => updateMap("apiTokens", id, patch)} onRemove={() => removeMapKey("apiTokens", id)} />
+            <RuleEditor key={id} label={t("patLabel", { id })} rule={rule} onChange={(patch) => updateMap("apiTokens", id, patch)} onRemove={() => removeMapKey("apiTokens", id)} />
           ))}
         </TabsContent>
       </Tabs>

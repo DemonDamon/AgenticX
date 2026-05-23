@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { LOCALE_COOKIE_NAME } from "./locale-constants";
 
 export type UiLocale = "zh" | "en";
 
@@ -13,30 +14,42 @@ type LocaleContextValue = {
 const STORAGE_KEY = "agenticx-ui-locale";
 const LocaleContext = createContext<LocaleContextValue | null>(null);
 
-function readLocale(): UiLocale {
-  if (typeof window === "undefined") return "zh";
-  const value = window.localStorage.getItem(STORAGE_KEY);
-  return value === "en" ? "en" : "zh";
+function writeLocaleCookie(next: UiLocale) {
+  if (typeof document === "undefined") return;
+  const maxAge = 60 * 60 * 24 * 365;
+  document.cookie = `${LOCALE_COOKIE_NAME}=${next};path=/;max-age=${maxAge};SameSite=Lax`;
 }
 
-export function LocaleProvider({ children, initialLocale = "zh" }: { children: ReactNode; initialLocale?: UiLocale }) {
+export function LocaleProvider({
+  children,
+  initialLocale = "zh",
+  onLocaleChange,
+}: {
+  children: ReactNode;
+  initialLocale?: UiLocale;
+  onLocaleChange?: (next: UiLocale) => void;
+}) {
   const [locale, setLocaleState] = useState<UiLocale>(initialLocale);
 
-  useLayoutEffect(() => {
-    const next = readLocale();
-    setLocaleState(next);
-    document.documentElement.lang = next === "en" ? "en" : "zh-CN";
-  }, []);
+  useEffect(() => {
+    setLocaleState(initialLocale);
+    document.documentElement.lang = initialLocale === "en" ? "en" : "zh-CN";
+  }, [initialLocale]);
 
-  const setLocale = useCallback((next: UiLocale) => {
-    setLocaleState(next);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      // Ignore storage quota errors for UI preference writes.
-    }
-    document.documentElement.lang = next === "en" ? "en" : "zh-CN";
-  }, []);
+  const setLocale = useCallback(
+    (next: UiLocale) => {
+      setLocaleState(next);
+      try {
+        window.localStorage.setItem(STORAGE_KEY, next);
+      } catch {
+        // Ignore storage quota errors for UI preference writes.
+      }
+      writeLocaleCookie(next);
+      document.documentElement.lang = next === "en" ? "en" : "zh-CN";
+      onLocaleChange?.(next);
+    },
+    [onLocaleChange]
+  );
 
   const value = useMemo(
     () => ({
@@ -57,4 +70,3 @@ export function useLocale() {
   }
   return context;
 }
-

@@ -1,11 +1,17 @@
 import type { ReactNode } from "react";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getMessages } from "next-intl/server";
 import { RootShell } from "../components/RootShell";
 import { AppProviders } from "../providers/AppProviders";
 import "./globals.css";
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const locale = await getLocale();
+  const messages = await getMessages();
+  const htmlLang = locale === "en" ? "en" : "zh-CN";
+
   return (
-    <html lang="zh-CN" suppressHydrationWarning>
+    <html lang={htmlLang} suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{
@@ -28,9 +34,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         />
       </head>
       <body className="min-h-screen bg-background text-foreground antialiased">
-        <AppProviders>
-          <RootShell>{children}</RootShell>
-        </AppProviders>
+        <NextIntlClientProvider messages={messages}>
+          <AppProviders initialLocale={locale === "en" ? "en" : "zh"}>
+            <RootShell>{children}</RootShell>
+          </AppProviders>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

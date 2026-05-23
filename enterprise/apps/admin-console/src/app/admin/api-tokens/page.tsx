@@ -25,6 +25,7 @@ import {
   toast,
 } from "@agenticx/ui";
 import { KeyRound, Plus, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 type PatRow = {
   id: number;
@@ -47,6 +48,8 @@ async function readJsonBody<T>(res: Response, fallback: T): Promise<T> {
 }
 
 export default function ApiTokensPage() {
+  const t = useTranslations("pages.admin.apiTokens");
+  const tc = useTranslations("common");
   const [tokens, setTokens] = useState<PatRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -61,11 +64,11 @@ export default function ApiTokensPage() {
       if (!res.ok || json.code !== "00000") throw new Error(json.message || "load failed");
       setTokens(json.data?.tokens ?? []);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "加载失败");
+      toast.error(e instanceof Error ? e.message : tc("toast.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tc]);
 
   useEffect(() => {
     void load();
@@ -88,21 +91,21 @@ export default function ApiTokensPage() {
       setOpen(false);
       setForm({ name: "", userId: "", expireDays: "90" });
       await load();
-      toast.success("API Token 已创建，请立即复制明文");
+      toast.success(t("toast.createSuccess"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "创建失败");
+      toast.error(e instanceof Error ? e.message : t("toast.createFailed"));
     }
   };
 
   const onRevoke = async (id: number) => {
-    if (!confirm("确定吊销该 Token？")) return;
+    if (!confirm(t("confirmRevoke"))) return;
     const res = await fetch(`/api/admin/api-tokens/${id}`, { method: "DELETE" });
     const json = await readJsonBody(res, { code: "50000", message: "empty response" });
     if (!res.ok || json.code !== "00000") {
-      toast.error(json.message || "吊销失败");
+      toast.error(json.message || t("toast.revokeFailed"));
       return;
     }
-    toast.success("已吊销");
+    toast.success(t("toast.revoked"));
     await load();
   };
 
@@ -112,22 +115,22 @@ export default function ApiTokensPage() {
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
-              <Link href="/">首页</Link>
+              <Link href="/">{tc("breadcrumb.home")}</Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <BreadcrumbPage>API Tokens</BreadcrumbPage>
+            <BreadcrumbPage>{t("title")}</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
 
       <PageHeader
-        title="API Tokens"
-        description="为企业用户或系统集成签发 agx-pat-* 令牌，供网关 M2M 鉴权。"
+        title={t("title")}
+        description={t("description")}
         actions={
           <Button size="sm" onClick={() => setOpen(true)}>
-            <Plus className="mr-1 h-4 w-4" /> 新建 Token
+            <Plus className="mr-1 h-4 w-4" /> {t("newToken")}
           </Button>
         }
       />
@@ -135,38 +138,38 @@ export default function ApiTokensPage() {
       {plainToken ? (
         <Card className="border-amber-500/50">
           <CardHeader>
-            <CardTitle className="text-sm">明文 Token（仅显示一次）</CardTitle>
+            <CardTitle className="text-sm">{t("plainTokenTitle")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             <code className="block break-all rounded bg-muted p-3 text-xs">{plainToken}</code>
             <Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(plainToken)}>
-              复制
+              {tc("actions.copy")}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setPlainToken(null)}>
-              我已保存，关闭
+              {tc("actions.closeSaved")}
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">加载中…</p>
+        <p className="text-sm text-muted-foreground">{tc("states.loading")}</p>
       ) : (
         <div className="grid gap-3">
-          {tokens.map((t) => (
-            <Card key={t.id}>
+          {tokens.map((row) => (
+            <Card key={row.id}>
               <CardContent className="flex items-center justify-between gap-4 pt-4">
                 <div>
                   <p className="font-medium flex items-center gap-2">
-                    <KeyRound className="h-4 w-4" /> {t.name}
+                    <KeyRound className="h-4 w-4" /> {row.name}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {t.tokenPrefix}… · 用户 {t.userId} · {t.status}
-                    {t.lastUsedAt ? ` · 最近使用 ${t.lastUsedAt}` : ""}
+                    {row.tokenPrefix}… · {t("meta.user", { userId: row.userId })} · {row.status}
+                    {row.lastUsedAt ? t("meta.lastUsed", { lastUsed: row.lastUsedAt }) : ""}
                   </p>
                 </div>
-                {t.status === "active" ? (
-                  <Button variant="ghost" size="sm" className="text-destructive" onClick={() => void onRevoke(t.id)}>
+                {row.status === "active" ? (
+                  <Button variant="ghost" size="sm" className="text-destructive" onClick={() => void onRevoke(row.id)}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 ) : null}
@@ -179,27 +182,27 @@ export default function ApiTokensPage() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>新建 API Token</DialogTitle>
+            <DialogTitle>{t("dialogTitle")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div>
-              <Label>名称</Label>
+              <Label>{t("nameLabel")}</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </div>
             <div>
-              <Label>归属用户 ID</Label>
+              <Label>{t("userIdLabel")}</Label>
               <Input value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })} />
             </div>
             <div>
-              <Label>有效天数</Label>
+              <Label>{t("expireDaysLabel")}</Label>
               <Input value={form.expireDays} onChange={(e) => setForm({ ...form, expireDays: e.target.value })} />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>
-              取消
+              {tc("actions.cancel")}
             </Button>
-            <Button onClick={() => void onCreate()}>创建</Button>
+            <Button onClick={() => void onCreate()}>{tc("actions.create")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

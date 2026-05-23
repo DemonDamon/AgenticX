@@ -33,6 +33,7 @@ import {
   SheetTitle,
   toast,
 } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 import { ALL_REGISTERED_SCOPES, SCOPE_REGISTRY } from "@agenticx/iam-core/scope-registry";
 import { Check, Copy, KeyRound, Pencil, Plus, RefreshCw, Shield, ShieldAlert, Trash2, UserCog, Users } from "lucide-react";
 
@@ -85,34 +86,6 @@ function buildMatrix(allRoles: RoleRow[]) {
     .sort((a, b) => a.resource.localeCompare(b.resource));
 }
 
-const RESOURCE_LABELS: Record<string, string> = {
-  user: "用户",
-  dept: "部门",
-  role: "角色",
-  audit: "审计",
-  metering: "计量",
-  workspace: "工作区",
-  tenant: "租户",
-  admin: "管理入口",
-  policy: "策略",
-  model: "模型",
-  kb: "知识库",
-  automation: "自动化",
-  gateway: "网关",
-  provider: "供应商",
-};
-
-const ACTION_LABELS: Record<string, string> = {
-  create: "创建",
-  read: "读取",
-  update: "修改",
-  delete: "删除",
-  manage: "管理",
-  chat: "对话",
-  enter: "进入",
-  export: "导出",
-};
-
 function roleHasScope(role: RoleRow, scope: string): boolean {
   if (role.scopes.includes("*")) return true;
   return role.scopes.includes(scope);
@@ -125,6 +98,26 @@ function ScopeMatrixEditor({
   value: Set<string>;
   onChange: (next: Set<string>) => void;
 }) {
+  const t = useTranslations("pages.iam.roles");
+  const resourceLabels = useMemo(
+    (): Record<string, string> => ({
+      user: t("resources.user"),
+      dept: t("resources.dept"),
+      role: t("resources.role"),
+      audit: t("resources.audit"),
+      metering: t("resources.metering"),
+      workspace: t("resources.workspace"),
+      tenant: t("resources.tenant"),
+      admin: t("resources.admin"),
+      policy: t("resources.policy"),
+      model: t("resources.model"),
+      kb: t("resources.kb"),
+      automation: t("resources.automation"),
+      gateway: t("resources.gateway"),
+      provider: t("resources.provider"),
+    }),
+    [t]
+  );
   const toggle = (s: string) => {
     const n = new Set(value);
     if (n.has(s)) n.delete(s);
@@ -138,7 +131,7 @@ function ScopeMatrixEditor({
         {Object.entries(SCOPE_REGISTRY).map(([resource, verbs]) => (
           <div key={resource}>
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {RESOURCE_LABELS[resource] ?? resource}
+              {resourceLabels[resource] ?? resource}
             </div>
             <div className="flex flex-wrap gap-2">
               {verbs.map((verb) => {
@@ -159,6 +152,41 @@ function ScopeMatrixEditor({
 }
 
 export default function RolesPage() {
+  const t = useTranslations("pages.iam.roles");
+  const tc = useTranslations("common");
+  const ts = useTranslations("shell");
+  const resourceLabels = useMemo(
+    (): Record<string, string> => ({
+      user: t("resources.user"),
+      dept: t("resources.dept"),
+      role: t("resources.role"),
+      audit: t("resources.audit"),
+      metering: t("resources.metering"),
+      workspace: t("resources.workspace"),
+      tenant: t("resources.tenant"),
+      admin: t("resources.admin"),
+      policy: t("resources.policy"),
+      model: t("resources.model"),
+      kb: t("resources.kb"),
+      automation: t("resources.automation"),
+      gateway: t("resources.gateway"),
+      provider: t("resources.provider"),
+    }),
+    [t]
+  );
+  const actionLabels = useMemo(
+    (): Record<string, string> => ({
+      create: t("actions.create"),
+      read: t("actions.read"),
+      update: t("actions.update"),
+      delete: t("actions.delete"),
+      manage: t("actions.manage"),
+      chat: t("actions.chat"),
+      enter: t("actions.enter"),
+      export: t("actions.export"),
+    }),
+    [t]
+  );
   const [roles, setRoles] = useState<RoleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeRoleCode, setActiveRoleCode] = useState<string | null>(null);
@@ -189,7 +217,7 @@ export default function RolesPage() {
       const res = await fetch("/api/admin/roles", { cache: "no-store" });
       const json = (await res.json()) as ApiEnvelope<{ items: RoleRow[] }>;
       if (!res.ok || !json.data?.items) {
-        toast.error(json.message ?? "加载失败");
+        toast.error(json.message ?? t("toast.loadFailed"));
         return;
       }
       setRoles(json.data.items);
@@ -198,7 +226,7 @@ export default function RolesPage() {
         return json.data!.items[0]?.code ?? null;
       });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "网络错误");
+      toast.error(e instanceof Error ? e.message : t("toast.networkError"));
     } finally {
       setLoading(false);
     }
@@ -221,7 +249,7 @@ export default function RolesPage() {
         users: Array<{ id: string; email: string; displayName: string }>;
       }>;
       if (!res.ok || !json.data?.users) {
-        toast.error(json.message ?? "加载成员失败");
+        toast.error(json.message ?? t("toast.membersLoadFailed"));
         setMembers([]);
         return;
       }
@@ -234,12 +262,12 @@ export default function RolesPage() {
   const handleCreate = async () => {
     const code = newCode.trim().toLowerCase().replace(/\s+/g, "_");
     if (!code || !newName.trim()) {
-      toast.error("请填写角色代码与名称");
+      toast.error(t("toast.fillCodeAndName"));
       return;
     }
     const scopes = [...newScopes];
     if (!scopes.length) {
-      toast.error("至少选择一条权限");
+      toast.error(t("toast.pickScope"));
       return;
     }
     const res = await fetch("/api/admin/roles", {
@@ -249,10 +277,10 @@ export default function RolesPage() {
     });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "创建失败");
+      toast.error(json.message ?? t("toast.createFailed"));
       return;
     }
-    toast.success("已创建角色");
+    toast.success(t("toast.created"));
     setCreateOpen(false);
     setNewCode("");
     setNewName("");
@@ -274,10 +302,10 @@ export default function RolesPage() {
     });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "复制失败");
+      toast.error(json.message ?? t("toast.duplicateFailed"));
       return;
     }
-    toast.success("已复制为新角色");
+    toast.success(t("toast.duplicated"));
     setDupOpen(false);
     setDupSource(null);
     await load();
@@ -293,10 +321,10 @@ export default function RolesPage() {
     });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "保存失败");
+      toast.error(json.message ?? t("toast.saveFailed"));
       return;
     }
-    toast.success("已保存");
+    toast.success(t("toast.saved"));
     setEditOpen(false);
     await load();
   };
@@ -306,10 +334,10 @@ export default function RolesPage() {
     const res = await fetch(`/api/admin/roles/${role.id}`, { method: "DELETE" });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "删除失败");
+      toast.error(json.message ?? t("toast.deleteFailed"));
       return;
     }
-    toast.success("已删除");
+    toast.success(t("toast.deleted"));
     if (activeRoleCode === role.code) setActiveRoleCode(roles.find((r) => r.id !== role.id)?.code ?? null);
     await load();
   };
@@ -319,7 +347,7 @@ export default function RolesPage() {
     const ures = await fetch(`/api/admin/users/${userId}`, { cache: "no-store" });
     const ujson = (await ures.json()) as ApiEnvelope<{ user: { roleCodes: string[] } }>;
     if (!ures.ok || !ujson.data?.user) {
-      toast.error("读取用户失败");
+      toast.error(t("toast.readUserFailed"));
       return;
     }
     const nextCodes = ujson.data.user.roleCodes.filter((c) => c !== membersRole.code);
@@ -330,10 +358,10 @@ export default function RolesPage() {
     });
     const pjson = (await pres.json()) as { message?: string };
     if (!pres.ok) {
-      toast.error(pjson.message ?? "移除失败");
+      toast.error(pjson.message ?? t("toast.removeFailed"));
       return;
     }
-    toast.success("已从该角色移除成员");
+    toast.success(t("toast.memberRemoved"));
     await openMembers(membersRole);
     await load();
   };
@@ -350,16 +378,16 @@ export default function RolesPage() {
                 </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator />
-              <BreadcrumbItem>身份与权限</BreadcrumbItem>
+              <BreadcrumbItem>{t("breadcrumbIam")}</BreadcrumbItem>
               <BreadcrumbSeparator />
               <BreadcrumbItem>
-                <BreadcrumbPage>角色</BreadcrumbPage>
+                <BreadcrumbPage>{t("breadcrumbRoles")}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
         }
-        title="角色与权限"
-        description="角色数据来自 PostgreSQL；矩阵反映当前租户全部角色（含 * 展开）。"
+        title={t("title")}
+        description={t("description")}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
@@ -367,14 +395,14 @@ export default function RolesPage() {
             </Button>
             <Button size="sm" onClick={() => setCreateOpen(true)}>
               <Plus className="mr-1 h-4 w-4" />
-              新建角色
+              {t("newRole")}
             </Button>
           </div>
         }
       />
 
       {loading && !roles.length ? (
-        <p className="text-sm text-muted-foreground">加载中…</p>
+        <p className="text-sm text-muted-foreground">{t("loading")}</p>
       ) : (
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {roles.map((role) => {
@@ -407,25 +435,25 @@ export default function RolesPage() {
                       <Badge variant={active ? "default" : "soft"}>{role.code}</Badge>
                       {role.immutable ? (
                         <Badge variant="outline" className="text-[10px]">
-                          系统
+                          {t("systemBadge")}
                         </Badge>
                       ) : null}
                       <Badge variant="soft" className="font-mono text-[10px]">
-                        {role.memberCount} 人
+                        {t("memberCount", { count: role.memberCount })}
                       </Badge>
                     </div>
                   </div>
                   <div className="mt-3 space-y-1 pr-2">
                     <h3 className="text-base font-semibold">{role.name}</h3>
                     <p className="text-xs text-muted-foreground">
-                      {role.scopes.includes("*") ? "全部注册权限 (*)" : `${role.scopes.length} 条作用域`}
+{role.scopes.includes("*") ? t("allScopes") : t("scopeCount", { count: role.scopes.length })}
                     </p>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2 border-t border-border p-4 pt-3">
                   <Button variant="outline" size="xs" onClick={() => void openMembers(role)}>
                     <Users className="mr-1 h-3 w-3" />
-                    成员
+                    {t("members")}
                   </Button>
                   <Button
                     variant="outline"
@@ -433,12 +461,12 @@ export default function RolesPage() {
                     onClick={() => {
                       setDupSource(role);
                       setDupCode(`${role.code}_copy`);
-                      setDupName(`${role.name}（副本）`);
+                      setDupName(`${role.name}${t("duplicateNameSuffix")}`);
                       setDupOpen(true);
                     }}
                   >
                     <Copy className="mr-1 h-3 w-3" />
-                    复制
+                    {t("duplicate")}
                   </Button>
                   {!role.immutable ? (
                     <>
@@ -453,11 +481,11 @@ export default function RolesPage() {
                         }}
                       >
                         <Pencil className="mr-1 h-3 w-3" />
-                        编辑
+                        {t("edit")}
                       </Button>
                       <Button variant="ghost" size="xs" className="text-danger" onClick={() => void handleDelete(role)}>
                         <Trash2 className="mr-1 h-3 w-3" />
-                        删除
+                        {t("delete")}
                       </Button>
                     </>
                   ) : null}
@@ -475,7 +503,7 @@ export default function RolesPage() {
               <div>
                 <CardTitle>{activeRole.name}</CardTitle>
                 <CardDescription>
-                  {activeRole.code} · {activeRole.immutable ? "系统内置" : "自定义"}
+                  {activeRole.code} · {activeRole.immutable ? t("builtin") : t("custom")}
                 </CardDescription>
               </div>
               <div className="flex max-w-xl flex-wrap gap-1">
@@ -492,8 +520,8 @@ export default function RolesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>权限矩阵</CardTitle>
-          <CardDescription>列：当前租户角色 · 行：resource:action。绿色表示拥有（含 * 展开）。</CardDescription>
+          <CardTitle>{t("matrixTitle")}</CardTitle>
+          <CardDescription>{t("matrixDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="overflow-hidden p-0">
           <div className="overflow-x-auto">
@@ -501,7 +529,7 @@ export default function RolesPage() {
               <thead className="bg-muted/40">
                 <tr className="border-b border-border">
                   <th className="sticky left-0 z-10 min-w-[160px] bg-muted/40 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    资源 / 动作
+                    {t("resourceActionHeader")}
                   </th>
                   {roles.map((role) => (
                     <th
@@ -521,7 +549,7 @@ export default function RolesPage() {
                         className="sticky left-0 z-10 bg-surface-subtle px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground"
                         colSpan={roles.length + 1}
                       >
-                        {RESOURCE_LABELS[resource] ?? resource}
+                        {resourceLabels[resource] ?? resource}
                       </td>
                     </tr>
                     {actions.map((action) => {
@@ -532,7 +560,7 @@ export default function RolesPage() {
                             <div className="flex items-center gap-2">
                               <span className="h-1.5 w-1.5 rounded-full bg-primary/60" aria-hidden />
                               <span className="font-mono text-xs text-foreground">{scope}</span>
-                              <span className="text-xs text-muted-foreground">{ACTION_LABELS[action] ?? action}</span>
+                              <span className="text-xs text-muted-foreground">{actionLabels[action] ?? action}</span>
                             </div>
                           </td>
                           {roles.map((role) => {
@@ -561,7 +589,7 @@ export default function RolesPage() {
           </div>
           <Separator />
           <div className="flex flex-wrap items-center gap-4 px-4 py-3 text-xs text-muted-foreground">
-            <span>共 {matrix.reduce((sum, row) => sum + row.actions.length, 0)} 条权限组合</span>
+<span>{t("comboCount", { count: matrix.reduce((sum, row) => sum + row.actions.length, 0) })}</span>
           </div>
         </CardContent>
       </Card>
@@ -569,29 +597,29 @@ export default function RolesPage() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>新建自定义角色</DialogTitle>
+            <DialogTitle>{t("createDialogTitle")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <Label>代码</Label>
-                <Input value={newCode} onChange={(e) => setNewCode(e.target.value)} placeholder="如 data_analyst" />
+                <Label>{t("codeLabel")}</Label>
+                <Input value={newCode} onChange={(e) => setNewCode(e.target.value)} placeholder={t("codePlaceholder")} />
               </div>
               <div>
-                <Label>显示名</Label>
-                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="数据分析员" />
+                <Label>{t("nameLabel")}</Label>
+                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t("namePlaceholder")} />
               </div>
             </div>
             <div>
-              <Label className="mb-2 block">权限（仅可选注册表内组合）</Label>
+              <Label className="mb-2 block">{t("scopesLabel")}</Label>
               <ScopeMatrixEditor value={newScopes} onChange={setNewScopes} />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
-              取消
+              {tc("actions.cancel")}
             </Button>
-            <Button onClick={() => void handleCreate()}>创建</Button>
+            <Button onClick={() => void handleCreate()}>{t("actions.create")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -599,24 +627,24 @@ export default function RolesPage() {
       <Dialog open={dupOpen} onOpenChange={setDupOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>复制角色</DialogTitle>
+            <DialogTitle>{t("duplicateDialogTitle")}</DialogTitle>
           </DialogHeader>
-          <p className="text-xs text-muted-foreground">来源：{dupSource?.name ?? "—"}</p>
+<p className="text-xs text-muted-foreground">{t("duplicateSource")}{dupSource?.name ?? "—"}</p>
           <div className="grid gap-2">
             <div>
-              <Label>新代码</Label>
+              <Label>{t("newCodeLabel")}</Label>
               <Input value={dupCode} onChange={(e) => setDupCode(e.target.value)} />
             </div>
             <div>
-              <Label>新名称</Label>
+              <Label>{t("newNameLabel")}</Label>
               <Input value={dupName} onChange={(e) => setDupName(e.target.value)} />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDupOpen(false)}>
-              取消
+              {tc("actions.cancel")}
             </Button>
-            <Button onClick={() => void handleDuplicate()}>复制</Button>
+            <Button onClick={() => void handleDuplicate()}>{t("duplicate")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -624,23 +652,23 @@ export default function RolesPage() {
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>编辑角色</DialogTitle>
+            <DialogTitle>{t("editDialogTitle")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div>
-              <Label>名称</Label>
+<Label>{t("nameLabel")}</Label>
               <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
             </div>
             <div>
-              <Label className="mb-2 block">权限</Label>
+<Label className="mb-2 block">{t("scopesLabel")}</Label>
               <ScopeMatrixEditor value={editScopes} onChange={setEditScopes} />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>
-              取消
+              {tc("actions.cancel")}
             </Button>
-            <Button onClick={() => void handleSaveEdit()}>保存</Button>
+<Button onClick={() => void handleSaveEdit()}>{tc("actions.save")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -648,14 +676,14 @@ export default function RolesPage() {
       <Sheet open={membersOpen} onOpenChange={setMembersOpen}>
         <SheetContent className="w-full sm:max-w-md">
           <SheetHeader>
-            <SheetTitle>角色成员 · {membersRole?.name}</SheetTitle>
-            <SheetDescription>移除成员将 PATCH 更新其 roleCodes。</SheetDescription>
+<SheetTitle>{t("membersSheetTitle")} {membersRole?.name}</SheetTitle>
+            <SheetDescription>{t("membersSheetDescription")}</SheetDescription>
           </SheetHeader>
           <div className="mt-4 space-y-2">
             {membersLoading ? (
-              <p className="text-sm text-muted-foreground">加载中…</p>
+              <p className="text-sm text-muted-foreground">{t("loading")}</p>
             ) : members.length === 0 ? (
-              <p className="text-sm text-muted-foreground">暂无成员</p>
+              <p className="text-sm text-muted-foreground">{t("membersEmpty")}</p>
             ) : (
               members.map((u) => (
                 <div key={u.id} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
@@ -664,7 +692,7 @@ export default function RolesPage() {
                     <div className="truncate font-mono text-xs text-muted-foreground">{u.email}</div>
                   </div>
                   <Button variant="ghost" size="xs" onClick={() => void removeMemberRole(u.id)}>
-                    移除
+                    {t("removeMember")}
                   </Button>
                 </div>
               ))

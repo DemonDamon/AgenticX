@@ -31,6 +31,7 @@ import {
   SelectValue,
   toast,
 } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 import {
   Activity,
   Check,
@@ -103,13 +104,18 @@ interface ProviderFormBaseline {
   apiKeyDraft: string;
 }
 
-const ROUTE_LABEL: Record<ProviderRoute, string> = {
-  local: "本地",
-  "private-cloud": "私有云",
-  "third-party": "第三方",
-};
-
 export default function ModelProvidersPage() {
+  const t = useTranslations("pages.admin.models");
+  const tc = useTranslations("common");
+  const ts = useTranslations("shell");
+  const routeLabel = useMemo(
+    (): Record<ProviderRoute, string> => ({
+      local: t("route.local"),
+      "private-cloud": t("route.privateCloud"),
+      "third-party": t("route.thirdParty"),
+    }),
+    [t]
+  );
   const [providers, setProviders] = useState<ProviderRecord[]>([]);
   const [templates, setTemplates] = useState<ProviderTemplate[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -168,14 +174,14 @@ export default function ModelProvidersPage() {
       const res = await fetch("/api/admin/providers", { cache: "no-store" });
       const json = (await res.json()) as ListResp;
       if (!res.ok || !json.data) {
-        toast.error(json.message ?? "加载失败");
+        toast.error(json.message ?? t("toast.loadFailed"));
         return;
       }
       setProviders(json.data.providers);
       setTemplates(json.data.templates);
       setActiveId((prev) => preferId ?? prev ?? json.data!.providers[0]?.id ?? null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "网络错误");
+      toast.error(error instanceof Error ? error.message : t("toast.networkError"));
     } finally {
       setLoading(false);
     }
@@ -208,7 +214,7 @@ export default function ModelProvidersPage() {
       });
       const json = (await res.json()) as ProviderResp;
       if (!res.ok || !json.data) {
-        toast.error(json.message ?? "保存失败");
+        toast.error(json.message ?? t("toast.saveFailed"));
         return null;
       }
       setProviders((prev) => prev.map((p) => (p.id === id ? json.data!.provider : p)));
@@ -223,11 +229,11 @@ export default function ModelProvidersPage() {
     const nextDisplayName = displayNameDraft.trim();
     const nextBaseUrl = baseUrlDraft.trim();
     if (!nextDisplayName) {
-      toast.error("服务厂商显示名不能为空");
+      toast.error(t("toast.displayNameRequired"));
       return;
     }
     if (!nextBaseUrl) {
-      toast.error("API 地址不能为空");
+      toast.error(t("toast.baseUrlRequired"));
       return;
     }
     if (nextDisplayName !== baseline.displayName) patch.displayName = nextDisplayName;
@@ -242,7 +248,7 @@ export default function ModelProvidersPage() {
     try {
       const updated = await persistProvider(active.id, patch);
       if (updated) {
-        toast.success("已保存");
+        toast.success(t("saved"));
         formInitializedForId.current = active.id;
         syncFormFromProvider(updated);
       }
@@ -253,13 +259,13 @@ export default function ModelProvidersPage() {
 
   const handleDeleteProvider = async () => {
     if (!active) return;
-    if (!window.confirm(`确认删除厂商「${active.displayName}」？该操作不可撤销。`)) return;
+    if (!window.confirm(t("confirm.deleteProvider", { name: active.displayName }))) return;
     const res = await fetch(`/api/admin/providers/${active.id}`, { method: "DELETE" });
     if (!res.ok) {
-      toast.error("删除失败");
+      toast.error(t("toast.deleteFailed"));
       return;
     }
-    toast.success("已删除");
+    toast.success(t("toast.deleted"));
     formInitializedForId.current = null;
     setActiveId(null);
     await load();
@@ -276,12 +282,12 @@ export default function ModelProvidersPage() {
       });
       const json = (await res.json()) as TestResp;
       if (json.data?.reachable) {
-        toast.success(`连通成功（${json.data.via ?? "OK"}${json.data.modelCount ? ` · ${json.data.modelCount} 个模型` : ""}）`);
+        toast.success(`${t("toast.testSuccess")}（${json.data.via ?? "OK"}${json.data.modelCount ? ` · ${json.data.modelCount} ${t("toast.testSuccessModels")}` : ""}）`);
       } else {
-        toast.error(json.message ?? "连通失败");
+        toast.error(json.message ?? t("toast.testFailed"));
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "网络错误");
+      toast.error(error instanceof Error ? error.message : t("toast.networkError"));
     } finally {
       setTesting(false);
     }
@@ -306,13 +312,13 @@ export default function ModelProvidersPage() {
         const json = (await res.json()) as { code?: string; message?: string; data?: { apiKey?: string } };
         const apiKey = json.data?.apiKey?.trim() ?? "";
         if (!res.ok || !apiKey) {
-          toast.error(json.message ?? "无法读取密钥");
+          toast.error(json.message ?? t("toast.keyReadFailed"));
           return;
         }
         serverKeyRef.current = apiKey;
         setKeyDraft(apiKey);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "网络错误");
+        toast.error(error instanceof Error ? error.message : t("toast.networkError"));
         return;
       } finally {
         setRevealingKey(false);
@@ -325,7 +331,7 @@ export default function ModelProvidersPage() {
   const handleAddModel = async () => {
     if (!active) return;
     if (!newModel.name.trim()) {
-      toast.error("模型名不能为空");
+      toast.error(t("toast.modelNameRequired"));
       return;
     }
     const res = await fetch(`/api/admin/providers/${active.id}/models`, {
@@ -339,13 +345,13 @@ export default function ModelProvidersPage() {
     });
     const json = (await res.json()) as ProviderResp;
     if (!res.ok || !json.data) {
-      toast.error(json.message ?? "添加失败");
+      toast.error(json.message ?? t("toast.addModelFailed"));
       return;
     }
     setProviders((prev) => prev.map((p) => (p.id === active.id ? json.data!.provider : p)));
     setNewModel({ name: "", label: "" });
     setAddingModel(false);
-    toast.success("已添加");
+    toast.success(t("toast.modelAdded"));
   };
 
   const handleToggleModel = async (modelName: string, enabled: boolean) => {
@@ -360,7 +366,7 @@ export default function ModelProvidersPage() {
     );
     const json = (await res.json()) as ProviderResp;
     if (!res.ok || !json.data) {
-      toast.error(json.message ?? "更新失败");
+      toast.error(json.message ?? t("toast.updateFailed"));
       return;
     }
     setProviders((prev) => prev.map((p) => (p.id === active.id ? json.data!.provider : p)));
@@ -368,18 +374,18 @@ export default function ModelProvidersPage() {
 
   const handleDeleteModel = async (modelName: string) => {
     if (!active) return;
-    if (!window.confirm(`从该厂商移除模型「${modelName}」？`)) return;
+    if (!window.confirm(t("confirm.removeModel", { name: modelName }))) return;
     const res = await fetch(
       `/api/admin/providers/${active.id}/models/${encodeURIComponent(modelName)}`,
       { method: "DELETE" }
     );
     const json = (await res.json()) as ProviderResp;
     if (!res.ok || !json.data) {
-      toast.error(json.message ?? "删除失败");
+      toast.error(json.message ?? t("toast.deleteFailed"));
       return;
     }
     setProviders((prev) => prev.map((p) => (p.id === active.id ? json.data!.provider : p)));
-    toast.success("已移除");
+    toast.success(t("toast.modelRemoved"));
   };
 
   return (
@@ -394,25 +400,25 @@ export default function ModelProvidersPage() {
                 </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator />
-              <BreadcrumbItem>平台配置</BreadcrumbItem>
+              <BreadcrumbItem>{t("breadcrumb.platform")}</BreadcrumbItem>
               <BreadcrumbSeparator />
               <BreadcrumbItem>
-                <BreadcrumbPage>模型服务</BreadcrumbPage>
+                <BreadcrumbPage>{t("breadcrumb.models")}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
         }
-        title="模型服务"
-        description="管理上游大模型厂商、API Key 与可用模型；配置后将下发到 Gateway 与所有前台用户。"
+        title={t("breadcrumb.models")}
+        description={t("description")}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => void load()}>
               <RefreshCcw />
-              刷新
+              {t("refresh")}
             </Button>
             <Button size="sm" onClick={() => setAddOpen(true)}>
               <Plus />
-              添加厂商
+              {t("addProvider")}
             </Button>
           </>
         }
@@ -425,16 +431,16 @@ export default function ModelProvidersPage() {
             {loading ? (
               <EmptyState
                 icon={<Server className="h-5 w-5" />}
-                title="加载中..."
-                description="读取 admin providers"
+                title={t("loadingTitle")}
+                description={t("loadingDescription")}
                 size="sm"
                 className="border-0"
               />
             ) : providers.length === 0 ? (
               <EmptyState
                 icon={<Server className="h-5 w-5" />}
-                title="尚未配置厂商"
-                description="点击右上「添加厂商」从模板选一个开始"
+                title={t("emptyProvidersTitle")}
+                description={t("emptyProvidersDescription")}
                 size="sm"
                 className="border-0"
               />
@@ -458,7 +464,7 @@ export default function ModelProvidersPage() {
                       />
                       <span className="min-w-0 flex-1 truncate font-medium">{p.displayName}</span>
                       {p.isDefault ? (
-                        <Badge variant="soft" className="ml-auto text-[10px]">默认</Badge>
+                        <Badge variant="soft" className="ml-auto text-[10px]">{t("defaultBadge")}</Badge>
                       ) : null}
                     </button>
                   </li>
@@ -474,8 +480,8 @@ export default function ModelProvidersPage() {
             {!active ? (
               <EmptyState
                 icon={<Wrench className="h-5 w-5" />}
-                title="未选择厂商"
-                description="左侧选择一个厂商开始配置 API Key 与模型"
+                title={t("noSelectionTitle")}
+                description={t("noSelectionDescription")}
                 size="sm"
                 className="border-0"
               />
@@ -487,47 +493,47 @@ export default function ModelProvidersPage() {
                     <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                       <Badge variant="soft" className="font-mono text-[10px]">{active.id}</Badge>
                       <span>·</span>
-                      <span>{ROUTE_LABEL[active.route]}</span>
+                      <span>{routeLabel[active.route]}</span>
                       {active.envKey ? (
                         <>
                           <span>·</span>
-                          <span>未填 Key 时回退环境变量 <code className="font-mono">{active.envKey}</code></span>
+<span>{t("envFallback")} <code className="font-mono">{active.envKey}</code></span>
                         </>
                       ) : null}
                     </div>
                   </div>
                   <Button variant="outline" size="sm" onClick={() => void handleDeleteProvider()}>
                     <Trash2 />
-                    删除厂商
+                    {t("deleteProvider")}
                   </Button>
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
                   <ToggleRow
-                    label="已启用"
-                    description="未启用时该厂商对前台不可见，gateway 也会跳过"
+                    label={t("enabledLabel")}
+                    description={t("enabledDescription")}
                     checked={enabledDraft}
                     onChange={setEnabledDraft}
                   />
                   <ToggleRow
-                    label="设为默认"
-                    description="新会话兜底使用该厂商首个启用模型"
+                    label={t("defaultLabel")}
+                    description={t("defaultDescription")}
                     checked={isDefaultDraft}
                     onChange={setIsDefaultDraft}
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label>服务厂商显示名</Label>
+                  <Label>{t("displayNameLabel")}</Label>
                   <Input
                     value={displayNameDraft}
                     onChange={(event) => setDisplayNameDraft(event.target.value)}
                   />
-                  <p className="text-xs text-muted-foreground">仅用于界面与侧栏展示；配置中的厂商 id 仍为左侧英文标识。</p>
+                  <p className="text-xs text-muted-foreground">{t("displayNameHint")}</p>
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label>API 密钥</Label>
+                  <Label>{t("apiKeyLabel")}</Label>
                   <div className="flex items-center gap-2">
                     <div className="relative min-w-0 flex-1">
                       <Input
@@ -535,10 +541,10 @@ export default function ModelProvidersPage() {
                         className="pr-10"
                         placeholder={
                           keyDraft.trim()
-                            ? "粘贴 API Key（仅 admin 可见）"
+                            ? t("apiKeyPlaceholder")
                             : active.apiKeyConfigured
                               ? active.apiKeyMasked
-                              : "粘贴 API Key（仅 admin 可见）"
+                              : t("apiKeyPlaceholder")
                         }
                         value={keyDraft}
                         onChange={(event) => {
@@ -554,49 +560,49 @@ export default function ModelProvidersPage() {
                         className="absolute right-0.5 top-1/2 z-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                         onClick={() => void handleToggleKeyVisible()}
                         disabled={revealingKey}
-                        aria-label={keyVisible ? "隐藏密钥" : "显示密钥"}
+                        aria-label={keyVisible ? t("hideKey") : t("showKey")}
                       >
                         {keyVisible ? <EyeOff /> : <Eye />}
                       </Button>
                     </div>
                     <Button variant="outline" size="sm" onClick={() => void handleTest()} disabled={testing}>
                       <Activity />
-                      {testing ? "检测中..." : "检测"}
+                      {testing ? t("testing") : t("test")}
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Key 加密存入 PostgreSQL（admin internal API 下发给 Gateway），不会被前台用户读到。
+                    {t("apiKeyHint")}
                   </p>
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label>API 地址</Label>
+                  <Label>{t("baseUrlLabel")}</Label>
                   <Input
                     value={baseUrlDraft}
                     onChange={(event) => setBaseUrlDraft(event.target.value)}
                   />
                   <p className="text-xs text-muted-foreground">
-                    预览：{(baseUrlDraft || active.baseUrl).replace(/\/$/, "")}/chat/completions
+                    {t("baseUrlPreview")}{(baseUrlDraft || active.baseUrl).replace(/\/$/, "")}/chat/completions
                   </p>
                 </div>
 
                 <div className="space-y-2 rounded-lg border border-border p-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-sm font-semibold">模型列表（{active.models.length}）</h3>
-                      <p className="text-xs text-muted-foreground">关闭某个模型后，前台将不会展示并禁止调用</p>
+<h3 className="text-sm font-semibold">{t("modelListTitle")}（{active.models.length}）</h3>
+                      <p className="text-xs text-muted-foreground">{t("modelListHint")}</p>
                     </div>
                     <Button size="sm" variant="outline" onClick={() => setAddingModel(true)}>
                       <Plus />
-                      添加模型
+                      {t("addModel")}
                     </Button>
                   </div>
 
                   {active.models.length === 0 ? (
                     <EmptyState
                       icon={<Server className="h-5 w-5" />}
-                      title="尚未添加模型"
-                      description="点击右上「添加模型」"
+                      title={t("emptyModelsTitle")}
+                      description={t("emptyModelsDescription")}
                       size="sm"
                       className="border-0"
                     />
@@ -619,7 +625,7 @@ export default function ModelProvidersPage() {
                             variant="ghost"
                             size="icon-sm"
                             onClick={() => void handleDeleteModel(m.name)}
-                            aria-label="移除模型"
+                            aria-label={t("removeModel")}
                           >
                             <Trash2 />
                           </Button>
@@ -631,7 +637,7 @@ export default function ModelProvidersPage() {
 
                 <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
                   {!formDirty ? (
-                    <span className="text-xs text-muted-foreground">已保存</span>
+                    <span className="text-xs text-muted-foreground">{t("saved")}</span>
                   ) : null}
                   <Button
                     size="sm"
@@ -639,7 +645,7 @@ export default function ModelProvidersPage() {
                     disabled={!formDirty || saving}
                   >
                     {saving ? null : <Check />}
-                    {saving ? "保存中..." : "保存"}
+{saving ? t("saving") : tc("actions.save")}
                   </Button>
                 </div>
               </>
@@ -659,32 +665,32 @@ export default function ModelProvidersPage() {
       <Dialog open={addingModel} onOpenChange={setAddingModel}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>添加模型</DialogTitle>
+            <DialogTitle>{t("addModel")}</DialogTitle>
             <DialogDescription>{active?.displayName ?? ""}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="add-model-name">模型 ID</Label>
+              <Label htmlFor="add-model-name">{t("modelIdLabel")}</Label>
               <Input
                 id="add-model-name"
-                placeholder="例如 gpt-4o-mini / qwen-plus"
+                placeholder={t("modelIdPlaceholder")}
                 value={newModel.name}
                 onChange={(event) => setNewModel((prev) => ({ ...prev, name: event.target.value }))}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="add-model-label">显示名（可选）</Label>
+              <Label htmlFor="add-model-label">{t("modelLabelLabel")}</Label>
               <Input
                 id="add-model-label"
-                placeholder="留空时使用 ID"
+                placeholder={t("modelLabelPlaceholder")}
                 value={newModel.label}
                 onChange={(event) => setNewModel((prev) => ({ ...prev, label: event.target.value }))}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddingModel(false)}>取消</Button>
-            <Button onClick={() => void handleAddModel()}>添加</Button>
+<Button variant="outline" onClick={() => setAddingModel(false)}>{tc("actions.cancel")}</Button>
+<Button onClick={() => void handleAddModel()}>{tc("actions.add")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -730,6 +736,8 @@ function AddProviderDialog({
   existingIds: string[];
   onCreated: (id: string) => void;
 }) {
+  const t = useTranslations("pages.admin.models");
+  const tc = useTranslations("common");
   const available = useMemo(
     () => templates.filter((t) => !existingIds.includes(t.id)),
     [templates, existingIds]
@@ -760,7 +768,7 @@ function AddProviderDialog({
       if (tab === "template") {
         const tpl = available.find((t) => t.id === pickedTemplate);
         if (!tpl) {
-          toast.error("请选择模板");
+          toast.error(t("toast.selectTemplate"));
           return;
         }
         payload = {
@@ -772,7 +780,7 @@ function AddProviderDialog({
         };
       } else {
         if (!custom.id.trim() || !custom.baseUrl.trim()) {
-          toast.error("ID 与 baseUrl 必填");
+          toast.error(t("toast.idAndBaseUrlRequired"));
           return;
         }
         payload = {
@@ -789,10 +797,10 @@ function AddProviderDialog({
       });
       const json = (await res.json()) as ProviderResp;
       if (!res.ok || !json.data) {
-        toast.error(json.message ?? "添加失败");
+        toast.error(json.message ?? t("toast.addModelFailed"));
         return;
       }
-      toast.success(`已添加 ${json.data.provider.displayName}`);
+      toast.success(`${t("toast.providerAdded")} ${json.data.provider.displayName}`);
       onCreated(json.data.provider.id);
       onOpenChange(false);
     } finally {
@@ -804,8 +812,8 @@ function AddProviderDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>添加厂商</DialogTitle>
-          <DialogDescription>从内置模板选择，或手动添加任意 OpenAI 兼容上游</DialogDescription>
+          <DialogTitle>{t("addProvider")}</DialogTitle>
+          <DialogDescription>{t("addProviderDialogDescription")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
@@ -818,7 +826,7 @@ function AddProviderDialog({
                 tab === "template" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
               ].join(" ")}
             >
-              内置模板
+              {t("tabTemplate")}
             </button>
             <button
               type="button"
@@ -828,17 +836,17 @@ function AddProviderDialog({
                 tab === "custom" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
               ].join(" ")}
             >
-              手动添加
+              {t("tabCustom")}
             </button>
           </div>
 
           {tab === "template" ? (
             available.length === 0 ? (
-              <p className="text-sm text-muted-foreground">所有内置模板均已添加，请使用「手动添加」</p>
+              <p className="text-sm text-muted-foreground">{t("allTemplatesAdded")}</p>
             ) : (
               <Select value={pickedTemplate} onValueChange={setPickedTemplate}>
                 <SelectTrigger>
-                  <SelectValue placeholder="选择模板..." />
+                  <SelectValue placeholder={t("selectTemplatePlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   {available.map((t) => (
@@ -852,23 +860,23 @@ function AddProviderDialog({
           ) : (
             <div className="space-y-2">
               <div className="space-y-1.5">
-                <Label>厂商 ID</Label>
+                <Label>{t("providerIdLabel")}</Label>
                 <Input
-                  placeholder="例如 my-internal"
+                  placeholder={t("providerIdPlaceholder")}
                   value={custom.id}
                   onChange={(event) => setCustom((prev) => ({ ...prev, id: event.target.value }))}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>显示名</Label>
+<Label>{t("displayNameLabel")}</Label>
                 <Input
-                  placeholder="留空使用 ID"
+                  placeholder={t("displayNameOptionalPlaceholder")}
                   value={custom.displayName}
                   onChange={(event) => setCustom((prev) => ({ ...prev, displayName: event.target.value }))}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>API 地址（须 OpenAI 兼容，含 /v1）</Label>
+                <Label>{t("baseUrlOpenAiHint")}</Label>
                 <Input
                   placeholder="https://api.example.com/v1"
                   value={custom.baseUrl}
@@ -876,7 +884,7 @@ function AddProviderDialog({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>路由类型</Label>
+                <Label>{t("routeTypeLabel")}</Label>
                 <Select
                   value={custom.route}
                   onValueChange={(value) => setCustom((prev) => ({ ...prev, route: value as ProviderRoute }))}
@@ -885,9 +893,9 @@ function AddProviderDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="local">本地</SelectItem>
-                    <SelectItem value="private-cloud">私有云</SelectItem>
-                    <SelectItem value="third-party">第三方</SelectItem>
+                    <SelectItem value="local">{t("route.local")}</SelectItem>
+                    <SelectItem value="private-cloud">{t("route.privateCloud")}</SelectItem>
+                    <SelectItem value="third-party">{t("route.thirdParty")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -896,10 +904,10 @@ function AddProviderDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+<Button variant="outline" onClick={() => onOpenChange(false)}>{tc("actions.cancel")}</Button>
           <Button onClick={() => void submit()} disabled={submitting}>
             <Plus />
-            添加
+            {tc("actions.add")}
           </Button>
         </DialogFooter>
       </DialogContent>

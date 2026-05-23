@@ -36,6 +36,7 @@ import {
 } from "@agenticx/ui";
 import type { ColumnDef } from "@tanstack/react-table";
 import { FileWarning, Filter, Inbox, RefreshCcw, Search, ShieldAlert, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 type QueryResult = {
   total: number;
@@ -46,6 +47,9 @@ type QueryResult = {
 };
 
 export default function AuditPage() {
+  const t = useTranslations("pages.ops.audit");
+  const ts = useTranslations("shell");
+  const tc = useTranslations("common");
   const [items, setItems] = useState<AuditEvent[]>([]);
   const [selected, setSelected] = useState<AuditEvent | null>(null);
   const [chainValid, setChainValid] = useState(true);
@@ -100,11 +104,11 @@ export default function AuditPage() {
       );
       await loadChainVerify();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载失败");
+      toast.error(error instanceof Error ? error.message : t("toast.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [userId, model, policyHit, loadChainVerify]);
+  }, [userId, model, policyHit, loadChainVerify, t]);
 
   useEffect(() => {
     void load();
@@ -128,26 +132,26 @@ export default function AuditPage() {
     anchor.download = `audit-${new Date().toISOString().slice(0, 10)}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
-    toast.success(`已导出 ${items.length} 条记录`);
+    toast.success(t("exportSuccess", { count: items.length }));
   };
 
   const columns = useMemo<ColumnDef<AuditEvent>[]>(
     () => [
       {
         accessorKey: "event_time",
-        header: "时间",
+        header: t("columns.time"),
         cell: ({ row }) => (
           <span className="font-mono text-xs text-muted-foreground">{row.original.event_time}</span>
         ),
       },
       {
         accessorKey: "event_type",
-        header: "事件",
+        header: t("columns.event"),
         cell: ({ row }) => <span className="font-medium">{row.original.event_type}</span>,
       },
       {
         accessorKey: "user_id",
-        header: "用户",
+        header: t("columns.user"),
         cell: ({ row }) => (
           <div className="flex items-center gap-2">
             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[10px] font-semibold text-primary">
@@ -159,7 +163,7 @@ export default function AuditPage() {
       },
       {
         accessorKey: "model",
-        header: "模型",
+        header: t("columns.model"),
         cell: ({ row }) =>
           row.original.model ? (
             <Badge variant="soft" className="font-mono text-[10px]">
@@ -171,40 +175,54 @@ export default function AuditPage() {
       },
       {
         accessorKey: "policies_hit",
-        header: "策略命中",
+        header: t("columns.policy"),
         cell: ({ row }) => {
           const count = row.original.policies_hit?.length ?? 0;
           if (count === 0) {
             return (
               <Badge variant="success" className="gap-1">
                 <ShieldCheck className="h-3 w-3" />
-                合规
+                {t("compliant")}
               </Badge>
             );
           }
           return (
             <Badge variant="destructive" className="gap-1">
               <ShieldAlert className="h-3 w-3" />
-              命中 {count}
+              {t("hit")} {count}
             </Badge>
           );
         },
       },
     ],
-    []
+    [t]
   );
 
   const activeFilters = useMemo(() => {
     const list = [];
-    if (userId) list.push({ id: "user", label: `用户：${userId}`, onRemove: () => setUserId("") });
-    if (model) list.push({ id: "model", label: `模型：${model}`, onRemove: () => setModel("") });
-    if (policyHit) list.push({ id: "policy", label: `策略：${policyHit}`, onRemove: () => setPolicyHit("") });
+    if (userId) list.push({ id: "user", label: `${t("filterLabels.user")}${userId}`, onRemove: () => setUserId("") });
+    if (model) list.push({ id: "model", label: `${t("filterLabels.model")}${model}`, onRemove: () => setModel("") });
+    if (policyHit) list.push({ id: "policy", label: `${t("filterLabels.policy")}${policyHit}`, onRemove: () => setPolicyHit("") });
     return list;
-  }, [userId, model, policyHit]);
+  }, [userId, model, policyHit, t]);
 
   const headerChainOk = chainFull != null ? chainFull.valid : chainValid;
   const headerChainAt =
     chainFull != null && !chainFull.valid ? chainFull.at : chainFull == null && !chainValid ? chainError?.at : undefined;
+
+  const headerDescription = useMemo(() => {
+    const prefix = t("description.count", { count: items.length });
+    if (chainFull != null) {
+      const chainPart = chainFull.valid
+        ? t("description.chainOk")
+        : `${t("description.chainFail")}${chainFull.reason ? `（${chainFull.reason}）` : ""}`;
+      return `${prefix} ${chainPart} · ${t("description.scanned", { count: chainFull.scanned ?? 0 })}`;
+    }
+    if (chainValid) {
+      return `${prefix} ${t("description.chainLoading")}`;
+    }
+    return `${prefix} ${t("description.pageChainFail")}${chainError?.reason ? `（${chainError.reason}）` : ""}`;
+  }, [items.length, chainFull, chainValid, chainError, t]);
 
   return (
     <div className="space-y-5">
@@ -214,29 +232,23 @@ export default function AuditPage() {
             <BreadcrumbList>
               <BreadcrumbItem>
                 <BreadcrumbLink asChild>
-                  <Link href="/dashboard">Admin</Link>
+                  <Link href="/dashboard">{ts("adminLabel")}</Link>
                 </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator />
               <BreadcrumbItem>
-                <BreadcrumbPage>审计日志</BreadcrumbPage>
+                <BreadcrumbPage>{t("breadcrumbAudit")}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
         }
-        title="审计日志"
-        description={`共 ${items.length} 条记录 · ${
-          chainFull != null
-            ? `${chainFull.valid ? "全表链校验通过" : `全表链校验失败${chainFull.reason ? `（${chainFull.reason}）` : ""}`} · 已扫 ${chainFull.scanned} 行`
-            : chainValid
-              ? "全表链校验加载中…"
-              : `当前页链校验失败${chainError?.reason ? `（${chainError.reason}）` : ""}`
-        }`}
+        title={t("title")}
+        description={headerDescription}
         actions={
           <>
             <Badge variant={headerChainOk ? "success" : "destructive"} className="gap-1">
               <ShieldCheck className="h-3 w-3" />
-              {headerChainOk ? "链完整" : "链异常"}
+              {headerChainOk ? t("chainOk") : t("chainBad")}
             </Badge>
             {!headerChainOk && headerChainAt ? (
               <Badge variant="warning" className="font-mono text-[10px]">
@@ -245,7 +257,7 @@ export default function AuditPage() {
             ) : null}
             <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
               <RefreshCcw />
-              刷新
+              {t("refresh")}
             </Button>
           </>
         }
@@ -256,7 +268,7 @@ export default function AuditPage() {
           <DataTable
             columns={columns}
             data={items}
-            searchPlaceholder="按事件类型 / 用户 / 模型搜索..."
+            searchPlaceholder={t("searchPlaceholder")}
             activeFilters={activeFilters}
             onClearFilters={() => {
               setUserId("");
@@ -268,8 +280,8 @@ export default function AuditPage() {
             emptyState={
               <EmptyState
                 icon={<FileWarning className="h-5 w-5" />}
-                title={loading ? "加载中..." : "暂无审计事件"}
-                description={loading ? "正在查询网关审计流" : "无符合条件的记录"}
+                title={loading ? t("emptyLoadingTitle") : t("emptyTitle")}
+                description={loading ? t("emptyLoadingDescription") : t("emptyDescription")}
                 size="sm"
                 className="border-0"
               />
@@ -279,7 +291,7 @@ export default function AuditPage() {
                 <PopoverTrigger asChild>
                   <Button variant="outline" size="sm" className="gap-1.5">
                     <Filter />
-                    高级筛选
+                    {t("advancedFilter")}
                     {activeFilters.length > 0 ? (
                       <Badge variant="default" className="ml-1 h-4 min-w-4 px-1 text-[10px]">
                         {activeFilters.length}
@@ -291,11 +303,11 @@ export default function AuditPage() {
                   <div className="space-y-3">
                     <div className="flex items-center gap-2 text-sm font-semibold">
                       <SlidersHorizontal className="h-4 w-4" />
-                      高级筛选
+                      {t("advancedFilter")}
                     </div>
                     <Separator />
                     <div className="space-y-1.5">
-                      <Label htmlFor="flt-user">用户 ID</Label>
+                      <Label htmlFor="flt-user">{t("filterUserId")}</Label>
                       <Input
                         id="flt-user"
                         value={userId}
@@ -304,7 +316,7 @@ export default function AuditPage() {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="flt-model">模型</Label>
+                      <Label htmlFor="flt-model">{t("filterModel")}</Label>
                       <Input
                         id="flt-model"
                         value={model}
@@ -313,7 +325,7 @@ export default function AuditPage() {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="flt-policy">策略命中</Label>
+                      <Label htmlFor="flt-policy">{t("filterPolicy")}</Label>
                       <Input
                         id="flt-policy"
                         value={policyHit}
@@ -331,11 +343,11 @@ export default function AuditPage() {
                           setPolicyHit("");
                         }}
                       >
-                        清空
+                        {t("clearFilters")}
                       </Button>
                       <Button size="sm" onClick={() => void load()}>
                         <Search />
-                        应用筛选
+                        {t("applyFilters")}
                       </Button>
                     </div>
                   </div>
@@ -361,12 +373,12 @@ export default function AuditPage() {
                     {(selected.policies_hit?.length ?? 0) > 0 ? (
                       <>
                         <ShieldAlert className="h-3 w-3" />
-                        命中 {selected.policies_hit?.length ?? 0}
+                        {t("hit")} {selected.policies_hit?.length ?? 0}
                       </>
                     ) : (
                       <>
                         <ShieldCheck className="h-3 w-3" />
-                        合规
+                        {t("compliant")}
                       </>
                     )}
                   </Badge>
@@ -377,22 +389,22 @@ export default function AuditPage() {
 
               <Tabs defaultValue="summary" className="flex flex-1 flex-col">
                 <TabsList>
-                  <TabsTrigger value="summary">概览</TabsTrigger>
-                  <TabsTrigger value="policies">策略 ({selected.policies_hit?.length ?? 0})</TabsTrigger>
-                  <TabsTrigger value="raw">原始 JSON</TabsTrigger>
+                  <TabsTrigger value="summary">{t("detail.tabSummary")}</TabsTrigger>
+                  <TabsTrigger value="policies">{t("detail.tabPolicies")} ({selected.policies_hit?.length ?? 0})</TabsTrigger>
+                  <TabsTrigger value="raw">{t("detail.tabRaw")}</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="summary" className="flex-1 overflow-y-auto pr-1">
                   <dl className="divide-y divide-border text-sm">
-                    <DetailField label="时间" value={<span className="font-mono text-xs">{selected.event_time}</span>} />
-                    <DetailField label="用户" value={selected.user_id ?? "—"} />
-                    <DetailField label="模型" value={selected.model ?? "—"} />
-                    <DetailField label="Provider" value={selected.provider ?? "—"} />
-                    <DetailField label="租户" value={<span className="font-mono text-xs">{selected.tenant_id}</span>} />
-                    <DetailField label="Session" value={<span className="font-mono text-xs">{selected.session_id ?? "—"}</span>} />
-                    <DetailField label="Input tokens" value={<span className="font-mono">{selected.input_tokens ?? "—"}</span>} />
-                    <DetailField label="Output tokens" value={<span className="font-mono">{selected.output_tokens ?? "—"}</span>} />
-                    <DetailField label="耗时" value={selected.latency_ms ? `${selected.latency_ms} ms` : "—"} />
+                    <DetailField label={t("detail.time")} value={<span className="font-mono text-xs">{selected.event_time}</span>} />
+                    <DetailField label={t("detail.user")} value={selected.user_id ?? "—"} />
+                    <DetailField label={t("detail.model")} value={selected.model ?? "—"} />
+                    <DetailField label={t("detail.provider")} value={selected.provider ?? "—"} />
+                    <DetailField label={t("detail.tenant")} value={<span className="font-mono text-xs">{selected.tenant_id}</span>} />
+                    <DetailField label={t("detail.session")} value={<span className="font-mono text-xs">{selected.session_id ?? "—"}</span>} />
+                    <DetailField label={t("detail.inputTokens")} value={<span className="font-mono">{selected.input_tokens ?? "—"}</span>} />
+                    <DetailField label={t("detail.outputTokens")} value={<span className="font-mono">{selected.output_tokens ?? "—"}</span>} />
+                    <DetailField label={t("detail.latency")} value={selected.latency_ms ? `${selected.latency_ms} ms` : "—"} />
                   </dl>
                 </TabsContent>
 
@@ -400,8 +412,8 @@ export default function AuditPage() {
                   {(selected.policies_hit?.length ?? 0) === 0 ? (
                     <EmptyState
                       icon={<ShieldCheck className="h-5 w-5" />}
-                      title="未命中任何策略"
-                      description="本次事件合规"
+                      title={t("detail.noPolicyTitle")}
+                      description={t("detail.noPolicyDescription")}
                       size="sm"
                       className="border-0"
                     />
@@ -444,8 +456,8 @@ export default function AuditPage() {
           ) : (
             <EmptyState
               icon={<Inbox className="h-5 w-5" />}
-              title="请选择一条事件"
-              description="从列表中点击任意行查看详情"
+              title={t("detail.selectTitle")}
+              description={t("detail.selectDescription")}
               size="sm"
               className="border-0"
             />

@@ -1,0 +1,76 @@
+import i18next from "eslint-plugin-i18next";
+import tseslint from "typescript-eslint";
+
+/** @type {import("eslint").Linter.Config[]} */
+export default tseslint.config(
+  {
+    ignores: ["**/*.test.ts", "**/*.test.tsx", "**/__fixtures__/**", ".next/**"],
+  },
+  {
+    files: ["src/app/**/*.{ts,tsx}", "src/components/**/*.{ts,tsx}"],
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        ecmaVersion: "latest",
+        sourceType: "module",
+        ecmaFeatures: { jsx: true },
+      },
+    },
+    plugins: { i18next },
+    rules: {
+      "i18next/no-literal-string": [
+        "warn",
+        {
+          mode: "jsx-text-only",
+          callees: {
+            exclude: ["t", "tc", "useTranslations", "getTranslations"],
+          },
+          "jsx-attributes": {
+            exclude: [
+              "className",
+              "id",
+              "href",
+              "type",
+              "name",
+              "accept",
+              "placeholder",
+              "aria-hidden",
+              "data-testid",
+              "key",
+              "variant",
+              "size",
+              "side",
+              "align",
+              "overlayClassName",
+              "aria-label",
+            ],
+          },
+          words: {
+            exclude: [
+              "Machi",
+              "AgenticX",
+              "Pyroscope",
+              "manifest.yaml",
+              "ON",
+              "OFF",
+              "HTTP",
+              "Gateway",
+              "Name",
+              "Backend",
+              "Key",
+              "Email",
+              "admin",
+              "admin@agenticx.local",
+              "✓",
+              "·",
+              "：",
+              "（",
+              "）",
+              "。",
+            ],
+          },
+        },
+      ],
+    },
+  }
+);
