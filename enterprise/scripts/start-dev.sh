@@ -124,23 +124,22 @@ cleanup() {
 }
 trap cleanup INT TERM EXIT
 
-# 5) 拉起 gateway
-echo "[start-dev] booting gateway (:8088) ..."
-(
-  cd "$ENTERPRISE_DIR/apps/gateway"
-  exec go run ./cmd/gateway
-) &
-PIDS+=("$!")
+wait_for_http() {
+  local label="$1"
+  local url="$2"
+  local max_attempts="${3:-60}"
+  for i in $(seq 1 "$max_attempts"); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      echo "[start-dev] $label ready"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "[start-dev] $label not ready after ${max_attempts}s" >&2
+  return 1
+}
 
-for i in $(seq 1 30); do
-  if curl -fsS "${GATEWAY_BASE_URL:-http://127.0.0.1:8088}/healthz" >/dev/null 2>&1; then
-    echo "[start-dev] gateway ready"
-    break
-  fi
-  sleep 1
-done
-
-# 6) 拉起 Next 应用（默认仅 enterprise，--all 时含 customers/*）
+# 5) 先拉起 Next 应用（gateway 依赖 admin internal API，须 admin 就绪后再启 gateway）
 TURBO_ARGS=(run dev "--ui=$TURBO_UI")
 if [ "$ALL_APPS" -eq 0 ]; then
   TURBO_ARGS+=(
@@ -158,6 +157,22 @@ echo "[start-dev] booting Next apps → $SCOPE"
   exec pnpm exec turbo "${TURBO_ARGS[@]}"
 ) &
 PIDS+=("$!")
+
+wait_for_http "admin-console" "http://127.0.0.1:3001" 90 || true
+wait_for_http "web-portal" "http://127.0.0.1:3000" 90 || true
+
+# 6) admin 就绪后再拉起 gateway（避免 policy/providers 远程拉取 connection refused）
+echo "[start-dev] booting gateway (:8088) ..."
+(
+  cd "$ENTERPRISE_DIR/apps/gateway"
+  exec go run ./cmd/gateway
+) &
+PIDS+=("$!")
+
+if ! wait_for_http "gateway" "${GATEWAY_BASE_URL:-http://127.0.0.1:8088}/healthz" 45; then
+  echo "[start-dev] 警告：gateway 未在 45s 内就绪，前台聊天会报 Gateway request failed。" >&2
+  echo "[start-dev] 请检查上方 gateway 日志（常见：admin internal 401 / 上游模型配置）。" >&2
+fi
 
 echo
 echo "[start-dev] all services launching. Ctrl+C 结束。"
