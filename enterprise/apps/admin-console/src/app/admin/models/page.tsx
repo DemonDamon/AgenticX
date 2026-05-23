@@ -122,6 +122,8 @@ export default function ModelProvidersPage() {
   const [isDefaultDraft, setIsDefaultDraft] = useState(false);
   const [keyDraft, setKeyDraft] = useState("");
   const [keyVisible, setKeyVisible] = useState(false);
+  const [revealingKey, setRevealingKey] = useState(false);
+  const serverKeyRef = useRef<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [addingModel, setAddingModel] = useState(false);
@@ -137,7 +139,8 @@ export default function ModelProvidersPage() {
       baseUrlDraft.trim() !== baseline.baseUrl ||
       enabledDraft !== baseline.enabled ||
       isDefaultDraft !== baseline.isDefault ||
-      keyDraft !== baseline.apiKeyDraft
+      keyDraft !== baseline.apiKeyDraft &&
+      keyDraft !== serverKeyRef.current
     );
   }, [baseline, displayNameDraft, baseUrlDraft, enabledDraft, isDefaultDraft, keyDraft]);
 
@@ -156,6 +159,7 @@ export default function ModelProvidersPage() {
     setIsDefaultDraft(snap.isDefault);
     setKeyDraft("");
     setKeyVisible(false);
+    serverKeyRef.current = null;
   }, []);
 
   const load = useCallback(async (preferId?: string) => {
@@ -230,7 +234,9 @@ export default function ModelProvidersPage() {
     if (nextBaseUrl !== baseline.baseUrl) patch.baseUrl = nextBaseUrl;
     if (enabledDraft !== baseline.enabled) patch.enabled = enabledDraft;
     if (isDefaultDraft !== baseline.isDefault) patch.isDefault = isDefaultDraft;
-    if (keyDraft.trim() && keyDraft !== baseline.apiKeyDraft) patch.apiKey = keyDraft.trim();
+    if (keyDraft.trim() && keyDraft !== baseline.apiKeyDraft && keyDraft !== serverKeyRef.current) {
+      patch.apiKey = keyDraft.trim();
+    }
 
     setSaving(true);
     try {
@@ -279,6 +285,41 @@ export default function ModelProvidersPage() {
     } finally {
       setTesting(false);
     }
+  };
+
+  const handleToggleKeyVisible = async () => {
+    if (!active) return;
+
+    if (keyVisible) {
+      if (serverKeyRef.current !== null && keyDraft === serverKeyRef.current) {
+        setKeyDraft("");
+        serverKeyRef.current = null;
+      }
+      setKeyVisible(false);
+      return;
+    }
+
+    if (!keyDraft.trim() && active.apiKeyConfigured) {
+      setRevealingKey(true);
+      try {
+        const res = await fetch(`/api/admin/providers/${active.id}/key`, { cache: "no-store" });
+        const json = (await res.json()) as { code?: string; message?: string; data?: { apiKey?: string } };
+        const apiKey = json.data?.apiKey?.trim() ?? "";
+        if (!res.ok || !apiKey) {
+          toast.error(json.message ?? "无法读取密钥");
+          return;
+        }
+        serverKeyRef.current = apiKey;
+        setKeyDraft(apiKey);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "网络错误");
+        return;
+      } finally {
+        setRevealingKey(false);
+      }
+    }
+
+    setKeyVisible(true);
   };
 
   const handleAddModel = async () => {
@@ -488,15 +529,36 @@ export default function ModelProvidersPage() {
                 <div className="space-y-1.5">
                   <Label>API 密钥</Label>
                   <div className="flex items-center gap-2">
-                    <Input
-                      type={keyVisible ? "text" : "password"}
-                      placeholder={active.apiKeyConfigured ? active.apiKeyMasked : "粘贴 API Key（仅 admin 可见）"}
-                      value={keyDraft}
-                      onChange={(event) => setKeyDraft(event.target.value)}
-                    />
-                    <Button variant="ghost" size="icon-sm" onClick={() => setKeyVisible((v) => !v)} aria-label="切换显示">
-                      {keyVisible ? <EyeOff /> : <Eye />}
-                    </Button>
+                    <div className="relative min-w-0 flex-1">
+                      <Input
+                        type={keyVisible ? "text" : "password"}
+                        className="pr-10"
+                        placeholder={
+                          keyDraft.trim()
+                            ? "粘贴 API Key（仅 admin 可见）"
+                            : active.apiKeyConfigured
+                              ? active.apiKeyMasked
+                              : "粘贴 API Key（仅 admin 可见）"
+                        }
+                        value={keyDraft}
+                        onChange={(event) => {
+                          serverKeyRef.current = null;
+                          setKeyDraft(event.target.value);
+                        }}
+                        autoComplete="off"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="absolute right-0.5 top-1/2 z-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        onClick={() => void handleToggleKeyVisible()}
+                        disabled={revealingKey}
+                        aria-label={keyVisible ? "隐藏密钥" : "显示密钥"}
+                      >
+                        {keyVisible ? <EyeOff /> : <Eye />}
+                      </Button>
+                    </div>
                     <Button variant="outline" size="sm" onClick={() => void handleTest()} disabled={testing}>
                       <Activity />
                       {testing ? "检测中..." : "检测"}
