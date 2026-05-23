@@ -11,8 +11,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@agenticx/db-schema": "workspace:*",
+    "@agenticx/iam-core": "workspace:*",
     "@node-saml/node-saml": "^5",
     "bcryptjs": "^3.0.3",
+    "drizzle-orm": "^0.45.2",
     "jose": "^6.2.2",
     "openid-client": "^6.0.0"
   },

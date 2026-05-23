@@ -20,6 +20,9 @@ const config: NextConfig = {
     "@agenticx/feature-tools-mcp",
     "@agenticx/feature-agents",
   ],
+  experimental: {
+    optimizePackageImports: ["lucide-react", "@agenticx/ui"],
+  },
 };
 
 export default withNextIntl(config);
