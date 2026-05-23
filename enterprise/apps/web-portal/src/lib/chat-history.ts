@@ -7,7 +7,7 @@ import {
 } from "@agenticx/core-api";
 import type { AuthUser } from "@agenticx/auth";
 import { chatMessages, chatSessions, users } from "@agenticx/db-schema";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { ulid as newUlid } from "ulid";
@@ -125,10 +125,11 @@ export async function listChatSessions(ctx: ChatHistoryContext): Promise<ChatSes
       and(
         eq(chatSessions.tenantId, ctx.tenantId),
         eq(chatSessions.userId, ctx.userId),
-        isNull(chatSessions.deletedAt)
+        isNull(chatSessions.deletedAt),
+        gt(chatSessions.messageCount, 0)
       )
     )
-    .orderBy(desc(chatSessions.updatedAt));
+    .orderBy(desc(chatSessions.createdAt));
   return rows.map(mapSessionRow);
 }
 
