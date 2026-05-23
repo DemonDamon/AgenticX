@@ -220,6 +220,22 @@ export default function ChannelsPage() {
     }
   };
 
+  const onProbe = async (id: string) => {
+    try {
+      const res = await fetch(`/api/admin/channels/${id}/probe`, { method: "POST" });
+      const json = await res.json();
+      if (json.code !== "00000") throw new Error(json.message || "probe failed");
+      toast.success("探活完成，已回填模型列表");
+      const models = (json.data?.probe?.supported_models as string[] | undefined) ?? [];
+      if (editing?.id === id && models.length) {
+        setEditing((prev) => (prev ? { ...prev, models: models.join(", ") } : prev));
+      }
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "探活失败");
+    }
+  };
+
   const onDelete = async (id: string) => {
     if (!confirm("确定删除该 Channel？")) return;
     const res = await fetch(`/api/admin/channels/${id}`, { method: "DELETE" });
@@ -301,9 +317,12 @@ export default function ChannelsPage() {
                     ) : null}
                     {health?.last_error ? <p className="text-destructive truncate">最近错误：{health.last_error}</p> : null}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Button variant="ghost" size="sm" onClick={() => openEdit(ch)}>
                       <Pencil className="mr-1 h-4 w-4" /> 编辑
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => void onProbe(ch.id)}>
+                      <Circle className="mr-1 h-4 w-4" /> 探活
                     </Button>
                     <Button variant="ghost" size="sm" className="text-destructive" onClick={() => void onDelete(ch.id)}>
                       <Trash2 className="mr-1 h-4 w-4" /> 删除
@@ -478,6 +497,11 @@ export default function ChannelsPage() {
             <Button variant="outline" onClick={() => setEditing(null)}>
               取消
             </Button>
+            {editing ? (
+              <Button variant="outline" onClick={() => void onProbe(editing.id)}>
+                探活
+              </Button>
+            ) : null}
             <Button onClick={() => void onSaveEdit()}>保存</Button>
           </DialogFooter>
         </DialogContent>

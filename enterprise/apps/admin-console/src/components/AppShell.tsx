@@ -50,6 +50,7 @@ import {
   Monitor,
   Moon,
   Package,
+  Puzzle,
   Search,
   Shield,
   Sliders,
@@ -112,6 +113,15 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/cache", label: "AI 缓存", icon: Database },
       { href: "/admin/api-tokens", label: "API Tokens", icon: KeyRound },
       { href: "/admin/mcp-servers", label: "MCP 托管", icon: Plug },
+      { href: "/admin/plugins", label: "Wasm 插件", icon: Puzzle },
+    ],
+  },
+  {
+    id: "observability",
+    label: "可观测",
+    items: [
+      { href: "/admin/errors", label: "错误聚类", icon: FileWarning },
+      { href: "/admin/perf", label: "性能分析", icon: Activity },
     ],
   },
 ];
