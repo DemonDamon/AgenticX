@@ -67,6 +67,8 @@ export type ChatStoreState = {
   historyLoading: boolean;
   historyError: string | null;
   sessionMessagesLoading: boolean;
+  /** 本地草稿 session：用户发送首条消息前不落盘（对齐 Machi Desktop lazy create） */
+  draftSessionId: string | null;
 };
 
 const EMPTY_USAGE: SessionTokenUsage = {
@@ -249,6 +251,50 @@ function stripVersionsForSession(
   return next;
 }
 
+function isDraftSessionId(state: Pick<ChatStoreState, "draftSessionId">, sessionId: string | null): boolean {
+  return !!sessionId && sessionId === state.draftSessionId;
+}
+
+function discardDraftSessionPatch(state: ChatStoreState): Partial<ChatStoreState> {
+  if (!state.draftSessionId) return {};
+  const draftId = state.draftSessionId;
+  const nextTokens = { ...state.sessionTokensBySessionId };
+  delete nextTokens[draftId];
+  return {
+    draftSessionId: null,
+    messages: state.messages.filter((message) => message.session_id !== draftId),
+    sessionTokensBySessionId: nextTokens,
+  };
+}
+
+function beginDraftSessionPatch(
+  state: ChatStoreState,
+  params?: { defaultModel?: string },
+): Partial<ChatStoreState> {
+  const prevDraftId = state.draftSessionId;
+  const draftId = makeId();
+  const nextTokens = { ...state.sessionTokensBySessionId };
+  if (prevDraftId) delete nextTokens[prevDraftId];
+  nextTokens[draftId] = { ...EMPTY_USAGE };
+  const withoutOldDraftMessages = prevDraftId
+    ? state.messages.filter((message) => message.session_id !== prevDraftId)
+    : state.messages;
+  return {
+    draftSessionId: draftId,
+    activeSessionId: draftId,
+    activeModel: params?.defaultModel ?? state.activeModel ?? DEFAULT_MODEL,
+    messages: withoutOldDraftMessages,
+    status: "idle",
+    errorMessage: null,
+    activeRequestId: null,
+    historyError: null,
+    sessionMessagesLoading: false,
+    sessionTokens: { ...EMPTY_USAGE },
+    sessionTokensBySessionId: nextTokens,
+    responseVersionsByUserMessageId: {},
+  };
+}
+
 function buildHydratedResponseVersions(messages: ChatMessage[]): Record<string, UserResponseVersionState> {
   const result: Record<string, UserResponseVersionState> = {};
   let i = 0;
@@ -299,6 +345,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   historyLoading: false,
   historyError: null,
   sessionMessagesLoading: false,
+  draftSessionId: null,
 
   async hydrateSessions() {
     if (chatHydrateInFlight) {
@@ -310,14 +357,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     chatHydrateInFlight = (async () => {
       set({ historyLoading: true, historyError: null });
       try {
-        let sessions = await portalHistory.listSessions();
+        const sessions = await portalHistory.listSessions();
         if (sessions.length === 0) {
-          const state = get();
-          const welcome = await portalHistory.createSession({
-            title: "欢迎使用 AgenticX",
-            activeModel: state.activeModel !== DEFAULT_MODEL ? state.activeModel : undefined,
+          set({
+            ...beginDraftSessionPatch(get()),
+            sessions: [],
+            hydrated: true,
+            historyLoading: false,
+            historyError: null,
           });
-          sessions = [welcome];
+          historyAuthRedirectScheduled = false;
+          return;
         }
         const activeSession = sessions[0]!;
         const activeSessionId = activeSession.id;
@@ -327,6 +377,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         set({
           sessions,
           activeSessionId,
+          draftSessionId: null,
           messages: remoteMessages,
           hydrated: true,
           historyLoading: false,
@@ -358,98 +409,36 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   bootstrap(params) {
     if (get().hydrated) return;
-    const sessionId = makeId();
-    const session: ChatSession = {
-      id: sessionId,
-      tenant_id: params?.tenantId ?? DEFAULT_TENANT,
-      user_id: params?.userId ?? DEFAULT_USER,
-      title: params?.title?.trim() || "New chat",
-      active_model: params?.defaultModel ?? DEFAULT_MODEL,
-      message_count: 0,
-      created_at: now(),
-      updated_at: now(),
-    };
-
     set({
-      sessions: [session],
-      activeSessionId: sessionId,
-      messages: [],
-      status: "idle",
-      activeModel: session.active_model ?? DEFAULT_MODEL,
-      errorMessage: null,
-      activeRequestId: null,
-      sessionTokens: { ...EMPTY_USAGE },
-      sessionTokensBySessionId: { [sessionId]: { ...EMPTY_USAGE } },
-      responseVersionsByUserMessageId: {},
+      ...beginDraftSessionPatch(get(), params),
+      sessions: [],
+      hydrated: false,
     });
   },
 
   async createSession(params) {
     if (!get().hydrated) {
-      const sessionId = makeId();
-      const session: ChatSession = {
-        id: sessionId,
-        tenant_id: params?.tenantId ?? DEFAULT_TENANT,
-        user_id: params?.userId ?? DEFAULT_USER,
-        title: params?.title?.trim() || "New chat",
-        active_model: params?.defaultModel ?? get().activeModel ?? DEFAULT_MODEL,
-        message_count: 0,
-        created_at: now(),
-        updated_at: now(),
-      };
-
       set((prev) => ({
-        sessions: [...prev.sessions, session],
-        activeSessionId: sessionId,
-        activeModel: session.active_model ?? DEFAULT_MODEL,
-        status: "idle",
-        errorMessage: null,
-        activeRequestId: null,
-        historyError: null,
-        sessionTokens: { ...EMPTY_USAGE },
-        sessionTokensBySessionId: {
-          ...prev.sessionTokensBySessionId,
-          [sessionId]: { ...EMPTY_USAGE },
-        },
+        ...beginDraftSessionPatch(prev, params),
+        sessions: prev.sessions,
       }));
       return;
     }
 
-    try {
-      const created = await portalHistory.createSession({
-        title: params?.title?.trim() || "New chat",
-        activeModel: params?.defaultModel ?? get().activeModel,
-      });
-      set((prev) => ({
-        sessions: [...prev.sessions, created],
-        activeSessionId: created.id,
-        activeModel: created.active_model ?? prev.activeModel ?? DEFAULT_MODEL,
-        status: "idle",
-        errorMessage: null,
-        activeRequestId: null,
-        sessionTokens: { ...EMPTY_USAGE },
-        sessionTokensBySessionId: {
-          ...prev.sessionTokensBySessionId,
-          [created.id]: { ...EMPTY_USAGE },
-        },
-        messages: mergeSessionMessages(prev.messages, created.id, []),
-        responseVersionsByUserMessageId: {},
-      }));
-    } catch (error) {
-      const message = resolveHistoryErrorMessage(error, "创建会话失败");
-      set({
-        historyError: message,
-        hydrated: message === "登录已过期，请重新登录" ? false : get().hydrated,
-      });
-    }
+    set((prev) => ({
+      ...beginDraftSessionPatch(prev, params),
+      sessions: prev.sessions,
+    }));
   },
 
   async switchSession(sessionId) {
+    if (isDraftSessionId(get(), sessionId)) return;
     const target = get().sessions.find((session) => session.id === sessionId);
     if (!target) return;
     const tokens = get().sessionTokensBySessionId[sessionId] ?? { ...EMPTY_USAGE };
     if (!get().hydrated) {
       set({
+        ...discardDraftSessionPatch(get()),
         activeSessionId: sessionId,
         activeModel: target.active_model ?? DEFAULT_MODEL,
         errorMessage: null,
@@ -460,6 +449,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     const loadSeq = ++sessionMessageLoadSeq;
     set({
+      ...discardDraftSessionPatch(get()),
       activeSessionId: sessionId,
       activeModel: target.active_model ?? DEFAULT_MODEL,
       errorMessage: null,
@@ -489,6 +479,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   async renameSession(sessionId, title) {
+    if (isDraftSessionId(get(), sessionId)) return;
     const nextTitle = title.trim() || "New chat";
     set((state) => ({
       sessions: state.sessions.map((session) =>
@@ -507,6 +498,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   async deleteSession(sessionId) {
+    if (isDraftSessionId(get(), sessionId)) return;
+
     if (get().hydrated) {
       try {
         await portalHistory.deleteSession(sessionId);
@@ -539,6 +532,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       const nextTarget = nextSessions.find((session) => session.id === nextActive);
       const nextSessionTokens = nextActive ? (nextTokensMap[nextActive] ?? { ...EMPTY_USAGE }) : { ...EMPTY_USAGE };
 
+      if (willBeEmpty && state.hydrated) {
+        return {
+          ...beginDraftSessionPatch(state, { defaultModel: state.activeModel }),
+          sessions: [],
+        };
+      }
+
       return {
         sessions: nextSessions,
         activeSessionId: nextActive,
@@ -552,17 +552,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         errorMessage: null,
       };
     });
-
-    if (willBeEmpty && get().hydrated) {
-      await get().createSession({
-        title: "欢迎使用 AgenticX",
-        defaultModel: get().activeModel,
-      });
-    }
   },
 
   switchModel(model) {
     const sessionId = get().activeSessionId;
+    if (isDraftSessionId(get(), sessionId)) {
+      set({ activeModel: model });
+      return;
+    }
     set((state) => ({
       activeModel: model,
       sessions: state.sessions.map((session) =>
@@ -584,15 +581,63 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   async sendMessage(client, input) {
     const state = get();
-    const sessionId = state.activeSessionId;
+    let sessionId = state.activeSessionId;
     if (!sessionId) return;
     if (state.status === "sending" || state.status === "streaming") return;
 
     const content = input.content.trim();
     if (!content) return;
 
-    const tenantId = input.tenantId ?? state.sessions.find((session) => session.id === sessionId)?.tenant_id ?? DEFAULT_TENANT;
-    const userId = input.userId ?? state.sessions.find((session) => session.id === sessionId)?.user_id ?? DEFAULT_USER;
+    if (isDraftSessionId(state, sessionId)) {
+      if (state.hydrated) {
+        try {
+          const created = await portalHistory.createSession({
+            title: buildAutoTitleFromFirstUserMessage(content) || "New chat",
+            activeModel: state.activeModel,
+          });
+          sessionId = created.id;
+          set((prev) => {
+            const draftId = prev.draftSessionId;
+            const draftTokens = draftId ? (prev.sessionTokensBySessionId[draftId] ?? { ...EMPTY_USAGE }) : { ...EMPTY_USAGE };
+            const nextTokensMap = { ...prev.sessionTokensBySessionId };
+            if (draftId) delete nextTokensMap[draftId];
+            nextTokensMap[created.id] = draftTokens;
+            return {
+              draftSessionId: null,
+              activeSessionId: created.id,
+              sessions: [...prev.sessions, created],
+              sessionTokensBySessionId: nextTokensMap,
+            };
+          });
+        } catch (error) {
+          const message = resolveHistoryErrorMessage(error, "创建会话失败");
+          set({
+            historyError: message,
+            hydrated: message === "登录已过期，请重新登录" ? false : get().hydrated,
+          });
+          return;
+        }
+      } else {
+        const promoted: ChatSession = {
+          id: sessionId,
+          tenant_id: input.tenantId ?? DEFAULT_TENANT,
+          user_id: input.userId ?? DEFAULT_USER,
+          title: buildAutoTitleFromFirstUserMessage(content) || "New chat",
+          active_model: state.activeModel,
+          message_count: 0,
+          created_at: now(),
+          updated_at: now(),
+        };
+        set((prev) => ({
+          draftSessionId: null,
+          sessions: [...prev.sessions, promoted],
+        }));
+      }
+    }
+
+    const latest = get();
+    const tenantId = input.tenantId ?? latest.sessions.find((session) => session.id === sessionId)?.tenant_id ?? DEFAULT_TENANT;
+    const userId = input.userId ?? latest.sessions.find((session) => session.id === sessionId)?.user_id ?? DEFAULT_USER;
     const userMessage: ChatMessage = {
       id: makeId(),
       session_id: sessionId,
@@ -609,11 +654,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       user_id: userId,
       role: "assistant",
       content: "",
-      model: state.activeModel,
+      model: latest.activeModel,
       created_at: now(),
     };
 
-    const sessionMessages = getSessionMessages(state.messages, sessionId);
+    const sessionMessages = getSessionMessages(latest.messages, sessionId);
     const nextSessionMessages = [...sessionMessages, userMessage, assistantMessage];
     const priorUserCount = sessionMessages.filter((m) => m.role === "user").length;
     const shouldAutoTitle = priorUserCount === 0;
@@ -647,7 +692,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }));
 
     try {
-      const request = toSdkRequest(sessionId, state.activeModel, nextSessionMessages);
+      const request = toSdkRequest(sessionId, get().activeModel, nextSessionMessages);
       const { requestId } = await client.sendMessage(request);
       set({ status: "streaming", activeRequestId: requestId });
 

@@ -68,8 +68,22 @@ describe("chat store history hydration", () => {
         lastUpdatedAt: null,
       },
       sessionTokensBySessionId: {},
+      draftSessionId: null,
       responseVersionsByUserMessageId: {},
     });
+  });
+
+  it("createSession opens a local draft without persisting to history list", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await useChatStore.getState().createSession({ title: "New chat" });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const state = useChatStore.getState();
+    expect(state.sessions).toHaveLength(3);
+    expect(state.draftSessionId).toBe(state.activeSessionId);
+    expect(state.sessions.some((session) => session.id === state.draftSessionId)).toBe(false);
   });
 
   it("ignores stale switchSession failures after a newer session is selected", async () => {
