@@ -1,26 +1,22 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { InputArea, MessageList, useChatStore } from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
 import {
   Activity,
   Check,
   ChevronDown,
-  Copy,
   Cpu,
   FileText,
   Globe,
-  Link,
   Microscope,
   Paperclip,
   Pencil,
-  RefreshCw,
   Share,
   ShieldAlert,
   Sparkles,
-  ThumbsDown,
-  ThumbsUp,
   Trash2,
   Wand2,
 } from "lucide-react";
@@ -36,7 +32,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@agenticx/ui";
-import { usePortalCopy } from "../lib/portal-copy";
 
 // 模型清单从 /api/me/models 动态获取（admin 配置 + 用户可见性）。
 // 没有任何分配时为空，UI 会提示「请联系管理员分配模型」。
@@ -64,30 +59,13 @@ type MachiChatViewProps = {
   client: ChatClient;
 };
 
-
-const SUGGESTIONS = [
-  {
-    icon: <Sparkles className="h-4 w-4" />,
-    title: "产品设计头脑风暴",
-    description: "给我 5 个改善员工入职体验的创意",
-    prompt: "帮我头脑风暴 5 个改善员工入职体验的创意，并给出可落地的第一步",
-  },
-  {
-    icon: <FileText className="h-4 w-4" />,
-    title: "文档摘要",
-    description: "把刚才那段内容改写得更简洁",
-    prompt: "请把以下内容改写得更简洁、更有条理（保持原意）：\n\n",
-  },
-  {
-    icon: <Wand2 className="h-4 w-4" />,
-    title: "对话格式美化",
-    description: "把会议纪要整理成可分发的日报",
-    prompt: "把下面的会议纪要整理为可分发的日报（含决定/行动项/截止）：\n\n",
-  },
-];
+function isComplianceError(message: string): boolean {
+  return (/合规|策略|compliance|policy/i.test(message) && !/Gateway/i.test(message));
+}
 
 export function MachiChatView({ client }: MachiChatViewProps) {
-  const t = usePortalCopy();
+  const t = useTranslations("chat");
+  const tw = useTranslations("workspace");
   const {
     sessions,
     activeSessionId,
@@ -98,7 +76,6 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     sessionTokens,
     responseVersionsByUserMessageId,
     hydrateSessions,
-    historyLoading,
     historyError,
     sessionMessagesLoading,
     renameSession,
@@ -123,6 +100,30 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     left: 0,
     width: 320,
   });
+
+  const suggestions = React.useMemo(
+    () => [
+      {
+        icon: <Sparkles className="h-4 w-4" />,
+        title: t("suggestion1Title"),
+        description: t("suggestion1Description"),
+        prompt: t("suggestion1Prompt"),
+      },
+      {
+        icon: <FileText className="h-4 w-4" />,
+        title: t("suggestion2Title"),
+        description: t("suggestion2Description"),
+        prompt: t("suggestion2Prompt"),
+      },
+      {
+        icon: <Wand2 className="h-4 w-4" />,
+        title: t("suggestion3Title"),
+        description: t("suggestion3Description"),
+        prompt: t("suggestion3Prompt"),
+      },
+    ],
+    [t],
+  );
 
   // 动态拉取当前用户可见的模型清单
   const [availableModels, setAvailableModels] = React.useState<PortalModelOption[]>([]);
@@ -196,25 +197,25 @@ export function MachiChatView({ client }: MachiChatViewProps) {
 
   const activeOption = React.useMemo(
     () => availableModels.find((m) => m.id === activeModel) ?? null,
-    [availableModels, activeModel]
+    [availableModels, activeModel],
   );
 
   const modelTriggerLabel = React.useMemo(() => {
     if (activeOption) return activeOption.label;
-    if (!modelsLoaded) return "加载中...";
+    if (!modelsLoaded) return t("loading");
     if (activeModel && activeModel !== "mock-model-v1") {
       return formatActiveModelFallback(activeModel);
     }
-    return availableModels.length === 0 ? "无可用模型" : "选择模型";
-  }, [activeOption, modelsLoaded, activeModel, availableModels.length]);
+    return availableModels.length === 0 ? t("noAvailableModel") : t("selectModel");
+  }, [activeOption, modelsLoaded, activeModel, availableModels.length, t]);
 
   const modelMenuEmptyHint = React.useMemo(() => {
     if (availableModels.length > 0) return null;
     if (activeModel && activeModel !== "mock-model-v1") {
-      return `当前会话使用 ${formatActiveModelFallback(activeModel)}，但该模型未分配给您的账号。请联系管理员在「用户管理 → 可见模型分配」中勾选可用模型。`;
+      return t("modelNotAssignedHint", { model: formatActiveModelFallback(activeModel) });
     }
-    return "暂无可用模型，请联系管理员在「平台配置 · 模型服务」启用模型，并在「用户管理 → 可见模型分配」中为您勾选。";
-  }, [availableModels.length, activeModel]);
+    return t("noModelsHint");
+  }, [availableModels.length, activeModel, t]);
 
   const visibleMessages = React.useMemo(() => {
     if (!activeSessionId) return [];
@@ -272,7 +273,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
     () => sessions.find((session) => session.id === activeSessionId),
     [sessions, activeSessionId],
   );
-  const [sessionTitle, setSessionTitle] = React.useState("新对话");
+  const [sessionTitle, setSessionTitle] = React.useState(t("newConversation"));
   const [isEditingTitle, setIsEditingTitle] = React.useState(false);
   const titleInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -292,7 +293,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
         <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
           <ShieldAlert className="h-5 w-5" />
           <div>
-            <AlertTitle>历史同步</AlertTitle>
+            <AlertTitle>{t("historySyncTitle")}</AlertTitle>
             <AlertDescription>{historyError}</AlertDescription>
           </div>
         </Alert>
@@ -302,9 +303,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
           <ShieldAlert className="h-5 w-5" />
           <div>
             <AlertTitle>
-              {/合规|策略/.test(errorMessage) && !/Gateway/i.test(errorMessage)
-                ? t.complianceTitle
-                : t.chatErrorTitle}
+              {isComplianceError(errorMessage) ? t("complianceTitle") : t("chatErrorTitle")}
             </AlertTitle>
             <AlertDescription>{errorMessage}</AlertDescription>
           </div>
@@ -322,11 +321,11 @@ export function MachiChatView({ client }: MachiChatViewProps) {
           <>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="附件" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
+                <Button variant="ghost" size="icon" aria-label={t("attachment")} className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
                   <Paperclip className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>上传文件（即将上线）</TooltipContent>
+              <TooltipContent>{t("uploadComingSoon")}</TooltipContent>
             </Tooltip>
             <Button
               variant={webSearch ? "secondary" : "ghost"}
@@ -426,7 +425,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                 onBlur={() => {
                   setIsEditingTitle(false);
                   if (activeSessionId) {
-                    void renameSession(activeSessionId, sessionTitle.trim() || "New chat");
+                    void renameSession(activeSessionId, sessionTitle.trim() || tw("newChat"));
                   }
                 }}
                 onKeyDown={(e) => {
@@ -453,8 +452,8 @@ export function MachiChatView({ client }: MachiChatViewProps) {
           <div className="flex items-center gap-1">
             <Badge variant="success" className="mr-2 gap-1 px-2.5 py-0.5 text-[11px] font-medium">
               <Activity className="h-3 w-3" />
-              <span className="hidden sm:inline">Gateway online</span>
-              <span className="sm:hidden">on</span>
+              <span className="hidden sm:inline">{t("gatewayOnline")}</span>
+              <span className="sm:hidden">{t("gatewayOnlineShort")}</span>
             </Badge>
             {sessionTokens.totalTokens > 0 && (
               <Tooltip>
@@ -470,8 +469,11 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                   </Badge>
                 </TooltipTrigger>
                 <TooltipContent>
-                  本会话累计 token：输入 {sessionTokens.inputTokens.toLocaleString()} · 输出{" "}
-                  {sessionTokens.outputTokens.toLocaleString()} · 合计 {sessionTokens.totalTokens.toLocaleString()}
+                  {t("tokenTooltip", {
+                    input: sessionTokens.inputTokens.toLocaleString(),
+                    output: sessionTokens.outputTokens.toLocaleString(),
+                    total: sessionTokens.totalTokens.toLocaleString(),
+                  })}
                 </TooltipContent>
               </Tooltip>
             )}
@@ -482,7 +484,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                     <Share className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>分享对话</TooltipContent>
+                <TooltipContent>{t("shareConversation")}</TooltipContent>
               </Tooltip>
             )}
             <Tooltip>
@@ -491,7 +493,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>删除对话</TooltipContent>
+              <TooltipContent>{t("deleteConversation")}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -506,15 +508,15 @@ export function MachiChatView({ client }: MachiChatViewProps) {
                   <MachiAvatar size={210} className="relative h-[210px] w-[210px]" />
                 </div>
                 <div>
-                  <h2 className="text-3xl font-semibold tracking-tight text-foreground">我是 Machi</h2>
+                  <h2 className="text-3xl font-semibold tracking-tight text-foreground">{t("welcomeTitle")}</h2>
                   <p className="mt-2 text-base text-muted-foreground/80">
-                    很高兴见到你，有什么我可以帮忙的吗？
+                    {t("welcomeSubtitle")}
                   </p>
                 </div>
               </div>
 
               <div className="mt-4 grid w-full max-w-2xl gap-4 sm:grid-cols-2">
-                {SUGGESTIONS.slice(0, 2).map((item) => (
+                {suggestions.slice(0, 2).map((item) => (
                   <button
                     key={item.title}
                     type="button"
@@ -542,7 +544,7 @@ export function MachiChatView({ client }: MachiChatViewProps) {
             <div className="relative h-full min-h-0">
               {sessionMessagesLoading && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 text-sm text-muted-foreground backdrop-blur-[1px]">
-                  加载消息…
+                  {t("loadingMessages")}
                 </div>
               )}
               <MessageList

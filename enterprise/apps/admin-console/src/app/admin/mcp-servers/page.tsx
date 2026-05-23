@@ -16,6 +16,7 @@ import {
   toast,
 } from "@agenticx/ui";
 import { Plug, Plus, RefreshCcw, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 type McpServer = {
   id: string;
@@ -34,6 +35,8 @@ type Health = {
 };
 
 export default function AdminMcpServersPage() {
+  const t = useTranslations("pages.admin.mcpServers");
+  const tc = useTranslations("common");
   const [servers, setServers] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -51,11 +54,11 @@ export default function AdminMcpServersPage() {
       const json = (await res.json()) as { data?: { servers?: McpServer[] } };
       setServers(json.data?.servers ?? []);
     } catch {
-      toast.error("加载 MCP Server 失败");
+      toast.error(t("toast.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -63,7 +66,7 @@ export default function AdminMcpServersPage() {
 
   async function createServer() {
     if (!name.trim()) {
-      toast.error("请填写 name");
+      toast.error(t("toast.nameRequired"));
       return;
     }
     try {
@@ -73,11 +76,11 @@ export default function AdminMcpServersPage() {
         body: JSON.stringify({ name: name.trim(), backendType, displayName: name.trim() }),
       });
       if (!res.ok) throw new Error(await res.text());
-      toast.success("已创建 MCP Server");
+      toast.success(t("toast.createSuccess"));
       setName("");
       await load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "创建失败");
+      toast.error(err instanceof Error ? err.message : t("toast.createFailed"));
     }
   }
 
@@ -89,13 +92,13 @@ export default function AdminMcpServersPage() {
       setHealth(json.data ?? null);
     } catch {
       setHealth(null);
-      toast.error("加载健康面板失败");
+      toast.error(t("toast.healthLoadFailed"));
     }
   }
 
   async function importOpenAPI() {
     if (!selectedId || !openApiSpec.trim()) {
-      toast.error("请选择 Server 并粘贴 OpenAPI JSON");
+      toast.error(t("toast.selectServerAndSpec"));
       return;
     }
     try {
@@ -109,42 +112,39 @@ export default function AdminMcpServersPage() {
         }),
       });
       if (!res.ok) throw new Error(await res.text());
-      toast.success("OpenAPI 工具已导入");
+      toast.success(t("toast.importSuccess"));
       await load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "导入失败");
+      toast.error(err instanceof Error ? err.message : t("toast.importFailed"));
     }
   }
 
   async function removeServer(id: string) {
-    if (!confirm("确认删除该 MCP Server？")) return;
+    if (!confirm(t("confirmDelete"))) return;
     try {
       const res = await fetch(`/api/admin/mcp-servers/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(await res.text());
-      toast.success("已删除");
+      toast.success(t("toast.deleteSuccess"));
       if (selectedId === id) {
         setSelectedId(null);
         setHealth(null);
       }
       await load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "删除失败");
+      toast.error(err instanceof Error ? err.message : t("toast.deleteFailed"));
     }
   }
 
   return (
     <div className="space-y-6 p-6">
-      <PageHeader
-        title="MCP Server 托管"
-        description="将 OpenAPI 等后端暴露为符合 MCP 协议的远程工具池，供 Machi / Cursor 等客户端通过网关 PAT 调用。"
-      />
+      <PageHeader title={t("title")} description={t("description")} />
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Plus className="size-4" /> 新建 MCP Server
+            <Plus className="size-4" /> {t("createTitle")}
           </CardTitle>
-          <CardDescription>内置 demo echo：`/mcp/demo/streamable-http`（需 PAT scope `mcp:*`）</CardDescription>
+          <CardDescription>{t("createDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
@@ -155,9 +155,9 @@ export default function AdminMcpServersPage() {
             <Label htmlFor="mcp-backend">Backend</Label>
             <Input id="mcp-backend" value={backendType} onChange={(e) => setBackendType(e.target.value)} />
           </div>
-          <Button onClick={() => void createServer()}>创建</Button>
+          <Button onClick={() => void createServer()}>{tc("actions.create")}</Button>
           <Button variant="outline" onClick={() => void load()} disabled={loading}>
-            <RefreshCcw className="mr-1 size-4" /> 刷新
+            <RefreshCcw className="mr-1 size-4" /> {tc("actions.refresh")}
           </Button>
         </CardContent>
       </Card>
@@ -165,13 +165,13 @@ export default function AdminMcpServersPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Plug className="size-4" /> Server 列表
+            <Plug className="size-4" /> {t("listTitle")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {loading && <p className="text-sm text-muted-foreground">加载中…</p>}
+          {loading && <p className="text-sm text-muted-foreground">{tc("states.loading")}</p>}
           {!loading && servers.length === 0 && (
-            <p className="text-sm text-muted-foreground">暂无自定义 Server（内置 demo 不在此列表）</p>
+            <p className="text-sm text-muted-foreground">{t("emptyList")}</p>
           )}
           {servers.map((s) => (
             <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3">
@@ -184,7 +184,7 @@ export default function AdminMcpServersPage() {
               <div className="flex items-center gap-2">
                 <Badge variant={s.status === "active" ? "default" : "secondary"}>{s.status}</Badge>
                 <Button size="sm" variant="outline" onClick={() => void loadHealth(s.id)}>
-                  健康面板
+                  {t("healthPanel")}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => void removeServer(s.id)}>
                   <Trash2 className="size-4" />
@@ -194,8 +194,11 @@ export default function AdminMcpServersPage() {
           ))}
           {health && selectedId && (
             <div className="rounded-lg bg-muted/40 p-3 text-sm">
-              最近 1h：调用 {health.callCount} 次 · 失败率 {(health.failRate * 100).toFixed(1)}% · p50{" "}
-              {health.p50LatencyMs} ms
+              {t("healthStats", {
+                callCount: health.callCount,
+                failRate: (health.failRate * 100).toFixed(1),
+                p50: health.p50LatencyMs,
+              })}
             </div>
           )}
         </CardContent>
@@ -203,13 +206,13 @@ export default function AdminMcpServersPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>OpenAPI 导入</CardTitle>
-          <CardDescription>粘贴 OpenAPI 3.x JSON，并用逗号分隔允许的 operationId 白名单</CardDescription>
+          <CardTitle>{t("openapiTitle")}</CardTitle>
+          <CardDescription>{t("openapiDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-1">
-            <Label>目标 Server（先点列表「健康面板」选中）</Label>
-            <Input value={selectedId ?? ""} readOnly placeholder="未选择" />
+            <Label>{t("targetServerLabel")}</Label>
+            <Input value={selectedId ?? ""} readOnly placeholder={t("notSelected")} />
           </div>
           <div className="space-y-1">
             <Label>Base URL</Label>
@@ -233,7 +236,7 @@ export default function AdminMcpServersPage() {
             />
           </div>
           <Button onClick={() => void importOpenAPI()} disabled={!selectedId}>
-            导入工具
+            {t("importTools")}
           </Button>
         </CardContent>
       </Card>

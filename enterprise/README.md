@@ -50,6 +50,15 @@ enterprise/
 └── docs/
 ```
 
+## 国际化（i18n）
+
+admin-console 与 web-portal 支持 **中文 / English** 切换（cookie `NEXT_LOCALE`，默认 `zh`）。文案集中在各 app 的 `messages/{zh,en}.json`，详见 [docs/architecture/i18n.md](./docs/architecture/i18n.md)。
+
+```bash
+# 双语言 × 双主题视觉截图（需先 start-dev.sh）
+pnpm -C enterprise visual-tour:i18n
+```
+
 ## 快速开始
 
 ### 日常启动（最常用，3 条命令就够）

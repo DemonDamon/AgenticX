@@ -25,6 +25,7 @@ import {
   toast,
 } from "@agenticx/ui";
 import { Activity, Circle, Pencil, Plus, RefreshCcw, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 interface ChannelRow {
   id: string;
@@ -70,6 +71,8 @@ type EditForm = {
 };
 
 export default function ChannelsPage() {
+  const t = useTranslations("pages.admin.channels");
+  const tc = useTranslations("common");
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [stats, setStats] = useState<Record<string, HealthStat>>({});
   const [loading, setLoading] = useState(true);
@@ -94,11 +97,11 @@ export default function ChannelsPage() {
       setChannels(json.data.channels ?? []);
       setStats(json.data.stats ?? {});
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "加载 Channel 失败");
+      toast.error(e instanceof Error ? e.message : t("toast.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -124,12 +127,12 @@ export default function ChannelsPage() {
       });
       const json = await res.json();
       if (json.code !== "00000") throw new Error(json.message || "create failed");
-      toast.success("Channel 已创建");
+      toast.success(t("toast.createSuccess"));
       setOpen(false);
       setForm({ name: "", baseUrl: "", apiKey: "", weight: "1", models: "", providerLabel: "" });
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "创建失败");
+      toast.error(e instanceof Error ? e.message : t("toast.createFailed"));
     }
   };
 
@@ -212,11 +215,11 @@ export default function ChannelsPage() {
       });
       const json = await res.json();
       if (json.code !== "00000") throw new Error(json.message || "update failed");
-      toast.success("Channel 已更新");
+      toast.success(t("toast.updateSuccess"));
       setEditing(null);
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "更新失败");
+      toast.error(e instanceof Error ? e.message : t("toast.updateFailed"));
     }
   };
 
@@ -225,26 +228,26 @@ export default function ChannelsPage() {
       const res = await fetch(`/api/admin/channels/${id}/probe`, { method: "POST" });
       const json = await res.json();
       if (json.code !== "00000") throw new Error(json.message || "probe failed");
-      toast.success("探活完成，已回填模型列表");
+      toast.success(t("toast.probeSuccess"));
       const models = (json.data?.probe?.supported_models as string[] | undefined) ?? [];
       if (editing?.id === id && models.length) {
         setEditing((prev) => (prev ? { ...prev, models: models.join(", ") } : prev));
       }
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "探活失败");
+      toast.error(e instanceof Error ? e.message : t("toast.probeFailed"));
     }
   };
 
   const onDelete = async (id: string) => {
-    if (!confirm("确定删除该 Channel？")) return;
+    if (!confirm(t("confirmDelete"))) return;
     const res = await fetch(`/api/admin/channels/${id}`, { method: "DELETE" });
     const json = await res.json();
     if (json.code !== "00000") {
-      toast.error(json.message || "删除失败");
+      toast.error(json.message || t("toast.deleteFailed"));
       return;
     }
-    toast.success("已删除");
+    toast.success(t("toast.deleted"));
     await load();
   };
 
@@ -254,38 +257,38 @@ export default function ChannelsPage() {
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
-              <Link href="/">首页</Link>
+              <Link href="/">{t("breadcrumbHome")}</Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <BreadcrumbPage>Channel 管理</BreadcrumbPage>
+            <BreadcrumbPage>{t("title")}</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
 
       <PageHeader
-        title="Channel 管理"
-        description="同一逻辑模型可绑定多个上游 Channel，支持加权路由、失败重试与健康面板。"
+        title={t("title")}
+        description={t("description")}
         actions={
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => void load()}>
-              <RefreshCcw className="mr-1 h-4 w-4" /> 刷新
+              <RefreshCcw className="mr-1 h-4 w-4" /> {tc("actions.refresh")}
             </Button>
             <Button size="sm" onClick={() => setOpen(true)}>
-              <Plus className="mr-1 h-4 w-4" /> 新建 Channel
+              <Plus className="mr-1 h-4 w-4" /> {t("newChannel")}
             </Button>
           </div>
         }
       />
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">加载中…</p>
+        <p className="text-sm text-muted-foreground">{t("loading")}</p>
       ) : channels.length === 0 ? (
         <EmptyState
           icon={<Activity className="h-5 w-5" />}
-          title="暂无 Channel"
-          description="创建 Channel 后，在 Gateway 进程设置 GATEWAY_CHANNEL_REGISTRY=on 并配置 GATEWAY_REMOTE_CHANNELS_URL 指向 internal API。"
+          title={t("emptyTitle")}
+          description={t("emptyDescription")}
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -303,29 +306,42 @@ export default function ChannelsPage() {
                     <Badge variant={ch.status === "active" ? "default" : "secondary"}>{ch.status}</Badge>
                   </div>
                   <div className="text-xs text-muted-foreground space-y-1">
-                    <p>权重 {ch.weight} · 优先级 {ch.priority}</p>
-                    <p>模型：{ch.supportedModels.join(", ") || "—"}</p>
-                    <p>Key：{ch.apiKeyConfigured ? "已配置" : "未配置"}</p>
+                    <p>{t("weightPriority", { weight: ch.weight, priority: ch.priority })}</p>
                     <p>
-                      成功率：{rate}
+                      {t("models")}
+                      {ch.supportedModels.join(", ") || "—"}
+                    </p>
+                    <p>
+                      Key：{ch.apiKeyConfigured ? t("keyConfigured") : t("keyNotConfigured")}
+                    </p>
+                    <p>
+                      {t("successRate")}
+                      {rate}
                       {typeof health?.p50_latency_ms === "number" && health.p50_latency_ms > 0
                         ? ` · p50 ${health.p50_latency_ms} ms`
                         : ""}
                     </p>
                     {health?.cooldown_until ? (
-                      <p className="text-amber-600">Cooldown 至 {health.cooldown_until}</p>
+                      <p className="text-amber-600">
+                        {t("cooldownUntil")} {health.cooldown_until}
+                      </p>
                     ) : null}
-                    {health?.last_error ? <p className="text-destructive truncate">最近错误：{health.last_error}</p> : null}
+                    {health?.last_error ? (
+                      <p className="text-destructive truncate">
+                        {t("lastError")}
+                        {health.last_error}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button variant="ghost" size="sm" onClick={() => openEdit(ch)}>
-                      <Pencil className="mr-1 h-4 w-4" /> 编辑
+                      <Pencil className="mr-1 h-4 w-4" /> {t("edit")}
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => void onProbe(ch.id)}>
-                      <Circle className="mr-1 h-4 w-4" /> 探活
+                      <Circle className="mr-1 h-4 w-4" /> {t("probe")}
                     </Button>
                     <Button variant="ghost" size="sm" className="text-destructive" onClick={() => void onDelete(ch.id)}>
-                      <Trash2 className="mr-1 h-4 w-4" /> 删除
+                      <Trash2 className="mr-1 h-4 w-4" /> {tc("actions.delete")}
                     </Button>
                   </div>
                 </CardContent>
@@ -338,39 +354,39 @@ export default function ChannelsPage() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>新建 Channel</DialogTitle>
+            <DialogTitle>{t("createDialogTitle")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div>
-              <Label>名称</Label>
+              <Label>{t("nameLabel")}</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </div>
             <div>
-              <Label>Base URL</Label>
+              <Label>{t("baseUrlLabel")}</Label>
               <Input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://api.example.com/v1" />
             </div>
             <div>
-              <Label>API Key</Label>
+              <Label>{t("apiKeyLabel")}</Label>
               <Input type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} />
             </div>
             <div>
-              <Label>Provider 标识（metadata.provider）</Label>
+              <Label>{t("providerLabel")}</Label>
               <Input value={form.providerLabel} onChange={(e) => setForm({ ...form, providerLabel: e.target.value })} placeholder="deepseek" />
             </div>
             <div>
-              <Label>支持模型（逗号或换行分隔）</Label>
+              <Label>{t("modelsLabel")}</Label>
               <Input value={form.models} onChange={(e) => setForm({ ...form, models: e.target.value })} placeholder="deepseek-chat" />
             </div>
             <div>
-              <Label>权重</Label>
+              <Label>{t("weightLabel")}</Label>
               <Input value={form.weight} onChange={(e) => setForm({ ...form, weight: e.target.value })} />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>
-              取消
+              {tc("actions.cancel")}
             </Button>
-            <Button onClick={() => void onCreate()}>保存</Button>
+            <Button onClick={() => void onCreate()}>{tc("actions.save")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -378,20 +394,20 @@ export default function ChannelsPage() {
       <Dialog open={editing != null} onOpenChange={(v) => (!v ? setEditing(null) : null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>编辑 Channel</DialogTitle>
+            <DialogTitle>{t("editDialogTitle")}</DialogTitle>
           </DialogHeader>
           {editing ? (
             <div className="space-y-3">
               <div>
-                <Label>名称</Label>
+                <Label>{t("nameLabel")}</Label>
                 <Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
               </div>
               <div>
-                <Label>Base URL</Label>
+                <Label>{t("baseUrlLabel")}</Label>
                 <Input value={editing.baseUrl} onChange={(e) => setEditing({ ...editing, baseUrl: e.target.value })} />
               </div>
               <div>
-                <Label>API Key（留空保留原值）</Label>
+                <Label>{t("apiKeyLabel")}（{t("apiKeyKeepPlaceholder")}）</Label>
                 <Input
                   type="password"
                   value={editing.apiKey}
@@ -400,17 +416,17 @@ export default function ChannelsPage() {
                 />
               </div>
               <div>
-                <Label>Key Refs（环境变量名，逗号分隔）</Label>
+                <Label>{t("keyRefsLabel")}</Label>
                 <Input
                   value={editing.keyRefs}
                   onChange={(e) => setEditing({ ...editing, keyRefs: e.target.value })}
                   placeholder="DEEPSEEK_API_KEY_1, DEEPSEEK_API_KEY_2"
                 />
-                <p className="mt-1 text-xs text-muted-foreground">与单 Key 互斥：配置 Key Refs 后优先轮询 env 中的多把 Key。</p>
+                <p className="mt-1 text-xs text-muted-foreground">{t("keyRefsHint")}</p>
               </div>
               {keypoolStats.length > 0 ? (
                 <div className="space-y-2 rounded-md border border-border p-3">
-                  <p className="text-xs font-medium">Key Pool 健康</p>
+                  <p className="text-xs font-medium">{t("keyPoolHealth")}</p>
                   {keypoolStats.map((stat) => (
                     <div key={stat.key_ref} className="flex items-center justify-between gap-2 text-xs">
                       <div className="flex items-center gap-2">
@@ -442,10 +458,10 @@ export default function ChannelsPage() {
                               .map((s) => s.trim())
                               .filter(Boolean);
                             await loadKeypoolStats(editing.id, refs);
-                            toast.success("已重置 cooldown");
+                            toast.success(t("toast.cooldownReset"));
                           }}
                         >
-                          重置
+                          {t("resetCooldown")}
                         </Button>
                       ) : null}
                     </div>
@@ -453,25 +469,25 @@ export default function ChannelsPage() {
                 </div>
               ) : null}
               <div>
-                <Label>Provider 标识</Label>
+                <Label>{t("providerLabel")}</Label>
                 <Input value={editing.providerLabel} onChange={(e) => setEditing({ ...editing, providerLabel: e.target.value })} />
               </div>
               <div>
-                <Label>支持模型（逗号或换行分隔）</Label>
+                <Label>{t("modelsLabel")}</Label>
                 <Input value={editing.models} onChange={(e) => setEditing({ ...editing, models: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <Label>权重</Label>
+                  <Label>{t("weightLabel")}</Label>
                   <Input value={editing.weight} onChange={(e) => setEditing({ ...editing, weight: e.target.value })} />
                 </div>
                 <div>
-                  <Label>优先级</Label>
+                  <Label>{t("priorityLabel")}</Label>
                   <Input value={editing.priority} onChange={(e) => setEditing({ ...editing, priority: e.target.value })} />
                 </div>
               </div>
               <div>
-                <Label>状态</Label>
+                <Label>{t("statusLabel")}</Label>
                 <div className="flex gap-2">
                   <Button
                     type="button"
@@ -479,7 +495,7 @@ export default function ChannelsPage() {
                     variant={editing.status === "active" ? "default" : "outline"}
                     onClick={() => setEditing({ ...editing, status: "active" })}
                   >
-                    启用
+                    {t("enable")}
                   </Button>
                   <Button
                     type="button"
@@ -487,7 +503,7 @@ export default function ChannelsPage() {
                     variant={editing.status === "disabled" ? "default" : "outline"}
                     onClick={() => setEditing({ ...editing, status: "disabled" })}
                   >
-                    禁用
+                    {t("disable")}
                   </Button>
                 </div>
               </div>
@@ -495,14 +511,14 @@ export default function ChannelsPage() {
           ) : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditing(null)}>
-              取消
+              {tc("actions.cancel")}
             </Button>
             {editing ? (
               <Button variant="outline" onClick={() => void onProbe(editing.id)}>
-                探活
+                {t("probe")}
               </Button>
             ) : null}
-            <Button onClick={() => void onSaveEdit()}>保存</Button>
+            <Button onClick={() => void onSaveEdit()}>{tc("actions.save")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Badge, Card, CardContent, CardHeader, CardTitle, PageHeader, toast } from "@agenticx/ui";
 import { AlertTriangle } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 type ErrorRow = {
   fingerprint: string;
@@ -17,6 +18,7 @@ type ErrorRow = {
 };
 
 export default function AdminErrorsPage() {
+  const t = useTranslations("pages.admin.errors");
   const [items, setItems] = useState<ErrorRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -28,11 +30,11 @@ export default function AdminErrorsPage() {
       if (json.code !== "00000") throw new Error(json.message || "load failed");
       setItems(json.data?.errors ?? []);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "加载错误聚类失败");
+      toast.error(e instanceof Error ? e.message : t("toast.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -40,20 +42,20 @@ export default function AdminErrorsPage() {
 
   return (
     <div className="space-y-6 p-6">
-      <PageHeader title="上游错误聚类" description="按错误指纹聚合 24h 内上游失败（new-api 风格）。" />
+      <PageHeader title={t("title")} description={t("description")} />
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <AlertTriangle className="h-4 w-4" />
-            Top Errors
+            {t("cardTitle")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {loading ? (
-            <p className="text-sm text-muted-foreground">加载中…</p>
+            <p className="text-sm text-muted-foreground">{t("loading")}</p>
           ) : items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无聚类记录</p>
+            <p className="text-sm text-muted-foreground">{t("empty")}</p>
           ) : (
             items.map((item) => (
               <div key={item.fingerprint} className="rounded-md border px-3 py-2">

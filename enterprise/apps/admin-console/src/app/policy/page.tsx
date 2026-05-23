@@ -32,6 +32,7 @@ import {
   Textarea,
   toast,
 } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 import { Pencil, Plus, RotateCcw, Send, ShieldCheck, ShieldX, TestTube2, Trash2 } from "lucide-react";
 
 type PolicyAppliesTo = {
@@ -101,33 +102,39 @@ function parseList(raw: string): string[] {
     .filter(Boolean);
 }
 
-function summarizeAppliesTo(appliesTo: PolicyAppliesTo | null): string {
-  if (!appliesTo) return "继承规则包";
+function summarizeAppliesTo(
+  appliesTo: PolicyAppliesTo | null,
+  t: ReturnType<typeof useTranslations<"pages.policy">>
+): string {
+  if (!appliesTo) return t("appliesInherit");
   const chunks: string[] = [];
-  if (appliesTo.departmentIds.length === 1 && appliesTo.departmentIds[0] === "*") chunks.push("全员");
-  else if (appliesTo.departmentIds.length > 0) chunks.push(`${appliesTo.departmentIds.length}个部门`);
+  if (appliesTo.departmentIds.length === 1 && appliesTo.departmentIds[0] === "*") chunks.push(t("appliesAll"));
+  else if (appliesTo.departmentIds.length > 0) chunks.push(t("appliesDepts", { count: appliesTo.departmentIds.length }));
   if (!(appliesTo.roleCodes.length === 1 && appliesTo.roleCodes[0] === "*") && appliesTo.roleCodes.length > 0) {
-    chunks.push(`${appliesTo.roleCodes.length}个角色`);
+    chunks.push(t("appliesRoles", { count: appliesTo.roleCodes.length }));
   }
   if (!(appliesTo.clientTypes.length === 1 && appliesTo.clientTypes[0] === "*") && appliesTo.clientTypes.length > 0) {
     chunks.push(appliesTo.clientTypes.join("/"));
   }
-  return chunks.join(" · ") || "全员";
+  return chunks.join(" · ") || t("appliesAll");
 }
 
-function labelPolicyKind(kind: PolicyRule["kind"]): string {
-  if (kind === "keyword") return "关键词";
-  if (kind === "regex") return "正则";
-  return "PII";
+function labelPolicyKind(kind: PolicyRule["kind"], t: ReturnType<typeof useTranslations<"pages.policy">>): string {
+  if (kind === "keyword") return t("tabs.keyword");
+  if (kind === "regex") return t("tabs.regex");
+  return t("tabs.pii");
 }
 
-function labelPolicyAction(action: PolicyRule["action"]): string {
-  if (action === "block") return "拦截";
-  if (action === "redact") return "脱敏";
-  return "警告";
+function labelPolicyAction(action: PolicyRule["action"], t: ReturnType<typeof useTranslations<"pages.policy">>): string {
+  if (action === "block") return t("action.block");
+  if (action === "redact") return t("action.redact");
+  return t("action.warn");
 }
 
 export default function PolicyPage() {
+  const t = useTranslations("pages.policy");
+  const tc = useTranslations("common");
+  const ts = useTranslations("shell");
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState("all");
   const [packs, setPacks] = useState<PolicyPack[]>([]);
@@ -177,16 +184,16 @@ export default function PolicyPage() {
       const packsJson = (await packsRes.json()) as { message?: string; data?: { packs?: PolicyPack[] } };
       const rulesJson = (await rulesRes.json()) as { message?: string; data?: { rules?: PolicyRule[] } };
       const publishJson = (await publishRes.json()) as { message?: string; data?: { events?: PublishEvent[] } };
-      if (!packsRes.ok) throw new Error(packsJson.message ?? "加载规则包失败");
-      if (!rulesRes.ok) throw new Error(rulesJson.message ?? "加载规则失败");
-      if (!publishRes.ok) throw new Error(publishJson.message ?? "加载发布记录失败");
+      if (!packsRes.ok) throw new Error(packsJson.message ?? t("toast.loadPacksFailed"));
+      if (!rulesRes.ok) throw new Error(rulesJson.message ?? t("toast.loadRulesFailed"));
+      if (!publishRes.ok) throw new Error(publishJson.message ?? t("toast.loadPublishFailed"));
       const nextPacks = packsJson.data?.packs ?? [];
       setPacks(nextPacks);
       setRules(rulesJson.data?.rules ?? []);
       setPublishes(publishJson.data?.events ?? []);
       setForm((prev) => ({ ...prev, packId: prev.packId || nextPacks[0]?.id || "" }));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载失败");
+      toast.error(error instanceof Error ? error.message : t("toast.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -290,13 +297,13 @@ export default function PolicyPage() {
     });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "保存失败");
+      toast.error(json.message ?? t("toast.saveFailed"));
       return;
     }
     if (mode === "publish") {
       await triggerPublish();
     } else {
-      toast.success("草稿已保存");
+      toast.success(t("toast.draftSaved"));
     }
     setDialogOpen(false);
     await load();
@@ -306,10 +313,10 @@ export default function PolicyPage() {
     const res = await fetch("/api/policy/publish", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "发布失败");
+      toast.error(json.message ?? t("toast.publishFailed"));
       return;
     }
-    toast.success("规则已发布，已对新请求生效");
+    toast.success(t("toast.published"));
     setSyncStatus("pending");
     for (let i = 0; i < 5; i += 1) {
       const health = await fetch("/healthz", { cache: "no-store" }).catch(() => null);
@@ -326,10 +333,10 @@ export default function PolicyPage() {
     const res = await fetch(`/api/policy/rules/${id}`, { method: "DELETE" });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "停用失败");
+      toast.error(json.message ?? t("toast.disableFailed"));
       return false;
     }
-    toast.success("规则已停用，可恢复");
+    toast.success(t("toast.disabled"));
     await load();
     return true;
   };
@@ -342,10 +349,10 @@ export default function PolicyPage() {
     });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "恢复失败");
+      toast.error(json.message ?? t("toast.restoreFailed"));
       return;
     }
-    toast.success("规则已恢复为草稿");
+    toast.success(t("toast.restored"));
     await load();
   };
 
@@ -365,7 +372,7 @@ export default function PolicyPage() {
 
   const runTest = async () => {
     if (!form.id) {
-      toast.error("请先保存规则再测试");
+      toast.error(t("test.saveFirst"));
       return;
     }
     const payload =
@@ -395,15 +402,15 @@ export default function PolicyPage() {
       data?: { blocked?: boolean; hits?: unknown[]; redactedText?: string };
     };
     if (!res.ok || !json.data) {
-      toast.error(json.message ?? "测试失败");
+      toast.error(json.message ?? t("test.failed"));
       return;
     }
     const hitCount = Array.isArray(json.data.hits) ? json.data.hits.length : 0;
-    const parts = [`命中：${hitCount} 处`, `是否拦截：${json.data.blocked ? "是" : "否"}`];
+    const parts = [t("test.hitSummary", { count: hitCount }), t("test.blockedSummary", { blocked: json.data.blocked ? t("test.yes") : t("test.no") })];
     const redacted = json.data.redactedText ?? sampleText;
     if (redacted !== sampleText && hitCount > 0) {
       const clip = redacted.length > 160 ? `${redacted.slice(0, 160)}…` : redacted;
-      parts.push(`脱敏预览：${clip}`);
+      parts.push(t("test.redactPreviewSummary", { text: clip }));
     }
     setTestSummary(parts.join(" · "));
   };
@@ -416,10 +423,10 @@ export default function PolicyPage() {
     });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "更新失败");
+      toast.error(json.message ?? t("toast.updateFailed"));
       return;
     }
-    toast.success(enabled ? `已启用 ${pack.name}` : `已禁用 ${pack.name}`);
+    toast.success(enabled ? t("toast.packEnabledNamed", { name: pack.name }) : t("toast.packDisabledNamed", { name: pack.name }));
     await load();
   };
 
@@ -427,10 +434,10 @@ export default function PolicyPage() {
     const res = await fetch(`/api/policy/publishes/${encodeURIComponent(id)}/rollback`, { method: "POST" });
     const json = (await res.json()) as { message?: string };
     if (!res.ok) {
-      toast.error(json.message ?? "回滚失败");
+      toast.error(json.message ?? t("toast.rollbackFailed"));
       return;
     }
-    toast.success("已回滚到该版本");
+    toast.success(t("toast.rolledBack"));
     await load();
   };
 
@@ -447,21 +454,21 @@ export default function PolicyPage() {
               </BreadcrumbItem>
               <BreadcrumbSeparator />
               <BreadcrumbItem>
-                <BreadcrumbPage>策略规则中心</BreadcrumbPage>
+                <BreadcrumbPage>{t("breadcrumbPolicy")}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
         }
-        title="策略规则中心"
+        title={t("breadcrumbPolicy")}
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={openCreate}>
               <Plus className="h-4 w-4" />
-              新建规则
+              {t("newRule")}
             </Button>
             <Button size="sm" onClick={() => void triggerPublish()}>
               <Send className="h-4 w-4" />
-              发布并生效
+              {t("publish")}
             </Button>
           </div>
         }
@@ -470,28 +477,28 @@ export default function PolicyPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            当前生效状态
+            {t("statusTitle")}
             <Badge variant="outline">v{latestPublish?.version ?? "-"}</Badge>
             <Badge variant={syncStatus === "synced" ? "success" : "secondary"}>
-              {syncStatus === "synced" ? "Gateway 已同步" : syncStatus === "pending" ? "等待网关同步" : "同步状态未知"}
+              {syncStatus === "synced" ? t("gatewaySynced") : syncStatus === "pending" ? t("gatewayPending") : t("syncUnknown")}
             </Badge>
           </CardTitle>
           <CardDescription>
             {latestPublish
-              ? `最后发布：${new Date(latestPublish.publishedAt).toLocaleString()} · ${latestPublish.publisher ?? "未知发布人"}`
-              : "尚未发布"}
+              ? t("lastPublishFormatted", { date: new Date(latestPublish.publishedAt).toLocaleString(), publisher: latestPublish.publisher ?? t("unknownPublisher") })
+              : t("notPublished")}
           </CardDescription>
         </CardHeader>
       </Card>
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
-          <TabsTrigger value="all">全部</TabsTrigger>
-          <TabsTrigger value="keyword">关键词</TabsTrigger>
-          <TabsTrigger value="regex">正则</TabsTrigger>
-          <TabsTrigger value="pii">PII</TabsTrigger>
-          <TabsTrigger value="packs">规则包</TabsTrigger>
-          <TabsTrigger value="publishes">发布记录</TabsTrigger>
+          <TabsTrigger value="all">{t("tabs.all")}</TabsTrigger>
+          <TabsTrigger value="keyword">{t("tabs.keyword")}</TabsTrigger>
+          <TabsTrigger value="regex">{t("tabs.regex")}</TabsTrigger>
+          <TabsTrigger value="pii">{t("tabs.pii")}</TabsTrigger>
+          <TabsTrigger value="packs">{t("tabs.packs")}</TabsTrigger>
+          <TabsTrigger value="publishes">{t("tabs.publishes")}</TabsTrigger>
         </TabsList>
 
         {["all", "keyword", "regex", "pii"].map((key) => (
@@ -505,19 +512,19 @@ export default function PolicyPage() {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{rule.code}</span>
-                      <Badge variant="outline">{labelPolicyKind(rule.kind)}</Badge>
-                      <Badge variant="secondary">{labelPolicyAction(rule.action)}</Badge>
+                      <Badge variant="outline">{labelPolicyKind(rule.kind, t)}</Badge>
+                      <Badge variant="secondary">{labelPolicyAction(rule.action, t)}</Badge>
                       <Badge variant={rule.status === "active" ? "success" : "outline"}>
-                        {rule.status === "active" ? "已发布" : rule.status === "draft" ? "草稿" : "已停用"}
+                        {rule.status === "active" ? t("status.active") : rule.status === "draft" ? t("status.draft") : t("status.disabled")}
                       </Badge>
                     </div>
-                    <p className="text-sm text-text-subtle">{rule.message || "无文案"}</p>
-                    <p className="text-xs text-text-faint">适用范围：{summarizeAppliesTo(rule.appliesTo)}</p>
+                    <p className="text-sm text-text-subtle">{rule.message || t("noMessage")}</p>
+                    <p className="text-xs text-text-faint">{t("appliesTo")}{summarizeAppliesTo(rule.appliesTo, t)}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="outline" onClick={() => openEdit(rule)} disabled={rule.status === "disabled"}>
                       <Pencil className="h-4 w-4" />
-                      编辑
+                      {t("edit")}
                     </Button>
                     <Button
                       size="sm"
@@ -526,26 +533,26 @@ export default function PolicyPage() {
                       disabled={rule.status === "disabled"}
                     >
                       <Trash2 className="h-4 w-4" />
-                      删除
+                      {t("delete")}
                     </Button>
                     {rule.status === "disabled" ? (
                       <Button size="sm" variant="destructive" onClick={() => void restoreRule(rule.id)}>
-                        恢复
+                        {t("restore")}
                       </Button>
                     ) : null}
                   </div>
                 </div>
               </div>
             ))}
-            {filteredRules.length === 0 ? <p className="text-sm text-text-faint">{loading ? "加载中..." : "暂无规则"}</p> : null}
+            {filteredRules.length === 0 ? <p className="text-sm text-text-faint">{loading ? t("loadingRules") : t("emptyRules")}</p> : null}
           </TabsContent>
         ))}
 
         <TabsContent value="packs" className="pt-3">
           <Card>
             <CardHeader>
-              <CardTitle>规则包</CardTitle>
-              <CardDescription>切换规则包启停状态。</CardDescription>
+              <CardTitle>{t("tabs.packs")}</CardTitle>
+              <CardDescription>{t("packsDescription")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {packs.map((pack) => (
@@ -553,10 +560,10 @@ export default function PolicyPage() {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{pack.name}</span>
-                      <Badge variant={pack.enabled ? "success" : "secondary"}>{pack.enabled ? "已启用" : "已禁用"}</Badge>
-                      <Badge variant="outline">{pack.source === "builtin" ? "内置" : "自定义"}</Badge>
+                      <Badge variant={pack.enabled ? "success" : "secondary"}>{pack.enabled ? t("packEnabled") : t("packDisabled")}</Badge>
+                      <Badge variant="outline">{pack.source === "builtin" ? t("packBuiltin") : t("packCustom")}</Badge>
                     </div>
-                    <p className="text-sm text-text-subtle">{pack.description || "无描述"}</p>
+                    <p className="text-sm text-text-subtle">{pack.description || t("noDescription")}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     {pack.enabled ? <ShieldCheck className="h-4 w-4 text-green-600" /> : <ShieldX className="h-4 w-4 text-gray-500" />}
@@ -571,8 +578,8 @@ export default function PolicyPage() {
         <TabsContent value="publishes" className="pt-3">
           <Card>
             <CardHeader>
-              <CardTitle>发布记录</CardTitle>
-              <CardDescription>支持快速回滚。</CardDescription>
+              <CardTitle>{t("tabs.publishes")}</CardTitle>
+              <CardDescription>{t("publishesDescription")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               {publishes.map((event) => (
@@ -583,12 +590,12 @@ export default function PolicyPage() {
                       <Badge variant={event.status === "published" ? "success" : "secondary"}>{event.status}</Badge>
                     </div>
                     <p className="text-sm text-text-subtle">
-                      {new Date(event.publishedAt).toLocaleString()} · {event.publisher ?? "未知发布人"}
+                      {new Date(event.publishedAt).toLocaleString()} · {event.publisher ?? t("unknownPublisher")}
                     </p>
                   </div>
                   <Button variant="outline" size="sm" onClick={() => void rollback(event.id)}>
                     <RotateCcw className="h-4 w-4" />
-                    回滚到此版本
+                    {t("rollback")}
                   </Button>
                 </div>
               ))}
@@ -600,15 +607,15 @@ export default function PolicyPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{form.id ? "编辑规则" : "新建规则"}</DialogTitle>
+            <DialogTitle>{form.id ? t("dialog.editTitle") : t("newRule")}</DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label>规则编码</Label>
+              <Label>{t("dialog.codeLabel")}</Label>
               <Input value={form.code} onChange={(e) => setForm((prev) => ({ ...prev, code: e.target.value }))} />
             </div>
             <div className="space-y-1">
-              <Label>规则包</Label>
+              <Label>{t("tabs.packs")}</Label>
               <select
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
                 value={form.packId}
@@ -622,62 +629,62 @@ export default function PolicyPage() {
               </select>
             </div>
             <div className="space-y-1">
-              <Label>类型</Label>
+              <Label>{t("dialog.kindLabel")}</Label>
               <select className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" value={form.kind} onChange={(e) => setForm((prev) => ({ ...prev, kind: e.target.value as RuleForm["kind"] }))}>
-                <option value="keyword">关键词</option>
-                <option value="regex">正则</option>
-                <option value="pii">PII</option>
+                <option value="keyword">{t("tabs.keyword")}</option>
+                <option value="regex">{t("tabs.regex")}</option>
+                <option value="pii">{t("tabs.pii")}</option>
               </select>
             </div>
             <div className="space-y-1">
-              <Label>处置动作</Label>
+              <Label>{t("dialog.actionLabel")}</Label>
               <select className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" value={form.action} onChange={(e) => setForm((prev) => ({ ...prev, action: e.target.value as RuleForm["action"] }))}>
-                <option value="warn">警告（记录命中，通常不拦截）</option>
-                <option value="redact">脱敏（命中片段替换为占位符，一般仍放行）</option>
-                <option value="block">拦截（命中则策略判定为阻断）</option>
+                <option value="warn">{t("dialog.actionWarn")}</option>
+                <option value="redact">{t("dialog.actionRedact")}</option>
+                <option value="block">{t("dialog.actionBlock")}</option>
               </select>
-              <p className="text-xs text-text-faint">脱敏：将敏感片段替换为 [REDACTED]，与「拦截」不同。</p>
+              <p className="text-xs text-text-faint">{t("dialog.actionHint")}</p>
             </div>
             <div className="col-span-2 space-y-1">
-              <Label>文案</Label>
+              <Label>{t("dialog.messageLabel")}</Label>
               <Input value={form.message} onChange={(e) => setForm((prev) => ({ ...prev, message: e.target.value }))} />
             </div>
             {form.kind === "keyword" ? (
               <div className="col-span-2 space-y-1">
-                <Label>关键词（逗号/换行分隔）</Label>
+                <Label>{t("dialog.keywordsLabel")}</Label>
                 <Textarea value={form.payloadKeywords} onChange={(e) => setForm((prev) => ({ ...prev, payloadKeywords: e.target.value }))} />
               </div>
             ) : null}
             {form.kind === "regex" ? (
               <div className="col-span-2 space-y-1">
-                <Label>Pattern</Label>
+                <Label>{t("dialog.patternLabel")}</Label>
                 <Input value={form.payloadPattern} onChange={(e) => setForm((prev) => ({ ...prev, payloadPattern: e.target.value }))} />
               </div>
             ) : null}
             {form.kind === "pii" ? (
               <div className="col-span-2 space-y-1">
-                <Label>PII Type</Label>
+                <Label>{t("dialog.piiTypeLabel")}</Label>
                 <Input value={form.payloadPiiType} onChange={(e) => setForm((prev) => ({ ...prev, payloadPiiType: e.target.value }))} />
               </div>
             ) : null}
             <div className="col-span-2 rounded-md border border-border p-3">
-              <p className="mb-2 text-sm font-medium">适用范围</p>
+              <p className="mb-2 text-sm font-medium">{t("dialog.scopeTitle")}</p>
               <div className="grid grid-cols-2 gap-2">
-                <Input placeholder="departmentIds: * 或 id1,id2" value={form.appliesDepartmentIds} onChange={(e) => setForm((prev) => ({ ...prev, appliesDepartmentIds: e.target.value }))} />
-                <Input placeholder="roleCodes: * 或 sales,member" value={form.appliesRoleCodes} onChange={(e) => setForm((prev) => ({ ...prev, appliesRoleCodes: e.target.value }))} />
-                <Input placeholder="userIds: u1,u2" value={form.appliesUserIds} onChange={(e) => setForm((prev) => ({ ...prev, appliesUserIds: e.target.value }))} />
-                <Input placeholder="userExcludeIds: u3,u4" value={form.appliesUserExcludeIds} onChange={(e) => setForm((prev) => ({ ...prev, appliesUserExcludeIds: e.target.value }))} />
-                <Input placeholder="clientTypes: * 或 web-portal,desktop" value={form.appliesClientTypes} onChange={(e) => setForm((prev) => ({ ...prev, appliesClientTypes: e.target.value }))} />
-                <Input placeholder="stages: request,response" value={form.appliesStages} onChange={(e) => setForm((prev) => ({ ...prev, appliesStages: e.target.value }))} />
+                <Input placeholder={t("dialog.scopeDeptPlaceholder")} value={form.appliesDepartmentIds} onChange={(e) => setForm((prev) => ({ ...prev, appliesDepartmentIds: e.target.value }))} />
+                <Input placeholder={t("dialog.scopeRolePlaceholder")} value={form.appliesRoleCodes} onChange={(e) => setForm((prev) => ({ ...prev, appliesRoleCodes: e.target.value }))} />
+                <Input placeholder={t("dialog.scopeUserPlaceholder")} value={form.appliesUserIds} onChange={(e) => setForm((prev) => ({ ...prev, appliesUserIds: e.target.value }))} />
+                <Input placeholder={t("dialog.scopeExcludePlaceholder")} value={form.appliesUserExcludeIds} onChange={(e) => setForm((prev) => ({ ...prev, appliesUserExcludeIds: e.target.value }))} />
+                <Input placeholder={t("dialog.scopeClientPlaceholder")} value={form.appliesClientTypes} onChange={(e) => setForm((prev) => ({ ...prev, appliesClientTypes: e.target.value }))} />
+                <Input placeholder={t("dialog.scopeStagesPlaceholder")} value={form.appliesStages} onChange={(e) => setForm((prev) => ({ ...prev, appliesStages: e.target.value }))} />
               </div>
             </div>
             <div className="col-span-2 rounded-md border border-border p-3">
-              <p className="mb-2 text-sm font-medium">样本测试</p>
-              <Textarea value={sampleText} onChange={(e) => setSampleText(e.target.value)} placeholder="输入测试文本" />
+              <p className="mb-2 text-sm font-medium">{t("dialog.testTitle")}</p>
+              <Textarea value={sampleText} onChange={(e) => setSampleText(e.target.value)} placeholder={t("dialog.testPlaceholder")} />
               <div className="mt-2 flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => void runTest()}>
                   <TestTube2 className="h-4 w-4" />
-                  运行测试
+                  {t("dialog.runTest")}
                 </Button>
                 {testSummary ? <Badge variant="outline">{testSummary}</Badge> : null}
               </div>
@@ -685,12 +692,12 @@ export default function PolicyPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              取消
+              {tc("actions.cancel")}
             </Button>
             <Button variant="outline" onClick={() => void saveRule("draft")}>
-              保存草稿
+              {t("dialog.saveDraft")}
             </Button>
-            <Button onClick={() => void saveRule("publish")}>发布并立即生效</Button>
+            <Button onClick={() => void saveRule("publish")}>{t("dialog.publishNow")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -704,20 +711,22 @@ export default function PolicyPage() {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>确认停用规则？</DialogTitle>
+            <DialogTitle>{t("deleteDialog.title")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-2 text-sm text-text-subtle">
             <p>
-              将停用规则 <span className="font-semibold text-text-strong">{pendingDeleteRule?.code ?? "-"}</span>，停用后不会进入下一次发布快照。
+              {t("deleteDialog.body")}{" "}
+              <span className="font-semibold text-text-strong">{pendingDeleteRule?.code ?? "-"}</span>
+              {t("deleteDialog.bodySuffix")}
             </p>
-            <p>后续可在规则列表中点击「恢复」将其还原为草稿。</p>
+            <p>{t("deleteDialog.restoreHint")}</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
-              取消
+              {tc("actions.cancel")}
             </Button>
             <Button variant="destructive" onClick={() => void confirmDeleteRule()}>
-              确认停用
+              {t("deleteDialog.confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>

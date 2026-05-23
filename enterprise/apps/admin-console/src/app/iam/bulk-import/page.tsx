@@ -28,6 +28,7 @@ import {
   Textarea,
   toast,
 } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 import {
   Check,
   ChevronRight,
@@ -43,19 +44,17 @@ import {
 
 const LS_MAP_KEY = "agx-iam-bulk-import-column-map-v1";
 
-const FIELD_DEFS = [
-  { key: "email", label: "邮箱（必填）", required: true },
-  { key: "display_name", label: "姓名（必填）", required: true },
-  { key: "dept_path", label: "部门路径（如 总部/研发）", required: false },
-  { key: "role_codes", label: "角色 codes（; 或 , 分隔）", required: false },
-  { key: "phone", label: "手机号", required: false },
-  { key: "employee_no", label: "工号", required: false },
-  { key: "job_title", label: "职位", required: false },
-  { key: "status", label: "状态 active/disabled", required: false },
-  { key: "initial_password", label: "初始密码（可选）", required: false },
-] as const;
+type FieldKey =
+  | "email"
+  | "display_name"
+  | "dept_path"
+  | "role_codes"
+  | "phone"
+  | "employee_no"
+  | "job_title"
+  | "status"
+  | "initial_password";
 
-type FieldKey = (typeof FIELD_DEFS)[number]["key"];
 type Step = 0 | 1 | 2 | 3 | 4;
 
 type ParsedRow = Record<string, string>;
@@ -82,14 +81,6 @@ type ApiBulkResp = {
     }>;
   };
 };
-
-const STEPS = [
-  { id: 0 as Step, label: "上传", description: "CSV / 粘贴", icon: Upload },
-  { id: 1 as Step, label: "列映射", description: "表头 → 字段", icon: Link2 },
-  { id: 2 as Step, label: "预检", description: "校验行数据", icon: ShieldCheck },
-  { id: 3 as Step, label: "执行", description: "写入数据库", icon: ListChecks },
-  { id: 4 as Step, label: "完成", description: "下载失败行", icon: Check },
-];
 
 function loadSavedMap(): Partial<Record<FieldKey, string>> {
   if (typeof window === "undefined") return {};
@@ -119,6 +110,34 @@ function parseRoleCodes(v: string | undefined): string[] {
 }
 
 export default function BulkImportPage() {
+  const t = useTranslations("pages.iam.bulkImport");
+  const tc = useTranslations("common");
+  const ts = useTranslations("shell");
+  const fieldDefs = useMemo(
+    () =>
+      [
+        { key: "email" as const, label: t("fields.email"), required: true },
+        { key: "display_name" as const, label: t("fields.displayName"), required: true },
+        { key: "dept_path" as const, label: t("fields.deptPath"), required: false },
+        { key: "role_codes" as const, label: t("fields.roleCodes"), required: false },
+        { key: "phone" as const, label: t("fields.phone"), required: false },
+        { key: "employee_no" as const, label: t("fields.employeeNo"), required: false },
+        { key: "job_title" as const, label: t("fields.jobTitle"), required: false },
+        { key: "status" as const, label: t("fields.status"), required: false },
+        { key: "initial_password" as const, label: t("fields.initialPassword"), required: false },
+      ] as const,
+    [t]
+  );
+  const steps = useMemo(
+    () => [
+      { id: 0 as Step, label: t("steps.upload.label"), description: t("steps.upload.description"), icon: Upload },
+      { id: 1 as Step, label: t("steps.mapping.label"), description: t("steps.mapping.description"), icon: Link2 },
+      { id: 2 as Step, label: t("steps.precheck.label"), description: t("steps.precheck.description"), icon: ShieldCheck },
+      { id: 3 as Step, label: t("steps.execute.label"), description: t("steps.execute.description"), icon: ListChecks },
+      { id: 4 as Step, label: t("steps.done.label"), description: t("steps.done.description"), icon: Check },
+    ],
+    [t]
+  );
   const [step, setStep] = useState<Step>(0);
   const [csvText, setCsvText] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
@@ -136,7 +155,7 @@ export default function BulkImportPage() {
       transformHeader: (h: string) => h.trim(),
     });
     if (out.errors?.length) {
-      toast.error(out.errors[0]?.message ?? "CSV 解析失败");
+      toast.error(out.errors[0]?.message ?? t("csvParseFailed"));
     }
     const fields = (out.meta.fields ?? []).filter((x): x is string => Boolean(x));
     setHeaders(fields);
@@ -178,25 +197,25 @@ export default function BulkImportPage() {
     mappedRows.forEach((mr, i) => {
       const rowIndex = i + 2;
       if (!mr.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mr.email)) {
-        fails.push({ rowIndex, reason: "邮箱无效" });
+        fails.push({ rowIndex, reason: t("precheck.invalidEmail") });
         return;
       }
       if (!mr.displayName) {
-        fails.push({ rowIndex, reason: "姓名不能为空" });
+        fails.push({ rowIndex, reason: t("precheck.nameRequired") });
       }
     });
     setPrecheckFailures(fails);
     setStep(2);
-    if (fails.length === 0) toast.success(`预检通过：${mappedRows.length} 行`);
-    else toast.error(`预检失败 ${fails.length} 行`);
+    if (fails.length === 0) toast.success(t("precheck.passToast", { count: mappedRows.length }));
+    else toast.error(t("precheck.failToast", { count: fails.length }));
   }, [mappedRows]);
 
   const persistMap = () => {
     try {
       localStorage.setItem(LS_MAP_KEY, JSON.stringify(columnMap));
-      toast.success("映射已保存到本机");
+      toast.success(t("mapping.savedLocal"));
     } catch {
-      toast.error("无法写入 localStorage");
+      toast.error(t("mapping.localStorageFailed"));
     }
   };
 
@@ -215,7 +234,7 @@ export default function BulkImportPage() {
 
   const handleExecute = async () => {
     if (mappedRows.length > 5000) {
-      toast.error("单次导入最多 5000 行，请拆分后再试");
+      toast.error(t("execute.maxRows"));
       return;
     }
     setBusy(true);
@@ -230,10 +249,10 @@ export default function BulkImportPage() {
       const json = (await res.json()) as ApiBulkResp;
       setResult(json.data ?? null);
       setStep(4);
-      if (json.data && json.data.failed === 0) toast.success(`导入完成：成功 ${json.data.success}`);
-      else toast.error(json.message ?? "部分失败，请下载失败行");
+      if (json.data && json.data.failed === 0) toast.success(t("execute.completeSuccess", { count: json.data.success }));
+      else toast.error(json.message ?? t("execute.partialFailed"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "请求失败");
+      toast.error(e instanceof Error ? e.message : t("execute.requestFailed"));
     } finally {
       setProgressPct(100);
       setBusy(false);
@@ -306,27 +325,27 @@ export default function BulkImportPage() {
                 </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator />
-              <BreadcrumbItem>身份与权限</BreadcrumbItem>
+              <BreadcrumbItem>{t("breadcrumbIam")}</BreadcrumbItem>
               <BreadcrumbSeparator />
               <BreadcrumbItem>
-                <BreadcrumbPage>批量导入</BreadcrumbPage>
+                <BreadcrumbPage>{t("breadcrumbBulkImport")}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
         }
-        title="批量开通子账号"
-        description="列映射 → 预检 → 服务端批量写入（失败行可下载修正）。示例见 /templates/iam-bulk-import-example.csv"
+        title={t("title")}
+        description={t("description")}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" asChild>
               <a href="/templates/iam-bulk-import-example.csv" download>
                 <Download className="mr-1 h-4 w-4" />
-                模板下载
+                {t("templateDownload")}
               </a>
             </Button>
             <Button variant="outline" size="sm" onClick={resetAll}>
               <RotateCcw className="mr-1 h-4 w-4" />
-              重新开始
+              {t("restart")}
             </Button>
           </div>
         }
@@ -335,7 +354,7 @@ export default function BulkImportPage() {
       <Card>
         <CardContent className="p-5">
           <div className="flex flex-wrap items-center gap-3">
-            {STEPS.map((item, index) => {
+            {steps.map((item, index) => {
               const Icon = item.icon;
               const reached = step >= item.id;
               const active = step === item.id;
@@ -359,7 +378,7 @@ export default function BulkImportPage() {
                     </div>
                     <div className="hidden text-xs text-muted-foreground sm:block">{item.description}</div>
                   </div>
-                  {index < STEPS.length - 1 ? <ChevronRight className="mx-1 h-4 w-4 text-muted-foreground/50" /> : null}
+                  {index < steps.length - 1 ? <ChevronRight className="mx-1 h-4 w-4 text-muted-foreground/50" /> : null}
                 </div>
               );
             })}
@@ -370,14 +389,14 @@ export default function BulkImportPage() {
       {step === 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle>1. 上传 CSV</CardTitle>
-            <CardDescription>拖拽文件或粘贴文本；首行为表头。</CardDescription>
+            <CardTitle>{t("upload.title")}</CardTitle>
+            <CardDescription>{t("upload.description")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="soft" className="gap-1">
                 <FileSpreadsheet className="h-3 w-3" />
-                {rows.length} 行数据
+                {t("upload.rowCount", { count: rows.length })}
               </Badge>
               <input
                 type="file"
@@ -386,11 +405,11 @@ export default function BulkImportPage() {
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (!f) return;
-                  void f.text().then((t) => {
-                    setCsvText(t);
-                    parseCsv(t);
+                  void f.text().then((text) => {
+                    setCsvText(text);
+                    parseCsv(text);
                     setStep(1);
-                    toast.success("已解析文件");
+                    toast.success(t("upload.parseSuccess"));
                   });
                 }}
               />
@@ -411,19 +430,19 @@ export default function BulkImportPage() {
                   setRows([]);
                 }}
               >
-                清空
+                {t("upload.clear")}
               </Button>
               <Button
                 onClick={() => {
                   if (!csvText.trim()) {
-                    toast.error("请先粘贴或上传 CSV");
+                    toast.error(t("upload.needContent"));
                     return;
                   }
                   parseCsv(csvText);
                   setStep(1);
                 }}
               >
-                下一步：列映射
+                {t("upload.nextMapping")}
               </Button>
             </div>
           </CardContent>
@@ -433,15 +452,15 @@ export default function BulkImportPage() {
       {step === 1 ? (
         <Card>
           <CardHeader>
-            <CardTitle>2. 列映射</CardTitle>
-            <CardDescription>将 CSV 列对应到系统字段；必填列未映射时无法预检。</CardDescription>
+            <CardTitle>{t("mapping.title")}</CardTitle>
+            <CardDescription>{t("mapping.description")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {headers.length === 0 ? (
-              <p className="text-sm text-muted-foreground">无表头，请返回上传步骤。</p>
+              <p className="text-sm text-muted-foreground">{t("mapping.noHeaders")}</p>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
-                {FIELD_DEFS.map((def) => (
+                {fieldDefs.map((def) => (
                   <div key={def.key} className="space-y-1">
                     <Label className="text-xs">
                       {def.label}
@@ -457,7 +476,7 @@ export default function BulkImportPage() {
                         }))
                       }
                     >
-                      <option value="">（不映射）</option>
+                      <option value="">{t("mapping.notMapped")}</option>
                       {headers.map((h) => (
                         <option key={h} value={h}>
                           {h}
@@ -470,14 +489,14 @@ export default function BulkImportPage() {
             )}
             <div className="flex flex-wrap justify-between gap-2">
               <Button variant="outline" onClick={persistMap}>
-                保存映射到本地
+                {t("mapping.saveLocal")}
               </Button>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setStep(0)}>
-                  上一步
+                  {t("mapping.prev")}
                 </Button>
                 <Button disabled={!mapReady} onClick={runPrecheck}>
-                  预检
+                  {t("mapping.precheck")}
                 </Button>
               </div>
             </div>
@@ -488,23 +507,23 @@ export default function BulkImportPage() {
       {step === 2 ? (
         <Card>
           <CardHeader>
-            <CardTitle>3. 预检结果</CardTitle>
+            <CardTitle>{t("precheck.title")}</CardTitle>
             <CardDescription>
-              {mappedRows.length} 行 · 失败 {precheckFailures.length} 行
+              {t("precheck.summary", { total: mappedRows.length, failed: precheckFailures.length })}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {precheckFailures.length === 0 ? (
               <Alert variant="success">
                 <ShieldCheck className="h-5 w-5" />
-                <AlertTitle>校验通过</AlertTitle>
-                <AlertDescription>可进入执行步骤；服务端按批处理写入。</AlertDescription>
+                <AlertTitle>{t("precheck.passedTitle")}</AlertTitle>
+                <AlertDescription>{t("precheck.passedDescription")}</AlertDescription>
               </Alert>
             ) : (
               <Alert variant="warning">
                 <CircleDot className="h-5 w-5" />
-                <AlertTitle>发现 {precheckFailures.length} 条问题</AlertTitle>
-                <AlertDescription>请返回修改 CSV 或调整映射后重新预检。</AlertDescription>
+<AlertTitle>{t("precheck.failedTitle", { count: precheckFailures.length })}</AlertTitle>
+                <AlertDescription>{t("precheck.failedDescription")}</AlertDescription>
               </Alert>
             )}
             {precheckFailures.length > 0 ? (
@@ -512,8 +531,8 @@ export default function BulkImportPage() {
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-muted/60">
                     <tr>
-                      <th className="px-3 py-2 text-left text-xs uppercase text-muted-foreground">行</th>
-                      <th className="px-3 py-2 text-left text-xs uppercase text-muted-foreground">原因</th>
+<th className="px-3 py-2 text-left text-xs uppercase text-muted-foreground">{t("precheck.rowHeader")}</th>
+                      <th className="px-3 py-2 text-left text-xs uppercase text-muted-foreground">{t("precheck.reasonHeader")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -529,10 +548,10 @@ export default function BulkImportPage() {
             ) : null}
             <div className="flex justify-between gap-2">
               <Button variant="outline" onClick={() => setStep(1)}>
-                返回映射
+                {t("precheck.backMapping")}
               </Button>
               <Button disabled={precheckFailures.length > 0 || busy} onClick={() => setStep(3)}>
-                开始导入
+                {t("precheck.startImport")}
               </Button>
             </div>
           </CardContent>
@@ -542,17 +561,17 @@ export default function BulkImportPage() {
       {step === 3 ? (
         <Card>
           <CardHeader>
-            <CardTitle>4. 执行导入</CardTitle>
-            <CardDescription>POST /api/admin/iam/bulk-import · {mappedRows.length} 行</CardDescription>
+            <CardTitle>{t("execute.title")}</CardTitle>
+<CardDescription>{t("execute.description", { count: mappedRows.length })}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <Progress value={progressPct} />
             <div className="flex justify-between gap-2">
               <Button variant="outline" onClick={() => setStep(2)}>
-                返回
+                {t("execute.back")}
               </Button>
               <Button disabled={busy} onClick={() => void handleExecute()}>
-                {busy ? "执行中…" : "确认写入"}
+                {busy ? t("execute.running") : t("execute.confirm")}
               </Button>
             </div>
           </CardContent>
@@ -562,20 +581,20 @@ export default function BulkImportPage() {
       {step === 4 ? (
         <Card>
           <CardHeader>
-            <CardTitle>5. 结果</CardTitle>
-            <CardDescription>成功 {result?.success ?? 0} · 失败 {result?.failed ?? 0}</CardDescription>
+            <CardTitle>{t("result.title")}</CardTitle>
+<CardDescription>{t("result.summary", { success: result?.success ?? 0, failed: result?.failed ?? 0 })}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {result ? (
               <>
                 <div className="grid gap-3 sm:grid-cols-3">
-                  <StatMini label="成功" value={result.success} variant="success" />
-                  <StatMini label="失败" value={result.failed} variant="danger" />
-                  <StatMini label="合计" value={result.success + result.failed} variant="default" />
+                  <StatMini label={t("result.success")} value={result.success} variant="success" />
+                  <StatMini label={t("result.failed")} value={result.failed} variant="danger" />
+                  <StatMini label={t("result.total")} value={result.success + result.failed} variant="default" />
                 </div>
                 {result.failures.length > 0 ? (
                   <div className="rounded-lg border border-danger/30 bg-danger-soft/40 p-3">
-                    <div className="mb-2 text-sm font-semibold text-danger">服务端失败行</div>
+                    <div className="mb-2 text-sm font-semibold text-danger">{t("result.serverFailures")}</div>
                     <ul className="max-h-40 space-y-1 overflow-y-auto text-xs text-danger">
                       {result.failures.map((f, i) => (
                         <li key={`${f.index}-${i}`} className="font-mono">
@@ -584,20 +603,20 @@ export default function BulkImportPage() {
                       ))}
                     </ul>
                     <Button variant="outline" size="sm" className="mt-2" onClick={downloadFailures}>
-                      下载失败行 CSV
+                      {t("result.downloadFailures")}
                     </Button>
                   </div>
                 ) : null}
                 <Separator />
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" asChild>
-                    <Link href="/iam/users">前往用户列表</Link>
+                    <Link href="/iam/users">{t("result.goUsers")}</Link>
                   </Button>
-                  <Button onClick={resetAll}>导入下一批</Button>
+                  <Button onClick={resetAll}>{t("result.nextBatch")}</Button>
                 </div>
               </>
             ) : (
-              <EmptyState title="无结果" description="执行未返回数据" size="sm" className="border-0" />
+              <EmptyState title={t("result.noResult")} description={t("result.noResultDescription")} size="sm" className="border-0" />
             )}
           </CardContent>
         </Card>

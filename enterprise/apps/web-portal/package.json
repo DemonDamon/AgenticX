@@ -7,7 +7,7 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "lint": "next lint",
+    "lint": "eslint src/app src/components",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "saml:mock": "pnpm -C ../.. sso:saml-mock"
@@ -28,6 +28,7 @@
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^0.542.0",
     "next": "^15.1.0",
+    "next-intl": "^3",
     "openid-client": "^6.0.0",
     "pg": "^8.20.0",
     "react": "^19.0.0",
@@ -36,10 +37,15 @@
     "ulid": "^2.3.0"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
     "@tailwindcss/postcss": "^4.2.4",
     "@types/pg": "^8.15.6",
     "@types/react": "19.2.14",
+    "eslint": "^10.4.0",
+    "eslint-config-next": "^16.2.6",
+    "eslint-plugin-i18next": "^6.1.4",
     "tailwindcss": "^4.2.4",
+    "typescript-eslint": "^8.59.4",
     "vitest": "^4.1.5"
   }
 }

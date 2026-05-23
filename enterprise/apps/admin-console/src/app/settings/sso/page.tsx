@@ -13,6 +13,7 @@ import {
   Input,
   Label,
 } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 import { parseProvidersPayload } from "./providers-payload";
 import { shouldDisableSamlHealthCheck, shouldDisableSamlToggle } from "./saml-ui-guards";
 
@@ -117,6 +118,9 @@ function buildEmptySamlForm(): SamlConfigDto & { idpCertPemListText: string } {
 }
 
 export default function SsoSettingsPage() {
+  const t = useTranslations("pages.settings.sso");
+  const tc = useTranslations("common");
+  const ts = useTranslations("shell");
   const [items, setItems] = useState<Provider[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -126,7 +130,7 @@ export default function SsoSettingsPage() {
   const [samlGloballyDisabled, setSamlGloballyDisabled] = useState(false);
   const [oidcForm, setOidcForm] = useState({
     providerId: "default",
-    displayName: "企业统一认证",
+    displayName: t("defaultOidcDisplayName"),
     issuer: "",
     clientId: "",
     clientSecret: "",
@@ -135,14 +139,14 @@ export default function SsoSettingsPage() {
   });
   const [samlForm, setSamlForm] = useState(() => ({
     providerId: "saml",
-    displayName: "企业 SAML 登录",
+    displayName: t("defaultSamlDisplayName"),
     samlConfig: buildEmptySamlForm(),
   }));
 
   function formatApiError(data: { message?: string; ssoError?: string }): string {
     const code = typeof data.ssoError === "string" ? data.ssoError : null;
     if (code) return getAdminSsoErrorMessageZh(code);
-    return data.message ?? "操作失败";
+    return data.message ?? t("operationFailed");
   }
 
   async function loadProviders() {
@@ -206,7 +210,7 @@ export default function SsoSettingsPage() {
         setStatus(formatApiError(data));
         return;
       }
-      setStatus("保存成功");
+      setStatus(t("saveSuccess"));
       await loadProviders();
       await loadCacheStats();
     } finally {
@@ -230,7 +234,7 @@ export default function SsoSettingsPage() {
   }
 
   async function runHealthCheck(item: Provider) {
-    setHealthByProvider((prev) => ({ ...prev, [item.id]: { error: "checking" } }));
+    setHealthByProvider((prev) => ({ ...prev, [item.id]: { error: t("checking") } }));
     try {
       const response = await fetch(`/api/admin/sso/providers/${item.id}/health`, {
         method: "POST",
@@ -259,13 +263,13 @@ export default function SsoSettingsPage() {
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
           <div>
-            <CardTitle>OIDC Discovery 缓存</CardTitle>
+            <CardTitle>{t("cacheTitle")}</CardTitle>
             <p className="text-sm text-muted-foreground">
-              命中率按「进程内累计」估算（hits / (hits + misses)），不等同于严格 1 小时滑动窗口；用于观察 IdP discovery 是否频繁未命中缓存。
+              {t("cacheDescription")}
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => void loadCacheStats()}>
-            刷新统计
+            {t("refreshStats")}
           </Button>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm">
@@ -273,21 +277,21 @@ export default function SsoSettingsPage() {
             <>
               <div className="grid gap-1 rounded-md border p-3">
                 <p>
-                  <span className="font-medium">全局命中占比（近似）：</span> {formatPercent(cacheStats?.hitRateApprox ?? null)}
+                  <span className="font-medium">{t("globalHitRate")}</span> {formatPercent(cacheStats?.hitRateApprox ?? null)}
                 </p>
                 <p className="text-muted-foreground">
                   hits: {g.hits} · misses: {g.misses} · staleHits: {g.staleHits} · staleEvictions: {g.staleEvictions}
-                  {denom === 0 ? "（尚无请求样本）" : null}
+                  {denom === 0 ? t("noSamples") : null}
                 </p>
                 {g.lastError ? (
                   <p className="text-destructive">
-                    最近 discovery 错误摘要：<span className="break-all">{g.lastError}</span>
+                    {t("lastDiscoveryError")}<span className="break-all">{g.lastError}</span>
                   </p>
                 ) : null}
               </div>
               {cacheStats?.byProvider && Object.keys(cacheStats.byProvider).length > 0 ? (
                 <div className="rounded-md border p-3">
-                  <p className="mb-2 font-medium">按 Provider</p>
+                  <p className="mb-2 font-medium">{t("byProvider")}</p>
                   <ul className="grid list-none gap-2">
                     {Object.entries(cacheStats.byProvider).map(([pid, row]) => {
                       const d = row.hits + row.misses;
@@ -296,7 +300,7 @@ export default function SsoSettingsPage() {
                         <li key={pid} className="flex justify-between gap-2 border-b border-border pb-2 last:border-0">
                           <span className="font-mono text-xs">{pid}</span>
                           <span className="text-muted-foreground">
-                            命中≈{formatPercent(rate)} · hits {row.hits} / misses {row.misses} · stale {row.staleHits}
+{t("hitRateDetail", { rate: formatPercent(rate), hits: row.hits, misses: row.misses, staleHits: row.staleHits })}
                           </span>
                         </li>
                       );
@@ -306,27 +310,27 @@ export default function SsoSettingsPage() {
               ) : null}
             </>
           ) : (
-            <p className="text-muted-foreground">暂无统计数据（需具备 sso:read 并已产生过 OIDC 请求）。</p>
+            <p className="text-muted-foreground">{t("noStats")}</p>
           )}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>新增 SSO Provider · {protocolLabel}</CardTitle>
+<CardTitle>{t("addProviderTitle")} {protocolLabel}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3">
           <div className="grid gap-1">
-            <Label htmlFor="protocol">协议</Label>
+            <Label htmlFor="protocol">{t("protocolLabel")}</Label>
             <select
               id="protocol"
               className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs"
               value={protocol}
               onChange={(e) => setProtocol((e.target.value === "saml" ? "saml" : "oidc") as Protocol)}
             >
-              <option value="oidc">OIDC（OpenID Connect）</option>
+              <option value="oidc">{t("protocolOidc")}</option>
               <option value="saml" disabled={samlGloballyDisabled}>
-                SAML 2.0（飞书 / Okta / 中移动 IDaaS 等）
+{t("protocolSaml")}
               </option>
             </select>
           </div>
@@ -338,11 +342,11 @@ export default function SsoSettingsPage() {
           )}
 
           <Button onClick={saveProvider} disabled={saving || (protocol === "saml" && samlGloballyDisabled)}>
-            {saving ? "保存中..." : "保存"}
+{saving ? t("saving") : tc("actions.save")}
           </Button>
           {samlGloballyDisabled ? (
             <Alert>
-              <AlertDescription>SAML 已被全局禁用，当前仅允许新增 OIDC Provider。</AlertDescription>
+              <AlertDescription>{t("samlGloballyDisabled")}</AlertDescription>
             </Alert>
           ) : null}
           {status ? (
@@ -355,7 +359,7 @@ export default function SsoSettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>已配置 Provider</CardTitle>
+          <CardTitle>{t("configuredTitle")}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-2">
           {items.map((item) => {
@@ -385,7 +389,7 @@ export default function SsoSettingsPage() {
                       disabled={shouldDisableSamlHealthCheck(item, samlGloballyDisabled)}
                       onClick={() => void runHealthCheck(item)}
                     >
-                      健康检查
+{t("healthCheck")}
                     </Button>
                     <Button
                       variant="outline"
@@ -393,7 +397,7 @@ export default function SsoSettingsPage() {
                       disabled={shouldDisableSamlToggle(item, samlGloballyDisabled)}
                       onClick={() => toggleEnabled(item, !item.enabled)}
                     >
-                      {item.enabled ? "停用" : "启用"}
+                      {item.enabled ? t("disable") : t("enable")}
                     </Button>
                   </div>
                 </div>
@@ -401,7 +405,7 @@ export default function SsoSettingsPage() {
               </div>
             );
           })}
-          {items.length === 0 ? <p className="text-sm text-muted-foreground">暂无 SSO Provider</p> : null}
+          {items.length === 0 ? <p className="text-sm text-muted-foreground">{t("emptyProviders")}</p> : null}
         </CardContent>
       </Card>
     </main>
@@ -441,41 +445,42 @@ function OidcForm(props: {
     scopes: string;
   }>>;
 }) {
+  const t = useTranslations("pages.settings.sso");
   const { form, setForm } = props;
   return (
     <>
       <div className="grid gap-1">
-        <Label htmlFor="providerId">Provider ID</Label>
+        <Label htmlFor="providerId">{t("fields.providerId")}</Label>
         <Input id="providerId" value={form.providerId} onChange={(e) => setForm((prev) => ({ ...prev, providerId: e.target.value }))} />
       </div>
       <div className="grid gap-1">
-        <Label htmlFor="displayName">显示名称</Label>
+        <Label htmlFor="displayName">{t("fields.displayName")}</Label>
         <Input id="displayName" value={form.displayName} onChange={(e) => setForm((prev) => ({ ...prev, displayName: e.target.value }))} />
       </div>
       <div className="grid gap-1">
-        <Label htmlFor="issuer">Issuer</Label>
+        <Label htmlFor="issuer">{t("fields.issuer")}</Label>
         <Input id="issuer" value={form.issuer} onChange={(e) => setForm((prev) => ({ ...prev, issuer: e.target.value }))} />
       </div>
       <div className="grid gap-1">
-        <Label htmlFor="clientId">Client ID</Label>
+        <Label htmlFor="clientId">{t("fields.clientId")}</Label>
         <Input id="clientId" value={form.clientId} onChange={(e) => setForm((prev) => ({ ...prev, clientId: e.target.value }))} />
       </div>
       <div className="grid gap-1">
-        <Label htmlFor="clientSecret">Client Secret</Label>
+        <Label htmlFor="clientSecret">{t("fields.clientSecret")}</Label>
         <Input
           id="clientSecret"
           type="password"
           value={form.clientSecret}
           onChange={(e) => setForm((prev) => ({ ...prev, clientSecret: e.target.value }))}
-          placeholder="留空表示不更新"
+          placeholder={t("fields.clientSecretPlaceholder")}
         />
       </div>
       <div className="grid gap-1">
-        <Label htmlFor="redirectUri">Redirect URI</Label>
+        <Label htmlFor="redirectUri">{t("fields.redirectUri")}</Label>
         <Input id="redirectUri" value={form.redirectUri} onChange={(e) => setForm((prev) => ({ ...prev, redirectUri: e.target.value }))} />
       </div>
       <div className="grid gap-1">
-        <Label htmlFor="scopes">Scopes</Label>
+        <Label htmlFor="scopes">{t("fields.scopes")}</Label>
         <Input id="scopes" value={form.scopes} onChange={(e) => setForm((prev) => ({ ...prev, scopes: e.target.value }))} />
       </div>
     </>
@@ -492,6 +497,7 @@ function SamlForm(props: {
   form: SamlFormState;
   setForm: React.Dispatch<React.SetStateAction<SamlFormState>>;
 }) {
+  const t = useTranslations("pages.settings.sso");
   const { form, setForm } = props;
   const update = (patch: Partial<SamlFormState["samlConfig"]>) =>
     setForm((prev) => ({ ...prev, samlConfig: { ...prev.samlConfig, ...patch } }));
@@ -510,7 +516,7 @@ function SamlForm(props: {
   return (
     <>
       <div className="grid gap-1">
-        <Label htmlFor="saml-providerId">Provider ID</Label>
+        <Label htmlFor="saml-providerId">{t("fields.providerId")}</Label>
         <Input
           id="saml-providerId"
           value={form.providerId}
@@ -518,7 +524,7 @@ function SamlForm(props: {
         />
       </div>
       <div className="grid gap-1">
-        <Label htmlFor="saml-displayName">显示名称</Label>
+        <Label htmlFor="saml-displayName">{t("fields.displayName")}</Label>
         <Input
           id="saml-displayName"
           value={form.displayName}
@@ -526,7 +532,7 @@ function SamlForm(props: {
         />
       </div>
       <div className="grid gap-1">
-        <Label htmlFor="idpEntityId">IdP Entity ID</Label>
+        <Label htmlFor="idpEntityId">{t("fields.idpEntityId")}</Label>
         <Input
           id="idpEntityId"
           value={form.samlConfig.idpEntityId}
@@ -534,7 +540,7 @@ function SamlForm(props: {
         />
       </div>
       <div className="grid gap-1">
-        <Label htmlFor="idpSsoUrl">IdP SSO URL（HTTP-POST 或 HTTP-Redirect）</Label>
+        <Label htmlFor="idpSsoUrl">{t("fields.idpSsoUrl")}</Label>
         <Input
           id="idpSsoUrl"
           value={form.samlConfig.idpSsoUrl}
@@ -542,7 +548,7 @@ function SamlForm(props: {
         />
       </div>
       <div className="grid gap-1">
-        <Label htmlFor="idpSloUrl">IdP SLO URL（可选）</Label>
+        <Label htmlFor="idpSloUrl">{t("fields.idpSloUrl")}</Label>
         <Input
           id="idpSloUrl"
           value={form.samlConfig.idpSloUrl ?? ""}
@@ -550,7 +556,7 @@ function SamlForm(props: {
         />
       </div>
       <div className="grid gap-1">
-        <Label htmlFor="spEntityId">SP Entity ID（与 IdP 配置一致）</Label>
+        <Label htmlFor="spEntityId">{t("fields.spEntityId")}</Label>
         <Input
           id="spEntityId"
           value={form.samlConfig.spEntityId}
@@ -558,7 +564,7 @@ function SamlForm(props: {
         />
       </div>
       <div className="grid gap-1">
-        <Label htmlFor="acsUrl">ACS URL（指向 /api/auth/sso/saml/callback）</Label>
+        <Label htmlFor="acsUrl">{t("fields.acsUrl")}</Label>
         <Input
           id="acsUrl"
           value={form.samlConfig.acsUrl}
@@ -566,7 +572,7 @@ function SamlForm(props: {
         />
       </div>
       <div className="grid gap-1">
-        <Label htmlFor="idpCertPemListText">IdP 证书 PEM 列表（每张证书完整保留 BEGIN/END 块）</Label>
+        <Label htmlFor="idpCertPemListText">{t("fields.idpCerts")}</Label>
         <textarea
           id="idpCertPemListText"
           className="min-h-[160px] rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs"
@@ -577,7 +583,7 @@ function SamlForm(props: {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="grid gap-1">
-          <Label htmlFor="nameIdFormat">NameID Format</Label>
+          <Label htmlFor="nameIdFormat">{t("fields.nameIdFormat")}</Label>
           <select
             id="nameIdFormat"
             className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs"
@@ -591,7 +597,7 @@ function SamlForm(props: {
           </select>
         </div>
         <div className="grid gap-1">
-          <Label htmlFor="clockSkewSeconds">时钟偏移（秒）</Label>
+          <Label htmlFor="clockSkewSeconds">{t("fields.clockSkew")}</Label>
           <Input
             id="clockSkewSeconds"
             type="number"
@@ -608,7 +614,7 @@ function SamlForm(props: {
             checked={form.samlConfig.wantAssertionsSigned}
             onChange={(e) => update({ wantAssertionsSigned: e.target.checked })}
           />
-          要求断言签名（推荐开启）
+{t("fields.wantAssertionsSigned")}
         </label>
         <label className="inline-flex items-center gap-2">
           <input
@@ -616,14 +622,14 @@ function SamlForm(props: {
             checked={form.samlConfig.wantResponseSigned}
             onChange={(e) => update({ wantResponseSigned: e.target.checked })}
           />
-          要求 Response 签名
+{t("fields.wantResponseSigned")}
         </label>
       </div>
       <div className="grid gap-1">
-        <Label>Attribute Mapping</Label>
+        <Label>{t("fields.attributeMapping")}</Label>
         <div className="grid grid-cols-2 gap-2">
           <Input
-            placeholder="email（必填）"
+            placeholder={t("fields.emailRequired")}
             value={form.samlConfig.attributeMapping.email}
             onChange={(e) => updateAttribute("email", e.target.value)}
           />
@@ -659,21 +665,26 @@ function SamlForm(props: {
 }
 
 function HealthDetail(props: { health: OidcHealth | SamlHealth | { error: string } }) {
+  const t = useTranslations("pages.settings.sso");
   const { health } = props;
   if ("error" in health) {
-    return <p className="text-xs text-destructive">健康检查失败：{health.error}</p>;
+    return (
+      <p className="text-xs text-destructive">
+        {t("healthCheckFailed")} {health.error}
+      </p>
+    );
   }
   if (health.protocol === "oidc") {
     return (
       <div className="rounded-md bg-muted/40 p-2 text-xs">
         <p>
-          可达性：<strong>{health.reachable ? "OK" : "失败"}</strong>
+          {t("oidcReachable")} <strong>{health.reachable ? t("ok") : t("failed")}</strong>
           {health.error ? ` · ${health.error}` : null}
         </p>
         {health.authorizationEndpoint ? <p>authorization_endpoint：{health.authorizationEndpoint}</p> : null}
         {health.tokenEndpoint ? <p>token_endpoint：{health.tokenEndpoint}</p> : null}
         {health.signingAlgorithms ? (
-          <p>id_token 算法：{health.signingAlgorithms.join(", ")}</p>
+          <p>{t("idTokenAlgorithms")}{health.signingAlgorithms.join(", ")}</p>
         ) : null}
       </div>
     );
@@ -681,20 +692,21 @@ function HealthDetail(props: { health: OidcHealth | SamlHealth | { error: string
   return (
     <div className="rounded-md bg-muted/40 p-2 text-xs">
       <p>
-        IdP SSO URL 可达：
+        {t("samlSsoReachable")}
         {health.ssoUrlReachable === null
-          ? "未检测"
+          ? t("notChecked")
           : health.ssoUrlReachable
-            ? `OK${health.ssoUrlStatus ? `（HTTP ${health.ssoUrlStatus}）` : ""}`
-            : `失败${health.ssoUrlError ? `（${health.ssoUrlError}）` : ""}`}
+            ? t("ok")
+            : t("failed")}
+        {health.ssoUrlError ? ` (${health.ssoUrlError})` : ""}
       </p>
       {health.certs.map((cert) => (
         <p key={cert.index}>
-          证书 #{cert.index + 1}
+{t("certIndex", { index: cert.index + 1 })}
           {cert.subject ? ` · subject=${cert.subject}` : ""}
           {cert.validFrom ? ` · validFrom=${cert.validFrom}` : ""}
           {cert.validTo ? ` · validTo=${cert.validTo}` : ""}
-          {cert.expired ? "（已过期）" : cert.notYetValid ? "（尚未生效）" : "（有效）"}
+          {cert.expired ? t("certExpired") : cert.notYetValid ? t("certNotYetValid") : t("certValid")}
         </p>
       ))}
     </div>

@@ -11,6 +11,7 @@
     "test": "turbo run test",
     "clean": "turbo run clean && rm -rf node_modules",
     "visual-tour": "tsx scripts/e2e-visual-tour.ts",
+    "visual-tour:i18n": "tsx scripts/e2e-visual-tour-i18n.ts",
     "visual-tour:install": "playwright install chromium",
     "load-test:keypool": "tsx scripts/load-test-keypool.ts",
     "e2e:iam": "tsx scripts/e2e-iam.ts",

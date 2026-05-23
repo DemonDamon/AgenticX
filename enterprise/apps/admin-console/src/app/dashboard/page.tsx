@@ -35,6 +35,7 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 
 type MeteringRow = {
   dims: Record<string, string | null>;
@@ -64,6 +65,10 @@ async function readJsonBody<T>(res: Response, fallback: T): Promise<T> {
 }
 
 export default function DashboardPage() {
+  const t = useTranslations("pages.dashboard");
+  const ts = useTranslations("shell");
+  const tc = useTranslations("common");
+  const locale = useLocale();
   const [kpi, setKpi] = useState<KpiData>({
     calls: 0,
     cost: 0,
@@ -135,13 +140,16 @@ export default function DashboardPage() {
 
   /* ---------- 派生图表数据 ---------- */
 
+  const callsSeriesKey = t("charts.callsSeries");
+  const costSeriesKey = t("charts.costSeries");
+
   const trendData = useMemo(() => {
     return meteringRows.slice(-12).map((row, index) => ({
       bucket: row.dims.day ?? `slot-${index + 1}`,
-      调用量: row.total_tokens,
-      成本: Number(row.cost_usd.toFixed(4)),
+      [callsSeriesKey]: row.total_tokens,
+      [costSeriesKey]: Number(row.cost_usd.toFixed(4)),
     }));
-  }, [meteringRows]);
+  }, [meteringRows, callsSeriesKey, costSeriesKey]);
 
   const policyData = useMemo(() => {
     const stats = new Map<string, number>();
@@ -192,39 +200,42 @@ export default function DashboardPage() {
             <BreadcrumbList>
               <BreadcrumbItem>
                 <BreadcrumbLink asChild>
-                  <Link href="/dashboard">Admin</Link>
+                  <Link href="/dashboard">{ts("adminLabel")}</Link>
                 </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator />
               <BreadcrumbItem>
-                <BreadcrumbPage>Dashboard</BreadcrumbPage>
+                <BreadcrumbPage>{t("breadcrumbDashboard")}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
         }
-        title="企业总览"
+        title={t("title")}
         description={
           lastUpdated
-            ? `最近更新：${lastUpdated.toLocaleTimeString("zh-CN", { hour12: false })} · 每 ${REFRESH_MS / 1000} 秒轮询`
-            : "正在加载..."
+            ? t("descriptionUpdated", {
+                time: lastUpdated.toLocaleTimeString(locale === "zh" ? "zh-CN" : "en-US", { hour12: false }),
+                seconds: REFRESH_MS / 1000,
+              })
+            : t("descriptionLoading")
         }
         actions={
           <>
             <Button variant="outline" size="sm" asChild>
               <Link href="/audit">
                 <Activity />
-                查看审计
+                {t("viewAudit")}
               </Link>
             </Button>
             <Button variant="outline" size="sm" asChild>
               <Link href="/metering">
                 <BarChart3 />
-                四维消耗
+                {t("viewMetering")}
               </Link>
             </Button>
             <Button size="sm" onClick={() => window.location.reload()}>
               <RefreshCcw />
-              刷新
+              {tc("actions.refresh")}
             </Button>
           </>
         }
@@ -236,22 +247,24 @@ export default function DashboardPage() {
         <CardContent className="relative grid gap-4 p-6 sm:grid-cols-[1.2fr_1fr] sm:items-center">
           <div className="space-y-2">
             <Badge variant="default" className="bg-primary/90">
-              欢迎回来
+              {t("welcomeBadge")}
             </Badge>
             <h2 className="text-xl font-semibold tracking-tight text-foreground">
-              AgenticX 企业管控中心
+              {t("welcomeTitle")}
             </h2>
             <p className="text-sm text-muted-foreground">
-              今日已为 <span className="font-medium text-foreground">{kpi.activeUsers}</span> 位活跃用户提供{" "}
-              <span className="font-medium text-foreground">{kpi.calls.toLocaleString()}</span> 次模型调用，
-              成本 <span className="font-medium text-foreground">${kpi.cost.toFixed(4)}</span>
-              ，触发合规策略 <span className="font-medium text-danger">{kpi.policyHits}</span> 次。
+              {t("welcomeSummary", {
+                users: kpi.activeUsers,
+                calls: kpi.calls.toLocaleString(),
+                cost: kpi.cost.toFixed(4),
+                hits: kpi.policyHits,
+              })}
             </p>
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <QuickLink icon={<Users className="h-4 w-4" />} label="用户管理" href="/iam/users" />
-            <QuickLink icon={<ShieldAlert className="h-4 w-4" />} label="审计日志" href="/audit" />
-            <QuickLink icon={<BarChart3 className="h-4 w-4" />} label="四维消耗" href="/metering" />
+            <QuickLink icon={<Users className="h-4 w-4" />} label={t("quickLinks.users")} href="/iam/users" />
+            <QuickLink icon={<ShieldAlert className="h-4 w-4" />} label={t("quickLinks.audit")} href="/audit" />
+            <QuickLink icon={<BarChart3 className="h-4 w-4" />} label={t("quickLinks.metering")} href="/metering" />
           </div>
         </CardContent>
       </Card>
@@ -259,79 +272,79 @@ export default function DashboardPage() {
       {/* KPI stat cards */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="今日调用量"
+          label={t("stats.callsLabel")}
           value={kpi.calls.toLocaleString()}
           icon={<BarChart3 />}
           delta={{ value: "12.4", trend: "up" }}
           accentClassName="bg-primary"
-          footer={<span className="text-xs text-muted-foreground">近 24 小时累计</span>}
+          footer={<span className="text-xs text-muted-foreground">{t("stats.callsFooter")}</span>}
         />
         <StatCard
-          label="今日消耗（USD）"
+          label={t("stats.costLabel")}
           value={`$${kpi.cost.toFixed(4)}`}
           icon={<DollarSign />}
           delta={{ value: "3.1", trend: "up" }}
           accentClassName="bg-chart-3"
-          footer={<span className="text-xs text-muted-foreground">按模型计费估算</span>}
+          footer={<span className="text-xs text-muted-foreground">{t("stats.costFooter")}</span>}
         />
         <StatCard
-          label="命中合规事件"
+          label={t("stats.policyLabel")}
           value={kpi.policyHits.toString()}
           icon={<ShieldAlert />}
           delta={{ value: kpi.policyHits > 0 ? `${kpi.policyHits}` : "0", trend: kpi.policyHits > 0 ? "up" : "flat", suffix: "" }}
           accentClassName="bg-danger"
-          footer={<span className="text-xs text-muted-foreground">近 24 小时累计</span>}
+          footer={<span className="text-xs text-muted-foreground">{t("stats.callsFooter")}</span>}
         />
         <StatCard
-          label="活跃用户"
+          label={t("stats.usersLabel")}
           value={kpi.activeUsers.toString()}
           icon={<Users />}
           delta={{ value: kpi.activeUsers.toString(), trend: "up", suffix: "" }}
           accentClassName="bg-chart-6"
-          footer={<span className="text-xs text-muted-foreground">审计窗口内去重</span>}
+          footer={<span className="text-xs text-muted-foreground">{t("stats.usersFooter")}</span>}
         />
       </section>
 
       {/* Primary chart + side charts */}
       <section className="grid gap-4 xl:grid-cols-[2fr_1fr]">
         <LineCard
-          title="调用量 & 成本趋势"
-          description="近 24 小时按天聚合"
+          title={t("charts.trendTitle")}
+          description={t("charts.trendDescription")}
           variant="area"
           data={trendData}
           xKey="bucket"
           series={[
-            { key: "调用量", color: chartPalette[0] },
-            { key: "成本", color: chartPalette[2] },
+            { key: callsSeriesKey, color: chartPalette[0] },
+            { key: costSeriesKey, color: chartPalette[2] },
           ]}
           height={300}
         />
         <DonutCard
-          title="策略命中分布"
-          description="按规则 ID 统计"
+          title={t("charts.policyTitle")}
+          description={t("charts.policyDescription")}
           data={policyData}
           height={300}
           centerLabel={
             <div>
-              <div className="text-xs text-muted-foreground">总命中</div>
+              <div className="text-xs text-muted-foreground">{t("charts.policyCenterLabel")}</div>
               <div className="text-2xl font-semibold">{kpi.policyHits}</div>
             </div>
           }
-          emptyLabel="无命中事件"
+          emptyLabel={t("charts.policyEmpty")}
         />
       </section>
 
       {/* Dept × Model stacked + top users + audit feed */}
       <section className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
         <BarCard
-          title="部门 × 模型消耗"
-          description="Token 堆叠对比"
+          title={t("charts.deptModelTitle")}
+          description={t("charts.deptModelDescription")}
           data={deptModelData}
           xKey="dept"
           series={[
             { key: "deepseek", label: "DeepSeek", color: chartPalette[0] },
             { key: "moonshot", label: "Moonshot", color: chartPalette[4] },
-            { key: "others", label: "其它", color: chartPalette[5] },
+            { key: "others", label: t("charts.others"), color: chartPalette[5] },
           ]}
           stacked
           height={280}
@@ -339,20 +352,20 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
             <div>
-              <CardTitle>Top 用户</CardTitle>
-              <CardDescription>审计事件数前 5</CardDescription>
+              <CardTitle>{t("topUsers.title")}</CardTitle>
+              <CardDescription>{t("topUsers.description")}</CardDescription>
             </div>
             <Badge variant="soft" className="gap-1">
               <ArrowUpRight className="h-3 w-3" />
-              实时
+              {t("topUsers.realtime")}
             </Badge>
           </CardHeader>
           <CardContent className="space-y-2">
             {topUsers.length === 0 ? (
               <EmptyState
                 icon={<Inbox className="h-5 w-5" />}
-                title="暂无活跃用户"
-                description="等待审计事件到达"
+                title={t("topUsers.emptyTitle")}
+                description={t("topUsers.emptyDescription")}
                 size="sm"
                 className="border-0"
               />
@@ -364,7 +377,9 @@ export default function DashboardPage() {
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{userId}</div>
-                    <div className="text-xs text-muted-foreground">{count} 次事件</div>
+                    <div className="text-xs text-muted-foreground">
+                      {count} {t("topUsers.eventCount")}
+                    </div>
                   </div>
                   <Badge variant="soft">{count}</Badge>
                 </div>
@@ -378,12 +393,12 @@ export default function DashboardPage() {
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
           <div>
-            <CardTitle>最近审计事件</CardTitle>
-            <CardDescription>点击跳转详细页</CardDescription>
+            <CardTitle>{t("recentAudit.title")}</CardTitle>
+            <CardDescription>{t("recentAudit.description")}</CardDescription>
           </div>
           <Button variant="outline" size="sm" asChild>
             <Link href="/audit">
-              查看全部
+              {t("recentAudit.viewAll")}
               <ArrowUpRight className="ml-1 h-3.5 w-3.5" />
             </Link>
           </Button>
@@ -392,8 +407,8 @@ export default function DashboardPage() {
           {auditItems.length === 0 ? (
             <EmptyState
               icon={<Inbox className="h-5 w-5" />}
-              title={loading ? "加载中..." : "暂无审计事件"}
-              description={loading ? "正在拉取最近 20 条记录" : "近 24 小时无事件记录"}
+              title={loading ? t("recentAudit.loadingTitle") : t("recentAudit.emptyTitle")}
+              description={loading ? t("recentAudit.loadingDescription") : t("recentAudit.emptyDescription")}
               size="sm"
               className="border-0"
             />
@@ -419,7 +434,7 @@ export default function DashboardPage() {
                     <span className="truncate text-muted-foreground">{event.user_id}</span>
                   </div>
                   <Badge variant={hitCount > 0 ? "destructive" : "soft"} className="shrink-0">
-                    {hitCount > 0 ? `命中 ${hitCount}` : "合规"}
+                    {hitCount > 0 ? `${t("recentAudit.hit")} ${hitCount}` : t("recentAudit.compliant")}
                   </Badge>
                 </Link>
               );

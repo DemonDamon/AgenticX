@@ -20,8 +20,10 @@ import {
 import { getAdminSsoErrorMessageZh } from "@agenticx/auth/src/services/oidc-error-codes";
 import { ArrowRight, ShieldAlert, ShieldCheck } from "lucide-react";
 import { getAdminSsoProviderOptions, pickPreferredSsoProvider } from "../../lib/admin-sso-provider-options";
+import { useTranslations } from "next-intl";
 
 function LoginPageInner() {
+  const t = useTranslations("pages.login");
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("admin@agenticx.local");
@@ -49,7 +51,7 @@ function LoginPageInner() {
       });
       const data = await response.json();
       if (!response.ok) {
-        setStatus(data.message ?? "登录失败，请检查邮箱和密码");
+        setStatus(data.message ?? t("loginFailed"));
         return;
       }
       router.push("/dashboard");
@@ -63,7 +65,7 @@ function LoginPageInner() {
       {/* 顶部 Logo */}
       <div className="absolute left-6 top-6 z-50 flex items-center gap-3 md:left-10 md:top-8">
         <MachiAvatar size={40} className="h-10 w-10 shadow-sm" />
-        <span className="text-xl font-bold tracking-tight text-foreground">AgenticX Enterprise</span>
+        <span className="text-xl font-bold tracking-tight text-foreground">{t("brandName")}</span>
       </div>
 
       {/* 装饰背景 */}
@@ -83,10 +85,12 @@ function LoginPageInner() {
           <div className="space-y-10">
             <div className="space-y-6">
               <h1 className="text-4xl font-bold leading-[1.15] tracking-tighter xl:text-5xl">
-                企业级大模型<br /><span className="text-primary">应用一体化平台</span>
+                {t("heroTitle")}
+                <br />
+                <span className="text-primary">{t("heroTitleAccent")}</span>
               </h1>
               <p className="max-w-lg text-base leading-relaxed text-muted-foreground">
-                前台 + 后台 + AI 网关三端联动 · 云端统一管控 · 端侧安全闭环 · 四维计量与合规审计全覆盖。
+                {t("heroDescription")}
               </p>
             </div>
 
@@ -96,8 +100,8 @@ function LoginPageInner() {
                   <ShieldCheck className="h-4 w-4" />
                 </div>
                 <div className="flex flex-col pt-0.5">
-                  <span className="font-semibold text-foreground">合规优先</span>
-                  <span className="text-sm leading-6 text-muted-foreground">审计链防篡改、策略拦截可视化、审计导出合规归档</span>
+                  <span className="font-semibold text-foreground">{t("features.complianceTitle")}</span>
+                  <span className="text-sm leading-6 text-muted-foreground">{t("features.complianceDesc")}</span>
                 </div>
               </li>
               <li className="flex items-start gap-3.5">
@@ -105,8 +109,8 @@ function LoginPageInner() {
                   <ShieldCheck className="h-4 w-4" />
                 </div>
                 <div className="flex flex-col pt-0.5">
-                  <span className="font-semibold text-foreground">管控深度</span>
-                  <span className="text-sm leading-6 text-muted-foreground">部门 × 员工 × 厂商 × 模型四维消耗穿透分析</span>
+                  <span className="font-semibold text-foreground">{t("features.controlTitle")}</span>
+                  <span className="text-sm leading-6 text-muted-foreground">{t("features.controlDesc")}</span>
                 </div>
               </li>
               <li className="flex items-start gap-3.5">
@@ -114,8 +118,8 @@ function LoginPageInner() {
                   <ShieldCheck className="h-4 w-4" />
                 </div>
                 <div className="flex flex-col pt-0.5">
-                  <span className="font-semibold text-foreground">白标交付</span>
-                  <span className="text-sm leading-6 text-muted-foreground">Machi 基底 + 客户 brand token 覆盖 · 5 分钟换肤</span>
+                  <span className="font-semibold text-foreground">{t("features.whitelabelTitle")}</span>
+                  <span className="text-sm leading-6 text-muted-foreground">{t("features.whitelabelDesc")}</span>
                 </div>
               </li>
             </ul>
@@ -126,13 +130,13 @@ function LoginPageInner() {
         <div className="flex items-center justify-center">
           <Card className="w-full max-w-md backdrop-blur">
             <CardHeader className="space-y-1.5">
-              <CardTitle className="text-2xl">管理员登录</CardTitle>
-              <CardDescription>使用企业管理员账号进入控制台</CardDescription>
+              <CardTitle className="text-2xl">{t("cardTitle")}</CardTitle>
+              <CardDescription>{t("cardDescription")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <form className="space-y-3.5" onSubmit={signIn}>
                 <div className="space-y-1.5">
-                  <Label htmlFor="email">邮箱</Label>
+                  <Label htmlFor="email">{t("emailLabel")}</Label>
                   <Input
                     id="email"
                     type="email"
@@ -144,13 +148,13 @@ function LoginPageInner() {
                 </div>
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <Label htmlFor="password">密码</Label>
+                    <Label htmlFor="password">{t("passwordLabel")}</Label>
                     <button
                       type="button"
                       className="text-xs text-muted-foreground hover:text-foreground"
-                      onClick={() => alert("请联系你的超级管理员重置密码")}
+                      onClick={() => alert(t("forgotPasswordAlert"))}
                     >
-                      忘记密码？
+                      {t("forgotPassword")}
                     </button>
                   </div>
                   <Input
@@ -172,13 +176,13 @@ function LoginPageInner() {
                 ) : null}
 
                 <Button type="submit" className="w-full" disabled={busy}>
-                  {busy ? "登录中..." : "登录并进入控制台"}
+                  {busy ? t("signingIn") : t("submit")}
                   <ArrowRight />
                 </Button>
               </form>
 
               <Separator>
-                <span className="bg-card px-2 text-xs text-muted-foreground">或使用</span>
+                <span className="bg-card px-2 text-xs text-muted-foreground">{t("orUse")}</span>
               </Separator>
 
               <div className="grid grid-cols-2 gap-2">
@@ -196,15 +200,15 @@ function LoginPageInner() {
                     window.location.href = `${startPath}?provider=${encodeURIComponent(providerId)}`;
                   }}
                 >
-                  企业 SSO 登录
+                  {t("ssoLogin")}
                 </Button>
                 <Button variant="outline" type="button" disabled>
-                  LDAP（敬请期待）
+                  {t("ldapComingSoon")}
                 </Button>
               </div>
 
               <p className="pt-2 text-center text-xs text-muted-foreground">
-                本次登录将记录到审计日志 · 所有操作需要管理员授权
+                {t("footerNote")}
               </p>
             </CardContent>
           </Card>
@@ -213,7 +217,7 @@ function LoginPageInner() {
 
       {/* 底部信息 */}
       <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-3 text-[11px] font-medium text-muted-foreground/40 md:bottom-6 md:gap-4">
-        <span>企业合规</span>
+        <span>{t("footerCompliance")}</span>
         <Separator orientation="vertical" className="h-3 bg-border/40" />
         <span>ISO27001 · SOC2</span>
         <Separator orientation="vertical" className="h-3 bg-border/40" />
