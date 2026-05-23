@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../lib/admin-auth";
 import { fetchGatewayPlugins, reloadGatewayPlugins } from "../../../../lib/gateway-ops-store";
+import { requireGatewayInternalToken } from "../../../../lib/gateway-internal-token";
 
 export async function GET() {
   const auth = await requireAdminScope(["provider:read"]);
@@ -26,10 +27,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ code: "40000", message: "name required" }, { status: 400 });
     }
     const base = process.env.GATEWAY_INTERNAL_BASE_URL?.trim() || "http://127.0.0.1:8080";
-    const token = process.env.GATEWAY_INTERNAL_TOKEN?.trim();
-    if (!token) {
-      return NextResponse.json({ code: "50000", message: "GATEWAY_INTERNAL_TOKEN missing" }, { status: 500 });
-    }
+    const token = requireGatewayInternalToken();
     const upstream = new FormData();
     upstream.set("name", name);
     const manifest = form.get("manifest");
