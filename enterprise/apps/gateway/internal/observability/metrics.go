@@ -23,6 +23,9 @@ type Registry struct {
 	channelHealth *prometheus.GaugeVec
 	activeStreams *prometheus.GaugeVec
 	upstreamErrors *prometheus.CounterVec
+	pluginInvocations *prometheus.CounterVec
+	pluginErrors      *prometheus.CounterVec
+	pluginLatency     *prometheus.HistogramVec
 
 	once sync.Once
 }
@@ -75,6 +78,19 @@ func (r *Registry) register() {
 		Name: "agx_gateway_upstream_error_total",
 		Help: "Upstream errors by channel and reason",
 	}, []string{"channel", "reason"})
+	r.pluginInvocations = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "agx_plugin_invocations_total",
+		Help: "Wasm plugin hook invocations",
+	}, []string{"plugin"})
+	r.pluginErrors = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "agx_plugin_errors_total",
+		Help: "Wasm plugin hook errors",
+	}, []string{"plugin"})
+	r.pluginLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "agx_plugin_latency_seconds",
+		Help:    "Wasm plugin hook latency in seconds",
+		Buckets: prometheus.ExponentialBuckets(0.00001, 2, 14),
+	}, []string{"plugin"})
 
 	r.reg.MustRegister(
 		r.ttftSeconds,
@@ -84,7 +100,27 @@ func (r *Registry) register() {
 		r.channelHealth,
 		r.activeStreams,
 		r.upstreamErrors,
+		r.pluginInvocations,
+		r.pluginErrors,
+		r.pluginLatency,
 	)
+}
+
+// ObservePlugin implements wasmhost.MetricsRecorder.
+func (r *Registry) ObservePlugin(name string, latency time.Duration, err error) {
+	if !r.Enabled() {
+		return
+	}
+	plugin := safeLabel(name)
+	if r.pluginInvocations != nil {
+		r.pluginInvocations.WithLabelValues(plugin).Inc()
+	}
+	if err != nil && r.pluginErrors != nil {
+		r.pluginErrors.WithLabelValues(plugin).Inc()
+	}
+	if r.pluginLatency != nil {
+		r.pluginLatency.WithLabelValues(plugin).Observe(latency.Seconds())
+	}
 }
 
 func (r *Registry) Enabled() bool { return r != nil && r.enabled }

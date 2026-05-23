@@ -62,6 +62,7 @@ type Event struct {
 	MCPToolName    string      `json:"mcp_tool_name,omitempty"`
 	MCPInputHash   string      `json:"mcp_input_hash,omitempty"`
 	MCPOutputHash  string      `json:"mcp_output_hash,omitempty"`
+	PluginsInvoked []string    `json:"plugins_invoked,omitempty"`
 	PrevChecksum string      `json:"prev_checksum"`
 	Checksum     string      `json:"checksum"`
 }

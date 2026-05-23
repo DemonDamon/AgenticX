@@ -13,6 +13,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/openai"
 	"github.com/agenticx/enterprise/gateway/internal/relay"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
+	"github.com/agenticx/enterprise/gateway/internal/wasmhost"
 )
 
 func (s *Server) handleChatCompleteRelay(
@@ -23,11 +24,13 @@ func (s *Server) handleChatCompleteRelay(
 	identity requestIdentity,
 	estimatedInputTokens int,
 	reservedTokens int64,
+	pluginCtx *wasmhost.HookContext,
 ) {
 	result, err := s.relayExecutor.Complete(r.Context(), req, req.Model, channelIdentity(identity))
 	decision := routingDecisionFromRelay(result, req.Model, s.decider.Decide(r, req.Model))
 	if err != nil {
 		s.billingService.Rollback(identity.UserID, reservedTokens)
+		s.recordUpstreamError(identity.TenantID, makeID("req"), result.Channel.ID, 500, []byte(err.Error()))
 		writeAPIError(w, openai.Internal(err.Error()))
 		return
 	}
@@ -102,6 +105,11 @@ func (s *Server) handleChatCompleteRelay(
 		}
 	}
 
+	s.transformChatResponseJSON(pluginCtx, &resp)
+	if len(resp.Choices) > 0 {
+		responseContent = openai.ComposeMessageContent(resp.Choices[0].Message.Content, resp.Choices[0].Message.ReasoningContent)
+	}
+
 	ev := audit.Event{
 		ID:              makeID("audit"),
 		TenantID:        identity.TenantID,
@@ -136,6 +144,7 @@ func (s *Server) handleChatCompleteRelay(
 		},
 	}
 	enrichAuditFromAttempts(&ev, result.Attempts)
+	applyPluginsInvoked(&ev, pluginCtx)
 	if err := s.writeAuditEvent(ev); err != nil {
 		writeAPIError(w, openai.Internal("audit write failed"))
 		return
