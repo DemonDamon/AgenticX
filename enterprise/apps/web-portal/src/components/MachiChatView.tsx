@@ -301,7 +301,11 @@ export function MachiChatView({ client }: MachiChatViewProps) {
         <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
           <ShieldAlert className="h-5 w-5" />
           <div>
-            <AlertTitle>{t.complianceTitle}</AlertTitle>
+            <AlertTitle>
+              {/合规|策略/.test(errorMessage) && !/Gateway/i.test(errorMessage)
+                ? t.complianceTitle
+                : t.chatErrorTitle}
+            </AlertTitle>
             <AlertDescription>{errorMessage}</AlertDescription>
           </div>
         </Alert>

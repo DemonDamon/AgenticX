@@ -33,6 +33,7 @@ const copy = {
     general: "常规设置",
     routeLabel: "路由",
     complianceTitle: "合规拦截",
+    chatErrorTitle: "聊天请求失败",
   },
   en: {
     checkingAuth: "Checking authentication…",
@@ -65,6 +66,7 @@ const copy = {
     general: "General settings",
     routeLabel: "Route",
     complianceTitle: "Compliance block",
+    chatErrorTitle: "Chat request failed",
   },
 } as const;
 
