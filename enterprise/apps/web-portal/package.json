@@ -4,7 +4,8 @@
   "private": true,
   "description": "员工前台 Web App（Next.js）",
   "scripts": {
-    "dev": "next dev --port 3000",
+    "dev": "next dev --turbopack --port 3000",
+    "dev:webpack": "next dev --port 3000",
     "build": "next build",
     "start": "next start -p 3000",
     "lint": "eslint src/app src/components",

@@ -181,6 +181,10 @@
         "confirmRevoke": "确定吊销该 Token？",
         "metaUser": "用户",
         "metaLastUsed": "最近使用",
+        "meta": {
+          "user": "用户 {userId}",
+          "lastUsed": " · 最近使用 {lastUsed}"
+        },
         "toast": {
           "loadFailed": "加载失败",
           "createSuccess": "API Token 已创建，请立即复制明文",
@@ -605,6 +609,7 @@
         "suspenseLoading": "加载中..."
       },
       "departments": {
+        "breadcrumbIam": "身份与权限",
         "breadcrumbDepartments": "部门",
         "title": "部门管理",
         "description": "层级目录式组织架构，点击部门卡片进入下级。支持在任意层级新建与管理。",

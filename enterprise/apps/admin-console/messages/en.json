@@ -181,6 +181,10 @@
         "confirmRevoke": "Revoke this token?",
         "metaUser": "User",
         "metaLastUsed": "Last used",
+        "meta": {
+          "user": "user {userId}",
+          "lastUsed": " · last used {lastUsed}"
+        },
         "toast": {
           "loadFailed": "Failed to load",
           "createSuccess": "API token created — copy the plaintext now",
@@ -605,6 +609,7 @@
         "suspenseLoading": "Loading..."
       },
       "departments": {
+        "breadcrumbIam": "Identity & Access",
         "breadcrumbDepartments": "Departments",
         "title": "Department management",
         "description": "Hierarchical org structure — drill into cards to manage at any level.",
