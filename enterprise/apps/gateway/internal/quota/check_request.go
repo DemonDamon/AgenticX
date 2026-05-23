@@ -3,6 +3,7 @@ package quota
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -110,6 +111,40 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64) CheckResult {
 	return CheckResult{Allowed: true, Rule: rule, Description: "ok"}
 }
 
+// CheckMCPToolCall enforces per-minute MCP tool invocation limits.
+func (t *Tracker) CheckMCPToolCall(ctx RequestContext, serverName string, overrideLimit int) CheckResult {
+	cfg := t.loadConfig()
+	rule := selectRuleExtended(cfg, ctx)
+	limit := rule.ToolCallsPerMinute
+	if overrideLimit > 0 {
+		limit = overrideLimit
+	}
+	if limit <= 0 {
+		limit = 60
+	}
+	lim := sharedLimiter()
+	key := rateKey("mcp_tool", ctx) + "::" + strings.TrimSpace(serverName)
+	ok, used := lim.AllowRPM(key, limit)
+	if !ok {
+		if rule.Action == ActionBlock || rule.Action == "" {
+			return CheckResult{
+				Allowed:     false,
+				Kind:        "mcp_tool",
+				Rule:        rule,
+				Description: "mcp:rate_limited",
+				Used:        int64(used),
+				Limit:       int64(limit),
+				Headers: map[string]string{
+					"X-AgenticX-Quota-Used":  fmt.Sprintf("%d", used),
+					"X-AgenticX-Quota-Limit": fmt.Sprintf("%d", limit),
+				},
+			}
+		}
+		return warnResult("mcp_tool", rule)
+	}
+	return CheckResult{Allowed: true, Rule: rule, Description: "ok"}
+}
+
 func (t *Tracker) ReleaseConcurrency(ctx RequestContext) {
 	cfg := t.loadConfig()
 	rule := selectRuleExtended(cfg, ctx)
@@ -153,6 +188,9 @@ func sanitizeRuleExtended(in Rule) Rule {
 	}
 	if r.MaxConcurrency < 0 {
 		r.MaxConcurrency = 0
+	}
+	if r.ToolCallsPerMinute < 0 {
+		r.ToolCallsPerMinute = 0
 	}
 	return r
 }

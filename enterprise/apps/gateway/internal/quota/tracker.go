@@ -24,11 +24,12 @@ const (
 )
 
 type Rule struct {
-	MonthlyTokens   int64  `json:"monthlyTokens"`
-	TPM             int    `json:"tpm,omitempty"`
-	RPM             int    `json:"rpm,omitempty"`
-	MaxConcurrency  int    `json:"maxConcurrency,omitempty"`
-	Action          Action `json:"action"`
+	MonthlyTokens        int64  `json:"monthlyTokens"`
+	TPM                  int    `json:"tpm,omitempty"`
+	RPM                  int    `json:"rpm,omitempty"`
+	MaxConcurrency       int    `json:"maxConcurrency,omitempty"`
+	ToolCallsPerMinute   int    `json:"toolCallsPerMinute,omitempty"`
+	Action               Action `json:"action"`
 }
 
 type Config struct {

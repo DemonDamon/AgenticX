@@ -66,6 +66,7 @@ INSERT INTO gateway_audit_events (
   channel_id, channel_key_ref, api_token_id,
   input_tokens, output_tokens, total_tokens, latency_ms,
   digest, policies_hit, tools_called,
+  mcp_server, mcp_tool_name, mcp_input_hash, mcp_output_hash, mcp_status,
   prev_checksum, checksum, signature,
   created_at, updated_at
 ) VALUES (
@@ -75,7 +76,8 @@ INSERT INTO gateway_audit_events (
   $14,$15,$16,
   $17,$18,$19,$20,
   $21,$22,$23,
-  $24,$25,$26,
+  $24,$25,$26,$27,$28,$29,
+  $30,$31,$32,
   timezone('utc', now()), timezone('utc', now())
 )
 ON CONFLICT (id) DO NOTHING`,
@@ -102,6 +104,11 @@ ON CONFLICT (id) DO NOTHING`,
 		nullJSON(digest),
 		nullJSON(policies),
 		nil, // tools_called
+		nullStr(e.MCPServer),
+		nullStr(e.MCPToolName),
+		nullStr(e.MCPInputHash),
+		nullStr(e.MCPOutputHash),
+		nullStr(e.MCPStatus),
 		strings.TrimSpace(e.PrevChecksum),
 		strings.TrimSpace(e.Checksum),
 		nil, // signature

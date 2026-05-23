@@ -27,6 +27,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/config"
 	"github.com/agenticx/enterprise/gateway/internal/gatewayinternal"
 	"github.com/agenticx/enterprise/gateway/internal/keypool"
+	"github.com/agenticx/enterprise/gateway/internal/mcphost"
 	"github.com/agenticx/enterprise/gateway/internal/metering"
 	"github.com/agenticx/enterprise/gateway/internal/observability"
 	"github.com/agenticx/enterprise/gateway/internal/openai"
@@ -39,6 +40,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -71,6 +73,10 @@ type Server struct {
 	cacheService       *cache.Service
 	pricing            *metering.PricingTable
 	metrics            *observability.Registry
+	pgPool             *pgxpool.Pool
+	mcpHost            *mcphost.Host
+	mcpStreamable      mcphost.StreamableHTTPTransport
+	mcpSSE             *mcphost.SSETransport
 }
 
 var (
@@ -140,11 +146,13 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 	fileWriter := audit.NewFileWriter(cfg.AuditDir)
 	var auditWriter audit.EventWriter = fileWriter
 	var patVerifier *gatewayauth.PATVerifier
+	var pgPool *pgxpool.Pool
 	if dbURL != "" {
 		pool, aerr := audit.NewPgxPool(dbURL)
 		if aerr != nil {
 			logger.Warn("audit pg unavailable, using file-only audit", "error", aerr)
 		} else {
+			pgPool = pool
 			patVerifier = gatewayauth.NewPATVerifier(pool)
 			auditWriter = audit.NewDualWriter(fileWriter, audit.NewPgWriter(pool), cfg.AuditDir, logger)
 			days := audit.BackfillDaysFromEnv()
@@ -180,7 +188,9 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 		cacheService:       initCacheService(logger),
 		pricing:            initPricingTable(logger),
 		metrics:            observability.NewRegistryFromEnv(),
+		pgPool:             pgPool,
 	}
+	srv.initMCPHost()
 	srv.initChannelRelay()
 	return srv, nil
 }
@@ -530,6 +540,7 @@ func (s *Server) Router() http.Handler {
 	if responsesInboundEnabled() {
 		r.Post("/v1/responses", s.handleResponses)
 	}
+	s.registerMCPRoutes(r)
 
 	return r
 }
