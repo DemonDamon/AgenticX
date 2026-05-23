@@ -87,8 +87,8 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    call["Gateway 每次 LLM 调用"] -->|必须成功| jsonl[("JSONL<br/>apps/gateway/<br/>.runtime/audit/")]
-    call -->|best-effort| pg[("gateway_audit_events")]
+    llmCall["Gateway 每次 LLM 调用"] -->|必须成功| jsonl[("JSONL<br/>apps/gateway/<br/>.runtime/audit/")]
+    llmCall -->|best-effort| pg[("gateway_audit_events")]
     pg -.->|失败| pending[(".pg-pending")]
     boot["进程启动"] -->|回灌窗口 GATEWAY_AUDIT_BACKFILL_DAYS=7| pending
     pending --> pg
