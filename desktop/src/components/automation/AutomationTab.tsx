@@ -58,7 +58,7 @@ function PreventSleepToggle() {
       <div className="min-w-0 flex-1">
         <div className="text-sm font-semibold text-text-strong">抑制系统睡眠</div>
         <p className="mt-1 text-xs leading-relaxed text-text-muted">
-          向系统申请「推迟睡眠」，减少长跑任务、合盖挂机或远程串联时被系统挂起的概率；退出 Machi 后不再拦截。
+          向系统申请「推迟睡眠」，减少长跑任务、合盖挂机或远程串联时被系统挂起的概率；退出 Near 后不再拦截。
         </p>
         {message ? (
           <div className={`mt-1 text-xs ${message.startsWith("已保存") ? "text-text-faint" : "text-rose-400"}`}>
@@ -180,7 +180,7 @@ export function AutomationTab() {
     <div className="space-y-4">
       {/* Header */}
       <div className="text-sm text-text-subtle">
-      管理自动化任务，让 Machi 按计划为你工作。
+      管理自动化任务，让 Near 按计划为你工作。
       </div>
 
       {/* System section */}

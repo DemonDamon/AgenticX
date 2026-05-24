@@ -17,11 +17,7 @@ import {
   MarkdownContext,
 } from "./markdown-components";
 import { renderUserMessageInlineBody } from "./user-message-inline";
-import {
-  getAssistantActionStyle,
-  getAssistantTextClassName,
-  getAssistantTextStyle,
-} from "./im-layout";
+import { resolveMetaDisplayName } from "../../utils/display-name";
 
 type Props = {
   message: Message;
@@ -221,7 +217,7 @@ export function ImBubble({
   const formatForwardSender = (sender?: string) => {
     const raw = String(sender || "").trim();
     if (!raw) return "AI";
-    return raw.toLowerCase() === "meta" ? "Machi" : raw;
+    return resolveMetaDisplayName(raw.toLowerCase() === "meta" ? null : raw);
   };
 
   useEffect(() => {

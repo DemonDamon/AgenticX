@@ -23,13 +23,13 @@ function formatAgxLoginInitError(raw: string): { message: string; detail?: strin
 
   if (code === "database_not_configured") {
     return {
-      message: "官网账号服务暂不可用，无法开始登录。请稍后再试；若多次出现，请联系 Machi 支持。",
+      message: "官网账号服务暂不可用，无法开始登录。请稍后再试；若多次出现，请联系 Near 支持。",
       detail: supportTail("AGX-AUTH-101"),
     };
   }
   if (code === "supabase_not_configured") {
     return {
-      message: "账号系统暂不可用，无法开始登录。请稍后再试；若多次出现，请联系 Machi 支持。",
+      message: "账号系统暂不可用，无法开始登录。请稍后再试；若多次出现，请联系 Near 支持。",
       detail: supportTail("AGX-AUTH-102"),
     };
   }
@@ -41,25 +41,25 @@ function formatAgxLoginInitError(raw: string): { message: string; detail?: strin
   }
   if (code === "database_schema_missing") {
     return {
-      message: "账号服务尚未完成初始化，无法开始登录。请联系 Machi 支持或稍后再试。",
+      message: "账号服务尚未完成初始化，无法开始登录。请联系 Near 支持或稍后再试。",
       detail: supportTail("AGX-AUTH-105"),
     };
   }
   if (code === "database_connection_failed") {
     return {
-      message: "无法连接到账号数据库，请稍后再试；若多次出现，请联系 Machi 支持。",
+      message: "无法连接到账号数据库，请稍后再试；若多次出现，请联系 Near 支持。",
       detail: supportTail("AGX-AUTH-106"),
     };
   }
   if (code === "database_ssl_error") {
     return {
-      message: "与账号服务的安全连接异常，请稍后再试；若多次出现，请联系 Machi 支持。",
+      message: "与账号服务的安全连接异常，请稍后再试；若多次出现，请联系 Near 支持。",
       detail: supportTail("AGX-AUTH-107"),
     };
   }
   if (code === "database_auth_failed") {
     return {
-      message: "账号数据库鉴权失败，服务暂不可用。请联系 Machi 支持。",
+      message: "账号数据库鉴权失败，服务暂不可用。请联系 Near 支持。",
       detail: supportTail("AGX-AUTH-108"),
     };
   }
@@ -137,7 +137,7 @@ export function AccountTab() {
   const onLogout = async () => {
     const r = await window.agenticxDesktop.confirmDialog({
       title: "退出官网账号",
-      message: "确定要清除本机已保存的 Machi 官网登录状态吗？",
+      message: "确定要清除本机已保存的 Near 官网登录状态吗？",
       confirmText: "退出",
       destructive: true,
     });
@@ -153,11 +153,11 @@ export function AccountTab() {
           <User className="size-4" />
         </div>
         <div>
-          <div className="text-[16px] font-semibold text-text-primary">Machi 官网账号</div>
+          <div className="text-[16px] font-semibold text-text-primary">Near 官网账号</div>
           <p className="mt-1 text-xs text-text-subtle leading-relaxed">
             与 <span className="font-mono text-[11px]">agxbuilder.com</span>{" "}
             使用同一套账号。点击登录后将在系统浏览器中完成验证，本应用自动同步登录状态。
-            本功能依赖 Machi 官网服务；若暂不可用，可能为服务维护或能力未开放，请稍后再试。
+            本功能依赖 Near 官网服务；若暂不可用，可能为服务维护或能力未开放，请稍后再试。
           </p>
         </div>
       </div>

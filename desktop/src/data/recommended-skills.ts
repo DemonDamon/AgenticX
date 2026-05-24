@@ -22,7 +22,7 @@ export const RECOMMENDED_SKILLS: RecommendedSkill[] = [
     id: "tencent-docs",
     name: "腾讯文档",
     provider: "腾讯",
-    description: "按官方页面指引在 Machi / Meta-Agent 中接入腾讯文档技能。",
+    description: "按官方页面指引在 Near / Meta-Agent 中接入腾讯文档技能。",
     icon_src: tencentDocsIcon,
     official_url: "https://docs.qq.com/scenario/open-claw.html?nlc=1",
     category: "文档协作",

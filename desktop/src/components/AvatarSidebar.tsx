@@ -3,6 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import { Ban, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { AutomationTaskIcon } from "./icons/AutomationTaskIcon";
 import { useAppStore, type Avatar, type GroupChat } from "../store";
+import { APP_DISPLAY_NAME, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { avatarBgClass, avatarDotColor, groupColorByIndex } from "../utils/avatar-color";
@@ -450,7 +451,7 @@ export function AvatarSidebar() {
           });
           return;
         }
-        // Lazy session: first real send in ChatPane will createSession (align Machi meta pane).
+        // Lazy session: first real send in ChatPane will createSession (align Near meta pane).
       } finally {
         openingRef.current = false;
       }
@@ -632,7 +633,7 @@ export function AvatarSidebar() {
     const groupPanes = panes.filter((item) => item.avatarId === groupPaneId);
     const nonGroupPanes = panes.filter((item) => item.avatarId !== groupPaneId);
     if (nonGroupPanes.length === 0 && groupPanes.length > 0) {
-      addPane(null, "Machi", "");
+      addPane(null, META_AGENT_DISPLAY_NAME, "");
     }
     groupPanes.forEach((item) => removePane(item.id));
     setGroups(groups.filter((g) => g.id !== group.id));
@@ -713,7 +714,7 @@ export function AvatarSidebar() {
               ? "bg-surface-card text-text-strong"
               : "text-text-muted hover:bg-surface-card hover:text-text-strong"
           }`}
-          onClick={() => void openOrFocusPane(null, "Machi")}
+          onClick={() => void openOrFocusPane(null, META_AGENT_DISPLAY_NAME)}
           onContextMenu={(e) => {
             e.preventDefault();
             setGroupContextMenu(null);
@@ -723,11 +724,11 @@ export function AvatarSidebar() {
         >
           <img
             src={metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL}
-            alt="Machi"
+            alt={APP_DISPLAY_NAME}
             className="h-8 w-8 shrink-0 rounded-full object-cover"
           />
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[15px] font-medium">Machi</div>
+            <div className="truncate text-[15px] font-medium">{APP_DISPLAY_NAME}</div>
             {/* <div className="truncate text-xs text-text-faint">全局调度</div> */}
           </div>
         </button>

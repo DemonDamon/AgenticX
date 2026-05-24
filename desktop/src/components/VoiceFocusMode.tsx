@@ -937,7 +937,7 @@ export function VoiceFocusMode() {
             const text = ev.text.trim();
             draftTurnsRef.current.assistant = text;
             setPartial({ role: "assistant", text });
-            // Keep Machi's full final text on screen until the next turn
+            // Keep Near's full final text on screen until the next turn
             // begins (user_partial / assistant_partial). No auto-clear timer:
             // long answers must not vanish mid-read.
             if (partialClearTimerRef.current != null) {

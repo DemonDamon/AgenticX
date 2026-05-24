@@ -10,6 +10,7 @@ import {
   encodeStartSession,
 } from "./doubao-wire";
 import type { RealtimeVoiceSession, VoiceConnectOptions, VoiceRealtimeEmit, VoiceRingPhase } from "./types";
+import { META_AGENT_DISPLAY_NAME } from "../../constants/branding";
 
 function httpToWs(apiBase: string): string {
   const u = apiBase.replace(/\/+$/, "");
@@ -288,7 +289,7 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
       (opts.voiceYaml?.doubao_realtime as Record<string, unknown> | undefined) ?? {};
     const speaker = String(db.voice_type || db.speaker || "zh_female_vv_jupiter_bigtts").trim();
     const model = String(db.model || "1.2.1.1").trim() || "1.2.1.1";
-    const botName = String(db.bot_name || "Machi").trim();
+    const botName = String(db.bot_name || META_AGENT_DISPLAY_NAME).trim();
     const baseSystemRole = typeof db.system_role === "string" ? (db.system_role as string) : "";
     const speakingStyle = typeof db.speaking_style === "string" ? (db.speaking_style as string) : "";
     const inputMod = String(db.input_mod || "").trim(); // 留空走默认麦克风模式
@@ -300,7 +301,7 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
     const turns = (opts.historyTurns ?? []).filter((t) => t.content && t.content.trim());
     let systemRole = baseSystemRole;
     if (turns.length) {
-      const lines = turns.map((t) => `${t.role === "user" ? "用户" : "Machi"}：${t.content.trim()}`);
+      const lines = turns.map((t) => `${t.role === "user" ? "用户" : META_AGENT_DISPLAY_NAME}：${t.content.trim()}`);
       const block = `\n\n## 此前对话上下文（仅供参考，电话里可自然延续）\n${lines.join("\n")}`;
       systemRole = (baseSystemRole + block).trim();
     }
@@ -330,7 +331,7 @@ export class DoubaoOpenspeechRealtimeSession implements RealtimeVoiceSession {
         extra: {},
       },
       dialog: {
-        bot_name: botName || "Machi",
+        bot_name: botName || META_AGENT_DISPLAY_NAME,
         ...(systemRole ? { system_role: systemRole } : {}),
         ...(speakingStyle ? { speaking_style: speakingStyle } : {}),
         extra: dialogExtra,

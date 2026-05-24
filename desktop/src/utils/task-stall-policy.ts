@@ -1,5 +1,5 @@
 /**
- * Stall detection thresholds and helpers for long-running Machi tasks.
+ * Stall detection thresholds and helpers for long-running Near tasks.
  */
 
 import type { ParsedTodo, TodoItem } from "../components/TodoUpdateCard";

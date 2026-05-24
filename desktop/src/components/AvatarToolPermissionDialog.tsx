@@ -76,8 +76,8 @@ export function AvatarToolPermissionDialog({
 
   const modeHint =
     mode === "avatar"
-      ? "未设置项继承 Machi 全局策略；如全局未设置，则默认启用。"
-      : "Machi 全局策略将作为所有分身默认值；未设置项默认启用。";
+      ? "未设置项继承 Near 全局策略；如全局未设置，则默认启用。"
+      : "Near 全局策略将作为所有分身默认值；未设置项默认启用。";
 
   if (!open) return null;
 

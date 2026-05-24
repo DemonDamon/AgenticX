@@ -113,7 +113,9 @@ import { buildCompactionNoticeText } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
 import machiEmptyState from "../assets/machi-logo-transparent.png";
+import { APP_DISPLAY_NAME, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
+import { resolveMetaDisplayName } from "../utils/display-name";
 import { createKbApi } from "./settings/knowledge/api";
 import {
   clearPaneAwaitingFreshSession,
@@ -148,7 +150,7 @@ function resolveForwardSender(message: Message, userLabel = "我"): string {
   if (message.role !== "assistant") return userLabel.trim() || "我";
   const raw = String(message.avatarName || message.agentId || "AI").trim();
   if (!raw) return "AI";
-  return raw.toLowerCase() === "meta" ? "Machi" : raw;
+  return resolveMetaDisplayName(raw.toLowerCase() === "meta" ? null : raw);
 }
 
 function shellSingleQuote(input: string): string {
@@ -195,7 +197,7 @@ function openWorkspaceSidebarForPane(
 const FALLBACK_PANE: ChatPaneState = {
   id: "fallback-pane",
   avatarId: null,
-  avatarName: "Machi",
+  avatarName: META_AGENT_DISPLAY_NAME,
   sessionId: "",
   modelProvider: "",
   modelName: "",
@@ -1875,8 +1877,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const panes = useAppStore((s) => s.panes);
   const metaLeaderDisplayName = useMemo(() => {
     const mp = panes.find((p) => p.avatarId === null);
-    const t = (mp?.avatarName ?? "").trim();
-    return t && t !== "分身" ? t : "Machi";
+    return resolveMetaDisplayName(mp?.avatarName);
   }, [panes]);
   const removePane = useAppStore((s) => s.removePane);
   const closePaneAndCleanupEmptySession = () => {
@@ -1976,9 +1977,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
   const paneAvatarMeta = useMemo(() => {
     const aid = pane?.avatarId;
     if (!aid) {
-      // avatarId 为空即为 Machi 窗格；勿依赖 avatarName===「Machi」才给 meta 头像（飞书绑定曾错误写入「分身」）
+      // avatarId 为空即为 Near 窗格；勿依赖 avatarName===「Near」才给 meta 头像（飞书绑定曾错误写入「分身」）
       const paneName = (pane?.avatarName ?? "").trim();
-      const name = paneName && paneName !== "分身" ? paneName : "Machi";
+      const name = resolveMetaDisplayName(paneName);
       return { name, url: metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL };
     }
     if (aid.startsWith("group:")) return { name: pane?.avatarName || "AI", url: undefined };
@@ -6695,16 +6696,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm }: Props) {
             <div className="flex h-full flex-col items-center justify-center gap-5 px-4 text-center text-xs">
               <img
                 src={machiEmptyState}
-                alt="Machi Empty State"
+                alt={`${APP_DISPLAY_NAME} Empty State`}
                 className="w-[13.2rem] max-w-[42vw] select-none opacity-[0.85] theme-invert-logo"
                 draggable={false}
               />
               <div className="space-y-1.5 select-none">
                 <div className="text-[15px] font-medium text-text-primary tracking-wide">
-                  Machi
+                  {APP_DISPLAY_NAME}
                 </div>
                 <div className="text-text-faint tracking-wider uppercase text-[11px]">
-                  Orchestrated by Machi · Executed by AgenticX
+                  Orchestrated by {APP_DISPLAY_NAME} · Executed by AgenticX
                 </div>
               </div>
               {isAutomationTaskPane && automationTaskErrorHint ? (

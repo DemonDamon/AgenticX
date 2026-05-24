@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Panel } from "../../ds/Panel";
-import { useAppStore } from "../../../store";
+import { META_AGENT_DISPLAY_NAME } from "../../../constants/branding";
 
 type VoiceForm = {
   provider: string;
@@ -46,7 +46,7 @@ function emptyVoiceForm(): VoiceForm {
       resource_id: "volc.speech.dialog",
       voice_type: "zh_female_vv_jupiter_bigtts",
       model: "1.2.1.1",
-      bot_name: "Machi",
+      bot_name: META_AGENT_DISPLAY_NAME,
       system_role: "",
       speaking_style: "",
     },
@@ -180,7 +180,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
           resource_id: String(db.resource_id || "volc.speech.dialog"),
           voice_type: String(db.voice_type || "zh_female_vv_jupiter_bigtts"),
           model: String(db.model || "1.2.1.1"),
-          bot_name: String(db.bot_name || "Machi"),
+          bot_name: String(db.bot_name || META_AGENT_DISPLAY_NAME),
           system_role: String(db.system_role || ""),
           speaking_style: String(db.speaking_style || ""),
         },
@@ -295,7 +295,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
   return (
     <Panel title="语音">
       <p className="mb-4 text-[11px] leading-relaxed text-text-faint">
-        灵巧模式胶囊走 Meta-Agent（Machi）：对话轮次归档到当前元智能体会话，`metadata.source = voice-focus`。
+        灵巧模式胶囊走 Meta-Agent（Near）：对话轮次归档到当前元智能体会话，`metadata.source = voice-focus`。
         实时链路按使用量计费——OpenAI Realtime 与豆包/火山均需自备账号与密钥。国内调用 OpenAI 需自行配置可访问代理的{" "}
         <code className="text-text-subtle">base_url</code>。请使用窗口<strong>底部</strong>的「保存」将本页写入{" "}
         <code className="text-text-subtle">~/.agenticx/config.yaml</code>（本页不再提供重复保存按钮）。
@@ -543,7 +543,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               Bot Name（角色称呼，仅 O 版本生效，≤20 字）
               <input
                 maxLength={20}
-                placeholder="Machi"
+                placeholder="Near"
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.doubao_realtime.bot_name}
                 onChange={(e) =>

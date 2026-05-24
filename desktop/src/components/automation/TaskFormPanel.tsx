@@ -316,7 +316,7 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={4}
-              placeholder="描述 Machi 应该执行的任务..."
+              placeholder="描述 Near 应该执行的任务..."
               className="mt-1 w-full resize-y rounded-md border border-border bg-surface-card px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-text-subtle focus:outline-none"
             />
           </label>

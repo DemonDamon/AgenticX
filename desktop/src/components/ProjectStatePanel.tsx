@@ -11,7 +11,7 @@ import { Loader2, FolderGit2, RefreshCw, FileText, ListChecks } from "lucide-rea
  *
  * No editing controls — the agent tool chain (project_init / feature_select /
  * feature_complete) is the single writer. This panel exists so the user can
- * see the on-disk state at a glance without leaving Machi.
+ * see the on-disk state at a glance without leaving Near.
  */
 
 interface FeatureRow {
