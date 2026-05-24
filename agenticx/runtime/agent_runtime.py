@@ -1564,6 +1564,11 @@ class AgentRuntime:
                                 "Stopping to preserve results."
                             ),
                             "detector": "token_budget",
+                            "budget_exceeded": True,
+                            "budget_source": budget_source,
+                            "current": budget_current,
+                            "max_allowed": budget_max,
+                            "unattended_useless": True,
                         },
                         agent_id=agent_id,
                     )
